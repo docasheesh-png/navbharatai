@@ -31,8 +31,9 @@ describe('Published Apps tile — the ceiling, readable at a glance', () => {
   });
 
   it('carries the same colour thresholds as the card below it', () => {
-    expect(tile).toContain("channels.verdict.level === 'critical' ? 'bg-red-500'");
-    expect(tile).toContain("channels.verdict.level === 'warn' ? 'bg-amber-500'");
+    // The fill's label colour (`text-on-accent`) rides in the same string since the theme replacement (PR G); the threshold → fill pairing is the claim.
+    expect(tile).toContain("channels.verdict.level === 'critical' ? 'bg-red-500");
+    expect(tile).toContain("channels.verdict.level === 'warn' ? 'bg-amber-500");
   });
 });
 

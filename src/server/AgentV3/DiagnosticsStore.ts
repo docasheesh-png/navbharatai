@@ -852,3 +852,93 @@ export async function getDiagnosticsHistoryItem(workspaceId: string, id: string)
     return null;
   }
 }
+
+/**
+ * 🔴 THE LAST N **BUILDS**, NOT THE LAST N **WORKSPACES** (admin 2026-09-18).
+ *
+ * Admin, on the Build-costs card: *"yeh report fix hai, har build ke bad update nahi ho rahi. hame
+ * pata hi nahi lag raha ki ham progress kar rahe ya nahi!!"*
+ *
+ * `listRecentFullReports` reads the PARENT documents of this collection, and there is exactly ONE per
+ * WORKSPACE holding that workspace's LATEST report — `saveDiagnostics` overwrites it on every build.
+ * So "last 30 builds" was really "the latest build of each of the 30 most recently active
+ * workspaces", and the two differ by exactly the thing the admin was trying to see: **iterating in
+ * one workspace — which is what testing the engine IS — produces one row, not twenty.** Twenty builds
+ * later the card still read "30 builds read", because the document count had not moved.
+ *
+ * The per-build record already existed and nothing was reading it: `saveDiagnosticsHistory` writes
+ * every settled build to `<workspace>/history/<startedAt>`. This reads THAT.
+ *
+ * 🔒 WHY SCANNING THE TOP `limit` WORKSPACES IS EXACT, not a heuristic: parents are ordered by their
+ * latest save. For a workspace at position `limit + 1` to hold one of the newest `limit` builds,
+ * every one of the `limit` workspaces above it would have to hold only builds OLDER than that one —
+ * impossible, since each of them holds at least one build saved more recently still.
+ *
+ * ⚠️ It orders by `documentId()`, exactly as `listDiagnosticsHistory` does, so it needs NO Firestore
+ * index — an ordered collectionGroup query would have needed a collection-group index that nothing in
+ * this repo creates, and its absence is a runtime error, not a compile one.
+ *
+ * Never throws. If the history sweep comes back with nothing at all (a fresh deployment, or reads
+ * failing), it falls back to the old per-workspace view and SAYS which one it returned — the card
+ * prints that, because a window that quietly means something else is the bug being fixed.
+ */
+export interface RecentBuildReports {
+  builds: StoredFullReport[];
+  /** 'history' = one entry per BUILD. 'latest-per-workspace' = the fallback, one per workspace. */
+  source: 'history' | 'latest-per-workspace';
+  /** How many workspaces' histories were swept (0 on the fallback path). */
+  workspacesScanned: number;
+}
+
+/** In-progress entries are overwritten at settle, so at most one per workspace can be in the way. */
+const IN_PROGRESS_HEADROOM = 10;
+
+export async function listRecentBuildReports(limit = 30): Promise<RecentBuildReports> {
+  const want = Math.max(1, Math.min(60, limit));
+  const db = getDb();
+  if (!db) return { builds: [], source: 'history', workspacesScanned: 0 };
+  try {
+    // `.select()` with no fields returns document REFERENCES only — the cheapest read Firestore has.
+    // Both sweeps below are projections; only the winning builds are fetched whole.
+    const parents = await db.collection(COLLECTION).orderBy('savedAt', 'desc').limit(want).select().get();
+    const candidates = (await Promise.all(parents.docs.map(async (p) => {
+      try {
+        const snap = await p.ref
+          .collection(HISTORY_SUBCOLLECTION)
+          .orderBy(admin.firestore.FieldPath.documentId(), 'desc')
+          .limit(want)
+          .select()
+          .get();
+        return snap.docs.map((d) => ({ workspaceId: p.id, startedAt: Number(d.id) || 0, ref: d.ref }));
+      } catch {
+        return []; // one unreadable workspace must not empty the whole card
+      }
+    }))).flat();
+
+    if (candidates.length === 0) {
+      const fallback = await listRecentFullReports(want);
+      return { builds: fallback, source: 'latest-per-workspace', workspacesScanned: parents.size };
+    }
+
+    candidates.sort((a, b) => b.startedAt - a.startedAt);
+    const picked = candidates.slice(0, want + IN_PROGRESS_HEADROOM);
+    const docs = await db.getAll(...picked.map((c) => c.ref));
+    const builds = docs.flatMap((d, i) => {
+      const report = d.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!report || typeof report !== 'object') return [];
+      // A build still running has no settled billing record, so counting it would drag every average
+      // toward "not measured". It reappears here the moment it settles, under the same document id.
+      if (report.endedAt === undefined) return [];
+      return [{
+        workspaceId: picked[i].workspaceId,
+        savedAt: (d.data()?.savedAt as number) ?? picked[i].startedAt,
+        ownerUid: workspaceOwnerUid(picked[i].workspaceId),
+        report,
+      }];
+    }).slice(0, want);
+
+    return { builds, source: 'history', workspacesScanned: parents.size };
+  } catch {
+    return { builds: [], source: 'history', workspacesScanned: 0 };
+  }
+}

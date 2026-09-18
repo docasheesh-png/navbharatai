@@ -419,15 +419,15 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* ── Tab Bar ── */}
-      <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-gray-800 bg-[#161b22]">
+      <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-line bg-card">
         {([['components', '🧩 Components'], ['libraries', '📦 CDN Libraries']] as const).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === id
-                ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
+                ? 'bg-indigo-600/30 text-accent-text border border-indigo-500/40'
+                : 'text-muted hover:text-body hover:bg-raised'
             }`}
           >
             {label}
@@ -437,41 +437,41 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
 
       {activeTab === 'libraries' && (
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 px-4 py-3 border-b border-gray-800">
+          <div className="flex-shrink-0 px-4 py-3 border-b border-line">
             <div className="relative">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
               <input
                 value={libSearch}
                 onChange={e => setLibSearch(e.target.value)}
                 placeholder="Search libraries..."
                 className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
-                style={{ background: 'var(--surface-card)', border: '1px solid #30363d', color: 'var(--text-body)' }}
+                style={{ background: 'var(--surface-card)', border: '1px solid var(--border-soft)', color: 'var(--text-body)' }}
               />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 gap-3">
             {filteredLibs.map(lib => (
-              <div key={lib.id} className="bg-[#161b22] border border-gray-800 rounded-xl p-4 hover:border-indigo-500/40 transition-all group">
+              <div key={lib.id} className="bg-card border border-line rounded-xl p-4 hover:border-indigo-500/40 transition-all group">
                 <div className="flex items-start justify-between mb-1">
                   <div>
-                    <span className="text-sm font-bold text-white">{lib.name}</span>
-                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-600/20 text-indigo-400 font-bold uppercase tracking-wider">{lib.tag}</span>
-                    <span className="ml-1 text-[9px] text-gray-600 font-mono">{lib.size}</span>
+                    <span className="text-sm font-bold text-ink">{lib.name}</span>
+                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-600/20 text-accent-text font-bold uppercase tracking-wider">{lib.tag}</span>
+                    <span className="ml-1 text-[9px] text-faint font-mono">{lib.size}</span>
                   </div>
                 </div>
-                <p className="text-[11px] text-gray-400 mb-3">{lib.description}</p>
+                <p className="text-[11px] text-muted mb-3">{lib.description}</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => copyLibTag(lib)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-lg transition-all"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-accent-text text-[10px] font-bold rounded-lg transition-all"
                   >
-                    {libCopied === lib.id ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                    {libCopied === lib.id ? <Check size={11} className="text-success" /> : <Copy size={11} />}
                     {libCopied === lib.id ? 'Copied!' : 'Copy Tag'}
                   </button>
                   <button
                     onClick={() => void addToApp(lib.scriptTag, lib.name, 'lib_' + lib.id)}
                     disabled={!canInsert || !!inserting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 border border-emerald-500/25 text-emerald-400 text-[10px] font-bold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/30 border border-emerald-500/25 text-success text-[10px] font-bold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {inserting === 'lib_' + lib.id ? <Loader2 size={11} className="animate-spin" /> : null}
                     Add to my app
@@ -485,16 +485,16 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
 
       {/* ── Where does "Add to my app" put things? Answering this once, at the top, is what turns
              every button below from a preview trick into a real change. ── */}
-      <div className="flex-shrink-0 border-b border-gray-800" style={{ background: 'var(--surface-base)' }}>
+      <div className="flex-shrink-0 border-b border-line" style={{ background: 'var(--surface-base)' }}>
         <button
           onClick={() => setMobilePicker(v => !v)}
           className="w-full flex items-center gap-2 px-4 py-2.5 text-left md:hidden"
         >
-          <Save size={13} className="text-indigo-400 flex-shrink-0" />
-          <span className="flex-1 min-w-0 text-xs text-gray-300 truncate">
-            {canInsert ? <>Adding to <span className="text-indigo-300">{targetPath}</span></> : 'Choose where to add components'}
+          <Save size={13} className="text-accent-text flex-shrink-0" />
+          <span className="flex-1 min-w-0 text-xs text-muted truncate">
+            {canInsert ? <>Adding to <span className="text-accent-text">{targetPath}</span></> : 'Choose where to add components'}
           </span>
-          <ChevronRight size={13} className={`text-gray-500 transition-transform ${mobilePicker ? 'rotate-90' : ''}`} />
+          <ChevronRight size={13} className={`text-faint transition-transform ${mobilePicker ? 'rotate-90' : ''}`} />
         </button>
         <div className={`${mobilePicker ? 'block' : 'hidden'} md:block`}>
           <AppTargetPicker
@@ -523,7 +523,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
           </p>
         )}
         {apps.length > 0 && (
-          <p className="hidden md:flex mx-3 mb-3 text-[11px] text-gray-500 gap-1.5 leading-snug">
+          <p className="hidden md:flex mx-3 mb-3 text-[11px] text-faint gap-1.5 leading-snug">
             <History size={11} className="mt-0.5 flex-shrink-0" />
             A restore point is saved before each change, so you can undo it from Versioning.
           </p>
@@ -533,9 +533,9 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
       {activeTab === 'components' && <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
       {/* ── Categories. A fixed 220px rail leaves nothing beside it on a phone, so on small screens
              this becomes a horizontal scroller instead. ── */}
-      <div className="flex-shrink-0 flex md:block md:w-[220px] overflow-x-auto md:overflow-x-visible md:overflow-y-auto border-b md:border-b-0 md:border-r border-gray-800 py-2 md:py-3">
+      <div className="flex-shrink-0 flex md:block md:w-[220px] overflow-x-auto md:overflow-x-visible md:overflow-y-auto border-b md:border-b-0 md:border-r border-line py-2 md:py-3">
         <div className="hidden md:block px-4 py-2 mb-1">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Categories</p>
+          <p className="text-xs font-semibold text-faint uppercase tracking-wider">Categories</p>
         </div>
         {CATEGORIES.map(cat => {
           const Icon = cat.icon;
@@ -546,14 +546,14 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
               onClick={() => { setActiveCategory(cat.id); setSearch(''); }}
               className={`flex-shrink-0 md:w-full flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-2.5 text-left whitespace-nowrap transition-colors ${
                 active
-                  ? 'bg-indigo-600/20 text-indigo-400 md:border-r-2 md:border-indigo-500'
-                  : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+                  ? 'bg-indigo-600/20 text-accent-text md:border-r-2 md:border-indigo-500'
+                  : 'text-muted hover:bg-raised hover:text-body'
               }`}
             >
               <Icon size={14} className="flex-shrink-0" />
               <span className="text-xs font-medium md:flex-1">{cat.label}</span>
               <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                active ? 'bg-indigo-600/30 text-indigo-300' : 'bg-gray-800 text-gray-500'
+                active ? 'bg-indigo-600/30 text-accent-text' : 'bg-raised text-faint'
               }`}>
                 {cat.count}
               </span>
@@ -565,15 +565,15 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
       {/* ── Center Grid ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Search */}
-        <div className="flex-shrink-0 px-4 py-3 border-b border-gray-800">
+        <div className="flex-shrink-0 px-4 py-3 border-b border-line">
           <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search components..."
               className="w-full pl-9 pr-4 py-2 rounded-lg text-xs outline-none"
-              style={{ background: 'var(--surface-card)', border: '1px solid #30363d', color: 'var(--text-body)' }}
+              style={{ background: 'var(--surface-card)', border: '1px solid var(--border-soft)', color: 'var(--text-body)' }}
             />
           </div>
         </div>
@@ -581,7 +581,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
         {/* Grid */}
         <div className="flex-1 overflow-y-auto p-4">
           {filteredComponents.length === 0 ? (
-            <div className="text-center text-gray-600 py-16 text-sm">No components found</div>
+            <div className="text-center text-faint py-16 text-sm">No components found</div>
           ) : (
             <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
               {filteredComponents.map(comp => {
@@ -609,10 +609,10 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                       {/* Overlay on hover for click-to-expand */}
                       <div
                         className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ background: 'rgba(0,0,0,0.5)' }}
+                        style={{ background: 'var(--scrim)' }}
                         onClick={e => { e.stopPropagation(); setModalComp(comp); }}
                       >
-                        <div className="flex items-center gap-1.5 bg-gray-900/90 text-white text-xs px-3 py-1.5 rounded-full">
+                        <div className="flex items-center gap-1.5 bg-card text-ink text-xs px-3 py-1.5 rounded-full">
                           <Eye size={11} /> Preview
                         </div>
                       </div>
@@ -623,7 +623,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                       >
                         <Star
                           size={14}
-                          className={isFav ? 'text-yellow-400 fill-yellow-400' : 'text-gray-500 hover:text-yellow-400'}
+                          className={isFav ? 'text-warn fill-yellow-400' : 'text-faint hover:text-warn'}
                         />
                       </button>
                     </div>
@@ -631,12 +631,12 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                     {/* Card Footer */}
                     <div className="p-3">
                       <div className="flex items-center justify-between mb-1.5">
-                        <p className="text-xs font-semibold text-gray-200 truncate">{comp.name}</p>
-                        {isFav && <Star size={11} className="text-yellow-400 fill-yellow-400 flex-shrink-0" />}
+                        <p className="text-xs font-semibold text-body truncate">{comp.name}</p>
+                        {isFav && <Star size={11} className="text-warn fill-yellow-400 flex-shrink-0" />}
                       </div>
                       <div className="flex flex-wrap gap-1 mb-2.5">
                         {comp.tags.slice(0, 3).map(tag => (
-                          <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#1f2937', color: '#9ca3af' }}>
+                          <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-raised)', color: 'var(--text-muted)' }}>
                             {tag}
                           </span>
                         ))}
@@ -644,15 +644,15 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                       <div className="flex gap-1.5">
                         <button
                           className="flex-1 flex items-center justify-center gap-1 text-[11px] py-1.5 rounded-md transition-colors"
-                          style={{ background: '#1f2937', color: '#9ca3af' }}
+                          style={{ background: 'var(--surface-raised)', color: 'var(--text-muted)' }}
                           onClick={e => { e.stopPropagation(); copyToClipboard(comp.html, comp.id + '_copy'); }}
                         >
-                          {copied === comp.id + '_copy' ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+                          {copied === comp.id + '_copy' ? <Check size={10} className="text-success" /> : <Copy size={10} />}
                           {copied === comp.id + '_copy' ? 'Copied!' : 'Copy'}
                         </button>
                         <button
                           className="flex-1 text-[11px] py-1.5 rounded-md transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={{ background: '#3730a3', color: '#c7d2fe' }}
+                          style={{ background: 'color-mix(in srgb, var(--accent) 18%, transparent)', color: 'var(--brand-accent-text)' }}
                           disabled={!canInsert || !!inserting}
                           onClick={e => { e.stopPropagation(); void addToApp(comp.html, comp.name, comp.id); }}
                         >
@@ -669,11 +669,11 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
       </div>
 
       {/* ── Right Panel ── */}
-      <div className="flex-shrink-0 w-full md:w-[300px] border-t md:border-t-0 md:border-l border-gray-800 flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 w-full md:w-[300px] border-t md:border-t-0 md:border-l border-line flex flex-col overflow-hidden">
         {selected ? (
           <>
             {/* Large Preview */}
-            <div className="flex-shrink-0 relative" style={{ height: '220px', background: 'var(--surface-base)', borderBottom: '1px solid #30363d' }}>
+            <div className="flex-shrink-0 relative" style={{ height: '220px', background: 'var(--surface-base)', borderBottom: '1px solid var(--border-soft)' }}>
               <iframe
                 srcDoc={buildSrcdoc(selected.html, customizer)}
                 className="w-full h-full"
@@ -686,31 +686,30 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
             {/* Detail + Customizer */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-white mb-0.5">{selected.name}</h3>
-                <p className="text-xs text-gray-500 leading-relaxed">{selected.description}</p>
+                <h3 className="text-sm font-semibold text-ink mb-0.5">{selected.name}</h3>
+                <p className="text-xs text-faint leading-relaxed">{selected.description}</p>
               </div>
 
               {/* Copy buttons */}
               <div className="space-y-2">
                 <button
                   className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-colors"
-                  style={{ background: '#1f2937', color: 'var(--text-body)', border: '1px solid #374151' }}
+                  style={{ background: 'var(--surface-raised)', color: 'var(--text-body)', border: '1px solid var(--border-soft)' }}
                   onClick={() => copyToClipboard(selected.html, 'raw')}
                 >
-                  {copied === 'raw' ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+                  {copied === 'raw' ? <Check size={12} className="text-success" /> : <Copy size={12} />}
                   {copied === 'raw' ? 'Copied!' : 'Copy HTML'}
                 </button>
                 <button
                   className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-colors"
-                  style={{ background: '#1e1b4b', color: '#a5b4fc', border: '1px solid #3730a3' }}
+                  style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--brand-accent-text)', border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' }}
                   onClick={() => copyToClipboard(WRAP(selected.html), 'full')}
                 >
-                  {copied === 'full' ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+                  {copied === 'full' ? <Check size={12} className="text-success" /> : <Copy size={12} />}
                   {copied === 'full' ? 'Copied!' : 'Copy with Tailwind CDN'}
                 </button>
                 <button
-                  className="w-full py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ background: '#4f46e5', color: '#fff' }}
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed bg-indigo-600 text-on-accent"
                   disabled={!canInsert || !!inserting}
                   onClick={() => void addToApp(selected.html, selected.name, 'sel_' + selected.id)}
                 >
@@ -720,17 +719,17 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
               </div>
 
               {/* Customizer */}
-              <div style={{ background: 'var(--surface-card)', border: '1px solid #30363d', borderRadius: '10px', padding: '14px' }}>
-                <p className="text-xs font-semibold text-gray-300 mb-3 flex items-center gap-1.5">
+              <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-soft)', borderRadius: '10px', padding: '14px' }}>
+                <p className="text-xs font-semibold text-muted mb-3 flex items-center gap-1.5">
                   <Layout size={12} /> Quick Customizer
                 </p>
 
                 {/* Color */}
                 <div className="mb-3">
-                  <label className="text-[11px] text-gray-500 block mb-1.5">Primary Color</label>
+                  <label className="text-[11px] text-faint block mb-1.5">Primary Color</label>
                   <div className="flex items-center gap-2">
                     <div
-                      className="w-7 h-7 rounded-md flex-shrink-0 cursor-pointer border border-gray-700 overflow-hidden relative"
+                      className="w-7 h-7 rounded-md flex-shrink-0 cursor-pointer border border-line overflow-hidden relative"
                       style={{ background: customizer.primaryColor }}
                     >
                       <input
@@ -748,14 +747,14 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                         if (/^#[0-9a-fA-F]{0,6}$/.test(v)) setCustomizer(prev => ({ ...prev, primaryColor: v }));
                       }}
                       className="flex-1 px-2 py-1 rounded text-xs outline-none"
-                      style={{ background: 'var(--surface-base)', border: '1px solid #30363d', color: 'var(--text-body)' }}
+                      style={{ background: 'var(--surface-base)', border: '1px solid var(--border-soft)', color: 'var(--text-body)' }}
                     />
                   </div>
                 </div>
 
                 {/* Font Size */}
                 <div className="mb-3">
-                  <label className="text-[11px] text-gray-500 block mb-1.5 flex items-center gap-1">
+                  <label className="text-[11px] text-faint block mb-1.5 flex items-center gap-1">
                     <Type size={10} /> Font Size
                   </label>
                   <div className="flex gap-1">
@@ -777,7 +776,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
 
                 {/* Rounded */}
                 <div>
-                  <label className="text-[11px] text-gray-500 block mb-1.5 flex items-center gap-1">
+                  <label className="text-[11px] text-faint block mb-1.5 flex items-center gap-1">
                     <Square size={10} /> Rounded
                   </label>
                   <div className="grid grid-cols-4 gap-1">
@@ -803,7 +802,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
           <div className="flex-1 flex items-center justify-center text-center p-8">
             <div>
               <LayoutGrid size={32} className="text-gray-700 mx-auto mb-3" />
-              <p className="text-gray-600 text-xs">Select a component<br />to preview and customize</p>
+              <p className="text-faint text-xs">Select a component<br />to preview and customize</p>
             </div>
           </div>
         )}
@@ -814,33 +813,33 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
       {modalComp && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.8)' }}
+          style={{ background: 'var(--scrim)' }}
           onClick={() => setModalComp(null)}
         >
           <div
             className="relative rounded-2xl overflow-hidden shadow-2xl"
-            style={{ width: '700px', maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid #30363d' }}
+            style={{ width: '700px', maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid var(--border-soft)' }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: '#30363d' }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border-soft)' }}>
               <div>
-                <p className="text-white font-semibold text-sm">{modalComp.name}</p>
+                <p className="text-ink font-semibold text-sm">{modalComp.name}</p>
                 <div className="flex gap-1.5 mt-1">
                   {modalComp.tags.map(t => (
-                    <span key={t} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#1f2937', color: '#6b7280' }}>{t}</span>
+                    <span key={t} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface-raised)', color: 'var(--text-faint)' }}>{t}</span>
                   ))}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors"
-                  style={{ background: '#1f2937', color: '#9ca3af' }}
+                  style={{ background: 'var(--surface-raised)', color: 'var(--text-muted)' }}
                   onClick={() => copyToClipboard(modalComp.html, 'modal')}
                 >
-                  {copied === 'modal' ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+                  {copied === 'modal' ? <Check size={11} className="text-success" /> : <Copy size={11} />}
                   {copied === 'modal' ? 'Copied!' : 'Copy HTML'}
                 </button>
-                <button onClick={() => setModalComp(null)} className="text-gray-500 hover:text-white transition-colors">
+                <button onClick={() => setModalComp(null)} className="text-faint hover:text-ink transition-colors">
                   <X size={16} />
                 </button>
               </div>
@@ -860,8 +859,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
 
       {/* ── Copied Toast ── */}
       {copied && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full shadow-xl text-sm font-medium"
-          style={{ background: '#22c55e', color: '#fff' }}>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full shadow-xl text-sm font-medium bg-emerald-600 text-on-accent">
           <Check size={14} /> Copied to clipboard!
         </div>
       )}

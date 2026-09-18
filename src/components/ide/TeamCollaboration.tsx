@@ -59,9 +59,9 @@ const AVATAR_COLORS = [
 ];
 
 const ROLE_STYLES: Record<Role, { bg: string; text: string; label: string }> = {
-  Admin:  { bg: 'bg-red-500/20',  text: 'text-red-400',  label: 'Admin'  },
-  Editor: { bg: 'bg-blue-500/20', text: 'text-blue-400', label: 'Editor' },
-  Viewer: { bg: 'bg-gray-500/20', text: 'text-gray-400', label: 'Viewer' },
+  Admin:  { bg: 'bg-red-500/20',  text: 'text-danger',  label: 'Admin'  },
+  Editor: { bg: 'bg-blue-500/20', text: 'text-info', label: 'Editor' },
+  Viewer: { bg: 'bg-raised', text: 'text-muted', label: 'Viewer' },
 };
 
 // P-COLLAB.1 — members now load from the real backend (`GET /api/team/:teamId/members`); no mock roster.
@@ -111,13 +111,13 @@ const Avatar: React.FC<{ member: TeamMember; size?: 'sm' | 'md'; ring?: boolean 
   const sz = size === 'sm' ? 'w-7 h-7 text-xs' : 'w-9 h-9 text-sm';
   return (
     <div
-      className={`${sz} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0 relative ${ring ? 'ring-2 ring-green-400' : ''}`}
+      className={`${sz} rounded-full flex items-center justify-center font-semibold text-ink flex-shrink-0 relative ${ring ? 'ring-2 ring-green-400' : ''}`}
       style={{ backgroundColor: member.avatarColor }}
       title={member.name}
     >
       {initials(member.name)}
       {member.online && (
-        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-[#161b22] rounded-full" />
+        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-line rounded-full" />
       )}
     </div>
   );
@@ -139,7 +139,7 @@ const RoleBadge: React.FC<{ role: Role }> = ({ role }) => {
 const Toast: React.FC<{ msg: string; type: 'success' | 'error' }> = ({ msg, type }) => (
   <div
     className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 transition-all
-      ${type === 'success' ? 'bg-green-500/20 border border-green-500/40 text-green-300' : 'bg-red-500/20 border border-red-500/40 text-red-300'}`}
+      ${type === 'success' ? 'bg-green-500/20 border border-green-500/40 text-success' : 'bg-red-500/20 border border-red-500/40 text-danger'}`}
   >
     {type === 'success' ? <Check size={14} /> : <X size={14} />}
     {msg}
@@ -336,7 +336,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-gray-100 p-4 font-sans">
+    <div className="h-full overflow-y-auto overscroll-contain bg-surface text-body p-4 font-sans">
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
       <div className="max-w-6xl mx-auto">
@@ -344,11 +344,11 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
         <div className="mb-6 flex items-start justify-between gap-2">
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
-              <Users size={20} className="text-blue-400" />
+              <Users size={20} className="text-info" />
               Team Collaboration
-              {projectName && <span className="text-sm font-normal text-gray-400 ml-1">— {projectName}</span>}
+              {projectName && <span className="text-sm font-normal text-muted ml-1">— {projectName}</span>}
             </h1>
-            <p className="text-gray-500 text-sm mt-1">Manage your team, send invites, and share the project</p>
+            <p className="text-faint text-sm mt-1">Manage your team, send invites, and share the project</p>
           </div>
           {/* T1-mention-inbox — @mentions delivered to your inbox */}
           <MentionInbox />
@@ -359,9 +359,9 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
           <div className="flex flex-col gap-4" style={{ width: '360px', minWidth: '320px', flexShrink: 0 }}>
 
             {/* — Invite Section */}
-            <div className="bg-[#161b22] border border-white/10 rounded-xl p-4">
+            <div className="bg-card border border-line rounded-xl p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Mail size={14} className="text-blue-400" /> Invite Member
+                <Mail size={14} className="text-info" /> Invite Member
               </h2>
               <div className="flex flex-col gap-2">
                 <input
@@ -370,13 +370,13 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleInvite()}
-                  className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500/60"
+                  className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-body placeholder-faint focus:outline-none focus:border-blue-500/60"
                 />
                 <div className="flex gap-2">
                   <select
                     value={inviteRole}
                     onChange={e => setInviteRole(e.target.value as Role)}
-                    className="flex-1 bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/60"
+                    className="flex-1 bg-surface border border-line rounded-lg px-3 py-2 text-sm text-body focus:outline-none focus:border-blue-500/60"
                   >
                     <option value="Admin">Admin</option>
                     <option value="Editor">Editor</option>
@@ -385,7 +385,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   <button
                     onClick={handleInvite}
                     disabled={inviting}
-                    className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center justify-center gap-1.5 transition-colors"
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-on-accent text-sm font-medium rounded-lg px-3 py-2 flex items-center justify-center gap-1.5 transition-colors"
                   >
                     {inviting ? <TirangaLoader size={14} /> : <Mail size={14} />}
                     {inviting ? 'Sending...' : 'Invite'}
@@ -395,20 +395,20 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
 
               {/* Pending Invites */}
               {pendingInvites.length > 0 && (
-                <div className="mt-3 border-t border-white/10 pt-3">
-                  <p className="text-xs text-gray-500 mb-2 font-medium uppercase tracking-wide">Pending Invites</p>
+                <div className="mt-3 border-t border-line pt-3">
+                  <p className="text-xs text-faint mb-2 font-medium uppercase tracking-wide">Pending Invites</p>
                   <div className="flex flex-col gap-1.5">
                     {pendingInvites.map(inv => (
-                      <div key={inv.id} className="flex items-center justify-between bg-[#0d1117] rounded-lg px-3 py-2">
+                      <div key={inv.id} className="flex items-center justify-between bg-surface rounded-lg px-3 py-2">
                         <div className="min-w-0">
-                          <p className="text-xs text-gray-300 truncate max-w-[160px]">{inv.email}</p>
-                          <p className="text-xs text-gray-600">{inv.role} · {inv.sentAt}</p>
+                          <p className="text-xs text-muted truncate max-w-[160px]">{inv.email}</p>
+                          <p className="text-xs text-faint">{inv.role} · {inv.sentAt}</p>
                         </div>
                         <div className="flex items-center gap-1.5 ml-2 shrink-0">
                           {inv.inviteUrl && (
                             <button
                               onClick={() => copyInviteLink(inv.inviteUrl!)}
-                              className="text-gray-500 hover:text-indigo-400 transition-colors"
+                              className="text-faint hover:text-accent-text transition-colors"
                               title="Copy invite link"
                             >
                               <Copy size={13} />
@@ -416,7 +416,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                           )}
                           <button
                             onClick={() => revokeInvite(inv.id)}
-                            className="text-gray-600 hover:text-red-400 transition-colors"
+                            className="text-faint hover:text-danger transition-colors"
                             title="Revoke invite"
                           >
                             <X size={13} />
@@ -430,31 +430,31 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
             </div>
 
             {/* — Active Members */}
-            <div className="bg-[#161b22] border border-white/10 rounded-xl p-4">
+            <div className="bg-card border border-line rounded-xl p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Users size={14} className="text-green-400" />
+                <Users size={14} className="text-success" />
                 Team Members
-                <span className="ml-auto bg-white/10 text-gray-400 text-xs px-2 py-0.5 rounded-full">
+                <span className="ml-auto bg-raised text-muted text-xs px-2 py-0.5 rounded-full">
                   {members.length}
                 </span>
               </h2>
 
               <div className="flex flex-col gap-2" ref={menuRef}>
                 {pagedMembers.visible.map(member => (
-                  <div key={member.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white/5 transition-colors relative group">
+                  <div key={member.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-raised transition-colors relative group">
                     <Avatar member={member} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-sm font-medium text-gray-200 truncate">{member.name}</span>
+                        <span className="text-sm font-medium text-body truncate">{member.name}</span>
                         {member.isYou && (
-                          <span className="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full">You</span>
+                          <span className="text-xs bg-yellow-500/20 text-warn px-1.5 py-0.5 rounded-full">You</span>
                         )}
                         <RoleBadge role={member.role} />
                       </div>
-                      <p className="text-xs text-gray-600 truncate">{member.email}</p>
+                      <p className="text-xs text-faint truncate">{member.email}</p>
                       {member.online
-                        ? <span className="text-xs text-green-400">● Online</span>
-                        : <span className="text-xs text-gray-600">Last seen {member.lastSeen}</span>
+                        ? <span className="text-xs text-success">● Online</span>
+                        : <span className="text-xs text-faint">Last seen {member.lastSeen}</span>
                       }
                     </div>
 
@@ -463,28 +463,28 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                       <div className="relative">
                         <button
                           onClick={() => setMenuOpen(menuOpen === member.id ? null : member.id)}
-                          className="p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-white/10 transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1 rounded text-faint hover:text-muted hover:bg-raised transition-colors opacity-0 group-hover:opacity-100"
                         >
                           <MoreVertical size={14} />
                         </button>
                         {menuOpen === member.id && (
-                          <div className="absolute right-0 top-7 z-30 bg-[#0d1117] border border-white/10 rounded-lg shadow-xl min-w-[160px] py-1">
-                            <p className="text-xs text-gray-600 px-3 py-1 font-medium uppercase tracking-wide">Change Role</p>
+                          <div className="absolute right-0 top-7 z-30 bg-surface border border-line rounded-lg shadow-xl min-w-[160px] py-1">
+                            <p className="text-xs text-faint px-3 py-1 font-medium uppercase tracking-wide">Change Role</p>
                             {(['Admin', 'Editor', 'Viewer'] as Role[]).map(r => (
                               <button
                                 key={r}
                                 onClick={() => changeMemberRole(member.id, r)}
-                                className={`w-full text-left text-sm px-3 py-1.5 hover:bg-white/5 flex items-center gap-2 ${member.role === r ? 'text-blue-400' : 'text-gray-300'}`}
+                                className={`w-full text-left text-sm px-3 py-1.5 hover:bg-raised flex items-center gap-2 ${member.role === r ? 'text-info' : 'text-muted'}`}
                               >
                                 {member.role === r && <Check size={12} />}
                                 {member.role !== r && <div className="w-3" />}
                                 {r}
                               </button>
                             ))}
-                            <div className="border-t border-white/10 my-1" />
+                            <div className="border-t border-line my-1" />
                             <button
                               onClick={() => removeMember(member.id)}
-                              className="w-full text-left text-sm px-3 py-1.5 hover:bg-white/5 text-red-400 flex items-center gap-2"
+                              className="w-full text-left text-sm px-3 py-1.5 hover:bg-raised text-danger flex items-center gap-2"
                             >
                               <UserMinus size={12} /> Remove from Team
                             </button>
@@ -498,27 +498,27 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
               </div>
 
               {/* Role descriptions — collapsible */}
-              <div className="mt-3 border-t border-white/10 pt-3">
+              <div className="mt-3 border-t border-line pt-3">
                 <button
                   onClick={() => setRolesOpen(r => !r)}
-                  className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors w-full"
+                  className="flex items-center gap-1.5 text-xs text-faint hover:text-muted transition-colors w-full"
                 >
                   <Shield size={12} /> Role Permissions
                   {rolesOpen ? <ChevronUp size={12} className="ml-auto" /> : <ChevronDown size={12} className="ml-auto" />}
                 </button>
                 {rolesOpen && (
-                  <div className="mt-2 flex flex-col gap-1.5 text-xs text-gray-400">
-                    <div className="flex items-start gap-2 p-2 bg-[#0d1117] rounded-lg">
-                      <Crown size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
-                      <div><span className="text-red-400 font-medium">Admin:</span> Full access, can invite/remove members and deploy</div>
+                  <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted">
+                    <div className="flex items-start gap-2 p-2 bg-surface rounded-lg">
+                      <Crown size={12} className="text-danger mt-0.5 flex-shrink-0" />
+                      <div><span className="text-danger font-medium">Admin:</span> Full access, can invite/remove members and deploy</div>
                     </div>
-                    <div className="flex items-start gap-2 p-2 bg-[#0d1117] rounded-lg">
-                      <Edit3 size={12} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                      <div><span className="text-blue-400 font-medium">Editor:</span> Can edit code, create files, and run builds</div>
+                    <div className="flex items-start gap-2 p-2 bg-surface rounded-lg">
+                      <Edit3 size={12} className="text-info mt-0.5 flex-shrink-0" />
+                      <div><span className="text-info font-medium">Editor:</span> Can edit code, create files, and run builds</div>
                     </div>
-                    <div className="flex items-start gap-2 p-2 bg-[#0d1117] rounded-lg">
-                      <Eye size={12} className="text-gray-400 mt-0.5 flex-shrink-0" />
-                      <div><span className="text-gray-400 font-medium">Viewer:</span> Read-only access, can add comments</div>
+                    <div className="flex items-start gap-2 p-2 bg-surface rounded-lg">
+                      <Eye size={12} className="text-muted mt-0.5 flex-shrink-0" />
+                      <div><span className="text-muted font-medium">Viewer:</span> Read-only access, can add comments</div>
                     </div>
                   </div>
                 )}
@@ -533,11 +533,11 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
             {userId && <TeamLibraryPanel teamId={userId} />}
 
             {/* — Live Presence (real: your own live session; teammate presence is not yet tracked) */}
-            <div className="bg-[#161b22] border border-white/10 rounded-xl p-4">
+            <div className="bg-card border border-line rounded-xl p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
                 Currently Online
-                <span className="ml-auto bg-green-500/20 text-green-400 text-xs px-2 py-0.5 rounded-full">
+                <span className="ml-auto bg-green-500/20 text-success text-xs px-2 py-0.5 rounded-full">
                   {onlineMembers.length} online
                 </span>
               </h2>
@@ -546,7 +546,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   <Avatar key={m.id} member={m} ring />
                 ))}
                 {onlineMembers.length === 0 && (
-                  <p className="text-xs text-gray-600">No one online right now</p>
+                  <p className="text-xs text-faint">No one online right now</p>
                 )}
               </div>
               {/* The unavailable state must be READABLE, not hover-only. A tooltip never fires on a
@@ -557,11 +557,11 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                 <button
                   disabled
                   title="Video calling is not built yet"
-                  className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-600 cursor-not-allowed"
+                  className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-line text-faint cursor-not-allowed"
                 >
                   <Video size={13} /> Start Video Call — not available yet
                 </button>
-                <p className="text-[10px] text-gray-500 leading-snug max-w-xs">
+                <p className="text-[10px] text-faint leading-snug max-w-xs">
                   Video calling isn&apos;t built yet — we won&apos;t show a button that does nothing. Use the
                   room chat and @mentions to work together in the meantime.
                 </p>

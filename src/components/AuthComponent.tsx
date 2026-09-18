@@ -935,7 +935,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/80 backdrop-blur-md"
+        className="absolute inset-0 bg-scrim backdrop-blur-md"
       />
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -944,34 +944,34 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         // max-h + overflow-y-auto so a tall form (email + all 4 social buttons) never runs off the top/
         // bottom of the screen — it scrolls INSIDE the card instead. 100dvh tracks the real visible height
         // on mobile Safari (accounts for the address bar), and the safe-area insets keep it clear of the notch.
-        className="relative w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-[#161b22] border border-white/10 rounded-[2.5rem] shadow-3xl p-8"
+        className="relative w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-card border border-line rounded-[2.5rem] shadow-3xl p-8"
         style={{ maxHeight: 'calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem)' }}
       >
         <button 
           onClick={onClose}
-          className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full text-[#484f58] hover:text-white transition-all"
+          className="absolute top-6 right-6 p-2 hover:bg-raised rounded-full text-faint hover:text-ink transition-all"
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="space-y-6">
           <div className="text-center space-y-2">
-            <h2 className="text-3xl font-black text-white tracking-tighter uppercase">
+            <h2 className="text-3xl font-black text-ink tracking-tighter uppercase">
               {isLogin ? 'Welcome Back' : 'Join Bharat'}
             </h2>
-            <p className="text-[11px] text-[#8b949e] font-black uppercase tracking-[0.2em]">
+            <p className="text-[11px] text-muted font-black uppercase tracking-[0.2em]">
               {isLogin ? 'Access your AI Workspace' : 'Start your building journey'}
             </p>
           </div>
 
           {isLogin && (
-            <div className="flex bg-[#0d1117] p-1 rounded-2xl border border-white/5">
+            <div className="flex bg-surface p-1 rounded-2xl border border-line">
               <button
                 type="button"
                 onClick={() => setAuthMethod('email')}
                 className={cn(
                   "flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all",
-                  authMethod === 'email' ? "bg-white/10 text-white shadow-lg" : "text-[#484f58] hover:text-white"
+                  authMethod === 'email' ? "bg-raised text-ink shadow-lg" : "text-faint hover:text-ink"
                 )}
               >
                 Email Access
@@ -981,7 +981,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                 onClick={() => setAuthMethod('phone')}
                 className={cn(
                   "flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all",
-                  authMethod === 'phone' ? "bg-white/10 text-white shadow-lg" : "text-[#484f58] hover:text-white"
+                  authMethod === 'phone' ? "bg-raised text-ink shadow-lg" : "text-faint hover:text-ink"
                 )}
               >
                 OTP Access
@@ -1004,7 +1004,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               would be a form with nothing behind it. */}
           {offerReferralBox && (
             <div className="mb-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-              <label className="ml-1 text-[10px] font-black uppercase tracking-widest text-amber-400">
+              <label className="ml-1 text-[10px] font-black uppercase tracking-widest text-warn">
                 Referral code (optional)
               </label>
               <input
@@ -1016,9 +1016,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                   if (clean) holdReferralCode(clean);
                 }}
                 placeholder="Enter your friend's code"
-                className="mt-1.5 w-full rounded-xl border border-white/10 bg-[#0d1117] px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-white transition-colors focus:border-amber-500 focus:outline-none"
+                className="mt-1.5 w-full rounded-xl border border-line bg-surface px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-ink transition-colors focus:border-amber-500 focus:outline-none"
               />
-              <p className="mt-2 text-[10px] font-semibold text-amber-200/60">
+              <p className="mt-2 text-[10px] font-semibold text-warn">
                 Applied automatically after you sign in. You can also add it later in Wallet &rarr; Promo.
               </p>
             </div>
@@ -1028,7 +1028,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             {isLogin && authMethod === 'phone' ? (
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#484f58] uppercase tracking-widest ml-1">Mobile Number</label>
+                  <label className="text-[10px] font-black text-faint uppercase tracking-widest ml-1">Mobile Number</label>
                   <div className="flex gap-2">
                     <input 
                       type="tel" 
@@ -1036,7 +1036,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                       disabled={otpSending || isOtpSent}
                       onChange={e => setMobile(e.target.value)} 
                       placeholder="+91 Mobile" 
-                      className="flex-1 bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-inner" 
+                      className="flex-1 bg-surface border border-line rounded-2xl p-4 text-xs text-ink outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-inner" 
                     />
                     <button 
                       type="button"
@@ -1045,8 +1045,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                       className={cn(
                         "px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center justify-center gap-1.5 min-w-[124px]",
                         otpSending || otpCooldown > 0
-                          ? "bg-white/5 border border-white/5 text-[#484f58] cursor-not-allowed pointer-events-none opacity-60"
-                          : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg active:scale-95"
+                          ? "bg-raised border border-line text-faint cursor-not-allowed pointer-events-none opacity-60"
+                          : "bg-indigo-600 hover:bg-indigo-700 text-on-accent shadow-lg active:scale-95"
                       )}
                     >
                       {otpSending ? (
@@ -1072,14 +1072,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                     className="space-y-4"
                   >
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-black text-amber-500 uppercase tracking-widest ml-1">Enter 6-digit OTP</label>
+                      <label className="text-[10px] font-black text-warn uppercase tracking-widest ml-1">Enter 6-digit OTP</label>
                       <input 
                         type="text" 
                         maxLength={6}
                         value={otp} 
                         onChange={e => setOtp(e.target.value)} 
                         placeholder="000000" 
-                        className="w-full bg-[#0d1117] border border-amber-500/20 rounded-2xl p-4 text-xs text-amber-500 outline-none focus:border-amber-500 transition-all shadow-inner text-center tracking-[0.5em] font-bold" 
+                        className="w-full bg-surface border border-amber-500/20 rounded-2xl p-4 text-xs text-warn outline-none focus:border-amber-500 transition-all shadow-inner text-center tracking-[0.5em] font-bold" 
                       />
                     </div>
                     <button 
@@ -1097,38 +1097,38 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               <div className="space-y-4">
                 {!isLogin && (
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-[#484f58] uppercase tracking-widest ml-1">Full Name</label>
+                    <label className="text-[10px] font-black text-faint uppercase tracking-widest ml-1">Full Name</label>
                     <input 
                       type="text" 
                       value={name} 
                       onChange={e => setName(e.target.value)} 
                       placeholder="Bharat Kumar" 
-                      className="w-full bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 transition-all shadow-inner" 
+                      className="w-full bg-surface border border-line rounded-2xl p-4 text-xs text-ink outline-none focus:border-indigo-500 transition-all shadow-inner" 
                     />
                   </div>
                 )}
                 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#484f58] uppercase tracking-widest ml-1">Email / User ID</label>
+                  <label className="text-[10px] font-black text-faint uppercase tracking-widest ml-1">Email / User ID</label>
                   <input 
                     type="email" 
                     required
                     value={email} 
                     onChange={e => setEmail(e.target.value)} 
                     placeholder="you@bharat.ai" 
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 transition-all shadow-inner" 
+                    className="w-full bg-surface border border-line rounded-2xl p-4 text-xs text-ink outline-none focus:border-indigo-500 transition-all shadow-inner" 
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-[#484f58] uppercase tracking-widest ml-1">Password</label>
+                  <label className="text-[10px] font-black text-faint uppercase tracking-widest ml-1">Password</label>
                   <input 
                     type="password" 
                     required
                     value={password} 
                     onChange={e => setPassword(e.target.value)} 
                     placeholder="••••••••"
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 transition-all shadow-inner"
+                    className="w-full bg-surface border border-line rounded-2xl p-4 text-xs text-ink outline-none focus:border-indigo-500 transition-all shadow-inner"
                   />
                   {isLogin && (
                     <div className="flex justify-end">
@@ -1136,7 +1136,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                         type="button"
                         onClick={handleForgotPassword}
                         disabled={loading}
-                        className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors mt-1 mr-1"
+                        className="text-[10px] font-bold text-accent-text hover:text-accent-text disabled:opacity-50 transition-colors mt-1 mr-1"
                       >
                         Forgot password?
                       </button>
@@ -1146,7 +1146,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
 
                 {!isLogin && (
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-[#484f58] uppercase tracking-widest ml-1">Mobile Verification (Optional)</label>
+                    <label className="text-[10px] font-black text-faint uppercase tracking-widest ml-1">Mobile Verification (Optional)</label>
                     {!isOtpVerified ? (
                       <div className="space-y-3">
                         <div className="flex gap-2">
@@ -1156,7 +1156,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                             disabled={otpSending || isOtpSent}
                             onChange={e => setMobile(e.target.value)} 
                             placeholder="+91 Mobile" 
-                            className="flex-1 bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-inner" 
+                            className="flex-1 bg-surface border border-line rounded-2xl p-4 text-xs text-ink outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-inner" 
                           />
                           <button 
                             type="button"
@@ -1165,8 +1165,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                             className={cn(
                               "px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center justify-center gap-1.5 min-w-[124px]",
                               otpSending || otpCooldown > 0
-                                ? "bg-white/5 border border-white/5 text-[#484f58] cursor-not-allowed pointer-events-none opacity-60"
-                                : "bg-[#0d1117] border border-white/10 text-white hover:bg-white/5"
+                                ? "bg-raised border border-line text-faint cursor-not-allowed pointer-events-none opacity-60"
+                                : "bg-surface border border-line text-ink hover:bg-raised"
                             )}
                           >
                             {otpSending ? (
@@ -1196,7 +1196,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                               value={otp} 
                               onChange={e => setOtp(e.target.value)} 
                               placeholder="OTP Code" 
-                              className="w-full bg-[#0d1117] border border-amber-500/20 rounded-2xl p-4 text-xs text-amber-500 outline-none focus:border-amber-500 transition-all shadow-inner text-center tracking-[0.5em] font-bold" 
+                              className="w-full bg-surface border border-amber-500/20 rounded-2xl p-4 text-xs text-warn outline-none focus:border-amber-500 transition-all shadow-inner text-center tracking-[0.5em] font-bold" 
                             />
                             <button 
                               type="button"
@@ -1210,8 +1210,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                         )}
                       </div>
                     ) : (
-                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-2 text-emerald-500 text-[10px] font-bold">
-                        <div className="w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center text-white text-[8px]">✓</div>
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-2 text-success text-[10px] font-bold">
+                        <div className="w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center text-on-accent text-[8px]">✓</div>
                         <span>Mobile Verified: {mobile}</span>
                       </div>
                     )}
@@ -1221,7 +1221,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                 <button 
                   type="submit" 
                   disabled={loading || (!isLogin && mobile.trim().length > 0 && !isOtpVerified)}
-                  className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-20 text-white rounded-2xl font-black uppercase tracking-[0.3em] transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
+                  className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-20 text-on-accent rounded-2xl font-black uppercase tracking-[0.3em] transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-3"
                 >
                   {loading ? (
                     <TirangaLoader className="w-5 h-5" />
@@ -1234,32 +1234,32 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           </form>
 
           {error && (
-            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-500 text-[10px] font-bold">
+            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-danger text-[10px] font-bold">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span className="whitespace-pre-wrap break-words">{error}</span>
             </div>
           )}
 
           {successMessage && (
-            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-emerald-400 text-[10px] font-bold">
-              <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">✓</div>
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-success text-[10px] font-bold">
+              <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-success shrink-0">✓</div>
               <span>{successMessage}</span>
             </div>
           )}
 
           {switchBanner && (
             <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-start gap-3">
-              <Users className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-              <span className="text-[11px] leading-relaxed text-indigo-200">{switchBanner}</span>
+              <Users className="w-4 h-4 text-accent-text shrink-0 mt-0.5" />
+              <span className="text-[11px] leading-relaxed text-accent-text">{switchBanner}</span>
             </div>
           )}
 
           {/* ── Social sign-in: Google + GitHub ─────────────────────────────── */}
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-white/10" />
-              <span className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">or continue with</span>
-              <div className="flex-1 h-px bg-white/10" />
+              <div className="flex-1 h-px bg-raised" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-faint">or continue with</span>
+              <div className="flex-1 h-px bg-raised" />
             </div>
             <button
               type="button"
@@ -1282,7 +1282,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               // Force white text + icon inline so the label is readable no matter what theme/global CSS is
               // applied around the modal (the button rendered with dark, unreadable text otherwise).
               style={{ color: '#ffffff' }}
-              className="w-full py-4 bg-black hover:bg-[#1a1a1a] disabled:opacity-50 text-white border border-white/25 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+              className="w-full py-4 bg-black hover:bg-[#1a1a1a] disabled:opacity-50 text-on-accent border border-line rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.53c-.02-2.02 1.65-2.99 1.72-3.04-.94-1.37-2.4-1.56-2.92-1.58-1.24-.13-2.42.73-3.05.73-.63 0-1.6-.71-2.63-.69-1.35.02-2.6.79-3.3 2-1.4 2.44-.36 6.04 1.01 8.02.67.97 1.47 2.05 2.51 2.01 1.01-.04 1.39-.65 2.61-.65 1.22 0 1.56.65 2.63.63 1.09-.02 1.78-.98 2.44-1.96.77-1.12 1.09-2.21 1.11-2.27-.02-.01-2.13-.82-2.15-3.23zM15.04 6.36c.56-.68.94-1.62.83-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.83-.46 2.4-1.14z"/></svg>
               Sign in with Apple
@@ -1294,12 +1294,12 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               disabled={loading}
               // Lighter GitHub grey + forced white text/icon so the label reads clearly (was too dark).
               style={{ color: '#ffffff' }}
-              className="w-full py-4 bg-[#30363d] hover:bg-[#3a4048] disabled:opacity-50 text-white border border-white/25 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+              className="w-full py-4 bg-raised hover:bg-[#3a4048] disabled:opacity-50 text-on-accent border border-line rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
             >
               <Github className="w-4 h-4" />
               Continue with GitHub
             </button>
-            <p className="text-[9px] text-[#484f58] text-center leading-relaxed">
+            <p className="text-[9px] text-faint text-center leading-relaxed">
               GitHub connects your repos so NavBharatAI can build, commit &amp; deploy your apps.
             </p>
           </div>
@@ -1316,7 +1316,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                 setIsOtpVerified(false);
                 setAuthMethod('email');
               }}
-              className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest hover:text-indigo-400 transition-colors"
+              className="text-[10px] text-muted font-black uppercase tracking-widest hover:text-accent-text transition-colors"
             >
               {isLogin ? "New to NavBharat? Create One" : "Already built something? Login"}
             </button>

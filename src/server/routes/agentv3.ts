@@ -14,6 +14,7 @@ import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
 import { honestResultEvent } from '../lib/responseEmoji';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowledge';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
 import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
@@ -9413,6 +9414,27 @@ async function noteBuildOutcome(
     // BEFORE the build lock: a role turn never writes, so it must run freely WHILE the executor builds
     // (that concurrency is the whole point of the model). Old clients never send `chatRole` → this
     // lane is invisible to them.
+    /**
+     * WHAT KIND OF APP IS THIS? — the sixteen enumerated domains first, a model only where they are
+     * silent (admin 2026-09-18: *"hame to app generator banana tha na?"*). See `domainKnowledge.ts`.
+     *
+     * The call is the FREE chat router — the same ₹0 door the intent doubt-reader uses — raced at 6 s,
+     * and EVERY failure mode (throw, timeout, empty, unparseable, "nothing special") resolves to a
+     * knowledge object with `source: 'none'`, which injects nothing. A known domain and a thin prompt
+     * never reach the model at all, so the common path pays nothing.
+     */
+    const learnDomain = async (text: string): Promise<DomainKnowledge | null> => {
+      try {
+        const free = AIRouterManager.getRouter('free');
+        return await raceTimeout(
+          resolveDomainKnowledge(text, (p) =>
+            free.route(p, 'You answer with JSON only.').then((r) => r.response.content)),
+          6_000,
+          'resolveDomainKnowledge',
+        );
+      } catch { return null; }
+    };
+
     const chatRole = parseChatRole(req.body?.chatRole);
     if (chatRole) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -9433,7 +9455,9 @@ async function noteBuildOutcome(
         // 🧭 THE PLAN THE USER CAN SEE, AND THE QUESTIONS WORTH ASKING (admin 2026-09-17). Deterministic,
         // no model call, and empty for everything but a FRESH app in PLAN mode with a real domain —
         // see `plannerDomainBrief`, which holds the reasoning and the three bounds.
-        const domainBrief = plannerDomainBrief(chatRole, prompt, { projectIsEmpty: Object.keys(roleFiles).length === 0 });
+        const projectIsEmpty = Object.keys(roleFiles).length === 0;
+        const knowledge = chatRole === 'planner' && projectIsEmpty ? await learnDomain(prompt) : null;
+        const domainBrief = plannerDomainBrief(chatRole, prompt, { projectIsEmpty, knowledge });
         const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked) + domainBrief;
         const roleRouter = AIRouterManager.getRouter('free');
         const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
@@ -14041,12 +14065,19 @@ async function noteBuildOutcome(
             // exports, no components, no routes) for the whole build. Everything built on the graph
             // then reasons about a project that looks like a list of blank files.
             //
-            // The FIX is deliberately not shipped here: filling the graph moves a real build's verdict
-            // in BOTH directions (a restored import can fire `unresolvedImport`, a 25-point hard
-            // blocker ⇒ ₹0 on a working app; while a hollow graph makes every component look
-            // un-imported ⇒ `PENALTY.orphanComponent` against every resumed build), and which one
-            // dominates has never been measured. This line is that measurement — admin-only, no
-            // behaviour change, nothing branches on it. Best-effort inside the same try.
+            // ✅ THE FIX SHIPPED 2026-09-18, and this line is what settled it. It used to read "the FIX
+            // is deliberately not shipped here … which one dominates has never been measured".
+            // Report 2ec15a71 measured it: **30 of 31 files stubbed** on a real user's edit, with the
+            // contract card, the architecture invariants ("1 observed rule") and grounding ("3 files,
+            // ~211 tokens of a 4000 budget") all degraded together — and the model then rewrote
+            // `App.tsx` with its own invented types, orphaning the project's `data.ts`.
+            //
+            // The recorded worry (a filled import firing `unresolvedImport` ⇒ ₹0 on a working app) was
+            // wrong twice over: a file not reached under `maxFiles` stays in `graph.files` as a stub so
+            // imports still resolve, and the readiness path that owns that penalty reads the DURABLE
+            // project content, not this graph — in that report it was never even invoked. See
+            // `warmIndexFiles`. This line STAYS as the instrument: it should now read 0 stubs on a
+            // resumed edit, and a non-zero count means the refill did not reach them.
             const stubs = wsMem.restoredStubPaths();
             if (stubs.length > 0) {
               const total = wsMem.graph().files.length;
@@ -14329,10 +14360,31 @@ async function noteBuildOutcome(
           // (2026-09-14): a persona request ("your job is to tell me until it's bullet proof") routed
           // to new_build and was handed a recruitment-ATS feature list to INCLUDE. The domain half is
           // now withheld unless an app was genuinely asked for; the India half is unaffected.
+          const askedForAnApp = userAskedForAnAppToBeBuilt(prompt);
           const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt), {
-            userAskedForAnApp: userAskedForAnAppToBeBuilt(prompt),
+            userAskedForAnApp: askedForAnApp,
           });
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
+          // 🇮🇳 THE LONG TAIL (2026-09-18). `buildRequirementGuidance` is silent outside its sixteen
+          // enumerated domains, so a mandir donation app or a machhli-palan tracker used to get NOTHING
+          // while a hospital got RBAC and an audit trail. This adds the same help for the domains
+          // nobody enumerated — and ONLY there: a listed domain returns `listed` and is skipped here,
+          // so every existing build prompt is byte-identical. It never asks a question (the 2026-07-20
+          // friction-free decision is untouched); it only names what such an app usually needs.
+          if (!reqGuidance && askedForAnApp) {
+            const learned = await learnDomain(prompt);
+            if (learned && learned.source === 'generated') {
+              buildPrompt = [
+                `[REQUIREMENT AWARENESS — this looks like a ${learned.domain} app]`,
+                `A production ${learned.domain} app almost always needs the following, which the request left implicit. INCLUDE them by default (real, wired — never stubbed) unless one is clearly out of scope for what the user asked; if it genuinely does not fit, skip it silently rather than asking:`,
+                ...learned.needs.map((f) => `- ${f}`),
+                '',
+                '---',
+                '',
+                buildPrompt,
+              ].join('\n');
+            }
+          }
         } catch { /* requirement guidance is best-effort — never affect the build */ }
       }
 

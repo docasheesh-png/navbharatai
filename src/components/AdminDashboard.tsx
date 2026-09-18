@@ -129,16 +129,16 @@ type ReportSortKey = 'time' | 'name' | 'app' | 'tier' | 'charged';
 // lists now use — and which carries 'unknown', a bucket this one silently folded into nothing.
 
 const statCard = (label: string, value: string | number, sub: string, color: string, Icon: React.ComponentType<any>) => (
-  <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 relative overflow-hidden">
+  <div className="bg-card border border-line rounded-[1.5rem] p-5 relative overflow-hidden">
     <div className={`absolute top-0 left-0 w-full h-1 ${color}`} />
     <div className="flex justify-between items-start">
       <div>
-        <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">{label}</p>
-        <h3 className="text-2xl font-black text-white tracking-tight mt-1 font-mono">{value}</h3>
-        <p className="text-[9px] text-[#8b949e] uppercase font-bold tracking-wider mt-2">{sub}</p>
+        <p className="text-[10px] text-muted font-black uppercase tracking-widest">{label}</p>
+        <h3 className="text-2xl font-black text-ink tracking-tight mt-1 font-mono">{value}</h3>
+        <p className="text-[9px] text-muted uppercase font-bold tracking-wider mt-2">{sub}</p>
       </div>
-      <div className={`p-2.5 rounded-xl border border-white/10 bg-white/5`}>
-        <Icon className="w-4 h-4 text-white/60" />
+      <div className={`p-2.5 rounded-xl border border-line bg-raised`}>
+        <Icon className="w-4 h-4 text-muted" />
       </div>
     </div>
   </div>
@@ -1605,7 +1605,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     else toast('Error: ' + r.error);
   };
 
-  const providerColors: Record<string, string> = { gemini: 'bg-blue-500', anthropic: 'bg-orange-500', grok: 'bg-purple-500', vertex: 'bg-green-500', openai: 'bg-emerald-500' };
+  const providerColors: Record<string, string> = { gemini: 'bg-blue-500 text-on-accent', anthropic: 'bg-orange-500 text-on-accent', grok: 'bg-purple-500 text-on-accent', vertex: 'bg-green-500 text-on-accent', openai: 'bg-emerald-500 text-on-accent' };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 py-4 text-left">
@@ -1617,7 +1617,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
       {/* Toast */}
       {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 bg-indigo-600 text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-2xl animate-in slide-in-from-top-2">
+        <div className="fixed top-6 right-6 z-50 bg-indigo-600 text-on-accent px-5 py-3 rounded-2xl font-bold text-sm shadow-2xl animate-in slide-in-from-top-2">
           {toastMsg}
         </div>
       )}
@@ -1639,32 +1639,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         const isBan = moderating.action === 'ban';
         const reasonMissing = isBan && !moderateReason.trim();
         return (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-5 bg-black/70 backdrop-blur-sm" role="presentation">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-5 bg-scrim backdrop-blur-sm" role="presentation">
             <div role="alertdialog" aria-modal="true" aria-label={copy.title}
-                 className="w-full max-w-[420px] rounded-2xl bg-[#161b22] border border-white/10 shadow-2xl p-5">
+                 className="w-full max-w-[420px] rounded-2xl bg-card border border-line shadow-2xl p-5">
               <div className="flex items-center gap-2.5 mb-2">
                 <span className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${
-                  isBan ? 'bg-red-500/10 border-red-500/20' : 'bg-white/5 border-white/10'}`}>
-                  {isBan ? <BanIcon size={16} className="text-red-400" /> : <Globe size={16} className="text-white/70" />}
+                  isBan ? 'bg-red-500/10 border-red-500/20' : 'bg-raised border-line'}`}>
+                  {isBan ? <BanIcon size={16} className="text-danger" /> : <Globe size={16} className="text-body" />}
                 </span>
-                <h2 className="text-base font-bold text-white">{copy.title}</h2>
+                <h2 className="text-base font-bold text-ink">{copy.title}</h2>
               </div>
 
-              <p className="text-[11px] font-mono text-white/70 bg-black/30 border border-white/5 rounded-lg px-2.5 py-1.5 mb-3 truncate">
+              <p className="text-[11px] font-mono text-body bg-well border border-line rounded-lg px-2.5 py-1.5 mb-3 truncate">
                 {moderating.workspaceId}
               </p>
-              <p className={`text-sm leading-relaxed mb-4 ${isBan ? 'text-red-200/90' : 'text-white/60'}`}>{copy.body}</p>
+              <p className={`text-sm leading-relaxed mb-4 ${isBan ? 'text-danger' : 'text-muted'}`}>{copy.body}</p>
 
-              <label className="block text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">
+              <label className="block text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">
                 Reason {isBan ? '(required)' : '(optional)'}
               </label>
               <input
                 value={moderateReason}
                 onChange={(e) => setModerateReason(e.target.value)}
                 placeholder={isBan ? 'Why is this app being banned?' : 'Why is it being taken offline?'}
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-[12px] text-white placeholder:text-[#484f58] mb-1 focus:outline-none focus:border-sky-500/40"
+                className="w-full bg-well border border-line rounded-lg px-3 py-2 text-[12px] text-ink placeholder:text-faint mb-1 focus:outline-none focus:border-sky-500/40"
               />
-              <p className="text-[10px] text-[#484f58] mb-4 leading-relaxed">
+              <p className="text-[10px] text-faint mb-4 leading-relaxed">
                 Kept for 180 days as the record of this removal. The owner is not shown what you type.
               </p>
 
@@ -1674,7 +1674,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <button
                   onClick={() => { setModerating(null); setModerateReason(''); }}
                   disabled={moderateBusy}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm font-bold disabled:opacity-40"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-raised hover:bg-raised text-ink text-sm font-bold disabled:opacity-40"
                 >
                   Cancel
                 </button>
@@ -1682,8 +1682,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   onClick={() => void runModeration()}
                   disabled={moderateBusy || reasonMissing}
                   title={reasonMissing ? 'A ban needs a reason' : undefined}
-                  className={`flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-bold disabled:opacity-40 ${
-                    isBan ? 'bg-red-600 hover:bg-red-500' : 'bg-white/20 hover:bg-white/30'}`}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-ink text-sm font-bold disabled:opacity-40 ${
+                    isBan ? 'bg-red-600 hover:bg-red-500 text-on-accent' : 'bg-raised hover:bg-raised'}`}
                 >
                   {moderateBusy ? 'Working…' : copy.cta}
                 </button>
@@ -1694,33 +1694,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       })()}
 
       {/* Header — logout always pinned top-right, visible on all screen sizes */}
-      <div className="relative flex items-start justify-between gap-4 border-b border-white/5 pb-6">
+      <div className="relative flex items-start justify-between gap-4 border-b border-line pb-6">
         <div className="flex-1 min-w-0 pr-24">
-          <p className="text-[10px] text-indigo-400 font-black uppercase tracking-widest flex items-center gap-2">
+          <p className="text-[10px] text-accent-text font-black uppercase tracking-widest flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse inline-block" />
             Platform Administration Console
           </p>
-          <h1 className="text-2xl font-black text-white uppercase tracking-tight mt-1">navBharatAI Admin</h1>
+          <h1 className="text-2xl font-black text-ink uppercase tracking-tight mt-1">navBharatAI Admin</h1>
           <div className="flex items-center gap-2 mt-3">
-            <button onClick={fetchAnalytics} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-white transition-all active:scale-95">
+            <button onClick={fetchAnalytics} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-raised border border-line hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-ink transition-all active:scale-95">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
             </button>
             {analytics?.maintenanceMode && (
-              <span className="px-3 py-2 bg-red-500/20 border border-red-500/30 rounded-xl text-[10px] font-black text-red-400 uppercase tracking-widest">Maintenance ON</span>
+              <span className="px-3 py-2 bg-red-500/20 border border-red-500/30 rounded-xl text-[10px] font-black text-danger uppercase tracking-widest">Maintenance ON</span>
             )}
           </div>
         </div>
         {/* Logout — always top-right, never wraps off screen */}
         <button
           onClick={() => { localStorage.removeItem('admin_token'); onLogout(); }}
-          className="absolute top-0 right-0 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 active:bg-red-600 border border-red-500/30 text-red-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap"
+          className="absolute top-0 right-0 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 active:bg-red-600 border border-red-500/30 text-danger hover:text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 whitespace-nowrap"
         >
           Logout
         </button>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-[#161b22] p-1 rounded-2xl border border-white/5 overflow-x-auto">
+      <div className="flex gap-1 bg-card p-1 rounded-2xl border border-line overflow-x-auto">
         {TABS.map(tab => {
           // THE COUNTER BESIDE THE NAME. `formatBadge` returns null for anything unmeasured, and a
           // null renders NOTHING — never a zero, which on this bar would read as "I looked, there is
@@ -1735,7 +1735,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               title={text && hint ? `${tab.label} — ${hint}` : tab.label}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-on-accent shadow-lg' : 'text-muted hover:text-ink hover:bg-raised'}`}
             >
               <tab.icon className="w-3.5 h-3.5" />
               {tab.label}
@@ -1743,10 +1743,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <span
                   className={`px-1.5 py-0.5 rounded-md text-[9px] font-black font-mono tabular-nums border ${
                     hot
-                      ? 'bg-red-500/15 border-red-500/40 text-red-300'
+                      ? 'bg-red-500/15 border-red-500/40 text-danger'
                       : activeTab === tab.id
-                        ? 'bg-black/25 border-white/20 text-white/90'
-                        : 'bg-white/5 border-white/10 text-[#8b949e]'
+                        ? 'bg-well border-line text-body'
+                        : 'bg-raised border-line text-muted'
                   }`}
                 >
                   {text}
@@ -1760,7 +1760,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       {loading && !analytics ? (
         <div className="py-24 text-center">
           <TirangaLoader className="w-10 h-10 mx-auto mb-4" />
-          <p className="text-xs text-[#8b949e] font-black uppercase tracking-widest">Loading dashboard data...</p>
+          <p className="text-xs text-muted font-black uppercase tracking-widest">Loading dashboard data...</p>
         </div>
       ) : (
         <>
@@ -1781,23 +1781,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <AudienceCard data={audience} onOpen={() => void fetchAudience()} loading={audienceLoading} />
 
               <div className="pt-1">
-                <h2 className="text-[11px] font-black text-white uppercase tracking-widest">Business</h2>
-                <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mt-0.5">
+                <h2 className="text-[11px] font-black text-ink uppercase tracking-widest">Business</h2>
+                <p className="text-[9px] text-muted font-bold uppercase tracking-widest mt-0.5">
                   Revenue, users and lifetime usage — from Firestore, not the live window above
                 </p>
               </div>
 
               {/* Row 1: 4 key metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'Verified payments', 'bg-emerald-500', IndianRupee)}
-                {statCard('Registered Users', analytics?.totalUsers || 0, `+${analytics?.newUsersToday || 0} today`, 'bg-indigo-500', Users)}
-                {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), analytics?.hitsSinceBoot ? `${(analytics?.websiteHitsTotal || 0).toLocaleString()} since this server started` : `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500', Globe)}
-                {statCard('Active (24h)', analytics?.activeUsers24h || 0, 'Unique users with AI requests', 'bg-violet-500', Activity)}
+                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'Verified payments', 'bg-emerald-500 text-on-accent', IndianRupee)}
+                {statCard('Registered Users', analytics?.totalUsers || 0, `+${analytics?.newUsersToday || 0} today`, 'bg-indigo-500 text-on-accent', Users)}
+                {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), analytics?.hitsSinceBoot ? `${(analytics?.websiteHitsTotal || 0).toLocaleString()} since this server started` : `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500 text-on-accent', Globe)}
+                {statCard('Active (24h)', analytics?.activeUsers24h || 0, 'Unique users with AI requests', 'bg-violet-500 text-on-accent', Activity)}
               </div>
 
               {/* Row 2: 4 more metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined', 'bg-amber-500', Zap)}
+                {statCard('Output Tokens', (analytics?.totalTokensUsed || 0).toLocaleString(), analytics?.scope === 'chat' ? 'Chat assistants only — builds are on the Monitor' : 'All providers combined', 'bg-amber-500 text-on-accent', Zap)}
                 {/* 🔒 "AT MOST" WHEN THE COST IS A FLOOR. Some calls cannot be priced (a provider that
                     reported no tokens, or a row written before usage was recorded), so the real cost is
                     at least what we summed and the margin is at most what we show. This card used to
@@ -1809,9 +1809,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
                   /* CHAT cost only — build cost is on the Monitor's own tiles (scope from the server) */
                   `Revenue minus ${analytics?.scope === 'chat' ? 'CHAT AI' : 'AI'} cost${analytics?.scope === 'chat' ? ' · build cost is on the Monitor' : ''}${analytics?.providerCostComplete === false ? ` · ${analytics?.unpricedCalls || 0} call(s) could not be priced` : ''}`,
-                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
-                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500', Tag)}
-                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500', Cpu)}
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500 text-on-accent', Tag)}
+                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500 text-on-accent', Cpu)}
               </div>
 
               {/* PUBLISHED APPS, as a NUMBER among the numbers.
@@ -1831,10 +1831,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   channelsError || !channels
                     ? 'Could not read the list — not a count of zero'
                     : `${channels.verdict.remaining} more can be published${channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}`,
-                  channelsError || !channels ? 'bg-white/20'
-                    : channels.verdict.level === 'critical' ? 'bg-red-500'
-                    : channels.verdict.level === 'warn' ? 'bg-amber-500'
-                    : 'bg-emerald-500',
+                  channelsError || !channels ? 'bg-raised'
+                    : channels.verdict.level === 'critical' ? 'bg-red-500 text-on-accent'
+                    : channels.verdict.level === 'warn' ? 'bg-amber-500 text-on-accent'
+                    : 'bg-emerald-500 text-on-accent',
                   Globe,
                 )}
               </div>
@@ -1846,10 +1846,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   can be found at all, since its id is a one-way hash with no record left to trace. */}
               {(channels || channelsError) && (
                 <div className={`rounded-[1.5rem] p-6 border ${
-                  channelsError ? 'bg-[#161b22] border-white/10'
+                  channelsError ? 'bg-card border-line'
                   : channels?.verdict.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
                   : channels?.verdict.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
-                  : 'bg-[#161b22] border-white/10'}`}>
+                  : 'bg-card border-line'}`}>
                   <div className="flex items-center justify-between gap-3 mb-3">
                     <button
                       type="button"
@@ -1859,27 +1859,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       className="flex items-center gap-2 min-w-0 text-left group"
                     >
                       {publishCardOpen
-                        ? <ChevronDown className="w-4 h-4 shrink-0 text-[#8b949e] group-hover:text-white" />
-                        : <ChevronRight className="w-4 h-4 shrink-0 text-[#8b949e] group-hover:text-white" />}
-                      <h3 className="text-sm font-black text-white uppercase tracking-tight">Publish Capacity</h3>
+                        ? <ChevronDown className="w-4 h-4 shrink-0 text-muted group-hover:text-ink" />
+                        : <ChevronRight className="w-4 h-4 shrink-0 text-muted group-hover:text-ink" />}
+                      <h3 className="text-sm font-black text-ink uppercase tracking-tight">Publish Capacity</h3>
                       <span className="sr-only">{publishCardOpen ? 'Hide the details' : 'Show the details'}</span>
                     </button>
                     <div className="flex items-center gap-2 shrink-0">
                       {/* Folded, the numbers still show: a collapsed card must not conceal the ceiling. */}
                       {!publishCardOpen && channels && (
-                        <span className="text-[10px] font-bold text-[#8b949e] tabular-nums">
+                        <span className="text-[10px] font-bold text-muted tabular-nums">
                           {channels.verdict.used} / {channels.verdict.cap} channels
                           {channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}
                         </span>
                       )}
                       {!publishCardOpen && channelsError && (
-                        <span className="text-[10px] font-bold text-[#8b949e]">could not be read</span>
+                        <span className="text-[10px] font-bold text-muted">could not be read</span>
                       )}
                       <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                        channelsError ? 'bg-white/5 border-white/10 text-[#8b949e]'
-                        : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                        : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+                        channelsError ? 'bg-raised border-line text-muted'
+                        : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                        : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
                         {channelsError ? 'unknown' : channels?.verdict.level}
                       </span>
                     </div>
@@ -1887,11 +1887,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                   <div id="publish-capacity-body">
                   {!publishCardOpen ? null : channelsError ? (
-                    <p className="text-xs text-[#8b949e] leading-relaxed">{channelsError}</p>
+                    <p className="text-xs text-muted leading-relaxed">{channelsError}</p>
                   ) : channels && (
                     <>
-                      <p className="text-xs text-white/80 leading-relaxed">{channels.verdict.message}</p>
-                      <p className="text-[11px] text-[#8b949e] mt-1.5 leading-relaxed">
+                      <p className="text-xs text-body leading-relaxed">{channels.verdict.message}</p>
+                      <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
                         {channels.verdict.remaining} more app{channels.verdict.remaining === 1 ? '' : 's'} can be published before
                         the limit. The cap of {channels.verdict.cap} is a working figure — Google does not publish this number —
                         so treat it as approximate until a real &quot;quota reached&quot; confirms it.
@@ -1900,22 +1900,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {channels.channels.some((c) => c.reclaimable) && (
                         <div className="mt-4 space-y-2">
                           <div className="flex items-center justify-between gap-3 flex-wrap">
-                            <p className="text-[10px] font-black uppercase tracking-wider text-[#8b949e]">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-muted">
                               Reclaimable channels — no live app is using these
                             </p>
                             <button
                               onClick={() => void reclaimAllChannels()}
                               disabled={!!reclaimingAll || !!reclaiming}
-                              className="shrink-0 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-600/20 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white/70 hover:text-red-300 disabled:opacity-40"
+                              className="shrink-0 px-3 py-1.5 rounded-lg bg-raised hover:bg-red-600/20 border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-danger disabled:opacity-40"
                             >
                               {reclaimingAll ? `Reclaiming ${reclaimingAll.done}/${reclaimingAll.total}…` : 'Reclaim all'}
                             </button>
                           </div>
                           {channels.channels.filter((c) => c.reclaimable).map((c) => (
-                            <div key={c.channelId} className="flex items-center justify-between gap-3 rounded-xl bg-black/20 border border-white/5 px-3 py-2">
+                            <div key={c.channelId} className="flex items-center justify-between gap-3 rounded-xl bg-well border border-line px-3 py-2">
                               <div className="min-w-0">
-                                <p className="text-[11px] font-mono text-white/80 truncate">{c.channelId}</p>
-                                <p className="text-[10px] text-[#8b949e] truncate">
+                                <p className="text-[11px] font-mono text-body truncate">{c.channelId}</p>
+                                <p className="text-[10px] text-muted truncate">
                                   {c.state === 'snapshot'
                                     /* A build copy, not an app. It never had a record, by design — and
                                        the next green build writes it again, so clearing it is safe. */
@@ -1931,7 +1931,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               <button
                                 onClick={() => void reclaimChannel(c.channelId)}
                                 disabled={reclaiming === c.channelId}
-                                className="shrink-0 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-red-600/20 text-[10px] font-black uppercase tracking-wider text-white/70 hover:text-red-300 disabled:opacity-40"
+                                className="shrink-0 px-3 py-1.5 rounded-lg bg-raised hover:bg-red-600/20 text-[10px] font-black uppercase tracking-wider text-body hover:text-danger disabled:opacity-40"
                               >
                                 {reclaiming === c.channelId ? 'Reclaiming…' : 'Reclaim'}
                               </button>
@@ -1947,15 +1947,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* ── P-MON.4 Composite platform health (real, from /api/admin/health-score) ── */}
               {healthScore?.score && (
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6">
+                <div className="bg-card border border-line rounded-[1.5rem] p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Platform Health Score</h3>
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Platform Health Score</h3>
                     <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                      healthScore.score.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : healthScore.score.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
-                      : healthScore.score.grade === 'fair' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                      : healthScore.score.grade === 'unknown' ? 'bg-white/5 border-white/10 text-[#8b949e]'
-                      : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                      healthScore.score.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
+                      : healthScore.score.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-info'
+                      : healthScore.score.grade === 'fair' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                      : healthScore.score.grade === 'unknown' ? 'bg-raised border-line text-muted'
+                      : 'bg-red-500/10 border-red-500/30 text-danger'}`}>
                       {healthScore.score.grade}
                     </span>
                   </div>
@@ -1965,17 +1965,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       { label: 'Reliability', value: healthScore.score.reliability, good: (v: number) => v >= 75 },
                       { label: 'Risk', value: healthScore.score.risk, good: (v: number) => v <= 25 },
                     ] as const).map(m => (
-                      <div key={m.label} className="bg-black/30 rounded-xl p-4 text-center">
-                        <div className="text-[9px] text-[#8b949e] uppercase font-bold tracking-widest">{m.label}</div>
+                      <div key={m.label} className="bg-well rounded-xl p-4 text-center">
+                        <div className="text-[9px] text-muted uppercase font-bold tracking-widest">{m.label}</div>
                         <div className={`text-2xl font-black font-mono mt-1 ${
-                          m.value == null ? 'text-[#8b949e]' : m.good(m.value) ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          m.value == null ? 'text-muted' : m.good(m.value) ? 'text-success' : 'text-warn'}`}>
                           {m.value == null ? '—' : m.value}
                         </div>
                       </div>
                     ))}
                   </div>
                   {Array.isArray(healthScore.score.missing) && healthScore.score.missing.length > 0 && (
-                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-3">
+                    <p className="text-[9px] text-faint font-bold uppercase tracking-widest mt-3">
                       No data yet for: {healthScore.score.missing.join(', ')} — excluded from the score (not faked).
                     </p>
                   )}
@@ -1984,49 +1984,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* ── P-MON.5 AI Insights (real, deterministic from live metrics) + NL query ── */}
               {insights && (
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6">
+                <div className="bg-card border border-line rounded-[1.5rem] p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">AI Insights</h3>
-                    <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">Derived from live metrics — not projected</span>
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">AI Insights</h3>
+                    <span className="text-[9px] text-faint font-bold uppercase tracking-widest">Derived from live metrics — not projected</span>
                   </div>
                   <div className="space-y-2">
                     {(insights.insights || []).map((i: any) => (
-                      <div key={i.id} className="flex items-start gap-3 bg-black/30 rounded-xl p-3">
+                      <div key={i.id} className="flex items-start gap-3 bg-well rounded-xl p-3">
                         <span className={`mt-0.5 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 ${
-                          i.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                          : i.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                          : i.severity === 'good' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                          : 'bg-white/5 border-white/10 text-[#8b949e]'}`}>
+                          i.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                          : i.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                          : i.severity === 'good' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
+                          : 'bg-raised border-line text-muted'}`}>
                           {i.severity}
                         </span>
                         <div>
-                          <div className="text-xs font-bold text-white">{i.headline}</div>
-                          <div className="text-[11px] text-[#8b949e] mt-0.5">{i.detail}</div>
+                          <div className="text-xs font-bold text-ink">{i.headline}</div>
+                          <div className="text-[11px] text-muted mt-0.5">{i.detail}</div>
                         </div>
                       </div>
                     ))}
                   </div>
 
                   {/* NL telemetry query */}
-                  <div className="mt-4 pt-4 border-t border-white/5">
+                  <div className="mt-4 pt-4 border-t border-line">
                     <div className="flex gap-2">
                       <input
                         value={insightQuestion}
                         onChange={(e) => setInsightQuestion(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') askInsight(); }}
                         placeholder="Ask: cost? success rate? which provider is cheapest?"
-                        className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                        className="flex-1 bg-well border border-line rounded-lg px-3 py-2 text-xs text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/50"
                       />
                       <button
                         onClick={askInsight}
                         disabled={insightAsking || !insightQuestion.trim()}
-                        className="bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-bold uppercase px-4 rounded-lg disabled:opacity-40 hover:bg-indigo-500/30 transition-colors"
+                        className="bg-indigo-500/20 border border-indigo-500/40 text-accent-text text-xs font-bold uppercase px-4 rounded-lg disabled:opacity-40 hover:bg-indigo-500/30 transition-colors"
                       >
                         {insightAsking ? '…' : 'Ask'}
                       </button>
                     </div>
                     {insightAnswer && (
-                      <p className="text-[11px] text-[#c9d1d9] bg-black/30 rounded-lg p-3 mt-2">{insightAnswer}</p>
+                      <p className="text-[11px] text-body bg-well rounded-lg p-3 mt-2">{insightAnswer}</p>
                     )}
                   </div>
                 </div>
@@ -2034,29 +2034,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Provider Usage Ranking */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                   <div>
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">API Usage Ranking</h3>
-                    <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
+                    <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
                   </div>
                   <div className="space-y-3">
                     {(analytics?.providerRanking || []).length === 0 && (
-                      <p className="text-[10px] text-[#8b949e] uppercase font-bold">No data yet</p>
+                      <p className="text-[10px] text-muted uppercase font-bold">No data yet</p>
                     )}
                     {(analytics?.providerRanking || []).map((p: any, i: number) => {
                       const total = (analytics?.providerRanking || []).reduce((s: number, x: any) => s + x.requests, 0);
                       const pct = total > 0 ? Math.round((p.requests / total) * 100) : 0;
-                      const col = providerColors[p.name?.toLowerCase()] || 'bg-indigo-500';
+                      const col = providerColors[p.name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
                       return (
                         <div key={p.name}>
-                          <div className="flex justify-between text-xs font-bold text-white mb-1">
+                          <div className="flex justify-between text-xs font-bold text-ink mb-1">
                             <span className="uppercase font-mono">#{i + 1} {p.name}</span>
-                            <span className="text-[#8b949e]">{p.requests} req · {p.avgLatencyMs == null ? 'latency not recorded' : `${p.avgLatencyMs}ms avg`}</span>
+                            <span className="text-muted">{p.requests} req · {p.avgLatencyMs == null ? 'latency not recorded' : `${p.avgLatencyMs}ms avg`}</span>
                           </div>
-                          <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
+                          <div className="w-full bg-well h-2 rounded-full overflow-hidden">
                             <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
                           </div>
-                          <div className="text-[9px] text-[#8b949e] mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}</div>
+                          <div className="text-[9px] text-muted mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}</div>
                         </div>
                       );
                     })}
@@ -2064,62 +2064,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
 
                 {/* Provider Burn Split */}
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                   <div>
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Provider Token Burn</h3>
-                    <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Chat token consumption by provider' : 'Token consumption by provider'}</p>
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Provider Token Burn</h3>
+                    <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Chat token consumption by provider' : 'Token consumption by provider'}</p>
                   </div>
                   <div className="space-y-3">
                     {Object.entries(analytics?.providerWise || {}).map(([name, tokens]: any) => {
                       const pct = analytics?.totalTokensUsed > 0 ? Math.round((tokens / analytics.totalTokensUsed) * 100) : 0;
-                      const col = providerColors[name?.toLowerCase()] || 'bg-indigo-500';
+                      const col = providerColors[name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
                       return (
                         <div key={name}>
-                          <div className="flex justify-between text-xs font-bold text-white mb-1">
+                          <div className="flex justify-between text-xs font-bold text-ink mb-1">
                             <span className="uppercase font-mono">{name}</span>
-                            <span className="text-[#8b949e] font-mono">{tokens.toLocaleString()} tokens</span>
+                            <span className="text-muted font-mono">{tokens.toLocaleString()} tokens</span>
                           </div>
-                          <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
+                          <div className="w-full bg-well h-2 rounded-full overflow-hidden">
                             <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
                           </div>
                         </div>
                       );
                     })}
                     {Object.keys(analytics?.providerWise || {}).length === 0 && (
-                      <p className="text-[10px] text-[#8b949e] uppercase font-bold">No data yet</p>
+                      <p className="text-[10px] text-muted uppercase font-bold">No data yet</p>
                     )}
                   </div>
-                  <div className="bg-black/30 rounded-xl p-3 space-y-1 font-mono text-xs border border-white/5">
+                  <div className="bg-well rounded-xl p-3 space-y-1 font-mono text-xs border border-line">
                     <div className="flex justify-between">
-                      <span className="text-[#8b949e]">
+                      <span className="text-muted">
                         {analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Total Provider Cost'}
                       </span>
-                      <span className="text-orange-400 font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
+                      <span className="text-warn font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
                     </div>
-                    <div className="flex justify-between"><span className="text-[#8b949e]">Cashfree Gateway</span><span className="text-emerald-400">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
+                    <div className="flex justify-between"><span className="text-muted">Cashfree Gateway</span><span className="text-success">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
                   </div>
                 </div>
               </div>
 
               {/* Recent Purchases */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Recent Token Purchases</h3>
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Recent Token Purchases</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                    <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
                       <th className="py-2 text-left">User</th><th className="py-2 text-left">Amount</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Date</th>
                     </tr></thead>
-                    <tbody className="divide-y divide-white/5">
+                    <tbody className="divide-y divide-line">
                       {(analytics?.recentPurchases || []).map((p: any, i: number) => (
-                        <tr key={i} className="hover:bg-white/5">
-                          <td className="py-2 text-[#8b949e] font-mono text-[10px]">{(p.userId || '').slice(0, 12)}…</td>
-                          <td className="py-2 text-emerald-400 font-black">₹{p.amount}</td>
-                          <td className="py-2 text-amber-400 font-mono">{(p.tokens || 0).toLocaleString()}</td>
-                          <td className="py-2 text-[#8b949e] text-[9px]">{new Date(p.date || 0).toLocaleDateString('en-IN')}</td>
+                        <tr key={i} className="hover:bg-raised">
+                          <td className="py-2 text-muted font-mono text-[10px]">{(p.userId || '').slice(0, 12)}…</td>
+                          <td className="py-2 text-success font-black">₹{p.amount}</td>
+                          <td className="py-2 text-warn font-mono">{(p.tokens || 0).toLocaleString()}</td>
+                          <td className="py-2 text-muted text-[9px]">{new Date(p.date || 0).toLocaleDateString('en-IN')}</td>
                         </tr>
                       ))}
                       {(!analytics?.recentPurchases || analytics.recentPurchases.length === 0) && (
-                        <tr><td colSpan={4} className="py-6 text-center text-[#8b949e] text-[10px] font-bold uppercase">No purchases yet</td></tr>
+                        <tr><td colSpan={4} className="py-6 text-center text-muted text-[10px] font-bold uppercase">No purchases yet</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -2133,22 +2133,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-4">
               {/* WHICH FEATURE IS BEING USED (admin 2026-09-13: "kon sa feature jyada use ho raha hai,
                   kon se feacher ko aur strong karna hai"). Today, across every user. */}
-              <div className="rounded-2xl border border-white/10 bg-[#161b22] p-4">
+              <div className="rounded-2xl border border-line bg-card p-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h4 className="text-sm font-black text-white tracking-tight">
+                  <h4 className="text-sm font-black text-ink tracking-tight">
                     What people used today
-                    {featureSpend?.date && <span className="ml-2 text-[10px] font-normal text-white/35">{featureSpend.date}</span>}
+                    {featureSpend?.date && <span className="ml-2 text-[10px] font-normal text-faint">{featureSpend.date}</span>}
                   </h4>
-                  <button onClick={() => void fetchFeatureSpend()} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50" aria-label="Refresh">
+                  <button onClick={() => void fetchFeatureSpend()} className="p-1.5 rounded-lg bg-raised hover:bg-raised text-muted" aria-label="Refresh">
                     <RefreshCw size={13} />
                   </button>
                 </div>
                 {featureSpendLoading && !featureSpend ? (
-                  <p className="mt-2 text-[11px] text-white/40">Reading…</p>
+                  <p className="mt-2 text-[11px] text-faint">Reading…</p>
                 ) : !featureSpend ? (
-                  <p className="mt-2 text-[11px] text-amber-300/80">Could not be read just now — this is not the same as nobody using anything.</p>
+                  <p className="mt-2 text-[11px] text-warn">Could not be read just now — this is not the same as nobody using anything.</p>
                 ) : (featureSpend.rows?.length ?? 0) === 0 ? (
-                  <p className="mt-2 text-[11px] text-white/40">Nothing has been charged to any wallet today yet.</p>
+                  <p className="mt-2 text-[11px] text-faint">Nothing has been charged to any wallet today yet.</p>
                 ) : (
                   <div className="mt-3 space-y-1.5">
                     {featureSpend.rows.map((r: { feature: string; label: string; inr: number; charges: number; users: number }) => {
@@ -2156,18 +2156,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       const pct = total > 0 ? Math.round((r.inr / total) * 100) : 0;
                       return (
                         <div key={r.feature} className="flex items-center gap-2 text-[11px]">
-                          <span className="text-white/70 w-40 shrink-0 truncate">{r.label}</span>
-                          <span className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden min-w-0">
-                            <span className="block h-full rounded-full bg-emerald-500/70" style={{ width: `${pct}%` }} />
+                          <span className="text-body w-40 shrink-0 truncate">{r.label}</span>
+                          <span className="flex-1 h-1.5 rounded-full bg-raised overflow-hidden min-w-0">
+                            <span className="block h-full rounded-full bg-emerald-500/70 text-on-accent" style={{ width: `${pct}%` }} />
                           </span>
                           {/* USERS first — the admin is deciding what to invest in, and one heavy
                               user is not the same signal as many people choosing a feature. */}
-                          <span className="text-white/50 tabular-nums w-24 text-right shrink-0">{r.users} user{r.users === 1 ? '' : 's'}</span>
-                          <span className="text-white/80 tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
+                          <span className="text-muted tabular-nums w-24 text-right shrink-0">{r.users} user{r.users === 1 ? '' : 's'}</span>
+                          <span className="text-body tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
                         </div>
                       );
                     })}
-                    <p className="pt-1 text-[10px] text-white/30">
+                    <p className="pt-1 text-[10px] text-faint">
                       Counts what a feature COST, across every user. Buying a hosting plan is not counted —
                       that is a purchase, not use of a feature.
                     </p>
@@ -2178,31 +2178,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* Search + Sort */}
               <div className="flex flex-wrap gap-3 items-center">
                 <div className="flex-1 min-w-[200px] relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#8b949e]" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                   <input
                     value={userSearch} onChange={e => setUserSearch(e.target.value)}
                     placeholder="Search by email or name..."
-                    className="w-full bg-[#161b22] border border-white/10 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder:text-[#8b949e] outline-none focus:border-indigo-500"
+                    className="w-full bg-card border border-line rounded-xl pl-9 pr-4 py-2.5 text-sm text-ink placeholder:text-muted outline-none focus:border-indigo-500"
                   />
                 </div>
-                <div className="flex gap-1 bg-[#161b22] p-1 rounded-xl border border-white/10">
+                <div className="flex gap-1 bg-card p-1 rounded-xl border border-line">
                   {[['alpha', 'A-Z'], ['tokens', 'Tokens'], ['ai_per_day', 'AI Use'], ['recent', 'Recent']].map(([val, lbl]) => (
-                    <button key={val} onClick={() => setUserSort(val)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${userSort === val ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}>
+                    <button key={val} onClick={() => setUserSort(val)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${userSort === val ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink'}`}>
                       {lbl}
                     </button>
                   ))}
                 </div>
-                <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-wider text-white hover:border-indigo-500 transition-all active:scale-95">
+                <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-raised border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95">
                   <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Load
                 </button>
               </div>
 
               {/* User Table */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] overflow-hidden">
+              <div className="bg-card border border-line rounded-[1.5rem] overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="border-b border-white/10 text-[#8b949e] font-black uppercase tracking-widest text-[9px] bg-black/20">
+                      <tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px] bg-well">
                         <th className="py-3 px-4 text-left">User</th>
                         {/* WHEN DID THEY JOIN, AND WHEN WERE THEY LAST HERE (admin 2026-09-11).
                             Both come from Firebase Auth — Firestore answers neither properly; see
@@ -2219,24 +2219,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <th className="py-3 px-4 text-left">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/5">
+                    <tbody className="divide-y divide-line">
                       {usersLoading && (
                         <tr><td colSpan={11} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && usersError && (
-                        <tr><td colSpan={11} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
+                        <tr><td colSpan={11} className="py-10 text-center text-danger text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && !usersError && (
-                        <tr><td colSpan={11} className="py-10 text-center text-[#8b949e] text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
+                        <tr><td colSpan={11} className="py-10 text-center text-muted text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
                       )}
                       {users.map((u: any) => (
-                        <tr key={u.userId} className={`hover:bg-white/5 transition-colors ${u.banned ? 'bg-red-950/20' : ''}`}>
+                        <tr key={u.userId} className={`hover:bg-raised transition-colors ${u.banned ? 'bg-red-500/10' : ''}`}>
                           <td className="py-3 px-4">
                             {/* The same account sheet a report opens — one place where a person's whole
                                 picture lives, reachable from both surfaces rather than rebuilt in each. */}
                             <button onClick={() => void openAccount(u.userId)} title="Open this account — everything we hold about this user, read only" className="text-left group">
-                              <div className="text-white font-bold text-[11px] group-hover:underline">{u.name}</div>
-                              <div className="text-[#8b949e] text-[9px] font-mono group-hover:text-white/80">{u.email}</div>
+                              <div className="text-ink font-bold text-[11px] group-hover:underline">{u.name}</div>
+                              <div className="text-muted text-[9px] font-mono group-hover:text-body">{u.email}</div>
                             </button>
                           </td>
                           {(() => {
@@ -2245,34 +2245,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             return (
                               <>
                                 <td className="py-3 px-4" title={joined.title}>
-                                  <span className={joined.unread ? 'text-[#484f58]' : 'text-[#8b949e]'}>{joined.unread ? joined.text : dayLabel(u.joinedAt)}</span>
+                                  <span className={joined.unread ? 'text-faint' : 'text-muted'}>{joined.unread ? joined.text : dayLabel(u.joinedAt)}</span>
                                 </td>
                                 <td className="py-3 px-4" title={active.title}>
-                                  <span className={active.unread ? 'text-[#484f58]' : 'text-[#8b949e]'}>{active.text}</span>
+                                  <span className={active.unread ? 'text-faint' : 'text-muted'}>{active.text}</span>
                                 </td>
                               </>
                             );
                           })()}
-                          <td className="py-3 px-4 font-mono text-amber-400 font-black">{(u.tokenBalance || 0).toLocaleString()}</td>
-                          <td className="py-3 px-4 font-mono text-sky-300">{(u.totalTokensPurchased || 0).toLocaleString()}</td>
+                          <td className="py-3 px-4 font-mono text-warn font-black">{(u.tokenBalance || 0).toLocaleString()}</td>
+                          <td className="py-3 px-4 font-mono text-info">{(u.totalTokensPurchased || 0).toLocaleString()}</td>
                           {/* Real since 2026-09-17: this read a field that was only ever written as 0 (walletLifetime.ts). */}
-                          <td className="py-3 px-4 font-mono text-violet-400">{(u.totalTokensUsed || 0).toLocaleString()}</td>
-                          <td className="py-3 px-4 font-mono text-emerald-400">₹{(u.remainingBalance || 0).toFixed(2)}</td>
-                          <td className="py-3 px-4 font-mono text-emerald-300">₹{Number(u.moneySpent || 0).toLocaleString('en-IN')}</td>
+                          <td className="py-3 px-4 font-mono text-accent-text">{(u.totalTokensUsed || 0).toLocaleString()}</td>
+                          <td className="py-3 px-4 font-mono text-success">₹{(u.remainingBalance || 0).toFixed(2)}</td>
+                          <td className="py-3 px-4 font-mono text-success">₹{Number(u.moneySpent || 0).toLocaleString('en-IN')}</td>
                           <td className="py-3 px-4">
-                            {u.banned ? <span className="text-red-400 font-black text-[9px] uppercase flex items-center gap-1"><BanIcon className="w-3 h-3"/>Banned</span> : <span className="text-emerald-400 font-black text-[9px] uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/>Active</span>}
+                            {u.banned ? <span className="text-danger font-black text-[9px] uppercase flex items-center gap-1"><BanIcon className="w-3 h-3"/>Banned</span> : <span className="text-success font-black text-[9px] uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/>Active</span>}
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex gap-1.5">
                               {/* Token adjust */}
                               {selectedUserId === u.userId ? (
                                 <div className="flex gap-1 items-center">
-                                  <input type="number" placeholder="tokens" value={tokenDelta} onChange={e => setTokenDelta(e.target.value)} className="w-20 bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white outline-none" />
-                                  <input placeholder="reason" value={tokenReason} onChange={e => setTokenReason(e.target.value)} className="w-20 bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white outline-none" />
-                                  <button onClick={() => handleTokenAdjust(u.userId)} disabled={actionLoading === u.userId} className="px-2 py-1 bg-indigo-600 rounded-lg text-[9px] font-black text-white uppercase">
+                                  <input type="number" placeholder="tokens" value={tokenDelta} onChange={e => setTokenDelta(e.target.value)} className="w-20 bg-well border border-line rounded-lg px-2 py-1 text-[10px] text-ink outline-none" />
+                                  <input placeholder="reason" value={tokenReason} onChange={e => setTokenReason(e.target.value)} className="w-20 bg-well border border-line rounded-lg px-2 py-1 text-[10px] text-ink outline-none" />
+                                  <button onClick={() => handleTokenAdjust(u.userId)} disabled={actionLoading === u.userId} className="px-2 py-1 bg-indigo-600 rounded-lg text-[9px] font-black text-on-accent uppercase">
                                     {actionLoading === u.userId ? '...' : 'OK'}
                                   </button>
-                                  <button onClick={() => setSelectedUserId('')} className="px-2 py-1 bg-white/10 rounded-lg text-[9px] text-white uppercase">X</button>
+                                  <button onClick={() => setSelectedUserId('')} className="px-2 py-1 bg-raised rounded-lg text-[9px] text-ink uppercase">X</button>
                                 </div>
                               ) : (
                                 <>
@@ -2280,13 +2280,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       hata do"). The account sheet opens by clicking the user's NAME —
                                       one way in, not two that do the same thing. The name carries the
                                       hover underline and a tooltip so it still reads as clickable. */}
-                                  <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-amber-400 uppercase hover:bg-amber-500/20 transition-all">
+                                  <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-warn uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
                                   </button>
-                                  <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}>
+                                  <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-danger hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
                                   </button>
-                                  <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-purple-400 uppercase hover:bg-purple-500/20 transition-all">
+                                  <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-accent-text uppercase hover:bg-purple-500/20 transition-all">
                                     {actionLoading === u.userId + '_merge' ? '...' : 'Merge'}
                                   </button>
                                 </>
@@ -2303,11 +2303,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         type="button"
                         onClick={() => setUserLimit((l) => l + USER_PAGE)}
                         disabled={usersLoading}
-                        className="px-4 py-2 rounded-full border border-white/10 bg-white/5 text-[11px] font-bold text-white hover:bg-white/10 disabled:opacity-50"
+                        className="px-4 py-2 rounded-full border border-line bg-raised text-[11px] font-bold text-ink hover:bg-raised disabled:opacity-50"
                       >
                         {usersLoading ? 'Loading…' : `Load ${Math.min(USER_PAGE, userTotal - users.length)} more`}
                       </button>
-                      <span className="text-[10px] text-[#8b949e]">
+                      <span className="text-[10px] text-muted">
                         Showing {users.length.toLocaleString('en-IN')} of {userTotal.toLocaleString('en-IN')} users
                       </span>
                     </div>
@@ -2329,13 +2329,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   disabling a provider would stop requests routing to it; `serverStats.providerEnabled`
                   is read by NOTHING that routes a request, so the promise was never kept. Both are
                   replaced by what actually decides a build: the three tier ladders themselves. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-5">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Cpu className="w-4 h-4 text-indigo-400" />
+                    <Cpu className="w-4 h-4 text-accent-text" />
                     <div>
-                      <h3 className="text-sm font-black text-white uppercase tracking-tight">Build Engines</h3>
-                      <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mt-0.5">
+                      <h3 className="text-sm font-black text-ink uppercase tracking-tight">Build Engines</h3>
+                      <p className="text-[9px] text-muted font-bold uppercase tracking-widest mt-0.5">
                         The exact order a build tries, per tier — read from the engine itself
                       </p>
                     </div>
@@ -2343,38 +2343,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <button
                     onClick={fetchEngines}
                     disabled={enginesLoading}
-                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-40"
                   >
                     <RefreshCw className={`w-3 h-3 ${enginesLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
 
                 {!engines || !Array.isArray(engines.tiers) ? (
-                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                  <p className="text-[10px] text-muted uppercase font-bold py-4">
                     {enginesLoading ? 'Reading the ladders…' : 'Could not read the engine ladders.'}
                   </p>
                 ) : (
                   <div className="space-y-4">
                     {engines.tiers.map((t: any) => (
-                      <div key={t.level} className={`rounded-xl border p-4 ${t.available ? 'border-white/5 bg-white/[0.02]' : 'border-red-500/40 bg-red-500/5'}`}>
+                      <div key={t.level} className={`rounded-xl border p-4 ${t.available ? 'border-line bg-raised' : 'border-red-500/40 bg-red-500/5'}`}>
                         <div className="flex items-center justify-between mb-3">
-                          <span className="text-[11px] font-black uppercase tracking-widest text-white">{t.label}</span>
-                          <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${t.available ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                          <span className="text-[11px] font-black uppercase tracking-widest text-ink">{t.label}</span>
+                          <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${t.available ? 'bg-emerald-500/10 border-emerald-500/30 text-success' : 'bg-red-500/10 border-red-500/30 text-danger'}`}>
                             {t.available ? 'Can build' : 'No engine — builds refused'}
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           {(t.rungs || []).map((r: any, i: number) => (
                             <React.Fragment key={`${r.provider}-${r.model}-${i}`}>
-                              {i > 0 && <span className="text-[#484f58] text-xs">→</span>}
+                              {i > 0 && <span className="text-faint text-xs">→</span>}
                               <span
                                 title={r.keyed ? 'Key present — this rung can run' : 'No key set for this engine — the ladder skips this rung'}
-                                className={`px-2.5 py-1.5 rounded-lg border font-mono text-[10px] font-black ${r.keyed ? 'bg-black/30 border-white/10 text-white' : 'bg-black/20 border-white/5 text-[#484f58] line-through'}`}
+                                className={`px-2.5 py-1.5 rounded-lg border font-mono text-[10px] font-black ${r.keyed ? 'bg-well border-line text-ink' : 'bg-well border-line text-faint line-through'}`}
                               >
                                 {r.provider}
-                                <span className="text-[#8b949e] font-normal"> · {r.model}</span>
+                                <span className="text-muted font-normal"> · {r.model}</span>
                                 {engines.today?.readable && engines.today?.counts?.[String(r.provider).split('_')[0]] > 0 && (
-                                  <span className="ml-1.5 text-emerald-400">
+                                  <span className="ml-1.5 text-success">
                                     {engines.today.counts[String(r.provider).split('_')[0]]} today
                                   </span>
                                 )}
@@ -2387,7 +2387,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                     {/* WHAT REALLY RAN TODAY. Withheld entirely when the day could not be read —
                         "nothing built today" and "we could not look" must never render the same. */}
-                    <div className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest leading-relaxed">
+                    <div className="text-[9px] text-faint font-bold uppercase tracking-widest leading-relaxed">
                       {engines.today?.readable
                         ? (Object.keys(engines.today.counts || {}).length > 0
                             ? `Calls today (${engines.today.day}, UTC): ` +
@@ -2407,8 +2407,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* ── CHAT ROUTER — kept, but labelled for what it actually is ─────────────────── */}
               <div className="space-y-2">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Chat Router — Live</h3>
-                <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Chat Router — Live</h3>
+                <p className="text-[9px] text-muted font-bold uppercase tracking-widest">
                   {engines?.chat?.scope
                     ? `Scope: ${engines.chat.scope} — resets on every deploy, and does not include other instances`
                     : 'This server instance, since it started — resets on every deploy'}
@@ -2424,63 +2424,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   // can have — it reads as "checked and fine" when nothing was ever checked.
                   const everRan = Number(stat.requestCount) > 0;
                   return (
-                    <div key={name} className={`bg-[#161b22] border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-white/10'}`}>
+                    <div key={name} className={`bg-card border rounded-[1.5rem] p-5 space-y-3 ${isOnCooldown ? 'border-red-500/30' : 'border-line'}`}>
                       <div className="flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse' : !everRan ? 'bg-[#484f58]' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
-                          <span className="font-black text-white uppercase font-mono">{name}</span>
+                          <div className={`w-3 h-3 rounded-full ${isOnCooldown ? 'bg-red-500 animate-pulse text-on-accent' : !everRan ? 'bg-faint' : stat.inFlight > 0 ? 'bg-amber-500 animate-pulse text-on-accent' : 'bg-emerald-500 text-on-accent'}`} />
+                          <span className="font-black text-ink uppercase font-mono">{name}</span>
                         </div>
-                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-red-400' : !everRan ? 'bg-white/5 border-white/10 text-[#8b949e]' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+                        <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${isOnCooldown ? 'bg-red-500/10 border-red-500/30 text-danger' : !everRan ? 'bg-raised border-line text-muted' : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
                           {isOnCooldown ? `Cooldown ${secondsLeft}s` : !everRan ? 'Not used yet' : 'Healthy'}
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-center">
-                        <div className="bg-black/30 rounded-lg p-2">
-                          <div className="text-[9px] text-[#8b949e] uppercase font-bold">In-Flight</div>
-                          <div className="text-sm font-black text-white font-mono">{stat.inFlight}</div>
+                        <div className="bg-well rounded-lg p-2">
+                          <div className="text-[9px] text-muted uppercase font-bold">In-Flight</div>
+                          <div className="text-sm font-black text-ink font-mono">{stat.inFlight}</div>
                         </div>
-                        <div className="bg-black/30 rounded-lg p-2">
-                          <div className="text-[9px] text-[#8b949e] uppercase font-bold">Avg Latency</div>
-                          <div className="text-sm font-black text-amber-400 font-mono">{everRan ? `${stat.avgLatencyMs}ms` : '—'}</div>
+                        <div className="bg-well rounded-lg p-2">
+                          <div className="text-[9px] text-muted uppercase font-bold">Avg Latency</div>
+                          <div className="text-sm font-black text-warn font-mono">{everRan ? `${stat.avgLatencyMs}ms` : '—'}</div>
                         </div>
-                        <div className="bg-black/30 rounded-lg p-2">
-                          <div className="text-[9px] text-[#8b949e] uppercase font-bold">Errors</div>
-                          <div className={`text-sm font-black font-mono ${stat.errorCount > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{stat.errorCount}</div>
+                        <div className="bg-well rounded-lg p-2">
+                          <div className="text-[9px] text-muted uppercase font-bold">Errors</div>
+                          <div className={`text-sm font-black font-mono ${stat.errorCount > 0 ? 'text-danger' : 'text-success'}`}>{stat.errorCount}</div>
                         </div>
                       </div>
-                      <div className="text-[9px] text-[#8b949e] font-mono">{stat.requestCount} total requests</div>
+                      <div className="text-[9px] text-muted font-mono">{stat.requestCount} total requests</div>
                     </div>
                   );
                 })}
                 {Object.keys(analytics?.liveProviderStats || {}).length === 0 && (
-                  <div className="col-span-2 text-center py-12 text-[#8b949e] text-[10px] font-bold uppercase">No chat activity on this server instance yet.</div>
+                  <div className="col-span-2 text-center py-12 text-muted text-[10px] font-bold uppercase">No chat activity on this server instance yet.</div>
                 )}
               </div>
 
 
               {/* ── P-MON.3 Inference-latency percentiles (real, from trace spans) ── */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-sky-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Inference Latency (p50 / p95 / p99)</h3>
+                    <Activity className="w-4 h-4 text-info" />
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Inference Latency (p50 / p95 / p99)</h3>
                   </div>
                   <button
                     onClick={fetchLlmLatency}
                     disabled={llmLoading}
-                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-40"
                   >
                     <RefreshCw className={`w-3 h-3 ${llmLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
                 {!llmLatency || !Array.isArray(llmLatency.providers) || llmLatency.providers.length === 0 ? (
-                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                  <p className="text-[10px] text-muted uppercase font-bold py-4">
                     {llmLoading ? 'Loading latency…' : 'No provider latency samples yet — appears after AI requests run.'}
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
-                      <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                      <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
                         <th className="py-2.5 px-3 text-left">Provider</th>
                         <th className="py-2.5 px-3 text-left">Samples</th>
                         <th className="py-2.5 px-3 text-left">p50</th>
@@ -2489,21 +2489,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <th className="py-2.5 px-3 text-left">Max</th>
                         <th className="py-2.5 px-3 text-left">Errors</th>
                       </tr></thead>
-                      <tbody className="divide-y divide-white/5">
+                      <tbody className="divide-y divide-line">
                         {llmLatency.providers.map((p: any) => (
-                          <tr key={p.provider} className="hover:bg-white/5">
-                            <td className="py-2.5 px-3 text-white font-black uppercase font-mono">{p.provider}</td>
-                            <td className="py-2.5 px-3 text-[#8b949e] font-mono">{p.latency?.count ?? 0}</td>
-                            <td className="py-2.5 px-3 text-emerald-400 font-mono">{p.latency?.p50 ?? '—'}ms</td>
-                            <td className="py-2.5 px-3 text-amber-400 font-mono">{p.latency?.p95 ?? '—'}ms</td>
-                            <td className="py-2.5 px-3 text-orange-400 font-mono">{p.latency?.p99 ?? '—'}ms</td>
-                            <td className="py-2.5 px-3 text-[#8b949e] font-mono">{p.latency?.max ?? '—'}ms</td>
-                            <td className={`py-2.5 px-3 font-mono font-black ${p.errorRatePct > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{p.errorRatePct}%</td>
+                          <tr key={p.provider} className="hover:bg-raised">
+                            <td className="py-2.5 px-3 text-ink font-black uppercase font-mono">{p.provider}</td>
+                            <td className="py-2.5 px-3 text-muted font-mono">{p.latency?.count ?? 0}</td>
+                            <td className="py-2.5 px-3 text-success font-mono">{p.latency?.p50 ?? '—'}ms</td>
+                            <td className="py-2.5 px-3 text-warn font-mono">{p.latency?.p95 ?? '—'}ms</td>
+                            <td className="py-2.5 px-3 text-warn font-mono">{p.latency?.p99 ?? '—'}ms</td>
+                            <td className="py-2.5 px-3 text-muted font-mono">{p.latency?.max ?? '—'}ms</td>
+                            <td className={`py-2.5 px-3 font-mono font-black ${p.errorRatePct > 0 ? 'text-danger' : 'text-success'}`}>{p.errorRatePct}%</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest pt-1">
+                    <p className="text-[9px] text-faint font-bold uppercase tracking-widest pt-1">
                       Percentiles from real `ai.provider.*` trace spans — tail latency (p95/p99) that the average hides.
                     </p>
                   </div>
@@ -2511,38 +2511,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               {/* ── P-MON.2 Latency anomaly / trend watch (real, from trace durations) ── */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-violet-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Latency Anomaly Watch</h3>
+                    <TrendingUp className="w-4 h-4 text-accent-text" />
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Latency Anomaly Watch</h3>
                   </div>
                   <button
                     onClick={fetchLatencyAnomaly}
                     disabled={anomalyLoading}
-                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-40"
                   >
                     <RefreshCw className={`w-3 h-3 ${anomalyLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
                 {!latencyAnomaly || typeof latencyAnomaly.count !== 'number' || latencyAnomaly.count === 0 ? (
-                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                  <p className="text-[10px] text-muted uppercase font-bold py-4">
                     {anomalyLoading ? 'Analyzing…' : 'Not enough request-latency samples yet — appears after traffic flows.'}
                   </p>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {statCard('Samples', latencyAnomaly.count, 'recent traces', 'bg-sky-500', Activity)}
-                      {statCard('Anomalies', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0), 'z-score + EWMA', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0) > 0 ? 'bg-amber-500' : 'bg-emerald-500', AlertTriangle)}
-                      {statCard('Trend', latencyAnomaly.trend?.direction || 'n/a', latencyAnomaly.trend ? `slope ${Number(latencyAnomaly.trend.slope).toFixed(3)}` : 'unknown', latencyAnomaly.trend?.direction === 'rising' ? 'bg-red-500' : latencyAnomaly.trend?.direction === 'falling' ? 'bg-emerald-500' : 'bg-[#30363d]', TrendingUp)}
-                      {statCard('Avg Latency', `${latencyAnomaly.stats?.mean ?? '—'}ms`, `max ${latencyAnomaly.stats?.max ?? '—'}ms`, 'bg-indigo-500', Cpu)}
+                      {statCard('Samples', latencyAnomaly.count, 'recent traces', 'bg-sky-500 text-on-accent', Activity)}
+                      {statCard('Anomalies', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0), 'z-score + EWMA', (latencyAnomaly.zAnomalies?.length || 0) + (latencyAnomaly.ewmaAnomalies?.length || 0) > 0 ? 'bg-amber-500 text-on-accent' : 'bg-emerald-500 text-on-accent', AlertTriangle)}
+                      {statCard('Trend', latencyAnomaly.trend?.direction || 'n/a', latencyAnomaly.trend ? `slope ${Number(latencyAnomaly.trend.slope).toFixed(3)}` : 'unknown', latencyAnomaly.trend?.direction === 'rising' ? 'bg-red-500 text-on-accent' : latencyAnomaly.trend?.direction === 'falling' ? 'bg-emerald-500 text-on-accent' : 'bg-raised', TrendingUp)}
+                      {statCard('Avg Latency', `${latencyAnomaly.stats?.mean ?? '—'}ms`, `max ${latencyAnomaly.stats?.max ?? '—'}ms`, 'bg-indigo-500 text-on-accent', Cpu)}
                     </div>
                     {(latencyAnomaly.zAnomalies?.length || 0) > 0 && (
-                      <div className="text-[10px] text-amber-400/90 font-mono">
+                      <div className="text-[10px] text-warn font-mono">
                         Spikes: {latencyAnomaly.zAnomalies.slice(0, 6).map((a: any) => `${Math.round(a.v)}ms`).join(', ')}
                       </div>
                     )}
-                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">
+                    <p className="text-[9px] text-faint font-bold uppercase tracking-widest">
                       z-score + EWMA anomaly detection over real per-trace durations. No data → no anomalies (never faked).
                     </p>
                   </>
@@ -2555,49 +2555,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {activeTab === 'revenue' && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500', IndianRupee)}
+                {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500 text-on-accent', IndianRupee)}
                 {statCard(
                   analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Provider Cost',
                   `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`,
                   analytics?.providerCostComplete === false
                     ? `AI API cost · ${analytics?.pricedCalls || 0} priced, ${analytics?.unpricedCalls || 0} not`
                     : 'AI API cost',
-                  'bg-red-500', Database)}
+                  'bg-red-500 text-on-accent', Database)}
                 {statCard(
                   analytics?.providerCostComplete === false ? 'Net Margin (at most)' : 'Net Margin',
                   `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
                   analytics?.providerCostComplete === false ? 'Revenue - cost (cost is a floor)' : 'Revenue - cost',
-                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500', TrendingUp)}
-                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500', Tag)}
-                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500', Cpu)}
-                {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500', UserCheck)}
+                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500 text-on-accent', Tag)}
+                {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500 text-on-accent', Cpu)}
+                {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500 text-on-accent', UserCheck)}
               </div>
 
               {/* PURCHASES — "this revenue came from which users?" (admin 2026-09-17). Every row is a
                   real `payment_transactions` document; the revenue rule (SUCCESS, paid > 0, a payment
                   rail) is purchaseLedger.ts, shared with the tiles above. Refunds are not recorded by
                   any writer, and the panel says so rather than staying silent. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-black text-white uppercase tracking-tight">Purchases — who paid, for what</h3>
+                  <h3 className="text-sm font-black text-ink uppercase tracking-tight">Purchases — who paid, for what</h3>
                   <button onClick={() => void fetchPurchases(purchaseQuery)} disabled={purchasesLoading}
-                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-50">
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-50">
                     <RefreshCw className={`w-3 h-3 ${purchasesLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
                 {purchases?.overall && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {statCard('Revenue (all time)', `₹${Number(purchases.overall.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.overall.revenueRows} paid purchase${purchases.overall.revenueRows === 1 ? '' : 's'}`, 'bg-emerald-500', IndianRupee)}
-                    {statCard('In this view', `₹${Number(purchases.summary?.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.summary?.revenueRows || 0} paid of ${purchases.total} row${purchases.total === 1 ? '' : 's'}`, 'bg-sky-500', Tag)}
-                    {statCard('Credits given free', (purchases.overall.freeCreditRows || 0).toLocaleString('en-IN'), 'coupons, gifts, referral steps — never revenue', 'bg-violet-500', UserCheck)}
-                    {statCard('Unfinished', `${purchases.overall.pendingRows || 0} pending · ${purchases.overall.failedRows || 0} failed`, 'never counted as revenue', 'bg-amber-500', Activity)}
+                    {statCard('Revenue (all time)', `₹${Number(purchases.overall.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.overall.revenueRows} paid purchase${purchases.overall.revenueRows === 1 ? '' : 's'}`, 'bg-emerald-500 text-on-accent', IndianRupee)}
+                    {statCard('In this view', `₹${Number(purchases.summary?.revenueInr || 0).toLocaleString('en-IN')}`, `${purchases.summary?.revenueRows || 0} paid of ${purchases.total} row${purchases.total === 1 ? '' : 's'}`, 'bg-sky-500 text-on-accent', Tag)}
+                    {statCard('Credits given free', (purchases.overall.freeCreditRows || 0).toLocaleString('en-IN'), 'coupons, gifts, referral steps — never revenue', 'bg-violet-500 text-on-accent', UserCheck)}
+                    {statCard('Unfinished', `${purchases.overall.pendingRows || 0} pending · ${purchases.overall.failedRows || 0} failed`, 'never counted as revenue', 'bg-amber-500 text-on-accent', Activity)}
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2 items-end">
                   <input value={purchaseQuery.search} onChange={(e) => setPurchaseQuery((q) => ({ ...q, search: e.target.value, offset: 0 }))}
-                    placeholder="Search user, email, txn id…" className="flex-1 min-w-[180px] bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-white/30" />
+                    placeholder="Search user, email, txn id…" className="flex-1 min-w-[180px] bg-well border border-line rounded-lg px-3 py-2 text-xs text-ink placeholder:text-faint" />
                   <select value={purchaseQuery.status} onChange={(e) => setPurchaseQuery((q) => ({ ...q, status: e.target.value as typeof q.status, offset: 0 }))}
-                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-white">
+                    className="bg-well border border-line rounded-lg px-2 py-2 text-xs text-ink">
                     <option value="all">All rows</option>
                     <option value="revenue">Paid (revenue)</option>
                     <option value="success">Successful (incl. free)</option>
@@ -2605,14 +2605,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <option value="pending">Pending</option>
                     <option value="failed">Failed</option>
                   </select>
-                  <label className="text-[9px] uppercase text-white/40 flex flex-col gap-1">From
-                    <input type="date" value={purchaseQuery.from} onChange={(e) => setPurchaseQuery((q) => ({ ...q, from: e.target.value, offset: 0 }))} className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
+                  <label className="text-[9px] uppercase text-faint flex flex-col gap-1">From
+                    <input type="date" value={purchaseQuery.from} onChange={(e) => setPurchaseQuery((q) => ({ ...q, from: e.target.value, offset: 0 }))} className="bg-well border border-line rounded-lg px-2 py-1.5 text-xs text-ink" />
                   </label>
-                  <label className="text-[9px] uppercase text-white/40 flex flex-col gap-1">To
-                    <input type="date" value={purchaseQuery.to} onChange={(e) => setPurchaseQuery((q) => ({ ...q, to: e.target.value, offset: 0 }))} className="bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
+                  <label className="text-[9px] uppercase text-faint flex flex-col gap-1">To
+                    <input type="date" value={purchaseQuery.to} onChange={(e) => setPurchaseQuery((q) => ({ ...q, to: e.target.value, offset: 0 }))} className="bg-well border border-line rounded-lg px-2 py-1.5 text-xs text-ink" />
                   </label>
                   <select value={`${purchaseQuery.sort}:${purchaseQuery.dir}`} onChange={(e) => { const [sort, dir] = e.target.value.split(':'); setPurchaseQuery((q) => ({ ...q, sort: sort as typeof q.sort, dir: dir as typeof q.dir, offset: 0 })); }}
-                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-white">
+                    className="bg-well border border-line rounded-lg px-2 py-2 text-xs text-ink">
                     <option value="date:desc">Latest first</option>
                     <option value="date:asc">Oldest first</option>
                     <option value="amount:desc">Amount ↓</option>
@@ -2623,7 +2623,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                    <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
                       <th className="py-2.5 px-2 text-left">Date</th>
                       <th className="py-2.5 px-2 text-left">User</th>
                       <th className="py-2.5 px-2 text-left">Product</th>
@@ -2634,122 +2634,122 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <th className="py-2.5 px-2 text-left">Method</th>
                       <th className="py-2.5 px-2 text-left">Transaction</th>
                     </tr></thead>
-                    <tbody className="divide-y divide-white/5">
+                    <tbody className="divide-y divide-line">
                       {purchasesLoading && <tr><td colSpan={9} className="py-8 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>}
-                      {!purchasesLoading && purchasesError && <tr><td colSpan={9} className="py-6 text-center text-red-400 text-[10px] font-bold normal-case">{purchasesError}</td></tr>}
+                      {!purchasesLoading && purchasesError && <tr><td colSpan={9} className="py-6 text-center text-danger text-[10px] font-bold normal-case">{purchasesError}</td></tr>}
                       {!purchasesLoading && !purchasesError && (purchases?.rows || []).map((p: any) => (
-                        <tr key={p.id} className={`hover:bg-white/5 ${p.revenue ? '' : 'opacity-70'}`}>
-                          <td className="py-2 px-2 text-[#8b949e] whitespace-nowrap">{p.at ? new Date(p.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
+                        <tr key={p.id} className={`hover:bg-raised ${p.revenue ? '' : 'opacity-70'}`}>
+                          <td className="py-2 px-2 text-muted whitespace-nowrap">{p.at ? new Date(p.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
                           <td className="py-2 px-2">
                             <button onClick={() => void openAccount(p.userId)} className="text-left group" title="Open this account">
-                              <div className="text-white font-bold group-hover:underline">{p.name || p.email || 'NavBharat user'}</div>
-                              <div className="text-[9px] text-[#8b949e] font-mono">{p.email}{p.email ? ' · ' : ''}{(p.userId || '').slice(0, 10)}…</div>
+                              <div className="text-ink font-bold group-hover:underline">{p.name || p.email || 'NavBharat user'}</div>
+                              <div className="text-[9px] text-muted font-mono">{p.email}{p.email ? ' · ' : ''}{(p.userId || '').slice(0, 10)}…</div>
                             </button>
                           </td>
-                          <td className="py-2 px-2 text-white/80">{p.product}</td>
-                          <td className={`py-2 px-2 text-right font-mono font-black ${p.revenue ? 'text-emerald-400' : 'text-white/40'}`}>{p.amountInr > 0 ? `₹${Number(p.amountInr).toLocaleString('en-IN')}` : '₹0'}{p.storePriceInr ? <div className="text-[8px] text-white/30 font-normal">store price ₹{p.storePriceInr}</div> : null}</td>
-                          <td className="py-2 px-2 text-right font-mono text-amber-400">{Number(p.tokens || 0).toLocaleString('en-IN')}</td>
-                          <td className="py-2 px-2 text-right font-mono text-sky-400">₹{Number(p.creditInr || 0).toFixed(2)}{p.platformFeeInr ? <div className="text-[8px] text-white/30 font-normal">fee ₹{p.platformFeeInr}</div> : null}</td>
+                          <td className="py-2 px-2 text-body">{p.product}</td>
+                          <td className={`py-2 px-2 text-right font-mono font-black ${p.revenue ? 'text-success' : 'text-faint'}`}>{p.amountInr > 0 ? `₹${Number(p.amountInr).toLocaleString('en-IN')}` : '₹0'}{p.storePriceInr ? <div className="text-[8px] text-faint font-normal">store price ₹{p.storePriceInr}</div> : null}</td>
+                          <td className="py-2 px-2 text-right font-mono text-warn">{Number(p.tokens || 0).toLocaleString('en-IN')}</td>
+                          <td className="py-2 px-2 text-right font-mono text-info">₹{Number(p.creditInr || 0).toFixed(2)}{p.platformFeeInr ? <div className="text-[8px] text-faint font-normal">fee ₹{p.platformFeeInr}</div> : null}</td>
                           <td className="py-2 px-2">
-                            <span className={`text-[9px] font-black uppercase ${p.status === 'SUCCESS' ? (p.revenue ? 'text-emerald-400' : 'text-violet-300') : p.status === 'PENDING' ? 'text-amber-400' : 'text-red-400'}`}>
+                            <span className={`text-[9px] font-black uppercase ${p.status === 'SUCCESS' ? (p.revenue ? 'text-success' : 'text-accent-text') : p.status === 'PENDING' ? 'text-warn' : 'text-danger'}`}>
                               {p.status === 'SUCCESS' && !p.revenue ? 'Free credit' : p.status}
                             </span>
                           </td>
-                          <td className="py-2 px-2 text-white/70">{p.method}</td>
-                          <td className="py-2 px-2 font-mono text-[9px] text-[#8b949e]">
+                          <td className="py-2 px-2 text-body">{p.method}</td>
+                          <td className="py-2 px-2 font-mono text-[9px] text-muted">
                             <div title={p.transactionId}>{p.transactionId}</div>
-                            {p.gatewayReference && p.gatewayReference !== p.transactionId && <div className="text-white/30" title={p.gatewayReference}>ref {p.gatewayReference}</div>}
+                            {p.gatewayReference && p.gatewayReference !== p.transactionId && <div className="text-faint" title={p.gatewayReference}>ref {p.gatewayReference}</div>}
                           </td>
                         </tr>
                       ))}
                       {!purchasesLoading && !purchasesError && (purchases?.rows || []).length === 0 && (
-                        <tr><td colSpan={9} className="py-6 text-center text-[#8b949e] text-[10px] font-bold uppercase">No purchases match</td></tr>
+                        <tr><td colSpan={9} className="py-6 text-center text-muted text-[10px] font-bold uppercase">No purchases match</td></tr>
                       )}
                     </tbody>
                   </table>
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#8b949e]">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted">
                   <span>
                     {purchases ? `Showing ${purchases.rows.length === 0 ? 0 : purchases.offset + 1}–${purchases.offset + purchases.rows.length} of ${purchases.total.toLocaleString('en-IN')}` : ''}
-                    {purchases?.overall?.refundTracked === false && <span className="ml-2 text-amber-300/80">· Refunds are not recorded by the payment webhook — check the gateway dashboard before treating a paid row as final.</span>}
+                    {purchases?.overall?.refundTracked === false && <span className="ml-2 text-warn">· Refunds are not recorded by the payment webhook — check the gateway dashboard before treating a paid row as final.</span>}
                   </span>
                   <span className="flex gap-2">
-                    <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-white">‹ Prev</button>
-                    <button disabled={!purchases || purchases.offset + purchases.rows.length >= purchases.total || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: q.offset + PURCHASE_PAGE }))} className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-white">Next ›</button>
+                    <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-ink">‹ Prev</button>
+                    <button disabled={!purchases || purchases.offset + purchases.rows.length >= purchases.total || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: q.offset + PURCHASE_PAGE }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-ink">Next ›</button>
                   </span>
                 </div>
               </div>
 
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Top Consuming Users</h3>
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Top Consuming Users</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
-                    <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                    <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
                       <th className="py-2.5 px-3 text-left">User</th>
                       <th className="py-2.5 px-3 text-left">Tokens Purchased</th>
                       <th className="py-2.5 px-3 text-left">Tokens Used</th>
                       <th className="py-2.5 px-3 text-left">Money Spent</th>
                       <th className="py-2.5 px-3 text-left">Balance Left</th>
                     </tr></thead>
-                    <tbody className="divide-y divide-white/5">
+                    <tbody className="divide-y divide-line">
                       {(analytics?.expensiveUsers || []).map((u: any, i: number) => (
-                        <tr key={i} className="hover:bg-white/5">
-                          <td className="py-2.5 px-3"><div className="text-white font-bold">{u.name}</div><div className="text-[9px] text-[#8b949e]">{u.email}</div></td>
-                          <td className="py-2.5 px-3 text-sky-300 font-mono">{(u.tokens_purchased || 0).toLocaleString()}</td>
-                          <td className="py-2.5 px-3 text-amber-400 font-mono font-black">{(u.tokens_used || 0).toLocaleString()}</td>
-                          <td className="py-2.5 px-3 text-emerald-400 font-mono">₹{u.money_spent || 0}</td>
-                          <td className="py-2.5 px-3 text-sky-400 font-mono">₹{(u.remaining_balance || 0).toFixed(2)}</td>
+                        <tr key={i} className="hover:bg-raised">
+                          <td className="py-2.5 px-3"><div className="text-ink font-bold">{u.name}</div><div className="text-[9px] text-muted">{u.email}</div></td>
+                          <td className="py-2.5 px-3 text-info font-mono">{(u.tokens_purchased || 0).toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-warn font-mono font-black">{(u.tokens_used || 0).toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-success font-mono">₹{u.money_spent || 0}</td>
+                          <td className="py-2.5 px-3 text-info font-mono">₹{(u.remaining_balance || 0).toFixed(2)}</td>
                         </tr>
                       ))}
-                      {(analytics?.expensiveUsers || []).length === 0 && <tr><td colSpan={5} className="py-8 text-center text-[#8b949e] text-[10px] font-bold uppercase">No data</td></tr>}
+                      {(analytics?.expensiveUsers || []).length === 0 && <tr><td colSpan={5} className="py-8 text-center text-muted text-[10px] font-bold uppercase">No data</td></tr>}
                     </tbody>
                   </table>
                 </div>
               </div>
 
               {/* ── AgentV3 cost-ladder (v5.0 build cost routing — real telemetry) ── */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Cpu className="w-4 h-4 text-indigo-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Build Cost-Ladder (last 30 days)</h3>
+                    <Cpu className="w-4 h-4 text-accent-text" />
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Build Cost-Ladder (last 30 days)</h3>
                   </div>
                   <button
                     onClick={fetchCostTelemetry}
                     disabled={costLoading}
-                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-40"
                   >
                     <RefreshCw className={`w-3 h-3 ${costLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
 
                 {!costSummary || costSummary.totalBuilds === 0 ? (
-                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                  <p className="text-[10px] text-muted uppercase font-bold py-4">
                     {costLoading ? 'Loading telemetry…' : 'No builds recorded yet — data appears once NavBharatAI Pro builds run.'}
                   </p>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {statCard('Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500', Server)}
-                      {statCard('Success Rate', `${costSummary.overallSuccessPct}%`, `${costSummary.okBuilds} ok`, costSummary.overallSuccessPct >= 80 ? 'bg-emerald-500' : 'bg-amber-500', CheckCircle2)}
-                      {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500', TrendingUp)}
-                      {statCard('Billed', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500', IndianRupee)}
+                      {statCard('Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500 text-on-accent', Server)}
+                      {statCard('Success Rate', `${costSummary.overallSuccessPct}%`, `${costSummary.okBuilds} ok`, costSummary.overallSuccessPct >= 80 ? 'bg-emerald-500 text-on-accent' : 'bg-amber-500 text-on-accent', CheckCircle2)}
+                      {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500 text-on-accent', TrendingUp)}
+                      {statCard('Billed', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500 text-on-accent', IndianRupee)}
                     </div>
 
                     {/* T1-admin-dashboard — build-failure analytics: overall failure rate + spike-day alert. */}
                     {failureReport && failureReport.overall.totalBuilds > 0 && (
-                      <div className={`rounded-xl border p-4 ${failureReport.spikeDates.length > 0 ? 'border-red-500/40 bg-red-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
+                      <div className={`rounded-xl border p-4 ${failureReport.spikeDates.length > 0 ? 'border-red-500/40 bg-red-500/5' : 'border-line bg-raised'}`}>
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-black uppercase tracking-widest text-[#8b949e]">Build Failure Rate (30d)</span>
-                          <span className={`text-sm font-black ${failureReport.overall.failureRate > 0.2 ? 'text-red-400' : 'text-emerald-400'}`}>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-muted">Build Failure Rate (30d)</span>
+                          <span className={`text-sm font-black ${failureReport.overall.failureRate > 0.2 ? 'text-danger' : 'text-success'}`}>
                             {(failureReport.overall.failureRate * 100).toFixed(1)}%
                           </span>
                         </div>
-                        <div className="text-[10px] text-[#8b949e] mt-1">
+                        <div className="text-[10px] text-muted mt-1">
                           {failureReport.overall.failedBuilds.toLocaleString()} failed of {failureReport.overall.totalBuilds.toLocaleString()} builds
                         </div>
                         {failureReport.spikeDates.length > 0 && (
-                          <div className="text-[10px] text-red-400 font-bold mt-2">
+                          <div className="text-[10px] text-danger font-bold mt-2">
                             ⚠️ Failure-rate spike on: {failureReport.spikeDates.join(', ')}
                           </div>
                         )}
@@ -2760,29 +2760,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           card is admin-only, like every other cost figure on this screen.
                         */}
                         {failureReport.causes && failureReport.causes.causes.length > 0 && (
-                          <div className="mt-3 border-t border-white/5 pt-3">
-                            <div className="text-[9px] font-black uppercase tracking-widest text-[#8b949e]">Why they failed — ranked by what it cost us</div>
-                            <div className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{failureReport.causes.headline}</div>
+                          <div className="mt-3 border-t border-line pt-3">
+                            <div className="text-[9px] font-black uppercase tracking-widest text-muted">Why they failed — ranked by what it cost us</div>
+                            <div className="text-[10px] text-muted mt-1 leading-relaxed">{failureReport.causes.headline}</div>
                             <div className="mt-2 space-y-1">
                               {failureReport.causes.causes.slice(0, 6).map((c) => (
                                 <div key={c.category}>
                                   <div className="flex items-center justify-between text-[10px]">
-                                    <span className={c.category === 'unknown' ? 'text-amber-400 font-bold' : 'text-[#c9d1d9]'}>
+                                    <span className={c.category === 'unknown' ? 'text-warn font-bold' : 'text-body'}>
                                       {c.category}
                                     </span>
-                                    <span className="text-[#8b949e]">
+                                    <span className="text-muted">
                                       {c.builds} build{c.builds === 1 ? '' : 's'} · {(c.shareOfBuilds * 100).toFixed(0)}% · ${c.usd.toFixed(4)} · {c.avgSeconds}s avg
                                     </span>
                                   </div>
                                   {/* One REAL example, so a row is something to act on rather than something to go and look up. */}
                                   {c.sample && (
-                                    <div className="text-[9px] text-[#6e7681] mt-0.5 pl-1 border-l border-white/10 leading-relaxed">{c.sample}</div>
+                                    <div className="text-[9px] text-faint mt-0.5 pl-1 border-l border-line leading-relaxed">{c.sample}</div>
                                   )}
                                 </div>
                               ))}
                             </div>
                             {failureReport.causes.frameworks.length > 0 && (
-                              <div className="text-[10px] text-[#8b949e] mt-2">
+                              <div className="text-[10px] text-muted mt-2">
                                 Mostly in: {failureReport.causes.frameworks.slice(0, 4).map((f) => `${f.framework} (${f.builds})`).join(', ')}
                               </div>
                             )}
@@ -2790,7 +2790,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         )}
                         {/* An unreadable ledger is NOT a clean week, and it says so rather than showing nothing. */}
                         {failureReport.causesComplete === false && (
-                          <div className="text-[10px] text-amber-400 mt-2">
+                          <div className="text-[10px] text-warn mt-2">
                             The cause ledger could not be read, so the reasons below are missing — this is not a clean record.
                           </div>
                         )}
@@ -2799,7 +2799,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
-                        <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                        <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
                           <th className="py-2.5 px-3 text-left">Start Tier</th>
                           <th className="py-2.5 px-3 text-left">Builds</th>
                           <th className="py-2.5 px-3 text-left">Share</th>
@@ -2808,22 +2808,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <th className="py-2.5 px-3 text-left">Avg Time</th>
                           <th className="py-2.5 px-3 text-left">Billed</th>
                         </tr></thead>
-                        <tbody className="divide-y divide-white/5">
+                        <tbody className="divide-y divide-line">
                           {costSummary.byTier.map((row) => (
-                            <tr key={row.key} className="hover:bg-white/5">
-                              <td className="py-2.5 px-3 text-white font-black uppercase">{row.key}</td>
-                              <td className="py-2.5 px-3 text-amber-400 font-mono font-black">{row.builds}</td>
-                              <td className="py-2.5 px-3 text-sky-400 font-mono">{row.sharePct}%</td>
-                              <td className={`py-2.5 px-3 font-mono font-black ${row.successPct >= 80 ? 'text-emerald-400' : 'text-amber-400'}`}>{row.successPct}%</td>
-                              <td className="py-2.5 px-3 text-[#8b949e] font-mono">{row.avgTokens.toLocaleString()}</td>
-                              <td className="py-2.5 px-3 text-[#8b949e] font-mono">{row.avgDurationSec}s</td>
-                              <td className="py-2.5 px-3 text-emerald-400 font-mono">${row.billedUsd.toFixed(4)}</td>
+                            <tr key={row.key} className="hover:bg-raised">
+                              <td className="py-2.5 px-3 text-ink font-black uppercase">{row.key}</td>
+                              <td className="py-2.5 px-3 text-warn font-mono font-black">{row.builds}</td>
+                              <td className="py-2.5 px-3 text-info font-mono">{row.sharePct}%</td>
+                              <td className={`py-2.5 px-3 font-mono font-black ${row.successPct >= 80 ? 'text-success' : 'text-warn'}`}>{row.successPct}%</td>
+                              <td className="py-2.5 px-3 text-muted font-mono">{row.avgTokens.toLocaleString()}</td>
+                              <td className="py-2.5 px-3 text-muted font-mono">{row.avgDurationSec}s</td>
+                              <td className="py-2.5 px-3 text-success font-mono">${row.billedUsd.toFixed(4)}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">
+                    <p className="text-[9px] text-faint font-bold uppercase tracking-widest">
                       Cheap-tier success rate is the P8 cutover signal — high share + high success means the ladder is safe to default-on.
                     </p>
                   </>
@@ -2831,30 +2831,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               {/* ── P-MON.6 FinOps recommendations (real, derived from live metrics) ── */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">FinOps Recommendations</h3>
+                    <TrendingUp className="w-4 h-4 text-success" />
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">FinOps Recommendations</h3>
                   </div>
                   <button
                     onClick={fetchFinOps}
                     disabled={finopsLoading}
-                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-40"
                   >
                     <RefreshCw className={`w-3 h-3 ${finopsLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
                 </div>
 
                 {!finops || !Array.isArray(finops.recommendations) ? (
-                  <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
+                  <p className="text-[10px] text-muted uppercase font-bold py-4">
                     {finopsLoading ? 'Analyzing spend…' : 'No metrics available yet.'}
                   </p>
                 ) : finops.recommendations.length === 0 ? (
-                  <div className="flex items-center gap-2 py-4 text-[10px] font-bold uppercase text-emerald-400">
+                  <div className="flex items-center gap-2 py-4 text-[10px] font-bold uppercase text-success">
                     <CheckCircle2 className="w-4 h-4" />
                     No cost issues detected from current metrics
-                    {finops.summary?.builds === 0 && <span className="text-[#8b949e]"> (no builds recorded yet)</span>}
+                    {finops.summary?.builds === 0 && <span className="text-muted"> (no builds recorded yet)</span>}
                   </div>
                 ) : (
                   <div className="space-y-2.5">
@@ -2865,25 +2865,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         : rec.severity === 'warning'
                           ? 'border-amber-500/20 bg-amber-500/5'
                           : 'border-sky-500/20 bg-sky-500/5';
-                      const dot = rec.severity === 'critical' ? 'bg-red-500' : rec.severity === 'warning' ? 'bg-amber-500' : 'bg-sky-500';
+                      const dot = rec.severity === 'critical' ? 'bg-red-500 text-on-accent' : rec.severity === 'warning' ? 'bg-amber-500 text-on-accent' : 'bg-sky-500 text-on-accent';
                       return (
                         <div key={rec.id} className={`border ${box} rounded-xl p-4`}>
                           <div className="flex items-start gap-2.5">
                             <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${dot}`} />
                             <div className="flex-1">
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-black text-white">{rec.title}</span>
+                                <span className="text-xs font-black text-ink">{rec.title}</span>
                                 {typeof rec.observedWasteUsd === 'number' && (
-                                  <span className="text-[10px] font-mono font-black text-red-400 whitespace-nowrap">~${rec.observedWasteUsd.toFixed(4)} wasted</span>
+                                  <span className="text-[10px] font-mono font-black text-danger whitespace-nowrap">~${rec.observedWasteUsd.toFixed(4)} wasted</span>
                                 )}
                               </div>
-                              <p className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{rec.detail}</p>
+                              <p className="text-[10px] text-muted mt-1 leading-relaxed">{rec.detail}</p>
                             </div>
                           </div>
                         </div>
                       );
                     })}
-                    <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest pt-1">
+                    <p className="text-[9px] text-faint font-bold uppercase tracking-widest pt-1">
                       Derived from real recorded metrics — no hardcoded prices, no projections. Waste figures are already-observed spend.
                     </p>
                   </div>
@@ -2898,24 +2898,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           the point is that a suspension is decided WITH the account in front of you, not from a
           complaint alone. Rendered at the dashboard root so it can sit above either surface. */}
       {account && (
-        <div className="nb-sheet-overlay fixed inset-0 z-[60] bg-black/75 flex items-center justify-center" onClick={() => setAccount(null)}>
-          <div className="nb-sheet w-full max-w-2xl overflow-y-auto bg-[#0d1117] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="nb-sheet-overlay fixed inset-0 z-[60] bg-scrim flex items-center justify-center" onClick={() => setAccount(null)}>
+          <div className="nb-sheet w-full max-w-2xl overflow-y-auto bg-surface border border-line rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
             {account.loading ? (
-              <p className="text-sm text-white/60">Opening account…</p>
+              <p className="text-sm text-muted">Opening account…</p>
             ) : account.error ? (
-              <p className="text-sm text-amber-300">{account.error}</p>
+              <p className="text-sm text-warn">{account.error}</p>
             ) : (
               <>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h4 className="text-base font-bold text-white break-all">{account.identity?.email || account.identity?.name || account.uid}</h4>
-                    <p className="text-[11px] text-white/40 break-all">{account.uid}</p>
+                    <h4 className="text-base font-bold text-ink break-all">{account.identity?.email || account.identity?.name || account.uid}</h4>
+                    <p className="text-[11px] text-faint break-all">{account.uid}</p>
                   </div>
-                  <button onClick={() => setAccount(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                  <button onClick={() => setAccount(null)} className="text-faint hover:text-ink p-1" aria-label="Close">✕</button>
                 </div>
 
                 {account.wallet?.banned && (
-                  <p className="mt-3 text-[11px] px-3 py-2 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30">
+                  <p className="mt-3 text-[11px] px-3 py-2 rounded-lg bg-rose-500/10 text-danger border border-rose-500/30">
                     Suspended{account.wallet.banReason ? ` — ${account.wallet.banReason}` : ''}
                   </p>
                 )}
@@ -2924,7 +2924,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {Array.isArray(account.flags) && account.flags.length > 0 && (
                   <ul className="mt-3 space-y-1">
                     {account.flags.map((f: string) => (
-                      <li key={f} className="text-[11px] px-3 py-2 rounded-lg bg-amber-500/10 text-amber-200 border border-amber-500/25">{f}</li>
+                      <li key={f} className="text-[11px] px-3 py-2 rounded-lg bg-amber-500/10 text-warn border border-amber-500/25">{f}</li>
                     ))}
                   </ul>
                 )}
@@ -2936,11 +2936,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     { label: 'Apps built', value: account.builds?.ok ? String(account.builds.apps?.length ?? 0) : null },
                     { label: 'Recharges', value: account.payments?.ok ? String(account.payments.successful) : null },
                   ].map((c) => (
-                    <div key={c.label} className="rounded-xl border border-white/10 p-3">
-                      <p className="text-[9px] font-black uppercase tracking-widest text-white/40">{c.label}</p>
+                    <div key={c.label} className="rounded-xl border border-line p-3">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-faint">{c.label}</p>
                       {/* NOT ZERO WHEN WE COULD NOT READ IT — see the route. An admin who reads "0
                           recharges" from a failed query sees someone who never paid us. */}
-                      <p className={`text-lg font-black ${c.value === null ? 'text-white/30' : 'text-white'}`}>
+                      <p className={`text-lg font-black ${c.value === null ? 'text-faint' : 'text-ink'}`}>
                         {c.value ?? 'unread'}
                       </p>
                     </div>
@@ -2949,8 +2949,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 {/* WHO THIS PERSON IS — the facts of the account itself (admin 2026-09-11: "user ka
                     biodata"). Read-only: nothing on this sheet writes to a profile. */}
-                <div className="mt-4 rounded-xl border border-white/10 p-3 space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Who they are</p>
+                <div className="mt-4 rounded-xl border border-line p-3 space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-faint">Who they are</p>
                   {(() => {
                     const a = account.account || {};
                     const p = account.profile || {};
@@ -2981,8 +2981,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     }
                     return rows.map(([label, value], i) => (
                       <div key={`${label}-${i}`} className="flex items-start gap-3 text-[11px]">
-                        <span className="text-white/40 w-32 shrink-0">{label}</span>
-                        <span className="text-white/80 break-words min-w-0">{value}</span>
+                        <span className="text-faint w-32 shrink-0">{label}</span>
+                        <span className="text-body break-words min-w-0">{value}</span>
                       </div>
                     ));
                   })()}
@@ -2990,8 +2990,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 {/* WHAT THEY USE — counts and times, never content. See the withheld note at the foot
                     of this sheet and the header of adminUserActivity.ts for why that line is where it is. */}
-                <div className="mt-3 rounded-xl border border-white/10 p-3 space-y-1.5">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-white/40">How they use NavBharatAI</p>
+                <div className="mt-3 rounded-xl border border-line p-3 space-y-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-faint">How they use NavBharatAI</p>
                   {(() => {
                     const act = account.activity || {};
                     const ent = account.entitlements || {};
@@ -3020,14 +3020,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       : ent.professionalPass.active ? `Active${ent.professionalPass.expiresAt ? ` · until ${dayLabel(Date.parse(ent.professionalPass.expiresAt))}` : ''}` : 'None']);
                     return rows.map(([label, value], i) => (
                       <div key={`${label}-${i}`} className="flex items-start gap-3 text-[11px]">
-                        <span className="text-white/40 w-32 shrink-0">{label}</span>
-                        <span className="text-white/80 break-words min-w-0">{value}</span>
+                        <span className="text-faint w-32 shrink-0">{label}</span>
+                        <span className="text-body break-words min-w-0">{value}</span>
                       </div>
                     ));
                   })()}
                 </div>
 
-                <p className="mt-3 text-[11px] text-white/50">
+                <p className="mt-3 text-[11px] text-muted">
                   Spent on builds: {account.builds?.ok ? `₹${Number(account.builds.spentInr).toFixed(2)}` : 'could not be read'}
                   {account.payments?.ok && <> · Paid in: ₹{Number(account.payments.totalInr).toFixed(2)} over {account.payments.successful} recharge{account.payments.successful === 1 ? '' : 's'}</>}
                   {account.builds?.ok && <> · {account.builds.totalBuilds} builds ({account.builds.failed} failed)</>}
@@ -3038,10 +3038,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     how many turns were not: a streamed turn carries no counts, and a sum that hid that
                     would under-state every streaming-heavy account. */}
                 {account.usage && (
-                  <div className="mt-4 rounded-xl border border-white/10 p-3 space-y-1.5">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40">Credits — purchased, used, remaining</p>
+                  <div className="mt-4 rounded-xl border border-line p-3 space-y-1.5">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-faint">Credits — purchased, used, remaining</p>
                     {account.usage.ok === false ? (
-                      <p className="text-[11px] text-white/40">The wallet could not be read.</p>
+                      <p className="text-[11px] text-faint">The wallet could not be read.</p>
                     ) : (
                       <>
                         <div className="grid grid-cols-3 gap-2">
@@ -3050,18 +3050,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             ['Used', account.usage.creditsUsedTokens],
                             ['Remaining', account.usage.remainingTokens],
                           ].map(([label, value]) => (
-                            <div key={String(label)} className="rounded-lg bg-white/[0.03] px-3 py-2">
-                              <p className="text-[9px] uppercase tracking-widest text-white/40">{label}</p>
-                              <p className="text-sm font-black text-white tabular-nums">{Number(value || 0).toLocaleString('en-IN')}</p>
+                            <div key={String(label)} className="rounded-lg bg-raised px-3 py-2">
+                              <p className="text-[9px] uppercase tracking-widest text-faint">{label}</p>
+                              <p className="text-sm font-black text-ink tabular-nums">{Number(value || 0).toLocaleString('en-IN')}</p>
                             </div>
                           ))}
                         </div>
-                        <p className="text-[10px] text-white/40">
+                        <p className="text-[10px] text-faint">
                           Ledger: +{Number(account.usage.ledgerCreditTokens || 0).toLocaleString('en-IN')} credited · −{Number(account.usage.ledgerDebitTokens || 0).toLocaleString('en-IN')} debited
                           {account.usage.ledgerVerdict === 'off' ? ' · does not reconcile with the balance' : account.usage.ledgerVerdict === 'balanced' ? ' · reconciles' : ''}
                         </p>
                         {account.usage.chat && (
-                          <p className="text-[10px] text-white/50">
+                          <p className="text-[10px] text-muted">
                             Chat AI: {account.usage.chat.ok === false ? 'could not be read' : (
                               <>{account.usage.chat.requests} request{account.usage.chat.requests === 1 ? '' : 's'} · {Number(account.usage.chat.inputTokens || 0).toLocaleString('en-IN')} in / {Number(account.usage.chat.outputTokens || 0).toLocaleString('en-IN')} out tokens measured on {account.usage.chat.measuredRequests}
                                 {account.usage.chat.unmeasuredRequests > 0 ? ` · ${account.usage.chat.unmeasuredRequests} streamed turn${account.usage.chat.unmeasuredRequests === 1 ? '' : 's'} carry no token count` : ''}
@@ -3069,7 +3069,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             )}
                           </p>
                         )}
-                        <p className="text-[10px] text-white/30">Build-side provider tokens and real API cost are on each build's report (Build Reports tab); "Spent on builds" above is what the wallet was charged.</p>
+                        <p className="text-[10px] text-faint">Build-side provider tokens and real API cost are on each build's report (Build Reports tab); "Spent on builds" above is what the wallet was charged.</p>
                       </>
                     )}
                   </div>
@@ -3077,22 +3077,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 {account.purchases && (
                   <div className="mt-4">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">
                       Purchases{account.purchases.ok ? ` · ₹${Number(account.purchases.summary?.revenueInr || 0).toLocaleString('en-IN')} paid over ${account.purchases.summary?.revenueRows || 0}` : ''}
                     </p>
                     {account.purchases.ok === false ? (
-                      <p className="text-[11px] text-white/40">Payment records could not be read.</p>
+                      <p className="text-[11px] text-faint">Payment records could not be read.</p>
                     ) : (account.purchases.rows?.length ?? 0) === 0 ? (
-                      <p className="text-[11px] text-white/40">No purchases on this account.</p>
+                      <p className="text-[11px] text-faint">No purchases on this account.</p>
                     ) : (
                       <div className="space-y-1 max-h-56 overflow-y-auto">
                         {account.purchases.rows.map((p: any) => (
-                          <div key={p.id} className="flex items-start gap-2 text-[10px] rounded-lg border border-white/5 bg-white/[0.02] px-2 py-1.5">
-                            <span className="text-white/40 shrink-0 w-24">{p.at ? new Date(p.at).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '—'}</span>
-                            <span className="text-white/80 flex-1 min-w-0 truncate" title={`${p.transactionId}${p.gatewayReference ? ` · ref ${p.gatewayReference}` : ''}`}>{p.product} · {p.method}</span>
-                            <span className={`tabular-nums shrink-0 font-bold ${p.revenue ? 'text-emerald-300' : 'text-white/40'}`}>₹{Number(p.amountInr || 0).toLocaleString('en-IN')}</span>
-                            <span className="tabular-nums shrink-0 text-amber-300/80">{Number(p.tokens || 0).toLocaleString('en-IN')} tk</span>
-                            <span className={`shrink-0 uppercase font-black ${p.status === 'SUCCESS' ? (p.revenue ? 'text-emerald-400' : 'text-violet-300') : p.status === 'PENDING' ? 'text-amber-400' : 'text-red-400'}`}>{p.status === 'SUCCESS' && !p.revenue ? 'free' : p.status.toLowerCase()}</span>
+                          <div key={p.id} className="flex items-start gap-2 text-[10px] rounded-lg border border-line bg-raised px-2 py-1.5">
+                            <span className="text-faint shrink-0 w-24">{p.at ? new Date(p.at).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '—'}</span>
+                            <span className="text-body flex-1 min-w-0 truncate" title={`${p.transactionId}${p.gatewayReference ? ` · ref ${p.gatewayReference}` : ''}`}>{p.product} · {p.method}</span>
+                            <span className={`tabular-nums shrink-0 font-bold ${p.revenue ? 'text-success' : 'text-faint'}`}>₹{Number(p.amountInr || 0).toLocaleString('en-IN')}</span>
+                            <span className="tabular-nums shrink-0 text-warn">{Number(p.tokens || 0).toLocaleString('en-IN')} tk</span>
+                            <span className={`shrink-0 uppercase font-black ${p.status === 'SUCCESS' ? (p.revenue ? 'text-success' : 'text-accent-text') : p.status === 'PENDING' ? 'text-warn' : 'text-danger'}`}>{p.status === 'SUCCESS' && !p.revenue ? 'free' : p.status.toLowerCase()}</span>
                           </div>
                         ))}
                       </div>
@@ -3109,11 +3109,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     rest of the answer, and it comes from ledger rows that were already being written. */}
                 {account.wallet?.ok && (
                   <div className="mt-4">
-                    <p className="text-[9px] uppercase tracking-widest font-black text-white/40 mb-2">
+                    <p className="text-[9px] uppercase tracking-widest font-black text-faint mb-2">
                       Where the balance went
                     </p>
                     {(account.wallet.spend?.rows?.length ?? 0) === 0 && !account.wallet.spend?.unattributedInr ? (
-                      <p className="text-[11px] text-white/40">Nothing has been spent from this wallet.</p>
+                      <p className="text-[11px] text-faint">Nothing has been spent from this wallet.</p>
                     ) : (
                       <div className="space-y-1">
                         {(account.wallet.spend?.rows ?? []).map((r: { feature: string; label: string; inr: number; entries: number }) => {
@@ -3121,14 +3121,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           const pct = total > 0 ? Math.round((r.inr / total) * 100) : 0;
                           return (
                             <div key={r.feature} className="flex items-center gap-2 text-[11px]">
-                              <span className="text-white/70 w-40 shrink-0 truncate">{r.label}</span>
+                              <span className="text-body w-40 shrink-0 truncate">{r.label}</span>
                               {/* The bar is the point: the admin asked which feature is used MOST,
                                   and a column of numbers does not answer that at a glance. */}
-                              <span className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden min-w-0">
-                                <span className="block h-full rounded-full bg-indigo-500/70" style={{ width: `${pct}%` }} />
+                              <span className="flex-1 h-1.5 rounded-full bg-raised overflow-hidden min-w-0">
+                                <span className="block h-full rounded-full bg-indigo-500/70 text-on-accent" style={{ width: `${pct}%` }} />
                               </span>
-                              <span className="text-white/80 tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
-                              <span className="text-white/30 tabular-nums w-9 text-right shrink-0">{pct}%</span>
+                              <span className="text-body tabular-nums w-16 text-right shrink-0">₹{r.inr.toFixed(2)}</span>
+                              <span className="text-faint tabular-nums w-9 text-right shrink-0">{pct}%</span>
                             </div>
                           );
                         })}
@@ -3138,9 +3138,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                              here and NavBharatAI ate the rest — shown so the bleeding is visible on
                              the screen used to judge it, never folded into the user's number. */
                           <div className="flex items-center gap-2 text-[11px] pt-1">
-                            <span className="text-rose-300/80 w-40 shrink-0">NavBharatAI absorbed</span>
+                            <span className="text-danger w-40 shrink-0">NavBharatAI absorbed</span>
                             <span className="flex-1 min-w-0" />
-                            <span className="text-rose-300/90 tabular-nums w-16 text-right shrink-0">
+                            <span className="text-danger tabular-nums w-16 text-right shrink-0">
                               ₹{Number(account.wallet.spend.absorbedInr).toFixed(2)}
                             </span>
                             <span className="w-9 shrink-0" />
@@ -3152,9 +3152,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                              under "AI tools" would be an invented number on the exact screen that
                              exists to stop inventing numbers. */
                           <div className="flex items-center gap-2 text-[11px] pt-1">
-                            <span className="text-amber-300/70 w-40 shrink-0">Before this was recorded</span>
+                            <span className="text-warn w-40 shrink-0">Before this was recorded</span>
                             <span className="flex-1 min-w-0" />
-                            <span className="text-amber-300/80 tabular-nums w-16 text-right shrink-0">
+                            <span className="text-warn tabular-nums w-16 text-right shrink-0">
                               ₹{Number(account.wallet.spend.unattributedInr).toFixed(2)}
                             </span>
                             <span className="w-9 shrink-0" />
@@ -3165,17 +3165,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                     {(account.wallet.ledger?.length ?? 0) > 0 && (
                       <details className="mt-3">
-                        <summary className="text-[10px] text-white/40 cursor-pointer hover:text-white/70">
+                        <summary className="text-[10px] text-faint cursor-pointer hover:text-body">
                           Every line on this wallet ({account.wallet.ledger.length})
                         </summary>
                         <div className="mt-2 space-y-1 max-h-56 overflow-y-auto">
                           {account.wallet.ledger.map((e: { description: string; tokens: number; at: string; featureLabel: string | null }, i: number) => (
                             <div key={`${e.at}-${i}`} className="flex items-start gap-2 text-[10px]">
-                              <span className={`tabular-nums w-20 shrink-0 text-right ${e.tokens < 0 ? 'text-rose-300/80' : 'text-emerald-300/80'}`}>
+                              <span className={`tabular-nums w-20 shrink-0 text-right ${e.tokens < 0 ? 'text-danger' : 'text-success'}`}>
                                 {e.tokens > 0 ? '+' : ''}{Number(e.tokens).toLocaleString('en-IN')}
                               </span>
-                              <span className="text-white/60 flex-1 min-w-0 break-words">{e.description || e.featureLabel || '—'}</span>
-                              <span className="text-white/25 shrink-0">{e.at ? new Date(e.at).toLocaleDateString() : ''}</span>
+                              <span className="text-muted flex-1 min-w-0 break-words">{e.description || e.featureLabel || '—'}</span>
+                              <span className="text-faint shrink-0">{e.at ? new Date(e.at).toLocaleDateString() : ''}</span>
                             </div>
                           ))}
                         </div>
@@ -3189,13 +3189,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     deriving a token figure from a changing rate would be an invented number. */}
                 {account.builds?.ok && account.builds.apps?.length > 0 && (
                   <div className="mt-4">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">Per app</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">Per app</p>
                     <div className="space-y-1.5">
                       {account.builds.apps.slice(0, 15).map((a: any) => (
-                        <div key={a.sessionId} className="flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
-                          <span className="text-xs text-white truncate flex-1">{a.title}</span>
-                          <span className="text-[11px] text-white/40 shrink-0">{a.builds} build{a.builds === 1 ? '' : 's'}{a.failed > 0 ? ` · ${a.failed} failed` : ''}</span>
-                          <span className="text-xs font-bold text-white shrink-0">₹{Number(a.spentInr).toFixed(2)}</span>
+                        <div key={a.sessionId} className="flex items-center gap-3 rounded-lg border border-line bg-raised px-3 py-2">
+                          <span className="text-xs text-ink truncate flex-1">{a.title}</span>
+                          <span className="text-[11px] text-faint shrink-0">{a.builds} build{a.builds === 1 ? '' : 's'}{a.failed > 0 ? ` · ${a.failed} failed` : ''}</span>
+                          <span className="text-xs font-bold text-ink shrink-0">₹{Number(a.spentInr).toFixed(2)}</span>
                         </div>
                       ))}
                     </div>
@@ -3214,7 +3214,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     badges say, from one rule (`liveAppCount`). */}
                 {account.publishedApps && (
                   <div className="mt-4">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-2">Published apps</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">Published apps</p>
                     <PublishedAppsCard
                       rows={publishedAppRows(account.publishedApps.rows)}
                       {...(typeof account.publishedApps.liveCount === 'number' ? { liveCount: account.publishedApps.liveCount } : {})}
@@ -3231,17 +3231,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     as "this user has done nothing", when it actually means "we deliberately do not
                     look". The server sends the sentence so the screen cannot drift from the rule. */}
                 {account.withheld && (
-                  <p className="mt-4 text-[10px] leading-relaxed text-white/35 border-t border-white/5 pt-3">{account.withheld}</p>
+                  <p className="mt-4 text-[10px] leading-relaxed text-faint border-t border-line pt-3">{account.withheld}</p>
                 )}
 
-                <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-white/10">
+                <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-line">
                   <button
                     onClick={() => { void handleBan(account.uid, !account.wallet?.banned); setAccount(null); }}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white ${account.wallet?.banned ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'}`}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-on-accent ${account.wallet?.banned ? 'bg-emerald-600 hover:bg-emerald-500 text-on-accent' : 'bg-rose-600 hover:bg-rose-500 text-on-accent'}`}
                   >
                     <Shield size={13} /> {account.wallet?.banned ? 'Lift the suspension' : 'Suspend this account'}
                   </button>
-                  <button onClick={() => setAccount(null)} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-white/60">Close</button>
+                  <button onClick={() => setAccount(null)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs text-muted">Close</button>
                 </div>
               </>
             )}
@@ -3252,10 +3252,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {activeTab === 'userreports' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
-                <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
-                  <Flag size={18} className="text-rose-400" /> User Reports
+                <h3 className="flex items-center gap-2 text-lg font-black text-ink tracking-tight">
+                  <Flag size={18} className="text-danger" /> User Reports
                   {userReports.length > 0 && (
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-danger">
                       {userReports.length}
                     </span>
                   )}
@@ -3265,19 +3265,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <button
                       key={f}
                       onClick={() => setReportFilter(f)}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised'}`}
                     >{f === 'open' ? 'Needs a person' : 'All'}</button>
                   ))}
-                  <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60" aria-label="Refresh">
+                  <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-raised hover:bg-raised text-muted" aria-label="Refresh">
                     <RefreshCw size={14} className={reportsLoading ? 'animate-spin' : ''} />
                   </button>
                 </div>
               </div>
 
               {reportsLoading && userReports.length === 0 ? (
-                <p className="text-xs text-white/40">Loading reports…</p>
+                <p className="text-xs text-faint">Loading reports…</p>
               ) : userReports.length === 0 ? (
-                <p className="text-xs text-white/40">
+                <p className="text-xs text-faint">
                   {reportFilter === 'open' ? 'Nothing waiting. Every report has been handled.' : 'No reports yet.'}
                 </p>
               ) : (
@@ -3286,10 +3286,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <button
                       key={r.id}
                       onClick={() => void openUserReport(r.id)}
-                      className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] p-3 transition-colors"
+                      className="w-full text-left rounded-xl border border-line bg-raised hover:bg-raised p-3 transition-colors"
                     >
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-line text-muted">
                           {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : problemKindLabel(r.problemKind) || 'Problem'}
                         </span>
                         {/* 🔴 THE REPLY BADGE OUTRANKS THE STATUS BADGE, and that ordering is the
@@ -3297,17 +3297,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             owed a response, and showing only "reviewed" is exactly how an answered
                             question goes unread and the reporter concludes nobody was listening. */}
                         {r.awaitingReply ? (
-                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-amber-400/40 bg-amber-400/10 text-amber-300">
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-amber-400/40 bg-amber-400/10 text-warn">
                             Replied — needs you
                           </span>
                         ) : r.status !== 'open' && (
-                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">{r.status}</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-success">{r.status}</span>
                         )}
-                        {r.hasScreenshot && <PictureIcon size={12} className="text-white/40" />}
-                        <span className="text-[10px] text-white/35 ml-auto">{new Date(r.at).toLocaleString()}</span>
+                        {r.hasScreenshot && <PictureIcon size={12} className="text-faint" />}
+                        <span className="text-[10px] text-faint ml-auto">{new Date(r.at).toLocaleString()}</span>
                       </div>
-                      <p className="text-sm text-white mt-1.5 line-clamp-2">{r.message}</p>
-                      <p className="text-[11px] text-white/40 mt-1">
+                      <p className="text-sm text-ink mt-1.5 line-clamp-2">{r.message}</p>
+                      <p className="text-[11px] text-faint mt-1">
                         From {r.reporter?.email || r.reporter?.name || r.reporter?.shortUid || 'unknown'}
                         {r.reported && <> · about {r.reported.email || r.reported.name || r.reported.shortUid}</>}
                       </p>
@@ -3321,47 +3321,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   are right here — reading a complaint and then hunting for the account in another tab
                   is how reports stop getting handled. */}
               {openReport && (
-                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => { setOpenReport(null); setReportReply(''); setReportReplyShot(''); setReportReplyNote(''); }}>
-                  <div className="nb-sheet w-full max-w-lg overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-scrim flex items-center justify-center" onClick={() => { setOpenReport(null); setReportReply(''); setReportReplyShot(''); setReportReplyNote(''); }}>
+                  <div className="nb-sheet w-full max-w-lg overflow-y-auto bg-card border border-line rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
                     {openReport.loading ? (
-                      <p className="text-sm text-white/60">Opening…</p>
+                      <p className="text-sm text-muted">Opening…</p>
                     ) : openReport.error ? (
-                      <p className="text-sm text-amber-300">{openReport.error}</p>
+                      <p className="text-sm text-warn">{openReport.error}</p>
                     ) : (
                       <>
                         <div className="flex items-start justify-between gap-3">
-                          <h4 className="text-base font-bold text-white">Report</h4>
-                          <button onClick={() => setOpenReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                          <h4 className="text-base font-bold text-ink">Report</h4>
+                          <button onClick={() => setOpenReport(null)} className="text-faint hover:text-ink p-1" aria-label="Close">✕</button>
                         </div>
                         {problemKindLabel(openReport.report?.problemKind) && (
-                          <p className="mt-3 inline-block px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-400/30 text-[11px] font-bold text-indigo-200">
+                          <p className="mt-3 inline-block px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-400/30 text-[11px] font-bold text-accent-text">
                             {problemKindLabel(openReport.report?.problemKind)}
                           </p>
                         )}
-                        <p className="text-sm text-white whitespace-pre-wrap mt-3 bg-black/30 rounded-xl p-3">{openReport.report?.message}</p>
+                        <p className="text-sm text-ink whitespace-pre-wrap mt-3 bg-well rounded-xl p-3">{openReport.report?.message}</p>
 
                         <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
-                          <div className="rounded-xl border border-white/10 p-3">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Reported by</p>
-                            <button onClick={() => void openAccount(openReport.report.reporterUid)} className="text-left text-white break-all underline decoration-white/20 hover:decoration-white">
+                          <div className="rounded-xl border border-line p-3">
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-1">Reported by</p>
+                            <button onClick={() => void openAccount(openReport.report.reporterUid)} className="text-left text-ink break-all underline decoration-line hover:decoration-ink">
                               {openReport.reporter?.email || openReport.reporter?.shortUid || '—'}
                             </button>
-                            <p className="text-white/40 break-all">{openReport.report?.reporterUid}</p>
+                            <p className="text-faint break-all">{openReport.report?.reporterUid}</p>
                           </div>
-                          <div className="rounded-xl border border-white/10 p-3">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">About</p>
+                          <div className="rounded-xl border border-line p-3">
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-1">About</p>
                             {openReport.reported ? (
                               <>
-                                <button onClick={() => void openAccount(openReport.report.target.ownerUid)} className="text-left text-white break-all underline decoration-white/20 hover:decoration-white">
+                                <button onClick={() => void openAccount(openReport.report.target.ownerUid)} className="text-left text-ink break-all underline decoration-line hover:decoration-ink">
                                   {openReport.reported.email || openReport.reported.shortUid}
                                 </button>
-                                <p className="text-white/40 break-all">{openReport.report?.target?.ownerUid}</p>
+                                <p className="text-faint break-all">{openReport.report?.target?.ownerUid}</p>
                                 {openReport.reportsAgainstReported > 1 && (
-                                  <p className="text-rose-300 mt-1 font-semibold">{openReport.reportsAgainstReported} reports about this account</p>
+                                  <p className="text-danger mt-1 font-semibold">{openReport.reportsAgainstReported} reports about this account</p>
                                 )}
                               </>
                             ) : (
-                              <p className="text-white/40">Not about a person</p>
+                              <p className="text-faint">Not about a person</p>
                             )}
                           </div>
                         </div>
@@ -3383,11 +3383,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           if (c.build) facts.push(`web ${String(c.build).slice(0, 16).replace('T', ' ')}`);
                           return (
                             <div className="mt-3 space-y-1.5">
-                              <p className="text-[10px] text-white/35">{facts.join(' · ') || '—'}</p>
+                              <p className="text-[10px] text-faint">{facts.join(' · ') || '—'}</p>
                               {/* 🔒 "Not measured" and "measured, nothing found" are printed as
                                   DIFFERENT lines on purpose. Collapsing them would send whoever
                                   reads this hunting for a layout bug that was never checked for. */}
-                              <p className={`text-[10px] ${(c.overflow?.length ?? 0) > 0 ? 'text-amber-300' : 'text-white/35'}`}>
+                              <p className={`text-[10px] ${(c.overflow?.length ?? 0) > 0 ? 'text-warn' : 'text-faint'}`}>
                                 {describeOverflow(
                                   c.overflowScanned === undefined
                                     ? null
@@ -3395,7 +3395,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                 )}
                               </p>
                               {(c.overflow?.length ?? 0) > 0 && (
-                                <ul className="text-[10px] text-amber-200/80 font-mono pl-3 list-disc">
+                                <ul className="text-[10px] text-warn font-mono pl-3 list-disc">
                                   {c.overflow.map((f, i) => (
                                     <li key={`${f.element}-${i}`}>{f.element} — {f.overflowPx}px past the edge</li>
                                   ))}
@@ -3403,33 +3403,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               )}
                               {(c.errors?.length ?? 0) > 0 && (
                                 <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-2">
-                                  <p className="text-[9px] uppercase tracking-widest font-black text-rose-300/70 mb-1">
+                                  <p className="text-[9px] uppercase tracking-widest font-black text-danger mb-1">
                                     Errors the browser recorded just before
                                   </p>
-                                  <ul className="text-[10px] text-rose-200/90 font-mono space-y-0.5 break-all">
+                                  <ul className="text-[10px] text-danger font-mono space-y-0.5 break-all">
                                     {c.errors.map((e, i) => <li key={`${e}-${i}`}>{e}</li>)}
                                   </ul>
                                 </div>
                               )}
                               {c.userAgent && (
-                                <p className="text-[9px] text-white/20 break-all">{c.userAgent}</p>
+                                <p className="text-[9px] text-faint break-all">{c.userAgent}</p>
                               )}
                             </div>
                           );
                         })()}
 
                         {openReport.screenshot && (
-                          <img src={openReport.screenshot} alt="Screenshot from the reporter" className="mt-3 w-full rounded-xl border border-white/10" />
+                          <img src={openReport.screenshot} alt="Screenshot from the reporter" className="mt-3 w-full rounded-xl border border-line" />
                         )}
 
                         {/* THE CONVERSATION. Asking "which page?" is usually cheaper than any
                             amount of guessing, and until now there was no way to ask at all. */}
-                        <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
-                          <p className="text-[9px] uppercase tracking-widest font-black text-white/40 mb-2">
+                        <div className="mt-4 rounded-xl border border-line bg-well p-3">
+                          <p className="text-[9px] uppercase tracking-widest font-black text-faint mb-2">
                             Conversation with the reporter
                           </p>
                           {(openReport.report?.messages?.length ?? 0) === 0 ? (
-                            <p className="text-[11px] text-white/40">Nothing said yet. Ask them anything you need.</p>
+                            <p className="text-[11px] text-faint">Nothing said yet. Ask them anything you need.</p>
                           ) : (
                             <div className="space-y-1.5 max-h-56 overflow-y-auto mb-2">
                               {openReport.report.messages.map((m: { from: string; text: string; at: number; shotId?: string }, i: number) => (
@@ -3437,8 +3437,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   key={`${m.at}-${i}`}
                                   className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-1.5 ${
                                     m.from === 'admin'
-                                      ? 'bg-indigo-500/10 border border-indigo-400/25 text-indigo-100'
-                                      : 'bg-white/5 border border-white/10 text-white/80'
+                                      ? 'bg-indigo-500/10 border border-indigo-400/25 text-accent-text'
+                                      : 'bg-raised border border-line text-body'
                                   }`}
                                 >
                                   <span className="block text-[9px] uppercase tracking-widest font-black opacity-60 mb-0.5">
@@ -3464,12 +3464,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               onChange={(e) => setReportReply(e.target.value.slice(0, 1000))}
                               rows={2}
                               placeholder="Ask them something, or tell them it is fixed…"
-                              className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2.5 py-2 text-[12px] text-white placeholder-white/30 outline-none focus:border-indigo-500/50 resize-none"
+                              className="flex-1 bg-well border border-line rounded-lg px-2.5 py-2 text-[12px] text-ink placeholder-faint outline-none focus:border-indigo-500/50 resize-none"
                             />
                             <button
                               onClick={() => void replyToReport(openReport.report.id)}
                               disabled={reportReplyBusy || (reportReply.trim().length === 0 && !reportReplyShot)}
-                              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white"
+                              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-on-accent"
                             >
                               {reportReplyBusy ? 'Sending…' : 'Send reply'}
                             </button>
@@ -3485,30 +3485,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             <button
                               onClick={() => adminReplyFileRef.current?.click()}
                               disabled={reportReplyBusy}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 text-[10px] font-semibold text-white/70 hover:bg-white/10 disabled:opacity-40"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-raised text-[10px] font-semibold text-body hover:bg-raised disabled:opacity-40"
                             >
                               <PictureIcon size={12} /> {reportReplyShot ? 'Change screenshot' : 'Add screenshot'}
                             </button>
                             {reportReplyShot && (
                               <>
-                                <img src={reportReplyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-white/10" />
-                                <button onClick={() => setReportReplyShot('')} className="text-[10px] text-white/40 hover:text-white/70 underline">Remove</button>
+                                <img src={reportReplyShot} alt="Screenshot to send" className="w-7 h-7 rounded object-cover border border-line" />
+                                <button onClick={() => setReportReplyShot('')} className="text-[10px] text-faint hover:text-body underline">Remove</button>
                               </>
                             )}
                           </div>
                           {reportReplyNote && (
-                            <p className="mt-2 text-[10px] text-amber-300 leading-snug">{reportReplyNote}</p>
+                            <p className="mt-2 text-[10px] text-warn leading-snug">{reportReplyNote}</p>
                           )}
                         </div>
 
                         <div className="flex flex-wrap gap-2 mt-5">
-                          <button onClick={() => void markUserReport(openReport.report.id, 'actioned')} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Acted on it</button>
-                          <button onClick={() => void markUserReport(openReport.report.id, 'reviewed')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Read it</button>
-                          <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-white/60">Dismiss</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'actioned')} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-on-accent">Acted on it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'reviewed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink">Read it</button>
+                          <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs text-muted">Dismiss</button>
                           {openReport.report?.target?.ownerUid && (
                             <button
                               onClick={() => { void handleBan(openReport.report.target.ownerUid, true); void markUserReport(openReport.report.id, 'actioned'); }}
-                              className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white"
+                              className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-on-accent"
                             ><Shield size={13} /> Suspend this account</button>
                           )}
                         </div>
@@ -3523,31 +3523,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {activeTab === 'apkreports' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
-                <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
-                  <Smartphone size={18} className="text-indigo-400" /> APK Reports
+                <h3 className="flex items-center gap-2 text-lg font-black text-ink tracking-tight">
+                  <Smartphone size={18} className="text-accent-text" /> APK Reports
                   {apkReports.length > 0 && (
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 text-danger">
                       {apkReports.filter((r: any) => !r.fixed).length} open
                     </span>
                   )}
                 </h3>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => void fetchApkReports()} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60" aria-label="Refresh">
+                  <button onClick={() => void fetchApkReports()} className="p-2 rounded-lg bg-raised hover:bg-raised text-muted" aria-label="Refresh">
                     <RefreshCw size={14} className={apkReportsLoading ? 'animate-spin' : ''} />
                   </button>
                   <button
                     onClick={downloadAllApkReports}
                     disabled={apkReports.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-raised hover:bg-raised text-muted disabled:opacity-40 disabled:cursor-not-allowed"
                   ><Download size={12} /> Download all</button>
                   <button
                     onClick={() => void clearApkReports()}
                     disabled={apkReports.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-raised hover:bg-raised text-muted disabled:opacity-40 disabled:cursor-not-allowed"
                   ><Trash2 size={12} /> Clear all</button>
                 </div>
               </div>
-              <p className="text-[11px] text-white/40 -mt-2">
+              <p className="text-[11px] text-faint -mt-2">
                 Sent automatically the moment a user's own Android/iOS store build fails on their GitHub —
                 no button, no user action. Every row carries the classified cause, the log excerpt and a
                 link to the full run on GitHub, so a fix never needs the user asked for more detail.
@@ -3555,30 +3555,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </p>
 
               {apkReportsLoading && apkReports.length === 0 ? (
-                <p className="text-xs text-white/40">Loading reports…</p>
+                <p className="text-xs text-faint">Loading reports…</p>
               ) : apkReports.length === 0 ? (
-                <p className="text-xs text-white/40">No failed store builds reported yet.</p>
+                <p className="text-xs text-faint">No failed store builds reported yet.</p>
               ) : (
                 <div className="space-y-2">
                   {apkReports.map((r: any) => (
                     <button
                       key={r.id}
                       onClick={() => void openApkReportById(r.id)}
-                      className="w-full text-left rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] p-3 transition-colors"
+                      className="w-full text-left rounded-xl border border-line bg-raised hover:bg-raised p-3 transition-colors"
                     >
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-white/15 text-white/60">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-line text-muted">
                           {r.building || r.workflow}
                         </span>
                         {r.fixed ? (
-                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-emerald-300">Fixed</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-emerald-500/30 text-success">Fixed</span>
                         ) : (
-                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-rose-500/40 text-rose-300">Open</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-rose-500/40 text-danger">Open</span>
                         )}
-                        <span className="text-[10px] text-white/35 ml-auto">{new Date(r.reportedAt).toLocaleString()}</span>
+                        <span className="text-[10px] text-faint ml-auto">{new Date(r.reportedAt).toLocaleString()}</span>
                       </div>
-                      <p className="text-sm text-white mt-1.5 line-clamp-2">{r.failure?.why || 'Build failed — no cause could be read.'}</p>
-                      <p className="text-[11px] text-white/40 mt-1">
+                      <p className="text-sm text-ink mt-1.5 line-clamp-2">{r.failure?.why || 'Build failed — no cause could be read.'}</p>
+                      <p className="text-[11px] text-faint mt-1">
                         {r.owner}/{r.repo} · {r.email || r.userId}
                         {r.failure?.stage && <> · stage: {r.failure.stage}</>}
                       </p>
@@ -3588,30 +3588,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               )}
 
               {openApkReport && (
-                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setOpenApkReport(null)}>
-                  <div className="nb-sheet w-full max-w-2xl max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] overflow-y-auto bg-[#161b22] border border-white/10 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                <div className="nb-sheet-overlay fixed inset-0 z-50 bg-scrim flex items-center justify-center" onClick={() => setOpenApkReport(null)}>
+                  <div className="nb-sheet w-full max-w-2xl max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] overflow-y-auto bg-card border border-line rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
                     {openApkReport.loading ? (
-                      <p className="text-sm text-white/60">Opening…</p>
+                      <p className="text-sm text-muted">Opening…</p>
                     ) : openApkReport.error ? (
-                      <p className="text-sm text-amber-300">{openApkReport.error}</p>
+                      <p className="text-sm text-warn">{openApkReport.error}</p>
                     ) : (
                       <>
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <h4 className="text-base font-bold text-white">{openApkReport.owner}/{openApkReport.repo}</h4>
-                            <p className="text-[11px] text-white/40">{openApkReport.building || openApkReport.workflow} · reported {new Date(openApkReport.reportedAt).toLocaleString()}</p>
+                            <h4 className="text-base font-bold text-ink">{openApkReport.owner}/{openApkReport.repo}</h4>
+                            <p className="text-[11px] text-faint">{openApkReport.building || openApkReport.workflow} · reported {new Date(openApkReport.reportedAt).toLocaleString()}</p>
                           </div>
-                          <button onClick={() => setOpenApkReport(null)} className="text-white/40 hover:text-white p-1" aria-label="Close">✕</button>
+                          <button onClick={() => setOpenApkReport(null)} className="text-faint hover:text-ink p-1" aria-label="Close">✕</button>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 mt-4 text-[11px]">
-                          <div className="rounded-xl border border-white/10 p-3">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Built by</p>
-                            <p className="text-white break-all">{openApkReport.email || openApkReport.userId}</p>
+                          <div className="rounded-xl border border-line p-3">
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-1">Built by</p>
+                            <p className="text-ink break-all">{openApkReport.email || openApkReport.userId}</p>
                           </div>
-                          <div className="rounded-xl border border-white/10 p-3">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Duration</p>
-                            <p className="text-white">{openApkReport.durationSeconds != null ? `${openApkReport.durationSeconds}s` : '—'}</p>
+                          <div className="rounded-xl border border-line p-3">
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-1">Duration</p>
+                            <p className="text-ink">{openApkReport.durationSeconds != null ? `${openApkReport.durationSeconds}s` : '—'}</p>
                           </div>
                         </div>
 
@@ -3619,13 +3619,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <div className="mt-3">
                             <a
                               href={openApkReport.runUrl} target="_blank" rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline decoration-indigo-300/30"
+                              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-accent-text hover:text-accent-text underline decoration-indigo-300/30"
                             ><ExternalLink size={12} /> Open the full run on GitHub</a>
                             {/* HONEST ABOUT WHO OWNS THAT RUN: the build ran in the USER's own GitHub
                                 account (mobileShip takes owner/repo from their connected account), so
                                 this link opens only if that repository is public or shared with you.
                                 Everything below is stored here and needs no GitHub access at all. */}
-                            <p className="text-[10px] text-white/35 mt-1">
+                            <p className="text-[10px] text-faint mt-1">
                               That run lives in the user's own GitHub account — the link opens only if the
                               repository is public or shared with you. Everything below is stored here.
                             </p>
@@ -3634,12 +3634,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         {openApkReport.steps?.length > 0 && (
                           <div className="mt-4">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-2">Steps</p>
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-2">Steps</p>
                             <div className="space-y-1">
                               {openApkReport.steps.map((s: any, idx: number) => (
                                 <div key={idx} className="flex items-center gap-2 text-[11px]">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${s.state === 'failed' ? 'bg-rose-400' : s.state === 'done' ? 'bg-emerald-400' : 'bg-white/20'}`} />
-                                  <span className={s.state === 'failed' ? 'text-rose-300 font-semibold' : 'text-white/60'}>{s.label}</span>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${s.state === 'failed' ? 'bg-rose-400' : s.state === 'done' ? 'bg-emerald-400' : 'bg-raised'}`} />
+                                  <span className={s.state === 'failed' ? 'text-danger font-semibold' : 'text-muted'}>{s.label}</span>
                                 </div>
                               ))}
                             </div>
@@ -3648,16 +3648,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         {openApkReport.failure && (
                           <div className="mt-4">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">Why it failed</p>
-                            <p className="text-sm text-white bg-black/30 rounded-xl p-3 whitespace-pre-wrap">{openApkReport.failure.why}</p>
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-1">Why it failed</p>
+                            <p className="text-sm text-ink bg-well rounded-xl p-3 whitespace-pre-wrap">{openApkReport.failure.why}</p>
                             {openApkReport.failure.detail && Object.keys(openApkReport.failure.detail).length > 0 && (
-                              <div className="mt-2 text-[11px] text-white/50 space-y-0.5">
+                              <div className="mt-2 text-[11px] text-muted space-y-0.5">
                                 {Object.entries(openApkReport.failure.detail).map(([k, v]: [string, any]) => (
-                                  <p key={k}><span className="text-white/30">{k}:</span> {String(v)}</p>
+                                  <p key={k}><span className="text-faint">{k}:</span> {String(v)}</p>
                                 ))}
                               </div>
                             )}
-                            <p className="text-[10px] text-white/35 mt-2">
+                            <p className="text-[10px] text-faint mt-2">
                               {openApkReport.failure.navbharatCanFixItself
                                 ? "NavBharatAI's self-heal can attempt to fix this class automatically."
                                 : 'Outside the self-heal — needs a manual fix in the app or its build files.'}
@@ -3667,10 +3667,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         {openApkReport.failure?.logExcerpt?.length > 0 && (
                           <div className="mt-4">
-                            <p className="text-white/40 uppercase tracking-widest text-[9px] font-black mb-1">
+                            <p className="text-faint uppercase tracking-widest text-[9px] font-black mb-1">
                               Log excerpt (failed step) · {openApkReport.failure.logExcerpt.length} lines — the complete log is on GitHub
                             </p>
-                            <pre className="text-[10px] text-white/70 bg-black/50 rounded-xl p-3 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-all">
+                            <pre className="text-[10px] text-body bg-well rounded-xl p-3 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap break-all">
 {openApkReport.failure.logExcerpt.join('\n')}
                             </pre>
                           </div>
@@ -3678,15 +3678,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                         <div className="flex items-center gap-2 mt-5">
                           {openApkReport.fixed ? (
-                            <button onClick={() => void markApkReport(openApkReport.id, false)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Reopen</button>
+                            <button onClick={() => void markApkReport(openApkReport.id, false)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink">Reopen</button>
                           ) : (
-                            <button onClick={() => void markApkReport(openApkReport.id, true)} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white">Mark fixed</button>
+                            <button onClick={() => void markApkReport(openApkReport.id, true)} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-on-accent">Mark fixed</button>
                           )}
                           {/* The whole stored report as a file — the log excerpt on screen scrolls,
                               so this is how the cause leaves this page intact. */}
-                          <button onClick={() => downloadApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white inline-flex items-center gap-1.5"><Download size={12} /> Download</button>
-                          <button onClick={() => copyApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-bold text-white">Copy</button>
-                          <button onClick={() => void deleteApkReportRow(openApkReport.id)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-xs font-bold text-white inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</button>
+                          <button onClick={() => downloadApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink inline-flex items-center gap-1.5"><Download size={12} /> Download</button>
+                          <button onClick={() => copyApkReport(openApkReport)} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-bold text-ink">Copy</button>
+                          <button onClick={() => void deleteApkReportRow(openApkReport.id)} className="ml-auto px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-xs font-bold text-on-accent inline-flex items-center gap-1.5"><Trash2 size={12} /> Delete</button>
                         </div>
                       </>
                     )}
@@ -3700,18 +3700,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="flex items-center gap-2 text-lg font-black text-white tracking-tight">
+                  <h3 className="flex items-center gap-2 text-lg font-black text-ink tracking-tight">
                     Build Reports
                     {/* THE ONE NUMBER WORTH SEEING FIRST (admin 2026-08-12): how many still need work.
                         Counted from the marks, so it can never disagree with the badges below it. */}
                     {(() => {
                       const open = openReportCount(buildReports);
                       return open > 0 ? (
-                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300">{open} open</span>
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-warn">{open} open</span>
                       ) : null;
                     })()}
                   </h3>
-                  <p className="text-[11px] text-[#8b949e] font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only. Download marks a report sent; “Mark fixed” is yours to set once the work is merged.</p>
+                  <p className="text-[11px] text-muted font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only. Download marks a report sent; “Mark fixed” is yours to set once the work is merged.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   {/* SERVER NECESSITY (admin 2026-08-12) — see fetchNecessity. Behind a button because it
@@ -3720,7 +3720,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     onClick={fetchNecessity}
                     disabled={necessityLoading}
                     title="How many past apps were given a server they never needed? Every one of those could have skipped the sandbox."
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-amber-500/40 text-amber-300 hover:text-white hover:bg-amber-600/20 disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-amber-500/40 text-warn hover:text-ink hover:bg-amber-600/20 disabled:opacity-40"
                   >
                     <Server className={`w-3.5 h-3.5 ${necessityLoading ? 'animate-pulse' : ''}`} /> Server necessity
                   </button>
@@ -3729,7 +3729,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     onClick={fetchHandover}
                     disabled={handoverLoading}
                     title="After a build finished, how much longer did its sandbox stay billable — and how much of that could the browser have served?"
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-violet-500/40 text-violet-300 hover:text-white hover:bg-violet-600/20 disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-violet-500/40 text-accent-text hover:text-ink hover:bg-violet-600/20 disabled:opacity-40"
                   >
                     <Clock className={`w-3.5 h-3.5 ${handoverLoading ? 'animate-pulse' : ''}`} /> Sandbox handover
                   </button>
@@ -3741,19 +3741,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     onChange={(e) => setAppleObservedCode(e.target.value)}
                     placeholder="auth/… (optional)"
                     title="The error code shown in the sign-in message, if you have one. It makes the answer more exact; leave it empty to just check our side."
-                    className="text-[11px] font-bold px-2.5 py-2 rounded-xl bg-[#0d1117] border border-white/10 text-white placeholder:text-[#6e7681] w-[9.5rem] focus:outline-none focus:border-sky-500/50"
+                    className="text-[11px] font-bold px-2.5 py-2 rounded-xl bg-surface border border-line text-ink placeholder:text-faint w-[9.5rem] focus:outline-none focus:border-sky-500/50"
                   />
                   <button
                     onClick={fetchAppleDiag}
                     disabled={appleDiagLoading}
                     title="Is anything on OUR side stopping Sign in with Apple? Fetches our own public verification file exactly as Apple does."
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-sky-500/40 text-sky-300 hover:text-white hover:bg-sky-600/20 disabled:opacity-40"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-sky-500/40 text-info hover:text-ink hover:bg-sky-600/20 disabled:opacity-40"
                   >
                     <Shield className={`w-3.5 h-3.5 ${appleDiagLoading ? 'animate-pulse' : ''}`} /> Apple sign-in
                   </button>
                   <button
                     onClick={fetchBuildReports}
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-line text-muted hover:text-ink hover:bg-raised"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${buildReportsLoading ? 'animate-spin' : ''}`} /> Refresh
                   </button>
@@ -3763,7 +3763,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     onClick={clearAllReports}
                     disabled={buildReports.length === 0}
                     title="Delete ALL build reports — frees their storage (cannot be undone)"
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-danger hover:text-ink hover:bg-red-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Delete all
                   </button>
@@ -3781,28 +3781,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 // FULL CLASS NAMES, never a class built by interpolating a colour name into it.
                 // Tailwind scans source text and cannot see a composed class, so it is simply never
                 // generated — the element ends up unstyled while the code looks correct.
-                const icon = ok ? 'text-emerald-400' : unknown ? 'text-amber-400' : 'text-red-400';
+                const icon = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';
                 const ring = ok ? 'border-emerald-500/25' : unknown ? 'border-amber-500/25' : 'border-red-500/25';
-                const text = ok ? 'text-emerald-200/90' : unknown ? 'text-amber-200/90' : 'text-red-200/90';
+                const text = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';
                 return (
-                  <div className={`bg-[#161b22] border ${ring} rounded-[1.25rem] p-4 space-y-3`}>
+                  <div className={`bg-card border ${ring} rounded-[1.25rem] p-4 space-y-3`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Shield className={`w-4 h-4 ${icon}`} />
-                      <h4 className="text-sm font-black text-white tracking-tight">Sign in with Apple — is it us?</h4>
+                      <h4 className="text-sm font-black text-ink tracking-tight">Sign in with Apple — is it us?</h4>
                       <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${ring} ${text}`}>
                         {appleDiag.verdict.replace(/-/g, ' ')}
                       </span>
                       {appleDiag.observedCode && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10 text-[#8b949e]">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-line text-muted">
                           code: {appleDiag.observedCode}
                         </span>
                       )}
                     </div>
                     <p className={`text-[12px] ${text} font-bold leading-relaxed`}>{appleDiag.message}</p>
                     {appleDiag.nextStep && (
-                      <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1">Do this next</p>
-                        <p className="text-[12px] text-white font-bold leading-relaxed">{appleDiag.nextStep}</p>
+                      <div className="bg-surface border border-line rounded-xl p-3">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-muted mb-1">Do this next</p>
+                        <p className="text-[12px] text-ink font-bold leading-relaxed">{appleDiag.nextStep}</p>
                       </div>
                     )}
                     {/* Lengths and status, never the file's contents — enough to spot a truncated paste
@@ -3814,14 +3814,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         ['Length here / there', `${appleDiag.servedLength ?? 0} / ${appleDiag.fetchedLength ?? '—'}`],
                         ['Services ID', appleDiag.serviceId || '—'],
                       ] as Array<[string, string]>).map(([label, value]) => (
-                        <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-2.5">
-                          <p className="text-[10px] font-black uppercase tracking-wider text-[#6e7681]">{label}</p>
-                          <p className="text-[12px] text-white font-bold break-all">{value}</p>
+                        <div key={label} className="bg-surface border border-line rounded-xl p-2.5">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-faint">{label}</p>
+                          <p className="text-[12px] text-ink font-bold break-all">{value}</p>
                         </div>
                       ))}
                     </div>
                     {appleDiag.fetchError && (
-                      <p className="text-[11px] text-amber-300/80 font-bold break-all">Check failed with: {appleDiag.fetchError}</p>
+                      <p className="text-[11px] text-warn font-bold break-all">Check failed with: {appleDiag.fetchError}</p>
                     )}
                   </div>
                 );
@@ -3832,33 +3832,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   bare percentage — this drives a large decision, and a number without its limits is how
                   a large change gets approved on a misunderstanding. */}
               {necessity && (
-                <div className="bg-[#161b22] border border-amber-500/25 rounded-[1.25rem] p-4 space-y-3">
+                <div className="bg-card border border-amber-500/25 rounded-[1.25rem] p-4 space-y-3">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Server className="w-4 h-4 text-amber-400" />
-                    <h4 className="text-sm font-black text-white tracking-tight">Did these apps need a server?</h4>
+                    <Server className="w-4 h-4 text-warn" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">Did these apps need a server?</h4>
                   </div>
-                  <p className="text-[12px] text-amber-200/90 font-bold leading-relaxed">{necessity.headline}</p>
+                  <p className="text-[12px] text-warn font-bold leading-relaxed">{necessity.headline}</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {([
-                      ['Server built, NOT needed', necessity.tally.builtButNotNeeded, 'text-amber-300', 'could have skipped the sandbox'],
-                      ['Neither needed nor built', necessity.tally.neitherNeededNorBuilt, 'text-emerald-300', 'already browser-native'],
-                      ['Genuinely needed one', necessity.tally.neededAndBuilt, 'text-sky-300', 'E2B is required here'],
-                      ['Needed, but missing', necessity.tally.neededButMissing, 'text-red-300', 'a correctness gap, not a cost one'],
+                      ['Server built, NOT needed', necessity.tally.builtButNotNeeded, 'text-warn', 'could have skipped the sandbox'],
+                      ['Neither needed nor built', necessity.tally.neitherNeededNorBuilt, 'text-success', 'already browser-native'],
+                      ['Genuinely needed one', necessity.tally.neededAndBuilt, 'text-info', 'E2B is required here'],
+                      ['Needed, but missing', necessity.tally.neededButMissing, 'text-danger', 'a correctness gap, not a cost one'],
                     ] as const).map(([label, n, cls, hint]) => (
-                      <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                      <div key={label} className="bg-surface border border-line rounded-xl p-3">
                         <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
-                        <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mt-1">{label}</div>
-                        <div className="text-[10px] text-[#6e7681] mt-0.5 leading-snug">{hint}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-muted mt-1">{label}</div>
+                        <div className="text-[10px] text-faint mt-0.5 leading-snug">{hint}</div>
                       </div>
                     ))}
                   </div>
                   {Object.keys(necessity.tally.reasonCounts).length > 0 && (
                     <div>
-                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">Why a server was genuinely needed</div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">Why a server was genuinely needed</div>
                       <div className="space-y-1">
                         {Object.entries(necessity.tally.reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, n]) => (
-                          <div key={reason} className="flex items-start gap-2 text-[11px] text-[#c9d1d9]">
-                            <span className="tabular-nums font-black text-sky-300 shrink-0 w-6">{n}×</span>
+                          <div key={reason} className="flex items-start gap-2 text-[11px] text-body">
+                            <span className="tabular-nums font-black text-info shrink-0 w-6">{n}×</span>
                             <span className="leading-snug">{reason}</span>
                           </div>
                         ))}
@@ -3868,18 +3868,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   {/* SPOT-CHECK. A percentage produced by a classifier nobody has read is not evidence —
                       these are real builds the admin can recognise and disagree with. */}
                   <details className="text-[11px]">
-                    <summary className="cursor-pointer text-[#8b949e] font-bold hover:text-white">Check it against {necessity.sample.length} real builds</summary>
+                    <summary className="cursor-pointer text-muted font-bold hover:text-ink">Check it against {necessity.sample.length} real builds</summary>
                     <div className="mt-2 space-y-1.5">
                       {necessity.sample.map((s) => (
-                        <div key={s.workspaceId} className="bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-2">
+                        <div key={s.workspaceId} className="bg-surface border border-line rounded-lg px-2.5 py-2">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${s.neededServer ? 'border-sky-500/40 text-sky-300' : 'border-emerald-500/40 text-emerald-300'}`}>
+                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${s.neededServer ? 'border-sky-500/40 text-info' : 'border-emerald-500/40 text-success'}`}>
                               {s.neededServer ? 'needed' : 'not needed'}
                             </span>
-                            {s.builtServer && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-amber-300">built one</span>}
+                            {s.builtServer && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">built one</span>}
                           </div>
-                          <div className="text-[11px] text-[#c9d1d9] mt-1 leading-snug">{s.prompt || <span className="text-[#6e7681]">(no prompt recorded)</span>}</div>
-                          {s.reasons.length > 0 && <div className="text-[10px] text-[#8b949e] mt-0.5">{s.reasons.join(' · ')}</div>}
+                          <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>
+                          {s.reasons.length > 0 && <div className="text-[10px] text-muted mt-0.5">{s.reasons.join(' · ')}</div>}
                         </div>
                       ))}
                     </div>
@@ -3892,23 +3892,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   loudly as the measured ones: an unmeasurable hold is not a zero-length hold, and
                   quietly treating it as one is how a measurement turns into a flattering estimate. */}
               {handover && (
-                <div className="bg-[#161b22] border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
+                <div className="bg-card border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Clock className="w-4 h-4 text-violet-400" />
-                    <h4 className="text-sm font-black text-white tracking-tight">Where does a sandbox's billed time go?</h4>
+                    <Clock className="w-4 h-4 text-accent-text" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">Where does a sandbox's billed time go?</h4>
                   </div>
-                  <p className="text-[12px] text-violet-200/90 font-bold leading-relaxed">{handover.headline}</p>
+                  <p className="text-[12px] text-accent-text font-bold leading-relaxed">{handover.headline}</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {([
-                      ['Real build work', `${handover.tally.buildHours}h`, 'text-sky-300', 'a browser can never absorb this'],
-                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-amber-300', 'the only window Phase 3 targets'],
-                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-emerald-300', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
-                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-[#8b949e]', 'excluded, never counted as zero'],
+                      ['Real build work', `${handover.tally.buildHours}h`, 'text-info', 'a browser can never absorb this'],
+                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-warn', 'the only window Phase 3 targets'],
+                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-success', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
+                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
                     ] as const).map(([label, n, cls, hint]) => (
-                      <div key={label} className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
+                      <div key={label} className="bg-surface border border-line rounded-xl p-3">
                         <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
-                        <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mt-1">{label}</div>
-                        <div className="text-[10px] text-[#6e7681] mt-0.5 leading-snug">{hint}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-muted mt-1">{label}</div>
+                        <div className="text-[10px] text-faint mt-0.5 leading-snug">{hint}</div>
                       </div>
                     ))}
                   </div>
@@ -3916,22 +3916,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     // WHERE DO THE MINUTES GO. The bill said ~29 min a session; a build is ~5-7 of work.
                     // "Idle" is the machine up with none of our operations running — a sweep/window
                     // problem. "Running" is our commands — a machine or workload problem. Different fixes.
-                    <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                      <span className="font-black text-white">Where the minutes go</span> (last {handover.minutes.sessions} ended sessions):{' '}
-                      up <span className="tabular-nums font-black text-white">{handover.minutes.avgWallMin} min</span> ·{' '}
-                      running our operations <span className="tabular-nums font-black text-sky-300">{handover.minutes.avgBusyMin} min</span> ·{' '}
-                      idle <span className="tabular-nums font-black text-amber-300">{handover.minutes.avgIdleMin} min</span>{' '}
-                      <span className="text-[#6e7681]">({Math.round(handover.minutes.idleShare * 100)}% of billed time was nobody's work)</span>
+                    <p className="text-[11px] text-muted leading-relaxed">
+                      <span className="font-black text-ink">Where the minutes go</span> (last {handover.minutes.sessions} ended sessions):{' '}
+                      up <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
+                      running our operations <span className="tabular-nums font-black text-info">{handover.minutes.avgBusyMin} min</span> ·{' '}
+                      idle <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
+                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of billed time was nobody's work)</span>
                     </p>
                   )}
                   {handover.starts && handover.starts.total > 0 && (
                     // WHY MACHINES START. 1,110 starts a month for one tester was the mystery; this is
                     // the table that ends it. A large "preview-door" share means the live frame is
                     // resuming paused machines; a large "files" share means reads are.
-                    <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                      <span className="font-black text-white">Why machines started</span> (last {handover.starts.days} days, {handover.starts.total} starts):{' '}
+                    <p className="text-[11px] text-muted leading-relaxed">
+                      <span className="font-black text-ink">Why machines started</span> (last {handover.starts.days} days, {handover.starts.total} starts):{' '}
                       {Object.entries(handover.starts.byReason).sort((a, b) => b[1] - a[1]).map(([reason, n], i) => (
-                        <span key={reason}>{i > 0 ? ' · ' : ''}{reason} <span className="tabular-nums font-black text-white">{n}</span></span>
+                        <span key={reason}>{i > 0 ? ' · ' : ''}{reason} <span className="tabular-nums font-black text-ink">{n}</span></span>
                       ))}
                     </p>
                   )}
@@ -3940,35 +3940,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     // fall to the 20-minute orphan sweep — that expectation was arithmetic, not evidence.
                     // This row is the evidence. "Provider / unknown" is a machine we never stamped: E2B's
                     // own timer, a kill, or one still running — reported as unknown rather than guessed.
-                    <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                      <span className="font-black text-white">Who stopped them:</span>{' '}
-                      idle sweep <span className="tabular-nums font-black text-sky-300">{handover.pauseCauses.idleSweep}</span> ·{' '}
-                      orphan sweep <span className="tabular-nums font-black text-amber-300">{handover.pauseCauses.orphanSweep}</span> ·{' '}
-                      sweep (cause not recorded) <span className="tabular-nums font-black text-[#c9d1d9]">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
-                      provider / unknown <span className="tabular-nums font-black text-violet-300">{handover.pauseCauses.providerOrUnknown}</span>{' '}
-                      <span className="text-[#6e7681]">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
+                    <p className="text-[11px] text-muted leading-relaxed">
+                      <span className="font-black text-ink">Who stopped them:</span>{' '}
+                      idle sweep <span className="tabular-nums font-black text-info">{handover.pauseCauses.idleSweep}</span> ·{' '}
+                      orphan sweep <span className="tabular-nums font-black text-warn">{handover.pauseCauses.orphanSweep}</span> ·{' '}
+                      sweep (cause not recorded) <span className="tabular-nums font-black text-body">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
+                      provider / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
+                      <span className="text-faint">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
                     </p>
                   )}
                   {/* The extrapolation is kept visually APART from the measured numbers above, and says
                       what it is. The two must never be read as one row of equally solid figures. */}
                   {handover.projection.monthlyUsdEstimate > 0 && (
-                    <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e]">Extrapolation, not a bill</div>
-                      <div className="text-[12px] text-[#c9d1d9] mt-1 leading-snug">
-                        Over the sample's <span className="tabular-nums font-black text-white">{handover.projection.spanDays}</span> days that is{' '}
-                        <span className="tabular-nums font-black text-emerald-300">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
-                        <span className="tabular-nums font-black text-emerald-300">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
+                    <div className="bg-surface border border-line rounded-xl p-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-muted">Extrapolation, not a bill</div>
+                      <div className="text-[12px] text-body mt-1 leading-snug">
+                        Over the sample's <span className="tabular-nums font-black text-ink">{handover.projection.spanDays}</span> days that is{' '}
+                        <span className="tabular-nums font-black text-success">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
+                        <span className="tabular-nums font-black text-success">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
                         window at the measured sandbox rate — the real bill moves with usage.
                       </div>
                     </div>
                   )}
                   {Object.entries(handover.tally.unknown).some(([, n]) => n > 0) && (
                     <div>
-                      <div className="text-[10px] font-black uppercase tracking-wider text-[#8b949e] mb-1.5">Why builds were excluded</div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">Why builds were excluded</div>
                       <div className="space-y-1">
                         {Object.entries(handover.tally.unknown).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([why, n]) => (
-                          <div key={why} className="flex items-start gap-2 text-[11px] text-[#c9d1d9]">
-                            <span className="tabular-nums font-black text-[#8b949e] shrink-0 w-6">{n}×</span>
+                          <div key={why} className="flex items-start gap-2 text-[11px] text-body">
+                            <span className="tabular-nums font-black text-muted shrink-0 w-6">{n}×</span>
                             <span className="leading-snug">{({
                               'no-build-window': 'the report never recorded a start and end (unsettled or legacy build)',
                               'no-sandbox-record': 'no durable sandbox record for that workspace',
@@ -3981,22 +3981,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </div>
                   )}
                   <details className="text-[11px]">
-                    <summary className="cursor-pointer text-[#8b949e] font-bold hover:text-white">Check it against {handover.sample.length} real builds</summary>
+                    <summary className="cursor-pointer text-muted font-bold hover:text-ink">Check it against {handover.sample.length} real builds</summary>
                     <div className="mt-2 space-y-1.5">
                       {handover.sample.map((s) => (
-                        <div key={s.workspaceId} className="bg-[#0d1117] border border-white/5 rounded-lg px-2.5 py-2">
+                        <div key={s.workspaceId} className="bg-surface border border-line rounded-lg px-2.5 py-2">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {s.known ? (
                               <>
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-sky-300">{s.buildMinutes}m build</span>
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-amber-300">{s.heldAfterMinutes}m held</span>
-                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-emerald-300">reclaimable</span>}
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-info">{s.buildMinutes}m build</span>
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m held</span>
+                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">reclaimable</span>}
                               </>
                             ) : (
-                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-white/15 text-[#8b949e]">not measurable · {s.why}</span>
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not measurable · {s.why}</span>
                             )}
                           </div>
-                          <div className="text-[11px] text-[#c9d1d9] mt-1 leading-snug">{s.prompt || <span className="text-[#6e7681]">(no prompt recorded)</span>}</div>
+                          <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>
                         </div>
                       ))}
                     </div>
@@ -4015,11 +4015,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
                   WITHOUT the user pressing Report. The engine already records every build durably;
                   this is the admin's global window over that record. */}
-              <div className="bg-[#161b22] border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
+              <div className="bg-card border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <FileText className="w-4 h-4 text-indigo-400" />
-                  <h4 className="text-sm font-black text-white tracking-tight">All builds — every user, no submit needed</h4>
-                  <span className="text-[10px] text-[#8b949e] font-bold">full 0→100% report per build, straight from the engine's own record</span>
+                  <FileText className="w-4 h-4 text-accent-text" />
+                  <h4 className="text-sm font-black text-ink tracking-tight">All builds — every user, no submit needed</h4>
+                  <span className="text-[10px] text-muted font-bold">full 0→100% report per build, straight from the engine's own record</span>
                 </div>
                 {/* THE SAME COMPONENT THE USER-SUBMITTED INBOX RENDERS (admin 2026-09-14). It used
                     to be ~100 lines of bespoke JSX here and a different bar over there; now one
@@ -4054,13 +4054,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   trailing={(
                     <button
                       onClick={() => void fetchAllBuilds()}
-                      className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
+                      className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-on-accent"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
                     </button>
                   )}
                 />
-                <p className="text-[10px] text-[#8b949e]">
+                <p className="text-[10px] text-muted">
                   Showing {allBuilds.length}
                   {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
                     /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
@@ -4070,34 +4070,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </p>
 
                 {allBuilds.length === 0 && !allBuildsLoading && (
-                  <p className="text-[11px] text-[#8b949e]">Press Load to list the most recently active builds across all users.</p>
+                  <p className="text-[11px] text-muted">Press Load to list the most recently active builds across all users.</p>
                 )}
                 <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
                   {pagedAllBuilds.visible.map((b) => (
-                    <div key={b.workspaceId} className="border border-white/5 rounded-xl overflow-hidden">
+                    <div key={b.workspaceId} className="border border-line rounded-xl overflow-hidden">
                       <button
                         onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/5"
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-raised"
                       >
-                        <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-zinc-500'}`} />
+                        <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
                         <span className="flex-1 min-w-0">
-                          <span className="block text-[12px] font-bold text-white truncate">{b.prompt || b.summary || b.workspaceId}</span>
+                          <span className="block text-[12px] font-bold text-ink truncate">{b.prompt || b.summary || b.workspaceId}</span>
                           {/* The person first, in words. This line used to read `user RyN1xjbfr…`,
                               which is the Firebase UID -- correct, unreadable, and impossible to act
                               on. The uid stays available (title + workspace id) for matching against
                               logs, but it is no longer the only thing shown. */}
                           <span className="block text-[10px] truncate">
                             <span
-                              className={b.owner?.anonymous ? 'text-amber-300/80' : 'text-sky-300/90'}
+                              className={b.owner?.anonymous ? 'text-warn' : 'text-info'}
                               title={b.ownerUid || 'no user id'}
                             >
                               {b.owner?.label || (b.ownerUid ? `id ${b.ownerUid.slice(0, 8)}…` : 'Signed-out user')}
                             </span>
-                            <span className="text-[#8b949e]">
+                            <span className="text-muted">
                               {' · '}{b.savedAt ? new Date(b.savedAt).toLocaleString() : ''}
                             </span>
                           </span>
-                          <span className="block text-[9px] text-[#6e7681] font-mono truncate">{b.workspaceId}</span>
+                          <span className="block text-[9px] text-faint font-mono truncate">{b.workspaceId}</span>
                         </span>
                         {/* ALREADY TAKEN? (admin 2026-09-14). The badge says only what we KNOW — that
                             the report left the admin's hands — never "someone is fixing it", which we
@@ -4113,7 +4113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               title={`${reportStatusHint(b.triage, (ms) => new Date(ms).toLocaleString())} — press to un-mark`}
                               onClick={(e) => { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); }}
                               onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); } }}
-                              className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
+                              className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-success' : 'border-sky-500/40 text-info'}`}
                             >{st === 'fixed' ? reportStatusLabel(st) : '📤 Taken'}</span>
                           );
                         })()}
@@ -4125,7 +4125,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); }}
                           onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); } }}
-                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-success hover:bg-emerald-500/10"
                         >
                           ⧉ Copy session
                         </span>
@@ -4134,16 +4134,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); }}
                           onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); } }}
-                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10"
+                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-accent-text hover:bg-indigo-500/10"
                         >
                           ⬇ Full session
                         </span>
                       </button>
                       {expandedWorkspace === b.workspaceId && (
-                        <div className="border-t border-white/5 bg-black/20 px-3 py-2 space-y-1">
-                          {expandedLoading && <p className="text-[11px] text-[#8b949e]">Loading builds…</p>}
+                        <div className="border-t border-line bg-well px-3 py-2 space-y-1">
+                          {expandedLoading && <p className="text-[11px] text-muted">Loading builds…</p>}
                           {!expandedLoading && expandedHistory.length === 0 && (
-                            <p className="text-[11px] text-[#8b949e]">Only the latest report exists for this workspace — use “Full session” above.</p>
+                            <p className="text-[11px] text-muted">Only the latest report exists for this workspace — use “Full session” above.</p>
                           )}
                           {/* NUMBERED 1st, 2nd, 3rd … in BUILD order (admin 2026-08-09). The list itself
                               arrives newest-first, so the position is counted from the far end — that way
@@ -4151,20 +4151,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               which is ordered oldest → newest. */}
                           {!expandedLoading && expandedHistory.map((h, i) => (
                             <div key={h.id} className="flex items-center gap-3 py-1">
-                              <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${h.ok === true ? 'bg-emerald-400' : h.ok === false ? 'bg-rose-400' : 'bg-zinc-500'}`} />
-                              <span className="shrink-0 text-[10px] font-black text-[#8b949e] tabular-nums w-9">{ordinal(expandedHistory.length - i)}</span>
-                              <span className="flex-1 min-w-0 text-[11px] text-[#c9d1d9] truncate">
+                              <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${h.ok === true ? 'bg-emerald-400' : h.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
+                              <span className="shrink-0 text-[10px] font-black text-muted tabular-nums w-9">{ordinal(expandedHistory.length - i)}</span>
+                              <span className="flex-1 min-w-0 text-[11px] text-body truncate">
                                 {h.startedAt ? new Date(h.startedAt).toLocaleString() : h.id} — {h.prompt || h.summary || 'build'}
                               </span>
                               <button
                                 onClick={() => void copyWorkspaceReport(b.workspaceId, h.id)}
-                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-emerald-500/30 text-emerald-300/80 hover:text-white hover:bg-emerald-500/10"
+                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-emerald-500/30 text-success hover:text-ink hover:bg-emerald-500/10"
                               >
                                 ⧉ Copy
                               </button>
                               <button
                                 onClick={() => void downloadWorkspaceReport(b.workspaceId, h.id)}
-                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-line text-muted hover:text-ink hover:bg-raised"
                               >
                                 ⬇ This build
                               </button>
@@ -4183,43 +4183,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   deliberately reads lower than the delivered rate shown beside it. Honest by
                   construction: shows nothing rather than a fake 0% when no row carries the signal. */}
               {firstPass && firstPass.cleanRate !== null && (
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4">
+                <div className="bg-card border border-line rounded-[1.25rem] p-4">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <Target className="w-4 h-4 text-indigo-400" />
-                    <h4 className="text-sm font-black text-white tracking-tight">First-pass quality</h4>
+                    <Target className="w-4 h-4 text-accent-text" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">First-pass quality</h4>
                     <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
                       firstPass.cleanRate >= FIRST_PASS_TARGET
-                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        ? 'bg-emerald-500/15 text-success border-emerald-500/30'
+                        : 'bg-amber-500/15 text-warn border-amber-500/30'
                     }`}>
                       target {Math.round(FIRST_PASS_TARGET * 100)}%
                     </span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                     <div>
-                      <p className="text-2xl font-black text-white tabular-nums">{(firstPass.cleanRate * 100).toFixed(1)}%</p>
-                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Right first time</p>
+                      <p className="text-2xl font-black text-ink tabular-nums">{(firstPass.cleanRate * 100).toFixed(1)}%</p>
+                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Right first time</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-black text-emerald-300 tabular-nums">{firstPass.clean}</p>
-                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Clean</p>
+                      <p className="text-2xl font-black text-success tabular-nums">{firstPass.clean}</p>
+                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Clean</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-black text-amber-300 tabular-nums">{firstPass.healed}</p>
-                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Needed repair</p>
+                      <p className="text-2xl font-black text-warn tabular-nums">{firstPass.healed}</p>
+                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Needed repair</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-black text-rose-300 tabular-nums">{firstPass.failed}</p>
-                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider">Failed</p>
+                      <p className="text-2xl font-black text-danger tabular-nums">{firstPass.failed}</p>
+                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider">Failed</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-[#8b949e] leading-snug">{firstPassHeadline(firstPass)} <span className="text-[#6e7681]">Across EVERY build by every user — not only the ones someone reported.</span></p>
+                  <p className="text-[11px] text-muted leading-snug">{firstPassHeadline(firstPass)} <span className="text-faint">Across EVERY build by every user — not only the ones someone reported.</span></p>
                   {/* THE GAP IS THE SIGNAL (admin screenshot 2026-08-12). Complaints far below the
                       engine-wide rate is healthy self-selection — people report what broke. The two
                       being EQUAL would mean users are reporting a fair sample, which is much worse
                       news, and only showing both makes that visible. */}
                   {firstPass.reported && firstPass.reported.cleanRate !== null && (
-                    <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
+                    <p className="text-[10px] text-muted mt-1.5 leading-snug">
                       Among the {firstPass.reported.total} build(s) users actually pressed “Report” on, {(firstPass.reported.cleanRate * 100).toFixed(1)}% were right first time.
                       {firstPass.cleanRate !== null && firstPass.reported.cleanRate < firstPass.cleanRate
                         ? ' Lower than the rate above, which is expected — people report what broke.'
@@ -4227,20 +4227,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </p>
                   )}
                   {firstPass.skippedLegacy > 0 && (
-                    <p className="text-[10px] text-[#8b949e]/70 mt-1.5 leading-snug">
+                    <p className="text-[10px] text-muted mt-1.5 leading-snug">
                       {firstPass.skippedLegacy} older build(s) excluded — they predate this measurement and
                       carry no repair count. Counting them as clean would inflate the number.
                     </p>
                   )}
                   {firstPass.topHealCodes.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-white/5">
-                      <p className="text-[10px] text-[#8b949e] font-bold uppercase tracking-wider mb-2">
+                    <div className="mt-3 pt-3 border-t border-line">
+                      <p className="text-[10px] text-muted font-bold uppercase tracking-wider mb-2">
                         Repairs that fire most — prevent these upstream
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {firstPass.topHealCodes.map((h) => (
-                          <span key={h.code} className="text-[10px] font-mono px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-[#c9d1d9]">
-                            {h.code} <span className="text-amber-300 font-bold">×{h.count}</span>
+                          <span key={h.code} className="text-[10px] font-mono px-2 py-1 rounded-lg bg-raised border border-line text-body">
+                            {h.code} <span className="text-warn font-bold">×{h.count}</span>
                           </span>
                         ))}
                       </div>
@@ -4252,11 +4252,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* Top failure patterns (M8-S8.1) — data-driven: which failure class recurs most, so the
                   most-impactful fix is chosen from real evidence. Only shown when there are failures. */}
               {!buildReportsLoading && failureSummary.totalFailed > 0 && (
-                <div className="bg-[#161b22] border border-amber-500/20 rounded-[1.25rem] p-4">
+                <div className="bg-card border border-amber-500/20 rounded-[1.25rem] p-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
-                    <h4 className="text-sm font-black text-white tracking-tight">Top failure patterns</h4>
-                    <span className="text-[11px] text-[#8b949e] font-bold">
+                    <AlertTriangle className="w-4 h-4 text-warn" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">Top failure patterns</h4>
+                    <span className="text-[11px] text-muted font-bold">
                       {failureSummary.totalFailed} failed of {failureSummary.totalReports} report(s)
                     </span>
                   </div>
@@ -4265,11 +4265,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       const pct = failureSummary.totalFailed > 0 ? Math.round((p.count / failureSummary.totalFailed) * 100) : 0;
                       return (
                         <div key={p.label} className="flex items-center gap-3">
-                          <span className="w-40 shrink-0 text-[12px] font-bold text-white truncate" title={p.sample}>{p.label}</span>
-                          <span className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
-                            <span className="block h-full bg-amber-500/70 rounded-full" style={{ width: `${pct}%` }} />
+                          <span className="w-40 shrink-0 text-[12px] font-bold text-ink truncate" title={p.sample}>{p.label}</span>
+                          <span className="flex-1 h-2 rounded-full bg-raised overflow-hidden">
+                            <span className="block h-full bg-amber-500/70 rounded-full text-on-accent" style={{ width: `${pct}%` }} />
                           </span>
-                          <span className="w-16 shrink-0 text-right text-[11px] text-[#8b949e] tabular-nums">{p.count} · {pct}%</span>
+                          <span className="w-16 shrink-0 text-right text-[11px] text-muted tabular-nums">{p.count} · {pct}%</span>
                         </div>
                       );
                     })}
@@ -4279,25 +4279,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Build-time signal (M6-S6.1) — average / median / slowest builds, so speed is measurable. */}
               {!buildReportsLoading && buildTimeSummary.counted > 0 && (
-                <div className="bg-[#161b22] border border-sky-500/20 rounded-[1.25rem] p-4">
+                <div className="bg-card border border-sky-500/20 rounded-[1.25rem] p-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <Activity className="w-4 h-4 text-sky-400" />
-                    <h4 className="text-sm font-black text-white tracking-tight">Build speed</h4>
-                    <span className="text-[11px] text-[#8b949e] font-bold">across {buildTimeSummary.counted} build(s)</span>
+                    <Activity className="w-4 h-4 text-info" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">Build speed</h4>
+                    <span className="text-[11px] text-muted font-bold">across {buildTimeSummary.counted} build(s)</span>
                   </div>
                   <div className="flex flex-wrap gap-6">
                     <div>
-                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Average</p>
-                      <p className="text-xl font-black text-white font-mono">{fmtDuration(buildTimeSummary.avgMs)}</p>
+                      <p className="text-[10px] text-muted font-black uppercase tracking-widest">Average</p>
+                      <p className="text-xl font-black text-ink font-mono">{fmtDuration(buildTimeSummary.avgMs)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Median</p>
-                      <p className="text-xl font-black text-white font-mono">{fmtDuration(buildTimeSummary.medianMs)}</p>
+                      <p className="text-[10px] text-muted font-black uppercase tracking-widest">Median</p>
+                      <p className="text-xl font-black text-ink font-mono">{fmtDuration(buildTimeSummary.medianMs)}</p>
                     </div>
                     <div className="min-w-[180px]">
-                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest mb-1">Slowest</p>
+                      <p className="text-[10px] text-muted font-black uppercase tracking-widest mb-1">Slowest</p>
                       {buildTimeSummary.slowest.slice(0, 3).map((s, i) => (
-                        <p key={i} className="text-[11px] text-[#8b949e] truncate"><span className="text-amber-400 font-bold font-mono">{fmtDuration(s.ms)}</span> · {s.app}</p>
+                        <p key={i} className="text-[11px] text-muted truncate"><span className="text-warn font-bold font-mono">{fmtDuration(s.ms)}</span> · {s.app}</p>
                       ))}
                     </div>
                   </div>
@@ -4325,7 +4325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <select
                         value={reportSortKey}
                         onChange={(e) => setReportSortKey(e.target.value as ReportSortKey)}
-                        className="shrink-0 bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] text-white outline-none focus:border-indigo-500"
+                        className="shrink-0 bg-surface border border-line rounded-xl px-2.5 py-2 text-[11px] text-ink outline-none focus:border-indigo-500"
                         title="Sort by"
                         aria-label="Sort by"
                       >
@@ -4337,7 +4337,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       </select>
                       <button
                         onClick={() => setReportSortAsc((v) => !v)}
-                        className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5"
+                        className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-line text-muted hover:text-ink hover:bg-raised"
                         title={reportSortAsc ? 'Ascending' : 'Descending'}
                       >
                         <ArrowUpDown className="w-3.5 h-3.5" /> {reportSortAsc ? 'Asc' : 'Desc'}
@@ -4348,16 +4348,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               )}
 
               {buildReportsLoading ? (
-                <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading reports…</div>
+                <div className="flex items-center justify-center py-12 text-muted text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading reports…</div>
               ) : buildReports.length === 0 ? (
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No build reports submitted yet.</div>
+                <div className="bg-card border border-line rounded-[1.5rem] p-8 text-center text-muted text-sm">No build reports submitted yet.</div>
               ) : (
                 <>
-                  <p className="text-[11px] text-[#8b949e] font-bold">
+                  <p className="text-[11px] text-muted font-bold">
                     Showing {visibleBuildReports.length} of {buildReports.length} report(s)
                   </p>
                   {visibleBuildReports.length === 0 ? (
-                    <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-8 text-center text-[#8b949e] text-sm">No reports match these filters.</div>
+                    <div className="bg-card border border-line rounded-[1.5rem] p-8 text-center text-muted text-sm">No reports match these filters.</div>
                   ) : (
                     /* THE NINE-COLUMN TABLE IS GONE (admin 2026-09-14).
                        The capture that prompted this recorded the measurable half: on the admin's own
@@ -4373,38 +4373,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {visibleBuildReports.map((r) => {
                         const st = reportStatus(r);
                         return (
-                          <div key={r.id} className="border border-white/5 rounded-xl overflow-hidden bg-[#161b22]">
+                          <div key={r.id} className="border border-line rounded-xl overflow-hidden bg-card">
                             <div
                               role="button"
                               tabIndex={0}
                               onClick={() => openBuildReport(r.id)}
                               onKeyDown={(e) => { if (e.key === 'Enter') openBuildReport(r.id); }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/5 cursor-pointer"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-raised cursor-pointer"
                             >
-                              <span className={`shrink-0 w-2 h-2 rounded-full ${r.ok === true ? 'bg-emerald-400' : r.ok === false ? 'bg-rose-400' : r.inFlight ? 'bg-amber-400' : 'bg-zinc-500'}`} />
+                              <span className={`shrink-0 w-2 h-2 rounded-full ${r.ok === true ? 'bg-emerald-400' : r.ok === false ? 'bg-rose-400' : r.inFlight ? 'bg-amber-400' : 'bg-faint'}`} />
                               <span className="flex-1 min-w-0">
-                                <span className="block text-[12px] font-bold text-white truncate">{r.appLabel}</span>
+                                <span className="block text-[12px] font-bold text-ink truncate">{r.appLabel}</span>
                                 <span className="block text-[10px] truncate">
-                                  <span className="text-sky-300/90">{personLabel(r.name, r.email, r.userId)}</span>
-                                  <span className="text-[#8b949e]">{' · '}{new Date(r.reportedAt).toLocaleString()}</span>
+                                  <span className="text-info">{personLabel(r.name, r.email, r.userId)}</span>
+                                  <span className="text-muted">{' · '}{new Date(r.reportedAt).toLocaleString()}</span>
                                 </span>
                                 {/* THE USER'S OWN WORDS COME FIRST (admin 2026-08-28). `rootCause`
                                     below is the ENGINE's verdict on itself; this is the only line that
                                     can say the button does nothing, or that it built the wrong app. */}
                                 {r.userNote && (
-                                  <span title={r.userNote} className="block text-[10px] text-sky-300/90 truncate">“{r.userNote}”</span>
+                                  <span title={r.userNote} className="block text-[10px] text-info truncate">“{r.userNote}”</span>
                                 )}
-                                {r.rootCause && <span className="block text-[10px] text-amber-400/80 truncate">{r.rootCause}</span>}
+                                {r.rootCause && <span className="block text-[10px] text-warn truncate">{r.rootCause}</span>}
                               </span>
                               {/* A report carrying the whole session says so, so the admin knows there
                                   are parts to choose from before opening it. */}
                               {(r.sessionParts ?? 1) > 1 && (
-                                <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-indigo-300">{r.sessionParts}p</span>
+                                <span className="shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-indigo-500/40 text-accent-text">{r.sessionParts}p</span>
                               )}
                               {st !== 'new' && (
                                 <span
                                   title={reportStatusHint(r, (ms) => new Date(ms).toLocaleString())}
-                                  className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-emerald-300' : 'border-sky-500/40 text-sky-300'}`}
+                                  className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-success' : 'border-sky-500/40 text-info'}`}
                                 >{st === 'fixed' ? '✅ Fixed' : '📤 Taken'}</span>
                               )}
                               <ReportInfoButton facts={submittedRowFacts(r, Date.now())} />
@@ -4412,7 +4412,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               <button
                                 onClick={(e) => { e.stopPropagation(); void deleteReport(r.id); }}
                                 title="Delete this report (frees its storage)"
-                                className="shrink-0 p-1.5 rounded-lg border border-white/10 text-[#8b949e] hover:text-red-400 hover:border-red-400/30 transition-colors"
+                                className="shrink-0 p-1.5 rounded-lg border border-line text-muted hover:text-danger hover:border-red-400/30 transition-colors"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -4427,12 +4427,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               {/* Detail viewer for the selected report */}
               {(selectedReport || selectedReportLoading) && (
-                <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setSelectedReport(null)}>
-                  <div className="nb-sheet bg-[#0d1117] border border-white/15 rounded-[1.5rem] w-full max-w-3xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+                <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-scrim" onClick={() => setSelectedReport(null)}>
+                  <div className="nb-sheet bg-surface border border-line rounded-[1.5rem] w-full max-w-3xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-line">
                       <div className="min-w-0">
-                        <h4 className="text-sm font-black text-white truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
-                        {selectedReport && <p className="text-[10px] text-[#8b949e] truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()} · {partsSummary(selectedReport)}</p>}
+                        <h4 className="text-sm font-black text-ink truncate">{selectedReport?.meta.appLabel ?? 'Loading…'}</h4>
+                        {selectedReport && <p className="text-[10px] text-muted truncate">{selectedReport.meta.email || selectedReport.meta.userId || 'unknown'} · {new Date(selectedReport.meta.reportedAt).toLocaleString()} · {partsSummary(selectedReport)}</p>}
                       </div>
                       {/* ⚠️ MOBILE CROP (admin 2026-09-03): on a narrow screen this row is wider than the
                           buttons it holds (part picker + Copy JSON + Download JSON + Mark fixed + Delete
@@ -4448,7 +4448,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             a confident wrong number that nobody would ever question. Said out loud
                             here, because a missing report is only findable if it announces itself. */}
                         {selectedReport?.session?.historyUnreadable && (
-                          <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-amber-300 bg-amber-500/10">
+                          <span className="shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border border-amber-500/50 text-warn bg-amber-500/10">
                             ⚠ Earlier builds could not be read — this may not be the whole session
                           </span>
                         )}
@@ -4460,7 +4460,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             value={reportPart}
                             onChange={(e) => setReportPart(e.target.value)}
                             aria-label="Which part of the report"
-                            className="shrink-0 bg-[#0d1117] border border-white/10 rounded-xl px-2.5 py-2 text-[11px] font-bold text-white focus:outline-none focus:border-indigo-500"
+                            className="shrink-0 bg-surface border border-line rounded-xl px-2.5 py-2 text-[11px] font-bold text-ink focus:outline-none focus:border-indigo-500"
                           >
                             {selectedParts.map((p) => (
                               <option key={p.key} value={p.key}>{p.label}</option>
@@ -4470,14 +4470,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <button
                           onClick={copySelectedReport}
                           disabled={!selectedPartJson}
-                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-emerald-500/40 text-success hover:text-ink hover:bg-emerald-600/20 disabled:opacity-40"
                         >
                           <FileText className="w-3.5 h-3.5" /> Copy JSON
                         </button>
                         <button
                           onClick={downloadSelectedReport}
                           disabled={!selectedPartJson}
-                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-indigo-300 hover:text-white hover:bg-indigo-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-indigo-500/40 text-accent-text hover:text-ink hover:bg-indigo-600/20 disabled:opacity-40"
                         >
                           <Download className="w-3.5 h-3.5" /> Download JSON
                         </button>
@@ -4496,8 +4496,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                 ? reportStatusHint(selectedReport?.meta, (ms) => new Date(ms).toLocaleString())
                                 : 'Mark this report as fixed — only after the work is actually merged'}
                               className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border disabled:opacity-40 ${isFixed
-                                ? 'border-emerald-500/60 text-emerald-200 bg-emerald-600/20 hover:bg-emerald-600/30'
-                                : 'border-white/15 text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+                                ? 'border-emerald-500/60 text-success bg-emerald-600/20 hover:bg-emerald-600/30'
+                                : 'border-line text-muted hover:text-ink hover:bg-raised'}`}
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" /> {isFixed ? 'Fixed' : 'Mark fixed'}
                             </button>
@@ -4509,11 +4509,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           onClick={() => selectedReport?.meta.id && void deleteReport(selectedReport.meta.id)}
                           disabled={!selectedReport?.meta.id}
                           title="Delete this report permanently (frees its storage)"
-                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-red-300 hover:text-white hover:bg-red-600/20 disabled:opacity-40"
+                          className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-red-500/40 text-danger hover:text-ink hover:bg-red-600/20 disabled:opacity-40"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Delete
                         </button>
-                        <button onClick={() => setSelectedReport(null)} className="shrink-0 whitespace-nowrap text-[#8b949e] hover:text-white px-2 py-2 rounded-xl hover:bg-white/5">Close</button>
+                        <button onClick={() => setSelectedReport(null)} className="shrink-0 whitespace-nowrap text-muted hover:text-ink px-2 py-2 rounded-xl hover:bg-raised">Close</button>
                       </div>
                     </div>
                     {/* THE COMPLAINT, IN FULL, ABOVE THE JSON (admin 2026-08-28).
@@ -4524,17 +4524,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         pre-wrap block — never as markup — since it is untrusted user input. */}
                     {selectedReport?.meta.userNote && (
                       <div className="mx-4 mt-4 rounded-2xl border border-sky-500/30 bg-sky-500/[0.06] px-4 py-3">
-                        <div className="text-[10px] font-black uppercase tracking-wider text-sky-300/80 mb-1">What the user said</div>
-                        <p className="text-[12px] leading-relaxed text-sky-100 whitespace-pre-wrap break-words">{selectedReport.meta.userNote}</p>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-info mb-1">What the user said</div>
+                        <p className="text-[12px] leading-relaxed text-info whitespace-pre-wrap break-words">{selectedReport.meta.userNote}</p>
                       </div>
                     )}
                     <div className="flex-1 overflow-auto p-4">
                       {selectedReportLoading ? (
-                        <div className="flex items-center justify-center py-12 text-[#8b949e] text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>
+                        <div className="flex items-center justify-center py-12 text-muted text-sm"><TirangaLoader className="w-5 h-5 mr-2" /> Loading report…</div>
                       ) : (
                         // WHAT YOU SEE IS WHAT YOU COPY: the viewer renders the SAME bytes the two
                         // buttons hand over, so the chosen part can never differ from the read one.
-                        <pre className="text-[11px] leading-relaxed text-[#c9d1d9] whitespace-pre-wrap break-words font-mono">{selectedPartJson || JSON.stringify(selectedReport?.report ?? {}, null, 2)}</pre>
+                        <pre className="text-[11px] leading-relaxed text-body whitespace-pre-wrap break-words font-mono">{selectedPartJson || JSON.stringify(selectedReport?.report ?? {}, null, 2)}</pre>
                       )}
                     </div>
                   </div>
@@ -4559,12 +4559,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   workspace can NEVER publish again — so it is red, it is second, and its
                   confirmation is a different sentence rather than the same one with a word swapped.
                   See `adminAppModeration.ts` for why that copy lives outside this file. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+              <div className="bg-card border border-line rounded-[1.5rem] p-5 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
-                    <Globe size={15} className="text-sky-400" /> Published apps
+                  <h3 className="flex items-center gap-2 text-sm font-black text-ink uppercase tracking-tight">
+                    <Globe size={15} className="text-info" /> Published apps
                     {Array.isArray(deployments) && (
-                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-white/15 text-[#8b949e]">
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-line text-muted">
                         {deployments.filter((d) => appStatusView(d.status).live).length} live
                       </span>
                     )}
@@ -4572,32 +4572,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <button
                     onClick={() => void fetchDeployments()}
                     disabled={deploymentsLoading}
-                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-sky-500/40 transition-all disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-ink hover:border-sky-500/40 transition-all disabled:opacity-40"
                   >
                     {deploymentsLoading ? 'Loading…' : 'Refresh'}
                   </button>
                 </div>
-                <p className="text-[11px] text-[#8b949e] leading-relaxed">
-                  Every app users have published. <span className="text-white/70">Unpublish</span> takes a site
+                <p className="text-[11px] text-muted leading-relaxed">
+                  Every app users have published. <span className="text-body">Unpublish</span> takes a site
                   off the internet and the owner can publish it again themselves.{' '}
-                  <span className="text-red-300">Ban</span> removes it and stops that workspace publishing ever
+                  <span className="text-danger">Ban</span> removes it and stops that workspace publishing ever
                   again — permanent, and nothing here can undo it.
                 </p>
 
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative flex-1 min-w-[180px]">
-                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#484f58]" />
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
                     <input
                       value={deployQuery}
                       onChange={(e) => setDeployQuery(e.target.value)}
                       placeholder="Search by app id, owner or link"
-                      className="w-full bg-black/30 border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-white placeholder:text-[#484f58] focus:outline-none focus:border-sky-500/40"
+                      className="w-full bg-well border border-line rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-ink placeholder:text-faint focus:outline-none focus:border-sky-500/40"
                     />
                   </div>
                   <select
                     value={deployStatusFilter}
                     onChange={(e) => setDeployStatusFilter(e.target.value)}
-                    className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] text-white focus:outline-none focus:border-sky-500/40"
+                    className="bg-well border border-line rounded-lg px-2.5 py-1.5 text-[11px] text-ink focus:outline-none focus:border-sky-500/40"
                   >
                     <option value="">All states</option>
                     <option value="active">Live only</option>
@@ -4611,13 +4611,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     the admin "nothing is published", which on a moderation screen is the worst
                     possible lie. */}
                 {deploymentsError && (
-                  <p className="text-[11px] text-amber-300">
+                  <p className="text-[11px] text-warn">
                     {deploymentsError}{' '}
                     <button onClick={() => void fetchDeployments()} className="underline">Retry</button>
                   </p>
                 )}
                 {!deploymentsError && deployments !== null && visibleDeployments.length === 0 && (
-                  <p className="text-[11px] text-[#8b949e]">
+                  <p className="text-[11px] text-muted">
                     {deployments.length === 0 ? 'No published apps yet.' : 'Nothing matches that search.'}
                   </p>
                 )}
@@ -4627,35 +4627,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     {visibleDeployments.slice(0, 200).map((d) => {
                       const view = appStatusView(d.status);
                       return (
-                        <div key={d.workspaceId} className="rounded-xl bg-black/20 border border-white/5 px-3 py-2.5">
+                        <div key={d.workspaceId} className="rounded-xl bg-well border border-line px-3 py-2.5">
                           <div className="flex items-start justify-between gap-3 flex-wrap">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                                  view.tone === 'live' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                                  : view.tone === 'banned' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                                  : view.tone === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                                  : 'bg-white/5 border-white/10 text-[#8b949e]'}`}>
+                                  view.tone === 'live' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
+                                  : view.tone === 'banned' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                                  : view.tone === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                                  : 'bg-raised border-line text-muted'}`}>
                                   {view.label}
                                 </span>
-                                <span className="text-[11px] font-mono text-white/80 truncate">{d.workspaceId}</span>
+                                <span className="text-[11px] font-mono text-body truncate">{d.workspaceId}</span>
                               </div>
-                              <p className="text-[10px] text-[#8b949e] mt-1 leading-relaxed">{view.meaning}</p>
+                              <p className="text-[10px] text-muted mt-1 leading-relaxed">{view.meaning}</p>
                               <div className="flex items-center gap-2.5 mt-1 flex-wrap">
                                 {d.url && (
                                   <a href={d.url} target="_blank" rel="noreferrer"
-                                     className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:underline">
+                                     className="inline-flex items-center gap-1 text-[10px] text-info hover:underline">
                                     <ExternalLink size={10} /> Open the app
                                   </a>
                                 )}
                                 {d.userId && (
                                   <button onClick={() => void openAccount(d.userId as string)}
-                                          className="text-[10px] text-[#8b949e] hover:text-white underline">
+                                          className="text-[10px] text-muted hover:text-ink underline">
                                     Owner
                                   </button>
                                 )}
                                 {typeof d.updatedAt === 'number' && d.updatedAt > 0 && (
-                                  <span className="text-[10px] text-[#484f58]">
+                                  <span className="text-[10px] text-faint">
                                     {new Date(d.updatedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
                                   </span>
                                 )}
@@ -4665,7 +4665,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               {canUnpublish(d.status) && (
                                 <button
                                   onClick={() => { setModerating({ workspaceId: d.workspaceId, action: 'unpublish' }); setModerateReason(''); }}
-                                  className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white/70 hover:text-white"
+                                  className="px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink"
                                 >
                                   Unpublish
                                 </button>
@@ -4673,7 +4673,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               {canBan(d.status) && (
                                 <button
                                   onClick={() => { setModerating({ workspaceId: d.workspaceId, action: 'ban' }); setModerateReason(''); }}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600/10 hover:bg-red-600/20 border border-red-500/30 text-[10px] font-black uppercase tracking-wider text-red-300"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600/10 hover:bg-red-600/20 border border-red-500/30 text-[10px] font-black uppercase tracking-wider text-danger"
                                 >
                                   <BanIcon size={11} /> Ban
                                 </button>
@@ -4692,29 +4692,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   document at all, so there is nothing else here to browse. Each row is something the
                   automatic check stopped or questioned, with secrets and personal identifiers already
                   stripped from the extract. Kept 180 days, then deleted. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+              <div className="bg-card border border-line rounded-[1.5rem] p-5 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
-                    <AlertTriangle size={15} className="text-amber-400" /> Safety queue
+                  <h3 className="flex items-center gap-2 text-sm font-black text-ink uppercase tracking-tight">
+                    <AlertTriangle size={15} className="text-warn" /> Safety queue
                     {Array.isArray(safetyFlags) && safetyFlags.length > 0 && (
-                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-amber-300">
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/40 text-warn">
                         {safetyFlags.length}
                       </span>
                     )}
                   </h3>
-                  <button onClick={() => void fetchSafetyFlags()} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-amber-500/40 transition-all">
+                  <button onClick={() => void fetchSafetyFlags()} className="px-3 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-ink hover:border-amber-500/40 transition-all">
                     Refresh
                   </button>
                 </div>
-                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed">
                   Messages the automatic check stopped or questioned. A clean message stores nothing at
                   all — this is the whole of what is kept, and only for 180 days.
                 </p>
                 {safetyError && (
-                  <p className="text-[11px] text-amber-300">{safetyError} <button onClick={() => void fetchSafetyFlags()} className="underline">Retry</button></p>
+                  <p className="text-[11px] text-warn">{safetyError} <button onClick={() => void fetchSafetyFlags()} className="underline">Retry</button></p>
                 )}
                 {!safetyError && safetyFlags !== null && safetyFlags.length === 0 && (
-                  <p className="text-[11px] text-emerald-300">Nothing flagged.</p>
+                  <p className="text-[11px] text-success">Nothing flagged.</p>
                 )}
                 {!safetyError && safetyFlags !== null && safetyFlags.length > 0 && (
                   <div className="space-y-1.5">
@@ -4726,22 +4726,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           f.verdict === 'block' ? 'border-rose-500/40 bg-rose-500/5 hover:border-rose-500/60' : 'border-amber-500/25 bg-amber-500/5 hover:border-amber-500/50'}`}
                       >
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${f.verdict === 'block' ? 'bg-rose-500/20 text-rose-200' : 'bg-amber-500/20 text-amber-200'}`}>
+                          <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${f.verdict === 'block' ? 'bg-rose-500/20 text-danger' : 'bg-amber-500/20 text-warn'}`}>
                             {f.verdict}
                           </span>
-                          <span className="text-[10px] font-mono text-white/60">{f.ruleId}</span>
-                          <span className="text-[10px] text-white/35">· {f.surface}</span>
-                          <span className="text-[10px] text-white/35">· {new Date(f.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                          <span className="text-[10px] font-mono text-muted">{f.ruleId}</span>
+                          <span className="text-[10px] text-faint">· {f.surface}</span>
+                          <span className="text-[10px] text-faint">· {new Date(f.at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>
                           {/* One flag is a maybe; six from one account is a pattern. Counting rows by
                               hand is how a reviewer misses the second kind. */}
                           {(f.flagsForThisAccount ?? 1) > 1 && (
-                            <span className="text-[10px] font-bold text-rose-300">· {f.flagsForThisAccount} flags on this account</span>
+                            <span className="text-[10px] font-bold text-danger">· {f.flagsForThisAccount} flags on this account</span>
                           )}
                         </div>
-                        <p className="text-[11px] text-white/70 mt-1 truncate">{f.label}</p>
-                        <p className="text-[11px] text-white/45 mt-0.5 leading-relaxed">{f.description}</p>
+                        <p className="text-[11px] text-body mt-1 truncate">{f.label}</p>
+                        <p className="text-[11px] text-muted mt-0.5 leading-relaxed">{f.description}</p>
                         {f.excerpt && (
-                          <p className="text-[10px] text-white/30 mt-1 font-mono break-words">“{f.excerpt}”</p>
+                          <p className="text-[10px] text-faint mt-1 font-mono break-words">“{f.excerpt}”</p>
                         )}
                       </button>
                     ))}
@@ -4753,16 +4753,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   A list of SETTINGS, not of content: who turned a switch on and when. It does not
                   say what anybody built, and there is nothing here to read about a person — the same
                   line the account panel holds. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5 space-y-3">
+              <div className="bg-card border border-line rounded-[1.5rem] p-5 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h3 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tight">
-                    <ShieldAlert size={15} className="text-rose-400" /> Adult content (18+) — who turned it on
+                  <h3 className="flex items-center gap-2 text-sm font-black text-ink uppercase tracking-tight">
+                    <ShieldAlert size={15} className="text-danger" /> Adult content (18+) — who turned it on
                   </h3>
-                  <button onClick={() => void fetchAdultOptIns()} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-wider text-white hover:border-rose-500/40 transition-all">
+                  <button onClick={() => void fetchAdultOptIns()} className="px-3 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-ink hover:border-rose-500/40 transition-all">
                     Refresh
                   </button>
                 </div>
-                <p className="text-[11px] text-[#8b949e] leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed">
                   Off for everyone by default. Turning it on allows lawful adult content in the user&apos;s own
                   apps and shows them 18+ apps on App Mart — it never unlocks anything the Terms prohibit,
                   and it is not available in the Android app at all.
@@ -4770,10 +4770,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {adultError && (
                   /* NOT ZERO WHEN WE COULD NOT READ IT — an empty list from a failed query would tell
                      the admin nobody has this on, which is the wrong thing to believe about it. */
-                  <p className="text-[11px] text-amber-300">{adultError} <button onClick={() => void fetchAdultOptIns()} className="underline">Retry</button></p>
+                  <p className="text-[11px] text-warn">{adultError} <button onClick={() => void fetchAdultOptIns()} className="underline">Retry</button></p>
                 )}
                 {!adultError && adultOptIns !== null && adultOptIns.length === 0 && (
-                  <p className="text-[11px] text-[#8b949e]">Nobody has turned it on.</p>
+                  <p className="text-[11px] text-muted">Nobody has turned it on.</p>
                 )}
                 {!adultError && adultOptIns !== null && adultOptIns.length > 0 && (
                   <div className="space-y-1.5">
@@ -4781,10 +4781,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <button
                         key={u.userId}
                         onClick={() => void openAccount(u.userId)}
-                        className="w-full flex items-center gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-left hover:border-rose-500/30 transition-colors"
+                        className="w-full flex items-center gap-3 rounded-lg border border-line bg-raised px-3 py-2 text-left hover:border-rose-500/30 transition-colors"
                       >
-                        <span className="text-xs text-white truncate flex-1">{u.label}</span>
-                        <span className="text-[10px] text-[#8b949e] shrink-0">
+                        <span className="text-xs text-ink truncate flex-1">{u.label}</span>
+                        <span className="text-[10px] text-muted shrink-0">
                           {u.optedInAt ? `since ${u.optedInAt.slice(0, 10)}` : 'on'}
                         </span>
                       </button>
@@ -4799,35 +4799,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   use, while NavBharatAI charges money. Switching one off is a PAUSE; the fix is a
                   commercial plan, so every row says so in the admin's own words. */}
               {licenceRows && licenceRows.length > 0 && (
-                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+                <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Shield className="w-4 h-4 text-amber-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Licence exposure</h3>
+                    <Shield className="w-4 h-4 text-warn" />
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Licence exposure</h3>
                     <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
-                      licenceRows.some((r) => r.state === 'active') ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-400'
+                      licenceRows.some((r) => r.state === 'active') ? 'bg-amber-500/20 text-warn' : 'bg-emerald-500/20 text-success'
                     }`}>
                       {licenceRows.filter((r) => r.state === 'active').length} running
                     </span>
                   </div>
-                  {licenceHeadline && <p className="text-[11px] text-[#8b949e] font-medium leading-snug">{licenceHeadline}</p>}
+                  {licenceHeadline && <p className="text-[11px] text-muted font-medium leading-snug">{licenceHeadline}</p>}
                   <div className="space-y-3">
                     {licenceRows.map((row) => (
-                      <div key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-2">
+                      <div key={row.id} className="rounded-2xl border border-line bg-well p-4 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-xs font-black text-white">{row.name}</p>
+                          <p className="text-xs font-black text-ink">{row.name}</p>
                           <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
-                            row.state === 'active' ? 'bg-amber-500/20 text-amber-300'
-                              : row.state === 'switched-off' ? 'bg-white/5 text-[#8b949e]'
-                              : 'bg-white/5 text-[#6e7681]'
+                            row.state === 'active' ? 'bg-amber-500/20 text-warn'
+                              : row.state === 'switched-off' ? 'bg-raised text-muted'
+                              : 'bg-raised text-faint'
                           }`}>
                             {row.state === 'active' ? 'Running' : row.state === 'switched-off' ? 'Switched off' : 'Not configured'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-[#8b949e] leading-snug">{row.restriction}</p>
-                        <p className="text-[11px] text-[#8b949e] leading-snug"><span className="text-[#6e7681]">Powers:</span> {row.powers}</p>
-                        <p className="text-[11px] text-emerald-300/90 leading-snug"><span className="text-[#6e7681]">The real fix:</span> {row.honestFix}</p>
-                        <p className="text-[11px] text-[#8b949e] leading-snug"><span className="text-[#6e7681]">If switched off:</span> {row.whenOff}</p>
-                        <p className="text-[10px] text-[#6e7681] font-mono">
+                        <p className="text-[11px] text-muted leading-snug">{row.restriction}</p>
+                        <p className="text-[11px] text-muted leading-snug"><span className="text-faint">Powers:</span> {row.powers}</p>
+                        <p className="text-[11px] text-success leading-snug"><span className="text-faint">The real fix:</span> {row.honestFix}</p>
+                        <p className="text-[11px] text-muted leading-snug"><span className="text-faint">If switched off:</span> {row.whenOff}</p>
+                        <p className="text-[10px] text-faint font-mono">
                           {row.killSwitch ? `Switch: set ${row.killSwitch}=off in Cloud Run` : `Switch: remove ${row.requires ?? 'its key'} — publishing then blocks, by design`}
                         </p>
                       </div>
@@ -4837,61 +4837,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               )}
 
               {/* ── P-SEC.3 — Two-Factor Authentication (TOTP) ── */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">Two-Factor Authentication</h3>
+                    <Shield className="w-4 h-4 text-success" />
+                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Two-Factor Authentication</h3>
                   </div>
-                  <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${mfaStatus?.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-[#8b949e]'}`}>
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${mfaStatus?.enabled ? 'bg-emerald-500/20 text-success' : 'bg-raised text-muted'}`}>
                     {mfaStatus?.enabled ? 'Enabled' : 'Disabled'}
                   </span>
                 </div>
-                <p className="text-[11px] text-[#8b949e] font-medium">
+                <p className="text-[11px] text-muted font-medium">
                   Require a time-based code from an authenticator app (Google Authenticator, Authy, 1Password) at admin login — protection against password leaks and SIM-swap attacks on SMS OTP.
                 </p>
 
                 {mfaStatus?.envManaged ? (
-                  <p className="text-[10px] text-amber-400 font-bold uppercase tracking-widest">
+                  <p className="text-[10px] text-warn font-bold uppercase tracking-widest">
                     Managed by ADMIN_TOTP_SECRET on the server — enrolment is read-only here.
                   </p>
                 ) : !mfaStatus?.enabled && !mfaEnroll ? (
                   <button onClick={startMfaEnroll} disabled={mfaBusy}
-                    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
+                    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-on-accent rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
                     {mfaBusy ? 'Working…' : 'Enable 2FA'}
                   </button>
                 ) : !mfaStatus?.enabled && mfaEnroll ? (
                   <div className="space-y-3">
-                    <div className="bg-black/40 border border-white/10 rounded-2xl p-4 space-y-2">
-                      <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">1. Add this key to your authenticator app</p>
+                    <div className="bg-well border border-line rounded-2xl p-4 space-y-2">
+                      <p className="text-[10px] text-muted font-black uppercase tracking-widest">1. Add this key to your authenticator app</p>
                       {/* data-nb-no-copy: this is a live TOTP secret. The floating page-copy button
                           puts the page's text on the clipboard and the admin pastes it into a chat —
                           so this block must be unreadable to it. See pageSnapshot.ts. */}
-                      <code data-nb-no-copy="" className="block text-emerald-400 font-mono text-sm break-all select-all">{mfaEnroll.secret}</code>
-                      <p data-nb-no-copy="" className="text-[9px] text-[#8b949e] break-all">Or paste this URI: <span className="font-mono">{mfaEnroll.otpauthUri}</span></p>
+                      <code data-nb-no-copy="" className="block text-success font-mono text-sm break-all select-all">{mfaEnroll.secret}</code>
+                      <p data-nb-no-copy="" className="text-[9px] text-muted break-all">Or paste this URI: <span className="font-mono">{mfaEnroll.otpauthUri}</span></p>
                     </div>
-                    <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">2. Enter the 6-digit code to confirm</p>
+                    <p className="text-[10px] text-muted font-black uppercase tracking-widest">2. Enter the 6-digit code to confirm</p>
                     <div className="flex gap-2">
                       <input value={mfaCode} inputMode="numeric" maxLength={6}
                         onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                         placeholder="000000"
-                        className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-white font-bold tracking-[0.3em] text-center outline-none focus:border-emerald-500" />
+                        className="flex-1 bg-well border border-line rounded-2xl px-5 py-3 text-ink font-bold tracking-[0.3em] text-center outline-none focus:border-emerald-500" />
                       <button onClick={confirmMfaEnroll} disabled={mfaBusy || mfaCode.length !== 6}
-                        className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
+                        className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-on-accent rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
                         Confirm
                       </button>
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Enter a current code to disable 2FA</p>
+                    <p className="text-[10px] text-muted font-black uppercase tracking-widest">Enter a current code to disable 2FA</p>
                     <div className="flex gap-2">
                       <input value={mfaCode} inputMode="numeric" maxLength={6}
                         onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                         placeholder="000000"
-                        className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-3 text-white font-bold tracking-[0.3em] text-center outline-none focus:border-red-500" />
+                        className="flex-1 bg-well border border-line rounded-2xl px-5 py-3 text-ink font-bold tracking-[0.3em] text-center outline-none focus:border-red-500" />
                       <button onClick={disableMfa} disabled={mfaBusy || mfaCode.length !== 6}
-                        className="px-5 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
+                        className="px-5 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-on-accent rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95">
                         Disable
                       </button>
                     </div>
@@ -4900,44 +4900,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500', Shield)}
-                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500', Globe)}
-                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500', Eye)}
+                {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500 text-on-accent', Shield)}
+                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500 text-on-accent', Globe)}
+                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500 text-on-accent', Eye)}
               </div>
 
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-400" />
-                  <h3 className="text-sm font-black text-white uppercase tracking-tight">Recent Failed Login Attempts</h3>
+                  <AlertTriangle className="w-4 h-4 text-danger" />
+                  <h3 className="text-sm font-black text-ink uppercase tracking-tight">Recent Failed Login Attempts</h3>
                 </div>
                 <div className="space-y-2">
-                  {(analytics?.failedLoginAttempts || []).length === 0 && <p className="text-[10px] text-[#8b949e] uppercase font-bold">No failed attempts recorded.</p>}
+                  {(analytics?.failedLoginAttempts || []).length === 0 && <p className="text-[10px] text-muted uppercase font-bold">No failed attempts recorded.</p>}
                   {(analytics?.failedLoginAttempts || []).slice().reverse().map((attempt: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between bg-black/30 rounded-xl px-4 py-2.5 border border-red-500/10">
+                    <div key={i} className="flex items-center justify-between bg-well rounded-xl px-4 py-2.5 border border-red-500/10">
                       <div>
-                        <span className="text-red-400 font-mono text-[11px] font-black">{attempt.ip}</span>
-                        {attempt.username && <span className="text-[#8b949e] text-[9px] ml-2">tried: "{attempt.username}"</span>}
+                        <span className="text-danger font-mono text-[11px] font-black">{attempt.ip}</span>
+                        {attempt.username && <span className="text-muted text-[9px] ml-2">tried: "{attempt.username}"</span>}
                       </div>
-                      <span className="text-[9px] text-[#8b949e]">{new Date(attempt.time).toLocaleString('en-IN')}</span>
+                      <span className="text-[9px] text-muted">{new Date(attempt.time).toLocaleString('en-IN')}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
               {/* Rate-limited providers */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Rate Limited Providers</h3>
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Rate Limited Providers</h3>
                 <div className="space-y-2">
                   {Object.entries(analytics?.liveProviderStats || {})
                     .filter(([, s]: any) => s.cooldownUntil > Date.now())
                     .map(([name, s]: any) => (
-                      <div key={name} className="flex justify-between items-center bg-red-950/20 border border-red-500/20 rounded-xl px-4 py-2.5">
-                        <span className="text-red-400 font-black uppercase font-mono text-[11px]">{name}</span>
-                        <span className="text-[10px] text-red-300">Cooldown: {Math.ceil((s.cooldownUntil - Date.now()) / 1000)}s remaining</span>
+                      <div key={name} className="flex justify-between items-center bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+                        <span className="text-danger font-black uppercase font-mono text-[11px]">{name}</span>
+                        <span className="text-[10px] text-danger">Cooldown: {Math.ceil((s.cooldownUntil - Date.now()) / 1000)}s remaining</span>
                       </div>
                     ))}
                   {Object.entries(analytics?.liveProviderStats || {}).filter(([, s]: any) => s.cooldownUntil > Date.now()).length === 0 && (
-                    <p className="text-emerald-400 font-bold text-[11px] flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />All providers healthy — no rate limits active</p>
+                    <p className="text-success font-bold text-[11px] flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />All providers healthy — no rate limits active</p>
                   )}
                 </div>
               </div>
@@ -4949,22 +4949,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-6">
               {/* App update broadcast — reaches the user who has NOT opened the app, which the in-app
                   banner by definition cannot. Targets only devices on an older build. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Bell className="w-4 h-4 text-emerald-400" /> App Update Notification
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-success" /> App Update Notification
                 </h3>
                 {updateCohort?.latestVersionCode == null ? (
-                  <p className="text-xs text-amber-300/90 leading-relaxed">
+                  <p className="text-xs text-warn leading-relaxed">
                     ANDROID_LATEST_VERSION_CODE is not set in Cloud Run, so there is no release to announce.
                     Set it to the versionCode of the build you uploaded to Play, then reload.
                   </p>
                 ) : (
                   <>
-                    <p className="text-xs text-[#8b949e] leading-relaxed">
+                    <p className="text-xs text-muted leading-relaxed">
                       {updateCohort?.summary || 'Checking which devices are behind…'}
                     </p>
                     {updateCohort?.truncated && (
-                      <p className="text-[11px] text-amber-300/80">
+                      <p className="text-[11px] text-warn">
                         Device scan hit its cap — the real number of stale devices is higher than shown.
                       </p>
                     )}
@@ -4972,19 +4972,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       <button
                         onClick={fetchUpdateCohort}
                         disabled={updateBusy}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-white/5 text-[#c9d1d9] hover:bg-white/10 disabled:opacity-50"
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-raised text-body hover:bg-raised disabled:opacity-50"
                       >
                         Refresh
                       </button>
                       <button
                         onClick={sendUpdateBroadcast}
                         disabled={updateBusy || !updateCohort || updateCohort.targetCount <= 0}
-                        className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 text-on-accent hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {updateBusy ? 'Working…' : `Send update notification${updateCohort ? ` (${updateCohort.targetCount})` : ''}`}
                       </button>
                     </div>
-                    <p className="text-[11px] text-[#6e7681] leading-relaxed">
+                    <p className="text-[11px] text-faint leading-relaxed">
                       Only devices on an OLDER build are notified — anyone already up to date is skipped, and a
                       device that has not reported its version is never guessed at. Android only (there is no iOS
                       release). Tapping the notification opens the Play Store listing.
@@ -4994,34 +4994,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               {/* Maintenance Mode */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Server className="w-4 h-4 text-red-400" /> Maintenance Mode
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <Server className="w-4 h-4 text-danger" /> Maintenance Mode
                 </h3>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-white font-bold">Site Maintenance</p>
-                    <p className="text-[10px] text-[#8b949e]">When enabled, users see a maintenance message</p>
+                    <p className="text-sm text-ink font-bold">Site Maintenance</p>
+                    <p className="text-[10px] text-muted">When enabled, users see a maintenance message</p>
                   </div>
                   <button onClick={() => { setMaintenanceModeState(!maintenanceMode); adminPost('/api/admin/settings', { maintenanceMode: !maintenanceMode }).then(() => toast('Maintenance mode updated!')); }}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border font-black text-[11px] uppercase transition-all ${maintenanceMode ? 'bg-red-500/20 border-red-500/30 text-red-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border font-black text-[11px] uppercase transition-all ${maintenanceMode ? 'bg-red-500/20 border-red-500/30 text-danger' : 'bg-emerald-500/10 border-emerald-500/20 text-success'}`}>
                     {maintenanceMode ? <><ToggleRight className="w-4 h-4" /> ON — Disable</> : <><ToggleLeft className="w-4 h-4" /> OFF — Enable</>}
                   </button>
                 </div>
               </div>
 
               {/* Feature Flags */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight">Feature Flags</h3>
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Feature Flags</h3>
                 <div className="space-y-3">
                   {Object.entries(featureFlags).map(([key, val]: any) => (
-                    <div key={key} className="flex items-center justify-between bg-black/20 rounded-xl px-4 py-3 border border-white/5">
+                    <div key={key} className="flex items-center justify-between bg-well rounded-xl px-4 py-3 border border-line">
                       <div>
-                        <p className="text-sm text-white font-bold capitalize">{key.replace(/([A-Z])/g, ' $1')}</p>
-                        <p className="text-[9px] text-[#8b949e] uppercase font-bold">{val ? 'Enabled' : 'Disabled'}</p>
+                        <p className="text-sm text-ink font-bold capitalize">{key.replace(/([A-Z])/g, ' $1')}</p>
+                        <p className="text-[9px] text-muted uppercase font-bold">{val ? 'Enabled' : 'Disabled'}</p>
                       </div>
                       <button onClick={() => { const nf = { ...featureFlags, [key]: !val }; setFeatureFlagsState(nf); adminPost('/api/admin/settings', { featureFlags: nf }).then(() => toast(`${key} ${!val ? 'enabled' : 'disabled'}`)); }}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase border transition-all ${val ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-white/5 border-white/10 text-[#8b949e]'}`}>
+                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase border transition-all ${val ? 'bg-emerald-500/10 border-emerald-500/20 text-success' : 'bg-raised border-line text-muted'}`}>
                         {val ? 'Enabled' : 'Disabled'}
                       </button>
                     </div>
@@ -5030,37 +5030,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               {/* Pricing Config */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <IndianRupee className="w-4 h-4 text-emerald-400" /> Pricing Configuration
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <IndianRupee className="w-4 h-4 text-success" /> Pricing Configuration
                 </h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block mb-2">Coins per Rs.1</label>
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Coins per Rs.1</label>
                     <input type="number" value={pricingConfig.coinsPerRupee || 100} onChange={e => setPricingConfigState((p: any) => ({ ...p, coinsPerRupee: parseInt(e.target.value) }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white font-mono outline-none focus:border-indigo-500" />
+                      className="w-full bg-well border border-line rounded-xl px-4 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block mb-2">Referral Bonus %</label>
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Referral Bonus %</label>
                     <input type="number" value={pricingConfig.referralBonusPct || 10} onChange={e => setPricingConfigState((p: any) => ({ ...p, referralBonusPct: parseInt(e.target.value) }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white font-mono outline-none focus:border-indigo-500" />
+                      className="w-full bg-well border border-line rounded-xl px-4 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
                   </div>
                 </div>
-                <button onClick={handleSettingsSave} className="px-5 py-2.5 bg-indigo-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-white hover:bg-indigo-700 transition-all active:scale-95">
+                <button onClick={handleSettingsSave} className="px-5 py-2.5 bg-indigo-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-on-accent hover:bg-indigo-700 transition-all active:scale-95">
                   Save Pricing
                 </button>
               </div>
 
               {/* Send a message to users (admin 2026-07-30): delivers a real notification to ALL users
                   or to ONE specific user (by email). Users see it via the notification bell in the app. */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Megaphone className="w-4 h-4 text-amber-400" /> Message Users
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-warn" /> Message Users
                 </h3>
                 <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your message to users..." rows={3}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder:text-[#8b949e] outline-none focus:border-indigo-500 resize-none" />
+                  className="w-full bg-well border border-line rounded-xl px-4 py-3 text-ink text-sm placeholder:text-muted outline-none focus:border-indigo-500 resize-none" />
                 <div className="flex flex-wrap items-center gap-3">
-                  <select value={annTarget} onChange={e => setAnnTarget(e.target.value)} className="bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-indigo-500">
+                  <select value={annTarget} onChange={e => setAnnTarget(e.target.value)} className="bg-well border border-line rounded-xl px-4 py-2.5 text-ink text-sm outline-none focus:border-indigo-500">
                     <option value="all">All Users</option>
                     <option value="user">A Specific User</option>
                   </select>
@@ -5070,57 +5070,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       value={annEmail}
                       onChange={e => setAnnEmail(e.target.value)}
                       placeholder="user@example.com"
-                      className="flex-1 min-w-[200px] bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-[#8b949e] outline-none focus:border-indigo-500"
+                      className="flex-1 min-w-[200px] bg-well border border-line rounded-xl px-4 py-2.5 text-ink text-sm placeholder:text-muted outline-none focus:border-indigo-500"
                     />
                   )}
                   <button onClick={handleAnnouncement} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-black transition-all active:scale-95">
                     Send Message
                   </button>
                 </div>
-                <p className="text-[10px] text-[#8b949e] leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>
+                <p className="text-[10px] text-muted leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>
               </div>
 
               {/* Promo Codes */}
-              <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-pink-400" /> Promo Code Generator
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-accent-text" /> Promo Code Generator
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block mb-2">Code</label>
-                    <input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="SAVE50" className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-white font-mono outline-none focus:border-indigo-500 uppercase" />
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Code</label>
+                    <input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="SAVE50" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500 uppercase" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block mb-2">Free Tokens</label>
-                    <input type="number" value={promoTokens} onChange={e => setPromoTokens(e.target.value)} placeholder="500" className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-white font-mono outline-none focus:border-indigo-500" />
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Free Tokens</label>
+                    <input type="number" value={promoTokens} onChange={e => setPromoTokens(e.target.value)} placeholder="500" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block mb-2">Discount %</label>
-                    <input type="number" value={promoDiscount} onChange={e => setPromoDiscount(e.target.value)} placeholder="10" className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-white font-mono outline-none focus:border-indigo-500" />
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Discount %</label>
+                    <input type="number" value={promoDiscount} onChange={e => setPromoDiscount(e.target.value)} placeholder="10" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-indigo-400 font-black uppercase tracking-widest block mb-2">Max Uses</label>
-                    <input type="number" value={promoMaxUses} onChange={e => setPromoMaxUses(e.target.value)} placeholder="1" className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-white font-mono outline-none focus:border-indigo-500" />
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Max Uses</label>
+                    <input type="number" value={promoMaxUses} onChange={e => setPromoMaxUses(e.target.value)} placeholder="1" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
                   </div>
                 </div>
-                <button onClick={handlePromoCreate} className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 rounded-xl text-[11px] font-black uppercase tracking-wider text-white transition-all active:scale-95 flex items-center gap-2">
+                <button onClick={handlePromoCreate} className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 rounded-xl text-[11px] font-black uppercase tracking-wider text-on-accent transition-all active:scale-95 flex items-center gap-2">
                   <Plus className="w-4 h-4" /> Create Promo Code
                 </button>
 
                 {promos.length > 0 && (
                   <div className="overflow-x-auto mt-2">
                     <table className="w-full text-xs">
-                      <thead><tr className="border-b border-white/5 text-[#8b949e] font-black uppercase tracking-widest text-[9px]">
+                      <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
                         <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Discount</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th>
                       </tr></thead>
-                      <tbody className="divide-y divide-white/5">
+                      <tbody className="divide-y divide-line">
                         {pagedPromos.visible.map((p: any) => (
-                          <tr key={p.id} className="hover:bg-white/5">
-                            <td className="py-2 text-pink-400 font-black font-mono">{p.code}</td>
-                            <td className="py-2 text-amber-400 font-mono">{p.freeTokens || 0}</td>
-                            <td className="py-2 text-sky-400 font-mono">{p.discountPct || 0}%</td>
-                            <td className="py-2 text-white font-mono">{p.usedCount || 0}/{p.maxUses || 1}</td>
-                            <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.active ? 'text-emerald-400' : 'text-red-400'}`}>{p.active ? 'Active' : 'Expired'}</span></td>
+                          <tr key={p.id} className="hover:bg-raised">
+                            <td className="py-2 text-accent-text font-black font-mono">{p.code}</td>
+                            <td className="py-2 text-warn font-mono">{p.freeTokens || 0}</td>
+                            <td className="py-2 text-info font-mono">{p.discountPct || 0}%</td>
+                            <td className="py-2 text-ink font-mono">{p.usedCount || 0}/{p.maxUses || 1}</td>
+                            <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.active ? 'text-success' : 'text-danger'}`}>{p.active ? 'Active' : 'Expired'}</span></td>
                           </tr>
                         ))}
                         <LoadMore list={pagedPromos} label="codes" colSpan={6} />

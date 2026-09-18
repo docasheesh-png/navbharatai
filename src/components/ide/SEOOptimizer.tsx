@@ -162,18 +162,18 @@ const ScoreGauge: React.FC<{ score: number }> = ({ score }) => {
 const CodeBlock: React.FC<{ code: string; copyKey: string; onCopy: (t: string, k: string) => void; copied: string | null }> = ({
   code, copyKey, onCopy, copied,
 }) => (
-  <div className="relative rounded-lg overflow-hidden border border-white/10">
-    <div className="flex items-center justify-between px-3 py-1.5 bg-white/5 border-b border-white/10">
-      <span className="text-xs text-white/40 font-mono">generated</span>
+  <div className="relative rounded-lg overflow-hidden border border-line">
+    <div className="flex items-center justify-between px-3 py-1.5 bg-raised border-b border-line">
+      <span className="text-xs text-faint font-mono">generated</span>
       <button
         onClick={() => onCopy(code, copyKey)}
-        className="flex items-center gap-1 text-xs text-white/50 hover:text-white/90 transition-colors"
+        className="flex items-center gap-1 text-xs text-muted hover:text-body transition-colors"
       >
-        {copied === copyKey ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+        {copied === copyKey ? <Check size={12} className="text-success" /> : <Copy size={12} />}
         {copied === copyKey ? 'Copied!' : 'Copy'}
       </button>
     </div>
-    <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto bg-[#0d1117] text-[#a5d6ff] whitespace-pre-wrap">
+    <pre className="p-4 text-xs font-mono leading-relaxed overflow-x-auto bg-surface text-info whitespace-pre-wrap">
       {code}
     </pre>
   </div>
@@ -181,8 +181,8 @@ const CodeBlock: React.FC<{ code: string; copyKey: string; onCopy: (t: string, k
 
 // ─── Input components ──────────────────────────────────────────────────────────
 
-const inputCls = 'w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-500/60 transition-colors';
-const labelCls = 'block text-xs font-medium text-white/60 mb-1.5';
+const inputCls = 'w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder-faint focus:outline-none focus:border-blue-500/60 transition-colors';
+const labelCls = 'block text-xs font-medium text-muted mb-1.5';
 
 // ─── TAB 1: Meta Tags ──────────────────────────────────────────────────────────
 
@@ -230,11 +230,11 @@ const MetaTab: React.FC<{
           <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
             <button
               onClick={() => setAutoExtract(v => !v)}
-              className={`w-10 h-5 rounded-full transition-colors relative ${autoExtract ? 'bg-blue-500' : 'bg-white/20'}`}
+              className={`w-10 h-5 rounded-full transition-colors relative ${autoExtract ? 'bg-blue-500 text-on-accent' : 'bg-raised'}`}
             >
               <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${autoExtract ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </button>
-            <span className="text-xs text-blue-300">Auto-extract from app code</span>
+            <span className="text-xs text-info">Auto-extract from app code</span>
           </div>
         )}
 
@@ -246,7 +246,7 @@ const MetaTab: React.FC<{
         <div>
           <label className={labelCls}>
             Page Title
-            <span className={`ml-2 text-xs ${meta.pageTitle.length > 60 ? 'text-red-400' : 'text-white/30'}`}>
+            <span className={`ml-2 text-xs ${meta.pageTitle.length > 60 ? 'text-danger' : 'text-faint'}`}>
               {meta.pageTitle.length}/60 {meta.pageTitle.length > 60 && '⚠ Too long'}
             </span>
           </label>
@@ -256,7 +256,7 @@ const MetaTab: React.FC<{
         <div>
           <label className={labelCls}>
             Meta Description
-            <span className={`ml-2 text-xs ${meta.description.length > 160 ? 'text-red-400' : 'text-white/30'}`}>
+            <span className={`ml-2 text-xs ${meta.description.length > 160 ? 'text-danger' : 'text-faint'}`}>
               {meta.description.length}/160 {meta.description.length > 160 && '⚠ Too long'}
             </span>
           </label>
@@ -310,13 +310,13 @@ const MetaTab: React.FC<{
       <div className="flex-1 min-w-0 space-y-3">
         <CodeBlock code={generatedTags} copyKey="meta" onCopy={copy} copied={copied} />
         {meta.pageTitle.length > 60 && (
-          <div className="flex items-center gap-2 text-xs text-red-400 bg-red-400/10 rounded-lg px-3 py-2 border border-red-400/20">
+          <div className="flex items-center gap-2 text-xs text-danger bg-red-400/10 rounded-lg px-3 py-2 border border-red-400/20">
             <AlertTriangle size={12} />
             Page title exceeds 60 characters — search engines may truncate it.
           </div>
         )}
         {meta.description.length > 160 && (
-          <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-400/10 rounded-lg px-3 py-2 border border-amber-400/20">
+          <div className="flex items-center gap-2 text-xs text-warn bg-amber-400/10 rounded-lg px-3 py-2 border border-amber-400/20">
             <AlertTriangle size={12} />
             Description exceeds 160 characters — it may be cut off in search results.
           </div>
@@ -378,7 +378,7 @@ const OGTab: React.FC<{
           <input className={inputCls} value={og.ogImage} onChange={set('ogImage')} placeholder="https://example.com/og-image.jpg" />
         </div>
         {og.ogImage && (
-          <div className="rounded-lg overflow-hidden border border-white/10 h-28 bg-black">
+          <div className="rounded-lg overflow-hidden border border-line h-28 bg-black">
             <img src={og.ogImage} alt="OG preview" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           </div>
         )}
@@ -411,7 +411,7 @@ const OGTab: React.FC<{
       <div className="flex-1 min-w-0 space-y-4 md:overflow-y-auto">
         {/* Google SERP preview */}
         <div>
-          <p className="text-xs text-white/40 mb-2 font-medium uppercase tracking-wide">Google Search Preview</p>
+          <p className="text-xs text-faint mb-2 font-medium uppercase tracking-wide">Google Search Preview</p>
           <div className="p-4 rounded-lg bg-white">
             <p className="text-[#1a0dab] text-lg font-medium truncate cursor-pointer hover:underline">{displayTitle}</p>
             <p className="text-[#006621] text-sm">{displaySite}</p>
@@ -421,7 +421,7 @@ const OGTab: React.FC<{
 
         {/* Facebook OG preview */}
         <div>
-          <p className="text-xs text-white/40 mb-2 font-medium uppercase tracking-wide">Facebook / OG Preview</p>
+          <p className="text-xs text-faint mb-2 font-medium uppercase tracking-wide">Facebook / OG Preview</p>
           <div className="rounded-lg overflow-hidden border border-[#dadde1] bg-[#f0f2f5]">
             {dOG.ogImage ? (
               <div className="h-36 bg-black">
@@ -442,7 +442,7 @@ const OGTab: React.FC<{
 
         {/* Twitter card preview */}
         <div>
-          <p className="text-xs text-white/40 mb-2 font-medium uppercase tracking-wide">Twitter Card Preview</p>
+          <p className="text-xs text-faint mb-2 font-medium uppercase tracking-wide">Twitter Card Preview</p>
           <div className="rounded-2xl overflow-hidden border border-[#2f3336] bg-black">
             {dOG.twitterCard === 'summary_large_image' && (
               dOG.ogImage ? (
@@ -450,19 +450,19 @@ const OGTab: React.FC<{
                   <img src={dOG.ogImage} alt="" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 </div>
               ) : (
-                <div className="h-40 bg-[#16181c] flex items-center justify-center">
+                <div className="h-40 bg-[#16181c] flex items-center justify-center text-on-accent">
                   <Eye size={32} className="text-[#536471]" />
                 </div>
               )
             )}
             <div className="p-3 flex gap-3">
               {dOG.twitterCard === 'summary' && (
-                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-[#16181c] flex-shrink-0">
+                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-[#16181c] flex-shrink-0 text-on-accent">
                   {dOG.ogImage && <img src={dOG.ogImage} alt="" className="w-full h-full object-cover" />}
                 </div>
               )}
               <div className="min-w-0">
-                <p className="text-white text-sm font-bold truncate">{displayTitle}</p>
+                <p className="text-on-accent text-sm font-bold truncate">{displayTitle}</p>
                 <p className="text-[#71767b] text-xs mt-0.5 line-clamp-2">{displayDesc}</p>
                 <p className="text-[#71767b] text-xs mt-1">{displaySite}</p>
               </div>
@@ -548,17 +548,17 @@ ${dPages.map(p => `  <url>
           <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
             <button
               onClick={() => setAutoExtract(v => !v)}
-              className={`w-10 h-5 rounded-full transition-colors relative ${autoExtract ? 'bg-blue-500' : 'bg-white/20'}`}
+              className={`w-10 h-5 rounded-full transition-colors relative ${autoExtract ? 'bg-blue-500 text-on-accent' : 'bg-raised'}`}
             >
               <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${autoExtract ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </button>
-            <span className="text-xs text-blue-300">Auto-extract URLs from code</span>
+            <span className="text-xs text-info">Auto-extract URLs from code</span>
           </div>
         )}
 
         <div className="space-y-3">
           {pages.map(p => (
-            <div key={p.id} className="p-3 rounded-lg border border-white/10 bg-white/5 space-y-2">
+            <div key={p.id} className="p-3 rounded-lg border border-line bg-raised space-y-2">
               <div className="flex gap-2">
                 <input
                   className={`${inputCls} flex-1`}
@@ -566,7 +566,7 @@ ${dPages.map(p => `  <url>
                   onChange={e => updatePage(p.id, 'url', e.target.value)}
                   placeholder="/about"
                 />
-                <button onClick={() => removePage(p.id)} className="text-white/30 hover:text-red-400 transition-colors">
+                <button onClick={() => removePage(p.id)} className="text-faint hover:text-danger transition-colors">
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -585,7 +585,7 @@ ${dPages.map(p => `  <url>
 
         <button
           onClick={addPage}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-white/20 text-sm text-white/50 hover:text-white/80 hover:border-white/40 transition-colors"
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-dashed border-line text-sm text-muted hover:text-body hover:border-white/40 transition-colors"
         >
           <Plus size={14} /> Add Page
         </button>
@@ -595,7 +595,7 @@ ${dPages.map(p => `  <url>
         <CodeBlock code={xml} copyKey="sitemap" onCopy={copy} copied={copied} />
         <button
           onClick={() => downloadFile(xml, 'sitemap.xml', 'application/xml')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-on-accent text-sm font-medium transition-colors"
         >
           <Download size={14} /> Download sitemap.xml
         </button>
@@ -643,7 +643,7 @@ const RobotsTab: React.FC<{
             { k: 'blockApi', label: 'Block /api' },
             { k: 'blockPrivate', label: 'Block /private' },
           ] as const).map(({ k, label }) => (
-            <label key={k} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/5 cursor-pointer transition-colors">
+            <label key={k} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-raised cursor-pointer transition-colors">
               <input
                 type="checkbox"
                 checked={robots[k] as boolean}
@@ -651,7 +651,7 @@ const RobotsTab: React.FC<{
                 className="w-4 h-4 rounded accent-blue-500"
                 disabled={k !== 'allowAll' && robots.allowAll}
               />
-              <span className={`text-sm ${k !== 'allowAll' && robots.allowAll ? 'text-white/30' : 'text-white/70'}`}>{label}</span>
+              <span className={`text-sm ${k !== 'allowAll' && robots.allowAll ? 'text-faint' : 'text-body'}`}>{label}</span>
             </label>
           ))}
         </div>
@@ -682,7 +682,7 @@ const RobotsTab: React.FC<{
         <CodeBlock code={robotsTxt} copyKey="robots" onCopy={copy} copied={copied} />
         <button
           onClick={() => downloadFile(robotsTxt, 'robots.txt')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-on-accent text-sm font-medium transition-colors"
         >
           <Download size={14} /> Download robots.txt
         </button>
@@ -696,24 +696,24 @@ const RobotsTab: React.FC<{
 const ScoreSidebar: React.FC<{ meta: MetaFormData; og: OGFormData; pages: SitemapPage[] }> = ({ meta, og, pages }) => {
   const { total, items } = calcScore(meta, og, pages);
   return (
-    <div className="w-full md:w-[240px] flex-shrink-0 bg-[#161b22] rounded-xl border border-white/10 p-4 flex flex-col gap-4">
-      <p className="text-xs font-semibold text-white/50 uppercase tracking-wider">SEO Score</p>
+    <div className="w-full md:w-[240px] flex-shrink-0 bg-card rounded-xl border border-line p-4 flex flex-col gap-4">
+      <p className="text-xs font-semibold text-muted uppercase tracking-wider">SEO Score</p>
       <div className="flex justify-center">
         <ScoreGauge score={total} />
       </div>
-      <p className="text-center text-xs text-white/40">
+      <p className="text-center text-xs text-faint">
         {total >= 80 ? 'Excellent' : total >= 50 ? 'Needs work' : 'Poor'}
       </p>
       <div className="space-y-2 mt-1">
         {items.map(item => (
           <div key={item.label} className="flex items-center gap-2">
-            <div className={`w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center ${item.done ? 'bg-green-500/20' : 'bg-white/5'}`}>
+            <div className={`w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center ${item.done ? 'bg-green-500/20' : 'bg-raised'}`}>
               {item.done
-                ? <Check size={9} className="text-green-400" />
-                : <ChevronRight size={9} className="text-white/20" />}
+                ? <Check size={9} className="text-success" />
+                : <ChevronRight size={9} className="text-faint" />}
             </div>
-            <span className={`text-xs flex-1 ${item.done ? 'text-white/70' : 'text-white/30'}`}>{item.label}</span>
-            <span className={`text-xs font-mono ${item.done ? 'text-green-400' : 'text-white/20'}`}>+{item.pts}</span>
+            <span className={`text-xs flex-1 ${item.done ? 'text-body' : 'text-faint'}`}>{item.label}</span>
+            <span className={`text-xs font-mono ${item.done ? 'text-success' : 'text-faint'}`}>+{item.pts}</span>
           </div>
         ))}
       </div>
@@ -868,15 +868,15 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
 
   return (
     // Mobile: single vertical scroll, sidebar stacks below. Desktop: bounded two-pane with inner scroll.
-    <div className="flex flex-col md:flex-row h-full bg-[#0d1117] text-white overflow-y-auto md:overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full bg-surface text-ink overflow-y-auto md:overflow-hidden">
       {/* Main area */}
       <div className="w-full md:flex-1 min-w-0 flex flex-col md:overflow-hidden">
         {/* Header */}
-        <div className="flex-shrink-0 px-5 pt-4 pb-0 border-b border-white/10">
+        <div className="flex-shrink-0 px-5 pt-4 pb-0 border-b border-line">
           <div className="flex items-center gap-2 mb-3">
-            <Search size={16} className="text-blue-400" />
-            <h2 className="text-sm font-semibold text-white/90">SEO Optimizer</h2>
-            <span className="text-xs text-white/30 ml-1">— meta tags, OG, sitemap &amp; robots</span>
+            <Search size={16} className="text-info" />
+            <h2 className="text-sm font-semibold text-body">SEO Optimizer</h2>
+            <span className="text-xs text-faint ml-1">— meta tags, OG, sitemap &amp; robots</span>
           </div>
           {/* Tabs — scroll horizontally on narrow phones instead of clipping */}
           <div className="flex gap-1 overflow-x-auto no-scrollbar">
@@ -886,8 +886,8 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
                 onClick={() => setTab(i)}
                 className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg border-b-2 transition-colors ${
                   tab === i
-                    ? 'text-blue-400 border-blue-400 bg-blue-500/10'
-                    : 'text-white/40 border-transparent hover:text-white/70'
+                    ? 'text-info border-blue-400 bg-blue-500/10'
+                    : 'text-faint border-transparent hover:text-body'
                 }`}
               >
                 {t.icon}
@@ -899,7 +899,7 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
 
         {/* Save into the user's REAL page. This used to update only the on-screen preview, so the
             SEO tags never reached the file — and search engines never saw any of them. */}
-        <div className="flex-shrink-0 border-b border-white/10 bg-blue-500/5">
+        <div className="flex-shrink-0 border-b border-line bg-blue-500/5">
           <AppTargetPicker
             apps={apps}
             appsLoading={appsLoading}
@@ -917,17 +917,17 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
               <button
                 onClick={() => void saveSeoToApp()}
                 disabled={!targetSession || !targetPath || saving}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-sm font-bold transition-colors"
               >
                 {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                 {saving ? 'Saving into your app…' : 'Save SEO tags into my app'}
               </button>
-              <p className="mt-2 text-[11px] text-white/40 leading-snug">
+              <p className="mt-2 text-[11px] text-faint leading-snug">
                 A restore point is saved first, so you can undo this from Versioning. Running it again
                 replaces the same tags rather than adding a second copy.
               </p>
               {saveNote && (
-                <p className={`mt-2 px-3 py-2 rounded-lg text-xs leading-relaxed ${saveFailed ? 'text-amber-300 bg-amber-500/10' : 'text-green-300 bg-green-500/10'}`}>
+                <p className={`mt-2 px-3 py-2 rounded-lg text-xs leading-relaxed ${saveFailed ? 'text-warn bg-amber-500/10' : 'text-success bg-green-500/10'}`}>
                   {saveNote}
                 </p>
               )}
@@ -953,7 +953,7 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files
       </div>
 
       {/* Score sidebar */}
-      <div className="w-full md:w-auto flex-shrink-0 p-4 border-t border-white/10 md:border-t-0 md:border-l md:overflow-y-auto pb-24 md:pb-4">
+      <div className="w-full md:w-auto flex-shrink-0 p-4 border-t border-line md:border-t-0 md:border-l md:overflow-y-auto pb-24 md:pb-4">
         <ScoreSidebar meta={meta} og={og} pages={pages} />
       </div>
     </div>

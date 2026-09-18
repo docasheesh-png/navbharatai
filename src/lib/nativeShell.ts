@@ -297,12 +297,23 @@ export function installKeyboardBehaviour(
  * mapping is locked by a test rather than by whoever last touched it.
  */
 export function statusBarStyleForTheme(theme: string | null | undefined): 'light' | 'dark' {
-  return theme === 'dark' ? 'light' : 'dark';
+  return isDarkSurfaceTheme(theme) ? 'light' : 'dark';
 }
 
-/** Status-bar background matching the app's own surface, so the bar never looks bolted on. */
+/**
+ * Which themes paint a DARK surface behind the status bar. High contrast is black, so it needs
+ * light icons exactly as Dark does — before 2026-09-18 it was treated as "not dark" and got dark
+ * icons on a white bar above a black app. (The retired `dim` is included so a saved value that
+ * has not been migrated yet still gets the right bar on the very first paint.)
+ */
+function isDarkSurfaceTheme(theme: string | null | undefined): boolean {
+  return theme === 'dark' || theme === 'contrast' || theme === 'dim';
+}
+
+/** Status-bar background matching the app's own surface (`--surface-base` per theme in index.css). */
 export function statusBarColorForTheme(theme: string | null | undefined): string {
-  return theme === 'dark' ? '#0d1117' : '#ffffff';
+  if (theme === 'contrast') return '#000000';
+  return isDarkSurfaceTheme(theme) ? '#0d1117' : '#ffffff';
 }
 
 /**

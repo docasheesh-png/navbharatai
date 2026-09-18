@@ -118,7 +118,6 @@ const ProfessionalHistoryView = _lz(() => import('./components/professionals/Pro
 import axios from 'axios';
 
 import { useBuild } from './components/ide/BuildContext';
-import { getThemeClasses } from './lib/theme';
 import { useDevLogs } from './hooks/useDevLogs';
 import { usePaymentEngine } from './hooks/usePaymentEngine';
 import { usePreviewBundler } from './hooks/usePreviewBundler';
@@ -2950,8 +2949,6 @@ export default function App() {
 
   // Phase 1.7 — template list lives in TemplatesPanel.tsx (CURATED_TEMPLATES).
 
-  const themeClasses = getThemeClasses(theme);
-
   /**
    * Is the global mobile bottom-nav actually on screen?
    *
@@ -2984,11 +2981,11 @@ export default function App() {
 
   return (
     <div
-      className={cn("h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500", themeClasses.bg, themeClasses.text)}
+      className="h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500 bg-surface text-body"
       style={{
         // Native safe-area (admin 2026-07-13): pad the whole app in from the device's top notch /
         // dynamic island and the left/right rounded-corner insets so the header is never cropped.
-        // The root's own themeClasses.bg fills the reserved strip, so it reads as a normal status-bar
+        // The root's own bg-surface fills the reserved strip, so it reads as a normal status-bar
         // area. Bottom is handled by the fixed mobile nav (its own env padding), so no bottom pad here.
         // On the web these vars are 0 → no visual change. box-sizing:border-box (Tailwind preflight)
         // means the padding shrinks the content box, so the header + content calc below stay exact.
@@ -3013,7 +3010,6 @@ export default function App() {
       {!focusMode && (
         <TopNav
           onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
-          themeClasses={themeClasses}
           effectiveDeviceMode={effectiveDeviceMode}
           isSidebarCollapsed={isSidebarCollapsed}
           setIsSidebarCollapsed={setIsSidebarCollapsed}
@@ -3045,7 +3041,6 @@ export default function App() {
       <SidebarNav
         onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
         unreadReports={unreadReports}
-        themeClasses={themeClasses}
         effectiveDeviceMode={effectiveDeviceMode}
         isSidebarCollapsed={isSidebarCollapsed}
         isMenuOpen={isMenuOpen}
@@ -3112,14 +3107,12 @@ export default function App() {
                isAdmin={isAdmin}
                data={homeData}
                onUpdate={(newData) => setHomeData(newData)}
-               theme={theme}
                user={user}
                onShowLogin={() => setShowAuth(true)}
              />
           )}
           {activeView === 'other_ai' && (
             <OtherAIView
-              theme={theme}
               onBack={() => toggleTab('home')}
               onOpenTool={(id) => { if (user) { toggleTab(id as any); } else { setShowAuth(true); } }}
             />
@@ -3127,7 +3120,6 @@ export default function App() {
           {activeView === 'settings' && (
             <SettingsPanel
               effectiveDeviceMode={effectiveDeviceMode}
-              themeClasses={themeClasses}
               settingsScreen={settingsScreen}
               setSettingsScreen={setSettingsScreen}
               toggleTab={toggleTab}
@@ -3176,7 +3168,6 @@ export default function App() {
 
           {(activeView === 'nbi_chat') && (
             <NBIChatPanel
-              themeClasses={themeClasses}
               teachMode={teachMode}
               setTeachMode={setTeachMode}
               sessions={sessions}
@@ -3962,7 +3953,6 @@ export default function App() {
               isAdmin={isAdmin}
               isDonationEditing={isDonationEditing}
               donationData={donationData}
-              bgClass={themeClasses.bg}
               onToggleEditing={() => setIsDonationEditing(p => !p)}
               onStartEditing={() => setIsDonationEditing(true)}
               onDonationDataChange={setDonationData}

@@ -1,7 +1,7 @@
 // useSettings — theme, hinglishMode, mode, enabledModules (Task 1.1 module extraction)
 // localStorage keys match App.tsx exactly so existing user data is preserved.
 import { useState, useEffect } from 'react';
-import { ThemeMode } from '../lib/theme';
+import { ThemeMode, normalizeThemeMode } from '../lib/theme';
 import type { AgentMode } from '../types';
 import { safeLocalJson } from '../lib/safeLocalJson';
 
@@ -15,7 +15,12 @@ export type PreferredLanguage = 'hindi' | 'hinglish' | 'english' | 'auto';
 
 export function useSettings() {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem('theme') as ThemeMode | null;
+    const raw = localStorage.getItem('theme');
+    const saved = normalizeThemeMode(raw);
+    // A retired theme name (dim / comfort) is carried to its successor AND written back, so the
+    // migration happens once per device instead of on every load — and so the pre-paint script in
+    // index.html, which reads the same key, stamps a theme that exists on the next visit.
+    if (saved && saved !== raw) localStorage.setItem('theme', saved);
     if (saved) return saved;
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });

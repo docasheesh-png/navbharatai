@@ -135,7 +135,7 @@ describe('the preview toolbar can be swiped', () => {
     // The failure mode that makes this look like it did nothing: flexbox squashes the children back
     // to fit and there is nothing to scroll.
     expect(prev).toContain('flex items-center gap-1 shrink-0');            // mode switcher
-    expect(prev).toContain('border border-zinc-700 p-0.5 shrink-0');       // viewport switcher
+    expect(prev).toContain('border border-line p-0.5 shrink-0');           // viewport switcher (token since the theme replacement)
     expect(prev).toContain('shrink-0 relative flex items-center gap-1');   // console
   });
 

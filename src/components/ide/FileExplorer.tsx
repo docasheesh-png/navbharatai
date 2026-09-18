@@ -196,12 +196,12 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           <div key={item.path}>
             <div 
               onClick={() => toggleDir(item.path)}
-              className="group flex items-center gap-2 px-4 py-1.5 hover:bg-white/5 cursor-pointer text-[#8b949e] transition-colors"
+              className="group flex items-center gap-2 px-4 py-1.5 hover:bg-raised cursor-pointer text-muted transition-colors"
               style={{ paddingLeft: `${(level + 1) * 12}px` }}
             >
               {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-              <FolderOpen className="w-4 h-4 text-indigo-400/70" />
-              <span className="text-[11px] font-bold uppercase tracking-tight text-[#c9d1d9]">{item.name}</span>
+              <FolderOpen className="w-4 h-4 text-accent-text" />
+              <span className="text-[11px] font-bold uppercase tracking-tight text-body">{item.name}</span>
             </div>
             {isExpanded && renderTree(item, level + 1)}
           </div>
@@ -218,7 +218,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           onMouseLeave={() => setImagePreviewPath(null)}
           className={cn(
             "group relative flex items-center justify-between px-4 py-1.5 cursor-pointer transition-all",
-            isSelected ? "bg-red-500/10" : isActive ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
+            isSelected ? "bg-red-500/10" : isActive ? "bg-indigo-600/10 text-ink border-r-2 border-indigo-500" : "hover:bg-raised text-muted"
           )}
           style={{ paddingLeft: `${(level + 1) * 12}px` }}
         >
@@ -226,13 +226,13 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             {/* Multi-select checkbox */}
             {selectMode && (
               isSelected
-                ? <CheckSquare className="w-3.5 h-3.5 shrink-0 text-red-400" />
-                : <Square className="w-3.5 h-3.5 shrink-0 text-[#484f58]" />
+                ? <CheckSquare className="w-3.5 h-3.5 shrink-0 text-danger" />
+                : <Square className="w-3.5 h-3.5 shrink-0 text-faint" />
             )}
             {/* C10: image icon for image files */}
             {isImageFile(item.name)
-              ? <Image className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
-              : <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#484f58]")} />
+              ? <Image className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-accent-text" : "text-faint")} />
+              : <FileCode className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-accent-text" : "text-faint")} />
             }
             <span className={cn("text-[11px] font-medium tracking-tight truncate", isActive ? "font-bold" : "")}>{item.name}</span>
             {dirtyTabs?.has(item.path) && (
@@ -240,7 +240,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             )}
             {/* A20: read-only indicator */}
             {isReadOnly(item.name) && (
-              <Lock className="w-2.5 h-2.5 shrink-0 text-[#484f58]/60" title="Read-only / auto-generated file" />
+              <Lock className="w-2.5 h-2.5 shrink-0 text-faint" title="Read-only / auto-generated file" />
             )}
           </div>
           {/* TOUCH-SAFE reveal. These are the row's real actions (open in GitHub, delete), and
@@ -258,7 +258,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                 onClick={(e) => e.stopPropagation()}
                 title="Open in GitHub"
                 aria-label={`Open ${item.path} in GitHub`}
-                className="p-1 hover:bg-white/10 rounded text-[#484f58] hover:text-white"
+                className="p-1 hover:bg-raised rounded text-faint hover:text-ink"
               >
                 <Github className="w-3 h-3" />
               </a>
@@ -269,14 +269,14 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                 setConfirmPaths([item.path]);
               }}
               aria-label={`Delete ${item.path}`}
-              className="p-1 hover:bg-red-500/10 rounded text-red-500/40 hover:text-red-500"
+              className="p-1 hover:bg-red-500/10 rounded text-danger hover:text-danger"
             >
               <Trash2 className="w-3 h-3" />
             </button>
           </div>
           {/* C10: image preview tooltip on hover */}
           {imagePreviewPath === item.path && (
-            <div className="absolute left-full top-0 ml-2 z-50 p-2 bg-[#161b22] border border-white/10 rounded-xl shadow-2xl pointer-events-none" style={{ minWidth: '120px', maxWidth: '200px' }}>
+            <div className="absolute left-full top-0 ml-2 z-50 p-2 bg-card border border-line rounded-xl shadow-2xl pointer-events-none" style={{ minWidth: '120px', maxWidth: '200px' }}>
               {(files[item.path] || '').startsWith('data:image') || item.name.endsWith('.svg') ? (
                 item.name.endsWith('.svg')
                   // SECURITY: never inject raw SVG source as HTML — a generated/imported `logo.svg`
@@ -287,8 +287,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                   : <img src={files[item.path]} alt={item.name} className="w-full rounded" />
               ) : (
                 <div className="flex items-center gap-2 p-1">
-                  <Image className="w-4 h-4 text-[#484f58]" />
-                  <span className="text-[9px] text-[#484f58]">{item.name}</span>
+                  <Image className="w-4 h-4 text-faint" />
+                  <span className="text-[9px] text-faint">{item.name}</span>
                 </div>
               )}
             </div>
@@ -323,10 +323,10 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-[var(--theme-card)] text-[var(--theme-text)] border-r border-[var(--theme-border)] select-none transition-colors duration-500">
-      <div className="p-4 border-b border-[var(--theme-border)] flex items-center justify-between bg-black/10">
+      <div className="p-4 border-b border-[var(--theme-border)] flex items-center justify-between bg-well">
         <div className="flex items-center gap-2">
-           <HardDrive className="w-4 h-4 text-indigo-400" />
-           <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Explorer</span>
+           <HardDrive className="w-4 h-4 text-accent-text" />
+           <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted">Explorer</span>
         </div>
         <div className="flex items-center gap-1">
           {/* C12: Expand All / Collapse All */}
@@ -341,7 +341,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
               }
             }}
             aria-label="Expand or collapse all folders"
-            className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
+            className="p-1.5 hover:bg-raised rounded-md text-muted hover:text-ink transition-all"
             title="Expand / Collapse All"
           >
             <FolderPlus className="w-3.5 h-3.5" />
@@ -350,7 +350,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           <button
             onClick={() => setSortMode(m => m === 'name' ? 'type' : 'name')}
             aria-label={`Sort files by ${sortMode === 'name' ? 'file type' : 'name'}`}
-            className={`p-1.5 rounded-md transition-all ${sortMode === 'type' ? 'text-indigo-400 bg-indigo-900/20' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+            className={`p-1.5 rounded-md transition-all ${sortMode === 'type' ? 'text-accent-text bg-indigo-500/10' : 'text-muted hover:text-ink hover:bg-raised'}`}
             title={`Sort by: ${sortMode === 'name' ? 'name' : 'type'} (click to toggle)`}
           >
             <SortAsc className="w-3 h-3" />
@@ -358,7 +358,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           <button
             onClick={() => setIsAddingFile(true)}
             aria-label="Create new file"
-            className="p-1.5 hover:bg-white/5 rounded-md text-[#8b949e] hover:text-white transition-all"
+            className="p-1.5 hover:bg-raised rounded-md text-muted hover:text-ink transition-all"
             title="New File"
           >
             <FilePlus className="w-3.5 h-3.5" />
@@ -368,7 +368,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             <button
               onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
               aria-label={selectMode ? 'Exit select mode' : 'Select files to delete'}
-              className={`p-1.5 rounded-md transition-all ${selectMode ? 'text-red-400 bg-red-900/20' : 'text-[#8b949e] hover:text-white hover:bg-white/5'}`}
+              className={`p-1.5 rounded-md transition-all ${selectMode ? 'text-danger bg-red-500/10' : 'text-muted hover:text-ink hover:bg-raised'}`}
               title={selectMode ? 'Exit selection' : 'Select files to delete'}
             >
               <CheckSquare className="w-3.5 h-3.5" />
@@ -379,22 +379,22 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
 
       {/* Multi-select action bar */}
       {selectMode && (
-        <div className="px-4 py-2 border-b border-[var(--theme-border)] bg-red-950/10 flex items-center justify-between gap-2">
+        <div className="px-4 py-2 border-b border-[var(--theme-border)] bg-red-500/10 flex items-center justify-between gap-2">
           <button
             onClick={() => setSelected(prev => prev.size === allFilePaths.length ? new Set() : new Set(allFilePaths))}
-            className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white transition-colors"
+            className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-muted hover:text-ink transition-colors"
           >
             {selected.size === allFilePaths.length && allFilePaths.length > 0
-              ? <CheckSquare className="w-3.5 h-3.5 text-red-400" />
+              ? <CheckSquare className="w-3.5 h-3.5 text-danger" />
               : <Square className="w-3.5 h-3.5" />}
             {selected.size === allFilePaths.length && allFilePaths.length > 0 ? 'Deselect All' : 'Select All'}
           </button>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-[#8b949e]">{selected.size} selected</span>
+            <span className="text-[10px] font-bold text-muted">{selected.size} selected</span>
             <button
               onClick={() => selected.size > 0 && setConfirmPaths([...selected])}
               disabled={selected.size === 0}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-red-600 text-white hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-red-600 text-on-accent hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
             >
               <Trash2 className="w-3 h-3" /> Delete
             </button>
@@ -402,14 +402,14 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
         </div>
       )}
 
-      <div className="px-4 py-3 bg-[#0d1117]/20">
+      <div className="px-4 py-3 bg-raised">
         <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-[#484f58]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-faint" />
           <input 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search files..."
-            className="w-full bg-black/20 border border-white/5 rounded-lg py-1.5 pl-9 pr-4 text-[10px] font-bold outline-none focus:border-indigo-500/50 transition-all shadow-inner placeholder:text-[#484f58] uppercase tracking-wider"
+            className="w-full bg-well border border-line rounded-lg py-1.5 pl-9 pr-4 text-[10px] font-bold outline-none focus:border-indigo-500/50 transition-all shadow-inner placeholder:text-faint uppercase tracking-wider"
           />
         </div>
       </div>
@@ -436,7 +436,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                  onBlur={() => !newFileName && setIsAddingFile(false)}
                  placeholder="name.js"
-                 className="w-full bg-[#0d1117] border border-indigo-500 rounded-lg px-3 py-2 text-[11px] text-white outline-none"
+                 className="w-full bg-surface border border-indigo-500 rounded-lg px-3 py-2 text-[11px] text-ink outline-none"
                />
             </motion.div>
           )}
@@ -446,7 +446,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
         {!searchQuery && recentFiles.filter(p => p in files).length > 0 && (
           <div className="mb-2">
             <div className="px-4 pt-2 pb-1">
-              <span className="text-[8px] font-black uppercase tracking-[0.2em] text-[#484f58]">Recent</span>
+              <span className="text-[8px] font-black uppercase tracking-[0.2em] text-faint">Recent</span>
             </div>
             {recentFiles.filter(p => p in files).map(path => (
               <div
@@ -454,14 +454,14 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                 onClick={() => handleFileSelectWithRecent(path)}
                 className={cn(
                   "flex items-center gap-2 px-4 py-1 cursor-pointer transition-all",
-                  activeFile === path ? "bg-indigo-600/10 text-white border-r-2 border-indigo-500" : "hover:bg-white/5 text-[#8b949e]"
+                  activeFile === path ? "bg-indigo-600/10 text-ink border-r-2 border-indigo-500" : "hover:bg-raised text-muted"
                 )}
               >
-                <FileCode className="w-3 h-3 shrink-0 text-[#484f58]" />
+                <FileCode className="w-3 h-3 shrink-0 text-faint" />
                 <span className="text-[10px] font-medium truncate">{path.split('/').pop()}</span>
               </div>
             ))}
-            <div className="mx-4 mt-1 mb-2 border-t border-white/5" />
+            <div className="mx-4 mt-1 mb-2 border-t border-line" />
           </div>
         )}
 
@@ -477,7 +477,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim backdrop-blur-sm p-4"
             onClick={() => setConfirmPaths(null)}
           >
             <motion.div
@@ -485,34 +485,34 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-sm bg-[#161b22] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+              className="w-full max-w-sm bg-card border border-line rounded-2xl shadow-2xl overflow-hidden"
             >
               <div className="p-5">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-9 h-9 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
-                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                    <AlertTriangle className="w-5 h-5 text-danger" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-black text-white">
+                    <h3 className="text-sm font-black text-ink">
                       Delete {confirmPaths.length === 1 ? 'file' : `${confirmPaths.length} files`}?
                     </h3>
-                    <p className="text-[11px] text-[#8b949e]">This cannot be undone.</p>
+                    <p className="text-[11px] text-muted">This cannot be undone.</p>
                   </div>
                 </div>
-                <div className="max-h-32 overflow-y-auto no-scrollbar rounded-lg bg-black/30 border border-white/5 p-2 mb-4">
+                <div className="max-h-32 overflow-y-auto no-scrollbar rounded-lg bg-well border border-line p-2 mb-4">
                   {confirmPaths.slice(0, 50).map(p => (
-                    <div key={p} className="text-[10px] font-mono text-[#c9d1d9] truncate py-0.5">{p}</div>
+                    <div key={p} className="text-[10px] font-mono text-body truncate py-0.5">{p}</div>
                   ))}
                   {confirmPaths.length > 50 && (
-                    <div className="text-[10px] text-[#484f58] py-0.5">…and {confirmPaths.length - 50} more</div>
+                    <div className="text-[10px] text-faint py-0.5">…and {confirmPaths.length - 50} more</div>
                   )}
                 </div>
                 {/* Bulk delete (2+ files) — arm it by TYPING "delete", so one stray click can't wipe every
                     file. Nothing is deleted until this input matches (admin-mandated 2026-07-17). */}
                 {requiresTypedConfirm(confirmPaths.length) && (
                   <div className="mb-4">
-                    <label className="block text-[11px] text-[#8b949e] mb-1.5">
-                      Type <span className="font-mono font-black text-red-300">{DELETE_CONFIRM_WORD}</span> to permanently delete these {confirmPaths.length} files:
+                    <label className="block text-[11px] text-muted mb-1.5">
+                      Type <span className="font-mono font-black text-danger">{DELETE_CONFIRM_WORD}</span> to permanently delete these {confirmPaths.length} files:
                     </label>
                     <input
                       autoFocus
@@ -523,21 +523,21 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                       spellCheck={false}
                       autoCapitalize="none"
                       autoCorrect="off"
-                      className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 focus:border-red-500/60 outline-none text-[12px] font-mono text-white placeholder:text-[#484f58] transition-colors"
+                      className="w-full px-3 py-2 rounded-lg bg-well border border-line focus:border-red-500/60 outline-none text-[12px] font-mono text-ink placeholder:text-faint transition-colors"
                     />
                   </div>
                 )}
                 <div className="flex items-center justify-end gap-2">
                   <button
                     onClick={() => setConfirmPaths(null)}
-                    className="px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider text-[#8b949e] hover:text-white hover:bg-white/5 transition-all"
+                    className="px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider text-muted hover:text-ink hover:bg-raised transition-all"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={() => performDelete(confirmPaths)}
                     disabled={!canProceedWithDelete(confirmPaths.length, confirmText)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider bg-red-600 text-white hover:bg-red-700 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-600"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider bg-red-600 text-on-accent hover:bg-red-700 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-600"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>

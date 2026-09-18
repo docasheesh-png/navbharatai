@@ -442,10 +442,10 @@ ${generatedCode}
 
   const statusBadge = () => {
     const cfg: Record<ConnectionStatus, { label: string; icon: React.ReactNode; color: string }> = {
-      disconnected: { label: 'Disconnected', icon: <X size={12} />, color: 'text-gray-400 bg-gray-800' },
-      connecting: { label: 'Connecting...', icon: <TirangaLoader size={12} />, color: 'text-yellow-400 bg-yellow-900/30' },
-      connected: { label: 'Connected ✓', icon: <CheckCircle2 size={12} />, color: 'text-green-400 bg-green-900/30' },
-      error: { label: 'Error', icon: <X size={12} />, color: 'text-red-400 bg-red-900/30' },
+      disconnected: { label: 'Disconnected', icon: <X size={12} />, color: 'text-muted bg-raised' },
+      connecting: { label: 'Connecting...', icon: <TirangaLoader size={12} />, color: 'text-warn bg-yellow-500/10' },
+      connected: { label: 'Connected ✓', icon: <CheckCircle2 size={12} />, color: 'text-success bg-green-500/10' },
+      error: { label: 'Error', icon: <X size={12} />, color: 'text-danger bg-red-500/10' },
     };
     const c = cfg[connectionStatus];
     return (
@@ -462,17 +462,17 @@ ${generatedCode}
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-gray-100 overflow-hidden">
+    <div className="flex flex-col h-full bg-surface text-body overflow-hidden">
       {/* Section 1: Connection */}
-      <div className="flex-shrink-0 p-4 border-b border-white/10">
-        <div className="bg-[#161b22] border border-white/10 rounded-xl p-4">
+      <div className="flex-shrink-0 p-4 border-b border-line">
+        <div className="bg-card border border-line rounded-xl p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               {/* Figma F logo */}
-              <div className="w-7 h-7 rounded-md bg-[#1e1333] flex items-center justify-center">
+              <div className="w-7 h-7 rounded-md bg-[#1e1333] flex items-center justify-center text-on-accent">
                 <span className="text-[#a259ff] font-black text-sm leading-none">F</span>
               </div>
-              <h2 className="text-sm font-semibold text-gray-100">Import Design from Figma</h2>
+              <h2 className="text-sm font-semibold text-body">Import Design from Figma</h2>
             </div>
             {statusBadge()}
           </div>
@@ -482,56 +482,56 @@ ${generatedCode}
             {/* URL input */}
             <div className="flex-1">
               <div className="flex items-center gap-1 mb-1">
-                <label className="text-xs text-gray-400">Figma File URL</label>
+                <label className="text-xs text-muted">Figma File URL</label>
                 <div className="relative group">
-                  <Info size={12} className="text-gray-500 cursor-pointer" />
-                  <div className="absolute left-0 top-5 z-20 hidden group-hover:block w-56 bg-[#1c2128] border border-white/10 rounded-lg p-2 text-xs text-gray-300 shadow-xl">
+                  <Info size={12} className="text-faint cursor-pointer" />
+                  <div className="absolute left-0 top-5 z-20 hidden group-hover:block w-56 bg-raised border border-line rounded-lg p-2 text-xs text-muted shadow-xl">
                     Open the file in Figma → Share → Copy link
                   </div>
                 </div>
               </div>
               <div className="relative">
-                <Link size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                <Link size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
                 <input
                   type="url"
                   value={figmaUrl}
                   onChange={(e) => { setFigmaUrl(e.target.value); validateUrl(e.target.value); }}
                   placeholder="https://www.figma.com/file/XXXXX/..."
-                  className={`w-full bg-[#0d1117] border ${urlError ? 'border-red-500' : 'border-white/10'} rounded-lg pl-8 pr-3 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors`}
+                  className={`w-full bg-surface border ${urlError ? 'border-red-500' : 'border-line'} rounded-lg pl-8 pr-3 py-2 text-xs text-body placeholder-faint focus:outline-none focus:border-indigo-500 transition-colors`}
                 />
               </div>
-              {urlError && <p className="text-red-400 text-xs mt-1">{urlError}</p>}
+              {urlError && <p className="text-danger text-xs mt-1">{urlError}</p>}
             </div>
 
             {/* Token input */}
             <div className="flex-1">
               <div className="flex items-center gap-1 mb-1">
-                <label className="text-xs text-gray-400">Personal Access Token</label>
+                <label className="text-xs text-muted">Personal Access Token</label>
                 <div className="relative group">
-                  <Info size={12} className="text-gray-500 cursor-pointer" />
-                  <div className="absolute left-0 top-5 z-20 hidden group-hover:block w-60 bg-[#1c2128] border border-white/10 rounded-lg p-2 text-xs text-gray-300 shadow-xl">
+                  <Info size={12} className="text-faint cursor-pointer" />
+                  <div className="absolute left-0 top-5 z-20 hidden group-hover:block w-60 bg-raised border border-line rounded-lg p-2 text-xs text-muted shadow-xl">
                     Figma Account Settings → Personal Access Tokens → Create new token
                   </div>
                 </div>
                 <button
                   onClick={() => setShowTokenHelp((v) => !v)}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 ml-1 underline"
+                  className="text-xs text-accent-text hover:text-accent-text ml-1 underline"
                 >
                   Where do I find the token?
                 </button>
               </div>
               <div className="relative">
-                <Key size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                <Key size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
                 <input
                   type={showToken ? 'text' : 'password'}
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="figd_xxxxxxxxxxxx"
-                  className="w-full bg-[#0d1117] border border-white/10 rounded-lg pl-8 pr-8 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-surface border border-line rounded-lg pl-8 pr-8 py-2 text-xs text-body placeholder-faint focus:outline-none focus:border-indigo-500 transition-colors"
                 />
                 <button
                   onClick={() => setShowToken((v) => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-muted"
                 >
                   {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -541,8 +541,8 @@ ${generatedCode}
 
           {/* Token help card */}
           {showTokenHelp && (
-            <div className="mb-3 bg-[#1c2128] border border-indigo-500/30 rounded-lg p-3 text-xs text-gray-300">
-              <p className="font-medium text-indigo-300 mb-1">How to create a token:</p>
+            <div className="mb-3 bg-raised border border-indigo-500/30 rounded-lg p-3 text-xs text-muted">
+              <p className="font-medium text-accent-text mb-1">How to create a token:</p>
               <ol className="list-decimal list-inside space-y-0.5">
                 <li>Open Figma → click the top-left avatar</li>
                 <li>Choose "Account Settings"</li>
@@ -558,15 +558,15 @@ ${generatedCode}
             <button
               onClick={handleConnect}
               disabled={!figmaUrl || !token || connectionStatus === 'connecting'}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-[#a259ff] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-[#a259ff] disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs font-medium px-4 py-2 rounded-lg transition-colors"
             >
               {connectionStatus === 'connecting' ? <TirangaLoader size={14} /> : <RefreshCw size={14} />}
               Connect &amp; Fetch
             </button>
             {history.length > 0 && (
               <div className="flex items-center gap-1">
-                <Clock size={12} className="text-gray-500" />
-                <span className="text-xs text-gray-500">Recent:</span>
+                <Clock size={12} className="text-faint" />
+                <span className="text-xs text-faint">Recent:</span>
                 {pagedHistory.visible.map((key) => (
                   <button
                     key={key}
@@ -575,7 +575,7 @@ ${generatedCode}
                       setFigmaUrl(url);
                       validateUrl(url);
                     }}
-                    className="text-xs bg-[#0d1117] border border-white/10 hover:border-indigo-500/50 text-gray-400 hover:text-gray-200 px-2 py-0.5 rounded transition-colors font-mono"
+                    className="text-xs bg-surface border border-line hover:border-indigo-500/50 text-muted hover:text-body px-2 py-0.5 rounded transition-colors font-mono"
                   >
                     {key.slice(0, 8)}…
                   </button>
@@ -587,7 +587,7 @@ ${generatedCode}
 
           {/* Connection error */}
           {connectionError && (
-            <div className="mt-3 flex items-start gap-2 bg-red-900/20 border border-red-500/30 rounded-lg p-2 text-xs text-red-300">
+            <div className="mt-3 flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-2 text-xs text-danger">
               <X size={14} className="flex-shrink-0 mt-0.5" />
               <span>{connectionError}</span>
             </div>
@@ -599,41 +599,41 @@ ${generatedCode}
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
         {/* Section 2: Design Tree */}
         {fileInfo && (
-          <div className="w-full md:w-[280px] flex-shrink-0 max-h-[38vh] supports-[height:100dvh]:max-h-[38dvh] md:max-h-none border-b md:border-b-0 md:border-r border-white/10 flex flex-col overflow-hidden bg-[#0d1117]">
+          <div className="w-full md:w-[280px] flex-shrink-0 max-h-[38vh] supports-[height:100dvh]:max-h-[38dvh] md:max-h-none border-b md:border-b-0 md:border-r border-line flex flex-col overflow-hidden bg-surface">
             {/* File info card */}
-            <div className="p-3 border-b border-white/10 flex-shrink-0">
-              <div className="bg-[#161b22] border border-white/10 rounded-lg p-3">
+            <div className="p-3 border-b border-line flex-shrink-0">
+              <div className="bg-card border border-line rounded-lg p-3">
                 {fileInfo.thumbnailUrl && (
                   <img src={fileInfo.thumbnailUrl} alt="thumbnail" className="w-full h-20 object-cover rounded mb-2 opacity-80" loading="lazy" />
                 )}
-                <p className="text-xs font-semibold text-gray-100 truncate">{fileInfo.name}</p>
+                <p className="text-xs font-semibold text-body truncate">{fileInfo.name}</p>
                 {fileInfo.lastModified && (
-                  <p className="text-xs text-gray-500 mt-0.5">Modified: {formatDate(fileInfo.lastModified)}</p>
+                  <p className="text-xs text-faint mt-0.5">Modified: {formatDate(fileInfo.lastModified)}</p>
                 )}
               </div>
             </div>
 
             {/* Pages & Frames */}
             <div className="flex-1 overflow-y-auto p-2">
-              <p className="text-xs font-medium text-gray-500 px-2 mb-1 uppercase tracking-wide">Pages</p>
+              <p className="text-xs font-medium text-faint px-2 mb-1 uppercase tracking-wide">Pages</p>
               {fileInfo.pages.map((page) => (
                 <div key={page.id}>
                   <button
                     onClick={() => togglePage(page.id)}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 text-left transition-colors group"
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-raised text-left transition-colors group"
                   >
-                    {expandedPages.has(page.id) ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
-                    <span className="text-xs text-gray-300 truncate">{page.name}</span>
-                    <span className="ml-auto text-xs text-gray-600">{page.children?.length || 0}</span>
+                    {expandedPages.has(page.id) ? <ChevronDown size={14} className="text-faint" /> : <ChevronRight size={14} className="text-faint" />}
+                    <span className="text-xs text-muted truncate">{page.name}</span>
+                    <span className="ml-auto text-xs text-faint">{page.children?.length || 0}</span>
                   </button>
                   {expandedPages.has(page.id) && (page.children || []).map((frame) => (
                     <button
                       key={frame.id}
                       onClick={() => handleSelectFrame(frame, frame)}
-                      className={`w-full flex items-center gap-2 pl-7 pr-2 py-1.5 rounded-lg text-left transition-colors ${selectedFrame?.id === frame.id ? 'bg-indigo-600/20 border border-indigo-500/40' : 'hover:bg-white/5'}`}
+                      className={`w-full flex items-center gap-2 pl-7 pr-2 py-1.5 rounded-lg text-left transition-colors ${selectedFrame?.id === frame.id ? 'bg-indigo-600/20 border border-indigo-500/40' : 'hover:bg-raised'}`}
                     >
-                      <FileCode size={12} className={selectedFrame?.id === frame.id ? 'text-indigo-400' : 'text-gray-600'} />
-                      <span className={`text-xs truncate ${selectedFrame?.id === frame.id ? 'text-indigo-300' : 'text-gray-400'}`}>{frame.name}</span>
+                      <FileCode size={12} className={selectedFrame?.id === frame.id ? 'text-accent-text' : 'text-faint'} />
+                      <span className={`text-xs truncate ${selectedFrame?.id === frame.id ? 'text-accent-text' : 'text-muted'}`}>{frame.name}</span>
                     </button>
                   ))}
                 </div>
@@ -641,16 +641,16 @@ ${generatedCode}
             </div>
 
             {/* Import options */}
-            <div className="p-3 border-t border-white/10 flex-shrink-0">
-              <div className="bg-[#161b22] border border-white/10 rounded-lg p-3 space-y-3">
+            <div className="p-3 border-t border-line flex-shrink-0">
+              <div className="bg-card border border-line rounded-lg p-3 space-y-3">
                 <div>
-                  <p className="text-xs font-medium text-gray-400 mb-2">Output Format</p>
+                  <p className="text-xs font-medium text-muted mb-2">Output Format</p>
                   <div className="flex gap-2">
                     {(['Tailwind CSS', 'Plain CSS'] as OutputFormat[]).map((fmt) => (
                       <button
                         key={fmt}
                         onClick={() => setImportOptions((o) => ({ ...o, outputFormat: fmt }))}
-                        className={`flex-1 text-xs py-1 rounded-md border transition-colors ${importOptions.outputFormat === fmt ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-white/10 text-gray-400 hover:border-white/20'}`}
+                        className={`flex-1 text-xs py-1 rounded-md border transition-colors ${importOptions.outputFormat === fmt ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'border-line text-muted hover:border-line'}`}
                       >
                         {fmt}
                       </button>
@@ -658,7 +658,7 @@ ${generatedCode}
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-gray-400 mb-1.5">Include</p>
+                  <p className="text-xs font-medium text-muted mb-1.5">Include</p>
                   <div className="space-y-1">
                     {[
                       { key: 'includeColors', label: 'Colors' },
@@ -673,7 +673,7 @@ ${generatedCode}
                           onChange={(e) => setImportOptions((o) => ({ ...o, [key]: e.target.checked }))}
                           className="w-3 h-3 accent-indigo-500"
                         />
-                        <span className="text-xs text-gray-400">{label}</span>
+                        <span className="text-xs text-muted">{label}</span>
                       </label>
                     ))}
                   </div>
@@ -681,7 +681,7 @@ ${generatedCode}
                 <button
                   onClick={handleImport}
                   disabled={!selectedFrame || isImporting}
-                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium py-2 rounded-lg transition-colors"
+                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs font-medium py-2 rounded-lg transition-colors"
                 >
                   {isImporting ? <TirangaLoader size={13} /> : <FileCode size={13} />}
                   Import Selected Frame
@@ -695,14 +695,14 @@ ${generatedCode}
         <div className="flex-1 flex flex-col overflow-hidden">
           {!generatedCode ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-8">
-              <div className="w-16 h-16 rounded-2xl bg-[#1e1333] border border-[#a259ff]/20 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-2xl bg-[#1e1333] border border-[#a259ff]/20 flex items-center justify-center text-on-accent">
                 <span className="text-[#a259ff] font-black text-3xl leading-none">F</span>
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-300">
+                <p className="text-sm font-medium text-muted">
                   {fileInfo ? 'Select a frame to import' : 'Connect a Figma file to get started'}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">
+                <p className="text-xs text-faint mt-1">
                   {fileInfo ? 'Expand a page in the left panel and choose a frame' : 'Enter the URL and token, then press Connect & Fetch'}
                 </p>
               </div>
@@ -710,18 +710,18 @@ ${generatedCode}
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Output header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 flex-shrink-0">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-line flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <FileCode size={15} className="text-indigo-400" />
-                  <span className="text-sm font-medium text-gray-100">Generated HTML</span>
-                  <span className="text-xs text-gray-500 bg-white/5 px-2 py-0.5 rounded-full">{importOptions.outputFormat}</span>
+                  <FileCode size={15} className="text-accent-text" />
+                  <span className="text-sm font-medium text-body">Generated HTML</span>
+                  <span className="text-xs text-faint bg-raised px-2 py-0.5 rounded-full">{importOptions.outputFormat}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-muted hover:text-body bg-raised hover:bg-raised px-3 py-1.5 rounded-lg transition-colors"
                   >
-                    {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
+                    {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
                     {copied ? 'Copied!' : 'Copy'}
                   </button>
                   <button
@@ -743,7 +743,7 @@ ${generatedCode}
                       w.document.body.appendChild(frame);
                       w.document.close();
                     }}
-                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-muted hover:text-body bg-raised hover:bg-raised px-3 py-1.5 rounded-lg transition-colors"
                   >
                     <ExternalLink size={13} />
                     Open in Preview
@@ -753,9 +753,9 @@ ${generatedCode}
 
               {/* Save into the user's real app. Until now the imported design could only be copied
                   by hand — the Figma fetch was real, but nothing it produced could be kept. */}
-              <div className="flex-shrink-0 border-b border-white/10" style={{ background: 'var(--surface-card)' }}>
-                <div className="px-4 pt-3 text-sm font-semibold text-gray-200 flex items-center gap-2">
-                  <Save size={14} className="text-[#a259ff]" /> Save this design into your app
+              <div className="flex-shrink-0 border-b border-line" style={{ background: 'var(--surface-card)' }}>
+                <div className="px-4 pt-3 text-sm font-semibold text-body flex items-center gap-2">
+                  <Save size={14} className="text-accent-text" /> Save this design into your app
                 </div>
                 <AppTargetPicker
                   apps={apps}
@@ -775,13 +775,13 @@ ${generatedCode}
                     <button
                       onClick={() => void saveDesignToApp()}
                       disabled={!targetSession || !targetPath || saving}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ background: '#a259ff' }}
                     >
                       {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
                       {saving ? 'Saving into your app…' : 'Save into my app'}
                     </button>
-                    <p className="mt-2 text-[11px] text-gray-500 leading-snug flex gap-1.5">
+                    <p className="mt-2 text-[11px] text-faint leading-snug flex gap-1.5">
                       <History size={11} className="mt-0.5 flex-shrink-0" />
                       A new file becomes a complete page; an existing page keeps what it has and gains
                       this design. A restore point is saved first, so you can undo it from Versioning.
@@ -804,30 +804,30 @@ ${generatedCode}
 
               {/* Code block */}
               <div className="flex-1 overflow-auto p-4">
-                <pre className="text-xs text-gray-300 font-mono bg-[#161b22] border border-white/10 rounded-xl p-4 overflow-auto h-full leading-relaxed">
+                <pre className="text-xs text-muted font-mono bg-card border border-line rounded-xl p-4 overflow-auto h-full leading-relaxed">
                   {generatedCode}
                 </pre>
               </div>
 
               {/* Assets row */}
               {(extractedAssets.colors.length > 0 || extractedAssets.fonts.length > 0) && (
-                <div className="px-4 pb-3 flex-shrink-0 flex gap-6 border-t border-white/10 pt-3">
+                <div className="px-4 pb-3 flex-shrink-0 flex gap-6 border-t border-line pt-3">
                   {extractedAssets.colors.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-500 mb-1.5 font-medium">Color Palette</p>
+                      <p className="text-xs text-faint mb-1.5 font-medium">Color Palette</p>
                       <div className="flex flex-wrap gap-1.5">
                         {extractedAssets.colors.map((c, i) => (
-                          <div key={i} title={c} className="w-5 h-5 rounded-full border border-white/20 flex-shrink-0" style={{ backgroundColor: c }} />
+                          <div key={i} title={c} className="w-5 h-5 rounded-full border border-line flex-shrink-0" style={{ backgroundColor: c }} />
                         ))}
                       </div>
                     </div>
                   )}
                   {extractedAssets.fonts.length > 0 && (
                     <div>
-                      <p className="text-xs text-gray-500 mb-1.5 font-medium">Typography</p>
+                      <p className="text-xs text-faint mb-1.5 font-medium">Typography</p>
                       <div className="flex flex-wrap gap-1.5">
                         {extractedAssets.fonts.map((f, i) => (
-                          <span key={i} className="text-xs bg-[#161b22] border border-white/10 px-2 py-0.5 rounded-full text-gray-400">
+                          <span key={i} className="text-xs bg-card border border-line px-2 py-0.5 rounded-full text-muted">
                             {f.family} {f.size}px/{f.weight}
                           </span>
                         ))}
@@ -838,11 +838,11 @@ ${generatedCode}
               )}
 
               {/* AI Refine */}
-              <div className="px-4 pb-4 flex-shrink-0 border-t border-white/10 pt-3">
+              <div className="px-4 pb-4 flex-shrink-0 border-t border-line pt-3">
                 {!aiRefineOpen ? (
                   <button
                     onClick={() => setAiRefineOpen(true)}
-                    className="flex items-center gap-2 text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors"
+                    className="flex items-center gap-2 text-xs text-accent-text hover:text-accent-text bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 px-4 py-2 rounded-lg transition-colors"
                   >
                     <Sparkles size={13} />
                     Refine with AI
@@ -855,19 +855,19 @@ ${generatedCode}
                       onChange={(e) => setAiPrompt(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleAiRefine(); }}
                       placeholder="Describe modification, e.g. 'Add padding, make it responsive'"
-                      className="flex-1 bg-[#0d1117] border border-indigo-500/50 rounded-lg px-3 py-2 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-400 transition-colors"
+                      className="flex-1 bg-surface border border-indigo-500/50 rounded-lg px-3 py-2 text-xs text-body placeholder-faint focus:outline-none focus:border-indigo-400 transition-colors"
                     />
                     <button
                       onClick={handleAiRefine}
                       disabled={isRefining || !aiPrompt.trim()}
-                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs px-4 py-2 rounded-lg transition-colors"
+                      className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs px-4 py-2 rounded-lg transition-colors"
                     >
                       {isRefining ? <TirangaLoader size={13} /> : <Sparkles size={13} />}
                       Refine
                     </button>
                     <button
                       onClick={() => { setAiRefineOpen(false); setAiPrompt(''); }}
-                      className="text-xs text-gray-500 hover:text-gray-300 px-2 transition-colors"
+                      className="text-xs text-faint hover:text-muted px-2 transition-colors"
                     >
                       Cancel
                     </button>

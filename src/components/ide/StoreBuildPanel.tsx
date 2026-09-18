@@ -664,18 +664,18 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   // ── Not connected: say what is needed and why, rather than showing a dead button ──
   if (!githubToken) {
     return (
-      <div className="rounded-xl border border-white/10 p-4 sm:p-5" style={{ background: 'var(--surface-card)' }}>
-        <h3 className="flex items-center gap-2 text-base font-bold text-white mb-2">
-          <Rocket size={17} className="text-indigo-400" /> Build a real Android app
+      <div className="rounded-xl border border-line p-4 sm:p-5" style={{ background: 'var(--surface-card)' }}>
+        <h3 className="flex items-center gap-2 text-base font-bold text-ink mb-2">
+          <Rocket size={17} className="text-accent-text" /> Build a real Android app
         </h3>
-        <p className="text-sm text-white/60 leading-relaxed mb-3">
+        <p className="text-sm text-muted leading-relaxed mb-3">
           NavBharatAI packages your app and starts the build for you — the build itself runs on GitHub's
           machines, and the signing key stays yours so nobody else can publish updates to your app.
           Connect GitHub once and the rest is automatic.
         </p>
         <button
           onClick={onConnectGitHub}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-white text-black hover:bg-white/90 transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-ink text-surface hover:bg-ink/90 transition-colors"
         >
           <Github size={16} /> Connect GitHub
         </button>
@@ -684,12 +684,12 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }
 
   return (
-    <div className="rounded-xl border border-white/10 overflow-hidden" style={{ background: 'var(--surface-card)' }}>
+    <div className="rounded-xl border border-line overflow-hidden" style={{ background: 'var(--surface-card)' }}>
       <div className="p-4 sm:p-5">
-        <h3 className="flex items-center gap-2 text-base font-bold text-white mb-1">
-          <Rocket size={17} className="text-indigo-400" /> Build a real Android app
+        <h3 className="flex items-center gap-2 text-base font-bold text-ink mb-1">
+          <Rocket size={17} className="text-accent-text" /> Build a real Android app
         </h3>
-        <p className="text-xs text-white/50 leading-relaxed">
+        <p className="text-xs text-muted leading-relaxed">
           Your app is packaged and sent to your own GitHub, built there on a real machine, and the
           finished file comes back here.
         </p>
@@ -699,33 +699,31 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           another, with no way to see or switch). Show the account plainly and give a short "Switch". The
           real mechanism to change accounts is logging out of GitHub first — GitHub otherwise silently
           re-uses whichever account is signed in — so that link is spelled out honestly. */}
-      <div className="mx-4 sm:mx-5 mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-white/10"
-           style={{ background: 'rgba(255,255,255,0.03)' }}>
+      <div className="mx-4 sm:mx-5 mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-line bg-raised">
         <div className="min-w-0 flex items-center gap-2">
-          <Github size={14} className="text-white/60 flex-shrink-0" />
-          <span className="text-xs text-white/70 truncate">
+          <Github size={14} className="text-muted flex-shrink-0" />
+          <span className="text-xs text-body truncate">
             {connectedLogin
-              ? <>Connected as <span className="font-semibold text-white">@{connectedLogin}</span></>
+              ? <>Connected as <span className="font-semibold text-ink">@{connectedLogin}</span></>
               : 'GitHub connected'}
           </span>
         </div>
         <button
           onClick={() => { try { onDisconnectGitHub?.(); } catch { /* best-effort */ } onConnectGitHub?.(); }}
           title="Connect a different GitHub account"
-          className="flex-shrink-0 text-[11px] font-semibold text-indigo-300 hover:text-indigo-200 px-2.5 py-1 rounded-md border border-indigo-500/40 hover:border-indigo-400/70 transition-colors"
+          className="flex-shrink-0 text-[11px] font-semibold text-accent-text hover:text-accent-text px-2.5 py-1 rounded-md border border-indigo-500/40 hover:border-indigo-400/70 transition-colors"
         >
           Switch
         </button>
       </div>
-      <p className="mx-4 sm:mx-5 -mt-1 mb-3 text-[10.5px] text-white/40 leading-snug">
+      <p className="mx-4 sm:mx-5 -mt-1 mb-3 text-[10.5px] text-faint leading-snug">
         This account will own the build. Wrong one?{' '}
-        <a href="https://github.com/logout" target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">Log out of GitHub</a>
+        <a href="https://github.com/logout" target="_blank" rel="noreferrer" className="text-accent-text hover:underline">Log out of GitHub</a>
         {' '}first, then tap Switch.
       </p>
 
       {error && (
-        <div className="mx-4 sm:mx-5 mb-4 flex gap-2 px-3 py-2.5 rounded-lg text-xs leading-relaxed text-amber-300"
-             style={{ background: 'rgba(245,158,11,0.1)' }}>
+        <div className="mx-4 sm:mx-5 mb-4 flex gap-2 px-3 py-2.5 rounded-lg text-xs leading-relaxed text-warn bg-amber-500/10">
           <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
           <span className="break-words">{error}</span>
         </div>
@@ -734,9 +732,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       {/* THE OFFER SITS WHERE THE REFUSAL IS. Until now the answer to "you need a signing key" was a
           guide: install a JDK, run keytool with six flags, base64 the file, paste four secrets. */}
       {signingGap && !newKey && (
-        <div className="mx-4 sm:mx-5 mb-4 px-3 py-3 rounded-lg text-xs leading-relaxed text-white/80 border border-white/10"
-             style={{ background: 'rgba(99,102,241,0.08)' }}>
-          <p className="font-bold text-white mb-1">NavBharatAI can create it for you</p>
+        <div className="mx-4 sm:mx-5 mb-4 px-3 py-3 rounded-lg text-xs leading-relaxed text-body border border-line bg-indigo-500/8">
+          <p className="font-bold text-ink mb-1">NavBharatAI can create it for you</p>
           <p className="mb-2.5">
             One press makes your signing key and saves it to your own GitHub repository, encrypted. You
             get the file to keep, and the Play Store build works from then on.
@@ -744,7 +741,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           <button
             onClick={() => void createSigningKey()}
             disabled={makingKey}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
           >
             {makingKey ? <Loader2 size={15} className="animate-spin" /> : <Key size={15} />}
             {makingKey ? 'Creating your signing key…' : 'Create my signing key'}
@@ -755,16 +752,15 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       {/* SHOWN ONCE, AND SAID PLAINLY. This is the only moment the key exists outside the repository —
           NavBharatAI keeps no copy, so "save it" here is a real instruction, not boilerplate. */}
       {newKey && (
-        <div className="mx-4 sm:mx-5 mb-4 px-3 py-3 rounded-lg text-xs leading-relaxed text-emerald-200 border border-emerald-500/25"
-             style={{ background: 'rgba(16,185,129,0.08)' }}>
-          <p className="font-bold text-emerald-100 mb-1">Your signing key is ready</p>
+        <div className="mx-4 sm:mx-5 mb-4 px-3 py-3 rounded-lg text-xs leading-relaxed text-success border border-emerald-500/25 bg-emerald-500/8">
+          <p className="font-bold text-success mb-1">Your signing key is ready</p>
           <p className="mb-2">
             It is saved in your GitHub repository, so builds can use it. The file has been downloaded to
             this device — keep it somewhere safe. NavBharatAI does not keep a copy.
           </p>
-          <p className="text-[11px] text-white/60 break-all">Password: <span className="text-white">{newKey.password}</span></p>
-          <p className="text-[11px] text-white/60 break-all">Alias: <span className="text-white">{newKey.alias}</span></p>
-          <p className="text-[11px] text-white/60 break-all mt-1">SHA-256: {newKey.fingerprint}</p>
+          <p className="text-[11px] text-muted break-all">Password: <span className="text-ink">{newKey.password}</span></p>
+          <p className="text-[11px] text-muted break-all">Alias: <span className="text-ink">{newKey.alias}</span></p>
+          <p className="text-[11px] text-muted break-all mt-1">SHA-256: {newKey.fingerprint}</p>
         </div>
       )}
 
@@ -775,7 +771,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             <button
               onClick={() => void prepare()}
               disabled={phase === 'preparing' || !sessionId}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
             >
               {phase === 'preparing' ? <Loader2 size={17} className="animate-spin" /> : <Github size={17} />}
               {phase === 'preparing' ? 'Preparing…' : 'Get my app ready to build'}
@@ -784,33 +780,33 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 Store", so a user who only wanted an installable APK read it as "not for me" and never
                 pressed it — the APK button lives on the NEXT screen, so they never reached it. The step
                 is shared by BOTH paths, so it is named neutrally and says what comes next. */}
-            <p className="text-[11px] text-white/45 text-center leading-relaxed">
+            <p className="text-[11px] text-muted text-center leading-relaxed">
               First step for both: your app goes to your own GitHub. Next you can build an
-              installable <span className="text-white/70 font-medium">.apk</span> in one click — no
+              installable <span className="text-body font-medium">.apk</span> in one click — no
               signing key needed — or the Play Store bundle.
             </p>
-            {busyNote && <p className="text-xs text-white/50 text-center">{busyNote}</p>}
+            {busyNote && <p className="text-xs text-muted text-center">{busyNote}</p>}
           </>
         )}
 
         {/* Step 2 — prepared, waiting for the signing key */}
         {setup && phase !== 'idle' && phase !== 'preparing' && (
-          <div className="rounded-lg border border-white/10 p-3 text-xs" style={{ background: 'var(--surface-base)' }}>
-            <p className="flex items-center gap-1.5 text-green-400 font-semibold mb-1.5">
+          <div className="rounded-lg border border-line p-3 text-xs" style={{ background: 'var(--surface-base)' }}>
+            <p className="flex items-center gap-1.5 text-success font-semibold mb-1.5">
               <CheckCircle2 size={13} />
               {setup.createdRepo ? 'Created' : 'Updated'} {setup.owner}/{setup.repo}
             </p>
-            <p className="text-white/50 leading-relaxed">
+            <p className="text-muted leading-relaxed">
               {setup.fileCount} files sent{setup.kind === 'static' ? ' (your pages are packaged as they are)' : ' (your app builds itself first)'}.
             </p>
             {setup.notes.map((n, i) => (
-              <p key={i} className="text-white/40 leading-relaxed mt-1.5">• {n}</p>
+              <p key={i} className="text-faint leading-relaxed mt-1.5">• {n}</p>
             ))}
             <a
               href={setup.repoUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 mt-2 text-indigo-400 hover:text-indigo-300"
+              className="inline-flex items-center gap-1 mt-2 text-accent-text hover:text-accent-text"
             >
               <ExternalLink size={11} /> Open it on GitHub
             </a>
@@ -824,21 +820,20 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 the SAME classifier the self-heal uses — with the build's own log lines underneath for
                 anyone who wants the detail. */}
             {phase === 'failed' && failReport?.failure && (
-              <div className="rounded-lg border border-red-500/25 p-3 text-xs leading-relaxed"
-                   style={{ background: 'rgba(239,68,68,0.06)' }}>
-                <p className="flex items-center gap-1.5 text-red-300 font-semibold mb-1.5">
+              <div className="rounded-lg border border-red-500/25 p-3 text-xs leading-relaxed bg-red-500/6">
+                <p className="flex items-center gap-1.5 text-danger font-semibold mb-1.5">
                   <AlertTriangle size={13} /> Why this build failed
                 </p>
-                <p className="text-white/70">
-                  Stopped at: <span className="text-white/90 font-medium">{failReport.failure.whatStopped}</span>
+                <p className="text-body">
+                  Stopped at: <span className="text-body font-medium">{failReport.failure.whatStopped}</span>
                 </p>
-                <p className="text-white/70 mt-1.5">{failReport.failure.why}</p>
+                <p className="text-body mt-1.5">{failReport.failure.why}</p>
                 {failReport.failure.logExcerpt.length > 0 && (
                   <details className="mt-2">
-                    <summary className="cursor-pointer text-white/50 hover:text-white/80 select-none">
+                    <summary className="cursor-pointer text-muted hover:text-body select-none">
                       Show the build&apos;s own log lines
                     </summary>
-                    <pre className="mt-1.5 max-h-48 overflow-auto rounded bg-black/40 p-2 text-[10px] text-white/60 whitespace-pre-wrap break-words">
+                    <pre className="mt-1.5 max-h-48 overflow-auto rounded bg-well p-2 text-[10px] text-muted whitespace-pre-wrap break-words">
                       {failReport.failure.logExcerpt.join('\n')}
                     </pre>
                   </details>
@@ -849,7 +844,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             {/* PRIMARY — the one-click path. No keys, no secrets, nothing for the user to set up. */}
             <button
               onClick={() => build('apk')}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-green-600 hover:bg-green-500 transition-colors text-white"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-green-600 hover:bg-green-500 transition-colors text-on-accent"
             >
               <Rocket size={17} /> {phase === 'failed' ? 'Try again' : 'Build my APK now'}
             </button>
@@ -867,17 +862,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                       detail: { view: 'nbi_pro_chat', fixPrompt: fixReport, autoSend: true },
                     }));
                   }}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 transition-colors text-white"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 transition-colors text-on-accent"
                 >
                   <Wrench size={17} /> Fix this with NavBharatAI
                 </button>
-                <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
+                <p className="text-[11px] text-muted leading-relaxed -mt-1">
                   Opens NavBharatAI Pro with the full error and starts fixing your app&apos;s code.
                   Come back and press &ldquo;Try again&rdquo; once it is done.
                 </p>
               </>
             )}
-            <p className="text-[11px] text-white/45 leading-relaxed -mt-1">
+            <p className="text-[11px] text-muted leading-relaxed -mt-1">
               Installs straight onto any Android phone. Nothing to set up — no signing key needed.
               (This file cannot go on Google Play; for that, use the option below.)
               {' '}₹1 per built app file (.apk, Play Store .aab, or iOS .ipa alike), taken from your
@@ -886,12 +881,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             </p>
 
             {/* SECONDARY — Google Play. This is the only path that genuinely needs the user's own key. */}
-            <div className="rounded-lg border border-amber-500/25 p-3 text-xs leading-relaxed"
-                 style={{ background: 'rgba(245,158,11,0.07)' }}>
-              <p className="flex items-center gap-1.5 text-amber-300 font-semibold mb-1.5">
+            <div className="rounded-lg border border-amber-500/25 p-3 text-xs leading-relaxed bg-amber-500/7">
+              <p className="flex items-center gap-1.5 text-warn font-semibold mb-1.5">
                 <Key size={13} /> Publishing on Google Play? One thing only you can do
               </p>
-              <p className="text-white/60">
+              <p className="text-muted">
                 Play needs a signed bundle, so add your signing key to the repository as
                 {' '}{setup.requiredSecrets.android.length} secrets. This key is your app's permanent
                 identity on the Play Store — it must stay with you, and NavBharatAI never sees it.
@@ -900,21 +894,21 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   non-technical user nothing about what to actually put in them. */}
               <ul className="mt-2 space-y-1.5">
                 {setup.requiredSecrets.android.map((s) => (
-                  <li key={s.name} className="text-white/55">
-                    <span className="text-white/85 font-mono text-[11px]">{s.name}</span>
+                  <li key={s.name} className="text-muted">
+                    <span className="text-body font-mono text-[11px]">{s.name}</span>
                     {s.what ? <> — {s.what}</> : null}
                   </li>
                 ))}
               </ul>
-              <p className="text-white/60 mt-2">The guide walks through creating it, step by step.</p>
+              <p className="text-muted mt-2">The guide walks through creating it, step by step.</p>
               {onOpenGuide && (
-                <button onClick={onOpenGuide} className="mt-2 text-indigo-400 hover:text-indigo-300 font-medium">
+                <button onClick={onOpenGuide} className="mt-2 text-accent-text hover:text-accent-text font-medium">
                   Show me how, step by step →
                 </button>
               )}
               <button
                 onClick={() => build('aab')}
-                className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-amber-500/40 text-amber-200 hover:bg-amber-500/10 transition-colors"
+                className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-amber-500/40 text-warn hover:bg-amber-500/10 transition-colors"
               >
                 <Rocket size={14} /> Build the Play Store bundle
               </button>
@@ -925,12 +919,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 needs a keystore. A successful build goes straight to TestFlight (there is no installable
                 file for the user to download — Apple's rule), and the panel says so honestly. */}
             {setup.requiredSecrets.ios.length > 0 && (
-              <div className="rounded-lg border border-sky-500/25 p-3 text-xs leading-relaxed"
-                   style={{ background: 'rgba(56,189,248,0.07)' }}>
-                <p className="flex items-center gap-1.5 text-sky-300 font-semibold mb-1.5">
+              <div className="rounded-lg border border-sky-500/25 p-3 text-xs leading-relaxed bg-sky-500/7">
+                <p className="flex items-center gap-1.5 text-info font-semibold mb-1.5">
                   <Key size={13} /> Building for iPhone? What only you can do
                 </p>
-                <p className="text-white/60">
+                <p className="text-muted">
                   Apple only lets an app reach an iPhone through TestFlight or the App Store, and only from
                   a Mac with your own Apple signing identity. Add your Apple credentials to the repository
                   as {setup.requiredSecrets.ios.length} secrets — they are yours, and NavBharatAI never
@@ -938,20 +931,20 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 </p>
                 <ul className="mt-2 space-y-1.5">
                   {setup.requiredSecrets.ios.map((s) => (
-                    <li key={s.name} className="text-white/55">
-                      <span className="text-white/85 font-mono text-[11px]">{s.name}</span>
+                    <li key={s.name} className="text-muted">
+                      <span className="text-body font-mono text-[11px]">{s.name}</span>
                       {s.what ? <> — {s.what}</> : null}
                     </li>
                   ))}
                 </ul>
                 {onOpenGuide && (
-                  <button onClick={onOpenGuide} className="mt-2 text-indigo-400 hover:text-indigo-300 font-medium">
+                  <button onClick={onOpenGuide} className="mt-2 text-accent-text hover:text-accent-text font-medium">
                     Show me how, step by step →
                   </button>
                 )}
                 <button
                   onClick={() => build('ipa')}
-                  className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-sky-500/40 text-sky-200 hover:bg-sky-500/10 transition-colors"
+                  className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold border border-sky-500/40 text-info hover:bg-sky-500/10 transition-colors"
                 >
                   <Rocket size={14} /> Build for iPhone (TestFlight)
                 </button>
@@ -963,7 +956,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               href={`https://github.com/${setup.owner}/${setup.repo}/actions`}
               target="_blank"
               rel="noreferrer"
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors text-white/60"
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-line hover:bg-raised transition-colors text-muted"
             >
               <ExternalLink size={12} /> Open this app's builds on GitHub
             </a>
@@ -972,16 +965,16 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
 
         {/* Step 3 — building. One number, one line of plain language, and nothing to do. */}
         {phase === 'building' && (
-          <div className="rounded-lg border border-white/10 p-4 text-center" style={{ background: 'var(--surface-base)' }}>
-            <p className="text-3xl font-bold text-white tabular-nums">{progress}%</p>
-            <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden my-3">
+          <div className="rounded-lg border border-line p-4 text-center" style={{ background: 'var(--surface-base)' }}>
+            <p className="text-3xl font-bold text-ink tabular-nums">{progress}%</p>
+            <div className="h-1.5 w-full rounded-full bg-raised overflow-hidden my-3">
               <div
-                className="h-full rounded-full bg-indigo-500 transition-all duration-700 ease-out"
+                className="h-full rounded-full bg-indigo-500 transition-all duration-700 ease-out text-on-accent"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="flex items-center justify-center gap-1.5 text-sm text-white/80 font-medium">
-              <Loader2 size={13} className="animate-spin text-indigo-400" />
+            <p className="flex items-center justify-center gap-1.5 text-sm text-body font-medium">
+              <Loader2 size={13} className="animate-spin text-accent-text" />
               {progressNote || 'Building your app…'}
             </p>
             {/* The REAL steps of the build, straight from GitHub — so the user sees exactly where it is. */}
@@ -990,36 +983,36 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                 {steps.map((s, i) => (
                   <li key={`${s.label}-${i}`} className="flex items-center gap-2 text-xs">
                     {s.state === 'done' ? (
-                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                      <CheckCircle2 size={13} className="text-success shrink-0" />
                     ) : s.state === 'running' ? (
-                      <Loader2 size={13} className="animate-spin text-indigo-400 shrink-0" />
+                      <Loader2 size={13} className="animate-spin text-accent-text shrink-0" />
                     ) : s.state === 'failed' ? (
-                      <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                      <AlertTriangle size={13} className="text-warn shrink-0" />
                     ) : (
-                      <span className="w-[13px] h-[13px] rounded-full border border-white/20 shrink-0" />
+                      <span className="w-[13px] h-[13px] rounded-full border border-line shrink-0" />
                     )}
                     <span className={
-                      s.state === 'done' ? 'text-white/45'
-                        : s.state === 'running' ? 'text-white/90 font-medium'
-                          : s.state === 'failed' ? 'text-amber-300'
-                            : 'text-white/40'
+                      s.state === 'done' ? 'text-muted'
+                        : s.state === 'running' ? 'text-body font-medium'
+                          : s.state === 'failed' ? 'text-warn'
+                            : 'text-faint'
                     }>{s.label}</span>
                   </li>
                 ))}
               </ul>
             )}
             {/* An honest clock: how long it has been running, against how long these builds usually take. */}
-            <p className="text-xs text-white/55 mt-3 tabular-nums">
+            <p className="text-xs text-muted mt-3 tabular-nums">
               {fmtDuration(elapsedSec)} elapsed · usually about {isIos(buildKind) ? '8' : '5'} minutes
             </p>
-            <p className="text-xs text-white/40 mt-1 leading-relaxed">
+            <p className="text-xs text-faint mt-1 leading-relaxed">
               This runs on its own — if anything goes wrong NavBharatAI fixes it and starts again. You can
               leave this screen open.
               {attempt > 0 && ` (Attempt ${attempt + 1} of ${MAX_AUTO_ATTEMPTS}.)`}
             </p>
             {run && (
               <a href={run.url} target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1 mt-2 text-xs text-white/35 hover:text-indigo-300">
+                 className="inline-flex items-center gap-1 mt-2 text-xs text-faint hover:text-accent-text">
                 <ExternalLink size={11} /> Watch the details
               </a>
             )}
@@ -1029,7 +1022,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             <button
               onClick={() => void stopBuild()}
               disabled={stopping}
-              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+              className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-red-500/40 text-danger hover:bg-red-500/10 disabled:opacity-40 transition-colors"
             >
               {stopping ? <Loader2 size={13} className="animate-spin" /> : <CircleStop size={13} />}
               {stopping ? 'Stopping…' : 'Stop this build'}
@@ -1042,22 +1035,22 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             instead of showing a download button that would hand over an unusable .ipa. */}
         {phase === 'built' && isIos(buildKind) && (
           <div className="space-y-2">
-            <p className="flex items-center gap-1.5 text-sm text-green-400 font-semibold">
+            <p className="flex items-center gap-1.5 text-sm text-success font-semibold">
               <CheckCircle2 size={15} /> Sent to TestFlight
             </p>
-            <p className="text-xs text-white/55 leading-relaxed">
+            <p className="text-xs text-muted leading-relaxed">
               Your iPhone app was built and uploaded to TestFlight. Open App Store Connect → your app →
               TestFlight to invite testers; internal testers get it automatically once Apple finishes
               processing (a few minutes). An iPhone app can only be installed through TestFlight or the App
               Store, so there is no file to download here.
             </p>
             <a href="https://appstoreconnect.apple.com/apps" target="_blank" rel="noreferrer"
-               className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+               className="inline-flex items-center gap-1 text-xs text-accent-text hover:text-accent-text">
               <ExternalLink size={11} /> Open App Store Connect
             </a>
             {run && (
               <a href={run.url} target="_blank" rel="noreferrer"
-                 className="block text-[11px] text-white/35 hover:text-indigo-300">Watch the build details</a>
+                 className="block text-[11px] text-faint hover:text-accent-text">Watch the build details</a>
             )}
           </div>
         )}
@@ -1066,7 +1059,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         {phase === 'built' && !isIos(buildKind) && (
           artifacts.length > 0 ? (
             <div className="space-y-2">
-              <p className="flex items-center gap-1.5 text-sm text-green-400 font-semibold">
+              <p className="flex items-center gap-1.5 text-sm text-success font-semibold">
                 <CheckCircle2 size={15} /> Your app is ready
               </p>
               {artifacts.map((a) => (
@@ -1074,7 +1067,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   key={a.id}
                   onClick={() => void download(a)}
                   disabled={downloading === String(a.id)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 transition-colors text-white"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 transition-colors text-on-accent"
                 >
                   {downloading === String(a.id) ? <Loader2 size={17} className="animate-spin" /> : <Download size={17} />}
                   Download {/apk/i.test(a.name) ? '.apk (install on a phone)' : '.aab (upload to Play Store)'}
@@ -1086,11 +1079,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   the per-BUILD rule is stated here because a bare price on a re-downloadable file
                   guarantees the "it charged me twice!" message. */}
               {APK_PRICE_INR > 0 && (
-                <p className="text-[11px] text-[#8b949e] text-center">{chargeHint(APK_PRICE_INR)}</p>
+                <p className="text-[11px] text-muted text-center">{chargeHint(APK_PRICE_INR)}</p>
               )}
               {/* …and what it actually cost, once the file is in their hands. */}
               {chargeNote && (
-                <p className="text-[11px] text-emerald-300 text-center font-semibold">{chargeNote}</p>
+                <p className="text-[11px] text-success text-center font-semibold">{chargeNote}</p>
               )}
               {/* Publish straight from this build (admin 2026-08-04). Offered ONLY for the .apk: the
                   App Mart installs apps, and a .aab is a Play Store bundle no phone can install —
@@ -1105,7 +1098,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
                   defaultAppName={setup.repo}
                 />
               ))}
-              <p className="text-[11px] text-white/40 leading-relaxed">
+              <p className="text-[11px] text-faint leading-relaxed">
                 {buildKind === 'apk'
                   ? 'Copy this .apk to an Android phone and open it — allow "install from unknown sources" when asked. It is for installing and sharing; Google Play needs the signed bundle instead.'
                   : 'The .aab is what Google Play wants. The .apk beside it is the one you can send to someone to install directly.'}
@@ -1114,8 +1107,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
             </div>
           ) : (
             // A green build with no artifact is a real state, and pretending otherwise would be a lie.
-            <div className="rounded-lg border border-amber-500/25 p-3 text-xs text-amber-300 leading-relaxed"
-                 style={{ background: 'rgba(245,158,11,0.07)' }}>
+            <div className="rounded-lg border border-amber-500/25 p-3 text-xs text-warn leading-relaxed bg-amber-500/7">
               The build finished but produced no downloadable file. Open it on GitHub to see what it did.
             </div>
           )
@@ -1128,7 +1120,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           <button
             onClick={() => void downloadReport()}
             disabled={reportBusy}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 disabled:opacity-40 transition-colors text-white/60"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-line hover:bg-raised disabled:opacity-40 transition-colors text-muted"
           >
             {reportBusy ? <Loader2 size={12} className="animate-spin" /> : <FileJson size={12} />}
             Download build report (JSON)
@@ -1138,7 +1130,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         {(phase === 'built' || phase === 'failed') && setup && (
           <button
             onClick={() => { setPhase('ready'); setError(''); setArtifacts([]); setProgress(0); setAttempt(0); setFailReport(null); }}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors text-white/60"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-line hover:bg-raised transition-colors text-muted"
           >
             <RefreshCw size={12} /> Start over
           </button>

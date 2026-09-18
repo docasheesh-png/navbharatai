@@ -87,49 +87,49 @@ const QUICK_TOOLS = [
   {
     label: 'Clinical Scores',
     icon: BarChart2,
-    color: 'text-blue-400 border-blue-800/40 hover:bg-blue-950/50',
+    color: 'text-info border-blue-800/40 hover:bg-blue-500/10',
     prompt: 'Using all clinical data collected so far, calculate every applicable severity score: SOFA (if sepsis/ICU), qSOFA (sepsis screening), GCS (if neuro), CURB-65 (if pneumonia), Wells score (if PE/DVT suspected), NIHSS (if stroke), Killip class (if cardiac). Show step-by-step calculation, score value, and clinical interpretation with recommended action for each.',
   },
   {
     label: 'Drug Interactions',
     icon: Pill,
-    color: 'text-red-400 border-red-800/40 hover:bg-red-950/50',
+    color: 'text-danger border-red-800/40 hover:bg-red-500/10',
     prompt: 'List all medications mentioned in this case (current meds + those being prescribed). Check every combination for drug-drug interactions. For each interaction found: severity (mild/moderate/severe/contraindicated), mechanism, clinical consequence, and management (avoid/monitor/dose adjust). Also check for drug-disease contraindications given this patient\'s comorbidities.',
   },
   {
     label: 'Lab Values',
     icon: TestTube,
-    color: 'text-purple-400 border-purple-800/40 hover:bg-purple-950/50',
+    color: 'text-accent-text border-purple-800/40 hover:bg-purple-500/10',
     prompt: 'Interpret all laboratory and investigation values mentioned in this case. For each value: normal range, patient\'s value, whether abnormal (and critically so), clinical significance in this patient\'s context, and what diagnosis or condition it supports. Highlight any critically abnormal values requiring immediate action.',
   },
   {
     label: 'Peds Dosing',
     icon: Baby,
-    color: 'text-emerald-400 border-emerald-800/40 hover:bg-emerald-950/50',
+    color: 'text-success border-emerald-800/40 hover:bg-emerald-500/10',
     prompt: 'For this pediatric patient, calculate weight-based doses for all medications being considered. Provide: dose in mg/kg, total dose for this patient\'s weight, frequency, route, maximum dose limit, any renal/hepatic dose adjustments. Use standard pediatric dosing references (BNF for Children / Harriet Lane).',
   },
   {
     label: 'Emergency Protocol',
     icon: Zap,
-    color: 'text-orange-400 border-orange-800/40 hover:bg-orange-950/50',
+    color: 'text-warn border-orange-800/40 hover:bg-orange-500/10',
     prompt: 'Based on this clinical picture, provide the immediate emergency management protocol. Include: triage priority, ABCDE approach, immediate stabilization steps, monitoring parameters, emergency medications with doses/timing, which emergency bundles to activate (sepsis 3-hour bundle, STEMI protocol, stroke pathway, anaphylaxis etc.), and ICU escalation criteria.',
   },
   {
     label: 'Antibiotic Guide',
     icon: Shield,
-    color: 'text-teal-400 border-teal-800/40 hover:bg-teal-950/50',
+    color: 'text-success border-teal-800/40 hover:bg-teal-500/10',
     prompt: 'Provide evidence-based antibiotic recommendations for this infection. Include: suspected organism(s), first-line antibiotic (drug, dose, frequency, route, duration), second-line alternative, allergy substitution, empirical vs targeted therapy, culture-sensitivity adjustment strategy, de-escalation criteria, and antibiotic stewardship points to minimize resistance.',
   },
   {
     label: 'Pregnancy Safety',
     icon: Heart,
-    color: 'text-pink-400 border-pink-800/40 hover:bg-pink-950/50',
+    color: 'text-accent-text border-pink-800/40 hover:bg-pink-500/10',
     prompt: 'For all medications being considered in this case, provide complete pregnancy safety information: FDA pregnancy category (A/B/C/D/X), specific teratogenic risks by trimester, breast milk transfer and infant risk, safer alternatives if category C/D/X, and dose adjustments in pregnancy. Note any pregnancy-specific management changes for this condition.',
   },
   {
     label: 'Refer?',
     icon: Navigation,
-    color: 'text-indigo-400 border-indigo-800/40 hover:bg-indigo-950/50',
+    color: 'text-accent-text border-indigo-800/40 hover:bg-indigo-500/10',
     prompt: 'Based on the complete clinical picture, make a referral decision: Should this patient be referred or managed here? If referral: which specialty, urgency (emergency/urgent within 24h/routine/elective), reason for referral, pre-referral workup to complete, and full content for the referral letter. If managing locally: define clear escalation criteria that would trigger referral.',
   },
 ];
@@ -748,17 +748,17 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full bg-[#0a0f1a] overflow-hidden">
+    <div className="flex h-full bg-surface overflow-hidden">
       {/* In-chat image lightbox */}
       {lightbox && (
         <div
-          className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[200] bg-scrim flex items-center justify-center p-4"
           onClick={() => setLightbox(null)}
         >
           <div className="relative max-w-[95vw] max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
             <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] rounded-2xl shadow-2xl object-contain" />
-            <p className="text-[10px] text-white/60 font-mono truncate max-w-full">{lightbox.name}</p>
-            <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-white/10 hover:bg-white/25 rounded-full flex items-center justify-center text-white transition-colors border border-white/20">
+            <p className="text-[10px] text-muted font-mono truncate max-w-full">{lightbox.name}</p>
+            <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised rounded-full flex items-center justify-center text-ink transition-colors border border-line">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -767,21 +767,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
       {/* ── Left Panel ──────────────────────────────────────────────────── */}
       {showPatientPanel && (
-        <div className="w-64 shrink-0 bg-[#0d1520] border-r border-emerald-900/30 flex-col overflow-hidden hidden md:flex">
+        <div className="w-64 shrink-0 bg-surface border-r border-emerald-900/30 flex-col overflow-hidden hidden md:flex">
           <div className="px-4 py-3 border-b border-emerald-900/30 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <User className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Patient Info</span>
+              <User className="w-3.5 h-3.5 text-success" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-success">Patient Info</span>
             </div>
-            <button onClick={() => setShowPatientPanel(false)} className="text-[#484f58] hover:text-white p-1">
+            <button onClick={() => setShowPatientPanel(false)} className="text-faint hover:text-ink p-1">
               <X className="w-3 h-3" />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
             {/* Demographics */}
-            <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
-              <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-2">Demographics</p>
+            <div className="bg-card rounded-xl p-3 border border-line">
+              <p className="text-[9px] text-faint font-black uppercase tracking-widest mb-2">Demographics</p>
               <div className="space-y-1.5">
                 {[
                   { label: 'Age', value: patient.age },
@@ -789,30 +789,30 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   { label: 'Weight', value: patient.weight },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between items-center">
-                    <span className="text-[10px] text-[#484f58]">{label}</span>
-                    <span className={cn("text-[10px] font-medium", value ? 'text-white' : 'text-[#2d3748]')}>{value || '—'}</span>
+                    <span className="text-[10px] text-faint">{label}</span>
+                    <span className={cn("text-[10px] font-medium", value ? 'text-ink' : 'text-faint')}>{value || '—'}</span>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Chief Complaint */}
-            <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
-              <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-1.5">Chief Complaint</p>
-              <p className={cn("text-[11px]", patient.chiefComplaint ? 'text-emerald-300 font-medium' : 'text-[#2d3748]')}>
+            <div className="bg-card rounded-xl p-3 border border-line">
+              <p className="text-[9px] text-faint font-black uppercase tracking-widest mb-1.5">Chief Complaint</p>
+              <p className={cn("text-[11px]", patient.chiefComplaint ? 'text-success font-medium' : 'text-faint')}>
                 {patient.chiefComplaint || 'Not recorded yet'}
               </p>
             </div>
 
             {/* Vitals */}
             {patient.vitals && patient.vitals.length > 0 && (
-              <div className="bg-[#111827] rounded-xl p-3 border border-white/5">
-                <p className="text-[9px] text-[#484f58] font-black uppercase tracking-widest mb-2">Vitals</p>
+              <div className="bg-card rounded-xl p-3 border border-line">
+                <p className="text-[9px] text-faint font-black uppercase tracking-widest mb-2">Vitals</p>
                 <div className="space-y-1.5">
                   {patient.vitals.map(v => (
                     <div key={v.label} className="flex justify-between items-center">
-                      <span className="text-[10px] text-[#484f58]">{v.label}</span>
-                      <span className={cn("text-[10px] font-mono font-bold", v.alert ? 'text-red-400' : 'text-white')}>{v.value}</span>
+                      <span className="text-[10px] text-faint">{v.label}</span>
+                      <span className={cn("text-[10px] font-mono font-bold", v.alert ? 'text-danger' : 'text-ink')}>{v.value}</span>
                     </div>
                   ))}
                 </div>
@@ -821,13 +821,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
             {/* Red Flags */}
             {activeRedFlags.length > 0 && (
-              <div className="bg-red-950/40 rounded-xl p-3 border border-red-500/30">
-                <p className="text-[9px] text-red-400 font-black uppercase tracking-widest mb-2 flex items-center gap-1">
+              <div className="bg-red-500/10 rounded-xl p-3 border border-red-500/30">
+                <p className="text-[9px] text-danger font-black uppercase tracking-widest mb-2 flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" /> Red Flags
                 </p>
                 <div className="space-y-1">
                   {activeRedFlags.map((flag, i) => (
-                    <p key={i} className="text-[10px] text-red-300">• {flag}</p>
+                    <p key={i} className="text-[10px] text-danger">• {flag}</p>
                   ))}
                 </div>
               </div>
@@ -837,15 +837,15 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           {/* Panel Actions */}
           <div className="p-3 border-t border-emerald-900/30 space-y-2">
             <button onClick={requestSummary} disabled={loading || messages.length < 3}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/30 rounded-lg text-[10px] font-black text-emerald-300 uppercase tracking-widest transition-all disabled:opacity-40">
+              className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/10 border border-emerald-700/30 rounded-lg text-[10px] font-black text-success uppercase tracking-widest transition-all disabled:opacity-40">
               <FileText className="w-3.5 h-3.5" /> Case Summary
             </button>
             <button onClick={requestMissingCheck} disabled={loading || messages.length < 3}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-indigo-900/20 hover:bg-indigo-900/40 border border-indigo-700/20 rounded-lg text-[10px] font-black text-indigo-300 uppercase tracking-widest transition-all disabled:opacity-40">
+              className="w-full flex items-center gap-2 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/10 border border-indigo-700/20 rounded-lg text-[10px] font-black text-accent-text uppercase tracking-widest transition-all disabled:opacity-40">
               <ClipboardList className="w-3.5 h-3.5" /> What Am I Missing?
             </button>
             <button onClick={generatePDF} disabled={messages.length < 2}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-black text-[#8b949e] hover:text-white uppercase tracking-widest transition-all disabled:opacity-40">
+              className="w-full flex items-center gap-2 px-3 py-2 bg-raised hover:bg-raised border border-line rounded-lg text-[10px] font-black text-muted hover:text-ink uppercase tracking-widest transition-all disabled:opacity-40">
               <Download className="w-3.5 h-3.5" /> Download PDF
             </button>
           </div>
@@ -860,19 +860,19 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             wide-screen affordances — on a narrow screen the title alone identifies the surface, and
             "Doctor Use Only" is carried by the always-visible disclaimer row above the composer. Both
             return at `sm`. Padding tightened; nothing removed from the wide layout. */}
-        <div className="shrink-0 bg-[#0d1520] border-b border-emerald-900/30 px-4 py-1.5 sm:py-2.5 flex items-center justify-between">
+        <div className="shrink-0 bg-surface border-b border-emerald-900/30 px-4 py-1.5 sm:py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {!showPatientPanel && (
-              <button onClick={() => setShowPatientPanel(true)} className="p-1.5 hover:bg-white/10 rounded-lg text-[#484f58] hover:text-emerald-400 transition-colors shrink-0">
+              <button onClick={() => setShowPatientPanel(true)} className="p-1.5 hover:bg-raised rounded-lg text-faint hover:text-success transition-colors shrink-0">
                 <User className="w-4 h-4" />
               </button>
             )}
-            <div className="hidden sm:flex w-7 h-7 rounded-lg bg-emerald-900/40 border border-emerald-700/40 items-center justify-center shrink-0">
-              <Stethoscope className="w-3.5 h-3.5 text-emerald-400" />
+            <div className="hidden sm:flex w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-700/40 items-center justify-center shrink-0">
+              <Stethoscope className="w-3.5 h-3.5 text-success" />
             </div>
             <div className="min-w-0">
-              <p className="text-[12px] font-black text-white tracking-wide truncate">Senior Doctor Assistant</p>
-              <p className="hidden sm:block text-[9px] text-emerald-600 font-medium">Clinical Decision Support · Doctor Use Only</p>
+              <p className="text-[12px] font-black text-ink tracking-wide truncate">Senior Doctor Assistant</p>
+              <p className="hidden sm:block text-[9px] text-success font-medium">Clinical Decision Support · Doctor Use Only</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -881,19 +881,19 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 no spelling — the three ways the chat path failed this exact user in two days. */}
             <button onClick={() => setShowDoseCalc(true)}
               title="Newborn dose calculator — instant mg and mL from the FBNC chart"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-900/30 border border-emerald-700/40 text-emerald-300 hover:text-white hover:bg-emerald-800/40 transition-all">
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-500/10 border border-emerald-700/40 text-success hover:text-ink hover:bg-emerald-500/10 transition-all">
               <Pill className="w-3 h-3" />
               <span className="hidden sm:inline">Dose</span>
             </button>
             <button onClick={generatePDF} disabled={messages.length < 2}
               title="Download case as PDF"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all disabled:opacity-40">
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-raised border border-line text-faint hover:text-ink hover:bg-raised transition-all disabled:opacity-40">
               <Download className="w-3 h-3" />
               <span className="hidden sm:inline">PDF</span>
             </button>
             <button onClick={() => setTeachingMode(p => !p)}
               className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border",
-                teachingMode ? "bg-amber-900/30 border-amber-600/40 text-amber-300" : "bg-white/5 border-white/10 text-[#484f58] hover:text-white")}>
+                teachingMode ? "bg-amber-500/10 border-amber-600/40 text-warn" : "bg-raised border-line text-faint hover:text-ink")}>
               <BookOpen className="w-3 h-3" />
               <span className="hidden sm:inline">Teaching {teachingMode ? 'ON' : 'OFF'}</span>
             </button>
@@ -902,7 +902,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 expecting a fresh case. A plus is the universal new-chat glyph. Same action, honest icon. */}
             <button onClick={startNewCase}
               title="New chat — start a fresh case"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 border border-white/10 text-[#484f58] hover:text-white hover:bg-white/10 transition-all">
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-raised border border-line text-faint hover:text-ink hover:bg-raised transition-all">
               <Plus className="w-3 h-3" />
               <span className="hidden sm:inline">New Chat</span>
             </button>
@@ -911,13 +911,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
         {/* Red Flag Alert */}
         {activeRedFlags.length > 0 && (
-          <div className="shrink-0 bg-red-950/60 border-b border-red-500/40 px-4 py-2 flex items-center gap-3">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 animate-pulse" />
+          <div className="shrink-0 bg-red-500/10 border-b border-red-500/40 px-4 py-2 flex items-center gap-3">
+            <AlertTriangle className="w-4 h-4 text-danger shrink-0 animate-pulse" />
             <div className="flex-1 min-w-0">
-              <span className="text-[10px] font-black text-red-300 uppercase tracking-widest">Red Flag Alert: </span>
-              <span className="text-[10px] text-red-200">{activeRedFlags.join(' · ')}</span>
+              <span className="text-[10px] font-black text-danger uppercase tracking-widest">Red Flag Alert: </span>
+              <span className="text-[10px] text-danger">{activeRedFlags.join(' · ')}</span>
             </div>
-            <button onClick={() => setActiveRedFlags([])} className="text-red-600 hover:text-red-400 p-1">
+            <button onClick={() => setActiveRedFlags([])} className="text-danger hover:text-danger p-1">
               <X className="w-3 h-3" />
             </button>
           </div>
@@ -933,26 +933,26 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           {filterMessages(messages as any, chatSearchQuery).map((msg: any) => (
             <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
               {msg.sender === 'sda' && (
-                <div className="w-7 h-7 rounded-full bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
-                  <Stethoscope className="w-3.5 h-3.5 text-emerald-400" />
+                <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
+                  <Stethoscope className="w-3.5 h-3.5 text-success" />
                 </div>
               )}
               <div className={cn(
                 "max-w-[80%] rounded-2xl px-4 py-3 text-[12px] leading-relaxed",
                 msg.sender === 'sda'
                   ? msg.isRedFlag
-                    ? "bg-red-950/60 border border-red-500/40 text-red-100"
-                    : "bg-[#111827] border border-white/5 text-[#c9d1d9]"
-                  : "bg-emerald-800/30 border border-emerald-700/30 text-emerald-100"
+                    ? "bg-red-500/10 border border-red-500/40 text-danger"
+                    : "bg-card border border-line text-body"
+                  : "bg-emerald-500/10 border border-emerald-700/30 text-success"
               )}>
                 {msg.isRedFlag && (
                   <div className="flex items-center gap-1.5 mb-2 pb-2 border-b border-red-500/30">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-                    <span className="text-[9px] font-black uppercase tracking-widest text-red-400">Red Flag Detected</span>
+                    <AlertTriangle className="w-3.5 h-3.5 text-danger" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-danger">Red Flag Detected</span>
                   </div>
                 )}
                 {msg.attachedFile && (
-                  <div className="mb-2 pb-2 border-b border-white/10">
+                  <div className="mb-2 pb-2 border-b border-line">
                     {msg.attachedFile.type.startsWith('image/') && msg.attachedFile.dataUrl ? (
                       <button
                         onClick={() => setLightbox({ src: msg.attachedFile!.dataUrl!, name: msg.attachedFile!.name })}
@@ -962,21 +962,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                         <img
                           src={msg.attachedFile.dataUrl}
                           alt={msg.attachedFile.name}
-                          className="w-16 h-16 rounded-lg object-cover border border-white/20 group-hover:brightness-110 transition-all cursor-zoom-in"
+                          className="w-16 h-16 rounded-lg object-cover border border-line group-hover:brightness-110 transition-all cursor-zoom-in"
                         />
-                        <div className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-                          <Navigation className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow rotate-45" />
+                        <div className="absolute inset-0 rounded-lg bg-well group-hover:bg-well transition-colors flex items-center justify-center">
+                          <Navigation className="w-4 h-4 text-ink opacity-0 group-hover:opacity-100 transition-opacity drop-shadow rotate-45" />
                         </div>
                       </button>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <FileSearch className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                        <span className="text-[10px] text-[#8b949e] truncate">{msg.attachedFile.name}</span>
+                        <FileSearch className="w-3.5 h-3.5 text-warn shrink-0" />
+                        <span className="text-[10px] text-muted truncate">{msg.attachedFile.name}</span>
                       </div>
                     )}
                   </div>
                 )}
-                <div className="prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-emerald-300 prose-strong:text-white prose-li:my-0.5">
+                <div className="prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-success prose-strong:text-ink prose-li:my-0.5">
                   {/* The DEFAULT anchor navigates the app's own webview away from NavBharatAI on a
                       phone (admin 2026-08-25). Every source link opens in a new tab instead, and only
                       http/https is ever clickable — this text is model-authored. */}
@@ -984,20 +984,20 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     components={{
                       a: ({ node, href, children, ...props }: any) => (
                         isSafeHttpUrl(String(href ?? ''))
-                          ? <a {...props} href={href} target="_blank" rel="noopener noreferrer" onClick={openInRealBrowser(String(href ?? ''))} className="text-indigo-400 underline underline-offset-2 break-all">{children}</a>
+                          ? <a {...props} href={href} target="_blank" rel="noopener noreferrer" onClick={openInRealBrowser(String(href ?? ''))} className="text-accent-text underline underline-offset-2 break-all">{children}</a>
                           : <>{children}</>
                       ),
                     }}
                   >{msg.text}</ReactMarkdown>
                 </div>
-                <p className="text-[8px] text-[#484f58] mt-2 text-right">
+                <p className="text-[8px] text-faint mt-2 text-right">
                   {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                 </p>
               </div>
               {msg.sender === 'doctor' && (
                 <div className="flex flex-col items-center shrink-0 ml-2.5 mt-0.5 group/msg">
-                  <div className="w-7 h-7 rounded-full bg-indigo-900/40 border border-indigo-700/40 flex items-center justify-center">
-                    <User className="w-3.5 h-3.5 text-indigo-400" />
+                  <div className="w-7 h-7 rounded-full bg-indigo-500/10 border border-indigo-700/40 flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-accent-text" />
                   </div>
                   {/* DELETE + EDIT on something the doctor already said (admin 2026-08-10). See
                       rewindCase() for why this is safe here and not merely cosmetic. */}
@@ -1024,16 +1024,16 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
           {loading && (
             <div className="flex justify-start">
-              <div className="w-7 h-7 rounded-full bg-emerald-900/40 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5">
-                <Stethoscope className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5">
+                <Stethoscope className="w-3.5 h-3.5 text-success" />
               </div>
-              <div className="bg-[#111827] border border-white/5 rounded-2xl px-4 py-3 flex items-center gap-2">
+              <div className="bg-card border border-line rounded-2xl px-4 py-3 flex items-center gap-2">
                 <div className="flex gap-1">
                   {[0, 1, 2].map(i => (
-                    <div key={i} className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                    <div key={i} className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: `${i * 0.15}s` }} />
                   ))}
                 </div>
-                <span className="text-[10px] text-[#484f58]">Analyzing...</span>
+                <span className="text-[10px] text-faint">Analyzing...</span>
               </div>
             </div>
           )}
@@ -1041,16 +1041,16 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           {/* PDF Suggest Card */}
           {suggestPDF && (
             <div className="flex justify-center">
-              <div className="bg-emerald-950/60 border border-emerald-600/40 rounded-2xl px-5 py-3 flex items-center gap-4 max-w-sm">
-                <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
-                <p className="text-[11px] text-emerald-200 flex-1">Case assessment ready. Generate a PDF report?</p>
+              <div className="bg-emerald-500/10 border border-emerald-600/40 rounded-2xl px-5 py-3 flex items-center gap-4 max-w-sm">
+                <FileText className="w-4 h-4 text-success shrink-0" />
+                <p className="text-[11px] text-success flex-1">Case assessment ready. Generate a PDF report?</p>
                 <div className="flex gap-2">
                   <button onClick={generatePDF}
-                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-[10px] font-black text-white transition-all">
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-[10px] font-black text-on-accent transition-all">
                     Yes, Generate
                   </button>
                   <button onClick={() => setSuggestPDF(false)}
-                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] font-black text-[#8b949e] transition-all">
+                    className="px-3 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] font-black text-muted transition-all">
                     Later
                   </button>
                 </div>
@@ -1067,19 +1067,19 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             of space a phone cannot spare. It is still ALWAYS visible — clinical-safety text is never
             hidden behind a tap — it simply shares the row with the tools toggle, and carries its full
             wording in the title attribute. Merging the rows is the whole saving; nothing was removed. */}
-        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/20 px-4 py-1.5">
+        <div className="shrink-0 bg-surface border-t border-emerald-900/20 px-4 py-1.5">
           <div className="flex items-center gap-3">
             <button
               onClick={toggleTools}
               title={showTools ? 'Hide Quick Tools' : 'Show Quick Tools'}
-              className="flex items-center gap-1 shrink-0 text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-emerald-400 transition-colors"
+              className="flex items-center gap-1 shrink-0 text-[9px] font-black uppercase tracking-widest text-faint hover:text-success transition-colors"
             >
               {showTools ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
               Quick Tools
             </button>
             <p
               title="SDA is a clinical decision support tool. All diagnoses and treatment decisions remain the sole responsibility of the treating physician."
-              className="flex-1 min-w-0 text-[8px] leading-tight text-[#2d3748] text-right truncate"
+              className="flex-1 min-w-0 text-[8px] leading-tight text-faint text-right truncate"
             >
               Decision support only — the treating physician remains responsible.
             </p>
@@ -1108,7 +1108,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
         </div>
 
         {/* Input Area */}
-        <div className="shrink-0 bg-[#0d1520] border-t border-emerald-900/30 px-4 pb-3 pt-2">
+        <div className="shrink-0 bg-surface border-t border-emerald-900/30 px-4 pb-3 pt-2">
 
           {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). Doctor AI had
               none of this — no Enter-to-send preference, no way to find something said earlier in a long
@@ -1132,21 +1132,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
           {/* Attached file preview */}
           {attachedFile && (
-            <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-[#111827] border border-emerald-900/40 rounded-xl">
+            <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-card border border-emerald-900/40 rounded-xl">
               {attachedFile.preview ? (
-                <img src={attachedFile.preview} alt="preview" className="w-8 h-8 rounded object-cover border border-white/10 shrink-0" />
+                <img src={attachedFile.preview} alt="preview" className="w-8 h-8 rounded object-cover border border-line shrink-0" />
               ) : (
-                <div className="w-8 h-8 rounded bg-orange-900/30 border border-orange-700/30 flex items-center justify-center shrink-0">
-                  <FileSearch className="w-4 h-4 text-orange-400" />
+                <div className="w-8 h-8 rounded bg-orange-500/10 border border-orange-700/30 flex items-center justify-center shrink-0">
+                  <FileSearch className="w-4 h-4 text-warn" />
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-white font-medium truncate">{attachedFile.name}</p>
-                <p className="text-[9px] text-[#484f58]">
+                <p className="text-[10px] text-ink font-medium truncate">{attachedFile.name}</p>
+                <p className="text-[9px] text-faint">
                   {attachedFile.type.startsWith('image/') ? 'Image' : attachedFile.type === 'application/pdf' ? 'PDF' : 'Document'} · Ready to analyze
                 </p>
               </div>
-              <button onClick={() => setAttachedFile(null)} className="text-[#484f58] hover:text-red-400 p-1 transition-colors">
+              <button onClick={() => setAttachedFile(null)} className="text-faint hover:text-danger p-1 transition-colors">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1154,14 +1154,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
           <div className="flex items-end gap-2">
             {/* Input box */}
-            <div className="flex-1 bg-[#111827] border border-emerald-900/40 focus-within:border-emerald-600/60 rounded-xl transition-all">
+            <div className="flex-1 bg-card border border-emerald-900/40 focus-within:border-emerald-600/60 rounded-xl transition-all">
               <div className="flex items-end px-3 py-2.5 gap-2">
                 {/* Attach button */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading}
                   title="Upload lab report, X-ray, ECG, or any medical document"
-                  className="text-[#484f58] hover:text-emerald-400 transition-colors pb-0.5 shrink-0 disabled:opacity-40"
+                  className="text-faint hover:text-success transition-colors pb-0.5 shrink-0 disabled:opacity-40"
                 >
                   <Paperclip className="w-4 h-4" />
                 </button>
@@ -1176,7 +1176,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                     title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
                     className={cn(
                       "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
-                      isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
+                      isListening ? "text-danger animate-pulse" : "text-faint hover:text-info"
                     )}
                   >
                     {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -1207,7 +1207,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   }}
                   placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
                   rows={1}
-                  className="flex-1 bg-transparent resize-none outline-none text-[12px] text-white placeholder-[#484f58] leading-relaxed overflow-y-auto custom-scrollbar"
+                  className="flex-1 bg-transparent resize-none outline-none text-[12px] text-ink placeholder-faint leading-relaxed overflow-y-auto custom-scrollbar"
                   style={{ minHeight: `${BASE_HEIGHT}px`, maxHeight: `${MAX_HEIGHT}px` }}
                   disabled={loading}
                 />
@@ -1223,7 +1223,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               professionalId="sda"
               title="Talk to SDA by voice — start a live spoken consult"
               icon={<Volume2 className="w-5 h-5" />}
-              className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 hover:text-emerald-200 active:scale-95 transition-all shrink-0 shadow-lg shadow-emerald-900/30"
+              className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-success hover:text-success active:scale-95 transition-all shrink-0 shadow-lg shadow-emerald-900/30"
               getHistory={() =>
                 messages
                   .filter((m) => m.text && m.text.trim())
@@ -1246,17 +1246,17 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               <button
                 onClick={stop}
                 title="Stop"
-                className="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-500 active:scale-95 rounded-xl transition-all shrink-0 shadow-lg shadow-red-900/40"
+                className="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-500 active:scale-95 rounded-xl transition-all shrink-0 shadow-lg shadow-red-900/40 text-on-accent"
               >
-                <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px] text-white">■</span>
+                <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px] text-ink">■</span>
               </button>
             ) : (
               <button
                 onClick={() => { handleSend(); dismissKeyboardOnMobile(inputRef.current); }}
                 disabled={!input.trim() && !attachedFile}
-                className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
+                className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40 text-on-accent"
               >
-                <Send className="w-4 h-4 text-white" />
+                <Send className="w-4 h-4 text-ink" />
               </button>
             )}
           </div>

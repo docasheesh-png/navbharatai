@@ -224,15 +224,15 @@ print(reply.choices[0].message.content)`,
   }), [base]);
 
   return (
-    <div className="bg-[#161b22] border border-indigo-500/20 rounded-2xl p-4 sm:p-5 space-y-5">
+    <div className="bg-card border border-indigo-500/20 rounded-2xl p-4 sm:p-5 space-y-5">
       {/* Header */}
       <div className="flex items-start gap-3">
         <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center shrink-0">
-          <Key className="w-5 h-5 text-indigo-400" />
+          <Key className="w-5 h-5 text-accent-text" />
         </div>
         <div className="min-w-0">
-          <h2 className="text-sm font-black text-white uppercase tracking-widest">NavBharatAI API</h2>
-          <p className="text-[11px] text-[#8b949e] mt-0.5 leading-relaxed">
+          <h2 className="text-sm font-black text-ink uppercase tracking-widest">NavBharatAI API</h2>
+          <p className="text-[11px] text-muted mt-0.5 leading-relaxed">
             Use NavBharatAI from your own program or app — read your account, list your apps, or let your
             software ask NavBharatAI's AI. You choose exactly what each key may do, and how much it may
             spend per day.
@@ -241,10 +241,10 @@ print(reply.choices[0].message.content)`,
       </div>
 
       {!signedIn ? (
-        <div className="bg-[#0d1117] border border-white/5 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-          <p className="text-[11px] text-[#8b949e] flex-1">Sign in to create API keys for your account.</p>
+        <div className="bg-surface border border-line rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <p className="text-[11px] text-muted flex-1">Sign in to create API keys for your account.</p>
           {onShowLogin && (
-            <button onClick={onShowLogin} className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">
+            <button onClick={onShowLogin} className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-on-accent rounded-lg text-xs font-bold">
               <LogIn className="w-3.5 h-3.5" /> Sign in
             </button>
           )}
@@ -254,41 +254,41 @@ print(reply.choices[0].message.content)`,
           {/* One-time reveal of a freshly created key + the live test */}
           {freshKey && (
             <div className="rounded-xl p-3 border border-amber-500/30 bg-amber-500/10 space-y-2">
-              <div className="flex items-center gap-2 text-amber-300 text-[11px] font-black">
+              <div className="flex items-center gap-2 text-warn text-[11px] font-black">
                 <AlertTriangle className="w-3.5 h-3.5" /> Copy this key now — it will not be shown again.
               </div>
               <div className="flex items-center gap-2">
-                <code className="flex-1 text-[11px] text-white bg-black/40 rounded-lg px-3 py-2 font-mono break-all">{freshKey.key}</code>
-                <button onClick={copyFresh} className="px-2 py-2 bg-indigo-600 rounded-lg text-white shrink-0" aria-label="Copy key">
+                <code className="flex-1 text-[11px] text-ink bg-well rounded-lg px-3 py-2 font-mono break-all">{freshKey.key}</code>
+                <button onClick={copyFresh} className="px-2 py-2 bg-indigo-600 rounded-lg text-on-accent shrink-0" aria-label="Copy key">
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={testFresh} disabled={testing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold disabled:opacity-50">
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-on-accent rounded-lg text-[11px] font-bold disabled:opacity-50">
                   <Play className="w-3 h-3" /> {testing ? 'Testing…' : 'Test this key now'}
                 </button>
-                <span className="text-[10px] text-[#8b949e]">Calls <code className="font-mono">GET {base}/me</code> with this key, live.</span>
-                <button onClick={() => { setFreshKey(null); setTestResult(null); }} className="ml-auto text-[10px] text-[#8b949e] hover:text-white">I've saved it — dismiss</button>
+                <span className="text-[10px] text-muted">Calls <code className="font-mono">GET {base}/me</code> with this key, live.</span>
+                <button onClick={() => { setFreshKey(null); setTestResult(null); }} className="ml-auto text-[10px] text-muted hover:text-ink">I've saved it — dismiss</button>
               </div>
               {testResult && (
-                <pre className={`text-[10px] font-mono rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-all ${testResult.ok ? 'bg-emerald-500/10 text-emerald-200 border border-emerald-500/30' : 'bg-red-500/10 text-red-200 border border-red-500/30'}`}>{testResult.text}</pre>
+                <pre className={`text-[10px] font-mono rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-all ${testResult.ok ? 'bg-emerald-500/10 text-success border border-emerald-500/30' : 'bg-red-500/10 text-danger border border-red-500/30'}`}>{testResult.text}</pre>
               )}
             </div>
           )}
 
           {/* Create form */}
-          <div className="bg-[#0d1117] rounded-xl p-4 border border-white/5 space-y-3">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Create a key</h3>
+          <div className="bg-surface rounded-xl p-4 border border-line space-y-3">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-muted">Create a key</h3>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Key name (e.g. my chatbot, CI pipeline)"
-              className="w-full bg-[#161b22] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500"
+              className="w-full bg-card border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500"
             />
 
             <div>
-              <p className="text-[10px] font-bold text-[#8b949e] mb-1.5">What may this key do? <span className="text-[#484f58]">(you can change this later)</span></p>
+              <p className="text-[10px] font-bold text-muted mb-1.5">What may this key do? <span className="text-faint">(you can change this later)</span></p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {(payload?.availableScopes ?? []).map((s) => {
                   const on = scopes.includes(s);
@@ -296,16 +296,16 @@ print(reply.choices[0].message.content)`,
                   const route = payload?.scopeRoutes?.[s];
                   return (
                     <button key={s} type="button" onClick={() => toggleScope(s)} aria-pressed={on}
-                      className={`text-left rounded-xl border p-3 transition-colors ${on ? 'bg-indigo-500/15 border-indigo-500/50' : 'bg-black/30 border-white/10 hover:border-white/20'}`}>
+                      className={`text-left rounded-xl border p-3 transition-colors ${on ? 'bg-indigo-500/15 border-indigo-500/50' : 'bg-well border-line hover:border-line'}`}>
                       <div className="flex items-center gap-2">
-                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${on ? 'bg-indigo-500 border-indigo-400' : 'border-white/30'}`}>
-                          {on && <Check className="w-2.5 h-2.5 text-white" />}
+                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${on ? 'bg-indigo-500 border-indigo-400 text-on-accent' : 'border-line'}`}>
+                          {on && <Check className="w-2.5 h-2.5 text-ink" />}
                         </span>
-                        <span className="text-[11px] font-bold text-white">{d?.title ?? s}</span>
-                        <code className="ml-auto text-[9px] font-mono text-[#8b949e]">{s}</code>
+                        <span className="text-[11px] font-bold text-ink">{d?.title ?? s}</span>
+                        <code className="ml-auto text-[9px] font-mono text-muted">{s}</code>
                       </div>
-                      {d?.detail && <p className="text-[10px] text-[#8b949e] mt-1 leading-snug">{d.detail}</p>}
-                      {route && <p className="text-[9px] font-mono text-[#484f58] mt-1">{route.method} {route.path}</p>}
+                      {d?.detail && <p className="text-[10px] text-muted mt-1 leading-snug">{d.detail}</p>}
+                      {route && <p className="text-[9px] font-mono text-faint mt-1">{route.method} {route.path}</p>}
                     </button>
                   );
                 })}
@@ -313,45 +313,45 @@ print(reply.choices[0].message.content)`,
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <label className="text-[10px] font-bold text-[#8b949e] sm:w-56">
+              <label className="text-[10px] font-bold text-muted sm:w-56">
                 Daily spending limit for this key (₹)
-                <span className="block text-[9px] font-normal text-[#484f58]">Applies to AI answers. Default ₹{payload?.dailyCap.default ?? 50}, max ₹{payload?.dailyCap.max ?? 1000}. A leaked key can never cost more than this in a day.</span>
+                <span className="block text-[9px] font-normal text-faint">Applies to AI answers. Default ₹{payload?.dailyCap.default ?? 50}, max ₹{payload?.dailyCap.max ?? 1000}. A leaked key can never cost more than this in a day.</span>
               </label>
               <input
                 type="number" inputMode="numeric" min={1} max={payload?.dailyCap.max ?? 1000}
                 value={capInr} onChange={(e) => setCapInr(e.target.value)}
                 placeholder={String(payload?.dailyCap.default ?? 50)}
-                className="w-32 bg-[#161b22] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500"
+                className="w-32 bg-card border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500"
               />
             </div>
 
-            {error && <p className="text-[11px] text-red-400">{error}</p>}
+            {error && <p className="text-[11px] text-danger">{error}</p>}
             <button onClick={createKey} disabled={creating}
-              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold disabled:opacity-50">
+              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-on-accent rounded-lg text-xs font-bold disabled:opacity-50">
               <Plus className="w-3.5 h-3.5" /> {creating ? 'Creating…' : 'Create key'}
             </button>
           </div>
 
           {/* Existing keys */}
           <div className="space-y-2">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Your keys</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-muted">Your keys</h3>
             {loading ? (
-              <p className="text-[11px] text-[#484f58]">Loading…</p>
+              <p className="text-[11px] text-faint">Loading…</p>
             ) : loadError ? (
-              <p className="text-[11px] text-red-400">{loadError}</p>
+              <p className="text-[11px] text-danger">{loadError}</p>
             ) : keys.length === 0 ? (
-              <p className="text-[11px] text-[#484f58]">No API keys yet. Create one above.</p>
+              <p className="text-[11px] text-faint">No API keys yet. Create one above.</p>
             ) : (
               <>
                 {paged.visible.map((k) => (
-                  <div key={k.id} className={`bg-[#0d1117] rounded-xl p-3 border border-white/5 ${k.revoked ? 'opacity-50' : ''}`}>
+                  <div key={k.id} className={`bg-surface rounded-xl p-3 border border-line ${k.revoked ? 'opacity-50' : ''}`}>
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-bold text-white truncate">
-                          {k.name} {k.revoked && <span className="text-red-400 font-normal">(revoked)</span>}
+                        <div className="text-xs font-bold text-ink truncate">
+                          {k.name} {k.revoked && <span className="text-danger font-normal">(revoked)</span>}
                         </div>
-                        <div className="text-[10px] text-[#8b949e] font-mono truncate">{k.displayPrefix}…{k.last4} · {k.scopes.join(', ')}</div>
-                        <div className="text-[10px] text-[#8b949e] mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        <div className="text-[10px] text-muted font-mono truncate">{k.displayPrefix}…{k.last4} · {k.scopes.join(', ')}</div>
+                        <div className="text-[10px] text-muted mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                           <span>Daily limit ₹{k.dailyCapInr}</span>
                           {k.todaySpentInr !== null && <span>Today ₹{k.todaySpentInr}{k.todayCalls !== null ? ` · ${k.todayCalls} call${k.todayCalls === 1 ? '' : 's'}` : ''}</span>}
                           <span>Last used {when(k.lastUsedAt)}</span>
@@ -360,18 +360,18 @@ print(reply.choices[0].message.content)`,
                           <div className="flex items-center gap-2 mt-2">
                             <input type="number" min={1} max={payload?.dailyCap.max ?? 1000} value={editingCap.value}
                               onChange={(e) => setEditingCap({ id: k.id, value: e.target.value })}
-                              className="w-28 bg-[#161b22] border border-white/10 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500" />
-                            <button onClick={saveCap} className="px-2.5 py-1 bg-indigo-600 text-white rounded-lg text-[10px] font-bold">Save limit</button>
-                            <button onClick={() => setEditingCap(null)} className="text-[10px] text-[#8b949e] hover:text-white">Cancel</button>
+                              className="w-28 bg-card border border-line rounded-lg px-2 py-1 text-xs text-ink focus:outline-none focus:border-indigo-500" />
+                            <button onClick={saveCap} className="px-2.5 py-1 bg-indigo-600 text-on-accent rounded-lg text-[10px] font-bold">Save limit</button>
+                            <button onClick={() => setEditingCap(null)} className="text-[10px] text-muted hover:text-ink">Cancel</button>
                           </div>
                         )}
                       </div>
                       {!k.revoked && (
                         <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => setEditingCap({ id: k.id, value: String(k.dailyCapInr) })} className="p-1.5 text-[#8b949e] hover:text-white" aria-label="Change daily limit" title="Change daily limit">
+                          <button onClick={() => setEditingCap({ id: k.id, value: String(k.dailyCapInr) })} className="p-1.5 text-muted hover:text-ink" aria-label="Change daily limit" title="Change daily limit">
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => revokeKey(k.id)} className="p-1.5 text-[#8b949e] hover:text-red-400" aria-label="Revoke key" title="Revoke key">
+                          <button onClick={() => revokeKey(k.id)} className="p-1.5 text-muted hover:text-danger" aria-label="Revoke key" title="Revoke key">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -387,24 +387,24 @@ print(reply.choices[0].message.content)`,
       )}
 
       {/* Quick start — visible signed out too, so a developer can see what they would get */}
-      <div className="bg-[#0d1117] rounded-xl p-4 border border-white/5 space-y-3">
+      <div className="bg-surface rounded-xl p-4 border border-line space-y-3">
         <div className="flex items-center gap-2">
-          <Code2 className="w-3.5 h-3.5 text-indigo-400" />
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Quick start</h3>
+          <Code2 className="w-3.5 h-3.5 text-accent-text" />
+          <h3 className="text-[10px] font-black uppercase tracking-widest text-muted">Quick start</h3>
           <div className="ml-auto flex gap-1">
             {(['curl', 'node', 'python'] as const).map((s) => (
               <button key={s} onClick={() => setSnippet(s)}
-                className={`px-2 py-1 rounded-md text-[10px] font-bold ${snippet === s ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}>
+                className={`px-2 py-1 rounded-md text-[10px] font-bold ${snippet === s ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink'}`}>
                 {s === 'node' ? 'Node.js' : s === 'python' ? 'Python' : 'curl'}
               </button>
             ))}
           </div>
         </div>
-        <pre className="text-[10px] font-mono text-[#c9d1d9] bg-black/40 rounded-lg p-3 overflow-x-auto whitespace-pre">{snippets[snippet]}</pre>
-        <ul className="text-[10px] text-[#8b949e] space-y-1 leading-relaxed">
-          <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" /> Base URL <code className="font-mono text-white">{base}</code>. Send the key as <code className="font-mono">X-API-Key</code> or <code className="font-mono">Authorization: Bearer</code>.</li>
-          <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" /> AI answers cost the same as in the app and come from your wallet — never more than the key's daily limit.</li>
-          <li className="flex gap-2"><AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" /> Keep the key on your server. Never put it inside a website's front-end code — anyone could read it there. An app you publish with NavBharatAI gets its AI assistant built in automatically, with no key at all.</li>
+        <pre className="text-[10px] font-mono text-body bg-well rounded-lg p-3 overflow-x-auto whitespace-pre">{snippets[snippet]}</pre>
+        <ul className="text-[10px] text-muted space-y-1 leading-relaxed">
+          <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> Base URL <code className="font-mono text-ink">{base}</code>. Send the key as <code className="font-mono">X-API-Key</code> or <code className="font-mono">Authorization: Bearer</code>.</li>
+          <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> AI answers cost the same as in the app and come from your wallet — never more than the key's daily limit.</li>
+          <li className="flex gap-2"><AlertTriangle className="w-3 h-3 text-warn shrink-0 mt-0.5" /> Keep the key on your server. Never put it inside a website's front-end code — anyone could read it there. An app you publish with NavBharatAI gets its AI assistant built in automatically, with no key at all.</li>
         </ul>
       </div>
     </div>

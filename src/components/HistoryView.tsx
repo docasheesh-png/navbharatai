@@ -194,7 +194,7 @@ export const HistoryView = ({
 
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col bg-[#0d1117] h-full overflow-hidden p-6">
+      <div className="flex-1 flex flex-col bg-surface h-full overflow-hidden p-6">
         <div className="h-8 w-48 mb-5"><Skeleton className="h-full w-full" rounded="rounded-lg" /></div>
         <SkeletonList count={6} />
       </div>
@@ -202,10 +202,10 @@ export const HistoryView = ({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#0d1117] h-full overflow-hidden p-6">
+    <div className="flex-1 flex flex-col bg-surface h-full overflow-hidden p-6">
       {/* Header */}
-      <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3 mb-5">
-        <MessageSquare className="w-8 h-8 text-indigo-500" />
+      <h2 className="text-3xl font-black text-ink italic tracking-tighter uppercase flex items-center gap-3 mb-5">
+        <MessageSquare className="w-8 h-8 text-accent-text" />
         Session History
       </h2>
 
@@ -215,7 +215,7 @@ export const HistoryView = ({
         {/* Row 1 + 2: type / AI-mode filters — hidden when the caller locked the scope. */}
         {!lockFilter && (
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
+          <div className="flex items-center gap-1 bg-card border border-line rounded-xl p-1 shrink-0">
             {([
               { key: 'all',  label: 'All',  icon: <Layers className="w-3 h-3" /> },
               { key: 'chat', label: 'Chat', icon: <MessageSquare className="w-3 h-3" /> },
@@ -226,7 +226,7 @@ export const HistoryView = ({
                 onClick={() => setFilterMode(key)}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                  filterMode === key ? "bg-indigo-600 text-white shadow-md" : "text-[#8b949e] hover:text-white hover:bg-white/5"
+                  filterMode === key ? "bg-indigo-600 text-on-accent shadow-md" : "text-muted hover:text-ink hover:bg-raised"
                 )}
               >
                 {icon}{label}
@@ -235,18 +235,18 @@ export const HistoryView = ({
           </div>
 
           {/* Row 2: AI mode filters */}
-          <div className="flex items-center gap-1 bg-[#161b22] border border-white/8 rounded-xl p-1 shrink-0">
+          <div className="flex items-center gap-1 bg-card border border-line rounded-xl p-1 shrink-0">
             {([
-              { key: 'free', label: 'Free', icon: <Zap className="w-3 h-3" />, color: 'bg-emerald-600' },
-              { key: 'pro',  label: 'Pro',  icon: <Cpu className="w-3 h-3" />, color: 'bg-violet-600' },
-              { key: 'sda',  label: 'SDA',  icon: <Stethoscope className="w-3 h-3" />, color: 'bg-rose-600' },
+              { key: 'free', label: 'Free', icon: <Zap className="w-3 h-3" />, color: 'bg-emerald-600 text-on-accent' },
+              { key: 'pro',  label: 'Pro',  icon: <Cpu className="w-3 h-3" />, color: 'bg-violet-600 text-on-accent' },
+              { key: 'sda',  label: 'SDA',  icon: <Stethoscope className="w-3 h-3" />, color: 'bg-rose-600 text-on-accent' },
             ] as { key: FilterMode; label: string; icon: React.ReactNode; color: string }[]).map(({ key, label, icon, color }) => (
               <button
                 key={key}
                 onClick={() => setFilterMode(key)}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                  filterMode === key ? `${color} text-white shadow-md` : "text-[#8b949e] hover:text-white hover:bg-white/5"
+                  filterMode === key ? `${color} text-ink shadow-md` : "text-muted hover:text-ink hover:bg-raised"
                 )}
               >
                 {icon}{label}
@@ -258,18 +258,18 @@ export const HistoryView = ({
 
         {/* Search box */}
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#484f58]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
           <input
             type="text"
             placeholder="Search by title, CUI, or message..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-[#161b22] border border-white/8 rounded-xl pl-8 pr-8 py-2 text-[11px] text-white placeholder-[#484f58] outline-none focus:border-indigo-500/50 transition-colors font-mono"
+            className="w-full bg-card border border-line rounded-xl pl-8 pr-8 py-2 text-[11px] text-ink placeholder-faint outline-none focus:border-indigo-500/50 transition-colors font-mono"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#484f58] hover:text-white transition-colors"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-ink transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -278,7 +278,7 @@ export const HistoryView = ({
       </div>
 
       {/* Count indicator */}
-      <div className="text-[9px] font-black uppercase tracking-widest text-[#484f58] mb-3">
+      <div className="text-[9px] font-black uppercase tracking-widest text-faint mb-3">
         {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
         {searchQuery ? ` matching "${searchQuery}"` : ''}
       </div>
@@ -291,8 +291,8 @@ export const HistoryView = ({
           while searching, and disappears by itself the instant the full list arrives. */}
       {!hydrated && searchQuery.trim() !== '' && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2">
-          <Clock className="h-3 w-3 shrink-0 text-amber-400" />
-          <p className="text-[10px] leading-relaxed text-amber-200/90">
+          <Clock className="h-3 w-3 shrink-0 text-warn" />
+          <p className="text-[10px] leading-relaxed text-warn">
             Searching titles only — still loading your messages, so results may grow in a moment.
           </p>
         </div>
@@ -304,13 +304,13 @@ export const HistoryView = ({
           /* F18: helpful empty state with CTA */
           <div className="flex flex-col items-center justify-center py-20 gap-6">
             <div className="w-20 h-20 bg-indigo-600/10 border border-indigo-600/20 rounded-[2rem] flex items-center justify-center">
-              <MessageSquare className="w-10 h-10 text-indigo-400/50" />
+              <MessageSquare className="w-10 h-10 text-accent-text" />
             </div>
             <div className="text-center space-y-2">
-              <p className="text-sm font-black text-white uppercase tracking-widest">
+              <p className="text-sm font-black text-ink uppercase tracking-widest">
                 {searchQuery ? `No results for "${searchQuery}"` : 'No sessions yet'}
               </p>
-              <p className="text-[11px] text-[#484f58] max-w-xs mx-auto leading-relaxed">
+              <p className="text-[11px] text-faint max-w-xs mx-auto leading-relaxed">
                 {searchQuery
                   ? 'Try a different search term or clear the filter.'
                   : 'Start a conversation in the Pro Chat or ask the AI to build an app — your sessions will appear here.'}
@@ -319,7 +319,7 @@ export const HistoryView = ({
             {!searchQuery && (
               <button
                 onClick={() => onRestoreSession?.('new')}
-                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg"
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg"
               >
                 Start a New Chat
               </button>
@@ -333,9 +333,9 @@ export const HistoryView = ({
             const prof = (session as Partial<ProfessionalPseudoSession>).profViewId ? (session as ProfessionalPseudoSession) : null;
             // The per-row MODE tag of the unified list — the "tag ke sath" half of the request.
             const modeTag = !includeProfessionals ? null
-              : prof ? { label: prof.profName, cls: 'bg-teal-500/10 text-teal-300 border-teal-500/25', Icon: Briefcase }
-              : isSdaSession(session) ? { label: 'Doctor AI', cls: 'bg-rose-500/10 text-rose-300 border-rose-500/25', Icon: Stethoscope }
-              : { label: 'Free', cls: 'bg-amber-500/10 text-amber-300 border-amber-500/25', Icon: Zap };
+              : prof ? { label: prof.profName, cls: 'bg-teal-500/10 text-success border-teal-500/25', Icon: Briefcase }
+              : isSdaSession(session) ? { label: 'Doctor AI', cls: 'bg-rose-500/10 text-danger border-rose-500/25', Icon: Stethoscope }
+              : { label: 'Free', cls: 'bg-amber-500/10 text-warn border-amber-500/25', Icon: Zap };
             const openRow = () => {
               if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
               // An archived conversation is genuinely RESUMED (same rule as Professional History) so
@@ -362,19 +362,19 @@ export const HistoryView = ({
                 className={cn(
                   "border rounded-2xl p-6 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative",
                   isConfirming
-                    ? "bg-red-950/20 border-red-500/30 shadow-lg shadow-red-500/5 animate-pulse"
-                    : "bg-[#161b22] border-white/5 hover:border-indigo-500/30"
+                    ? "bg-red-500/10 border-red-500/30 shadow-lg shadow-red-500/5 animate-pulse"
+                    : "bg-card border-line hover:border-indigo-500/30"
                 )}
               >
                 {isConfirming ? (
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full gap-4">
                     <div className="space-y-1">
-                      <h4 className="font-bold text-red-400 text-sm flex items-center gap-2">
-                        <Trash2 className="w-4 h-4 text-red-500" />
+                      <h4 className="font-bold text-danger text-sm flex items-center gap-2">
+                        <Trash2 className="w-4 h-4 text-danger" />
                         Delete this session permanently?
                       </h4>
-                      <p className="text-xs text-[#8b949e]">
-                        All messages and context for <span className="font-mono text-red-300">{(session as Partial<ProfessionalPseudoSession>).profName ?? `CUI: ${session.uci || session.id}`}</span> will be deleted. This cannot be undone.
+                      <p className="text-xs text-muted">
+                        All messages and context for <span className="font-mono text-danger">{(session as Partial<ProfessionalPseudoSession>).profName ?? `CUI: ${session.uci || session.id}`}</span> will be deleted. This cannot be undone.
                       </p>
                     </div>
                     <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto">
@@ -383,13 +383,13 @@ export const HistoryView = ({
                           deleteRow();
                           setConfirmDeleteId(null);
                         }}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-red-500/20"
+                        className="px-4 py-2 bg-red-600 hover:bg-red-500 text-on-accent font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-red-500/20"
                       >
                         Yes, Delete
                       </button>
                       <button
                         onClick={() => setConfirmDeleteId(null)}
-                        className="px-4 py-2 bg-[#21262d] hover:bg-[#30363d] text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer border border-white/10"
+                        className="px-4 py-2 bg-raised hover:bg-raised text-ink font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer border border-line"
                       >
                         Cancel
                       </button>
@@ -400,13 +400,13 @@ export const HistoryView = ({
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         {/* B25: fallback to first-message excerpt when title is blank */}
-                        <h3 className="font-bold text-white text-base leading-snug">
+                        <h3 className="font-bold text-ink text-base leading-snug">
                           {session.title && session.title !== 'New Conversation'
                             ? session.title
                             : messagesOf(session).find((m) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation'}
                         </h3>
                         {!prof && (
-                        <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">
+                        <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-accent-text border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">
                           CUI: {session.uci || session.id}
                         </span>
                         )}
@@ -419,22 +419,22 @@ export const HistoryView = ({
                         <span className={cn(
                           "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border",
                           sessionIsApp
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
-                            : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                            ? "bg-emerald-500/10 text-success border-emerald-500/25"
+                            : "bg-indigo-500/10 text-accent-text border-indigo-500/20"
                         )}>
                           {sessionIsApp ? <><Code2 className="w-2.5 h-2.5" /> App</> : <><MessageSquare className="w-2.5 h-2.5" /> Chat</>}
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-[#8b949e] font-bold uppercase tracking-widest">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-muted font-bold uppercase tracking-widest">
                         <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 animate-pulse" /> {prof?.profLive ? 'Ongoing' : new Date(session.lastUpdated).toLocaleString()}</span>
-                        <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-emerald-500" /> {prof ? prof.profName : (session.current_agent || 'navbharatai')}</span>
+                        <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-success" /> {prof ? prof.profName : (session.current_agent || 'navbharatai')}</span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto z-10">
                       <button
                         onClick={openRow}
-                        className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 shrink-0 cursor-pointer"
+                        className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-on-accent font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 shrink-0 cursor-pointer"
                       >
                         Open Chat
                         <LogIn className="w-3.5 h-3.5" />
@@ -447,8 +447,8 @@ export const HistoryView = ({
                           className={cn(
                             "p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-center",
                             openDropdownId === session.id
-                              ? "bg-indigo-600 border-indigo-500 text-white"
-                              : "bg-[#21262d]/50 hover:bg-[#30363d] border-white/5 text-[#8b949e] hover:text-white"
+                              ? "bg-indigo-600 border-indigo-500 text-on-accent"
+                              : "bg-raised hover:bg-raised border-line text-muted hover:text-ink"
                           )}
                           title="Options"
                         >
@@ -458,10 +458,10 @@ export const HistoryView = ({
                         {openDropdownId === session.id && (
                           <>
                             <div
-                              className="fixed inset-0 z-40 bg-black/5"
+                              className="fixed inset-0 z-40 bg-well"
                               onClick={() => setOpenDropdownId(null)}
                             />
-                            <div className="absolute right-0 mt-2 w-48 bg-[#1f242c] border border-white/10 rounded-xl shadow-2xl z-50 py-1.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                            <div className="absolute right-0 mt-2 w-48 bg-[#1f242c] border border-line rounded-xl shadow-2xl z-50 py-1.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 text-on-accent">
                               <button
                                 onClick={() => {
                                   setOpenDropdownId(null);

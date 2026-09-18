@@ -228,3 +228,86 @@ export function summarizeCosts(rows: readonly BuildCostRow[]): CostSummaryCell[]
     };
   }).sort((a, b) => (order[a.tier] - order[b.tier]) || (sizeOrder[a.size] - sizeOrder[b.size]));
 }
+
+/**
+ * 📉 ARE WE ACTUALLY GETTING BETTER? (admin 2026-09-18, verbatim: *"hame pata hi nahi lag raha ki ham
+ * progress kar rahe ya nahi!!"*)
+ *
+ * The tier × size table answers "what does a build cost" and cannot answer "is it costing less than it
+ * used to" — every cell is one average over the whole window, so a run of cheaper builds and a run of
+ * dearer ones produce the same number. This splits the window in half by time and compares.
+ *
+ * 🔒 EVERY METRIC CARRIES ITS OWN DENOMINATOR, and a half without a real sample yields `null` rather
+ * than a delta: with two builds on one side, "cost halved" is noise wearing a decimal point. Same rule
+ * as `avgWithSample` on the card — this file never reports an average without the sample behind it.
+ *
+ * ⚠️ `successRate` is the ONE metric where higher is better; every other delta is an improvement when
+ * it is NEGATIVE. The reader (`trendHeadline`) must not treat them alike.
+ */
+export const MIN_TREND_SAMPLE = 3;
+
+export interface TrendMetric {
+  recent: number | null;
+  older: number | null;
+  /** recent − older, only when BOTH halves cleared MIN_TREND_SAMPLE. */
+  delta: number | null;
+  nRecent: number;
+  nOlder: number;
+}
+
+export interface CostTrend {
+  /** Builds in the newer half / the older half. */
+  nRecent: number;
+  nOlder: number;
+  /** The timestamp the halves were split at, or null when there was nothing to split. */
+  splitAt: number | null;
+  realInr: TrendMetric;
+  billedInr: TrendMetric;
+  minutes: TrendMetric;
+  heals: TrendMetric;
+  /** Share of builds that succeeded, 0..1. HIGHER is better here, unlike every other metric. */
+  successRate: TrendMetric;
+  /** True when at least one metric produced a real delta. */
+  comparable: boolean;
+}
+
+const metric = (recent: readonly number[], older: readonly number[]): TrendMetric => {
+  const r = avg([...recent]);
+  const o = avg([...older]);
+  const enough = recent.length >= MIN_TREND_SAMPLE && older.length >= MIN_TREND_SAMPLE;
+  return {
+    recent: r,
+    older: o,
+    delta: enough && r !== null && o !== null ? money(r - o) : null,
+    nRecent: recent.length,
+    nOlder: older.length,
+  };
+};
+
+/** Newest half against the older half. Pure; input order does not matter. */
+export function costTrend(rows: readonly BuildCostRow[]): CostTrend {
+  const sorted = [...rows].filter((r) => r.startedAt > 0).sort((a, b) => b.startedAt - a.startedAt);
+  const half = Math.floor(sorted.length / 2);
+  const recent = sorted.slice(0, half);
+  const older = sorted.slice(half, half * 2);
+  const pick = (g: readonly BuildCostRow[], f: (r: BuildCostRow) => number | null): number[] =>
+    g.map(f).filter((v): v is number => v !== null);
+  const priced = (g: readonly BuildCostRow[]): number[] =>
+    g.filter((r) => r.measured && r.realInr !== null).map((r) => r.realInr as number);
+  const settled = (g: readonly BuildCostRow[]): number[] =>
+    g.filter((r) => r.ok !== null).map((r) => (r.ok ? 1 : 0));
+
+  const out: CostTrend = {
+    nRecent: recent.length,
+    nOlder: older.length,
+    splitAt: recent.length > 0 ? recent[recent.length - 1].startedAt : null,
+    realInr: metric(priced(recent), priced(older)),
+    billedInr: metric(pick(recent, (r) => r.billedInr), pick(older, (r) => r.billedInr)),
+    minutes: metric(pick(recent, (r) => r.minutes), pick(older, (r) => r.minutes)),
+    heals: metric(recent.map((r) => r.heals), older.map((r) => r.heals)),
+    successRate: metric(settled(recent), settled(older)),
+    comparable: false,
+  };
+  out.comparable = [out.realInr, out.billedInr, out.minutes, out.heals, out.successRate].some((m) => m.delta !== null);
+  return out;
+}

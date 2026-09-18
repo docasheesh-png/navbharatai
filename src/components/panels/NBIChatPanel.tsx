@@ -6,14 +6,6 @@ import type { Message, ChatSession, AgentMode } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 export interface NBIChatPanelProps {
-  themeClasses: {
-    bg: string;
-    text: string;
-    border: string;
-    accent: string;
-    card: string;
-    raw: { bg: string; text: string; border: string; card: string };
-  };
   teachMode: boolean;
   setTeachMode: React.Dispatch<React.SetStateAction<boolean>>;
   sessions: ChatSession[];
@@ -52,7 +44,6 @@ export interface NBIChatPanelProps {
 }
 
 export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
-  themeClasses,
   teachMode,
   setTeachMode,
   sessions,
@@ -87,14 +78,13 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
 
   return (
     <div className={cn(
-      "flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10",
-      themeClasses.bg
+      "flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-line bg-surface"
     )}>
       {/* NBI Chat column */}
       <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-        <div className="flex items-center justify-between px-3 py-1 bg-indigo-950/20 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
+        <div className="flex items-center justify-between px-3 py-1 bg-indigo-500/10 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-muted">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0" />
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0 text-on-accent" />
             <span>NAVBHARATAI</span>
           </div>
           <div className="flex items-center gap-2">
@@ -113,7 +103,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
               <button
                 onClick={onNewChat}
                 title="Start a new chat — this conversation stays saved in History"
-                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-white/5 border-white/10 text-[8px] font-black uppercase tracking-widest text-[#484f58] hover:text-white hover:border-white/30 transition-all"
+                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-raised border-line text-[8px] font-black uppercase tracking-widest text-faint hover:text-ink hover:border-line transition-all"
               >
                 <span>＋</span>
                 <span className="hidden sm:inline">New</span>
@@ -123,13 +113,13 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
               onClick={() => setTeachMode(p => !p)}
               title={teachMode ? 'Teaching Mode ON — click to turn off' : 'Teaching Mode OFF — click to enable beginner explanations'}
               className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-widest transition-all ${
-                teachMode ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-white/5 border-white/10 text-[#484f58] hover:text-white'
+                teachMode ? 'bg-amber-500/20 border-amber-500/40 text-warn' : 'bg-raised border-line text-faint hover:text-ink'
               }`}
             >
               <span>{teachMode ? '📚' : '🎓'}</span>
               <span className="hidden sm:inline">Teach</span>
             </button>
-            <span className="font-mono text-indigo-400 hidden sm:inline">{currentSession?.uci || ''}</span>
+            <span className="font-mono text-accent-text hidden sm:inline">{currentSession?.uci || ''}</span>
           </div>
         </div>
         <AIChat

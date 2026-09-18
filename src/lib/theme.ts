@@ -1,68 +1,45 @@
-export type ThemeMode = 'light' | 'dark' | 'dim' | 'comfort' | 'contrast';
+/**
+ * The theme system's one vocabulary (theme replacement, PR B — admin 2026-09-18).
+ *
+ * THREE themes, not five. The 2026-09-18 audit (72 screens × 5 themes, every text node measured)
+ * found Comfort failing on 84 of 84 screens and Dim adding nothing Dark did not already do — two
+ * more palettes to keep readable, with no reader they served. So: Light, Dark, and High contrast.
+ * A saved `dim` becomes `dark` and a saved `comfort` becomes `light` (`normalizeThemeMode`), so a
+ * returning user lands on the nearest theme rather than on a value nothing recognises.
+ *
+ * WHAT IS DELIBERATELY GONE: `getThemeClasses`. It handed every caller a bag of hardcoded colour
+ * literals per theme (`bg-[#0d1117]`, `text-[#657b83]`, …) — the exact class of literal that
+ * `tests/themeTokensOnly.test.ts` now ratchets to zero. Colour comes from the semantic tokens
+ * (`bg-surface`, `text-body`, `bg-card`, `border-line`, …) that `index.css` maps per
+ * `html[data-theme]`; a component needs no JavaScript to know which theme it is in.
+ */
+export type ThemeMode = 'light' | 'dark' | 'contrast';
 
 export const THEME_MODES: { label: string; value: ThemeMode }[] = [
   { label: 'Light', value: 'light' },
   { label: 'Dark', value: 'dark' },
-  { label: 'Dim Light', value: 'dim' },
-  { label: 'Comfort', value: 'comfort' },
-  { label: 'Contrast', value: 'contrast' },
+  { label: 'High contrast', value: 'contrast' },
 ];
 
-export const getThemeClasses = (mode: ThemeMode): { bg: string; text: string; border: string; accent: string; card: string; raw: { bg: string; text: string; border: string; card: string } } => {
-  switch (mode) {
-    case 'light': 
-      return { 
-        bg: 'bg-[#f8fafc]', 
-        text: 'text-[#0f172a]', 
-        border: 'border-[#e2e8f0]', 
-        accent: 'text-indigo-600',
-        card: 'bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)]',
-        raw: { bg: '#f8fafc', text: '#0f172a', border: '#e2e8f0', card: '#ffffff' }
-      };
-    case 'dark': 
-      return { 
-        bg: 'bg-[#0d1117]', 
-        text: 'text-[#c9d1d9]', 
-        border: 'border-white/10', 
-        accent: 'text-indigo-400',
-        card: 'bg-[#161b22] border-white/5',
-        raw: { bg: '#0d1117', text: '#c9d1d9', border: 'rgba(255,255,255,0.1)', card: '#161b22' }
-      };
-    case 'dim': 
-      return { 
-        bg: 'bg-[#15202b]', 
-        text: 'text-[#f7f9f9]', 
-        border: 'border-[#38444d]', 
-        accent: 'text-[#1d9bf0]',
-        card: 'bg-[#1c2732] border-[#38444d]',
-        raw: { bg: '#15202b', text: '#f7f9f9', border: '#38444d', card: '#1c2732' }
-      };
-    case 'comfort': 
-      return { 
-        bg: 'bg-[#fdf6e3]', 
-        text: 'text-[#657b83]', 
-        border: 'border-[#eee8d5]', 
-        accent: 'text-[#268bd2]',
-        card: 'bg-[#eee8d5] border-[#dfd9c6]',
-        raw: { bg: '#fdf6e3', text: '#657b83', border: '#eee8d5', card: '#eee8d5' }
-      };
-    case 'contrast': 
-      return { 
-        bg: 'bg-black', 
-        text: 'text-[#ffff00]', 
-        border: 'border-[#ffff00]', 
-        accent: 'text-white',
-        card: 'bg-black border-2 border-[#ffff00]',
-        raw: { bg: '#000000', text: '#ffff00', border: '#ffff00', card: '#000000' }
-      };
-    default: 
-      return { 
-        bg: 'bg-[#0d1117]', 
-        text: 'text-white', 
-        border: 'border-white/5', 
-        accent: 'text-indigo-400',
-        card: 'bg-[#161b22]',
-        raw: { bg: '#0d1117', text: '#ffffff', border: 'rgba(255,255,255,0.05)', card: '#161b22' }
-      };
-  }
+/** The two retired themes and the theme each one's users are carried to. */
+export const LEGACY_THEME_MAP: Readonly<Record<string, ThemeMode>> = {
+  dim: 'dark',      // a second dark palette — Dark is what it was for
+  comfort: 'light', // a cream light palette — Light is what it was for
 };
+
+export function isThemeMode(v: unknown): v is ThemeMode {
+  return v === 'light' || v === 'dark' || v === 'contrast';
+}
+
+/**
+ * Turn whatever storage holds into a live theme, or `null` when it holds nothing usable.
+ * Legacy names map to their successor; anything else (an empty string, a typo, a value from a
+ * build that never existed) is `null`, so the caller falls back to the system preference rather
+ * than stamping `data-theme="sepia"` on the document and getting the default palette by accident.
+ */
+export function normalizeThemeMode(raw: string | null | undefined): ThemeMode | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (isThemeMode(v)) return v;
+  return LEGACY_THEME_MAP[v] ?? null;
+}

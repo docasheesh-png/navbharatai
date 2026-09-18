@@ -6,6 +6,47 @@
 @import "./styles/theme-compat.css";
 @import "./styles/font-scale-compat.css";
 
+/* ── THE SEMANTIC COLOUR TOKENS — the ONLY way a component may name a colour (admin 2026-09-18) ──
+   Audit "pura theme system badlo": the UI was written in hardcoded GitHub-dark literals (14,620
+   usages) and theme-compat.css re-mapped an allowlist of them — patched three times and still 1,347
+   usages short, with 236 invisible text nodes across 420 page×theme screenshots. An allowlist can
+   never be complete against an open-ended set of class names. So colour now comes from HERE.
+
+   `@theme inline` turns each `--color-*` into Tailwind utilities that emit the var itself —
+   `bg-surface` → `background-color: var(--surface-base)` — so the per-theme blocks below are what a
+   component's class resolves to at runtime, and a new theme is a new block of variables, nothing else.
+   Alpha modifiers work (`text-ink/40` → color-mix of the theme's own ink), which is the sanctioned
+   replacement for the app's `text-white/40` habit — but see tests/themeTokensOnly.test.ts: a faded
+   label must still clear 4.5:1, so `text-muted` is the answer far more often than `text-ink/40`.
+
+   The names are ROLES, not colours: `ink` is the primary text whatever its hue, `line` the hairline,
+   `on-accent` the text that sits on a solid accent. `scripts/themeColourBaseline.mjs` is the ratchet
+   that keeps every literal out of new code and drives the old ones to zero, file by file. */
+@theme inline {
+  --color-surface: var(--surface-base);
+  --color-card: var(--surface-card);
+  --color-raised: var(--surface-raised);
+  --color-ink: var(--text-primary);
+  --color-body: var(--text-body);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-line: var(--border-soft);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--brand-accent-strong);
+  --color-success: var(--brand-success-text);
+  --color-warn: var(--brand-warn-text);
+  --color-danger: var(--brand-danger-text);
+  --color-info: var(--brand-info-text);
+  /* Text on a SOLID accent/success/danger fill. Every theme's accents are saturated mid-tones, so
+     white is the readable choice on all of them — a token rather than `text-white` so the ratchet
+     can tell "white by design" from "white because the app was dark". */
+  --color-on-accent: #ffffff;
+  /* An inset well inside a card (the old bg-black/20–40 on dark) and the modal scrim (bg-black/60+),
+     which stays dark on every theme because it dims what is behind it. */
+  --color-well: var(--surface-well);
+  --color-scrim: var(--scrim);
+}
+
 /* Disable the browser's left/right swipe back/forward navigation — it was
    triggering accidental history navigation. Custom swipe (open/close the
    sidebar) is handled in JS. */
@@ -106,8 +147,15 @@ button, [role='button'], nav, header, footer {
     --text-primary: #ffffff;   /* headings / strong text    */
     --text-body: #c9d1d9;      /* body text                 */
     --text-muted: #8b949e;     /* secondary text            */
-    --text-faint: #484f58;     /* placeholder / faint       */
+    /* AUDIT 2026-09-18: #484f58 was 2.09:1 on a card — 330 usages of placeholder/faint text that
+       nobody could read on the DEFAULT theme. #838d97 clears 4.5 on base, card and raised while
+       staying visibly lighter than --text-muted, so the hierarchy survives. */
+    --text-faint: #838d97;     /* placeholder / faint       */
     --border-soft: rgba(255, 255, 255, 0.1);
+    --surface-well: rgba(0, 0, 0, 0.3);   /* inset well inside a card */
+    --scrim: rgba(0, 0, 0, 0.7);          /* modal backdrop — the same on every theme */
+    /* Native controls (select, date, scrollbar) follow the theme instead of the OS default. */
+    color-scheme: dark;
     --accent: #818cf8;
     /* BRAND TEXT ON A SURFACE (added 2026-09-13). Tailwind's light brand shades are foreground
        colours ~1,459 places in this app, and the compat layer deliberately leaves brand colours
@@ -130,82 +178,60 @@ button, [role='button'], nav, header, footer {
     --text-primary: #0f172a;
     --text-body: #1e293b;
     --text-muted: #475569;
-    --text-faint: #64748b;
+    --text-faint: #5b6b82;     /* audit 2026-09-18: #64748b was 4.23 on --surface-raised */
     --border-soft: #e2e8f0;
+    --surface-well: rgba(15, 23, 42, 0.06);
+    color-scheme: light;
     --accent: #4f46e5;
     /* LIGHT — the theme the admin reported unreadable on 2026-09-13. Each is the 700 shade, which
        clears WCAG AA against both --surface-card (#ffffff) and --surface-raised (#eef2f7). */
     --brand-accent-text: #4338ca;
     --brand-accent-strong: #4338ca;
-    --brand-success-text: #047857;
-    --brand-success-strong: #047857;
-    --brand-warn-text: #92400e;
-    --brand-warn-strong: #92400e;
-    --brand-danger-text: #b91c1c;
-    --brand-info-text: #0369a1;
-  }
-  html[data-theme="dim"] {
-    --surface-base: #15202b;
-    --surface-card: #1c2732;
-    --surface-raised: #22303c;
-    --text-primary: #f7f9f9;
-    --text-body: #e1e8ed;
-    --text-muted: #8899a6;
-    --text-faint: #5b7083;
-    --border-soft: #38444d;
-    --accent: #1d9bf0;
-    /* DIM is a dark theme, so the original light Tailwind shades already read correctly. */
-    --brand-accent-text: #a5b4fc;
-    --brand-accent-strong: #818cf8;
-    --brand-success-text: #34d399;
-    --brand-success-strong: #6ee7b7;
-    --brand-warn-text: #fcd34d;
-    --brand-warn-strong: #fbbf24;
-    --brand-danger-text: #f87171;
-    --brand-info-text: #7dd3fc;
-  }
-  html[data-theme="comfort"] {
-    /* Solarized-light — warm, low-eye-strain cream (now actually visible app-wide). */
-    --surface-base: #fdf6e3;
-    --surface-card: #eee8d5;
-    --surface-raised: #e4ddc7;
-    --text-primary: #073642;
-    --text-body: #586e75;
-    --text-muted: #657b83;
-    --text-faint: #93a1a1;
-    --border-soft: #dfd9c6;
-    --accent: #268bd2;
-    /* COMFORT is a light cream, so it needs the dark shades for the same reason LIGHT does. */
-    --brand-accent-text: #4338ca;
-    --brand-accent-strong: #4338ca;
+    /* success: emerald-800, not -700 (PR E, 2026-09-18). A success badge sits on a 15% emerald tint
+       (~#c6eee3 over white), and -700 is 4.37:1 there — the last three Light misses on Home and
+       Billing were all this one pair. -800 is 6.13 on the tint and 7.68 on white. */
     --brand-success-text: #065f46;
     --brand-success-strong: #065f46;
     --brand-warn-text: #92400e;
     --brand-warn-strong: #92400e;
     --brand-danger-text: #b91c1c;
-    --brand-info-text: #075985;
+    --brand-info-text: #0369a1;
   }
   html[data-theme="contrast"] {
-    /* Maximum accessibility: every surface black, every text light → text OPPOSITE background,
-       app-wide (bug 4). Deterministic in CSS via the shared cascade — no per-element JS needed. */
+    /* HIGH CONTRAST (the third of three themes since 2026-09-18): every surface black, every text
+       light → text OPPOSITE background, app-wide, deterministically in CSS. The BRAND hues are
+       DISTINCT on purpose — the first version painted success, warning, danger and info all the
+       same yellow, so a red "failed" and a green "saved" were the same colour to the one audience
+       that chose this theme for legibility. Each hue clears 7:1 on black (AAA), checked by
+       tests/themeTokensOnly.test.ts. */
     --surface-base: #000000;
     --surface-card: #000000;
     --surface-raised: #000000;
     --text-primary: #ffff00;
-    --brand-accent-text: #ffff00;
-    --brand-accent-strong: #ffff00;
-    --brand-success-text: #ffff00;
-    --brand-success-strong: #ffff00;
-    --brand-warn-text: #ffff00;
-    --brand-warn-strong: #ffff00;
-    --brand-danger-text: #ffff00;
-    --brand-info-text: #ffff00;
     --text-body: #ffffff;
     --text-muted: #ffffff;
     --text-faint: #ffff00;
     --border-soft: #ffff00;
+    --surface-well: #111111;
+    color-scheme: dark;
     --accent: #ffff00;
+    --brand-accent-text: #ffff00;
+    --brand-accent-strong: #ffff00;
+    --brand-success-text: #5cff9d;
+    --brand-success-strong: #5cff9d;
+    --brand-warn-text: #ffc233;
+    --brand-warn-strong: #ffc233;
+    --brand-danger-text: #ff8585;
+    --brand-info-text: #6ee0ff;
   }
+
+  /* Theme-picker swatches (Settings → General → Theme). A swatch shows what a theme LOOKS like, so
+     its colour must not follow the CURRENT theme — the Light swatch is white even on Dark. That is
+     the one legitimate place for a fixed colour in the picker, and it lives here in CSS rather than
+     as a class literal so the ratchet in tests/themeTokensOnly.test.ts stays honest. */
+  .theme-swatch[data-swatch="light"]    { background-color: #ffffff; border-color: #94a3b8; }
+  .theme-swatch[data-swatch="dark"]     { background-color: #0d1117; border-color: #8b949e; }
+  .theme-swatch[data-swatch="contrast"] { background-color: #000000; border-color: #ffff00; }
 
   :root {
     /* Legacy aliases (kept so the existing var(--theme-*) consumers follow the theme unchanged). */

@@ -105,11 +105,11 @@ function buildIframeSrc(appHtml: string, tests: TestCase[]): string {
 }
 
 const StatusIcon: React.FC<{ status: TestCase['status'] }> = ({ status }) => {
-  if (status === 'pass') return <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />;
-  if (status === 'fail') return <X className="w-4 h-4 text-red-400 shrink-0" />;
+  if (status === 'pass') return <CheckCircle2 className="w-4 h-4 text-success shrink-0" />;
+  if (status === 'fail') return <X className="w-4 h-4 text-danger shrink-0" />;
   if (status === 'running') return <TirangaLoader className="w-4 h-4 shrink-0" />;
-  if (status === 'skip') return <AlertCircle className="w-4 h-4 text-gray-500 shrink-0" />;
-  return <Clock className="w-4 h-4 text-gray-500 shrink-0" />;
+  if (status === 'skip') return <AlertCircle className="w-4 h-4 text-faint shrink-0" />;
+  return <Clock className="w-4 h-4 text-faint shrink-0" />;
 };
 
 export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) => {
@@ -199,7 +199,7 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-gray-200 text-sm overflow-hidden">
+    <div className="flex flex-col h-full bg-surface text-body text-sm overflow-hidden">
       {/* Hidden iframe for running tests */}
       {iframeSrc && (
         <iframe
@@ -213,14 +213,14 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#30363d] bg-[#161b22] shrink-0">
-        <span className="font-semibold text-gray-100 tracking-wide">Tests</span>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-card shrink-0">
+        <span className="font-semibold text-body tracking-wide">Tests</span>
         <div className="flex items-center gap-1 ml-1">
           {passCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded text-xs bg-green-900/50 text-green-400 font-mono">{passCount} pass</span>
+            <span className="px-1.5 py-0.5 rounded text-xs bg-green-500/10 text-success font-mono">{passCount} pass</span>
           )}
           {failCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded text-xs bg-red-900/50 text-red-400 font-mono">{failCount} fail</span>
+            <span className="px-1.5 py-0.5 rounded text-xs bg-red-500/10 text-danger font-mono">{failCount} fail</span>
           )}
         </div>
         <div className="flex-1" />
@@ -228,7 +228,7 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
           onClick={resetTests}
           disabled={running}
           title="Reset all tests"
-          className="p-1.5 rounded hover:bg-[#30363d] text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-40"
+          className="p-1.5 rounded hover:bg-raised text-muted hover:text-body transition-colors disabled:opacity-40"
         >
           <RefreshCcw className="w-3.5 h-3.5" />
         </button>
@@ -236,8 +236,8 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
           onClick={() => setShowAddTest(v => !v)}
           title="Add test"
           className={cn(
-            'p-1.5 rounded hover:bg-[#30363d] text-gray-400 hover:text-gray-200 transition-colors',
-            showAddTest && 'bg-indigo-900/50 text-indigo-300'
+            'p-1.5 rounded hover:bg-raised text-muted hover:text-body transition-colors',
+            showAddTest && 'bg-indigo-500/10 text-accent-text'
           )}
         >
           <Plus className="w-3.5 h-3.5" />
@@ -248,8 +248,8 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
           className={cn(
             'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors',
             canRun && !running
-              ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-              : 'bg-[#30363d] text-gray-500 cursor-not-allowed'
+              ? 'bg-indigo-600 hover:bg-indigo-500 text-on-accent'
+              : 'bg-raised text-faint cursor-not-allowed'
           )}
         >
           {running
@@ -262,7 +262,7 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
 
       {/* No app warning — honest, actionable guidance (build first / open Preview to bundle). */}
       {!canRun && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-yellow-900/20 border-b border-yellow-800/30 text-yellow-400 text-xs shrink-0">
+        <div className="flex items-center gap-2 px-3 py-2 bg-yellow-500/10 border-b border-yellow-800/30 text-warn text-xs shrink-0">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           {appSourceGuidance(appSource.kind)}
         </div>
@@ -270,10 +270,10 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
 
       {/* Add test panel */}
       {showAddTest && (
-        <div className="border-b border-[#30363d] bg-[#161b22] px-3 py-3 shrink-0 space-y-2">
+        <div className="border-b border-line bg-card px-3 py-3 shrink-0 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">New Test</span>
-            <button onClick={() => setShowAddTest(false)} className="p-0.5 rounded hover:bg-[#30363d] text-gray-500">
+            <span className="text-xs font-semibold text-muted uppercase tracking-wider">New Test</span>
+            <button onClick={() => setShowAddTest(false)} className="p-0.5 rounded hover:bg-raised text-faint">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -282,7 +282,7 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
               <button
                 key={tpl.name}
                 onClick={() => applyTemplate(tpl)}
-                className="px-2 py-0.5 rounded border border-[#30363d] text-xs text-gray-400 hover:border-indigo-500 hover:text-indigo-300 transition-colors"
+                className="px-2 py-0.5 rounded border border-line text-xs text-muted hover:border-indigo-500 hover:text-accent-text transition-colors"
               >
                 {tpl.name}
               </button>
@@ -292,23 +292,23 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
             value={newName}
             onChange={e => setNewName(e.target.value)}
             placeholder="Test name…"
-            className="w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-surface border border-line rounded px-2 py-1 text-xs text-body placeholder-faint focus:outline-none focus:border-indigo-500"
           />
           <textarea
             value={newCode}
             onChange={e => setNewCode(e.target.value)}
             placeholder={"// JS snippet — return truthy to pass, throw to fail\nreturn document.querySelector('.my-class') !== null;"}
             rows={3}
-            className="w-full bg-[#0d1117] border border-[#30363d] rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 font-mono resize-none focus:outline-none focus:border-indigo-500"
+            className="w-full bg-surface border border-line rounded px-2 py-1 text-xs text-body placeholder-faint font-mono resize-none focus:outline-none focus:border-indigo-500"
           />
           <div className="flex justify-end gap-2">
-            <button onClick={() => setShowAddTest(false)} className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-gray-200 hover:bg-[#30363d] transition-colors">
+            <button onClick={() => setShowAddTest(false)} className="px-2.5 py-1 rounded text-xs text-muted hover:text-body hover:bg-raised transition-colors">
               Cancel
             </button>
             <button
               onClick={addTest}
               disabled={!newName.trim() || !newCode.trim()}
-              className="px-2.5 py-1 rounded text-xs bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="px-2.5 py-1 rounded text-xs bg-indigo-600 text-on-accent hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Add Test
             </button>
@@ -319,44 +319,44 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
       {/* Test list */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {tests.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2">
+          <div className="flex flex-col items-center justify-center h-full text-faint gap-2">
             <AlertCircle className="w-8 h-8" />
             <span className="text-xs">No tests yet. Add one above.</span>
           </div>
         ) : (
-          <ul className="divide-y divide-[#21262d]">
+          <ul className="divide-y divide-line">
             {tests.map(test => (
-              <li key={test.id} className={cn('group', selectedId === test.id && 'bg-[#161b22]')}>
+              <li key={test.id} className={cn('group', selectedId === test.id && 'bg-card')}>
                 <div
-                  className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[#161b22] transition-colors"
+                  className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-card transition-colors"
                   onClick={() => toggleExpand(test.id)}
                 >
                   <StatusIcon status={test.status} />
                   <span className={cn(
                     'flex-1 truncate',
-                    test.status === 'pass' && 'text-green-300',
-                    test.status === 'fail' && 'text-red-300',
-                    test.status === 'running' && 'text-yellow-300',
-                    test.status === 'pending' && 'text-gray-400',
-                    test.status === 'skip' && 'text-gray-500',
+                    test.status === 'pass' && 'text-success',
+                    test.status === 'fail' && 'text-danger',
+                    test.status === 'running' && 'text-warn',
+                    test.status === 'pending' && 'text-muted',
+                    test.status === 'skip' && 'text-faint',
                   )}>
                     {test.name}
                   </span>
                   {isFlaky(flakyHistory, test.id) && (
-                    <span title="Flaky — this test has both passed and failed across recent runs" className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-300 border border-yellow-500/30">
+                    <span title="Flaky — this test has both passed and failed across recent runs" className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-warn border border-yellow-500/30">
                       🟡 flaky
                     </span>
                   )}
                   {test.duration !== undefined && (
-                    <span className="text-xs text-gray-600 font-mono shrink-0">{test.duration}ms</span>
+                    <span className="text-xs text-faint font-mono shrink-0">{test.duration}ms</span>
                   )}
                   {expanded[test.id]
-                    ? <ChevronDown className="w-3.5 h-3.5 text-gray-600 shrink-0" />
-                    : <ChevronRight className="w-3.5 h-3.5 text-gray-600 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    ? <ChevronDown className="w-3.5 h-3.5 text-faint shrink-0" />
+                    : <ChevronRight className="w-3.5 h-3.5 text-faint shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                   }
                   <button
                     onClick={e => { e.stopPropagation(); removeTest(test.id); }}
-                    className="p-0.5 rounded text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                    className="p-0.5 rounded text-faint hover:text-danger opacity-0 group-hover:opacity-100 transition-all shrink-0"
                     title="Remove test"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -369,15 +369,15 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
                       <div className={cn(
                         'rounded px-2 py-1.5 font-mono text-xs whitespace-pre-wrap break-all',
                         test.status === 'pass'
-                          ? 'bg-green-900/20 text-green-300 border border-green-800/30'
-                          : 'bg-red-900/20 text-red-300 border border-red-800/30'
+                          ? 'bg-green-500/10 text-success border border-green-800/30'
+                          : 'bg-red-500/10 text-danger border border-red-800/30'
                       )}>
                         {test.status === 'pass' ? '✓ ' : '✗ '}{test.output}
                       </div>
                     )}
-                    <div className="rounded bg-[#0d1117] border border-[#30363d] px-2 py-1.5">
-                      <div className="text-xs text-gray-600 mb-1 uppercase tracking-wider font-semibold">Code</div>
-                      <code className="font-mono text-xs text-indigo-300 whitespace-pre-wrap break-all">{test.code}</code>
+                    <div className="rounded bg-surface border border-line px-2 py-1.5">
+                      <div className="text-xs text-faint mb-1 uppercase tracking-wider font-semibold">Code</div>
+                      <code className="font-mono text-xs text-accent-text whitespace-pre-wrap break-all">{test.code}</code>
                     </div>
                   </div>
                 )}
@@ -388,12 +388,12 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
       </div>
 
       {/* Footer summary */}
-      <div className="flex items-center gap-3 px-3 py-2 border-t border-[#30363d] bg-[#161b22] shrink-0 text-xs text-gray-500">
+      <div className="flex items-center gap-3 px-3 py-2 border-t border-line bg-card shrink-0 text-xs text-faint">
         <span>{tests.length} test{tests.length !== 1 ? 's' : ''}</span>
-        {passCount > 0 && <span className="text-green-500">{passCount} passed</span>}
-        {failCount > 0 && <span className="text-red-500">{failCount} failed</span>}
+        {passCount > 0 && <span className="text-success">{passCount} passed</span>}
+        {failCount > 0 && <span className="text-danger">{failCount} failed</span>}
         {running && (
-          <span className="flex items-center gap-1 text-yellow-400 ml-auto">
+          <span className="flex items-center gap-1 text-warn ml-auto">
             <TirangaLoader className="w-3 h-3" /> Running tests…
           </span>
         )}

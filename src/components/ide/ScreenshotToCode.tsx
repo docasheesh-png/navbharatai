@@ -311,12 +311,12 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
       <div className="flex flex-col gap-4 lg:w-1/2 w-full">
         {/* Website → App: a public page's address instead of a screenshot */}
         <div
-          className="rounded-xl border border-white/10 p-4 flex flex-col gap-3"
+          className="rounded-xl border border-line p-4 flex flex-col gap-3"
           style={{ backgroundColor: 'var(--surface-card)' }}
         >
           <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-indigo-400" />
-            <p className="text-xs text-gray-500 uppercase tracking-wide">From a website address</p>
+            <Globe className="w-4 h-4 text-accent-text" />
+            <p className="text-xs text-faint uppercase tracking-wide">From a website address</p>
           </div>
           <div className="flex gap-2">
             <input
@@ -325,36 +325,36 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               onChange={(e) => setSiteUrl(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleImportUrl(); }}
               placeholder="shop.example.com"
-              className="flex-1 min-w-0 text-sm px-3 py-2 rounded-lg border border-white/10 bg-black/20 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              className="flex-1 min-w-0 text-sm px-3 py-2 rounded-lg border border-line bg-well text-body placeholder-faint focus:outline-none focus:border-indigo-500"
               disabled={urlStatus === 'reading'}
             />
             <button
               onClick={handleImportUrl}
               disabled={!siteUrl.trim() || urlStatus === 'reading'}
-              className="text-sm px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:border-indigo-500 hover:text-indigo-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
+              className="text-sm px-3 py-2 rounded-lg border border-line text-muted hover:border-indigo-500 hover:text-accent-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
             >
               {urlStatus === 'reading' ? <TirangaLoader className="w-4 h-4" /> : null}
               {urlStatus === 'reading' ? 'Reading…' : 'Read website'}
             </button>
           </div>
           {urlStatus === 'error' && (
-            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-950/30 border border-red-800/40">
-              <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-red-400">{urlError}</p>
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-500/10 border border-red-800/40">
+              <AlertCircle className="w-4 h-4 text-danger mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-danger">{urlError}</p>
             </div>
           )}
           {extracted && (
-            <div className="flex flex-col gap-2 text-xs text-gray-400">
-              <p className="text-sm text-gray-200 truncate">{extracted.title || 'Untitled page'}</p>
+            <div className="flex flex-col gap-2 text-xs text-muted">
+              <p className="text-sm text-body truncate">{extracted.title || 'Untitled page'}</p>
               {extracted.thin && (
-                <p className="text-amber-300/80">
+                <p className="text-warn">
                   This site draws itself with JavaScript, so little could be read from its markup. The build will rely on looking at the live page.
                 </p>
               )}
               {extracted.nav.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {extracted.nav.map((n) => (
-                    <span key={n} className="px-2 py-0.5 rounded-full border border-white/10 text-gray-300">{n}</span>
+                    <span key={n} className="px-2 py-0.5 rounded-full border border-line text-muted">{n}</span>
                   ))}
                 </div>
               )}
@@ -365,17 +365,17 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               {extracted.colors.length > 0 && (
                 <div className="flex items-center gap-1.5">
                   {extracted.colors.map((c) => (
-                    <span key={c} title={c} className="w-5 h-5 rounded border border-white/20" style={{ backgroundColor: c }} />
+                    <span key={c} title={c} className="w-5 h-5 rounded border border-line" style={{ backgroundColor: c }} />
                   ))}
                 </div>
               )}
               <button
                 onClick={handleBuildFromSite}
-                className="mt-1 w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                className="mt-1 w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-on-accent transition-colors"
               >
                 Build from this website
               </button>
-              <p className="text-[11px] text-gray-500 leading-relaxed">
+              <p className="text-[11px] text-faint leading-relaxed">
                 The site's images, logos, icons and fonts are never copied — the layout is recreated with placeholders and you add your own. Reading the page costs nothing; the build is charged as usual.
               </p>
             </div>
@@ -386,8 +386,8 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         <div
           className={`rounded-xl border-2 border-dashed p-8 flex flex-col items-center justify-center cursor-pointer transition-all min-h-48 ${
             isDragging
-              ? 'border-indigo-500 bg-indigo-950/30'
-              : 'border-white/10 hover:border-white/25'
+              ? 'border-indigo-500 bg-indigo-500/10'
+              : 'border-line hover:border-line'
           }`}
           style={{ backgroundColor: 'var(--surface-card)' }}
           onDrop={handleDrop}
@@ -395,12 +395,12 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
           onDragLeave={handleDragLeave}
           onClick={() => fileInputRef.current?.click()}
         >
-          <ImageIcon className="w-10 h-10 text-gray-500 mb-3" />
-          <p className="text-gray-400 text-sm text-center leading-relaxed">
+          <ImageIcon className="w-10 h-10 text-faint mb-3" />
+          <p className="text-muted text-sm text-center leading-relaxed">
             Drop a screenshot here, or click to select
           </p>
           {imageFile && (
-            <p className="mt-2 text-xs text-indigo-400 truncate max-w-full px-4">
+            <p className="mt-2 text-xs text-accent-text truncate max-w-full px-4">
               {imageFile.name}
             </p>
           )}
@@ -416,7 +416,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {clipboardSupported && (
           <button
             onClick={(e) => { e.stopPropagation(); handleClipboardRead(); }}
-            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg border border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20 transition-colors w-fit"
+            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg border border-line text-muted hover:text-body hover:border-line transition-colors w-fit"
             style={{ backgroundColor: 'var(--surface-card)' }}
           >
             <Clipboard className="w-4 h-4" />
@@ -427,17 +427,17 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {/* Image Preview */}
         {imageFile && imageUrl && (
           <div
-            className="rounded-xl border border-white/10 p-4 flex flex-col gap-3"
+            className="rounded-xl border border-line p-4 flex flex-col gap-3"
             style={{ backgroundColor: 'var(--surface-card)' }}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex flex-col gap-1 min-w-0">
-                <p className="text-sm text-gray-300 truncate">{imageFile.name}</p>
-                <p className="text-xs text-gray-500">{formatBytes(imageFile.size)}</p>
+                <p className="text-sm text-muted truncate">{imageFile.name}</p>
+                <p className="text-xs text-faint">{formatBytes(imageFile.size)}</p>
               </div>
               <button
                 onClick={removeImage}
-                className="text-gray-500 hover:text-red-400 transition-colors flex-shrink-0"
+                className="text-faint hover:text-danger transition-colors flex-shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -453,11 +453,11 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
 
         {/* Style Options */}
         <div
-          className="rounded-xl border border-white/10 p-4 flex flex-col gap-4"
+          className="rounded-xl border border-line p-4 flex flex-col gap-4"
           style={{ backgroundColor: 'var(--surface-card)' }}
         >
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Output Style</p>
+            <p className="text-xs text-faint uppercase tracking-wide">Output Style</p>
             <div className="flex flex-wrap gap-2">
               {styleOptions.map((opt) => (
                 <button
@@ -465,8 +465,8 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
                   onClick={() => setSelectedStyle(opt)}
                   className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                     selectedStyle === opt
-                      ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300'
-                      : 'border-white/10 text-gray-400 hover:border-white/25 hover:text-gray-300'
+                      ? 'border-indigo-500 bg-indigo-500/20 text-accent-text'
+                      : 'border-line text-muted hover:border-line hover:text-muted'
                   }`}
                 >
                   {opt}
@@ -476,7 +476,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
           </div>
 
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Framework</p>
+            <p className="text-xs text-faint uppercase tracking-wide">Framework</p>
             <div className="flex flex-wrap gap-2">
               {frameworkOptions.map((opt) => (
                 <button
@@ -484,8 +484,8 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
                   onClick={() => setSelectedFramework(opt)}
                   className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                     selectedFramework === opt
-                      ? 'border-indigo-500 bg-indigo-500/20 text-indigo-300'
-                      : 'border-white/10 text-gray-400 hover:border-white/25 hover:text-gray-300'
+                      ? 'border-indigo-500 bg-indigo-500/20 text-accent-text'
+                      : 'border-line text-muted hover:border-line hover:text-muted'
                   }`}
                 >
                   {opt}
@@ -501,7 +501,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
               onChange={(e) => setIncludeJs(e.target.checked)}
               className="w-4 h-4 accent-indigo-500 rounded"
             />
-            <span className="text-sm text-gray-400">Include JS</span>
+            <span className="text-sm text-muted">Include JS</span>
           </label>
         </div>
       </div>
@@ -510,17 +510,17 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
       <div className="flex flex-col gap-4 lg:w-1/2 w-full">
         {/* Code Output Card */}
         <div
-          className="rounded-xl border border-white/10 flex flex-col flex-1"
+          className="rounded-xl border border-line flex flex-col flex-1"
           style={{ backgroundColor: 'var(--surface-card)', minHeight: '320px' }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-            <h2 className="text-sm font-semibold text-gray-300">Build spec (from your screenshot or website)</h2>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-line">
+            <h2 className="text-sm font-semibold text-muted">Build spec (from your screenshot or website)</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopy}
                 disabled={!generatedCode}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-line text-muted hover:text-body hover:border-line transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? 'Copied!' : 'Copy'}
@@ -532,8 +532,8 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
           <div className="flex-1 overflow-auto p-4">
             {status === 'idle' && (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
-                <Upload className="w-8 h-8 text-gray-600" />
-                <p className="text-sm text-gray-500">
+                <Upload className="w-8 h-8 text-faint" />
+                <p className="text-sm text-faint">
                   Upload a website screenshot, or paste a website address on the left — a same-to-same app is built from it
                 </p>
               </div>
@@ -541,8 +541,8 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
 
             {status === 'ready' && (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
-                <ImageIcon className="w-8 h-8 text-indigo-500" />
-                <p className="text-sm text-gray-400">
+                <ImageIcon className="w-8 h-8 text-accent-text" />
+                <p className="text-sm text-muted">
                   Image ready — press "Build from Screenshot"
                 </p>
               </div>
@@ -551,25 +551,25 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
             {status === 'generating' && (
               <div className="h-full flex flex-col items-center justify-center gap-3">
                 <TirangaLoader className="w-8 h-8" />
-                <p className="text-sm text-gray-400">AI is analyzing...</p>
+                <p className="text-sm text-muted">AI is analyzing...</p>
               </div>
             )}
 
             {status === 'error' && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-red-950/30 border border-red-800/40">
-                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-red-400">{errorMsg}</p>
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-800/40">
+                <AlertCircle className="w-4 h-4 text-danger mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-danger">{errorMsg}</p>
               </div>
             )}
 
             {status === 'done' && generatedCode && (
               <div className="space-y-2">
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-xs">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-800/40 text-success text-xs">
                   <Check className="w-3.5 h-3.5 shrink-0" />
                   Build spec ready — sent to NavBharatAI Pro. Press Send there to build your app.
                 </div>
                 <pre
-                  className="text-xs leading-relaxed whitespace-pre-wrap break-words text-gray-300"
+                  className="text-xs leading-relaxed whitespace-pre-wrap break-words text-muted"
                 >
                   {generatedCode}
                 </pre>
@@ -582,7 +582,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         <button
           onClick={handleGenerate}
           disabled={!imageFile || status === 'generating'}
-          className="w-full py-3 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-3 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-on-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {status === 'generating' ? (
             <>
@@ -595,7 +595,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         </button>
 
         {/* Honest, intent-aware note — inspired-by is built as asked; only a deceptive real-brand clone is guarded. */}
-        <p className="text-[11px] text-amber-300/70 leading-relaxed">
+        <p className="text-[11px] text-warn leading-relaxed">
           Want a page in <span className="font-semibold">your own</span> app to just <span className="font-semibold">look like</span> this
           (your brand, your name)? It’s built exactly as you ask. A pixel-perfect clone of a real branded site (login/payment) ships as a
           watermarked, non-original demo — so it can’t be used to impersonate or phish the real site.
@@ -604,12 +604,12 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
         {/* History */}
         {history.length > 0 && (
           <div
-            className="rounded-xl border border-white/10 overflow-hidden"
+            className="rounded-xl border border-line overflow-hidden"
             style={{ backgroundColor: 'var(--surface-card)' }}
           >
             <button
               onClick={() => setHistoryOpen((v) => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-3 text-sm text-muted hover:text-muted transition-colors"
             >
               <span className="flex items-center gap-2">
                 <Clock className="w-4 h-4" />
@@ -623,11 +623,11 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onBuildViaV5
             </button>
 
             {historyOpen && (
-              <div className="border-t border-white/10 divide-y divide-white/5">
+              <div className="border-t border-line divide-y divide-line">
                 {pagedHistory.visible.map((entry, i) => (
                   <div key={i} className="px-4 py-3 flex flex-col gap-1">
-                    <p className="text-xs text-gray-500">{formatTime(entry.timestamp)}</p>
-                    <p className="text-xs text-gray-400 font-mono truncate">{entry.preview}</p>
+                    <p className="text-xs text-faint">{formatTime(entry.timestamp)}</p>
+                    <p className="text-xs text-muted font-mono truncate">{entry.preview}</p>
                   </div>
                 ))}
                 <LoadMore list={pagedHistory} label="conversions" />

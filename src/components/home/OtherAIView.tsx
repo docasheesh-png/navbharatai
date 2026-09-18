@@ -1,6 +1,5 @@
 import { motion } from 'motion/react';
 import { LayoutGrid, ArrowLeft } from 'lucide-react';
-import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
 import { HOME_TOOL_GROUPS } from './homeToolGroups';
 import { isComingSoonTool, COMING_SOON_LABEL } from '../../lib/comingSoonTools';
@@ -10,7 +9,6 @@ interface OtherAIViewProps {
   onOpenTool: (id: string) => void;
   /** Back to the Home page. */
   onBack?: () => void;
-  theme: ThemeMode;
 }
 
 /**
@@ -18,17 +16,16 @@ interface OtherAIViewProps {
  * It renders EVERY builder-tool group INSIDE its own page (admin 2026-07-23: the tools must live
  * inside Other AI, not expand below the Home cards). Each tile opens its tool via onOpenTool.
  */
-export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
-  const colors = getThemeClasses(theme);
+export function OtherAIView({ onOpenTool, onBack }: OtherAIViewProps) {
   return (
-    <div className={cn('flex-1 w-full overflow-y-auto overflow-x-hidden', colors.bg, colors.text)}>
+    <div className="flex-1 w-full overflow-y-auto overflow-x-hidden bg-surface text-body">
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col gap-6">
         {/* Header */}
         <div className="flex items-center gap-3">
           {onBack && (
             <button
               onClick={onBack}
-              className="flex items-center gap-1.5 text-xs font-bold text-[#8b949e] hover:text-white transition-colors px-2.5 py-1.5 rounded-lg hover:bg-white/5"
+              className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-ink transition-colors px-2.5 py-1.5 rounded-lg hover:bg-raised"
               aria-label="Back to Home"
             >
               <ArrowLeft className="w-4 h-4" /> Home
@@ -36,11 +33,11 @@ export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
           )}
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-fuchsia-500/15 flex items-center justify-center shrink-0">
-              <LayoutGrid className="w-5 h-5 text-fuchsia-400" />
+              <LayoutGrid className="w-5 h-5 text-accent-text" />
             </div>
             <div>
-              <h1 className="text-lg sm:text-xl font-black text-white tracking-tight leading-none">Other</h1>
-              <p className="text-[11px] sm:text-xs text-[#8b949e] mt-0.5">Builder tools &amp; utilities — design, develop, ship &amp; monetize your app</p>
+              <h1 className="text-lg sm:text-xl font-black text-ink tracking-tight leading-none">Other</h1>
+              <p className="text-[11px] sm:text-xs text-muted mt-0.5">Builder tools &amp; utilities — design, develop, ship &amp; monetize your app</p>
             </div>
           </div>
         </div>
@@ -55,7 +52,7 @@ export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, delay: 0.04 * gi }}
-                className="bg-[#161b22] border border-white/5 rounded-2xl p-4"
+                className="bg-card border border-line rounded-2xl p-4"
               >
                 <div className="flex items-center gap-2 mb-3">
                   <GroupIcon className={cn('w-3.5 h-3.5', group.color)} />
@@ -79,7 +76,7 @@ export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
                         aria-disabled={soon}
                         title={soon ? `${item.label} — ${COMING_SOON_LABEL}` : undefined}
                         className={cn(
-                          'flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl transition-all group text-left',
+                          'flex items-center gap-2 p-3 min-h-[52px] bg-surface border border-line rounded-xl transition-all group text-left',
                           soon
                             ? 'opacity-55 cursor-not-allowed'
                             : 'hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20',
@@ -87,21 +84,21 @@ export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
                       >
                         <ToolIcon
                           className={cn(
-                            'w-4 h-4 text-[#8b949e] flex-shrink-0',
-                            !soon && 'group-hover:text-indigo-400 transition-colors',
+                            'w-4 h-4 text-muted flex-shrink-0',
+                            !soon && 'group-hover:text-accent-text transition-colors',
                           )}
                         />
                         <span className="flex flex-col min-w-0">
                           <span
                             className={cn(
-                              'text-[11px] font-bold text-[#8b949e] leading-tight',
-                              !soon && 'group-hover:text-white transition-colors',
+                              'text-[11px] font-bold text-muted leading-tight',
+                              !soon && 'group-hover:text-ink transition-colors',
                             )}
                           >
                             {item.label}
                           </span>
                           {soon && (
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400/80 leading-tight mt-0.5">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-warn leading-tight mt-0.5">
                               {COMING_SOON_LABEL}
                             </span>
                           )}

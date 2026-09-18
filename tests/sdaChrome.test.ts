@@ -92,7 +92,7 @@ describe('SDAChat wiring — the space actually came back, the safety text did n
   });
 
   it('the phone header is compact but the wide layout keeps its full identity', () => {
-    expect(SRC).toContain('hidden sm:block text-[9px] text-emerald-600');
+    expect(SRC).toContain('hidden sm:block text-[9px] text-success'); // the role token since the theme replacement (PR G): emerald-600 was 3.5:1 on Light
     expect(SRC).toContain('py-1.5 sm:py-2.5');
   });
 });

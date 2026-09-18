@@ -14,11 +14,8 @@
 // context-file selection. The route wires it into a lock-free read-only lane.
 
 import { MAX_QUEUE_ITEMS } from './BuildQueue';
-import {
-  analyzeRequirementGaps,
-  shouldSurfaceRequirementGaps,
-  indiaFirstGuidance,
-} from '../lib/RequirementGapAnalyzer';
+import { analyzeRequirementGaps, indiaFirstGuidance } from '../lib/RequirementGapAnalyzer';
+import type { DomainKnowledge } from '../lib/domainKnowledge';
 
 export type ChatRole = 'planner' | 'advisor';
 
@@ -88,9 +85,15 @@ export const PLANNER_MAX_QUESTIONS = 3;
  *   • at most `PLANNER_MAX_QUESTIONS`, and only those whose answer would change what gets built;
  *   • the PLAN comes first and is never held back waiting for answers — the user can ignore every
  *     question and say "you decide", which the reply is required to offer;
- *   • it fires only for a FRESH app (`projectIsEmpty`) and only when `shouldSurfaceRequirementGaps`
- *     finds a real domain with genuinely-missing features. Planning a change inside a live project
- *     gets nothing — "does it need login?" is noise to someone who already has login.
+ *   • it fires only for a FRESH app (`projectIsEmpty`) and only when there is real knowledge to add.
+ *     Planning a change inside a live project gets nothing — "does it need login?" is noise to someone
+ *     who already has login.
+ *
+ * 🇮🇳 ⚠️ **THE KNOWLEDGE IS NO LONGER A LIST (2026-09-18).** `opts.knowledge` comes from
+ * `resolveDomainKnowledge`, which asks the sixteen enumerated domains FIRST and a model only where
+ * they are silent — so a mandir donation app or a machhli-palan tracker gets the same help a hospital
+ * has always had. Passing nothing keeps the India half and adds no domain block, so a caller that has
+ * not been updated degrades to less rather than to wrong.
  *
  * India guidance rides the same gate: when the user's OWN words name the market (₹ / GST / UPI /
  * Hindi), the plan should assume Indian rails rather than dollars and Stripe.
@@ -100,21 +103,19 @@ export const PLANNER_MAX_QUESTIONS = 3;
 export function plannerDomainBrief(
   role: ChatRole,
   prompt: string,
-  opts: { projectIsEmpty: boolean },
+  opts: { projectIsEmpty: boolean; knowledge?: DomainKnowledge | null },
 ): string {
   if (role !== 'planner' || !opts.projectIsEmpty) return '';
   const gaps = analyzeRequirementGaps(prompt);
-  const surface = shouldSurfaceRequirementGaps(gaps);
-  if (!surface && !gaps.india) return '';
+  const k = opts.knowledge && opts.knowledge.source !== 'none' ? opts.knowledge : null;
+  if (!k && !gaps.india) return '';
 
   const parts: string[] = [];
-  if (surface) {
-    const feats = gaps.likelyMissing.slice(0, 6);
-    const questions = gaps.clarifyingQuestions.slice(0, PLANNER_MAX_QUESTIONS);
+  if (k) {
     parts.push([
-      `== WHAT THIS KIND OF APP USUALLY NEEDS (this reads like a ${gaps.domain} app) ==`,
+      `== WHAT THIS KIND OF APP USUALLY NEEDS (this reads like ${k.domain ? `a ${k.domain} app` : 'a specialised app'}) ==`,
       'Commonly needed for this kind of app, and NOT stated in the request:',
-      ...feats.map((f) => `- ${f}`),
+      ...k.needs.map((f) => `- ${f}`),
       '',
       'HOW TO USE THIS, and the limits matter as much as the list:',
       '1. Open with the PLAN itself, in plain words the user would use — what you understood they want,',
@@ -123,7 +124,7 @@ export function plannerDomainBrief(
       '   change what gets built. Never ask about something they already told you.',
       '3. Say in one short line that they can simply tell you to decide, and you will use sensible',
       '   defaults for the rest — the plan must never be held back waiting for answers.',
-      ...(questions.length ? ['', 'Questions worth choosing from:', ...questions.map((q) => `- ${q}`)] : []),
+      ...(k.questions.length ? ['', 'Questions worth choosing from:', ...k.questions.slice(0, PLANNER_MAX_QUESTIONS).map((q) => `- ${q}`)] : []),
     ].join('\n'));
   }
   if (gaps.india) parts.push(indiaFirstGuidance(gaps.domain));

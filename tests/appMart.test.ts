@@ -129,7 +129,7 @@ describe('App Mart browse is a 2-up TILE grid on a phone, not a list of rows', (
   });
 
   it('the tile is VERTICAL — a horizontal row cannot survive being halved in width', () => {
-    expect(store).toContain('flex flex-col rounded-xl bg-[#161b22]');
+    expect(store).toContain('flex flex-col rounded-xl bg-card'); // the surface token since the theme replacement
     expect(store).toContain('flex flex-col items-start gap-2 p-3 pb-2');
   });
 
@@ -147,7 +147,7 @@ describe('App Mart browse is a 2-up TILE grid on a phone, not a list of rows', (
   it('the sensitive-permission warning keeps its own line in the narrower tile', () => {
     // It is the one thing on an Android card a person must not miss, and the tile is half the width
     // of the row it replaced — so it stops sharing a line with the developer name and size.
-    expect(store).toContain('text-[11px] text-amber-400 leading-tight w-full');
+    expect(store).toContain('text-[11px] text-warn leading-tight w-full'); // token since the theme replacement
   });
 });
 
@@ -173,7 +173,7 @@ describe('the phone layout the admin drew: 2-up squares, App Mart 2x1 across the
   it('squares only work because the content shrinks with them', () => {
     // A square tile with a description and three feature bullets in it would overflow. These are the
     // rules that make the shape possible — remove one and the tile spills.
-    expect(home).toContain('hidden sm:block text-[#8b949e]');   // description
+    expect(home).toContain('hidden sm:block text-muted');       // description (token since the theme replacement)
     expect(home).toContain('hidden sm:flex flex-col gap-1.5');  // feature list
     expect(home).toContain('hidden sm:inline-block');            // badge
   });

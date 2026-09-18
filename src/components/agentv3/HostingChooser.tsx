@@ -596,7 +596,7 @@ export function HostingChooser({
 
   return (
     <div
-      className="nb-sheet-overlay fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      className="nb-sheet-overlay fixed inset-0 z-[60] flex items-center justify-center bg-scrim backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog"
       aria-label="Publish your app"
@@ -619,15 +619,15 @@ export function HostingChooser({
           screen's own last controls — Publish again, Visit <domain> — could not be reached or even
           scrolled to (admin: "last page ... waha bhi niche scroll nahi hota hai"). `nb-sheet` caps
           against the VISIBLE viewport instead; see the definition in index.css. */}
-      <div className="nb-sheet w-full max-w-lg lg:max-w-4xl flex flex-col bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="nb-sheet w-full max-w-lg lg:max-w-4xl flex flex-col bg-surface border border-line rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-line">
           <div className="flex items-center gap-2">
-            <Rocket className="w-4 h-4 text-emerald-400" />
-            <h3 className="text-sm font-bold text-white">Publish your app</h3>
+            <Rocket className="w-4 h-4 text-success" />
+            <h3 className="text-sm font-bold text-ink">Publish your app</h3>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded-lg" title="Close">
-            <X className="w-4 h-4 text-zinc-400" />
+          <button onClick={onClose} className="p-1 hover:bg-raised rounded-lg" title="Close">
+            <X className="w-4 h-4 text-muted" />
           </button>
         </div>
 
@@ -664,20 +664,20 @@ export function HostingChooser({
              still be reached and taken down. It also makes "5 of 5 used" visible BEFORE a publish is
              refused, instead of the limit arriving as a surprise. */
           <div className="p-4 flex flex-col gap-3">
-            <button onClick={() => setView('choose')} className="text-[11px] text-zinc-400 hover:text-white self-start">← Back</button>
+            <button onClick={() => setView('choose')} className="text-[11px] text-muted hover:text-ink self-start">← Back</button>
             <div className="flex items-baseline justify-between gap-2">
-              <h4 className="text-[13px] font-bold text-white">Your published apps</h4>
+              <h4 className="text-[13px] font-bold text-ink">Your published apps</h4>
               {myAppsMeta && (
-                <span className="text-[11px] text-zinc-400">
+                <span className="text-[11px] text-muted">
                   {myAppsMeta.used} of {myAppsMeta.cap} {myAppsMeta.planName ? `${myAppsMeta.planName} slots` : 'free slots'} used
                 </span>
               )}
             </div>
 
-            {myAppsErr && <p className="text-[11.5px] text-amber-300 leading-relaxed">{myAppsErr}</p>}
-            {!myApps && !myAppsErr && <p className="text-[11.5px] text-zinc-400">Loading…</p>}
+            {myAppsErr && <p className="text-[11.5px] text-warn leading-relaxed">{myAppsErr}</p>}
+            {!myApps && !myAppsErr && <p className="text-[11.5px] text-muted">Loading…</p>}
             {myApps?.length === 0 && (
-              <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+              <p className="text-[11.5px] text-muted leading-relaxed">
                 You have no apps published on NavBharatAI right now. Publishing one puts it at a permanent
                 link you can share.
               </p>
@@ -695,18 +695,18 @@ export function HostingChooser({
             */}
             {myPausedApps.length > 0 && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-                <p className="text-[12px] font-bold text-amber-200">
+                <p className="text-[12px] font-bold text-warn">
                   {myPausedApps.length} app{myPausedApps.length === 1 ? '' : 's'} paused — your plan ended
                 </p>
-                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed">
                   You are back on the free {myAppsMeta?.freeCap ?? 5} published apps, so these went
-                  offline. <span className="text-white font-semibold">Nothing was deleted</span> — all
+                  offline. <span className="text-ink font-semibold">Nothing was deleted</span> — all
                   your files are still here. Renew a plan in Billing → Plans, then open each app and
                   press Publish to put it back online.
                 </p>
                 <div className="space-y-1">
                   {myPausedApps.map((a) => (
-                    <p key={a.workspaceId} className="text-[11px] text-zinc-400 break-all">
+                    <p key={a.workspaceId} className="text-[11px] text-muted break-all">
                       • {a.workspaceId}
                       {a.updatedAt ? ` · last updated ${new Date(a.updatedAt).toLocaleDateString()}` : ''}
                       {a.orphaned ? ' · its chat was deleted, so it cannot be reopened' : ''}
@@ -717,7 +717,7 @@ export function HostingChooser({
             )}
 
             {myApps?.map((a) => (
-              <div key={a.workspaceId} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 flex flex-col gap-1.5">
+              <div key={a.workspaceId} className="rounded-xl border border-line bg-raised p-3 flex flex-col gap-1.5">
                 {/* SIBLING OF THE PROFILE/ADMIN LISTS (2026-09-17), fixed in the same change.
                     This is the same action — "open my published app" — and a bare `target="_blank"`
                     opens INSIDE the Android shell's own WebView rather than in the browser, which is
@@ -728,16 +728,16 @@ export function HostingChooser({
                 <button
                   type="button"
                   onClick={() => openExternalUrl(a.url)}
-                  className="text-[12px] text-emerald-300 hover:text-emerald-200 font-semibold break-all text-left"
+                  className="text-[12px] text-success hover:text-success font-semibold break-all text-left"
                 >
                   {a.url.replace(/^https?:\/\//, '')}
                 </button>
-                <p className="text-[11px] text-zinc-500">
+                <p className="text-[11px] text-faint">
                   {a.sizeMb !== null ? `${a.sizeMb.toFixed(1)} MB` : 'size unknown'}
                   {a.updatedAt ? ` · updated ${new Date(a.updatedAt).toLocaleDateString()}` : ''}
                 </p>
                 {a.orphaned && (
-                  <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                  <p className="text-[11px] text-warn leading-relaxed">
                     Its chat was deleted, so it cannot be opened for editing — but it is still live, and
                     you can take it down from here.
                   </p>
@@ -756,7 +756,7 @@ export function HostingChooser({
                       .finally(() => setMyAppsBusy(''));
                   }}
                   disabled={!onUnpublishApp || myAppsBusy === a.workspaceId}
-                  className="self-start mt-0.5 px-2.5 py-1 rounded-lg border border-zinc-700 hover:border-red-700 text-zinc-400 hover:text-red-300 text-[11px] font-semibold disabled:opacity-40"
+                  className="self-start mt-0.5 px-2.5 py-1 rounded-lg border border-line hover:border-red-700 text-muted hover:text-danger text-[11px] font-semibold disabled:opacity-40"
                 >
                   {myAppsBusy === a.workspaceId ? 'Removing…' : 'Take offline'}
                 </button>
@@ -765,40 +765,40 @@ export function HostingChooser({
           </div>
         ) : view === 'selfhost' ? (
           <div className="p-4 flex flex-col gap-3">
-            <button onClick={() => setView('choose')} className="text-[11px] text-zinc-400 hover:text-white self-start">← Back</button>
+            <button onClick={() => setView('choose')} className="text-[11px] text-muted hover:text-ink self-start">← Back</button>
             {ownRepo ? (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+              <div className="rounded-xl border border-line bg-raised p-4 flex flex-col gap-2.5">
                 <div className="flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-emerald-400" />
-                  <span className="text-[13px] font-bold text-white">Connected — {ownRepo.owner}/{ownRepo.repo}</span>
+                  <GitBranch className="w-4 h-4 text-success" />
+                  <span className="text-[13px] font-bold text-ink">Connected — {ownRepo.owner}/{ownRepo.repo}</span>
                 </div>
-                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
-                  NavBharatAI writes your code to the <code className="text-zinc-300">{ownRepo.workBranch}</code> branch
-                  and opens a pull request. It only merges into <code className="text-zinc-300">{ownRepo.baseBranch}</code> once
+                <p className="text-[11.5px] text-muted leading-relaxed">
+                  NavBharatAI writes your code to the <code className="text-muted">{ownRepo.workBranch}</code> branch
+                  and opens a pull request. It only merges into <code className="text-muted">{ownRepo.baseBranch}</code> once
                   your checks are green — we never push straight to your live branch.
                 </p>
-                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                <p className="text-[11.5px] text-muted leading-relaxed">
                   Connect this exact repo in your own hosting dashboard — Vercel, Netlify, Render, or Cloudflare
                   Pages all have an &quot;Import Git Repository&quot; option. Once connected there, every merge into
-                  <code className="text-zinc-300"> {ownRepo.baseBranch}</code> deploys automatically through YOUR
+                  <code className="text-muted"> {ownRepo.baseBranch}</code> deploys automatically through YOUR
                   account. NavBharatAI never touches your hosting or sees your deploy credentials.
                 </p>
                 <a
                   href={`https://github.com/${ownRepo.owner}/${ownRepo.repo}`}
                   target="_blank" rel="noopener noreferrer"
-                  className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+                  className="w-full py-2 rounded-lg border border-line bg-card hover:border-line hover:text-ink text-muted text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   View repo on GitHub
                 </a>
               </div>
             ) : !githubConnected ? (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+              <div className="rounded-xl border border-line bg-raised p-4 flex flex-col gap-2.5">
                 <div className="flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-zinc-400" />
-                  <span className="text-[13px] font-bold text-white">Connect GitHub first</span>
+                  <GitBranch className="w-4 h-4 text-muted" />
+                  <span className="text-[13px] font-bold text-ink">Connect GitHub first</span>
                 </div>
-                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                <p className="text-[11.5px] text-muted leading-relaxed">
                   To use your own hosting, NavBharatAI needs to write code into a GitHub repo you own — nothing
                   else. Connect your GitHub account to get started.
                 </p>
@@ -811,12 +811,12 @@ export function HostingChooser({
                 </button>
               </div>
             ) : (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+              <div className="rounded-xl border border-line bg-raised p-4 flex flex-col gap-2.5">
                 <div className="flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-emerald-400" />
-                  <span className="text-[13px] font-bold text-white">GitHub connected ✓</span>
+                  <GitBranch className="w-4 h-4 text-success" />
+                  <span className="text-[13px] font-bold text-ink">GitHub connected ✓</span>
                 </div>
-                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+                <p className="text-[11.5px] text-muted leading-relaxed">
                   This app isn't linked to one of your own repos yet. Import your existing repo (paste its URL
                   when you start a build, or ask NavBharatAI to import it) and this app's changes will go there
                   as pull requests instead — ready for your own host's auto-deploy to pick up.
@@ -828,7 +828,7 @@ export function HostingChooser({
         <>
         {/* The publish did not start — say WHY, right where the user is looking. Never a silent no-op. */}
         {blocked && (
-          <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-[11.5px] text-rose-200">
+          <div className="mx-4 mt-4 flex items-start gap-2 rounded-lg border border-rose-900/50 bg-rose-500/10 px-3 py-2 text-[11.5px] text-danger">
             <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>{blocked}</span>
           </div>
@@ -838,7 +838,7 @@ export function HostingChooser({
             point of moving publishing off the chat stream is that the user can watch it here. A build
             failure arrives with the compiler's real output, so `whitespace-pre-wrap` is deliberate. */}
         {publishStatus && (
-          <div className="mx-4 mt-4 rounded-lg border border-sky-900/50 bg-sky-950/30 px-3 py-2 text-[11.5px] text-sky-100">
+          <div className="mx-4 mt-4 rounded-lg border border-sky-900/50 bg-sky-500/10 px-3 py-2 text-[11.5px] text-info">
             <div className="flex items-start gap-2">
               {busy ? <TirangaLoader className="w-3.5 h-3.5 mt-0.5 shrink-0" /> : <Rocket className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
               <span className="whitespace-pre-wrap break-words max-h-48 overflow-auto">{publishStatus}</span>
@@ -849,27 +849,27 @@ export function HostingChooser({
         {/* The backend-deploy offer. Appears ONLY after a publish was refused for needing a server —
             which is the one moment the words "Deploy backend" are on the screen. */}
         {backendOffer.show && (
-          <div className="mx-4 mt-4 rounded-xl border border-indigo-800/50 bg-indigo-950/20 p-3.5 flex flex-col gap-2.5">
+          <div className="mx-4 mt-4 rounded-xl border border-indigo-800/50 bg-indigo-500/10 p-3.5 flex flex-col gap-2.5">
             <div className="flex items-center gap-2">
-              <Server className="w-4 h-4 text-indigo-300" />
-              <span className="text-[13px] font-bold text-white">{backendOffer.title}</span>
+              <Server className="w-4 h-4 text-accent-text" />
+              <span className="text-[13px] font-bold text-ink">{backendOffer.title}</span>
             </div>
-            <p className="text-[11.5px] text-zinc-300 leading-relaxed">
+            <p className="text-[11.5px] text-muted leading-relaxed">
               NavBharatAI hosting serves files, so it cannot keep your server running. Putting it there anyway
               would give you a site that loads while every button quietly fails — so nothing was published.
             </p>
             {backendOffer.canDeploy ? (
               <>
-                <p className="text-[11.5px] text-zinc-400 leading-relaxed">
-                  Deploying from <span className="text-zinc-200 font-semibold">{backendOffer.repoPath}</span>.
+                <p className="text-[11.5px] text-muted leading-relaxed">
+                  Deploying from <span className="text-body font-semibold">{backendOffer.repoPath}</span>.
                 </p>
                 {backendOffer.note && (
-                  <p className="text-[11.5px] text-amber-200 leading-relaxed">{backendOffer.note}</p>
+                  <p className="text-[11.5px] text-warn leading-relaxed">{backendOffer.note}</p>
                 )}
                 <button
                   onClick={() => void deployBackend()}
                   disabled={backendBusy || busy}
-                  className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
+                  className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-on-accent text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
                 >
                   {backendBusy ? <TirangaLoader size={14} /> : <Server className="w-3.5 h-3.5" />}
                   {backendBusy ? 'Deploying…' : DEPLOY_BACKEND_LABEL}
@@ -881,13 +881,13 @@ export function HostingChooser({
                     happen first instead of offering a press that could only fail. */}
                 <ol className="flex flex-col gap-1.5 pl-4 list-decimal">
                   {backendOffer.steps.map((step) => (
-                    <li key={step} className="text-[11.5px] text-zinc-300 leading-relaxed">{step}</li>
+                    <li key={step} className="text-[11.5px] text-muted leading-relaxed">{step}</li>
                   ))}
                 </ol>
                 {backendOffer.cta === 'connect-github' && onConnectGitHub && (
                   <button
                     onClick={() => onConnectGitHub()}
-                    className="py-2 px-3 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 text-zinc-200 text-[11.5px] font-semibold transition-colors self-start"
+                    className="py-2 px-3 rounded-lg border border-line bg-card hover:border-line text-body text-[11.5px] font-semibold transition-colors self-start"
                   >
                     Connect GitHub
                   </button>
@@ -899,7 +899,7 @@ export function HostingChooser({
                   <button
                     onClick={() => void pushAppToGitHub()}
                     disabled={pushBusy || busy}
-                    className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
+                    className="py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-on-accent text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors self-start"
                   >
                     {pushBusy ? <TirangaLoader size={14} /> : <Server className="w-3.5 h-3.5" />}
                     {pushBusy ? 'Saving to GitHub…' : 'Put this app in my GitHub'}
@@ -908,9 +908,9 @@ export function HostingChooser({
               </>
             )}
             {backendLines.length > 0 && (
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 flex flex-col gap-1">
+              <div className="rounded-lg border border-line bg-raised px-3 py-2 flex flex-col gap-1">
                 {backendLines.map((line) => (
-                  <span key={line} className="text-[11.5px] text-zinc-200 leading-relaxed whitespace-pre-wrap break-words">{line}</span>
+                  <span key={line} className="text-[11.5px] text-body leading-relaxed whitespace-pre-wrap break-words">{line}</span>
                 ))}
               </div>
             )}
@@ -919,23 +919,23 @@ export function HostingChooser({
 
         {/* The data gate. Shown only when the app REALLY stores data and REALLY has nowhere to put it. */}
         {dataGate?.needsDatabase && !dataGate.connected && (
-          <div className="mx-4 mt-4 rounded-xl border border-amber-800/50 bg-amber-950/20 p-3.5 flex flex-col gap-2.5">
+          <div className="mx-4 mt-4 rounded-xl border border-amber-800/50 bg-amber-500/10 p-3.5 flex flex-col gap-2.5">
             <div className="flex items-center gap-2">
-              <Database className="w-4 h-4 text-amber-300" />
-              <span className="text-[13px] font-bold text-white">Your app needs a database</span>
+              <Database className="w-4 h-4 text-warn" />
+              <span className="text-[13px] font-bold text-ink">Your app needs a database</span>
             </div>
-            <p className="text-[11.5px] text-zinc-300 leading-relaxed">
+            <p className="text-[11.5px] text-muted leading-relaxed">
               It uses {dataGate.signals.join(', ')}, so it saves data — but no database is connected yet.
               Publish without one and the live site will load, while anything that saves (signups, orders,
               bookings) will fail for real users.
             </p>
-            {dbNote && <p className="text-[11.5px] text-amber-200 leading-relaxed">{dbNote}</p>}
+            {dbNote && <p className="text-[11.5px] text-warn leading-relaxed">{dbNote}</p>}
             <div className="flex flex-col sm:flex-row gap-2">
               {dataGate.canProvision && (
                 <button
                   onClick={() => void createDatabase()}
                   disabled={dbBusy}
-                  className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors"
+                  className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-on-accent text-[11.5px] font-bold flex items-center justify-center gap-2 transition-colors"
                 >
                   {dbBusy ? <TirangaLoader size={14} /> : <Database className="w-3.5 h-3.5" />}
                   {dbBusy ? 'Creating…' : 'Create one free in my account'}
@@ -943,7 +943,7 @@ export function HostingChooser({
               )}
               <button
                 onClick={() => onOpenDatabaseSettings?.()}
-                className="flex-1 py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 text-zinc-200 text-[11.5px] font-semibold transition-colors"
+                className="flex-1 py-2 rounded-lg border border-line bg-card hover:border-line text-body text-[11.5px] font-semibold transition-colors"
               >
                 Connect my own database
               </button>
@@ -954,7 +954,7 @@ export function HostingChooser({
                  user's two free project slots, which is why it is not the first button. */
               <button
                 onClick={() => void createDatabase(true)}
-                className="text-[11px] text-zinc-500 hover:text-zinc-300 self-start underline underline-offset-2"
+                className="text-[11px] text-faint hover:text-muted self-start underline underline-offset-2"
               >
                 Want this app to have its own separate database instead? Create a new one
               </button>
@@ -963,7 +963,7 @@ export function HostingChooser({
             {!proceedAnyway && (
               <button
                 onClick={() => { setProceedAnyway(true); setBlocked(null); }}
-                className="text-[11px] text-zinc-500 hover:text-zinc-300 self-start underline underline-offset-2"
+                className="text-[11px] text-faint hover:text-muted self-start underline underline-offset-2"
               >
                 Publish without a database — I know data won&apos;t be saved
               </button>
@@ -972,18 +972,18 @@ export function HostingChooser({
         )}
         <div className="p-4 grid gap-3 sm:grid-cols-2">
           {/* Path 1 — Host on NavBharatAI */}
-          <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
+          <div className="rounded-xl border border-emerald-800/50 bg-emerald-500/10 p-4 flex flex-col gap-2.5">
             {/* The "Free" badge was REMOVED (admin 2026-08-21). Hosting itself costs the user nothing,
                 but the badge sat at the top of a card that also offers a PAID custom domain, so it read
                 as a promise about the whole card. The one line that is genuinely free-or-not — the
                 domain — now carries its own price instead. */}
             <div className="flex items-center justify-between">
-              <span className="text-[13px] font-bold text-white">Host on NavBharatAI</span>
+              <span className="text-[13px] font-bold text-ink">Host on NavBharatAI</span>
             </div>
-            <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+            <p className="text-[11.5px] text-muted leading-relaxed">
               One click, no account. We host it and keep it online at a permanent link.
             </p>
-            <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
+            <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
               <li>• Instant publish — nothing to set up</li>
               <li>• Frontend now · full app (backend + DB) coming soon</li>
               <li>• 5 apps free · updating one you published is always free</li>
@@ -992,14 +992,14 @@ export function HostingChooser({
             <button
               onClick={() => publish(NBAI_HOST_ID)}
               disabled={busy || !hasOurHosting}
-              className="mt-auto w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+              className="mt-auto w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs font-bold flex items-center justify-center gap-2 transition-colors"
             >
               {busy ? <TirangaLoader className="w-4 h-4" /> : <Rocket className="w-3.5 h-3.5" />}
               Publish on NavBharatAI
             </button>
             {/* A disabled button with no explanation is its own dead end — say why it's greyed out. */}
             {!hasOurHosting && (
-              <p className="text-[11px] text-zinc-500 leading-relaxed">
+              <p className="text-[11px] text-faint leading-relaxed">
                 NavBharatAI hosting isn&apos;t available right now — you can still publish to your own
                 provider or your own repo below.
               </p>
@@ -1007,14 +1007,14 @@ export function HostingChooser({
             {canConnectDomain && (
               <button
                 onClick={() => setView('domain')}
-                className="w-full py-1.5 rounded-lg border border-emerald-800/60 hover:border-emerald-600 text-emerald-300 hover:text-emerald-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                className="w-full py-1.5 rounded-lg border border-emerald-800/60 hover:border-emerald-600 text-success hover:text-success text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Link2 className="w-3.5 h-3.5" />
                 Connect your own domain{typeof customDomainPriceInr === 'number' ? ` (₹${customDomainPriceInr}/month)` : ''}
                 {/* THE MIDDLE STEP OF THE DOT TRAIL (admin 2026-08-21). The dot on the v5 Publish
                     button brought the user here; this one tells them the trail continues inward
                     rather than ending on this screen. Same source of truth as both its neighbours. */}
-                {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />}
+                {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500 text-on-accent" aria-label="You have unpublished changes" />}
               </button>
             )}
 
@@ -1033,13 +1033,13 @@ export function HostingChooser({
                   <button
                     onClick={() => setRollbackConfirm(true)}
                     disabled={busy || rollbackBusy || unpubBusy}
-                    className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-amber-600 text-zinc-400 hover:text-amber-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+                    className="w-full py-1.5 rounded-lg border border-line hover:border-amber-600 text-muted hover:text-warn text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
                   >
                     Undo last publish — put the previous version back
                   </button>
                 ) : (
-                  <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-2.5 flex flex-col gap-2">
-                    <p className="text-[11px] text-amber-100 leading-relaxed">
+                  <div className="rounded-lg border border-amber-900/60 bg-amber-500/10 p-2.5 flex flex-col gap-2">
+                    <p className="text-[11px] text-warn leading-relaxed">
                       Your live app goes back to the version you published before this one. Visitors see the
                       change straight away. Your files and chat are untouched, and you can undo this too.
                     </p>
@@ -1051,14 +1051,14 @@ export function HostingChooser({
                             .finally(() => { setRollbackBusy(false); setRollbackConfirm(false); });
                         }}
                         disabled={rollbackBusy}
-                        className="flex-1 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-[11px] font-semibold disabled:opacity-50"
+                        className="flex-1 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-on-accent text-[11px] font-semibold disabled:opacity-50"
                       >
                         {rollbackBusy ? 'Bringing it back…' : 'Yes, go back'}
                       </button>
                       <button
                         onClick={() => setRollbackConfirm(false)}
                         disabled={rollbackBusy}
-                        className="flex-1 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 text-[11px] font-semibold disabled:opacity-50"
+                        className="flex-1 py-1.5 rounded-lg border border-line text-muted text-[11px] font-semibold disabled:opacity-50"
                       >
                         Keep this version
                       </button>
@@ -1075,37 +1075,37 @@ export function HostingChooser({
               <div className="pt-1">
                 {!historyOpen ? (
                   <button onClick={() => void openHistory()} disabled={busy || rollbackBusy || unpubBusy}
-                    className="w-full py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-600 text-zinc-500 hover:text-zinc-300 text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                    className="w-full py-1.5 rounded-lg border border-line hover:border-line text-faint hover:text-muted text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
                     Go back to an earlier version…
                   </button>
                 ) : (
-                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-2.5 flex flex-col gap-1.5" data-testid="publish-history">
+                  <div className="rounded-lg border border-line bg-raised p-2.5 flex flex-col gap-1.5" data-testid="publish-history">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-zinc-200">Publish history</span>
-                      <button onClick={() => { setHistoryOpen(false); setPickedVersion(null); }} className="text-[10px] text-zinc-500 hover:text-zinc-300">close</button>
+                      <span className="text-[11px] font-bold text-body">Publish history</span>
+                      <button onClick={() => { setHistoryOpen(false); setPickedVersion(null); }} className="text-[10px] text-faint hover:text-muted">close</button>
                     </div>
                     {choices === undefined ? (
-                      <p className="text-[10.5px] text-zinc-500">Reading the history…</p>
+                      <p className="text-[10.5px] text-faint">Reading the history…</p>
                     ) : choices === null ? (
-                      <p className="text-[10.5px] text-amber-200/90">The publish history could not be read just now — this is not an empty history. Try again in a moment.</p>
+                      <p className="text-[10.5px] text-warn">The publish history could not be read just now — this is not an empty history. Try again in a moment.</p>
                     ) : choices.length <= 1 ? (
-                      <p className="text-[10.5px] text-zinc-500">Only one published version so far — there is nothing earlier to go back to yet.</p>
+                      <p className="text-[10.5px] text-faint">Only one published version so far — there is nothing earlier to go back to yet.</p>
                     ) : (
                       <ul className="flex flex-col gap-1 max-h-44 overflow-y-auto">
                         {choices.map((c) => {
                           const when = c.releaseTime ? new Date(c.releaseTime) : null;
                           const label = when && !Number.isNaN(when.getTime()) ? when.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'time unknown';
                           return (
-                            <li key={c.versionName} className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${c.live ? 'bg-emerald-950/40' : 'bg-zinc-800/40'}`}>
-                              <span className="text-[10.5px] text-zinc-300 truncate">{label}{c.live ? ' — live now' : ''}</span>
+                            <li key={c.versionName} className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${c.live ? 'bg-emerald-500/10' : 'bg-raised'}`}>
+                              <span className="text-[10.5px] text-muted truncate">{label}{c.live ? ' — live now' : ''}</span>
                               {!c.live && pickedVersion !== c.versionName && (
-                                <button onClick={() => setPickedVersion(c.versionName)} disabled={rollbackBusy} className="text-[10px] font-semibold text-amber-300 hover:text-amber-200 shrink-0">Go back to this</button>
+                                <button onClick={() => setPickedVersion(c.versionName)} disabled={rollbackBusy} className="text-[10px] font-semibold text-warn hover:text-warn shrink-0">Go back to this</button>
                               )}
                               {!c.live && pickedVersion === c.versionName && (
                                 <span className="flex gap-1 shrink-0">
                                   <button onClick={() => { setRollbackBusy(true); void onRollback(c.versionName).finally(() => { setRollbackBusy(false); setPickedVersion(null); setHistoryOpen(false); }); }} disabled={rollbackBusy}
-                                    className="px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-600 text-white text-[10px] font-semibold disabled:opacity-50">{rollbackBusy ? 'Bringing it back…' : 'Yes, go back'}</button>
-                                  <button onClick={() => setPickedVersion(null)} disabled={rollbackBusy} className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 text-[10px]">Keep</button>
+                                    className="px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-600 text-on-accent text-[10px] font-semibold disabled:opacity-50">{rollbackBusy ? 'Bringing it back…' : 'Yes, go back'}</button>
+                                  <button onClick={() => setPickedVersion(null)} disabled={rollbackBusy} className="px-2 py-0.5 rounded border border-line text-muted text-[10px]">Keep</button>
                                 </span>
                               )}
                             </li>
@@ -1113,7 +1113,7 @@ export function HostingChooser({
                         })}
                       </ul>
                     )}
-                    <p className="text-[10px] text-zinc-500">Nothing is deleted — going back adds a new entry, so you can come forward again.</p>
+                    <p className="text-[10px] text-faint">Nothing is deleted — going back adds a new entry, so you can come forward again.</p>
                   </div>
                 )}
               </div>
@@ -1126,53 +1126,53 @@ export function HostingChooser({
               <div className="pt-1">
                 {!settingsOpen ? (
                   <button onClick={() => void openSettings()} disabled={busy}
-                    className="w-full py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-600 text-zinc-500 hover:text-zinc-300 text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                    className="w-full py-1.5 rounded-lg border border-line hover:border-line text-faint hover:text-muted text-[11px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
                     Site settings — redirects, embedding, 404
                   </button>
                 ) : (
-                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-2.5 flex flex-col gap-2" data-testid="site-settings">
+                  <div className="rounded-lg border border-line bg-raised p-2.5 flex flex-col gap-2" data-testid="site-settings">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-zinc-200">Site settings</span>
-                      <button onClick={() => setSettingsOpen(false)} className="text-[10px] text-zinc-500 hover:text-zinc-300">close</button>
+                      <span className="text-[11px] font-bold text-body">Site settings</span>
+                      <button onClick={() => setSettingsOpen(false)} className="text-[10px] text-faint hover:text-muted">close</button>
                     </div>
                     {siteCfg === undefined ? (
-                      <p className="text-[10.5px] text-zinc-500">Loading…</p>
+                      <p className="text-[10.5px] text-faint">Loading…</p>
                     ) : siteCfg === null ? (
-                      <p className="text-[10.5px] text-amber-200/90">Your settings could not be read just now. Try again in a moment.</p>
+                      <p className="text-[10.5px] text-warn">Your settings could not be read just now. Try again in a moment.</p>
                     ) : (
                       <>
                         <div className="flex flex-col gap-1">
-                          <span className="text-[10px] font-semibold text-zinc-300 uppercase tracking-widest">Redirects</span>
-                          {siteCfg.redirects.length === 0 && <p className="text-[10px] text-zinc-500">None yet. Send an old address to a new one — visitors with the old link still arrive.</p>}
+                          <span className="text-[10px] font-semibold text-muted uppercase tracking-widest">Redirects</span>
+                          {siteCfg.redirects.length === 0 && <p className="text-[10px] text-faint">None yet. Send an old address to a new one — visitors with the old link still arrive.</p>}
                           {siteCfg.redirects.map((r, i) => (
                             <div key={i} className="flex items-center gap-1">
                               <input value={r.from} placeholder="/old-page" onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)) })}
-                                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-1.5 py-1 text-[10.5px] text-zinc-200 font-mono outline-none focus:border-zinc-500" />
-                              <span className="text-zinc-500 text-[10px]">→</span>
+                                className="flex-1 min-w-0 bg-surface border border-line rounded px-1.5 py-1 text-[10.5px] text-body font-mono outline-none focus:border-line" />
+                              <span className="text-faint text-[10px]">→</span>
                               <input value={r.to} placeholder="/new-page or https://…" onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)) })}
-                                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded px-1.5 py-1 text-[10.5px] text-zinc-200 font-mono outline-none focus:border-zinc-500" />
+                                className="flex-1 min-w-0 bg-surface border border-line rounded px-1.5 py-1 text-[10.5px] text-body font-mono outline-none focus:border-line" />
                               <select value={r.code} onChange={(e) => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.map((x, j) => (j === i ? { ...x, code: e.target.value === '302' ? 302 : 301 } : x)) })}
-                                className="bg-zinc-950 border border-zinc-700 rounded px-1 py-1 text-[10px] text-zinc-300">
+                                className="bg-surface border border-line rounded px-1 py-1 text-[10px] text-muted">
                                 <option value={301}>301 permanent</option>
                                 <option value={302}>302 temporary</option>
                               </select>
-                              <button onClick={() => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.filter((_, j) => j !== i) })} className="text-zinc-500 hover:text-red-400 text-[11px] px-1" title="Remove">×</button>
+                              <button onClick={() => setSiteCfg({ ...siteCfg, redirects: siteCfg.redirects.filter((_, j) => j !== i) })} className="text-faint hover:text-danger text-[11px] px-1" title="Remove">×</button>
                             </div>
                           ))}
                           <button onClick={() => setSiteCfg({ ...siteCfg, redirects: [...siteCfg.redirects, { from: '', to: '', code: 301 }] })} disabled={siteCfg.redirects.length >= 50}
-                            className="self-start text-[10px] text-zinc-400 hover:text-zinc-200 disabled:opacity-40">+ add a redirect</button>
+                            className="self-start text-[10px] text-muted hover:text-body disabled:opacity-40">+ add a redirect</button>
                         </div>
-                        <label className="flex items-start gap-2 text-[10.5px] text-zinc-300">
+                        <label className="flex items-start gap-2 text-[10.5px] text-muted">
                           <input type="checkbox" checked={siteCfg.allowEmbedding} onChange={(e) => setSiteCfg({ ...siteCfg, allowEmbedding: e.target.checked })} className="mt-0.5" />
-                          <span>Allow other websites to embed this app in a frame. <span className="text-zinc-500">Off by default — that is what stops a stranger's site from framing yours.</span></span>
+                          <span>Allow other websites to embed this app in a frame. <span className="text-faint">Off by default — that is what stops a stranger's site from framing yours.</span></span>
                         </label>
-                        <p className="text-[10px] text-zinc-500 leading-relaxed">
+                        <p className="text-[10px] text-faint leading-relaxed">
                           404 pages: a multi-page site that includes a <span className="font-mono">404.html</span> gets it served for missing pages. A single-page app handles missing pages in its own router, so nothing changes there.
                         </p>
-                        {cfgErrors.length > 0 && <ul className="text-[10.5px] text-red-300 list-disc pl-4">{cfgErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
-                        {cfgNote && <p className="text-[10.5px] text-emerald-300">{cfgNote}</p>}
+                        {cfgErrors.length > 0 && <ul className="text-[10.5px] text-danger list-disc pl-4">{cfgErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+                        {cfgNote && <p className="text-[10.5px] text-success">{cfgNote}</p>}
                         <button onClick={() => void saveSettings()} disabled={cfgBusy}
-                          className="self-start px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-[11px] font-semibold disabled:opacity-50">
+                          className="self-start px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-ink text-[11px] font-semibold disabled:opacity-50">
                           {cfgBusy ? 'Saving…' : 'Save settings'}
                         </button>
                       </>
@@ -1186,54 +1186,54 @@ export function HostingChooser({
                 live link is. Three honest states: loading, numbers, or "could not read" in words.
                 Never a zero that was not measured. */}
             {liveUrl && onLoadSiteAnalytics && (
-              <div className="rounded-lg border border-zinc-700/80 bg-zinc-900/60 p-2.5 flex flex-col gap-1.5" data-testid="site-analytics">
+              <div className="rounded-lg border border-line bg-raised p-2.5 flex flex-col gap-1.5" data-testid="site-analytics">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-zinc-200">Visitors</span>
+                  <span className="text-[11px] font-bold text-body">Visitors</span>
                   <div className="flex gap-1">
                     {([7, 30] as const).map((d) => (
                       <button key={d} onClick={() => setAnalyticsDays(d)}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${analyticsDays === d ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${analyticsDays === d ? 'bg-raised text-ink' : 'text-faint hover:text-muted'}`}>
                         {d}d
                       </button>
                     ))}
                   </div>
                 </div>
                 {!siteAnalytics ? (
-                  <p className="text-[10.5px] text-zinc-500">Counting…</p>
+                  <p className="text-[10.5px] text-faint">Counting…</p>
                 ) : !siteAnalytics.available ? (
-                  <p className="text-[10.5px] text-amber-200/90 leading-relaxed">
+                  <p className="text-[10.5px] text-warn leading-relaxed">
                     Visitor counts are unavailable right now — NavBharatAI could not read them. This is not a zero; try again in a minute.
                   </p>
                 ) : (
                   <>
                     <div className="flex items-baseline gap-3">
-                      <span className="text-lg font-black text-white leading-none">{siteAnalytics.totalUniques ?? 0}</span>
-                      <span className="text-[10.5px] text-zinc-400">people · {siteAnalytics.totalViews ?? 0} views · today {siteAnalytics.todayViews ?? 0}</span>
+                      <span className="text-lg font-black text-ink leading-none">{siteAnalytics.totalUniques ?? 0}</span>
+                      <span className="text-[10.5px] text-muted">people · {siteAnalytics.totalViews ?? 0} views · today {siteAnalytics.todayViews ?? 0}</span>
                     </div>
                     {(siteAnalytics.totalBytes ?? 0) > 0 && (
-                      <p className="text-[10.5px] text-zinc-400">
-                        <span className="text-zinc-200 font-semibold">{formatTraffic(siteAnalytics.totalBytes ?? 0)}</span> of traffic in this period
+                      <p className="text-[10.5px] text-muted">
+                        <span className="text-body font-semibold">{formatTraffic(siteAnalytics.totalBytes ?? 0)}</span> of traffic in this period
                       </p>
                     )}
                     {/* One bar per day, height by that day's views against the window's max. */}
                     <div className="flex items-end gap-[2px] h-7" aria-hidden="true">
                       {(siteAnalytics.days ?? []).map((p) => {
                         const max = Math.max(1, ...(siteAnalytics.days ?? []).map((q) => q.views));
-                        return <div key={p.day} title={`${p.day}: ${p.views} views`} className="flex-1 rounded-sm bg-emerald-500/70" style={{ height: `${Math.max(2, Math.round((p.views / max) * 100))}%` }} />;
+                        return <div key={p.day} title={`${p.day}: ${p.views} views`} className="flex-1 rounded-sm bg-emerald-500/70 text-on-accent" style={{ height: `${Math.max(2, Math.round((p.views / max) * 100))}%` }} />;
                       })}
                     </div>
                     {((siteAnalytics.topPaths?.length ?? 0) > 0 || (siteAnalytics.topReferrers?.length ?? 0) > 0) && (
-                      <div className="grid grid-cols-2 gap-2 text-[10px] text-zinc-400">
+                      <div className="grid grid-cols-2 gap-2 text-[10px] text-muted">
                         <div>
-                          <div className="font-semibold text-zinc-300 mb-0.5">Top pages</div>
+                          <div className="font-semibold text-muted mb-0.5">Top pages</div>
                           {(siteAnalytics.topPaths ?? []).slice(0, 3).map((t) => (
                             <div key={t.path} className="flex justify-between gap-2"><span className="truncate font-mono">{t.path}</span><span>{t.views}</span></div>
                           ))}
                         </div>
                         <div>
-                          <div className="font-semibold text-zinc-300 mb-0.5">Came from</div>
+                          <div className="font-semibold text-muted mb-0.5">Came from</div>
                           {(siteAnalytics.topReferrers ?? []).length === 0
-                            ? <div className="text-zinc-500">direct / unknown</div>
+                            ? <div className="text-faint">direct / unknown</div>
                             : (siteAnalytics.topReferrers ?? []).slice(0, 3).map((t) => (
                               <div key={t.host} className="flex justify-between gap-2"><span className="truncate">{t.host}</span><span>{t.views}</span></div>
                             ))}
@@ -1241,7 +1241,7 @@ export function HostingChooser({
                       </div>
                     )}
                     {(siteAnalytics.totalViews ?? 0) === 0 && (
-                      <p className="text-[10px] text-zinc-500">No visits recorded in this window yet. Counting starts from the first publish after 10 Sep 2026.</p>
+                      <p className="text-[10px] text-faint">No visits recorded in this window yet. Counting starts from the first publish after 10 Sep 2026.</p>
                     )}
                   </>
                 )}
@@ -1258,13 +1258,13 @@ export function HostingChooser({
                   <button
                     onClick={() => { setUnpubNote(''); setUnpubConfirm(true); }}
                     disabled={busy || unpubBusy}
-                    className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-red-700 text-zinc-400 hover:text-red-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+                    className="w-full py-1.5 rounded-lg border border-line hover:border-red-700 text-muted hover:text-danger text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
                   >
                     Remove this app from NavBharatAI hosting
                   </button>
                 ) : (
-                  <div className="rounded-lg border border-red-900/60 bg-red-950/20 p-2.5 flex flex-col gap-2">
-                    <p className="text-[11px] text-red-200 leading-relaxed">
+                  <div className="rounded-lg border border-red-900/60 bg-red-500/10 p-2.5 flex flex-col gap-2">
+                    <p className="text-[11px] text-danger leading-relaxed">
                       Take it offline? Anyone with the link will stop being able to open it. Your code and
                       chat are untouched, and you can publish it again whenever you like.
                     </p>
@@ -1277,7 +1277,7 @@ export function HostingChooser({
                             .finally(() => { setUnpubBusy(false); setUnpubConfirm(false); });
                         }}
                         disabled={unpubBusy}
-                        className="flex-1 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-[11px] font-bold flex items-center justify-center gap-1.5"
+                        className="flex-1 py-1.5 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-40 text-on-accent text-[11px] font-bold flex items-center justify-center gap-1.5"
                       >
                         {unpubBusy ? <TirangaLoader className="w-3.5 h-3.5" /> : null}
                         {unpubBusy ? 'Removing…' : 'Yes, take it offline'}
@@ -1285,14 +1285,14 @@ export function HostingChooser({
                       <button
                         onClick={() => setUnpubConfirm(false)}
                         disabled={unpubBusy}
-                        className="flex-1 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 text-[11px] font-semibold disabled:opacity-40"
+                        className="flex-1 py-1.5 rounded-lg border border-line text-muted text-[11px] font-semibold disabled:opacity-40"
                       >
                         Keep it live
                       </button>
                     </div>
                   </div>
                 )}
-                {unpubNote && <p className="mt-1.5 text-[11px] text-zinc-400">{unpubNote}</p>}
+                {unpubNote && <p className="mt-1.5 text-[11px] text-muted">{unpubNote}</p>}
               </div>
             )}
 
@@ -1313,7 +1313,7 @@ export function HostingChooser({
                     })
                     .catch(() => setMyAppsErr('Could not load your published apps. Please try again.'));
                 }}
-                className="w-full py-1.5 rounded-lg border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                className="w-full py-1.5 rounded-lg border border-line hover:border-emerald-700 text-muted hover:text-success text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Globe className="w-3.5 h-3.5" />
                 Your published apps
@@ -1329,7 +1329,7 @@ export function HostingChooser({
               and a card asking a first-time user to choose between their own cloud account and ours is
               a fork they cannot answer yet. Nothing was removed: both sub-choices are one press away,
               and for anyone already using them the section opens itself (`advancedPublish.ts`). */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2.5">
+          <div className="rounded-xl border border-line bg-raised p-4 flex flex-col gap-2.5">
             <button
               type="button"
               onClick={() => setAdvancedToggled(!advancedOpen)}
@@ -1337,13 +1337,13 @@ export function HostingChooser({
               className="w-full text-left flex flex-col gap-1"
             >
               <span className="flex items-center justify-between gap-2">
-                <span className="text-[13px] font-bold text-white">{ADVANCED_PUBLISH_LABEL}</span>
+                <span className="text-[13px] font-bold text-ink">{ADVANCED_PUBLISH_LABEL}</span>
                 <span className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">Your account</span>
-                  <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-muted bg-raised px-2 py-0.5 rounded-full">Your account</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-faint transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
                 </span>
               </span>
-              <span className="text-[11.5px] text-zinc-400 leading-relaxed">
+              <span className="text-[11.5px] text-muted leading-relaxed">
                 {advancedOpen ? 'Keep it off NavBharatAI — your cloud, your bill, free from us.' : ADVANCED_PUBLISH_HINT}
               </span>
             </button>
@@ -1351,7 +1351,7 @@ export function HostingChooser({
             {advancedOpen && (<>
             {/* Sub-choice A — we deploy to the user's connected provider */}
             <div className="mt-0.5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">We deploy to your provider</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-faint mb-1.5">We deploy to your provider</p>
               {byo.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {byo.map((p) => (
@@ -1360,7 +1360,7 @@ export function HostingChooser({
                       onClick={() => publish(p.id)}
                       disabled={busy}
                       title={p.requirement}
-                      className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white disabled:opacity-40 text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+                      className="w-full py-2 rounded-lg border border-line bg-card hover:border-line hover:text-ink disabled:opacity-40 text-muted text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
                     >
                       <Globe className="w-3.5 h-3.5" />
                       Publish to {p.name}
@@ -1368,7 +1368,7 @@ export function HostingChooser({
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                <p className="text-[11px] text-faint leading-relaxed">
                   No provider connected yet. Connect Vercel, Netlify, Cloudflare, or GitHub Pages to publish
                   to your own account.
                 </p>
@@ -1376,15 +1376,15 @@ export function HostingChooser({
             </div>
 
             {/* Sub-choice B — the user hosts it themselves; we only open a PR into their own GitHub repo */}
-            <div className="mt-1.5 pt-2.5 border-t border-zinc-800">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5">I host it myself</p>
-              <p className="text-[11px] text-zinc-500 leading-relaxed mb-2">
+            <div className="mt-1.5 pt-2.5 border-t border-line">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-faint mb-1.5">I host it myself</p>
+              <p className="text-[11px] text-faint leading-relaxed mb-2">
                 We only write code and open a pull request into your own GitHub repo — CI-gated. Your own
                 host&apos;s auto-deploy takes it from there. We never touch your hosting.
               </p>
               <button
                 onClick={() => setView('selfhost')}
-                className="w-full py-2 rounded-lg border border-zinc-700 bg-zinc-900 hover:border-zinc-500 hover:text-white text-zinc-300 text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
+                className="w-full py-2 rounded-lg border border-line bg-card hover:border-line hover:text-ink text-muted text-[11.5px] font-semibold flex items-center justify-center gap-2 transition-colors"
               >
                 <GitBranch className="w-3.5 h-3.5" />
                 {ownRepo ? `Connected: ${ownRepo.owner}/${ownRepo.repo}` : 'Set up'}
@@ -1394,15 +1394,15 @@ export function HostingChooser({
           </div>
 
           {/* Path 3 — Make an Android app (APK) via the APK Builder, pre-targeted to THIS app (admin 2026-08-13). */}
-          <div className="rounded-xl border border-sky-800/50 bg-sky-950/20 p-4 flex flex-col gap-2.5">
+          <div className="rounded-xl border border-sky-800/50 bg-sky-500/10 p-4 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-[13px] font-bold text-white">Make an Android app</span>
-              <span className="text-[9px] font-black uppercase tracking-widest text-sky-300 bg-sky-900/50 px-2 py-0.5 rounded-full">APK</span>
+              <span className="text-[13px] font-bold text-ink">Make an Android app</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-info bg-sky-500/10 px-2 py-0.5 rounded-full">APK</span>
             </div>
-            <p className="text-[11.5px] text-zinc-400 leading-relaxed">
+            <p className="text-[11.5px] text-muted leading-relaxed">
               Turn this app into a real installable Android app (.apk) — share it or upload it to the Play Store.
             </p>
-            <ul className="text-[11px] text-zinc-300 flex flex-col gap-1 mt-0.5">
+            <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
               <li>• Built on your own GitHub account</li>
               <li>• Your app icon, name &amp; package</li>
               <li>• Signed .apk / .aab — ready to install</li>
@@ -1410,12 +1410,12 @@ export function HostingChooser({
             <button
               onClick={() => onOpenApkBuilder?.()}
               disabled={!onOpenApkBuilder}
-              className="mt-auto w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+              className="mt-auto w-full py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs font-bold flex items-center justify-center gap-2 transition-colors"
             >
               <Smartphone className="w-3.5 h-3.5" />
               Open APK Builder
             </button>
-            <p className="text-[11px] text-zinc-500 leading-relaxed">
+            <p className="text-[11px] text-faint leading-relaxed">
               Needs GitHub connected · paid step — the builder shows the price before you build.
             </p>
           </div>
@@ -1424,11 +1424,11 @@ export function HostingChooser({
 
         {/* Full-stack note + sync law */}
         <div className="px-4 pb-4 flex flex-col gap-2">
-          <div className="flex items-start gap-2 text-[11px] text-amber-300/90 bg-amber-950/20 border border-amber-900/40 rounded-lg px-3 py-2">
+          <div className="flex items-start gap-2 text-[11px] text-warn bg-amber-500/10 border border-amber-900/40 rounded-lg px-3 py-2">
             <Server className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span><b className="font-semibold">Full-stack hosting (running backend + database) on NavBharatAI is coming soon.</b> For now, apps with a backend keep it on your own database (Settings → Database) or your own provider.</span>
           </div>
-          <div className="flex items-center justify-center gap-2 text-[11px] text-emerald-300/80">
+          <div className="flex items-center justify-center gap-2 text-[11px] text-success">
             <span aria-hidden="true">↔</span>
             <span>Publish anywhere — it&apos;s always the same app you built.</span>
           </div>

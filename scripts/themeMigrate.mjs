@@ -187,10 +187,12 @@ export function fillContext(line, idx, insideFill = null) {
   // A label INSIDE a filled box — an element with no background of its own, nested (by indentation)
   // under an opener whose className carries a solid fill. The same-element rule cannot see a parent,
   // and this shape (an avatar badge, a status bar's labels) is where the audit found labels going dark.
-  // ⚠️ A RESTING background only. `hover:bg-emerald-500/10` paints nothing at rest, so an element
-  // carrying just that is still sitting on whatever encloses it — and reading it as "has its own
-  // background" is what put a `text-ink` label on a fixed near-black dropdown (invisible on Light).
-  if (insideFill && !/(?<![\w-:])bg-/.test(span)) return insideFill === 'light' ? 'fixed-light' : 'yes';
+  // ⚠️ A RESTING, OPAQUE background only. `hover:bg-emerald-500/10` paints nothing at rest, and a
+  // translucent tint (`bg-amber-500/10`) lets the fixed box show straight through — in both cases the
+  // element is still sitting on whatever encloses it. Reading either as "has its own background" is
+  // what put a `text-ink` label on a fixed near-black dropdown and a `text-warn` strip on a fixed
+  // near-black header, both invisible on Light.
+  if (insideFill && !hasOwnOpaqueBackground(span)) return insideFill === 'light' ? 'fixed-light' : 'yes';
   const start = lineStart(line, idx);
   const bounded = line[start - 1] === '`' || line[start + span.length] === '`';
   if (!bounded) return 'no';
@@ -329,6 +331,24 @@ function gradientIsWash(span) {
   if (!/(?<![\w-])(?:[a-z-]+:)*bg-gradient-/.test(span)) return false;
   return /(?<![\w-])(?:from|via|to)-(?:\[?#?[\w.]*\]?-?\d{2,3}\/\d{1,3}|surface|card|raised|well|line|ink|body|muted|faint|transparent)(?![\w-])/.test(span)
     || /(?<![\w-])(?:from|via|to)-\w+-\d{2,3}\/\d{1,3}(?![\w-])/.test(span);
+}
+
+/**
+ * Does this element paint a surface of its OWN? Only a resting, opaque background does: a variant
+ * prefix means it is not painted at rest, and an opacity under 80% means the surface beneath still
+ * shows through and still decides what is readable on top.
+ */
+export function hasOwnOpaqueBackground(span) {
+  // ⚠️ The value class MUST carry `-`: a Tailwind colour is `amber-500`, and a class without it
+  // matched only `amber`, failed the trailing lookahead on the hyphen, and returned false for EVERY
+  // hyphenated background — which made this helper right about tints purely by accident.
+  for (const m of span.matchAll(/(?<![\w-])((?:[a-z-]+:)*)bg-([\w[\]#.-]+)(?:\/(\d{1,3}))?(?![\w/-])/g)) {
+    if (m[1]) continue;                       // hover:, focus:, md: — not the resting state
+    if (m[2] === 'gradient' || m[2].startsWith('gradient-')) continue;
+    if (m[3] !== undefined && Number(m[3]) < 80) continue; // a tint, not a surface
+    return true;
+  }
+  return false;
 }
 
 /** A themed surface the element declares for ITSELF — it ends any fixed subtree it sits in. */

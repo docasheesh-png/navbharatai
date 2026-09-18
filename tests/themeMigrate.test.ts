@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR, fixedFill, inlineFillKind } from '../scripts/themeMigrate.mjs';
+import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR, fixedFill, inlineFillKind, hasOwnOpaqueBackground } from '../scripts/themeMigrate.mjs';
 import { literalsIn, maskEmbeddedSources } from '../scripts/themeColourBaseline.mjs';
 
 const compat = readFileSync(resolve(__dirname, '../src/styles/theme-compat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
@@ -400,6 +400,20 @@ describe('🔒 a FIXED background fixes everything inside it, and its luminance 
       .toBe('<div className="bg-[#1e1333] text-[#a259ff]">F</div>');
     // …while off a fill it still becomes the role token
     expect(migrate('<p className="text-amber-400">x</p>').out).toContain('text-warn');
+  });
+
+  it('a TRANSLUCENT tint does not replace the fixed surface beneath it (AICodeReview\'s warning strip)', () => {
+    const src = [
+      '<div className="px-6 py-4 bg-[#0f141b] space-y-3">',
+      '  <div className="text-xs text-amber-400 bg-amber-500/10 px-3 py-2">{err}</div>',
+      '</div>',
+    ].join('\n');
+    expect(migrate(src).out).toContain('text-amber-400'); // stays literal on the fixed box, NOT text-warn
+    expect(hasOwnOpaqueBackground('text-xs bg-amber-500/10 px-3')).toBe(false);
+    expect(hasOwnOpaqueBackground('text-xs hover:bg-card px-3')).toBe(false);
+    expect(hasOwnOpaqueBackground('text-xs bg-card px-3')).toBe(true);
+    expect(hasOwnOpaqueBackground('text-xs bg-indigo-600 px-3')).toBe(true); // a HYPHENATED colour must parse
+    expect(hasOwnOpaqueBackground('text-xs bg-white/90 px-3')).toBe(true);
   });
 
   it('a chrome background still themes its children normally (no false fixed scope)', () => {

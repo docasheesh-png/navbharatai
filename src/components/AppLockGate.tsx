@@ -180,8 +180,8 @@ function usePinFlow(userId: string) {
 
 type PinFlow = ReturnType<typeof usePinFlow>;
 
-const PIN_BOX = 'w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-center text-lg font-bold tracking-[0.5em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50';
-const PRIMARY = 'bg-indigo-600 text-white hover:bg-indigo-500';
+const PIN_BOX = 'w-full rounded-xl border border-line bg-well px-3 py-3 text-center text-lg font-bold tracking-[0.5em] text-ink placeholder-faint outline-none focus:border-indigo-500/50';
+const PRIMARY = 'bg-indigo-600 text-on-accent hover:bg-indigo-500';
 
 /** The PIN card itself. Presentational — every decision is made in `usePinFlow`. */
 const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean; label?: string }> = ({ area, flow, embedded, label }) => {
@@ -198,17 +198,17 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
 
   return (
     <div className={embedded ? 'py-6' : 'py-10'}>
-      <div className="mx-auto max-w-sm rounded-2xl border border-white/10 bg-[#0d1117] p-6 text-center">
+      <div className="mx-auto max-w-sm rounded-2xl border border-line bg-surface p-6 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-500/10">
-          <Lock className="h-6 w-6 text-indigo-300" />
+          <Lock className="h-6 w-6 text-accent-text" />
         </div>
-        <h3 className="text-base font-bold text-white">
+        <h3 className="text-base font-bold text-ink">
           {status === null ? 'Checking your app lock…' : mode === 'setup' ? (status.hasPin ? 'Reset your PIN' : 'Create your PIN') : 'Enter your PIN'}
         </h3>
         {/* NAMES THE SCREEN BEING OPENED. With one lock in front of six places, "Enter your PIN" on its
             own leaves the user wondering what they are about to unlock — and on the overlay there is
             nothing else on screen to tell them. */}
-        <p className="mt-2 text-xs leading-relaxed text-gray-400">
+        <p className="mt-2 text-xs leading-relaxed text-muted">
           {mode === 'setup'
             ? `${what} is locked with a 4-digit PIN. We will email a code to the address on your account first, so only you can set it.`
             : area === 'api_keys'
@@ -217,12 +217,12 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
         </p>
 
         {error && (
-          <p className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-left text-[11px] leading-snug text-red-300">
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-left text-[11px] leading-snug text-danger">
             <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
           </p>
         )}
         {notice && !error && (
-          <p className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-left text-[11px] leading-snug text-emerald-300">
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-left text-[11px] leading-snug text-success">
             <Mail size={14} className="mt-px shrink-0" /> {notice}
           </p>
         )}
@@ -232,20 +232,20 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
              for ever — on a screen that cannot open without the answer, that is a locked door with no
              handle. */
           <div className="mt-5 space-y-2">
-            <p className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-left text-[11px] leading-relaxed text-red-300">{statusError}</p>
+            <p className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-left text-[11px] leading-relaxed text-danger">{statusError}</p>
             <button onClick={() => void refreshStatus(true)} className={`w-full rounded-xl px-4 py-3 text-sm font-bold ${PRIMARY}`}>
               Try again
             </button>
           </div>
         ) : status === null ? (
-          <p className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-500">
+          <p className="mt-5 flex items-center justify-center gap-2 text-xs text-faint">
             <Loader2 size={14} className="animate-spin" /> One moment…
           </p>
         ) : lockedForMs > 0 ? (
           /* 🔒 THE LOCK-OUT IS WHAT MAKES FOUR DIGITS SAFE, so the screen states it plainly rather than
              hiding it behind a generic error — and it still offers the way out, which is a new code. */
           <div className="mt-5 space-y-3">
-            <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-relaxed text-amber-200">
+            <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-relaxed text-warn">
               Too many wrong PINs. Locked for about {lockoutMinutes(lockedForMs)} minute
               {lockoutMinutes(lockedForMs) === 1 ? '' : 's'}. You can set a new PIN with an emailed code instead.
             </p>
@@ -281,13 +281,13 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
               {busy === 'unlock' ? 'Checking…' : 'Unlock'}
             </button>
             {typeof status.attemptsLeft === 'number' && status.attemptsLeft < status.maxAttempts && (
-              <p className="text-[10px] text-amber-300/80">
+              <p className="text-[10px] text-warn">
                 {status.attemptsLeft} {status.attemptsLeft === 1 ? 'try' : 'tries'} left before it locks for a while.
               </p>
             )}
             <button
               onClick={() => { setMode('setup'); setError(''); setNotice(''); }}
-              className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-gray-300 hover:bg-white/5"
+              className="w-full rounded-xl border border-line px-4 py-2.5 text-xs font-bold text-muted hover:bg-raised"
             >
               Forgot PIN?
             </button>
@@ -295,7 +295,7 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
         ) : noEmail || noContact ? (
           /* HONEST ABOUT THE ONE ACCOUNT WE CANNOT EMAIL, and it names the door that does work. */
           <div className="mt-5 space-y-3 text-left">
-            <p className="rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] leading-relaxed text-gray-300">
+            <p className="rounded-xl border border-line bg-well p-3 text-[11px] leading-relaxed text-muted">
               {noEmail
                 ? `Your account signs in with your mobile number${status.destination ? ` (${status.destination})` : ''} and has no email address, so we cannot email you a code. Sign in again with your mobile OTP — that is your verification — and you will be able to set your PIN straight after.`
                 : 'Your account has no email address or mobile number on it, so there is no way to send you a verification code. Add one in Settings, then come back to set your PIN.'}
@@ -308,7 +308,7 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
             {status.hasPin && (
               <button
                 onClick={() => { setMode('unlock'); setError(''); }}
-                className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-gray-300 hover:bg-white/5"
+                className="w-full rounded-xl border border-line px-4 py-2.5 text-xs font-bold text-muted hover:bg-raised"
               >
                 Back to PIN
               </button>
@@ -320,7 +320,7 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
               onClick={() => void requestCode()}
               disabled={!!busy || status.resendInMs > 0}
               className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50 ${
-                codeSentTo ? 'border border-white/10 text-gray-200 hover:bg-white/5' : PRIMARY
+                codeSentTo ? 'border border-line text-body hover:bg-raised' : PRIMARY
               }`}
             >
               <Mail size={16} />
@@ -342,7 +342,7 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               placeholder="6-digit code from your email"
               aria-label="Verification code"
-              className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-center text-sm font-mono tracking-[0.3em] text-white placeholder-gray-600 outline-none focus:border-indigo-500/50"
+              className="w-full rounded-xl border border-line bg-well px-3 py-2.5 text-center text-sm font-mono tracking-[0.3em] text-ink placeholder-faint outline-none focus:border-indigo-500/50"
             />
             <input
               type="password"
@@ -375,14 +375,14 @@ const PinScreen: React.FC<{ area: AppLockArea; flow: PinFlow; embedded?: boolean
               <ShieldCheck size={16} />
               {busy === 'save' ? 'Saving…' : status.hasPin ? 'Reset PIN and open' : 'Create PIN and open'}
             </button>
-            <p className="text-[10px] leading-snug text-gray-500">
+            <p className="text-[10px] leading-snug text-faint">
               Avoid 0000 or 1234. Five wrong PINs holds the lock for a while — you can always reset it with
               a new emailed code.
             </p>
             {status.hasPin && (
               <button
                 onClick={() => { setMode('unlock'); setError(''); setNotice(''); }}
-                className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-gray-300 hover:bg-white/5"
+                className="w-full rounded-xl border border-line px-4 py-2.5 text-xs font-bold text-muted hover:bg-raised"
               >
                 Back to PIN
               </button>
@@ -400,16 +400,16 @@ const UnlockedBanner: React.FC<{ secondsLeft: number; onRelock: () => void }> = 
   const ss = String(secondsLeft % 60).padStart(2, '0');
   return (
     <div className="flex items-center justify-between gap-2 flex-wrap rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
-      <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-emerald-300">
+      <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-success">
         <ShieldCheck size={14} />
         Unlocked
-        <span className="font-sans font-normal normal-case tracking-normal text-emerald-200/70">with your PIN</span>
+        <span className="font-sans font-normal normal-case tracking-normal text-success">with your PIN</span>
       </span>
       <span className="flex items-center gap-3">
-        <span className="text-[11px] text-emerald-200/70 tabular-nums">Re-locks in {mm}:{ss}</span>
+        <span className="text-[11px] text-success tabular-nums">Re-locks in {mm}:{ss}</span>
         <button
           onClick={onRelock}
-          className="rounded border border-emerald-400/30 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-emerald-200 hover:bg-emerald-400/10"
+          className="rounded border border-emerald-400/30 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-success hover:bg-emerald-400/10"
         >
           Lock now
         </button>
@@ -528,7 +528,7 @@ export function useAreaLocked(userId: string, area: AppLockArea): boolean {
 export const AppLockScreen: React.FC<{ userId: string; area: AppLockArea; embedded?: boolean }> = ({ userId, area, embedded }) => {
   const flow = usePinFlow(userId);
   return (
-    <div role="dialog" aria-modal="true" aria-label={`${areaLabel(area)} is locked`} className="flex-1 overflow-y-auto bg-[#0d1117]">
+    <div role="dialog" aria-modal="true" aria-label={`${areaLabel(area)} is locked`} className="flex-1 overflow-y-auto bg-surface">
       <PinScreen area={area} flow={flow} embedded={embedded} />
     </div>
   );

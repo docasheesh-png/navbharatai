@@ -251,6 +251,26 @@ export function analyzeRequirementCoverage(
     if (feat.artifact.test(surface)) { covered.push(feat.label); continue; }
     // Named nowhere — but it may be built INLINE. Check the bodies before calling it missing.
     if (canReadBodies && feat.evidence && feat.evidence.test(bodies)) { covered.push(feat.label); continue; }
+    /**
+     * 🔴 A ONE-FILE APP KEEPS ITS FEATURES INLINE, SO ITS NAMES NEVER REACH `surface` (build
+     * b6f88a72, 2026-09-18). The Gita reader implemented bookmarks completely — a `saved` array, a
+     * `toggleSave` handler, a "सहेजे गए" tab, persisted under `geeta-saved-v1` — all inside one
+     * `App.tsx`. `surface` holds file and component NAMES, and a single-file app contributes none,
+     * so the broad `artifact` pattern above could not match; `evidence` is a list of four literal
+     * function names and `toggleSave` is not one of them. The feature was reported **CONFIRMED NOT
+     * BUILT**, the agent spent five edits renaming a UI label to satisfy a detector that reads
+     * function names, and the user's own summary said, in one message, both *"Has Favorites /
+     * Wishlist"* and *"One thing you asked for isn't in the app yet: wishlist / favorites"*.
+     *
+     * 🔒 THE SAME QUESTION, ASKED WHERE THIS APP ANSWERS IT. `artifact` is deliberately broad —
+     * this list's own comment says it exists "so a feature built under a reasonable alternate name
+     * still counts". That intent simply never reached a one-file app. Nothing new is invented here.
+     *
+     * ⚠️ THE ERROR DIRECTION IS THE WHOLE JUSTIFICATION. Broader coverage can only cost a nag we do
+     * not print; the reverse tells a user their working feature is missing, and buys a heal pass to
+     * "add" it. This module's stated posture is high-precision, not nagging.
+     */
+    if (canReadBodies && feat.artifact.test(bodies)) { covered.push(feat.label); continue; }
     missing.push(feat.label);
     // CONFIRMED only when we genuinely looked and genuinely did not find it. Without bodies, or
     // without an evidence pattern for this feature, "missing" stays the advisory it always was —

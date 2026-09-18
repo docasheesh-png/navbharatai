@@ -6,7 +6,7 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
-import { declaredPortFrom, DECLARED_PORT_FILES } from './declaredPort';
+import { declaredPortsFrom, DECLARED_PORT_FILES } from './declaredPort';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
@@ -3299,9 +3299,24 @@ export class ToolDispatcher {
       case 'grep': {
         const pattern = reqStr(input, 'pattern');
         const path = optStr(input, 'path') ?? '.';
+        /**
+         * 🔴 THE ONE SEARCH IN THIS FILE THAT EXCLUDED NOTHING (build b6f88a72, 2026-09-18).
+         *
+         * Eight other search paths here carry a `SKIP_DIR` / `EXCLUDE` pattern for exactly these
+         * directories; the agent-facing `grep` tool ran a bare `grep -rn`. A reviewer's
+         * `grep <pattern> .` therefore walked `node_modules/.vite/deps/*.js.map` and returned a
+         * result of **2,709,481 characters** — which was then truncated to ~12k tokens, so the
+         * machine paid for the walk and the model still did not get its answer.
+         *
+         * The set is copied from this file's own `SKIP_DIR`, so there is one vocabulary of
+         * "not the user's code", not two. An explicit path is still searched as given — only the
+         * unqualified walk is bounded, which is the case that produced this.
+         */
+        const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.next', '__pycache__'];
+        const excludes = EXCLUDED_DIRS.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
         const { stdout } = await this.actuator.runCommand(
           this.workspaceId,
-          `grep -rn ${shellQuote(pattern)} ${shellQuote(path)} || true`,
+          `grep -rn ${excludes} ${shellQuote(pattern)} ${shellQuote(path)} || true`,
         );
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
         return redactSecrets(stdout.trim()) || '(no matches)';
@@ -8347,7 +8362,7 @@ export class ToolDispatcher {
            * that declares nothing leaves `sourceDeclaredPort` null and the behaviour byte-identical to
            * before, because the veto simply has nothing to veto.
            */
-          let sourceDeclaredPort: number | null = null;
+          let sourceDeclaredPorts: number[] = [];
           try {
             const portFiles: Record<string, string | undefined> = {};
             for (const path of DECLARED_PORT_FILES) {
@@ -8355,9 +8370,12 @@ export class ToolDispatcher {
                 portFiles[path] = await withTimeout(this.actuator.readFile(this.workspaceId, path), 3_000, 'supersede-declared-port');
               } catch { /* absent is normal — most apps have only one or two of these */ }
             }
-            sourceDeclaredPort = declaredPortFrom(portFiles)?.port ?? null;
+            // EVERY port the app declares, not the strongest one. A full-stack app's frontend and API
+            // are both its own, and the singular answer protected one while leaving the other killable
+            // — report `1a7f4a58` killed a Vite frontend to bless the app's own Express API.
+            sourceDeclaredPorts = declaredPortsFrom(portFiles).map((d) => d.port);
           } catch { /* a port hint must never be able to affect a build */ }
-          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPort });
+          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPorts });
           if (decision.staleports.length > 0) {
             await withTimeout(
               this.actuator.runCommand(this.workspaceId, buildPreKillPortCommand(decision.staleports)),

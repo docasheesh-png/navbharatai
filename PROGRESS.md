@@ -67647,3 +67647,55 @@ counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail;
 3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
    system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
    ASKED what it needs is a product question, not a threshold one.
+
+## 2026-09-18 — A status is never the first word written about a record: the ghost-write sibling hunt (branch `claude/a-status-is-never-the-first-word`, stacked on #3101)
+
+Rule 3 applied to the defect in the admin's own screenshot (#3101): `DeploymentStore.setStatus` /
+`markOrphaned` / `setOutboundVerdict` minted status-only registry docs because `set(…, { merge: true })`
+CREATES a missing document. That is a CLASS, not an instance — so every merge-set in `src/server` was
+listed (85 outside the two stores already fixed) and each judged by its semantics: **create-or-update
+of a whole record with its identity** (`record`, `save`, memory docs, counters, the file store's meta
+doc) keeps its merge, because the first write of a new record must land; **a patch of a status, flag or
+stamp onto a record that must already exist** must never be able to write first.
+
+### Converted to `update()` (refuses a missing doc; honest `false`/no-op instead of a ghost)
+
+| Store | Method | What the ghost would have been |
+|---|---|---|
+| `SandboxStore` | `markPaused` | a sandbox record with only `pausedAt` — the one writer there whose payload carries no `workspaceId`/`sandboxId` (a `clear()` between the sweep's read and its stamp) |
+| `AdminApkReportStore` | `markApkReportFixed` | a blank row in the admin's APK Reports tab |
+| `userReportStore` | `setReportStatus` | a blank row in the admin's User Reports tab |
+| `TeamStore` | `setInviteStatus`, `removeMember`, `updateMemberRole` | a ghost invite; a "removed" member with no uid; **a member row with a role and nobody behind it** |
+| `MentionNotificationStore` | `markRead` | a `{ read: true }` notification with no text, sorting as NaN to the top of an inbox (NOT_FOUND swallowed per id, so one stale id cannot fail the batch) |
+| `ShareStore` | `revokeShare` | a share with only `status: 'revoked'` (returns before writing when the share does not exist) |
+| `CheckpointStore` | `setCheckpointLabel` | a checkpoint holding only a name — and the function's own contract promised an honest `false` |
+| `AppBuildStore` | `setLatestRun`, `setOutcome` | the very row its own comment says the list cannot read back (no workflow, no name) |
+| `HostingBillingStore` | `markDebited` | a minted `{ debited: true }` under a bill key makes the next claim's `create` fail and absorbs a day |
+| `zipUploadStore` | `noteSharedProgress` | an upload record with no owner |
+
+**Left as merge-set, deliberately, with the reason:** `authMiddleware.setUserRole` (a role may be
+assigned to a uid whose profile doc does not exist yet — create-or-update is the intent);
+`BuildOutcomeStore.claimReport`, `userReportStore.markReportReadByReporter` / `addReportMessage` (inside
+transactions that check `snap.exists` first); `ManualEditTracker.consumeManualEdits` (a reset to empty);
+every `record`/`save`/counter writer.
+
+### Readers
+
+Two admin-facing readers that fetch a WHOLE collection now skip a row with no timestamp, so a ghost
+already in the data never renders blank: `userReportStore.listReports` (unordered branch — the ordered
+branch already excludes such docs, because Firestore drops documents missing an `orderBy` field, which
+is also why `listApkReports` needed nothing) and `MentionNotificationStore.listForUser`.
+
+### Tests
+
+`tests/aStatusIsNeverTheFirstWord.test.ts` — sixteen patchers asserted `update()` and no `merge: true`
+per method body (comments stripped); four create-or-update writers asserted to STILL merge (so a
+mechanical sweep cannot break a first save); the honesty half (revoke's existence check precedes the
+write, markRead's per-id catch, both reader guards). Existing store suites (checkpoint, share, team, APK
+report, restore) unchanged and green.
+
+### Open (rule 6)
+
+Ghost docs already written before today are not deleted by this change — the readers hide them; a
+one-off cleanup would be an admin-console decision (Firestore query: docs in `agentv3_deployments` /
+`user_reports` / `admin_apk_reports` with no `updatedAt`/`at`/`reportedAt`).

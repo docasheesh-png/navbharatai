@@ -745,6 +745,28 @@ export interface SmartIntent {
    * this flag behaves EXACTLY as it does today. The flag adds an option; it removes none.
    */
   unclear: boolean;
+  /**
+   * TRUE only when the LLM reader itself answered this turn — never for a high-confidence keyword
+   * verdict, and never when the call failed, timed out or said "unclear".
+   *
+   * 🔴 WHY IT EXISTS (autopsy e9b25b08, 2026-09-18). The build route carries a DETERMINISTIC SAFETY
+   * NET: `new_build` on a non-empty workspace is forced to `edit_existing`. Its own comment states
+   * the case it was written for — *"even if the LLM is down/slow and the keyword fallback returned
+   * new_build"*. It fired unconditionally, so it also overrode THIS reader, which had been handed
+   * `projectExists` in its own prompt (*"the user ALREADY has a working project … only a fresh BUILD
+   * if they clearly ask to start over"*) and had still answered **build**.
+   *
+   * A fallback that becomes an override breaks the thing it was helping — this repo's own words for
+   * `withSandboxBrowsers` (autopsy 697b38ee), the same shape one layer up. `"Build a search engines
+   * like google"` was therefore built as an EDIT of a four-file scaffold, the user was told *"✏️
+   * Editing your existing app"* about an app they had never written, Software Project Mode reported
+   * *"this turn is not a fresh build, so no plan was created"*, and the user stopped the build at 69
+   * seconds having seen nothing produced.
+   *
+   * 🔒 A caller that ignores this flag is byte-identical to before it existed — the same discipline
+   * `unclear` above already follows.
+   */
+  readerAnswered: boolean;
 }
 
 /**
@@ -759,7 +781,8 @@ export async function classifyIntentSmartDetailed(
   context?: IntentContext,
 ): Promise<SmartIntent> {
   const { intent, confidence } = classifyIntentWithConfidence(message);
-  if (confidence === 'high') return { intent, unclear: false };
+  // The reader is not consulted at all here, so the route's deterministic net still governs.
+  if (confidence === 'high') return { intent, unclear: false, readerAnswered: false };
 
   const ctxLines: string[] = [];
   if (context?.projectExists !== undefined) {
@@ -809,12 +832,13 @@ export async function classifyIntentSmartDetailed(
     // NAVBHARATAI_UI_MAP and can say "press the Preview tab" instead of `npm run dev`. Two sessions
     // added a fourth answer on the same day (#3045's `unclear`, #3046's `help`); they are different
     // answers to different situations, so the reader now has five, not a merged four.
-    if (raw === 'chat' || raw === 'help') return { intent: 'chat', unclear: false };
-    if (raw === 'build') return { intent: 'new_build', unclear: false };
-    if (raw === 'edit') return { intent: 'edit_existing', unclear: false };
+    if (raw === 'chat' || raw === 'help') return { intent: 'chat', unclear: false, readerAnswered: true };
+    if (raw === 'build') return { intent: 'new_build', unclear: false, readerAnswered: true };
+    if (raw === 'edit') return { intent: 'edit_existing', unclear: false, readerAnswered: true };
     // ⚠️ The INTENT stays at the keyword result here, on purpose — see `SmartIntent.unclear`. A
     // caller that does not read the flag must be byte-identical to before this answer existed.
-    if (raw === 'unclear') return { intent, unclear: true };
+    // `intent` is the KEYWORD verdict here, not the reader's — so the net must still govern it.
+    if (raw === 'unclear') return { intent, unclear: true, readerAnswered: false };
   } catch {
     /* LLM call failed — fall through to the honest fallback below */
   }
@@ -825,7 +849,9 @@ export async function classifyIntentSmartDetailed(
   // is one message (the chat reply already offers to build; "haan" starts it), wrong-toward-build is a
   // whole build nobody asked for. So a question falls to CHAT; a statement or order keeps the keyword
   // verdict exactly as before, which is what keeps "add a payment button" an edit when GLM is slow.
-  return { intent: readsAsQuestion(message.toLowerCase()) ? 'chat' : intent, unclear: false };
+  // The reader could not answer (failed, timed out, or an unusable word). Whatever this returns is
+  // a FALLBACK, so the route's deterministic net keeps governing it, exactly as it did before.
+  return { intent: readsAsQuestion(message.toLowerCase()) ? 'chat' : intent, unclear: false, readerAnswered: false };
 }
 
 /**

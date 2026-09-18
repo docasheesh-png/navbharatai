@@ -67224,3 +67224,80 @@ than quietly corrected.
 **Tests:** `tests/aSuggestionCostsASuggestionsPrice.test.ts` — 16 cases + source-anchored wiring
 guard. **Proven by reversion four ways:** the plan not asked · the budget not told · the green cap
 removed · the plan ignoring the write rule (bites two cases).
+---
+
+## 2026-09-18 — 🔴 FOUR VARIABLES HELD ONE FACT, AND THE TWO PRODUCERS DID NOT AGREE (evidence ledger, 7th appearance)
+
+**Admin:** *"ab next kya kya kaam bacha hai??"* — this is the first of the three items left from the
+`95598899` autopsy, and the one that turned out to have a real defect behind it rather than only a
+tidy-up.
+
+### What was left, and what hunting the sibling found
+
+The recorded item was narrow: *"`RUNTIME_UNCHECKED` still reaches the report through a threaded
+`previewRendered` boolean rather than through `provenFromTimeline` — same fact, two paths."* Reading
+the route for that threading found the paths were not two but **four**, and that they disagreed:
+
+| | `previewVerifiedRendered` | `browserRenderProven` | `buildObs.previewRendered` | the ledger |
+|---|---|---|---|---|
+| the preview verify loop | set | set | set | — |
+| **the render rescue** | set | set | **never set** | — |
+
+The two adjacent branches of ONE `if` read two different copies — `verifiedNoChangeSummary` is passed
+`previewVerifiedRendered`, and ten lines below `emptyBuildFailureSummary` is passed
+`buildObs.previewRendered`.
+
+### What the missing assignment actually cost — checked one reader at a time
+
+- 🔴 **The failure card the admin asked for could never fire for a rescued build.** The `result`
+  event's `appRendered` is that third copy, and `appRanDespiteFailedVerdict` requires it `true`. A
+  rescued app whose verdict a LATER flip returned to `ok: false` — a **stopped** build is exactly such
+  a case, since `runProvenApp` does not hold a flip for one — therefore showed the plain failure card
+  and its *"finish/fix the build so the app works end-to-end"* button. That is the admin's own
+  2026-09-14 mechanism verbatim: *"ham aise builds ko fix with ai press hote hi SACH ME TOD DETE
+  HAI"*. The half built to be durable was disarmed by a missing line.
+- 🔴 **The admin Monitor under-counted it** — both exits report `previewAllowed` from the same copy.
+- ⚠️ **The cancelled-build bill reads it too** (`appRendered: buildObs.previewRendered === true`), so a
+  Stop arriving after the rescue under-charges for an app the browser had just watched rendering —
+  against the standing 2026-09-15 rule. **Reachable by ordering; not observed in a report**, and
+  recorded as the weaker claim it is.
+- ✅ **`emptyBuildFailureSummary` was NOT affected, and saying so closes the obvious wrong
+  conclusion** — my own first reading of this. `renderRescueEligible` requires `filesWritten > 0`, and
+  that summary returns `null` on `fileCount > 0` **before** it ever reads the render. The argument is
+  dead on the rescue path.
+
+### The fix — the ledger's WRITE half, for the one fact that had none
+
+`renderProof.ts` records `APP_RENDERED` — *"a real browser opened this app and it rendered"* — and
+`provenFromTimeline` reads it back as `preview: 'passed'`. The route now has **one writer**,
+`markAppRendered(source, where)`, which sets every local copy and files the ledger fact; both
+producers call it and no producer assigns by hand any more.
+
+🔒 **Why a recorded fact and not a fourth boolean.** A boolean must be assigned at every producer, so
+a new producer is one forgotten line from this bug — which is what happened. **The 50/50 half is that
+hand-assigning is now gone**, not that the missing line was added.
+
+🔒 **Only a real browser counts, and that rule lives in the module, not at the call sites** — the same
+line `browserRenderProven` and the green-freeze latch already drew (a curl fallback's empty-shell
+render is not proof, adversarial review 2026-08-12). A non-browser source records **nothing**, rather
+than a weaker fact a later reader could mistake for proof.
+
+🔒 **It cannot move a verdict it should not.** The gate fill is fill-only (`=== 'not-run'`), so a
+preview recorded as `failed` keeps its failure; the record is `info` + `autoResolved`, so
+`shippingIssueCount` (severity-filtered) can never count it and `buildFindingSuggestions` skips it —
+registered in `NEVER_SUGGEST` as well, matching `RUNTIME_VERIFIED`.
+
+### Tests
+
+`tests/fourVariablesForOneFact.test.ts` — **22 cases**: the write half's browser-only rule, a
+writer→reader ROUND TRIP with no literal in between (the anti-drift case), the read half promoting
+only, the two producers' wiring, the consumers, and the reader this did NOT affect. **Proven by four
+independent reversions**: dropping the copy from the writer, deleting the reader's mapping, letting
+curl count as proof, and making the gate fill unconditional — each turns the suite red.
+
+### 🔴 Still open (rule 6)
+
+- **The ledger's write half is now real for ONE fact.** `typecheck`, `tests` and this render proof are
+  read back; an explicit `proved(fact, source)` every actor calls is still the subsystem.
+- **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
+  contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.

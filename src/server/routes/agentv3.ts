@@ -360,6 +360,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
 import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
+import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
 import { futilityMinutes, initialFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
@@ -17347,6 +17348,32 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      /**
+       * 🔴 ONE FACT, ONE WRITE — the render proof's only producer (autopsy 697b38ee, 7th appearance).
+       *
+       * Before this, proving a render meant assigning `previewVerifiedRendered`, `browserRenderProven` and
+       * `buildObs.previewRendered` by hand at every producer — and the render rescue set the first two and
+       * not the third. So the `result` event told the client `appRendered: false` about an app a real
+       * browser had just watched rendering, which is precisely what `failedButRunning.ts` needs to be TRUE
+       * to stop us offering to "fix" a working app. See `renderProof.ts` for each reader, checked one at a
+       * time — including the one this did NOT affect.
+       *
+       * Every producer now calls this instead, so the copies cannot diverge again. The LEDGER write and
+       * `browserRenderProven` are gated on a real browser — that rule lives in `renderProof.ts` and here,
+       * never at the call sites — while the other two copies keep exactly the semantics their strongest
+       * producer already had, so nothing that was true today becomes false.
+       */
+      const markAppRendered = (source: 'browser' | 'curl' | undefined, where: string): void => {
+        previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
+        buildObs.previewRendered = true; // the same observation, readable by the deadline finalizer
+        // …and the third copy, on the stricter rule it has always had: a curl fallback's empty-shell
+        // "render" is not proof, so only a real browser may hold a late flip (the Green Freeze rule).
+        if (source === 'browser') browserRenderProven = true;
+        try {
+          const proof = appRenderedRecord(source, where);
+          if (proof) buildDiag.record(proof);
+        } catch { /* the ledger write is best-effort — it must never affect a build */ }
+      };
 
       // ── 🔴 DELIVERY PROOF: THE PLATFORM BRINGS THE PREVIEW UP ITSELF (autopsy 4efab9d7, 2026-09-15) ──
       //
@@ -17460,7 +17487,6 @@ async function noteBuildOutcome(
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
-            if (shot.source === 'browser') browserRenderProven = true; // the evidence every late flip must respect
             // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files
             // unless an allowlisted pass (the user's own request) makes them, so no later pass can
             // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
@@ -17476,7 +17502,7 @@ async function noteBuildOutcome(
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             // THE EVIDENCE REACHES THE GATE. A real browser just rendered this app, so every later
             // verdict — the release gate above all — must be told, not left to infer it from silence.
-            previewVerifiedRendered = true;
+            markAppRendered(shot.source, 'render rescue');
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'RENDER_RESCUE', message: 'Build finished not-ok but the live preview renders cleanly (real-browser verified) — upgraded to success so health, billing and the verdict are honest.', autoResolved: true });
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Your app is built and the live preview renders correctly.', ts: Date.now() });
           } else if (runtimeCrashBlocker && verdict.rendered) {
@@ -17518,7 +17544,6 @@ async function noteBuildOutcome(
             // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
             // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
             previewGreen = true; // opened in a real browser, rendered, and no console errors
-            if (shot.source === 'browser') browserRenderProven = true; // the evidence every late flip must respect
             // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files
             // unless an allowlisted pass (the user's own request) makes them, so no later pass can
             // silently break what the browser just rendered. Snapshot the files present now. Best-effort.
@@ -17656,8 +17681,7 @@ async function noteBuildOutcome(
                 });
               }
             } catch { /* feature-presence is best-effort — never blocks a verified build */ }
-            previewVerifiedRendered = true; // the eyes SAW it render — the runtime verdict must not deny it
-            buildObs.previewRendered = true; // same observation, readable by the deadline finalizer
+            markAppRendered(shot.source, 'preview verify loop');
             break;
           }
           // THE DEV SERVER IS DEAD — RESTART A PROCESS, DO NOT REWRITE AN APP (admin build transcript
@@ -18386,6 +18410,11 @@ async function noteBuildOutcome(
         try {
           const seen = provenFromTimeline(buildDiag.report().issues);
           if (gateEvidence.pages === 'not-run' && seen.pages) gateEvidence.pages = seen.pages;
+          // Fill-only, exactly like the two above: a preview recorded as `'failed'` keeps its failure,
+          // and a `'passed'` that is already there is untouched. This can only turn an UNPROVEN preview
+          // into a proven one, which removes no failure and adds none — see provenFromTimeline.ts on why
+          // that cannot move a bill.
+          if (gateEvidence.preview === 'not-run' && seen.preview) gateEvidence.preview = seen.preview;
           if (gateEvidence.previewUrlPublished === undefined && seen.previewUrlPublished !== undefined) {
             gateEvidence.previewUrlPublished = seen.previewUrlPublished;
           }
@@ -18825,12 +18854,18 @@ async function noteBuildOutcome(
             // The live preview console was unavailable — but the page checks may already have loaded
             // every page in a real browser. Use that measurement rather than discarding it; it returns
             // null when there is genuinely nothing to conclude, and the honest "unchecked" stands.
+            // DOES IT RUN? — asked of the LEDGER, not of one pass's local memory. `previewVerifiedRendered`
+            // is still the fast answer, but any actor that recorded the proof answers too, so this verdict
+            // can never contradict a render the same report already shows (autopsy 697b38ee).
+            let renderProven = previewVerifiedRendered;
+            try { renderProven = renderProven || provenFromTimeline(buildDiag.report().issues).preview === 'passed'; }
+            catch { /* the ledger read is best-effort — fall back to what this pass saw */ }
             const fromPages = runtimeRecordFromPageChecks(
               pageConsoleEvidence?.routesChecked ?? 0,
               pageConsoleEvidence?.errors ?? [],
-              { previewRendered: previewVerifiedRendered },
+              { previewRendered: renderProven },
             );
-            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: previewVerifiedRendered }));
+            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProven }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }

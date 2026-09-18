@@ -66869,3 +66869,111 @@ guard on the script case this is a sibling of.
 - `const unread = unreadable || signalsFoundNothing(prompt)` → `unreadable`
 - removing the new branch in `needsSecondOpinion`
 - `e[\s-]?commerce` → `e-?commerce`
+
+## 2026-09-18 — Autopsy b6f88a72 (Gita reader): the app was fine; four things we said about it were not
+
+Free Weak build, **6.1 min**, real cost $0.38, `ok: true`, release gate YELLOW. The app was genuinely
+built and genuinely rendering. Every defect below is in what the ENGINE said about it.
+
+**Ledger — 251 events, 0 errors, 7 warnings.**
+✅ self-healed 4 · 🔀 workaround 1 (GLM benched → KIMI) · ⏭️ skipped 2 (journey, test suite) ·
+❌ shipped imperfect 3 (the summary's self-contradiction, vulnerable vite, stale snapshot) ·
+🥵 struggle 5 (label-chase, 6× re-read, 2.7 MB grep, three "I can't size this yet", 25 s dead rung).
+
+### 🔴 1. The user's summary contradicted itself in one message
+
+It said **"Has Favorites / Wishlist — save shlokas from any verse card"** and, six lines later,
+**"⚠️ One thing you asked for isn't in the app yet: wishlist / favorites"**. Both about the same
+working feature.
+
+Root cause, read from `RequirementCoverage.ts`: `artifact` (broad, and it would have matched) is
+tested against `surface` — file and component NAMES — and a **one-file app contributes none**. The
+whole burden then falls on `evidence`, a list of four literal function names
+(`toggleFavourite|isFavourite|addToWishlist|toggleBookmark`); this app's handler is `toggleSave`. So
+it was recorded **confirmedMissing** — stated as fact, not advisory.
+
+It also cost real time: the agent read the evaluator, concluded "the evaluator is looking for the
+literal word", and spent **five `edit_file` calls (one of which failed) renaming a tab label**
+"सहेजे गए" → "पसंदीदा" — to satisfy a detector that reads function names, so the rename could never
+have worked.
+
+**Fixed:** when the surface has no name and `evidence` does not fire, the same broad `artifact`
+pattern is tested against the BODIES — the question this module already asks, asked where a one-file
+app answers it. The list's own comment says `artifact` is broad "so a feature built under a
+reasonable alternate name still counts"; that intent had simply never reached a one-file app. Error
+direction is the justification: broader coverage costs a nag we do not print, the reverse tells a
+user their working feature is missing and buys a heal pass.
+
+### 🔴 2. "in Hindi" was read as an order to TRANSLATE
+
+`requestAnalysis` recorded **`taskType: 'translate'`, score 15, cheapest band** — reproduced exactly:
+`RE.translate` carried `in hindi`, and the prompt opens *"Build a Bhagavad Gita reader **in Hindi**"*.
+
+⚠️ It is worst for precisely the users this app exists for:
+`'ek dukaan ka app banao in hindi with stock, bills, customers'` → **`translate`, score 10**.
+
+**Fixed:** the translation VERB stays (`translate|translation|anuvad|convert to`); the bare language
+phrases go. A real translation request still classifies as one; a request that merely names its
+output language falls through and is floored honestly. The Gita prompt: **15 → 58, cheapest band →
+standard band, `ambiguous: false` → `true`**.
+
+⚠️ **Stated plainly, because it is a behaviour change:** the score-58 band is the one that takes a
+build out of the one-shot and simple lanes. A many-part request that matches no signal now leaves
+the fast lane. That is intended — it is a multi-feature app — but it is not a no-op.
+
+🔎 **This is the THIRD sibling of one class**, and the shape is now unmistakable: the signals said
+`chat` for a script they could not read (fixed 09-17), `chat` when nothing fired (fixed today), and
+`translate` when the WRONG thing fired (this build). A keyword list standing in for understanding,
+reporting `ambiguous: false` each time.
+
+### 🔴 3. The agent's own `grep` tool excluded nothing
+
+One reviewer call carries **`promptChars: 2,709,481`** — a `grep <pattern> .` that walked
+`node_modules/.vite/deps/*.js.map`. It was truncated to ~12k tokens before the model, so the sandbox
+paid for the walk and the model still did not get its answer. **Eight other search paths in the same
+file carry a skip set; `case 'grep'` ran a bare `grep -rn`.** Fixed with that same vocabulary.
+
+### 📋 Recorded, NOT fixed here (rule 6) — each measured from this report
+
+1. **Our own scaffold ships a vulnerable vite.** `vite@5.4.21`, 3 advisories; `npm audit fix`
+   exited 1 because the fix is `vite@8` — a major upgrade. The user did not choose this version;
+   we did. Every build from this template carries it, and the report tells the USER to decide.
+2. **We wrote a Playwright suite and then reported we could not run it.** `E2E_SCAFFOLDED` →
+   `TEST_SUITE_UNVERIFIED` → `RELEASE_GATE: YELLOW` cites "this project HAS a test suite, but it
+   could not be run here". The suite is ours; the YELLOW is self-inflicted.
+3. **`JOURNEY_NOT_DERIVED`** — "no field this check could address honestly (no name, id, placeholder,
+   label or test id)". The app has a search box. It is OUR golden template's input that carries no
+   label, so our own journey check cannot test the app we seeded.
+4. **`PREVIEW_SNAPSHOT_STALE`** — the copy was taken, then the production-defaults and test-scaffold
+   passes changed files. Those passes run after the snapshot on every build, so this is ordering,
+   not chance.
+5. **The reviewer read `src/App.tsx` six times and `src/index.css` five times**, each time told by
+   the tool result that it already had the file, then returned no findings — 71 calls,
+   **1,520,722 input tokens** (1,427,968 cache-read).
+6. **Three times in six minutes the user was told "still working out how big it is."** The ETA was
+   inside its own band (368 s actual vs a 200–422 s band) and was never shown because it was
+   unevidenced.
+7. **A static Gita reader was given a Neon `DATABASE_URL` and a `RENDER_API_KEY` in `.env`** from
+   saved keys. `.gitignore` covers `.env`, so nothing leaked — but an app with no server should not
+   be handed a deploy credential.
+8. **`glm-4.7-flashx` was benched at 25 s** for answering below a usable rate — the first real
+   evidence on the rung that became the Weak/Normal lead on 2026-09-17.
+
+### 📌 The flag the admin actually set did not fire, and the report says so honestly
+
+`PROJECT_MODE`: *"Software Project Mode is ON for this account, but this prompt is not a mega-project
+— normal path. Signals: 0 enumerated feature lines."* `detectMegaProject` counts enumerated
+**lines**; this prompt is one paragraph of commas. So this build did not test the thing it was
+meant to test, and the honest way to test it is a prompt with ≥8 feature LINES and a big-software
+noun.
+
+### Tests
+
+`tests/aOneFileAppKeepsItsFeaturesInline.test.ts` (6) — the shipped app's own code, the genuine
+missing feature that must still be reported, the multi-file case, the no-bodies case, and a
+source-anchored guard on the grep command.
+`tests/theSignalsReadEveryLetterAndRecognisedNothing.test.ts` (+2 = 11) — the real prompt, the
+dukaan prompt, and the genuine translation requests that must not regress.
+
+**Proven by reversion** — each turns its suite red, and each was restored: `in hindi` back in the
+translate signal · the inline-artifact line removed · the excludes dropped from the grep command.

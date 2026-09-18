@@ -104,6 +104,36 @@ describe('the signals read every letter and recognised nothing', () => {
     expect(scores).toEqual([58, 58, 58]);
   });
 
+  /**
+   * 🔴 THE THIRD SIBLING, from build b6f88a72: not "no signal fired" but "the WRONG signal fired".
+   * `RE.translate` carried `in hindi`, so a real user's app request classified as a TRANSLATION.
+   */
+  it('🔴 "in Hindi" is a language, not an order to translate', () => {
+    const gita =
+      'Build a Bhagavad Gita reader in Hindi: all eighteen chapters listed with their names, each ' +
+      'shloka shown in Devanagari with a simple Hindi meaning below it, a verse of the day chosen ' +
+      'from the date so it is the same for everyone all day, bookmarks saved in the browser, search ' +
+      'across the Hindi meaning and the chapter name, and next and previous navigation inside a ' +
+      'chapter. Large readable Devanagari, mobile-first, light/dark mode.';
+    const r = analyzeRequest({ prompt: gita });
+    // The shipped report recorded taskType 'translate', score 15, cheapest band.
+    expect(r.taskType).not.toBe('translate');
+    expect(r.complexityScore).toBeGreaterThan(15);
+    expect(r.ambiguous).toBe(true);
+
+    // Worst for exactly the users this app exists for.
+    const dukaan = analyzeRequest({ prompt: 'ek dukaan ka app banao in hindi with stock, bills, customers' });
+    expect(dukaan.taskType).not.toBe('translate');
+    expect(dukaan.complexityScore).toBeGreaterThan(10);
+  });
+
+  it('⚠️ but a genuine translation request is still a translation', () => {
+    expect(analyzeRequest({ prompt: 'translate this paragraph in hindi' }).taskType).toBe('translate');
+    expect(analyzeRequest({ prompt: 'anuvad kar do' }).taskType).toBe('translate');
+    // And a build request that merely mentions translating later is still the app.
+    expect(analyzeRequest({ prompt: 'make a notes app, translate to english later' }).taskType).toBe('simple_app');
+  });
+
   it('the script case it is a sibling of still behaves exactly as it did', () => {
     const devanagari = 'एक अस्पताल ऐप बनाओ, डॉक्टर लॉगिन, मरीज़ रिकॉर्ड, अपॉइंटमेंट, बिलिंग, रिपोर्ट';
     const r = analyzeRequest({ prompt: devanagari });

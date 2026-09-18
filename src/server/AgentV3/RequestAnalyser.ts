@@ -117,7 +117,25 @@ const NORMAL_LADDER: StartTier[] = ['gemini', 'haiku', 'sonnet'];
 // ── Keyword signals (lowercased, word-ish boundaries kept loose for Hinglish) ──────
 const RE = {
   greeting: /\b(hi|hello|hey|namaste|namaskar|kaise ho|how are you|thanks|thank you|dhanyaiwad|shukriya|good morning|good evening)\b/i,
-  translate: /\b(translate|translation|anuvad|in hindi|in english|convert to)\b/i,
+  /**
+   * 🔴 "IN HINDI" IS A LANGUAGE, NOT AN ORDER TO TRANSLATE (build b6f88a72, 2026-09-18).
+   *
+   * This pattern used to carry `in hindi` and `in english`. A real user's request —
+   * *"Build a Bhagavad Gita reader **in Hindi**: all eighteen chapters …"* — therefore classified as
+   * **taskType 'translate'**, scored 15, and opened on the cheapest band. Reproduced exactly against
+   * the shipped report's `requestAnalysis`.
+   *
+   * ⚠️ IT IS WORST FOR PRECISELY THE USERS THIS APP EXISTS FOR. *"ek dukaan ka app banao in hindi
+   * with stock, bills, customers"* scored **10** — a shop app read as a translation job. For
+   * NavBharatAI, "in Hindi" is the ORDINARY case, not a task type.
+   *
+   * What stays is the translation VERB. A genuine request keeps it ("translate this paragraph in
+   * hindi" still matches `translate`), so nothing that was really a translation is lost; a request
+   * that merely names its output language now falls through to the checks below and, if they
+   * recognise nothing either, is floored honestly by `signalsFoundNothing` rather than being
+   * confidently mislabelled.
+   */
+  translate: /\b(translate|translation|anuvad|convert to)\b/i,
   summary: /\b(summar(y|ize|ise)|tl;?dr|in short|key points|gist)\b/i,
   // Simple, self-contained apps cheap models build reliably.
   simpleApp: /\b(calculator|calc|clock|stopwatch|stop-watch|timer|todo|to-do|to do list|counter|dice|ludo|tic[\s-]?tac[\s-]?toe|snake game|memory game|quiz|flashcard|stopwatch|weather widget|color picker|qr code|bouncing ball|3d ball|landing page|portfolio page|single page|simple website|note app|notes app)\b/i,

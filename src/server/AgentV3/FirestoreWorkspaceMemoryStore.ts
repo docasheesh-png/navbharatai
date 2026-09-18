@@ -243,9 +243,14 @@ export async function restoreWorkspaceMemory(
       else if (ep.kind === 'request') mem.recordRequest(ep.text, ep.ts);
     }
     // ⚠️ THE TWO SENTENCES THAT USED TO STAND HERE CONTRADICTED EACH OTHER, AND THE FALSE ONE IS THE
-    // ONE A READER WOULD ACT ON. They read: "content empty — warmIndexFiles will fill them later"
+    // ⚠️ UPDATED 2026-09-18: the FIRST sentence is now the true one. These two comments used to
+    // contradict each other — "warmIndexFiles will fill them later" beside "warmIndexFiles skips
+    // already-known files" — and the code did the second, so a stub kept empty facts for the whole
+    // build. `warmIndexFiles` now excludes restored stubs from `known`, so it really does fill them.
+    // The original note is kept below because it records how the contradiction was found.
+    // They read: "content empty — warmIndexFiles will fill them later"
     // and, immediately after, "This populates the graph.files set so warmIndexFiles skips
-    // already-known files." Only the second is true. `warmIndexFiles` builds `known` from
+    // already-known files." `warmIndexFiles` built `known` from
     // `graph.files` and filters those out, so a file stubbed here KEEPS its empty facts — no
     // imports, no exports, no components, no routes — for the whole build.
     //

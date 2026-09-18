@@ -485,6 +485,8 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
+import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
+import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -9933,6 +9935,16 @@ async function noteBuildOutcome(
       'countWorkspaceFiles',
     ).catch(() => 0);
     const projectExists = projectFileCount > 0;
+    /**
+     * 🔴 …AND WHOSE FILES ARE THEY? (autopsy e9b25b08). `projectExists` counts files, so the golden
+     * scaffold the platform seeds itself reads as "the user has an app". Metadata-only, raced, and
+     * FAIL-SAFE: an unreadable listing answers `null`, which `workspaceHoldsUserApp` treats as yes —
+     * today's behaviour exactly, and the only direction in which this could reach a real app.
+     */
+    const projectFilePaths = projectExists
+      ? await raceTimeout(listWorkspaceFilePaths(intentWorkspaceId), 4_000, 'listWorkspaceFilePaths').catch(() => null)
+      : [];
+    const userAppExists = projectExists && workspaceHoldsUserApp(projectFilePaths);
     const recentRequests = (() => {
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequests(3); } catch { return [] as string[]; }
     })();
@@ -9941,6 +9953,9 @@ async function noteBuildOutcome(
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
     // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
     let readerSaysUnclear = false;
+    let readerAnswered = false;
+    /** Set when a BUILD order was turned into an edit by the net below — recorded once a report exists. */
+    let buildOrderReadAsEdit: { files: number; ownFiles: number; readerRan: boolean } | null = null;
     try {
       const freeRouter = AIRouterManager.getRouter('free');
       // Bounded (6s) — this LLM upgrade runs before the deadline timer is armed; a stalled free
@@ -9959,6 +9974,10 @@ async function noteBuildOutcome(
       );
       intent = smart.intent;
       readerSaysUnclear = smart.unclear;
+      // Did the READER itself answer, or is this a keyword verdict wearing the reader's return type?
+      // The deterministic net below stands in for a reader that did not run; it must not overrule one
+      // that did. See `SmartIntent.readerAnswered` (autopsy e9b25b08).
+      readerAnswered = smart.readerAnswered;
     } catch { /* LLM upgrade is best-effort — keyword result stands */ }
 
     /**
@@ -10090,8 +10109,48 @@ async function noteBuildOutcome(
     // "edited" the app page-by-page over junk files (26 min, 146 steps, incomplete). An explicit
     // build-a-complete-app request is a fresh build regardless of stray files in the workspace.
     const explicitCompleteBuild = isExplicitCompleteBuild(prompt);
-    if (intent === 'new_build' && projectExists && !wantsFreshStart(prompt) && !explicitCompleteBuild) {
+    /**
+     * 🔴 A SAFETY NET MUST NOT OVERRULE THE SIGNAL IT STANDS IN FOR (autopsy e9b25b08, 2026-09-18).
+     *
+     * The net above is written, in its own words, for the case where *"the LLM is down/slow and the
+     * keyword fallback returned new_build"*. It fired unconditionally — including when the reader HAD
+     * run, had been handed `projectExists` in its own prompt (*"the user ALREADY has a working project
+     * … only a fresh BUILD if they clearly ask to start over"*), and had still answered **build**.
+     *
+     * `"Build a search engines like google"` was consequently built as an EDIT of a four-file
+     * scaffold: the user was told *"✏️ Editing your existing app"* about an app they had never
+     * written, Software Project Mode recorded *"this turn is not a fresh build, so no plan was
+     * created"* — the admin's own first test of that flag, blocked here — and the user stopped the
+     * build at 69 seconds having seen nothing produced.
+     *
+     * 🔒 EVERY OTHER PATH IS BYTE-IDENTICAL. A high-confidence keyword verdict, a reader that timed
+     * out, failed, or answered "unclear" — all still return `readerAnswered: false`, so the net
+     * governs them exactly as before. That is precisely the population it was built for.
+     *
+     * ⚠️ This is deliberately NOT a widening of `isExplicitCompleteBuild`. That guard is strict so a
+     * genuine edit ("add a logout button", "fix the header") can never become a rebuild, and loosening
+     * its VOCABULARY would put a real user's app at risk. Here the decision is handed to the one
+     * actor that reads intention with the project's state in front of it.
+     */
+    const readerOverrulesTheNet = readerAnswered && intent === 'new_build';
+    /**
+     * 🔴 AND THE NET ASKS ABOUT THE USER'S APP, NOT ABOUT FILES ON DISK (autopsy e9b25b08).
+     *
+     * ⚠️ `readerOverrulesTheNet` alone does NOT fix the reported build, and that was measured rather
+     * than assumed: `"Build a search engines like google"` classifies `new_build` at **high**
+     * confidence, so the intention reader is deliberately never consulted for it and `readerAnswered`
+     * is false. Every plain build order is high-confidence. The two guards answer different halves —
+     * the reader guard covers the ambiguous turns it really decides, this one covers the certain
+     * orders it never sees — and only together do they close the class.
+     */
+    if (intent === 'new_build' && userAppExists && !wantsFreshStart(prompt) && !explicitCompleteBuild && !readerOverrulesTheNet) {
       intent = 'edit_existing';
+      // 🔎 SAY SO. This downgrade decides whether a plan is created, which prompt the builder gets and
+      // what the user is told, and until now it left NO trace at all: report e9b25b08 shows only
+      // `PROJECT_MODE: "this turn is not a fresh build"` with nothing anywhere saying why it was not
+      // one. That silence is why the class survived from the 2026-07-07 Hospital OPD report to this
+      // one. No recorder exists this early, so the fact is carried to the first one that does.
+      buildOrderReadAsEdit = { files: projectFileCount, ownFiles: userOwnedFileCount(projectFilePaths), readerRan: readerAnswered };
     } else if (intent === 'edit_existing' && explicitCompleteBuild) {
       // Rescue a spurious edit classification (the LLM biased by projectExists, or a keyword edit
       // signal) when the user EXPLICITLY asked to CREATE A COMPLETE new app. Strict detector, so a
@@ -14174,6 +14233,16 @@ async function noteBuildOutcome(
             text: `✏️ Editing your existing app (${sourceCount} source file${sourceCount === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
             ts: Date.now(),
           });
+          if (buildOrderReadAsEdit) {
+            buildDiag.record({
+              phase: 'plan',
+              severity: 'info',
+              code: 'BUILD_ORDER_READ_AS_EDIT',
+              autoResolved: true,
+              message: 'This message read as an order to BUILD, and was turned into an edit because the workspace already had files.',
+              detail: `${buildOrderReadAsEdit.files} file(s) in the workspace, ${buildOrderReadAsEdit.ownFiles} of them the user's own (the rest are the platform scaffold) · intention reader ${buildOrderReadAsEdit.readerRan ? 'answered' : 'did not run'} · no "start over" wording · not an explicit complete-app request. A plan is created only on a fresh build, so Software Project Mode cannot run on this turn.`,
+            });
+          }
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
           // Warm the project graph from the PERSISTED sandbox files when memory is
           // cold (process restarted but the sandbox survived). This makes the agent's
@@ -20114,9 +20183,17 @@ async function noteBuildOutcome(
         // A VERIFIED_NO_CHANGE turn is a SUCCESS that wrote nothing (report 697b38ee), so calling it an
         // "empty build" in the admin's own ledger would re-tell the exact falsehood this change removes.
         // It stays FREE either way: charging for it would be a pricing decision, and this is a bug fix.
-        zeroBillReason = result.ok
-          ? 'verified-no-change turn (nothing needed changing) — not charged'
-          : 'empty build (0 files produced) — never charged';
+        // 🔴 THREE FACTS, AND THIS READ ONLY TWO (autopsy e9b25b08). A build the USER STOPPED wrote
+        // nothing because they stopped it, not because the engine failed to produce — and the branch
+        // above says "the build failed" about it, in the admin's own ledger. Same class as
+        // `JOURNEY_PASSED` and `PAGE_RENDER_FAILED`: one fact with three states, encoded in two.
+        // The BILL is unchanged (₹0 either way); only the stated reason stops being false.
+        // `stoppedByUser` is the release gate's OWN predicate, so the ledger and the verdict cannot
+        // disagree about whether the user stopped this build.
+        zeroBillReason = zeroBillReasonFor({
+          ok: result.ok,
+          stoppedByUser: stoppedByUser(buildDiag.report().issues),
+        });
         // FREE-TIER: a cheap-only free build that produced nothing is NOT rescued on Claude (that would
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.

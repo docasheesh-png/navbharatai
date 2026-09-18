@@ -57,6 +57,13 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   OUTCOME_PREVIEW_COMPILE: { category: 'preview', hint: 'The in-browser preview does not compile — the app would not load for the user.' },
   OUTCOME_REVIEW_CRITICAL: { category: 'quality', hint: 'The reviewer found something critical the build did not repair.' },
   OUTCOME_RELEASE_GATE_RED: { category: 'quality', hint: 'The release gate found evidence the app does not work.' },
+  // Recorded since 2026-09-17 by the empty-build verdict flip — the one flip that used to record no code.
+  OUTCOME_EMPTY_BUILD: { category: 'incomplete', hint: 'The build expected files and wrote none — nothing to run, nothing to verify.' },
+  // 'network' is the retrospective's own bucket for "could not reach something" — a sandbox that could not be
+  // set up is that, and a mapped code may never be 'unknown' (tests/classifyRealFailures.test.ts).
+  OUTCOME_SANDBOX_UNAVAILABLE: { category: 'network', hint: 'The build sandbox could not be set up or reached — an infrastructure condition, not the app or the prompt. Retry; nothing in the code caused it.' },
+  // Legacy fast-lane end-state (`OUTCOME_${sb.outcome}`) still present on old records; labelled on the panel, so known here too.
+  OUTCOME_BUILD_FAILED: { category: 'build', hint: 'The build itself failed — check the compiler / bundler output the diagnostic names.' },
 };
 
 /**

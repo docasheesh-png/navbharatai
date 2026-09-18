@@ -21,6 +21,7 @@
 // the single LLM call. Kill switch: AGENTV3_ENDGAME_REPAIR=off.
 
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 
 export interface TscError {
   file: string;
@@ -30,6 +31,8 @@ export interface TscError {
   message: string;
 }
 
+// The cause analysis is imported AFTER TscError is declared above — tscErrorCause.ts imports the type
+// from here, so this pairing is type-only in one direction and value-only in the other (no cycle at runtime).
 /** Parse `tsc --noEmit` output lines like `src/x.ts(12,5): error TS6133: 'y' is declared …`. Pure. */
 export function parseTscErrors(output: string): TscError[] {
   const out: TscError[] = [];
@@ -295,7 +298,16 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     if (errors2.length > 0 && io.llmRepair) {
       io.log?.(`🔧 ${errors2.length} error(s) need real fixes — one batch repair pass…`);
       const subset = offendingFileSubset(files, errors2);
-      const fixed = (await io.llmRepair(out2, subset).catch(() => [])) || [];
+      // WHAT THE ERRORS MEAN, handed to the repair with the errors themselves (autopsy baa0b3c7).
+      // This is the pass that ground six times over `Property 'setState' does not exist on type
+      // 'ErrorBoundary'` on a project whose React types were simply absent — a cause no amount of
+      // reading the file can reveal, because the compiler reports it where the symbol is USED. The
+      // analysis rides the error text rather than a new parameter deliberately: every implementor of
+      // `llmRepair`, present and future, passes that string to the model, and an optional argument an
+      // implementor forgot to read would be decoration. `tscCauseNote` heads it unmistakably so our
+      // words are never mistaken for the compiler's, and returns '' for every other kind of error.
+      const causes = tscCauseNote(tscErrorCauses(errors2, files));
+      const fixed = (await io.llmRepair(out2 + causes, subset).catch(() => [])) || [];
       // CONVERGENCE GUARD (CrewHub autopsy 2026-07-20: repair went 59 → 67 and the WORSE files stayed):
       // snapshot every file BEFORE the repair overwrites it, so a repair that increases the error count
       // can be rolled back. The pass is then monotone by construction — it helps or does nothing, never harms.

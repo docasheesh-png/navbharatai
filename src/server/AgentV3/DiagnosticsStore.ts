@@ -10,7 +10,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
-import { audit } from '../lib/audit';
+import { audit, truncateForAudit } from '../lib/audit';
 import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
@@ -112,7 +112,7 @@ function reportSaveFailure(kind: EmergencyKind, key: string, report: BuildDiagno
   emergencyStash(kind, key, report);
   const message = error instanceof Error ? error.message : String(error);
   console.error(`[DIAGNOSTICS] SAVE FAILED (${kind}=${key}) after retries — report held in the in-memory emergency cache. Cause: ${message}`);
-  try { audit('DIAGNOSTICS_SAVE_FAILED', { kind, key, error: message.slice(0, 300) }); } catch { /* the honesty layer itself must never throw */ }
+  try { audit('DIAGNOSTICS_SAVE_FAILED', { kind, key, error: truncateForAudit(message) }); } catch { /* the honesty layer itself must never throw */ }
 }
 
 /** Keep the last `n` items of an array (newest), or the whole array if shorter. */
@@ -464,12 +464,12 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
     if (!result.ok) {
       const message = result.error instanceof Error ? result.error.message : String(result.error);
       console.error(`[DIAGNOSTICS] HISTORY SAVE FAILED (workspace=${workspaceId}) after retries: ${message}`);
-      try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: message.slice(0, 300) }); } catch { /* never throws */ }
+      try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: truncateForAudit(message) }); } catch { /* never throws */ }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[DIAGNOSTICS] HISTORY SAVE FAILED (workspace=${workspaceId}) unexpectedly: ${message}`);
-    try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: message.slice(0, 300) }); } catch { /* never throws */ }
+    try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: truncateForAudit(message) }); } catch { /* never throws */ }
   }
 }
 
@@ -542,7 +542,7 @@ export async function listDiagnosticsHistoryResult(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[DIAGNOSTICS] HISTORY READ FAILED (workspace=${workspaceId}): ${message}`);
-    try { audit('DIAGNOSTICS_READ_FAILED', { kind: 'history', key: workspaceId, error: message.slice(0, 300) }); } catch { /* never throws */ }
+    try { audit('DIAGNOSTICS_READ_FAILED', { kind: 'history', key: workspaceId, error: truncateForAudit(message) }); } catch { /* never throws */ }
     return { entries: [], ok: false };
   }
 }

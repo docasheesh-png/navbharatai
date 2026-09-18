@@ -25,6 +25,7 @@ import { FREE_PUBLISHED_APPS, type HostingTier } from '../../lib/hostingTiers';
 import { activeHostingTier, hostingPlansEnabled } from './hostingPlan';
 import { doc, getDoc, getServerDb } from './serverDb';
 
+import { parseEnvNumber } from './envNumber';
 /**
  * The tier this user holds right now, for the publish gate. Never throws; null means "no plan, or we
  * could not tell" — and both resolve to the FREE cap, which is the only safe answer in both
@@ -63,8 +64,8 @@ export function hostingDeployCap(): number {
 
 /** Per-deploy bundle ceiling in MB. Env AGENTV3_DEPLOY_MAX_MB; default 50 (safe ON). 0 = disabled. */
 export function maxDeployMb(): number {
-  const raw = Number(process.env.AGENTV3_DEPLOY_MAX_MB);
-  if (Number.isFinite(raw) && raw >= 0) return raw; // allow explicit 0 (disable) or a custom value
+  const raw = parseEnvNumber(process.env.AGENTV3_DEPLOY_MAX_MB);
+  if (raw !== null && raw >= 0) return raw; // allow explicit 0 (disable) or a custom value
   return 50;
 }
 

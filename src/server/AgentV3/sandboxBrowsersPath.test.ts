@@ -112,3 +112,56 @@ describe('every browser script the PLATFORM runs carries the path too', () => {
     expect(runLine).toContain('NBAI_DIAG:');
   });
 });
+
+// 🔎 THE SIBLING SWEEP the admin asked for (2026-09-17): "PLAYWRIGHT_BROWSERS_PATH wala fix screenshot
+// script me bhi check karo".
+//
+// Answer, verified rather than assumed: the PATH was already correct in every screenshot, daemon,
+// browser-action and browse invocation — the journey runner was the only one that ever lacked it, and
+// these assertions keep it that way. What the screenshot family DID share was the second half of that
+// bug: `2>/dev/null` on the command plus `.catch(() => null)` on the promise, which together destroy
+// the reason twice over. The E2B SDK rejects on a non-zero exit and carries the command's real
+// stdout/stderr ON THE ERROR, so those two lines discarded a diagnosis that was free to keep —
+// `commandFailureResult` had already been centralised for exactly this class (sandboxCommandError.ts)
+// and applied to the npm-install call sites, never to the browser ones.
+describe('the screenshot / browse family — same class, swept', () => {
+  const ACTUATORS = [
+    'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts',
+    'src/server/EngineerAI/actuators/E2BActuator.ts',
+  ];
+
+  it('every browser invocation carries the path — none of them was missing it, and none may start', () => {
+    for (const f of ACTUATORS) {
+      const src = readFileSync(f, 'utf8');
+      const runs = src.split('\n').filter((l) => /node \$\{(TOOLS_DIR|browsePath|shotPath)\}/.test(l) && !l.trim().startsWith('//'));
+      expect(runs.length, `${f}: found no browser invocations to check`).toBeGreaterThan(0);
+      for (const line of runs) {
+        expect(line, `${f}: a browser invocation without the path — ${line.trim()}`)
+          .toContain('PLAYWRIGHT_BROWSERS_PATH=');
+      }
+    }
+  });
+
+  it('no browser invocation throws its error output away at the shell', () => {
+    for (const f of ACTUATORS) {
+      const src = readFileSync(f, 'utf8');
+      for (const line of src.split('\n')) {
+        if (!line.includes('PLAYWRIGHT_BROWSERS_PATH=')) continue;
+        expect(line, `${f}: 2>/dev/null on a browser command destroys the only explanation — ${line.trim()}`)
+          .not.toContain('2>/dev/null');
+      }
+    }
+  });
+
+  it('a failed browser command keeps what it said, via the shared helper', () => {
+    // Comments are stripped first: the fix's own comment NAMES the lossy spelling it replaced, and a
+    // needle that reads prose would be satisfied — or, as here, defeated — by a sentence about code.
+    const src = readFileSync(ACTUATORS[0], 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    const browserBlock = src.slice(src.indexOf('async browseUrl('), src.indexOf('async getPortUrl('));
+    expect(browserBlock).toContain('commandFailureResult(err)');
+    // `.catch(() => null)` on a browser RUN drops the CommandExitError that carries stderr.
+    expect(browserBlock).not.toContain('.catch(() => null)');
+  });
+});

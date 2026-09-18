@@ -400,6 +400,7 @@ declare module 'lucide-react' {
   export const Sun: Icon;
   export const Megaphone: Icon;
   export const BadgeIndianRupee: Icon;
+  export const Ban: Icon;
   export const Banknote: Icon;
   export const Repeat: Icon;
   export const Moon: Icon;

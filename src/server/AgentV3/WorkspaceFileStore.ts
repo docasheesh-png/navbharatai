@@ -492,6 +492,88 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
 }
 
 /**
+ * ONE PAGE of EVERY user's built apps, newest save first (admin Security → Built apps, 2026-09-18:
+ * "sabhi users ki build app dikhni chahiye … 12-12 ke set me").
+ *
+ * Reads only the small metadata docs of `workspace_files_v3`, never file content, and never more than
+ * a few pages' worth: the query is `orderBy('savedAt', 'desc')` resumed from a DOCUMENT SNAPSHOT
+ * (`startAfter(snap)`), the one cursor form that is exact under this ordering without a composite
+ * index. Green-guard snapshot keys and empty indexes share the collection and are skipped AFTER the
+ * read, so a page may come back a little short; the loop refills it (bounded) rather than handing the
+ * admin a page of nine and calling it twelve.
+ *
+ * `ok: false` means the store could not be read — NOT that there are no apps. The panel treats the
+ * two differently, because "no built apps" on a moderation screen over a failed read is the exact lie
+ * that screen exists to avoid.
+ */
+export async function listWorkspaceAppsPage(opts: { limit: number; afterDocId?: string | null }): Promise<{
+  ok: boolean;
+  apps: UserWorkspaceApp[];
+  /** The raw last document id of the page, to resume from; null when the collection is exhausted. */
+  nextAfterDocId: string | null;
+}> {
+  const db = getDb();
+  if (!db) return { ok: false, apps: [], nextAfterDocId: null };
+  const size = Math.max(1, Math.min(48, Math.floor(opts.limit) || 12));
+  try {
+    const col = db.collection(COLLECTION);
+    let after: FirebaseFirestore.DocumentSnapshot | null = null;
+    if (opts.afterDocId) {
+      const snap = await col.doc(opts.afterDocId).get();
+      if (!snap.exists) return { ok: true, apps: [], nextAfterDocId: null }; // the cursor's doc is gone: nothing to resume from
+      after = snap;
+    }
+    const apps: UserWorkspaceApp[] = [];
+    let lastId: string | null = null;
+    let exhausted = false;
+    // Refill at most three times: a page of twelve among a handful of snapshot keys fills on the first
+    // read; a pathological stretch of empties is bounded rather than scanned to the end.
+    for (let round = 0; round < 3 && apps.length < size && !exhausted; round++) {
+      let q = col.orderBy('savedAt', 'desc').limit(size);
+      if (after) q = q.startAfter(after);
+      const snap = await q.get();
+      if (snap.docs.length < size) exhausted = true;
+      for (const d of snap.docs) {
+        after = d;
+        lastId = d.id;
+        const data = d.data() || {};
+        const fileCount = typeof data.count === 'number' ? data.count : (Array.isArray(data.paths) ? data.paths.length : 0);
+        if (fileCount <= 0) continue;           // an emptied index is not an app
+        if (isGreenSnapshotKey(d.id)) continue; // a safety copy, never an app
+        apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
+        if (apps.length >= size) break;
+      }
+      if (snap.docs.length === 0) break;
+    }
+    return { ok: true, apps, nextAfterDocId: exhausted && apps.length < size ? null : lastId };
+  } catch {
+    return { ok: false, apps: [], nextAfterDocId: null };
+  }
+}
+
+/**
+ * The metadata of a SET of workspaces in ONE `getAll` — the join the admin panel needs when the page
+ * came from the publish registry (a status filter) rather than from this store. Missing docs are
+ * simply absent from the map (an orphaned publish whose files were purged). Never throws.
+ */
+export async function getWorkspaceAppsMany(workspaceIds: string[]): Promise<Map<string, UserWorkspaceApp>> {
+  const out = new Map<string, UserWorkspaceApp>();
+  const db = getDb();
+  const ids = [...new Set(workspaceIds.filter((id) => typeof id === 'string' && id.length > 0 && !id.includes('/')))].slice(0, 100);
+  if (!db || ids.length === 0) return out;
+  try {
+    const snaps = await db.getAll(...ids.map((id) => db.collection(COLLECTION).doc(id)));
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const data = s.data() || {};
+      const fileCount = typeof data.count === 'number' ? data.count : (Array.isArray(data.paths) ? data.paths.length : 0);
+      out.set(s.id, { workspaceId: s.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
+    }
+  } catch { /* best-effort — a store hiccup leaves the map short, never throws at the route */ }
+  return out;
+}
+
+/**
  * Pure: the UNION of a project's file paths as seen by the (ephemeral) sandbox and the (durable)
  * WorkspaceFileStore. RC-1 root fix (admin 2026-07-06): the sandbox listing can be near-empty on a
  * recycled/cold sandbox — if it alone drove large-project detection and the edit prompt, the true

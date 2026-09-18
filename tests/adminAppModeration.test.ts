@@ -131,10 +131,14 @@ describe('the wiring — the capability must actually be reachable', () => {
   const admin = read('src/components/AdminDashboard.tsx');
   const route = read('src/server/routes/admin.ts');
 
+  // Re-anchored 2026-09-18: the LIST moved to admin/BuiltAppsPanel.tsx (every built app, twelve at a
+  // time, from `/api/admin/apps`); the two ACTIONS still run from the dashboard's confirmation dialog.
+  const panel = read('src/components/admin/BuiltAppsPanel.tsx');
+
   it('the client calls BOTH server routes — the bug was that nothing called either', () => {
     expect(admin).toContain("action === 'ban' ? 'takedown' : 'unpublish'");
     expect(admin).toContain('/api/admin/deployments/');
-    expect(admin).toContain('`/api/admin/deployments${q}`');
+    expect(panel).toContain('/api/admin/apps?');
   });
 
   it('the reversible route exists on the server beside the permanent one', () => {
@@ -173,7 +177,8 @@ describe('the wiring — the capability must actually be reachable', () => {
   });
 
   it('an unreadable list is NOT shown as an empty one', () => {
-    // On a moderation screen, "no published apps" over a failed read is the worst possible lie.
-    expect(admin).toContain('Could not read the published-app list.');
+    // On a moderation screen, "no built apps" over a failed read is the worst possible lie.
+    expect(panel).toContain('Could not read the built-app list.');
+    expect(panel).toContain('if (!opts.append) setRows(null);');
   });
 });

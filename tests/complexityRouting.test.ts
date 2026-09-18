@@ -89,14 +89,41 @@ describe('🔴 a request the scorer could not READ is asked about, whatever it s
    * What the case really exists to prove is unchanged and is still asserted below: the SCORE alone
    * would never buy a second opinion for a request in this script, and reading the prompt does.
    */
+  /**
+   * ⚠️ THE FIXTURE MOVED ON 2026-09-18, AND THE CASE'S CLAIM DID NOT — the third correction to this
+   * one test, kept here for the same reason the two above it are.
+   *
+   * It used to use a Devanagari HOSPITAL prompt, chosen when nothing in the sizing path could read a
+   * word of it. That is no longer true: `RequirementGapAnalyzer` now carries the Devanagari spellings
+   * of the Hindi words it already accepted in Latin letters (`अस्पताल` is the same word as the
+   * `aspatal` that was always in its healthcare list), so that prompt is now READ — `complex_app`,
+   * score 58. Pinned as a positive fact in the case below rather than deleted.
+   *
+   * ⚠️ AND THE OLD ASSERTION MUST NOT SIMPLY BE RELAXED TO MATCH. What this case exists to prove is
+   * about a request the scorer genuinely CANNOT read, so the fixture has to be one: a drawing app
+   * names no business domain in any script. It satisfies every original assertion unchanged — a
+   * fallthrough `chat`, `unreadable`, a score floored above 20 by script-neutral evidence (six
+   * enumerated parts), and an ask that the score alone would never buy.
+   */
   it('the score alone never asks about an unread request — reading the prompt is what does', () => {
-    const hindi = 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें डॉक्टर लॉगिन, मरीज़ रिकॉर्ड, अपॉइंटमेंट बुकिंग, बिलिंग और रिपोर्ट हों';
+    const hindi = 'एक ड्रॉइंग ऐप बनाओ जिसमें रंग, ब्रश, मिटाने वाला, परतें, ज़ूम और सेव करने की सुविधा हो';
     const a = analyzeRequest({ prompt: hindi });
     expect(a.taskType).toBe('chat');                 // a FALLTHROUGH, not a classification
     expect(a.unreadable).toBe(true);                 // …and the scorer now SAYS so
     expect(a.complexityScore).toBeGreaterThan(20);   // floored on script-neutral evidence, not a 5
     expect(needsSecondOpinion(a.complexityScore)).toBe(false);   // the score alone would NEVER ask
     expect(needsSecondOpinion(a.complexityScore, hindi)).toBe(true); // reading the prompt does
+  });
+
+  it('…and a Devanagari prompt that DOES name a domain is now read, not floored', () => {
+    // The fixture this case used to hold. It needed the script-neutral floor because nothing could
+    // read it; it does not any more, and a build sized `complex_app` never depended on the ask above.
+    const hindi = 'एक अस्पताल प्रबंधन ऐप बनाओ जिसमें डॉक्टर लॉगिन, मरीज़ रिकॉर्ड, अपॉइंटमेंट बुकिंग, बिलिंग और रिपोर्ट हों';
+    const a = analyzeRequest({ prompt: hindi });
+    expect(a.taskType).toBe('complex_app');
+    expect(a.complexityScore).toBeGreaterThan(40);
+    // Still honestly marked unread — the SIGNALS in `RE` cannot read it; the DOMAIN classifier can.
+    expect(a.unreadable).toBe(true);
   });
 
   it('is script-agnostic — India is not one script', () => {

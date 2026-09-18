@@ -91,6 +91,20 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
    */
   OUTCOME_EMPTY_BUILD: { key: 'empty-build', label: 'No files were produced' },
   OUTCOME_SANDBOX_UNAVAILABLE: { key: 'sandbox-unavailable', label: 'Build sandbox unavailable (infra, not the app)' },
+  /**
+   * 🔴 THE SEVEN ABORTS THAT RECORDED NOTHING (admin's failure table, 2026-09-18 — "Other" was the top
+   * reason for the biggest row, 45 of 106). Nine causes abort a build; only the two deadline causes
+   * wrote an outcome. `abortOutcome.ts` now records one for every cause at the route's single abort
+   * funnel, and these are their names. A user's stop gets a label too so a legacy reader can still
+   * name it — but `categorizeBuildFailures` moves it OUT of the failure tally, because a person ending
+   * a build is not a build that failed.
+   */
+  OUTCOME_USER_STOPPED: { key: 'user-stopped', label: 'Stopped by the user — not a failure' },
+  OUTCOME_COST_CEILING: { key: 'cost-ceiling', label: 'Hit the build cost ceiling' },
+  OUTCOME_FUTILE: { key: 'futile', label: 'Stopped because nothing was being produced (futility breaker)' },
+  OUTCOME_DEPLOY_DRAIN: { key: 'deploy-drain', label: 'Interrupted by a NavBharatAI deploy (resumes on its own)' },
+  OUTCOME_SUPERSEDED: { key: 'superseded', label: 'Replaced by a newer build on the same project' },
+  OUTCOME_REAPED: { key: 'reaped', label: 'Stopped reporting and was cleaned up by the reaper' },
 };
 
 /**
@@ -145,6 +159,28 @@ const REASON_PATTERNS: ReadonlyArray<{ key: string; label: string; test: RegExp 
     key: 'cost-ceiling',
     label: 'Hit the build cost ceiling',
     test: /cost ceiling|spending (limit|cap) reached/i,
+  },
+  {
+    key: 'user-stopped',
+    label: 'Stopped by the user — not a failure',
+    // BuildDiagnostics.ts deriveRootCause: "The USER stopped this build — that is why it ended".
+    test: /the user stopped this build/i,
+  },
+  {
+    key: 'futile',
+    label: 'Stopped because nothing was being produced (futility breaker)',
+    // routes/agentv3.ts FUTILITY_BREAKER: "Build stopped because it was producing nothing" — the loudest
+    // unresolved warning on a record written before OUTCOME_FUTILE existed.
+    test: /stopped because it was producing nothing|futility breaker/i,
+  },
+  {
+    key: 'no-cause-recorded',
+    label: 'The engine recorded no cause (stopped before it could say why)',
+    // BuildDiagnostics.ts deriveRootCause's own fallbacks — "no specific error was captured", "ended
+    // without recording an outcome", "why it failed is not known from this report". These are the
+    // engine SAYING it does not know; a stable bucket of its own, distinct from a sentence we have not
+    // patterned yet, because only this one means the record itself is incomplete.
+    test: /no specific error was captured|ended without recording an outcome|why it failed is not known/i,
   },
   {
     key: 'wall-clock',

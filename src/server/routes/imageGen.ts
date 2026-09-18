@@ -14,8 +14,9 @@ import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   IMAGE_PRO_PRICE_INR, IMAGE_PRO_TIMEOUT_MS, imageProConfigured, imageProEndpoint, imageProAuthHeaders,
   imageProMode, imageProCount, imageProQuotedInr, buildImageProRequest, parseImageProResponse,
-  imageProFailureMessage, initImageTooLarge, parseDataUrl,
+  imageProFailureMessage, initImageTooLarge, parseDataUrl, imageProMargin, imageProMarginWarning,
 } from '../lib/imageProGen';
+import { usdInrRate } from '../lib/UsdInrRate';
 import { IMAGE_SIZE_PIXELS } from '../lib/imageGen';
 import { getServerDb } from '../lib/serverDb';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
@@ -70,6 +71,10 @@ const proSchema = vobject({
   strength: vstring({ optional: true, max: 10 }),
   count: vstring({ optional: true, max: 3 }),
 });
+
+// Once per process: the margin line is a CONFIGURATION fact, not a per-request one, and repeating it
+// on every image would make the inverted-price warning invisible in the noise it created.
+let marginWarned = false;
 
 const proLimiter = () => rateLimiter({
   name: 'imagegenpro', authed: 30, anon: 0, anonGlobalPerHour: 0, noun: 'Pro image generations',
@@ -424,6 +429,22 @@ export function registerImageGenRoutes(app: Express): void {
     });
 
     if (chargedInr > 0) {
+      // ADMIN-ONLY cost visibility. The user was told ₹2 and charged ₹2; this line is the other half
+      // of that honesty — what it actually cost US — so the admin's own picture of this feature is
+      // never an assumption. Throttled to once per process because a per-image line would bury it.
+      if (!marginWarned) {
+        marginWarned = true;
+        const warning = imageProMarginWarning(usdInrRate());
+        if (warning) {
+          // Loud, because this is the E2B_USD_PER_HOUR failure mode: an env value always beats the
+          // code, so a warning is the only thing the code can do about a price that has inverted.
+          console.error(warning);
+        } else {
+          const m = imageProMargin(usdInrRate());
+          console.log(`[IMAGE PRO] margin OK — ₹${m.priceInr.toFixed(2)} charged vs ₹${m.costInr.toFixed(2)} cost `
+            + `(${m.ratio.toFixed(2)}x; break-even at ₹${m.breakEvenUsdInr.toFixed(0)}/$).`);
+        }
+      }
       // After the answer and never awaited into it: a money-path failure must not cost the user the
       // image they already have. The same rule the professional turn obeys.
       void debitWalletRolledUp(getServerDb() as never, account.uid, {

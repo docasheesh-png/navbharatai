@@ -23,6 +23,7 @@ import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from 
 import { abortCauseOf, abortSummary } from './buildAbortCause';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
+import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -147,6 +148,26 @@ export interface AgentRunnerOptions {
    * before, so this is additive only.
    */
   hasExistingFiles?: () => boolean;
+  /**
+   * True when this turn is editing a project that ALREADY EXISTS (the route's `isEditMode`).
+   *
+   * Used for ONE thing: the build nudge's wording. The old single message told the model to "start
+   * by writing the entry file (e.g. index.html or src/main)" — correct for an empty workspace and
+   * destructive in an established one, which is how autopsy 95598899 lost a user's app. It never
+   * changes WHETHER a nudge is issued, only what it says. Omitted ⇒ the fresh-build wording, i.e.
+   * exactly the pre-2026-09-18 text.
+   *
+   * ⚠️ Deliberately NOT `hasExistingFiles`: that one counts files the MODEL wrote in THIS run, which
+   * is zero at nudge time by construction. "Is there an app here already?" is a different question.
+   */
+  editingExistingApp?: boolean;
+  /**
+   * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
+   * override the model — the one decision that otherwise leaves no trace at all, since a turn that
+   * was NOT nudged looks identical to a turn where the nudge never applied. Best-effort and never
+   * user-facing. Omitted by every caller but the top-level build.
+   */
+  onNote?: (note: { code: string; message: string; detail?: string }) => void;
   /**
    * Optional durable persistence of the transcript (D7). When provided, the build is created
    * in the store at the start, the new transcript turns are appended as the loop runs, and the
@@ -752,16 +773,29 @@ export class AgentRunner {
           // not actually built anything — but the model usually intends to act on the NEXT turn.
           // Terminating here is the "model replied without building" failure (even Opus does it).
           // So instead of giving up, push the model to ACT and give it another turn (capped).
-          if (!starvedTurn && expectsArtifacts && totalToolUses === 0 && noBuildNudges < MAX_BUILD_NUDGES) {
-            noBuildNudges++;
-            messages.push({
-              role: 'user',
-              content:
-                'You described a plan but have not created any files yet. Do NOT just describe or ' +
-                'delegate in prose — ACT NOW: use the tools (write_file / write_files_batch, and run ' +
-                'commands as needed) to actually create the project files this turn. Start by writing ' +
-                'the entry file (e.g. index.html or src/main). Output tool calls, not a description.',
+          //
+          // 🔴 …BUT AN ANSWER IS NOT A STALL (autopsy 95598899, 2026-09-18). `toolUses.length === 0`
+          // is equally the shape of a model that DECLINED or ASKED THE USER A QUESTION, and nudging
+          // one of those replies with "ACT NOW … start by writing the entry file" told a model to
+          // overwrite a user's existing 35-file app. `decideBuildNudge` asks what the turn WAS before
+          // overriding it, and picks wording that cannot order a rewrite on an edit. See
+          // nudgeToBuild.ts for the full incident and the asymmetry that decides the close calls.
+          const nudge = starvedTurn
+            ? { nudge: false as const, message: '', standDown: undefined }
+            : decideBuildNudge({
+              text: turn.text,
+              expectsArtifacts,
+              totalToolUses,
+              nudgesUsed: noBuildNudges,
+              maxNudges: MAX_BUILD_NUDGES,
+              editingExistingApp: this.opts.editingExistingApp === true,
             });
+          if (nudge.standDown) {
+            try { this.opts.onNote?.({ code: 'BUILD_NUDGE_STOOD_DOWN', message: standDownNote(nudge.standDown), detail: nudge.standDown }); } catch { /* a note must never fail a build */ }
+          }
+          if (nudge.nudge) {
+            noBuildNudges++;
+            messages.push({ role: 'user', content: nudge.message });
             messageTs.push(Date.now());
             continue; // give the model another turn to actually build
           }

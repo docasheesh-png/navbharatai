@@ -54,6 +54,19 @@ export interface CategorizableBuild {
   outcomeSeverity?: string | null;
   /** Was the app SEEN running (real browser render / published preview)? See `appWasSeenRunning`. */
   appSeenRunning?: boolean | null;
+  /** Did the USER stop this build? Read off the timeline by the store (`stoppedByUser`), never guessed. */
+  userStopped?: boolean | null;
+}
+
+/**
+ * A build the USER ended. Two proofs, both machine facts: the outcome the abort funnel records
+ * (`OUTCOME_USER_STOPPED`, since 2026-09-18) for a new record, and the store's timeline read for a
+ * legacy one (`USER_STOPPED_BUILD` / `CANCELLED_BUILD_CHARGED`). A rootCause SENTENCE is deliberately
+ * not enough on its own — "the user stopped this build" in prose is exactly the kind of reading this
+ * module was told never to put into the one number meant to end guessing.
+ */
+export function isUserStoppedBuild(b: Pick<CategorizableBuild, 'outcomeCode' | 'userStopped'>): boolean {
+  return b.userStopped === true || String(b.outcomeCode ?? '') === 'OUTCOME_USER_STOPPED';
 }
 
 /** The domain a build's prompt most likely belongs to, reusing the platform's OWN classifier. Pure. */
@@ -93,12 +106,14 @@ export interface DomainRow {
  * "40.8% failed" is not one thing, and treating it as one makes the target unreachable by definition:
  * you cannot fix builds that are not broken. Splitting it is what turns a number into work.
  *
- * ⚠️ WHAT IS DELIBERATELY MISSING, said plainly rather than guessed: **builds the USER stopped**.
- * `buildAbortCause.ts` knows the difference (`'user-stop'`, and it refuses to default to it — "an abort
- * we cannot explain is not a user's fault"), but that cause is NOT persisted into the report, so it
- * cannot be separated from stored data today. Inventing a rule for it — "short builds are abandoned",
- * "OUTCOME_STOPPED means cancelled" — would put a guess into the one number meant to end guessing.
- * Recorded as an open root cause instead.
+ * ✅ THE FOURTH POPULATION, SEPARATED (2026-09-18): **builds the USER stopped.** The first version of this
+ * split said plainly that it could not separate them — `buildAbortCause.ts` knew the difference, but the
+ * cause was not persisted into the report, and inventing a rule ("short builds are abandoned") would have
+ * put a guess into the one number meant to end guessing. The abort funnel now records
+ * `OUTCOME_USER_STOPPED`, and the store reads legacy records' own `USER_STOPPED_BUILD` /
+ * `CANCELLED_BUILD_CHARGED` lines, so `userStopped` below is a machine fact, not a rule. A person ending
+ * a build is not a build that failed (admin 2026-09-14: "user ki galti hai, isme hamari nahi"), so these
+ * leave BOTH the failure tally and the success tally — they are neither.
  */
 export interface VerdictSplit {
   /** Judged failed, and the app was never seen running. The real target. */
@@ -112,6 +127,11 @@ export interface VerdictSplit {
   succeeded: number;
   /** No settled verdict — still running, or a legacy record. */
   unjudged: number;
+  /**
+   * Judged failed because the USER stopped the build. Neither a failure nor a success: excluded from
+   * the failure count, the rate, the domain rows and the reason table, and shown on its own.
+   */
+  userStopped: number;
   /**
    * Failures that could not be checked either way, because the record predates render evidence being
    * projected. Counted separately so the split is never presented as more certain than it is.
@@ -194,7 +214,12 @@ function tallyReasons(failedBuilds: readonly CategorizableBuild[]): ReasonRow[] 
  */
 export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | null | undefined): FailureCategoryReport {
   const rows = Array.isArray(builds) ? builds.filter((b) => b && typeof b.workspaceId === 'string') : [];
-  const judged = rows.filter((b) => typeof b.ok === 'boolean');
+  // A build the user stopped is `ok:false` on the record — and it is not a failure. Set aside FIRST, so
+  // it reaches neither the rate nor the reason table. Only an `ok:false` build can be one: a build the
+  // user stopped after it had already succeeded (#3004) is a success and stays one.
+  const userStopped = rows.filter((b) => b.ok === false && isUserStoppedBuild(b));
+  const stoppedIds = new Set(userStopped);
+  const judged = rows.filter((b) => typeof b.ok === 'boolean' && !stoppedIds.has(b));
   const ok = judged.filter((b) => b.ok === true);
   const failed = judged.filter((b) => b.ok === false);
 
@@ -232,7 +257,8 @@ export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | 
     engineFailed,
     builtButJudgedFailed,
     succeeded: ok.length,
-    unjudged: rows.length - judged.length,
+    unjudged: rows.length - judged.length - userStopped.length,
+    userStopped: userStopped.length,
     evidenceUnknown,
     appDeliveredPct: ratePct(ok.length + builtButJudgedFailed, judgeable),
     reportedOkPct: ratePct(ok.length, judgeable),
@@ -240,7 +266,7 @@ export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | 
 
   return {
     totalBuilds: rows.length,
-    unjudged: rows.length - judged.length,
+    unjudged: rows.length - judged.length - userStopped.length,
     ok: ok.length,
     failed: failed.length,
     verdictSplit,

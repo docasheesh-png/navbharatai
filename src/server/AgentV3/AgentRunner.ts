@@ -10,6 +10,7 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
+import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
@@ -307,6 +308,16 @@ export interface AgentRunResult {
   usage: TurnUsage;
   /** Amount billed to the user (D5/D6) for the whole run. */
   billedUsd: number;
+  /**
+   * Where the build stood when the deterministic readiness scan FIRST judged the app finished, or
+   * absent when it never did (see `doneSignal.ts`).
+   *
+   * 🔎 This is a MEASUREMENT, not an outcome: the route reports how many steps and seconds ran after
+   * this point. Nobody knows today whether builds overrun once they are done, and the decision that
+   * needs the answer — whether the loop should END itself here rather than merely say so — must not
+   * be taken on a belief. Absent means "never judged finished", which is NOT an overrun of zero.
+   */
+  readyAt?: { step: number; elapsedMs: number; score: number };
   /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
@@ -562,6 +573,12 @@ export class AgentRunner {
     try {
       // eslint-disable-next-line no-labels
       stepResumeLoop: for (;;) {
+      // THE DONE SIGNAL (doneSignal.ts) — the readiness scan already runs in here; this is the half of
+      // its answer nobody read. `readyMark` is the MEASUREMENT (when was this app first finished?) and
+      // is recorded whether or not the model acts on the steer.
+      const doneCfg = doneSignalConfig();
+      let readyMark: ReadyMark | null = null;
+      let doneSignalled = false;
       while (steps < stepCap) {
         steps++;
 
@@ -698,7 +715,7 @@ export class AgentRunner {
               : `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
             await persist(builtSomething ? 'complete' : 'error');
             events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
-            return { ok: builtSomething, summary, steps, usage, billedUsd: billed() };
+            return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
           }
           throw err;
         }
@@ -920,7 +937,7 @@ export class AgentRunner {
           if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
-          return { ok, summary, steps, usage, billedUsd: billed() };
+          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
@@ -1078,7 +1095,24 @@ export class AgentRunner {
             events.emit({ type: 'narration', agent: agentRole, text: bs.narration, ts: Date.now() });
           }
         } catch { /* the budget steer is advisory — it must never break a build */ }
-        const steer = [truncationSteer, loopSteer, budgetText].filter(Boolean).join('\n\n') || null;
+        // DONE — the app may already be finished. Runs the SAME free deterministic scan the weak
+        // checkpoint uses (no model call, no file read), records when it first passed, and says so
+        // once. Best-effort by construction: a scan that throws leaves the build exactly as it was.
+        let doneText: string | null = null;
+        try {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled })) {
+            const readiness = await dispatcher.assessBuildReadiness();
+            if (appIsDone(readiness)) {
+              if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
+              doneText = doneSteer(readiness);
+              if (doneText) {
+                doneSignalled = true;
+                events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
+              }
+            }
+          }
+        } catch { /* the done check is advisory — it must never break a build */ }
+        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
 
@@ -1089,7 +1123,7 @@ export class AgentRunner {
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
           // T1-budget-ux: a budget stop is a resumable PAUSE, not a failure — flag it so the client offers
           // an honest "continue" (each continue is a fresh run with a fresh budget window).
-          return { ok: false, summary, steps, usage, billedUsd: billed(), budgetReached: true };
+          return { ok: false, summary, steps, usage, billedUsd: billed(), budgetReached: true, ...(readyMark ? { readyAt: readyMark } : {}) };
         }
 
         // Mid-build checkpoint: the turn (assistant + tool results) is persisted so a reconnect
@@ -1243,7 +1277,7 @@ export class AgentRunner {
         if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
         await persist(ok ? 'complete' : 'stopped');
         events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
-        return { ok, summary, steps, usage, billedUsd: billed() };
+        return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
       }
       } // stepResumeLoop
     } catch (err) {

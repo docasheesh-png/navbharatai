@@ -5,7 +5,7 @@
     <!-- Theme (admin 2026-07-14): set data-theme on <html> BEFORE first paint so the app renders in the
          saved theme with no dark→theme flash (FOUC). React keeps it in sync afterwards (App.tsx). -->
     <script>
-      try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'dark'); } catch (e) {}
+      try { var t = localStorage.getItem('theme'); if (t === 'dim') t = 'dark'; else if (t === 'comfort') t = 'light'; document.documentElement.setAttribute('data-theme', t === 'light' || t === 'contrast' ? t : 'dark'); } catch (e) {}
       // NATIVE-ONLY: mark <html> and tighten the viewport BEFORE first paint, same reasoning as the
       // theme line above — a class/attribute added after React mounts would let one frame of website
       // behaviour (pinch-enabled) flash before the app-only rules kick in. `window.Capacitor` is

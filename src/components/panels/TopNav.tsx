@@ -20,7 +20,6 @@ interface MenuItem {
 }
 
 export interface TopNavProps {
-  themeClasses: { card: string; border: string };
   effectiveDeviceMode: string;
   isSidebarCollapsed: boolean;
   setIsSidebarCollapsed: (v: boolean) => void;
@@ -55,7 +54,7 @@ export interface TopNavProps {
 }
 
 export function TopNav({
-  themeClasses, effectiveDeviceMode, isSidebarCollapsed, setIsSidebarCollapsed,
+  effectiveDeviceMode, isSidebarCollapsed, setIsSidebarCollapsed,
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
@@ -145,8 +144,7 @@ export function TopNav({
 
   return (
     <nav className={cn(
-      "h-10 border-b flex items-center justify-between px-4 shrink-0 transition-all z-[100] gap-4 select-none w-full",
-      themeClasses.card, themeClasses.border
+      "h-10 border-b flex items-center justify-between px-4 shrink-0 transition-all z-[100] gap-4 select-none w-full bg-card border-line"
     )}>
       <div className="flex items-center gap-3 min-w-0 flex-1">
         {effectiveDeviceMode === 'mobile' && (

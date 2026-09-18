@@ -90,7 +90,7 @@ function palette(theme: string): Record<string, string> {
   for (const v of m![1].matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})/g)) out[v[1]] = v[2].toLowerCase();
   return out;
 }
-const THEMES = ['light', 'dark', 'dim', 'comfort', 'contrast'];
+const THEMES = ['light', 'dark', 'contrast'];
 const SURFACES = ['surface-base', 'surface-card', 'surface-raised'];
 const TEXTS = ['text-primary', 'text-body', 'text-muted', 'text-faint', 'accent', 'brand-accent-text', 'brand-success-text', 'brand-warn-text', 'brand-danger-text', 'brand-info-text'];
 
@@ -108,6 +108,15 @@ describe('🔒 every theme palette clears WCAG AA (4.5:1) for normal text — Co
       expect(short.join('; '), `${t} has text that fails AA`).toBe('');
     });
   }
+
+  it('🔒 High contrast: the four brand hues are DISTINCT and each clears 7:1 (AAA) on black', () => {
+    // The first version painted success, warning, danger and info all #ffff00 — a red "failed" and a
+    // green "saved" were the same colour to the one audience that chose this theme to read better.
+    const p = palette('contrast');
+    const hues = ['brand-success-text', 'brand-warn-text', 'brand-danger-text', 'brand-info-text'].map(k => p[k]);
+    expect(new Set(hues).size).toBe(4);
+    for (const h of hues) expect(contrast(h, p['surface-base']), `${h} on black`).toBeGreaterThanOrEqual(7);
+  });
 
   it('the maths is right — pinned against the audit\'s own numbers', () => {
     expect(contrast('#484f58', '#161b22')).toBeCloseTo(2.09, 2); // the old dark --text-faint on a card

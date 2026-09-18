@@ -2701,6 +2701,23 @@ is now enforced at the source, by CI.**
   out of `index.css`. Do not add a theme, or "tune" one, that fails it (Comfort's Solarized values did).
 - **Do NOT add selectors to `theme-compat.css`.** It is the thing being retired: it shrinks as files
   migrate, and is deleted when the baseline reaches zero.
+- **THREE themes — Light, Dark, High contrast — and no more (PR B, 2026-09-18).** Dim and Comfort are
+  RETIRED: the audit found Comfort failing on 84 of 84 screens and Dim adding nothing Dark did not.
+  `src/lib/theme.ts` is the one vocabulary (`ThemeMode`, `THEME_MODES`, `normalizeThemeMode`); a saved
+  `dim` is carried to `dark` and `comfort` to `light` where the value is READ (`useSettings` writes the
+  successor back; the pre-paint script in `index.html` maps the same two names, so the first frame is
+  right too). `tests/themeSystem.test.ts` fails if either retired palette reappears in `index.css`.
+  ⚠️ Do not add a fourth theme without adding its palette to the AA lock, `THEMES` in
+  `themeTokensOnly.test.ts`, the pre-paint script, and the status-bar mapping in `nativeShell.ts`.
+- **`getThemeClasses` is GONE — do not bring it back in any form.** It was a per-theme bag of colour
+  literals handed through props (`themeClasses`, `bgClass`); every consumer now uses the tokens
+  directly (`bg-surface text-body` on the root, `bg-card border-line` on bars) and needs no JavaScript
+  to know which theme it is in. `tests/theme.test.ts` asserts the export does not exist.
+- **High contrast's brand hues are DISTINCT by test** (success / warn / danger / info each ≥ 7:1 on
+  black and no two the same): the first version painted all four #ffff00, so a red "failed" and a
+  green "saved" were the same colour to the one audience that chose this theme to read better.
+- **A swatch is the one legitimate fixed colour in the picker** (the Light swatch is white even on
+  Dark) and it lives in CSS as `.theme-swatch[data-swatch]`, not as a class literal in TSX.
 
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 

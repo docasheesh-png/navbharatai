@@ -1,6 +1,5 @@
 import { motion } from 'motion/react';
 import { LayoutGrid, ArrowLeft } from 'lucide-react';
-import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
 import { HOME_TOOL_GROUPS } from './homeToolGroups';
 import { isComingSoonTool, COMING_SOON_LABEL } from '../../lib/comingSoonTools';
@@ -10,7 +9,6 @@ interface OtherAIViewProps {
   onOpenTool: (id: string) => void;
   /** Back to the Home page. */
   onBack?: () => void;
-  theme: ThemeMode;
 }
 
 /**
@@ -18,10 +16,9 @@ interface OtherAIViewProps {
  * It renders EVERY builder-tool group INSIDE its own page (admin 2026-07-23: the tools must live
  * inside Other AI, not expand below the Home cards). Each tile opens its tool via onOpenTool.
  */
-export function OtherAIView({ onOpenTool, onBack, theme }: OtherAIViewProps) {
-  const colors = getThemeClasses(theme);
+export function OtherAIView({ onOpenTool, onBack }: OtherAIViewProps) {
   return (
-    <div className={cn('flex-1 w-full overflow-y-auto overflow-x-hidden', colors.bg, colors.text)}>
+    <div className="flex-1 w-full overflow-y-auto overflow-x-hidden bg-surface text-body">
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col gap-6">
         {/* Header */}
         <div className="flex items-center gap-3">

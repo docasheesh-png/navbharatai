@@ -65828,3 +65828,50 @@ in blue and Comfort is broken by design) with stored-value migration and `getThe
 from its seven callers. PR C onward — migrate files to tokens, heaviest first (AdminDashboard 1,073,
 AgentV3Panel 598, GitPanel 485, ComponentLibrary 442, SettingsPanel 316 …), each PR lowering the
 baseline. Last — the audit crawl itself in CI so an invisible text node fails the PR that adds it.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR B of N: five themes to three, `getThemeClasses` gone, the status bar fixed on the way
+
+**What changed, and why each half exists.**
+- **Light · Dark · High contrast.** `src/lib/theme.ts` is now 40 lines: the `ThemeMode` union, the three
+  `THEME_MODES`, `LEGACY_THEME_MAP` (`dim → dark`, `comfort → light`) and `normalizeThemeMode`, which
+  also answers `null` for anything no version of the app ever wrote (`''`, `'sepia'`, `'DARK'`) so the
+  caller asks the OS instead of stamping `data-theme="sepia"` and getting the default palette by
+  accident. Comfort went because the audit found it failing on 84 of 84 screens — low contrast is
+  Solarized's signature, not comfort; Dim went because it was Dark in blue: two more palettes to keep
+  readable for a reader Dark already served.
+- **The migration happens where the value is READ, in both readers.** `useSettings` normalises the
+  stored value and writes the successor back once; the pre-paint script in `index.html` — which reads
+  the same key before React exists — maps the same two names and never stamps anything but the three
+  live values. Verified in a real browser on the built `dist/`: stored `dim` → `data-theme="dark"`,
+  storage rewritten to `dark`, root background `rgb(13,17,23)` = `--surface-base`; stored `comfort` →
+  `light`; stored `sepia` → the OS preference; `color-scheme` right on all three; zero page errors.
+- **`getThemeClasses` is deleted, with its prop plumbing.** It handed each caller a per-theme bag of
+  colour literals (`bg-[#0d1117]`, `text-[#657b83]`, …) — the literal class the ratchet exists to
+  remove — and App.tsx threaded it as `themeClasses` into SidebarNav, TopNav, NBIChatPanel,
+  SettingsPanel and as `bgClass` into DonationPanel; HomeView, OtherAIView and CodeStudio called it
+  themselves. All eight now use the tokens directly (`bg-surface text-body` on the root, `bg-card
+  border-line` on the bars) — byte-equivalent on screen, since the compat layer was remapping those
+  literals to the same variables, and no JavaScript needs to know which theme it is in. `theme.ts`
+  goes 33 → 0 literals and SettingsPanel 316 → 304 in the baseline.
+- **High contrast's brand hues are distinct.** The first version painted success, warning, danger and
+  info all `#ffff00`, so a red "failed" and a green "saved" were the same colour to the one audience
+  that chose this theme to read better. Now `#5cff9d` / `#ffc233` / `#ff8585` / `#6ee0ff`, each ≥ 7:1
+  (AAA) on black, four distinct values by test.
+- **The picker.** Three buttons; the unselected style is on tokens; the swatches (the Light swatch must
+  be white even on Dark) live in CSS as `.theme-swatch[data-swatch]` rather than as class literals.
+  Verified in the browser: three swatches at their theme's colour under every current theme, and a
+  click on High contrast flips the attribute and storage together.
+- **🔎 A sibling found on the way (rule 3): the native status bar treated High contrast as a light
+  theme** — `statusBarStyleForTheme` returned dark icons and a `#ffffff` bar above a black app. Now
+  Dark, High contrast (and a not-yet-migrated `dim`) get light icons on their own surface colour.
+  Test-locked in `nativeShell.test.ts`.
+- **AppKnowledgeBase**: the General Settings entry names the three themes and says Dim/Comfort users
+  are carried over automatically, so every assistant answers "mera Comfort theme kahan gaya?" honestly.
+
+**Reversion-proven three ways**: a retired `comfort` block restored to `index.css` fails
+`themeSystem.test.ts`; the migration removed from the pre-paint script fails the same file; two High
+contrast hues made equal fails `themeTokensOnly.test.ts`.
+
+**What this PR does NOT do**: migrate any file's literals beyond the lines it touched (that is PR C+,
+heaviest first), or delete `theme-compat.css` (at zero). Stacked on PR A (#3070); pushed only after A
+merges, so #3070 stays exactly what its CI ran.

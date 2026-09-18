@@ -40,16 +40,6 @@ const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'Conn
 // REAL workspace logs — live v5.0 build events + the app's own captured runtime errors.
 const WorkspaceLogs    = _lz(() => import('../ide/WorkspaceLogs'),         'WorkspaceLogs');
 
-// Inlined theme-classes shape (matches getThemeClasses return type)
-type ThemeClasses = {
-  bg: string;
-  text: string;
-  border: string;
-  accent: string;
-  card: string;
-  raw: { bg: string; text: string; border: string; card: string };
-};
-
 // MenuItem shape (mirrors what App.tsx builds in menuItems useMemo)
 type MenuItem = {
   id: string;
@@ -59,9 +49,6 @@ type MenuItem = {
 };
 
 export interface SettingsPanelProps {
-  // layout / theme
-  themeClasses: ThemeClasses;
-
   // navigation
   settingsScreen: SettingsScreen;
   setSettingsScreen: (s: SettingsScreen) => void;
@@ -381,7 +368,6 @@ function AppSignatureToggle() {
 }
 
 export function SettingsPanel({
-  themeClasses,
   settingsScreen,
   setSettingsScreen,
   toggleTab,
@@ -434,9 +420,9 @@ export function SettingsPanel({
    */
   const [metricsError, setMetricsError] = useState<string | null>(null);
   return (
-    <div className={cn("flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar modal-scroll-lock animate-in fade-in zoom-in duration-300", themeClasses.bg)}>
+    <div className="flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar modal-scroll-lock animate-in fade-in zoom-in duration-300 bg-surface">
       {/* Settings Header */}
-      <div className={cn("h-14 border-b flex items-center px-4 gap-4 sticky top-0 z-20 select-none", themeClasses.card, themeClasses.border)}>
+      <div className="h-14 border-b flex items-center px-4 gap-4 sticky top-0 z-20 select-none bg-card border-line">
         {settingsScreen !== 'root' && (
           <button
             onClick={() => setSettingsScreen('root')}
@@ -818,17 +804,11 @@ export function SettingsPanel({
                                   "flex items-center gap-2 px-4 py-3 rounded-xl text-left text-[11px] font-black uppercase tracking-wider transition-all border",
                                   isSelected
                                     ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/10"
-                                    : "bg-[#0d1117] border-white/5 text-[#8b949e] hover:bg-white/5 hover:text-white"
+                                    : "bg-surface border-line text-muted hover:bg-raised hover:text-ink"
                                 )}
                               >
-                                <div className={cn(
-                                  "w-3 h-3 rounded-full shrink-0 border border-black/20",
-                                  t.value === 'light' ? 'bg-white border-gray-400' :
-                                  t.value === 'dark' ? 'bg-[#0d1117]' :
-                                  t.value === 'dim' ? 'bg-[#15202b]' :
-                                  t.value === 'comfort' ? 'bg-[#fdf6e3]' :
-                                  'bg-[#ffff00]'
-                                )} />
+                                {/* The swatch's colour is the THEME's, not the current one — see .theme-swatch in index.css. */}
+                                <div className="theme-swatch w-3 h-3 rounded-full shrink-0 border" data-swatch={t.value} />
                                 {t.label}
                               </button>
                             );

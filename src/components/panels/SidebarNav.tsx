@@ -16,12 +16,6 @@ interface MenuItem {
 }
 
 export interface SidebarNavProps {
-  themeClasses: {
-    bg: string;
-    text: string;
-    card: string;
-    border: string;
-  };
   effectiveDeviceMode: string;
   isSidebarCollapsed: boolean;
   isMenuOpen: boolean;
@@ -115,7 +109,7 @@ function NavItem({
 }
 
 export function SidebarNav({
-  themeClasses, effectiveDeviceMode, isSidebarCollapsed,
+  effectiveDeviceMode, isSidebarCollapsed,
   isMenuOpen, setIsMenuOpen, menuItems, enabledModules,
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
@@ -225,10 +219,10 @@ export function SidebarNav({
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className={cn(
                 "absolute left-0 top-0 bottom-0 w-[300px] border-r flex flex-col shadow-3xl select-none transition-colors duration-500",
-                themeClasses.card, themeClasses.border, themeClasses.text
+                'bg-card border-line text-body'
               )}
             >
-              <div className={cn("p-6 border-b flex items-center justify-between", themeClasses.border)}>
+              <div className="p-6 border-b border-line flex items-center justify-between">
                 <button
                   onClick={() => { setActiveView('home'); setIsMenuOpen(false); }}
                   className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"

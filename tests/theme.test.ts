@@ -1,71 +1,68 @@
 /**
- * Tests for src/lib/theme.ts — pure theme class computation.
+ * Tests for src/lib/theme.ts — the three-theme vocabulary and the migration of the two retired ones
+ * (theme replacement, PR B — admin 2026-09-18).
  */
 import { describe, it, expect } from 'vitest';
-import { getThemeClasses, THEME_MODES } from '../src/lib/theme';
-import type { ThemeMode } from '../src/lib/theme';
+import { THEME_MODES, LEGACY_THEME_MAP, isThemeMode, normalizeThemeMode } from '../src/lib/theme';
+import * as theme from '../src/lib/theme';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { codeOnly } from '../scripts/themeColourBaseline.mjs';
 
-describe('THEME_MODES', () => {
-  it('exports all 5 theme modes', () => {
-    expect(THEME_MODES).toHaveLength(5);
-    const values = THEME_MODES.map(m => m.value);
-    expect(values).toContain('light');
-    expect(values).toContain('dark');
-    expect(values).toContain('dim');
-    expect(values).toContain('comfort');
-    expect(values).toContain('contrast');
+describe('THEME_MODES — three themes, no more', () => {
+  it('exports exactly Light, Dark and High contrast', () => {
+    expect(THEME_MODES.map(m => m.value)).toEqual(['light', 'dark', 'contrast']);
   });
 
-  it('each mode has a label and value', () => {
+  it('each mode has a non-empty label a user can read', () => {
     for (const mode of THEME_MODES) {
-      expect(typeof mode.label).toBe('string');
       expect(mode.label.length).toBeGreaterThan(0);
-      expect(typeof mode.value).toBe('string');
     }
+  });
+
+  it('🔒 getThemeClasses is gone — colour comes from tokens, never from a per-theme class bag', () => {
+    expect((theme as Record<string, unknown>).getThemeClasses).toBeUndefined();
   });
 });
 
-describe('getThemeClasses', () => {
-  const MODES: ThemeMode[] = ['light', 'dark', 'dim', 'comfort', 'contrast'];
+describe('normalizeThemeMode — a saved value from any version of the app lands on a live theme', () => {
+  it('passes the three live themes through unchanged', () => {
+    for (const t of ['light', 'dark', 'contrast'] as const) expect(normalizeThemeMode(t)).toBe(t);
+  });
 
-  it('returns an object with the expected shape for every theme', () => {
-    for (const mode of MODES) {
-      const classes = getThemeClasses(mode);
-      expect(typeof classes.bg).toBe('string');
-      expect(typeof classes.text).toBe('string');
-      expect(typeof classes.border).toBe('string');
-      expect(typeof classes.accent).toBe('string');
-      expect(typeof classes.card).toBe('string');
-      expect(typeof classes.raw.bg).toBe('string');
-      expect(typeof classes.raw.text).toBe('string');
-      expect(typeof classes.raw.border).toBe('string');
-      expect(typeof classes.raw.card).toBe('string');
+  it('carries the two retired themes to their successors (dim → dark, comfort → light)', () => {
+    expect(normalizeThemeMode('dim')).toBe('dark');
+    expect(normalizeThemeMode('comfort')).toBe('light');
+    expect(LEGACY_THEME_MAP).toEqual({ dim: 'dark', comfort: 'light' });
+  });
+
+  it('returns null for nothing, whitespace, or a value no version ever wrote — the caller then asks the OS', () => {
+    for (const raw of [null, undefined, '', '  ', 'sepia', 'DARK', 'undefined']) {
+      expect(normalizeThemeMode(raw)).toBeNull();
     }
   });
 
-  it('dark theme has dark background class', () => {
-    const { bg } = getThemeClasses('dark');
-    expect(bg).toContain('0d1117');
+  it('tolerates surrounding whitespace on a real value', () => {
+    expect(normalizeThemeMode(' dark ')).toBe('dark');
   });
 
-  it('light theme has light background class', () => {
-    const { bg } = getThemeClasses('light');
-    // Light theme background is a light color (#f8fafc)
-    expect(bg).toContain('f8fafc');
+  it('isThemeMode is the same predicate the type is built on', () => {
+    expect(isThemeMode('contrast')).toBe(true);
+    expect(isThemeMode('dim')).toBe(false);
+    expect(isThemeMode(42)).toBe(false);
   });
+});
 
-  it('each theme returns a distinct background class', () => {
-    const bgs = MODES.map(m => getThemeClasses(m).bg);
-    const unique = new Set(bgs);
-    // All 5 backgrounds should be distinct
-    expect(unique.size).toBe(5);
+describe('the stored value is migrated where it is READ, not only where it is typed', () => {
+  // No DOM environment in this suite, so the hook is not rendered; the real-browser smoke check
+  // (stored "dim" → data-theme="dark", storage rewritten) is recorded in PROGRESS.md 2026-09-18.
+  // This pins the two lines that behaviour depends on so a refactor cannot drop them silently.
+  const hook = codeOnly(readFileSync(resolve(__dirname, '../src/hooks/useSettings.ts'), 'utf8'));
+  it('useSettings normalises what localStorage holds instead of casting it to ThemeMode', () => {
+    expect(hook).toContain('normalizeThemeMode(raw)');
+    expect(hook).not.toContain("as ThemeMode | null");
   });
-
-  it('raw.bg values are valid CSS hex or rgba strings', () => {
-    for (const mode of MODES) {
-      const { raw } = getThemeClasses(mode);
-      // Should start with # or rgb
-      expect(raw.bg).toMatch(/^(#|rgb)/);
-    }
+  it('and writes the migrated value back, so the pre-paint script sees a live theme next visit', () => {
+    expect(hook).toContain("localStorage.setItem('theme', saved)");
   });
 });

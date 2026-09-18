@@ -23,7 +23,6 @@ export interface DonationPanelProps {
   isAdmin: boolean;
   isDonationEditing: boolean;
   donationData: DonationData;
-  bgClass: string;
   onToggleEditing: () => void;
   onStartEditing: () => void;
   onDonationDataChange: (data: DonationData) => void;
@@ -35,7 +34,6 @@ export function DonationPanel({
   isAdmin,
   isDonationEditing,
   donationData,
-  bgClass,
   onToggleEditing,
   onStartEditing,
   onDonationDataChange,
@@ -43,7 +41,7 @@ export function DonationPanel({
   onCopySuccess,
 }: DonationPanelProps) {
   return (
-    <div className={`flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-8 relative min-h-screen transition-colors duration-500 ${bgClass}`}>
+    <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-8 relative min-h-screen transition-colors duration-500 bg-surface">
       {/* Master Edit Toggle */}
       {isAdmin && (
         <div className="sticky top-0 right-0 z-50 flex justify-end pb-4">

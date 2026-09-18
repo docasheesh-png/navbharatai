@@ -6,14 +6,6 @@ import type { Message, ChatSession, AgentMode } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 export interface NBIChatPanelProps {
-  themeClasses: {
-    bg: string;
-    text: string;
-    border: string;
-    accent: string;
-    card: string;
-    raw: { bg: string; text: string; border: string; card: string };
-  };
   teachMode: boolean;
   setTeachMode: React.Dispatch<React.SetStateAction<boolean>>;
   sessions: ChatSession[];
@@ -52,7 +44,6 @@ export interface NBIChatPanelProps {
 }
 
 export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
-  themeClasses,
   teachMode,
   setTeachMode,
   sessions,
@@ -87,8 +78,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
 
   return (
     <div className={cn(
-      "flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10",
-      themeClasses.bg
+      "flex-1 overflow-hidden h-full min-h-0 max-h-full relative group flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-white/10 bg-surface"
     )}>
       {/* NBI Chat column */}
       <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">

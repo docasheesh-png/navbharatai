@@ -4,7 +4,6 @@ import {
   Sparkles, Shield, MessageSquare, Bot, Zap, Rocket,
   CheckCircle2, ArrowRight, LayoutGrid, Store, Play, PlayCircle, X
 } from 'lucide-react';
-import { ThemeMode, getThemeClasses } from '../../lib/theme';
 import { cn } from '../../lib/utils';
 // `openExternalUrl` only — the tutorial strip's video link. main removed the Professionals cards from
 // Home, which is what used isNativeApp / playCompliance here; keeping those imports would have left
@@ -58,7 +57,6 @@ interface HomeViewProps {
   isAdmin?: boolean;
   data?: HomeData;
   onUpdate?: (newData: HomeData) => void;
-  theme: ThemeMode;
   user: any;
   onShowLogin: () => void;
   /**
@@ -174,11 +172,9 @@ export const HomeView = ({
   isAdmin,
   data,
   onUpdate,
-  theme,
   user,
   onShowLogin,
 }: HomeViewProps) => {
-  const colors = getThemeClasses(theme);
   // Lazy initial read: touching localStorage during render is fine, but doing it on EVERY render is
   // a synchronous disk hit for a value that cannot change without us changing it.
   const [tutorialDismissed, setTutorialDismissed] = React.useState<boolean>(() => readTutorialDismissed());
@@ -195,7 +191,7 @@ export const HomeView = ({
     <div
       className={cn(
         'flex-1 flex flex-col items-center justify-start relative w-full overflow-y-auto overflow-x-hidden',
-        colors.bg, colors.text
+        'bg-surface text-body'
       )}
     >
       {/*

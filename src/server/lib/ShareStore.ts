@@ -252,7 +252,10 @@ export async function revokeShare(token: string): Promise<void> {
   try {
     const snap = await db.collection(SHARES_COLLECTION).doc(token).get();
     const htmlPath = snap.exists ? (snap.data() as Partial<ShareRecord> | undefined)?.htmlPath : undefined;
-    await db.collection(SHARES_COLLECTION).doc(token).set({ status: 'revoked' }, { merge: true });
+    // A share that does not exist has nothing to revoke — and a merge-set would MINT a share holding only
+    // `status: 'revoked'` (the DeploymentStore.setStatus class, 2026-09-18).
+    if (!snap.exists) return;
+    await db.collection(SHARES_COLLECTION).doc(token).update({ status: 'revoked' });
     if (typeof htmlPath === 'string' && htmlPath) {
       try {
         await admin.storage().bucket(shareBucketName()).file(htmlPath).delete({ ignoreNotFound: true });

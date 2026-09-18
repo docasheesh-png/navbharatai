@@ -1,8 +1,8 @@
-node_modules
-# ...and a node_modules that is a SYMLINK, which the trailing slash above does NOT match.
-# A `git add -A` beside one therefore COMMITS it, and a checkout then replaces the real
-# directory with a link to an absolute path that exists on no other machine — which is exactly
-# how a working tree lost its dependencies on 2026-09-18. Both forms, so neither can be added.
+# No trailing slash, on purpose: `node_modules/` matches a DIRECTORY only, so a node_modules that
+# is a SYMLINK was not ignored, `git add -A` beside one COMMITTED it, and a checkout then replaced
+# the real directory with a link to an absolute path that exists on no other machine — which is
+# exactly how a working tree lost its dependencies on 2026-09-18. The bare name matches a
+# directory, a file and a symlink alike. Locked by tests/nodeModulesIsNotAFile.test.ts.
 node_modules
 dist/
 build/

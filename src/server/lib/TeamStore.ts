@@ -191,7 +191,9 @@ export async function setInviteStatus(token: string, status: InviteStatus): Prom
   const db = getDb();
   if (!db) return;
   try {
-    await db.collection(INVITES_COLLECTION).doc(token).set({ status }, { merge: true });
+    // An UPDATE, never a merge-set — an invite that does not exist must not be minted from a status
+    // (the DeploymentStore.setStatus class, 2026-09-18). Same for the two member writers below.
+    await db.collection(INVITES_COLLECTION).doc(token).update({ status });
   } catch {
     /* best-effort */
   }
@@ -214,7 +216,7 @@ export async function removeMember(teamId: string, uid: string): Promise<void> {
   const db = getDb();
   if (!db || !teamId || !uid) return;
   try {
-    await db.collection(TEAMS_COLLECTION).doc(teamId).collection(MEMBERS_SUBCOLLECTION).doc(uid).set({ status: 'removed' }, { merge: true });
+    await db.collection(TEAMS_COLLECTION).doc(teamId).collection(MEMBERS_SUBCOLLECTION).doc(uid).update({ status: 'removed' });
   } catch {
     /* best-effort */
   }
@@ -225,7 +227,9 @@ export async function updateMemberRole(teamId: string, uid: string, role: Invita
   const db = getDb();
   if (!db || !teamId || !uid) return;
   try {
-    await db.collection(TEAMS_COLLECTION).doc(teamId).collection(MEMBERS_SUBCOLLECTION).doc(uid).set({ role }, { merge: true });
+    // A role on a uid that is not a member would CREATE a member row with a role and no identity — a
+    // privilege with nobody behind it. `update()` refuses it.
+    await db.collection(TEAMS_COLLECTION).doc(teamId).collection(MEMBERS_SUBCOLLECTION).doc(uid).update({ role });
   } catch {
     /* best-effort */
   }

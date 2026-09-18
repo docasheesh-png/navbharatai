@@ -31,6 +31,7 @@ import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, should
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
 import { advancedPublishStartsOpen, ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
+import { FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
 import {
   DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
   pushSavedLine, repoFactOf, type PushAppResult,
@@ -986,7 +987,12 @@ export function HostingChooser({
             <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
               <li>• Instant publish — nothing to set up</li>
               <li>• Frontend now · full app (backend + DB) coming soon</li>
-              <li>• 5 apps free · updating one you published is always free</li>
+              {/* The NUMBER comes from the same constant the server enforces and the plan screen quotes
+                  — never a literal. It read "5 apps free" while `publishedAppCap()` refused the FOURTH
+                  publish, so this card and the error printed directly above it (admin's own capture,
+                  2026-09-18: "free limit of 3") contradicted each other on one screen. The drifted-copy
+                  class, in a string: nothing type-checks a number written in prose. */}
+              <li>• {FREE_PUBLISHED_APPS} apps free · updating one you published is always free</li>
               <li>• Fair-use limits apply (per-publish size + safety scan)</li>
             </ul>
             <button

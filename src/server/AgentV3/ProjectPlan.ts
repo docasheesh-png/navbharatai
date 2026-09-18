@@ -20,6 +20,7 @@
 
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
+import { countEnumeratedFeatures } from './enumeratedFeatures';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -114,15 +115,30 @@ export function projectModeEnabled(
 
 /** The thresholds `detectMegaProject` decides on — named so a report can quote them exactly. */
 export const MEGA_SCALE_MIN = 100;
-export const MEGA_BULLETS_WITH_NOUN = 8;
+/**
+ * 🔴 WAS 8 UNTIL 2026-09-18, AND 8 WAS A BULLET COUNT — a threshold on a signal that could not see a
+ * comma. Six is not a new invention: `complexityFromPrompt` (lib/BuildTimeEstimator.ts) already
+ * floors a named complex app's `featureCount` at SIX, and that is this repo's own standing answer to
+ * "how many parts before this is a complex app". Here it is the WEAKER half of an AND — a big-software
+ * noun must be present too — so six named parts beside the word ERP/HMS/marketplace is at least as
+ * strong a signal as the eight this used to demand of a bulleted spec.
+ *
+ * Measured margin on the corpus in `tests/theGateReadsBulletsUsersWriteCommas.test.ts`: every ordinary
+ * app prompt counts 0-2, every real project prompt counts 5-8. Six sits in the gap, not on an edge.
+ */
+export const MEGA_BULLETS_WITH_NOUN = 6;
 export const MEGA_BULLETS_ALONE = 14;
 
 /** The raw signals behind a mega-project verdict, plus the verdict itself. */
 export interface MegaProjectSignals {
   /** The first "N files/pages/screens/modules" figure in the prompt; 0 when none is stated. */
   scale: number;
-  /** How many enumerated feature lines the prompt carries. */
-  bullets: number;
+  /**
+   * How many distinct parts the prompt enumerates — bullet LINES and inline "a, b, c" / "a aur b"
+   * runs alike (`countEnumeratedFeatures`). Named `bullets` until 2026-09-18, when it was measured
+   * and could only read the first kind.
+   */
+  features: number;
   /** Does the prompt name a big-software category (ERP, CRM, marketplace, social network, …)? */
   bigNoun: boolean;
   /** The verdict — exactly what `detectMegaProject` returns. */
@@ -150,12 +166,12 @@ export function megaProjectSignals(prompt: string): MegaProjectSignals {
   const text = (prompt || '').toLowerCase();
   const scaleMatch = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
   const scale = scaleMatch ? Number(scaleMatch[1]) : 0;
-  const bullets = (prompt || '').split('\n').filter((l) => /^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/.test(l)).length;
+  const features = countEnumeratedFeatures(prompt || '');
   const bigNoun = /\b(?:erp|crm|lms|hms|hrms|pos)\b|management system|management software|enterprise|saas platform|multi[- ]tenant|marketplace|social network|super ?app|full[- ](?:fledged|scale)/i.test(text);
   const fires = scale >= MEGA_SCALE_MIN
-    || (bigNoun && bullets >= MEGA_BULLETS_WITH_NOUN)
-    || bullets >= MEGA_BULLETS_ALONE;
-  return { scale, bullets, bigNoun, fires };
+    || (bigNoun && features >= MEGA_BULLETS_WITH_NOUN)
+    || features >= MEGA_BULLETS_ALONE;
+  return { scale, features, bigNoun, fires };
 }
 
 /** See `megaProjectSignals` — this is its `fires` field, kept as the call sites' short name. PURE. */
@@ -282,7 +298,7 @@ export function projectModeDiagnosis(args: {
   }
 
   const sig = megaProjectSignals(args.prompt ?? '');
-  const signals = `Signals: ${sig.bullets} enumerated feature ${sig.bullets === 1 ? 'line' : 'lines'}, `
+  const signals = `Signals: ${sig.features} enumerated feature ${sig.features === 1 ? 'part' : 'parts'}, `
     + `big-software noun: ${sig.bigNoun ? 'yes' : 'no'}, `
     + `largest stated scale: ${sig.scale > 0 ? sig.scale : 'none'}. `
     + `It fires at >= ${MEGA_BULLETS_WITH_NOUN} lines WITH such a noun, >= ${MEGA_BULLETS_ALONE} without, `

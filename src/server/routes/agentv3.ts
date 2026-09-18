@@ -156,8 +156,9 @@ import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySign
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
-import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
+import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild } from '../AgentV3/inBuildGreen';
+import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
@@ -10332,6 +10333,7 @@ async function noteBuildOutcome(
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void } | undefined;
     let disposeGreenFreezeObserver: (() => void) | null = null;
+    let disposeWriteObserver: (() => void) | null = null;
 
     const events = new AgentEventStream();
     events.subscribe((e) => emit(e), false);
@@ -13604,6 +13606,7 @@ async function noteBuildOutcome(
             // The same key the end-of-build GreenGuard reads — no second store, no second rule.
             await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
             inBuildGreenAt = Date.now();
+            try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
             try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
             events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
           } else if (outcome.kind !== 'proven') {
@@ -13621,6 +13624,13 @@ async function noteBuildOutcome(
           void attemptInBuildGreen().then(() => { if (inBuildGreenAt > 0) stopInBuildGreen(); });
         }
       }, false);
+      // WHO WROTE AFTER THE APP WAS GREEN (postGreenWrites.ts) — the ledger every stronger protection
+      // depends on. Fed by the actuator's write chokepoint, so tool writes, heals, restores and
+      // sub-agents are all seen once; only writes AFTER the first proven render are kept.
+      const postGreenWrites: PostGreenWrite[] = [];
+      disposeWriteObserver = setWriteObserver(({ path, pass }) => {
+        if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
+      });
 
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
@@ -17978,7 +17988,10 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview',
               severity: pageSummary.ok ? 'info' : 'warning',
-              code: pageSummary.ok ? 'PAGE_RENDER_PASSED' : 'PAGE_RENDER_FAILED',
+              // THREE outcomes, not two — the same correction `JOURNEY_NOT_RUN` made below. A browser
+              // that returned nothing did not pass and did not fail; `PAGE_RENDER_NOT_RUN` says so
+              // instead of borrowing either verdict, and both other codes now require `ran`.
+              code: !pageSummary.ran ? 'PAGE_RENDER_NOT_RUN' : pageSummary.ok ? 'PAGE_RENDER_PASSED' : 'PAGE_RENDER_FAILED',
               message: pageSummary.summary,
               autoResolved: pageSummary.ok,
               detail: pageResults.map((r) => `${r.verdict.toUpperCase()} ${r.note}`).join('\n'),
@@ -19793,6 +19806,13 @@ async function noteBuildOutcome(
           let saved = false;
           /** What actually reached the durable store — `toSave`, unless the guard restored the green set. */
           let persisted: Record<string, string> = toSave;
+          // The post-green ledger, read against the END verdict — one line, always, so "nothing wrote"
+          // and "something wrote and it broke" are both facts on the timeline rather than absences.
+          if (inBuildGreenAt > 0) {
+            try {
+              buildDiag.record({ phase: 'build', ...postGreenWritesNote({ writes: postGreenWrites, firstRenderAt: inBuildGreenAt, buildStartedAt, end: endVerdictFrom(previewGreen, previewProvenBroken) }) });
+            } catch { /* measurement is best-effort */ }
+          }
           if (greenGuardEnabled()) {
             try {
               const greenKey = greenWorkspaceKey(workspaceId);
@@ -20879,6 +20899,7 @@ async function noteBuildOutcome(
       // latch can never freeze the EARLY writes of the NEXT build for the same workspace.
       try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
       try { disposeGreenFreezeObserver?.(); } catch { /* best-effort */ }
+      try { disposeWriteObserver?.(); } catch { /* best-effort */ }
       // Flush the LAST background checkpoint so the finished app is captured in History/restore.
       // Bounded (6s) + best-effort: checkpoints are off the hot path during the build, so this is
       // the ONLY place git is awaited, and the cap guarantees a slow/stuck git can never re-stall a

@@ -65387,3 +65387,91 @@ servers would have passed the new tests and broken every preview in the product.
   the loop and does not break it, because it cannot say WHAT to do differently — here the answer was one
   install away and nothing in the engine knew that `Property 'props' does not exist on a React class`
   means missing React types. That mapping is the missing subsystem this report names.
+
+## 2026-09-17 — THE MISSING SUBSYSTEM FROM AUTOPSY `baa0b3c7`: what a compiler error actually MEANS
+
+The `baa0b3c7` entry above closed with three open root causes. This is the first of them, and the one that
+report itself named as the missing subsystem: *"nothing in the engine knew that `Property 'props' does not
+exist on a React class` means missing React types. That mapping is the missing subsystem this report
+names."* It exists now — `src/server/AgentV3/tscErrorCause.ts`.
+
+**🔴 THE CORRECTION FIRST, because the entry above states it wrongly.** That entry recorded, as an open
+root cause, *"There is no guard against a destructive 'fix'"* for `rm src/components/Dashboard/Dashboard.tsx`.
+**That is false and was false on the day of the build.** `destructiveSourceDeletionTarget` has blocked the
+whole class — directory teardown, bulk deletion, blanking, moving source out, git wipes — since before
+that build, and a SECOND guard (2026-08-02) refuses to delete a file other modules still import. Neither
+fired because **neither was wrong to allow it**: the first deliberately permits *"deleting ONE stale source
+file by name"*, and the second asked the import graph, which had no importer of `Dashboard.tsx` to protect.
+A third guard shipped the same day this was written (`fileDeletion.ts`, autopsy 8b3dca5c) for the graph
+half. The real gap is narrower than "no guard" and is stated properly below.
+
+**WHAT ACTUALLY WENT WRONG, and it is one cause with two faces.** The build read
+
+    src/ErrorBoundary.tsx(29,39): error TS2339: Property 'setState' does not exist on type 'ErrorBoundary'.
+
+six times. The file was CORRECT. React's type declarations were absent, so `React.Component` had no members
+and a good class lost `this.props`. **A missing-declaration error is reported where the symbol is USED, so
+its remedy appears nowhere in the message and the code under the cursor looks broken.** The model therefore
+did the only thing the message suggests — it rewrote the file, four times — and then deleted a *different*
+component to make that one's errors go away. Both are rational responses to an error nobody translated.
+Four "repeated step is not making progress" nudges fired and changed nothing, because the loop detector can
+see a repeat without being able to say WHAT to do differently. **So the destructive delete is downstream of
+this, not a guard gap: the answer was one install away and the engine could not say so.**
+
+**THE MAPPING, and its boundary — this is not a hint bag.** Five signatures, every one a case where *the
+compiler is missing a DECLARATION and the code is fine*: React class members, untyped JSX, `import.meta.env`
+(Vite's client types), TS7016 "no declaration file for module", and TS2307 for a BARE package. A genuine
+code error needs no translation — the model reads `TS2345` and fixes it, and that ordinary path is
+deliberately untouched (test-locked on four such errors). **Do not add a signature whose remedy is "change
+the code".**
+
+**🔒 PRECISION, because advice is a steer and a wrong steer costs a round.** `Property 'props' does not
+exist on type 'X'` is genuinely AMBIGUOUS, and this repo holds both causes: the types are missing
+(`baa0b3c7`), or the class never extended `React.Component` (the dukaan stock app, 2026-08-12, which
+`looksLikeBrokenErrorBoundary` was written for). When the source is in hand the two are told apart and the
+advice is exact and opposite; when it is not, it names both, cheapest check first, rather than guessing.
+`extendsReactComponent` returns **null** for a class the file does not declare — "did not look" must not
+read as "does not extend".
+
+**FIVE SITES, because annotating only the tidy one would have missed this very report.** The build's own
+`rootCause` line is `$ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2` — a BASH command, not the
+`typecheck` tool. So: the write-time typecheck note (earliest possible moment, and the only site holding
+the file content, so the only one that gets the exact answer); the `typecheck` tool; a bare `tsc` through
+bash, keyed on output that really parses as compiler errors so an ordinary command is never annotated; and
+the endgame batch repair. That one rides the **error text** rather than a new parameter deliberately:
+every implementor of `llmRepair` passes that string to the model, and an optional argument an implementor
+forgot to read would be decoration.
+
+**AND A FIFTH, FOUND BY RULE 3 AFTER THE OTHER FOUR WERE WIRED — the one that REPEATS.** The fast lane's
+repair loop (`SimpleBuilder`) runs up to `maxRepairs` times climbing a strategy ladder, so a
+missing-declaration error aims EVERY rung of that ladder at a file that was never wrong — the
+four-rewrites-of-one-file shape itself. It reads `parseTscErrors` through a different import than the
+dispatcher, which is why a grep for the dispatcher's spelling alone did not find it. It holds `byPath`, so
+it gets the exact answer rather than the hedged one. The sweep that found it is kept as a test, so a sixth
+site cannot appear unnoticed: the only other consumer of parsed compiler errors, `AgentRunner`, parses to
+COUNT for the trend checkpoint and shows a model nothing.
+
+**Costs nothing.** Pure string analysis — no model call, no file read, no clock. `tscCauseNote` returns ''
+for every error outside the five, so a clean build and an ordinary type error are byte-identical to before.
+
+**Tests:** `tests/tscErrorCause.test.ts` (42 cases), **proven by reversion five ways** — removing the
+write-time note, the endgame block, the bash annotation, the typecheck-tool annotation or the fast-lane
+block each fails a named case. `tests/writeTimeTypecheck.test.ts` gained a guard that the call sites pass the CONTENT, not
+only the path, so a future edit that drops back to paths fails there instead of silently downgrading every
+piece of advice to the hedged form.
+
+⚠️ **Not added to `AppKnowledgeBase.ts`, deliberately:** this changes what the build engine tells itself. It
+adds no screen, route, button or capability a user can navigate to, and inventing an entry would make the
+knowledge base describe the engine's internals to people who cannot see them.
+
+**STILL OPEN from `baa0b3c7` (rule 6), and now stated correctly:**
+- **A single-file delete by name is allowed by design, and the ONLY thing that can refuse it is whether
+  another file imports it.** Nothing asks whether the file was a FEATURE the user asked for — a component
+  with no importer yet is indistinguishable from dead code, and `RequirementCoverage` / the feature heal
+  are downstream nets that report it rather than prevent it. Narrowing that allowance is a real design
+  decision (which deletions are legitimate?), not a patch, and it is now much less pressing: this change
+  removes the commonest REASON to reach for a delete.
+- **The batch repair that took 4 errors to 41** is bounded by the convergence guard (CrewHub autopsy
+  2026-07-20) — it reverted itself honestly and that worked. Why the pass made it eight times worse is
+  still unexplained on this evidence. Starting that pass with the real cause is the most that could be
+  done from this report.

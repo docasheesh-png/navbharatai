@@ -30,6 +30,7 @@
  */
 import { robustTscCommand } from './tscCommand';
 import type { TscError } from './EndgameRepair';
+import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 
 /** The ONE cache every in-build typecheck shares (endgame, `typecheck` tool, this). Ephemeral, never durable. */
 export const WRITE_TYPECHECK_TSBUILDINFO = '/tmp/agentv3.tsbuildinfo';
@@ -80,7 +81,11 @@ const fmt = (e: TscError) => `${e.file}(${e.line},${e.col}): ${e.code} ${e.messa
  * holds the file); errors elsewhere are counted and a few named, so an old problem never floods the
  * result of an unrelated write. Plain instructions, in the order the model should act. Pure.
  */
-export function writeTypecheckNote(errors: TscError[], written: string[]): string {
+export function writeTypecheckNote(
+  errors: TscError[],
+  written: string[],
+  sources: Readonly<Record<string, string>> = {},
+): string {
   const { own, others } = splitByWrittenFiles(errors, written);
   if (own.length === 0 && others.length === 0) return '';
   const files = written.map(normalizePath).join(', ');
@@ -102,7 +107,11 @@ export function writeTypecheckNote(errors: TscError[], written: string[]): strin
         : `Also ${others.length} error(s) elsewhere (${named}${more}).`,
     );
   }
-  return `\n\n${parts.join('\n')}`;
+  // WHAT THE ERROR MEANS, not just what it says (autopsy baa0b3c7). A missing-declaration error points
+  // at the file where the symbol is USED, so its remedy appears nowhere in the message and the code under
+  // the cursor looks broken — which is how a correct file gets rewritten six times. Diagnosed here, at the
+  // earliest moment there is anything to diagnose, and costing no model call. Empty for every other error.
+  return `\n\n${parts.join('\n')}${tscCauseNote(tscErrorCauses([...own, ...others], sources))}`;
 }
 
 /**

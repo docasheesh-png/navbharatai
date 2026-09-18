@@ -141,15 +141,26 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
   const dispatcher = readFileSync(resolve(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n');
 
-  it('write_file, write_files_batch, edit_file and replace_symbol all append the note', () => {
-    expect(dispatcher).toContain('const typecheckNote = await this.writeTypecheckNote([path]);');
-    expect(dispatcher).toContain('const batchTypecheckNote = await this.writeTypecheckNote(written);');
-    expect(dispatcher).toContain('const editTypecheckNote = await this.writeTypecheckNote([path]);');
-    expect(dispatcher).toContain('const symbolTypecheckNote = await this.writeTypecheckNote([path]);');
+  // ⚠️ These four spellings changed on 2026-09-17 (autopsy baa0b3c7): each call site now passes the
+  // CONTENT it just wrote, not only the path. That content is the sole thing able to tell the two causes
+  // of "Property 'props' does not exist on type 'X'" apart — does X extend React.Component? — and every
+  // call site already held it. Asserted as `{ … }` rather than `[path]` precisely so a future edit that
+  // drops back to paths fails here instead of silently downgrading the advice to the hedged form.
+  it('write_file, write_files_batch, edit_file and replace_symbol all append the note, WITH the content', () => {
+    expect(dispatcher).toContain('const typecheckNote = await this.writeTypecheckNote({ [path]: content });');
+    expect(dispatcher).toContain('const batchTypecheckNote = await this.writeTypecheckNote(writtenRecord);');
+    expect(dispatcher).toContain('const editTypecheckNote = await this.writeTypecheckNote({ [path]: updated });');
+    expect(dispatcher).toContain('const symbolTypecheckNote = await this.writeTypecheckNote({ [path]: result.content });');
     for (const v of ['typecheckNote', 'batchTypecheckNote', 'editTypecheckNote', 'symbolTypecheckNote']) {
       // Each note variable is used in a return, not only computed.
       expect(dispatcher).toMatch(new RegExp(`return [^;]*\\b${v}\\b`));
     }
+  });
+
+  it('the helper hands that content to the analysis — otherwise the advice can only ever hedge', () => {
+    const helper = dispatcher.slice(dispatcher.indexOf('private async writeTypecheckNote('), dispatcher.indexOf('async dispatch(call: ToolUse'));
+    expect(helper).toContain('private async writeTypecheckNote(sources: Record<string, string>)');
+    expect(helper).toContain('return writeTypecheckNote(errors, tsPaths, sources);');
   });
 
   it('every run reaches the evidence bridge the typecheck tool uses, and a JS project is never compiled', () => {

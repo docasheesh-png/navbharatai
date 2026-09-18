@@ -71,6 +71,7 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
+import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
@@ -2095,10 +2096,11 @@ export class ToolDispatcher {
    * Never blocks a write, never throws, never fakes a pass: a check that could not run returns ''.
    * Coalesced per build so a burst of parallel writes costs at most two compiles.
    */
-  private async writeTypecheckNote(paths: string[]): Promise<string> {
+  private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
       if (!writeTypecheckEnabled()) return '';
+      const paths = Object.keys(sources);
       const tsPaths = paths.filter(shouldTypecheckWrite);
       if (tsPaths.length === 0) { s.skipped += paths.length; return ''; }
       if (s.disabledReason) { s.skipped += tsPaths.length; return ''; }
@@ -2143,7 +2145,10 @@ export class ToolDispatcher {
       if (own > 0) {
         try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${own} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
       }
-      return writeTypecheckNote(errors, tsPaths);
+      // The content just written is passed on: it is the ONLY thing that can tell the two causes of
+      // "Property 'props' does not exist on type 'X'" apart (does X extend React.Component?), and it is
+      // already in hand — no file is read for this. See tscErrorCause.ts.
+      return writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
@@ -2587,7 +2592,7 @@ export class ToolDispatcher {
         const hooksNote = await this.hookWriteNote({ [path]: content });
         // WRITE → TYPECHECK → NEXT (autopsy e706e068): the compiler's verdict on THIS file, now, while
         // the model still holds it — not twelve minutes later as one line of twenty-one.
-        const typecheckNote = await this.writeTypecheckNote([path]);
+        const typecheckNote = await this.writeTypecheckNote({ [path]: content });
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -2752,7 +2757,7 @@ export class ToolDispatcher {
         for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
         const batchHooksNote = await this.hookWriteNote(writtenRecord);
         // ONE compile for the whole batch (the queue coalesces anyway); the note names each file's errors.
-        const batchTypecheckNote = await this.writeTypecheckNote(written);
+        const batchTypecheckNote = await this.writeTypecheckNote(writtenRecord);
         return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchHooksNote}${batchTypecheckNote}`;
       }
 
@@ -2809,7 +2814,7 @@ export class ToolDispatcher {
         const editTestHint = testFileHint(path);
         // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
         const editHooksNote = await this.hookWriteNote({ [path]: updated });
-        const editTypecheckNote = await this.writeTypecheckNote([path]);
+        const editTypecheckNote = await this.writeTypecheckNote({ [path]: updated });
         return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editHooksNote + editTypecheckNote;
       }
 
@@ -3236,6 +3241,17 @@ export class ToolDispatcher {
             }
           } catch { /* honesty hint is best-effort — never blocks the build */ }
         }
+        // WHAT THE COMPILER ERROR MEANS (autopsy baa0b3c7). The model runs `tsc --noEmit` through bash far
+        // more often than through the `typecheck` tool — the VPN build's own root cause line is literally
+        // `$ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2` — and that path handed the output back raw.
+        // A missing-declaration error names the file where the symbol is USED, so its remedy is nowhere in
+        // the message: that build read `Property 'setState' does not exist on type 'ErrorBoundary'` six
+        // times and rewrote a CORRECT file four times because React's types were simply not installed.
+        // Keyed on output that really parses as tsc errors, so an ordinary command is never annotated.
+        try {
+          const bashTscErrors = parseTscErrors(`${stdout}\n${stderr}`);
+          if (bashTscErrors.length > 0) out = `${out}${tscCauseNote(tscErrorCauses(bashTscErrors))}`;
+        } catch { /* the analysis is advisory — the raw output is still reported */ }
         if (risk.level !== 'none') {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[${risk.level}] ran: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
@@ -4372,7 +4388,11 @@ export class ToolDispatcher {
             const tscErrs = parseTscErrors(combined);
             if (tscErrs.length > 0) {
               getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${tscErrs.length} TypeScript error(s).`);
-              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}\n\n`;
+              // The same analysis the write-time note and the endgame repair carry. No `sources` here:
+              // this tool holds no file content, and reading one back would put I/O in a hot path for a
+              // sharper wording. The sourceless form still names both causes in order and still says not
+              // to rewrite the file, which is the loop that had to break.
+              tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscRanClean = true;
             }
@@ -8107,7 +8127,7 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, result.content);
         this.scheduleCheckpoint(`replace ${symbol} in ${path}`);
-        const symbolTypecheckNote = await this.writeTypecheckNote([path]);
+        const symbolTypecheckNote = await this.writeTypecheckNote({ [path]: result.content });
         return `Replaced top-level symbol "${symbol}" in ${path} (AST-safe — surrounding code untouched).` + symbolTypecheckNote;
       }
 

@@ -33,9 +33,9 @@ const STYLES = [
 // while it generated 512. Every number a user read here was wrong, which is its own small dishonesty
 // and made the real fix — raising the resolution — impossible to even see.
 const SIZES = [
-  { id: 'square', label: 'Square', w: 1280, h: 1280, desc: '1280×1280' },
-  { id: 'wide', label: 'Wide / OG', w: 1536, h: 864, desc: '1536×864' },
-  { id: 'portrait', label: 'Portrait', w: 960, h: 1280, desc: '960×1280' },
+  { id: 'square', label: 'Square', w: 1024, h: 1024, desc: '1024×1024' },
+  { id: 'wide', label: 'Wide / OG', w: 1280, h: 720, desc: '1280×720' },
+  { id: 'portrait', label: 'Portrait', w: 864, h: 1152, desc: '864×1152' },
   { id: 'icon', label: 'App Icon', w: 1024, h: 1024, desc: '1024×1024' },
 ];
 
@@ -392,16 +392,24 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 <button
                   key={s.id}
                   onClick={() => setStyle(s.id)}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all ${
+                  /* 🔴 `min-w-0` IS THE FIX, NOT DECORATION (admin 2026-09-18: "STYLE wale
+                     column ka text box se bahar nikal kar other box se overlap karta hai").
+                     A flex item defaults to `min-width: auto`, which refuses to shrink below its
+                     content — so "Three dimensional" and "Real photo look" held the button wider
+                     than its grid-cols-3 cell and spilled over the neighbour. The grid cell was
+                     never too small; the child simply would not fit into it. `min-w-0` on BOTH the
+                     button and the text column restores shrinking, and `truncate` decides what
+                     happens at the boundary instead of leaving it to overflow. */
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all min-w-0 ${
                     style === s.id
                       ? 'border-violet-500/60 bg-violet-500/10'
                       : 'border-white/5 bg-[#161b22] hover:border-white/10'
                   }`}
                 >
-                  <span className="text-lg">{s.emoji}</span>
-                  <div>
-                    <div className="text-xs font-medium text-white">{s.label}</div>
-                    <div className="text-[10px] text-white/30">{s.desc}</div>
+                  <span className="text-lg shrink-0">{s.emoji}</span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-white truncate">{s.label}</div>
+                    <div className="text-[10px] text-white/30 truncate" title={s.desc}>{s.desc}</div>
                   </div>
                 </button>
               ))}
@@ -416,7 +424,9 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 <button
                   key={s.id}
                   onClick={() => setSize(s.id)}
-                  className={`flex flex-col items-center p-2.5 rounded-xl border text-center transition-all ${
+                  /* Same class as the Style chips above: without `min-w-0` the widest label
+                     ("1536×864") sets the cell's floor and the four-column grid overflows. */
+                  className={`flex flex-col items-center p-2.5 rounded-xl border text-center transition-all min-w-0 ${
                     size === s.id
                       ? 'border-violet-500/60 bg-violet-500/10'
                       : 'border-white/5 bg-[#161b22] hover:border-white/10'
@@ -425,8 +435,8 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   <div className={`mb-1 border border-white/20 ${
                     s.id === 'wide' ? 'w-8 h-4' : s.id === 'portrait' ? 'w-4 h-7' : 'w-5 h-5'
                   } rounded-sm`} />
-                  <div className="text-[10px] font-medium text-white">{s.label}</div>
-                  <div className="text-[9px] text-white/30">{s.desc}</div>
+                  <div className="text-[10px] font-medium text-white truncate max-w-full">{s.label}</div>
+                  <div className="text-[9px] text-white/30 truncate max-w-full" title={s.desc}>{s.desc}</div>
                 </button>
               ))}
             </div>

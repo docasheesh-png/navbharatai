@@ -2718,6 +2718,21 @@ is now enforced at the source, by CI.**
   green "saved" were the same colour to the one audience that chose this theme to read better.
 - **A swatch is the one legitimate fixed colour in the picker** (the Light swatch is white even on
   Dark) and it lives in CSS as `.theme-swatch[data-swatch]`, not as a class literal in TSX.
+- **Migrate a file with the codemod, not by hand (PR C, 2026-09-18):**
+  `node scripts/themeMigrate.mjs <file> [--dry]` then `node scripts/themeColourBaseline.mjs --write`.
+  One explicit table, two kinds of row: **EXACT** (the literal is one `theme-compat.css` already remaps,
+  and the token emits the SAME variable — `tests/themeMigrate.test.ts` proves it against the compat
+  file, so it is pixel-identical on every theme by construction) and **FIX** (the audit's unreadable
+  idioms — `text-white/40`, a light brand shade as text, `bg-black/30` as a well — moved to the
+  readable token, on purpose). Anything else is left and listed; nothing is guessed. `text-white` on
+  a SOLID brand fill in the same string becomes `text-on-accent` (the compat exception, mirrored); a
+  fill chosen by a ternary inside a template literal is handled only when every branch is a fill,
+  otherwise it is left for a hand split. Verified on AdminDashboard: 1,073 → 1 literals, and the
+  audit crawler's numbers and screenshots on the admin view are IDENTICAL before and after on all
+  three themes. ⚠️ Do not extend the table with a row you cannot classify as EXACT or FIX.
+- **Two more tokens exist since PR C:** `bg-well` (an inset panel inside a card — the old
+  `bg-black/20–40` on dark; a 6% ink wash on light) and `bg-scrim` (the modal backdrop, deliberately
+  the same dark on every theme because it dims what is behind it).
 
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 

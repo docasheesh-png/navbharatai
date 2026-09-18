@@ -41,6 +41,10 @@
      white is the readable choice on all of them — a token rather than `text-white` so the ratchet
      can tell "white by design" from "white because the app was dark". */
   --color-on-accent: #ffffff;
+  /* An inset well inside a card (the old bg-black/20–40 on dark) and the modal scrim (bg-black/60+),
+     which stays dark on every theme because it dims what is behind it. */
+  --color-well: var(--surface-well);
+  --color-scrim: var(--scrim);
 }
 
 /* Disable the browser's left/right swipe back/forward navigation — it was
@@ -148,6 +152,8 @@ button, [role='button'], nav, header, footer {
        staying visibly lighter than --text-muted, so the hierarchy survives. */
     --text-faint: #838d97;     /* placeholder / faint       */
     --border-soft: rgba(255, 255, 255, 0.1);
+    --surface-well: rgba(0, 0, 0, 0.3);   /* inset well inside a card */
+    --scrim: rgba(0, 0, 0, 0.7);          /* modal backdrop — the same on every theme */
     /* Native controls (select, date, scrollbar) follow the theme instead of the OS default. */
     color-scheme: dark;
     --accent: #818cf8;
@@ -174,6 +180,7 @@ button, [role='button'], nav, header, footer {
     --text-muted: #475569;
     --text-faint: #5b6b82;     /* audit 2026-09-18: #64748b was 4.23 on --surface-raised */
     --border-soft: #e2e8f0;
+    --surface-well: rgba(15, 23, 42, 0.06);
     color-scheme: light;
     --accent: #4f46e5;
     /* LIGHT — the theme the admin reported unreadable on 2026-09-13. Each is the 700 shade, which
@@ -202,6 +209,7 @@ button, [role='button'], nav, header, footer {
     --text-muted: #ffffff;
     --text-faint: #ffff00;
     --border-soft: #ffff00;
+    --surface-well: #111111;
     color-scheme: dark;
     --accent: #ffff00;
     --brand-accent-text: #ffff00;

@@ -137,7 +137,7 @@ describe('🔒 the pipeline — tokens exist and the first migrated file is at z
   it('index.css exposes every semantic token through @theme inline', () => {
     const css = read('src/index.css');
     const block = css.match(/@theme inline \{([^}]*)\}/)?.[1] ?? '';
-    for (const tok of ['surface', 'card', 'raised', 'ink', 'body', 'muted', 'faint', 'line', 'accent', 'accent-text', 'success', 'warn', 'danger', 'info', 'on-accent']) {
+    for (const tok of ['surface', 'card', 'raised', 'ink', 'body', 'muted', 'faint', 'line', 'accent', 'accent-text', 'success', 'warn', 'danger', 'info', 'on-accent', 'well', 'scrim']) {
       expect(block, `--color-${tok} missing from @theme inline`).toMatch(new RegExp(`--color-${tok}:`));
     }
     // `inline` is load-bearing: without it Tailwind would bake the var's initial value into the

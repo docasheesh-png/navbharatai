@@ -65946,3 +65946,53 @@ rule, `disabled:bg-white/10` and `disabled:text-white/25` with no light-theme re
 with no gradient stop). All four were added to the compat layers rather than designed around — a
 disabled SEND button rendering white-on-white would have told a light-theme user the button had
 vanished, not that it was disabled.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR C of N: the codemod, proven on the heaviest file (AdminDashboard 1,073 → 1)
+
+**The instrument.** `scripts/themeMigrate.mjs` — one explicit literal → token table applied
+mechanically, variants (`hover:`, `md:`, `group-hover:`, `placeholder:`) preserved verbatim. The
+heaviest files use ~110 distinct literals and the top twenty carry 80% of the usages, so a table is
+reviewable in a way 1,073 hand edits are not, and it is the same answer in every file.
+- **EXACT rows** (455 in AdminDashboard): the literal is one `theme-compat.css` already remaps to a
+  palette variable and the token's utility emits the SAME variable. `tests/themeMigrate.test.ts`
+  proves this against the compat file itself — it parses the selectors, takes the LAST rule for each
+  class exactly as the cascade does, and asserts `TOKEN_VAR[token] === compatVar[literal]`. That
+  test is what demoted `border-white/10` from EXACT to FIX: compat's last rule for it is a 10% mix
+  of `--text-primary`, not `--border-soft` (identical on dark, a shade apart on light).
+- **FIX rows** (675): the audit's unreadable idioms moved to the readable token on purpose —
+  `text-white/40` → `text-faint` (was 1.9–2.2:1 on every theme), `text-emerald-400` as text →
+  `text-success`, `bg-black/30` inside a card → `bg-well`, `bg-black/70` on a modal → `bg-scrim`,
+  `bg-white/5` → `bg-raised`, the neutral status dot `bg-zinc-500` → `bg-faint`, an underline
+  `decoration-white/20` → `decoration-line`. Opacity on brand text is dropped: it only lowers contrast.
+- **White on a solid brand fill stays white** — the compat exception (`.bg-indigo-600.text-white`)
+  is mirrored: `text-white` in the same quoted span as a 500–700 fill (or an 80%+ one, or a
+  gradient) becomes `text-on-accent`. **A fill chosen by a ternary INSIDE the template** (line 3240:
+  `` `text-white ${banned ? 'bg-emerald-600' : 'bg-rose-600'}` ``) is handled only when EVERY
+  branch is a fill; a mixed one is left untouched and listed as "split by hand". The first run
+  turned that line into dark-on-emerald on Light — caught by reading the diff, and it is why the
+  three-way `fillContext` exists.
+- **Arbitrary opacity is normalised first** (`bg-white/[0.02]` → `bg-white/2` → `bg-raised`),
+  because the LITERAL regex reads only the `bg-white` part and mapping that alone would have left
+  `bg-raised/[0.02]` — a 2% raised surface nobody can see.
+- **Left, and said so:** one `text-black` on an amber button (black on amber is right on every
+  theme; there is no token for it and inventing one for one usage is not worth it).
+
+**The proof in the browser.** The audit crawler (admin flag set, three themes) on the admin view,
+pre-migration build vs migrated build: **131 text nodes each; dark 0/0/0, contrast 0/0/0, light
+sev 3 / fail 2 — the same five nodes, the same ratios, and pixel-identical screenshots.** The five
+light-theme misses are outside this file (the sidebar's grey header block and the Live Monitor's
+range pills) and are the next files' problem, not this one's.
+
+**Two new tokens:** `--surface-well` / `bg-well` (per theme) and `--scrim` / `bg-scrim` (one value,
+every theme — a backdrop dims what is behind it). Added to the `@theme inline` guard's list.
+
+**Baseline:** 11,517 → 10,445 literals (172 files). Stacked on A+B in #3070; committed and pushed
+after that merges so the PR the admin was asked to merge stays what its CI ran.
+
+**Addendum (same PR, after `main` moved):** #3071 landed `ImageStudioPro.tsx` (63 literals) and six
+more in `AIImageGenerator.tsx` while A+B waited, and the ratchet caught both on the merged state — a
+file absent from the baseline is at zero, exactly as designed. The merge commit on #3070 records them
+(they predate the rule on `main`); this PR then migrates them with the same codemod: **81 → 9 and
+63 → 6**, the remainder being `text-black` on a light control, a near-black stage `bg-[#08090c]` and a
+white gradient over an image — hand decisions, listed by the tool. The image-studio render test and
+the Pro-tier tests pass on the migrated files.

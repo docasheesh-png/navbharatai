@@ -347,22 +347,22 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
 
   return (
-    <div className={`h-full flex flex-col text-white overflow-hidden ${tier === 'pro' ? 'bg-[#08090c]' : 'bg-[#0d1117]'}`}>
+    <div className={`h-full flex flex-col text-ink overflow-hidden ${tier === 'pro' ? 'bg-[#08090c]' : 'bg-surface'}`}>
       {/* Header. In Pro it collapses to a single slim bar carrying only the toggle — the studio below
           introduces itself, and a dense title block would undo the restraint the whole surface is for.
           The toggle itself is never hidden: a user must always be one press from the free tier, which
           is exactly what Pro's own error messages tell them to do. */}
-      <div className={`flex items-center gap-3 border-b border-white/5 ${
-        tier === 'pro' ? 'px-4 sm:px-6 py-2.5 bg-transparent' : 'px-6 py-4 bg-[#161b22]'
+      <div className={`flex items-center gap-3 border-b border-line ${
+        tier === 'pro' ? 'px-4 sm:px-6 py-2.5 bg-transparent' : 'px-6 py-4 bg-card'
       }`}>
         {tier === 'free' && (
           <>
             <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
-              <Wand2 className="w-5 h-5 text-violet-400" />
+              <Wand2 className="w-5 h-5 text-accent-text" />
             </div>
             <div className="min-w-0">
-              <h2 className="font-semibold text-white text-base truncate">AI Image Generator</h2>
-              <p className="text-xs text-white/40 truncate">Write a prompt to generate images — logos, banners, icons</p>
+              <h2 className="font-semibold text-ink text-base truncate">AI Image Generator</h2>
+              <p className="text-xs text-faint truncate">Write a prompt to generate images — logos, banners, icons</p>
             </div>
           </>
         )}
@@ -371,8 +371,8 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             Both states are always reachable — switching back to Free is one press, and it is the
             press the paid tier's own error messages point at when Pro cannot serve. */}
         <div className="ml-auto flex items-center gap-2 shrink-0">
-          <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-violet-300 px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
-          <div role="tablist" aria-label="Image quality tier" className="flex items-center bg-black/40 border border-white/10 rounded-full p-0.5">
+          <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
+          <div role="tablist" aria-label="Image quality tier" className="flex items-center bg-well border border-line rounded-full p-0.5">
             {(['free', 'pro'] as const).map((t) => (
               <button
                 key={t}
@@ -382,7 +382,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
                   tier === t
                     ? (t === 'pro' ? 'bg-amber-400 text-black' : 'bg-emerald-400 text-black')
-                    : 'text-white/45 hover:text-white/80'
+                    : 'text-muted hover:text-body'
                 }`}
               >
                 {t === 'pro' ? 'Pro ₹2' : 'Free'}
@@ -399,10 +399,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       ) : (
       <div className="flex flex-1 overflow-hidden">
         {/* Left Panel */}
-        <div className="w-[60%] flex flex-col gap-4 p-5 overflow-y-auto border-r border-white/5">
+        <div className="w-[60%] flex flex-col gap-4 p-5 overflow-y-auto border-r border-line">
           {/* Image Type — compulsory: exactly one is always selected (comes first, above the prompt) */}
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Image Type</label>
+            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Image Type</label>
             <div className="flex flex-wrap gap-1.5">
               {IMAGE_TYPES.map(t => (
                 <button
@@ -411,8 +411,8 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   aria-pressed={imageType === t}
                   className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                     imageType === t
-                      ? 'border-violet-500/60 bg-violet-500/20 text-violet-200 font-medium'
-                      : 'border-white/5 bg-[#161b22] text-white/50 hover:border-white/10 hover:text-white/70'
+                      ? 'border-violet-500/60 bg-violet-500/20 text-accent-text font-medium'
+                      : 'border-line bg-card text-muted hover:border-line hover:text-body'
                   }`}
                 >
                   {t}
@@ -423,9 +423,9 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
           {/* Prompt */}
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Prompt</label>
+            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Prompt</label>
             <textarea
-              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-3 text-sm text-white placeholder-white/20 resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
+              className="w-full bg-card border border-line rounded-xl p-3 text-sm text-ink placeholder-faint resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
               rows={4}
               placeholder="Add details for your Modern app logo, banner, icon... e.g. 'with blue gradient and rupee symbol'"
               value={prompt}
@@ -434,7 +434,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             <div className="flex items-center justify-end mt-2">
               <button
                 onClick={handleEnhance}
-                className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 shrink-0"
+                className="text-xs text-accent-text hover:text-accent-text flex items-center gap-1 shrink-0"
               >
                 <Sparkles className="w-3 h-3" /> Enhance
               </button>
@@ -443,7 +443,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
           {/* Style */}
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Style</label>
+            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Style</label>
             <div className="grid grid-cols-3 gap-2">
               {STYLES.map(s => (
                 <button
@@ -460,13 +460,13 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all min-w-0 ${
                     style === s.id
                       ? 'border-violet-500/60 bg-violet-500/10'
-                      : 'border-white/5 bg-[#161b22] hover:border-white/10'
+                      : 'border-line bg-card hover:border-line'
                   }`}
                 >
                   <span className="text-lg shrink-0">{s.emoji}</span>
                   <div className="min-w-0">
-                    <div className="text-xs font-medium text-white truncate">{s.label}</div>
-                    <div className="text-[10px] text-white/30 truncate" title={s.desc}>{s.desc}</div>
+                    <div className="text-xs font-medium text-ink truncate">{s.label}</div>
+                    <div className="text-[10px] text-faint truncate" title={s.desc}>{s.desc}</div>
                   </div>
                 </button>
               ))}
@@ -475,7 +475,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
           {/* Size */}
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Size / Format</label>
+            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Size / Format</label>
             <div className="grid grid-cols-4 gap-2">
               {SIZES.map(s => (
                 <button
@@ -486,14 +486,14 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   className={`flex flex-col items-center p-2.5 rounded-xl border text-center transition-all min-w-0 ${
                     size === s.id
                       ? 'border-violet-500/60 bg-violet-500/10'
-                      : 'border-white/5 bg-[#161b22] hover:border-white/10'
+                      : 'border-line bg-card hover:border-line'
                   }`}
                 >
-                  <div className={`mb-1 border border-white/20 ${
+                  <div className={`mb-1 border border-line ${
                     s.id === 'wide' ? 'w-8 h-4' : s.id === 'portrait' ? 'w-4 h-7' : 'w-5 h-5'
                   } rounded-sm`} />
-                  <div className="text-[10px] font-medium text-white truncate max-w-full">{s.label}</div>
-                  <div className="text-[9px] text-white/30 truncate max-w-full" title={s.desc}>{s.desc}</div>
+                  <div className="text-[10px] font-medium text-ink truncate max-w-full">{s.label}</div>
+                  <div className="text-[9px] text-faint truncate max-w-full" title={s.desc}>{s.desc}</div>
                 </button>
               ))}
             </div>
@@ -501,7 +501,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
           {/* Color Hints */}
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+            <label className="text-xs text-muted uppercase tracking-wider mb-2 block flex items-center gap-1.5">
               <Palette className="w-3 h-3" /> Color Hints
             </label>
             <div className="flex gap-2">
@@ -510,11 +510,11 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   key={c.color}
                   onClick={() => setPrompt(p => p + ` in ${c.label.toLowerCase()} tones`)}
                   title={`Add ${c.label}`}
-                  className="w-7 h-7 rounded-full border-2 border-white/20 hover:scale-110 transition-transform"
+                  className="w-7 h-7 rounded-full border-2 border-line hover:scale-110 transition-transform"
                   style={{ backgroundColor: c.color }}
                 />
               ))}
-              <span className="text-xs text-white/30 self-center ml-1">Click to add to prompt</span>
+              <span className="text-xs text-faint self-center ml-1">Click to add to prompt</span>
             </div>
           </div>
 
@@ -536,26 +536,26 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         <div className="flex-1 flex flex-col gap-4 p-5 overflow-y-auto">
           {/* Generated Image */}
           <div>
-            <label className="text-xs text-white/50 uppercase tracking-wider mb-2 block">Generated Image</label>
-            <div className="relative bg-[#161b22] border border-white/5 rounded-xl overflow-hidden" style={{ minHeight: '240px' }}>
+            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Generated Image</label>
+            <div className="relative bg-card border border-line rounded-xl overflow-hidden" style={{ minHeight: '240px' }}>
               {isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
                   <TirangaLoader className="w-12 h-12" />
-                  <p className="text-xs text-white/40">Generating AI image...</p>
-                  <p className="text-[10px] text-white/20">Size: {selectedSize.w}×{selectedSize.h}</p>
+                  <p className="text-xs text-faint">Generating AI image...</p>
+                  <p className="text-[10px] text-faint">Size: {selectedSize.w}×{selectedSize.h}</p>
                 </div>
               )}
               {!isLoading && imageError && (
                 <div className="flex flex-col items-center justify-center h-60 gap-2 px-4 text-center">
-                  <ImageIcon className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-red-400">{errorMsg || 'Image could not be generated. Retry or change the prompt.'}</p>
-                  <button onClick={handleGenerate} className="text-xs text-violet-400 hover:underline">Retry</button>
+                  <ImageIcon className="w-10 h-10 text-faint" />
+                  <p className="text-xs text-danger">{errorMsg || 'Image could not be generated. Retry or change the prompt.'}</p>
+                  <button onClick={handleGenerate} className="text-xs text-accent-text hover:underline">Retry</button>
                 </div>
               )}
               {!isLoading && !imageError && !generatedUrl && (
                 <div className="flex flex-col items-center justify-center h-60 gap-2">
-                  <Wand2 className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-white/30">Pick a type, add details, then press Generate</p>
+                  <Wand2 className="w-10 h-10 text-faint" />
+                  <p className="text-xs text-faint">Pick a type, add details, then press Generate</p>
                 </div>
               )}
               {!isLoading && !imageError && generatedUrl && (
@@ -569,17 +569,17 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   <div className="absolute bottom-2 right-2 flex gap-1.5">
                     <button
                       onClick={handleCopyImage}
-                      className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"
+                      className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
                       title="Copy image"
                     >
-                      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-white/70" />}
+                      {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5 text-body" />}
                     </button>
                     <button
                       onClick={handleDownload}
-                      className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"
+                      className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
                       title="Download image"
                     >
-                      <Download className="w-3.5 h-3.5 text-white/70" />
+                      <Download className="w-3.5 h-3.5 text-body" />
                     </button>
                   </div>
                 </>
@@ -587,7 +587,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             </div>
             {/* Honest fallback note (e.g. device can't copy the raw image, or save needs a long-press). */}
             {actionNote && (
-              <p className="mt-2 text-[11px] text-amber-300/80 leading-relaxed">{actionNote}</p>
+              <p className="mt-2 text-[11px] text-warn leading-relaxed">{actionNote}</p>
             )}
             {/* Art-direction notes from the server: a style chip that was overruled by the user's own
                 wording, or the warning that no image engine spells reliably. These are shown BESIDE
@@ -596,7 +596,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             {craftNotes.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {craftNotes.map((n, i) => (
-                  <li key={i} className="text-[11px] text-sky-300/80 leading-relaxed flex gap-1.5">
+                  <li key={i} className="text-[11px] text-info leading-relaxed flex gap-1.5">
                     <span aria-hidden="true">•</span><span>{n}</span>
                   </li>
                 ))}
@@ -608,10 +608,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           {history.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-white/50 uppercase tracking-wider flex items-center gap-1.5">
+                <label className="text-xs text-muted uppercase tracking-wider flex items-center gap-1.5">
                   <Clock className="w-3 h-3" /> Recent ({history.length})
                 </label>
-                <button onClick={handleClearHistory} className="text-[10px] text-white/30 hover:text-red-400 flex items-center gap-1">
+                <button onClick={handleClearHistory} className="text-[10px] text-faint hover:text-danger flex items-center gap-1">
                   <Trash2 className="w-3 h-3" /> Clear
                 </button>
               </div>
@@ -620,12 +620,12 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   <button
                     key={item.id}
                     onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setImageType(item.type || IMAGE_TYPES[0]); setStyle(item.style); setSize(item.size); }}
-                    className="group relative rounded-lg overflow-hidden border border-white/5 hover:border-violet-500/40 transition-all aspect-square bg-[#161b22]"
+                    className="group relative rounded-lg overflow-hidden border border-line hover:border-violet-500/40 transition-all aspect-square bg-card"
                   >
                     <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
-                      <p className="text-[8px] text-white text-center line-clamp-2">{item.prompt}</p>
-                      <p className="text-[7px] text-white/50">{relativeTime(item.timestamp)}</p>
+                    <div className="absolute inset-0 bg-scrim opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
+                      <p className="text-[8px] text-ink text-center line-clamp-2">{item.prompt}</p>
+                      <p className="text-[7px] text-muted">{relativeTime(item.timestamp)}</p>
                     </div>
                   </button>
                 ))}
@@ -636,10 +636,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
           {/* Tips */}
           <div className="bg-violet-500/5 border border-violet-500/10 rounded-xl p-3">
-            <p className="text-xs text-violet-300 font-medium mb-1.5 flex items-center gap-1.5">
+            <p className="text-xs text-accent-text font-medium mb-1.5 flex items-center gap-1.5">
               <Star className="w-3 h-3" /> Pro Tips
             </p>
-            <ul className="text-[10px] text-white/40 space-y-1">
+            <ul className="text-[10px] text-faint space-y-1">
               <li>• Specific prompts = better results ("blue gradient tech logo" not just "logo")</li>
               <li>• Style + Color hints add extra quality</li>
               <li>• "Enhance" button adds style-specific keywords automatically</li>

@@ -67600,6 +67600,99 @@ curl count as proof, and making the gate fill unconditional — each turns the s
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+## 2026-09-18 — AUTOPSY `e9b25b08`: a build ORDER was built as an EDIT of our own scaffold, and it blocked the admin's first Project-Mode test
+
+**The build:** free/Weak, `"Build a search engines like google"`, 90 seconds, **stopped by the user**,
+₹0 (correctly). Delivered by `kimi-k2.7-code` after the planned `glm-4.7-flashx` lead rung was benched.
+
+### The five buckets (honest counts)
+
+- ✅ **Self-healed: 0.**
+- 🔀 **Worked around: 1** — GLM FlashX *"answering far below a usable rate after 31s — abandoned"*,
+  benched; KIMI made the build's only model call.
+- ⏭️ **Skipped: 2** — Software Project Mode created no plan (*"this turn is not a fresh build"*);
+  typecheck / page-render / journey all skipped with no preview.
+- ❌ **Still broken: 4** — design consistency 62/100 (grade C, 16 colours); accessibility 84/100 (two
+  buttons with no accessible name); release gate RED; **the ₹0 reason was false** (below).
+- 🥵 **Struggle: 5** — 6 s setup · **31 s inside a dead GLM call (34% of the build)** · 47 s first
+  model call · **four `read_file` calls on one scaffold file at 9–15 s each** · and the user pressing
+  Stop at 69 seconds having been shown nothing built. Sandbox: 3.0 min up, **2.7 min (89%) idle**.
+
+### 🔴 The chain, every link measured on `main` rather than assumed
+
+| | |
+|---|---|
+| 1 | `classifyIntentWithConfidence("Build a search engines like google")` → **`new_build`, HIGH** |
+| 2 | HIGH confidence ⇒ the intention reader is **deliberately never consulted** |
+| 3 | `isExplicitCompleteBuild(...)` → **false** (only a prompt carrying the literal word "complete"/"full" passes) |
+| 4 | so the route's deterministic net forced `new_build` → `edit_existing` |
+| 5 | the workspace held **the platform's own golden scaffold**, and `projectExists = fileCount > 0` cannot tell that from the user's app |
+| 6 | user told *"✏️ Editing your existing app (4 source files)"* about an app they never wrote |
+| 7 | `PROJECT_MODE: "this turn is not a fresh build, so no plan was created"` — **the admin's own first test of the flag they had switched on that morning** |
+
+Measured, same run:
+
+```
+   edit      | Build a search engine like google
+   edit      | build a todo website
+   edit      | ek dukaan ka billing app banao
+   edit      | make a game like ludo
+FRESH-BUILD  | Create a complete Hospital OPD Management System
+```
+
+🔴 **THE 2026-07-07 REPORT NAMED THIS CAUSE AND IT WAS TREATED IN VOCABULARY.** Its own words, still
+in `IntentClassifier.ts`: *"a handful of scaffold/test files had been restored from history
+(projectExists=true)"*. The remedy chosen then was `isExplicitCompleteBuild`, a PROMPT guard — so the
+cause survived, and two months later a prompt one word outside that guard hit it again.
+
+### The fixes (all five reversion-proven)
+
+**1 · The net asks about the USER's app, not about files on disk.** `userProjectFiles.ts` —
+`SCAFFOLD_PATHS` is **derived** from `goldenBaseFiles`, never re-listed, so adding a scaffold file
+updates it automatically. A workspace holding only our starter files holds no app of the user's.
+🔒 It cannot endanger a real app: any app a user has built carries files the scaffold does not, so the
+net still fires. 🔒 **UNKNOWN MEANS YES** — an unreadable listing answers `true`, today's behaviour
+exactly, and the only direction in which this could reach a real app.
+⚠️ Stated plainly: `src/App.tsx` IS a scaffold path, so a one-file app reads as "no app of your own
+yet" and an explicit build order there starts a fresh build. That is what the order asked for.
+
+**2 · A safety net must not overrule the signal it stands in for.** `SmartIntent.readerAnswered` is
+true only when the LLM reader itself answered; the net skips a `new_build` it decided. The net's own
+comment names its population — *"even if the LLM is down/slow"* — and every one of those paths
+(high-confidence keyword, timeout, failure, "unclear") still returns `false` and is byte-identical.
+⚠️ **This alone does NOT fix the reported build, and that was measured rather than assumed** — a plain
+build order is HIGH confidence, so the reader never sees one. My first version was exactly that guard;
+my own test caught it. The two guards answer different halves and only together close the class.
+
+**3 · The downgrade is no longer silent.** `BUILD_ORDER_READ_AS_EDIT` (info) names the file count, how
+many are the user's own, and whether the reader ran. Registered in `PROCESS_ONLY_CODES` and
+`NEVER_SUGGEST` — how a turn was ROUTED is a fact about our engine, never a finding about their app.
+That silence is why this class survived from July to today: the report said only *"not a fresh build"*,
+with nothing anywhere saying why it was not one.
+
+**4 · A build the user stopped is not an empty build.** `zeroBillReasonFor` — three states where the
+route had a two-branch ternary, so a stop was recorded as *"empty build (0 files produced)"* under a
+comment reading *"the build failed"*. Both false. Third instance of the `JOURNEY_PASSED` /
+`PAGE_RENDER_FAILED` class. **The bill is unchanged (₹0 in every branch); only the sentence stops lying.**
+
+**Test:** `tests/aBuildOrderIsNotAnEdit.test.ts` — 25 cases, **proven by reversion five ways**
+(scaffold not excluded → 3 fail · unknown-means-empty → 1 · `readerAnswered` always false → 1 · the
+code dropped from `PROCESS_ONLY` → 1 · the stopped branch removed → 1).
+
+### Still open, recorded rather than guessed (rule 6)
+
+1. **`glm-4.7-flashx` has now failed to lead TWO consecutive reports** — `2ec15a71` (abandoned at 18 s)
+   and this one (31 s). `CLAUDE.md`'s own 2026-09-17 entry calls its coding quality unmeasured and says
+   to watch it. The ladder is admin-mandated, so this is a decision, not a fix: on a third report the
+   recommendation is to drop FlashX and let KIMI lead Weak/Normal.
+2. **`read_file` took 9–15 seconds per call**, four times on one file — roughly half of a 90-second
+   build. Cause not established from this report.
+3. **`framework: python-fastapi`** was recorded for an app whose only service is *"frontend on port
+   5173"* and whose file is `index.html`. A misdetection with real consequences (scaffold, run command);
+   not investigated here.
+4. **"A search engine like Google" is something this platform cannot build** — it needs a crawler and an
+   index, not a web app — and the engine said nothing. Second report supporting an honest
+   capability gate (the VPN-app build spent 18 minutes on the same class).
 ---
 
 ## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)

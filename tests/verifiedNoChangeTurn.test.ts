@@ -138,7 +138,15 @@ describe('the wiring — the report\'s three false sentences cannot be produced 
   });
 
   it('and the admin ledger stops calling a successful turn an empty build', () => {
-    expect(src).toContain("'verified-no-change turn (nothing needed changing) — not charged'");
+    // ⚠️ RE-ANCHORED 2026-09-18 (autopsy e9b25b08). The sentence moved into `zeroBillReason.ts`,
+    // because a build the USER STOPPED was a THIRD state this route's two-branch ternary could not
+    // hold and was therefore recorded as an "empty build". The guard is unchanged in substance: the
+    // route must still ask the question, and the module must still distinguish a successful turn from
+    // an empty one. Both halves are asserted, so neither can be dropped silently.
+    expect(src).toContain('zeroBillReasonFor({');
+    expect(src).toContain('ok: result.ok,');
+    const owner = readFileSync(join(process.cwd(), 'src/server/AgentV3/zeroBillReason.ts'), 'utf8');
+    expect(owner).toContain("'verified-no-change turn (nothing needed changing) — not charged'");
   });
 
   it('the outcome is recorded, so the admin can count how often this turn shape happens', () => {

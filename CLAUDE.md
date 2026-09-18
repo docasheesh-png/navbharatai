@@ -2676,6 +2676,32 @@ the USER's own app, build-prompt content, input parsing — each carry the reaso
 strings. **Comments are deliberately NOT swept**: the Hindi in them is the admin's own verbatim words
 kept as evidence, and destroying that trail to satisfy a lint would cost more than it buys.
 
+## 🎨 COLOUR COMES FROM TOKENS, NEVER FROM A LITERAL (admin-mandated 2026-09-18: "pura theme system badlo")
+
+The audit that day (72 screens × 5 themes, 420 screenshots, every text node measured) found 236 invisible
+and 1,557 near-invisible text nodes, and ONE cause: the UI was written in hardcoded GitHub-dark classes
+(`text-white` ×1,852, `bg-[#0d1117]`, `text-[#8b949e]` … 14,620 usages) and `theme-compat.css` re-mapped an
+allowlist of them. That allowlist was patched three times for "a category I missed" and the audit found
+the next 1,347. **An allowlist can never be complete against an open-ended set of class names — so the rule
+is now enforced at the source, by CI.**
+
+- **Colour is named by ROLE, through the tokens in `index.css` `@theme inline`:** `bg-surface / bg-card /
+  bg-raised`, `text-ink / text-body / text-muted / text-faint`, `border-line`, `text-accent-text`,
+  `text-success / text-warn / text-danger / text-info`, `text-on-accent` (white on a solid accent).
+  `text-white`, `text-gray-400`, `bg-[#161b22]`, `text-indigo-300`, `style={{ color: '#…' }}` are all
+  FORBIDDEN in client code. Solid brand fills (`bg-indigo-600`) are tolerated for now — they are the
+  same in every theme — but prefer `bg-accent`.
+- **🔒 `tests/themeTokensOnly.test.ts` is the ratchet.** `tests/fixtures/themeColourBaseline.json` records
+  today's literal count PER FILE; CI fails if any file goes ABOVE its number (a new literal) or BELOW it
+  without the baseline being regenerated (`node scripts/themeColourBaseline.mjs --write`, commit the
+  smaller file). A file not in the baseline has a baseline of ZERO. The number only goes down.
+- **A faded label is `text-muted`, not `text-ink/40`.** The old `text-white/20`–`/40` idiom is 1.9–2.2:1 on
+  every theme; the same test holds every theme's palette at ≥ 4.5:1, and a 40% ink does not clear it.
+- **Every theme's palette must pass WCAG AA on all 10 text × 3 surface pairs** — the test reads the blocks
+  out of `index.css`. Do not add a theme, or "tune" one, that fails it (Comfort's Solarized values did).
+- **Do NOT add selectors to `theme-compat.css`.** It is the thing being retired: it shrinks as files
+  migrate, and is deleted when the baseline reaches zero.
+
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 
 - **AI Model (multi-provider fallback — Phase 2, admin-approved):**

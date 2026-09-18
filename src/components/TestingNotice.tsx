@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Circle, FlaskConical, MessageSquare, X } from 'lucide-react';
-import { ThemeMode, getThemeClasses } from '../lib/theme';
+import type { ThemeMode } from '../lib/theme';
 import { cn } from '../lib/utils';
 import { TESTING_NOTICE_COPY, TESTING_NOTICE_MS, markTestingNoticeShown } from '../lib/testingNotice';
 import { checklistHeadline, type ChecklistRow } from '../lib/referralChecklist';
@@ -43,8 +43,12 @@ export const TestingNotice: React.FC<{
   rewardRows?: ChecklistRow[];
   /** Opens the screen where the pending steps can actually be completed. */
   onOpenRewards?: () => void;
-}> = ({ theme, onReport, onDone, rewardRows = [], onOpenRewards }) => {
-  const colors = getThemeClasses(theme);
+}> = ({ onReport, onDone, rewardRows = [], onOpenRewards }) => {
+  // THE FIRST FILE ON TOKENS (admin 2026-09-18, "pura theme system badlo"). `getThemeClasses(theme)`
+  // used to hand this card one hardcoded palette per theme; the `theme` prop is kept in the contract
+  // so App.tsx is untouched, but the colours now come from the semantic tokens in index.css —
+  // `bg-card`, `border-line`, `text-ink` — which every theme defines. tests/themeTokensOnly.test.ts
+  // holds this file at ZERO literal colours; it is the proof the token pipeline works end to end.
   const [leaving, setLeaving] = useState(false);
   const [paused, setPaused] = useState(false);
   // One timer, cleared on every path out — a stray timer would fire onDone after the parent unmounted.
@@ -104,12 +108,12 @@ export const TestingNotice: React.FC<{
         // Below the top bar on every screen, and clear of the notch on a phone.
         'top-[calc(env(safe-area-inset-top,0px)+4.5rem)]',
         'rounded-2xl border p-3.5 shadow-2xl backdrop-blur',
-        colors.card, colors.border, colors.text,
+        'bg-card border-line text-ink',
         leaving ? 'nb-testing-notice-out' : 'nb-testing-notice-in',
       )}
     >
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 shrink-0 rounded-lg bg-amber-500/15 p-1.5 text-amber-500">
+        <span className="mt-0.5 shrink-0 rounded-lg bg-amber-500/15 p-1.5 text-warn">
           <FlaskConical size={16} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
@@ -117,12 +121,12 @@ export const TestingNotice: React.FC<{
           <p className="mt-0.5 text-xs leading-snug opacity-80">{TESTING_NOTICE_COPY.body}</p>
           {waitForUser && (
             <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-2.5">
-              <p className="text-[11px] font-bold text-emerald-500">{checklistHeadline(rewardRows)}</p>
+              <p className="text-[11px] font-bold text-success">{checklistHeadline(rewardRows)}</p>
               <ul className="mt-1.5 space-y-1">
                 {rewardRows.map((row) => (
                   <li key={row.step} className="flex items-start gap-1.5 text-[11px] leading-snug">
                     {row.claimed
-                      ? <CheckCircle2 size={13} className="mt-px shrink-0 text-emerald-500" aria-hidden="true" />
+                      ? <CheckCircle2 size={13} className="mt-px shrink-0 text-success" aria-hidden="true" />
                       : <Circle size={13} className="mt-px shrink-0 opacity-40" aria-hidden="true" />}
                     <span className={row.claimed ? 'opacity-60' : 'font-semibold'}>{row.label}</span>
                   </li>
@@ -131,7 +135,7 @@ export const TestingNotice: React.FC<{
               {onOpenRewards && (
                 <button
                   onClick={() => { close(); onOpenRewards(); }}
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-emerald-500"
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-on-accent hover:bg-emerald-500"
                 >
                   Claim now
                 </button>
@@ -140,7 +144,7 @@ export const TestingNotice: React.FC<{
           )}
           <button
             onClick={() => { close(); onReport(); }}
-            className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white hover:bg-indigo-500"
+            className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-on-accent hover:bg-indigo-500"
           >
             <MessageSquare size={13} aria-hidden="true" /> {TESTING_NOTICE_COPY.action}
           </button>

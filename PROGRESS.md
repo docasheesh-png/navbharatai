@@ -65776,3 +65776,55 @@ parser, so no early-close happens) and it is not what caused the crop — record
 
 Gate on the final merged state: typecheck · noUnusedImports · typecheck:server · vitest
 **25554 passed | 1 skipped** · build · test:bundle · boot:check · deps:server-gate — all green.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR A of N: tokens, the ratchet, and the palette fixed (admin: "pura theme system badlo, plan ke hisab se shuru karo")
+
+**The audit that ordered it** (same day, published as an artifact for the admin): 72 screens × 5 themes
+= 420 screenshots on desktop and mobile, every visible text node's computed colour measured against
+its real composited background. **236 invisible (< 1.5:1), 1,557 near-invisible (< 3:1), 2,089 below
+AA.** Comfort failed on 84/84 screens; Light had 80 invisible nodes; Dark/Dim/Contrast each had
+hundreds of near-invisible ones. Plus a code census: **14,620 hardcoded colour-class usages** (1,335
+distinct) across 474 client files, and 387 inline `style={{ color }}` values.
+
+**The root cause, which is why this is a replacement and not a fourth patch.** There was no theme
+system. The UI was written in GitHub-dark literals and `theme-compat.css` re-mapped an ALLOWLIST of
+them (241 selectors) to CSS variables. That file had been patched for "a category I missed" on
+2026-08-08 (`bg-zinc-950`), 2026-08-16 (`text-white/N` ×566 and every `hover:` ×704) and 2026-09-13
+(brand text ×1,459, then the 100/200 shades ×250) — and the audit found the next 1,347. An allowlist
+cannot be complete against an open-ended set of class names. Three theme systems coexisted
+(`getThemeClasses()` in 7 files, the compat allowlist, and 354 correct `var(--…)` usages) and none of
+them knew about the others. The "dark theme mein hazaron jagah kuch nahi dikhta" the admin sees is not
+even a remap gap: it is the app's own idiom of writing every small label as `text-white/20`–`/40`,
+which is 1.9–2.2:1 on EVERY theme by construction.
+
+**PR A — what shipped:**
+- **`@theme inline` in `index.css`**: `bg-surface / bg-card / bg-raised`, `text-ink / text-body /
+  text-muted / text-faint`, `border-line`, `text-accent / text-accent-text`, `text-success / text-warn
+  / text-danger / text-info`, `text-on-accent`. Each utility emits the theme VARIABLE (`inline`), so
+  the per-`html[data-theme]` blocks are what a class resolves to at runtime — a new theme is a block of
+  variables and nothing else. Verified in the built CSS, not assumed.
+- **`color-scheme` per theme** — native selects, date pickers and scrollbars followed the OS, not the
+  app, on every theme. One line each.
+- **Palette fixed where the palette itself was the bug**: Dark `--text-faint` #484f58 → #838d97
+  (2.09 → 5.13 on a card; 330 usages of placeholder/faint text that nobody could read on the DEFAULT
+  theme), Dim faint and accent, Light faint on raised, and Comfort's whole Solarized text set (body
+  4.39 → 6.57, muted 3.64 → 5.08, faint 2.18 → 4.5+, accent 3.0 → 5.9). `tests/themeTokensOnly.test.ts`
+  now asserts every theme's 10 text × 3 surface pairs ≥ 4.5:1, reading the palette OUT of index.css.
+- **🔒 THE RATCHET — `scripts/themeColourBaseline.mjs` + `tests/fixtures/themeColourBaseline.json`.**
+  Every client file's count of literal colours (white/black, the grey families, GitHub hexes, brand
+  TEXT shades, arbitrary `[#hex]`, inline style colours; solid brand FILLS deliberately excluded — they
+  are the same in every theme) is recorded per file. The test fails ABOVE the baseline (a new literal)
+  and BELOW it (an improvement not locked in — run `--write`). A file absent from the baseline has a
+  baseline of zero, so **every new file is token-only from its first line.** 11,487 literals in 173
+  files today; the number can only go down; at zero, `theme-compat.css` is deleted.
+- **First file migrated as the pipeline's proof**: `TestingNotice.tsx` (the "in active testing" card
+  on every Home) — `getThemeClasses` gone, `bg-card border-line text-ink`, held at zero by the test.
+
+**Reversion-proven three ways**: a `text-white` added to the migrated file fails the ratchet; Comfort's
+old body colour restored fails the AA lock; `inline` removed from `@theme` fails the pipeline guard.
+
+**Next (the plan, in order):** PR B — five themes to three (Light / Dark / High-contrast; Dim is Dark
+in blue and Comfort is broken by design) with stored-value migration and `getThemeClasses` removed
+from its seven callers. PR C onward — migrate files to tokens, heaviest first (AdminDashboard 1,073,
+AgentV3Panel 598, GitPanel 485, ComponentLibrary 442, SettingsPanel 316 …), each PR lowering the
+baseline. Last — the audit crawl itself in CI so an invisible text node fails the PR that adds it.

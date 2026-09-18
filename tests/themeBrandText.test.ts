@@ -42,7 +42,11 @@ describe('brand text is readable on every theme, not just the dark one', () => {
   // lack it inherit nothing and the text falls back to the browser default.
   it('every variable is defined for all five themes', () => {
     for (const v of VARS) {
-      const count = INDEX.split(v).length - 1;
+      // Count DEFINITIONS (`--brand-x: #hex`), not mentions. This used to split on the bare name,
+      // which also counted a REFERENCE — and on 2026-09-18 the semantic token block in index.css
+      // (`--color-success: var(--brand-success-text)`) added exactly one per variable, failing a
+      // guard whose claim was untouched. A definition is the name followed by a literal colour.
+      const count = (INDEX.match(new RegExp(`${v}:\\s*#[0-9a-fA-F]{6}`, 'g')) ?? []).length;
       expect(count, `${v} is defined ${count} times, expected 5 (one per theme)`).toBe(5);
     }
   });

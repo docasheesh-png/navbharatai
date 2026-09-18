@@ -6,6 +6,43 @@
 @import "./styles/theme-compat.css";
 @import "./styles/font-scale-compat.css";
 
+/* ── THE SEMANTIC COLOUR TOKENS — the ONLY way a component may name a colour (admin 2026-09-18) ──
+   Audit "pura theme system badlo": the UI was written in hardcoded GitHub-dark literals (14,620
+   usages) and theme-compat.css re-mapped an allowlist of them — patched three times and still 1,347
+   usages short, with 236 invisible text nodes across 420 page×theme screenshots. An allowlist can
+   never be complete against an open-ended set of class names. So colour now comes from HERE.
+
+   `@theme inline` turns each `--color-*` into Tailwind utilities that emit the var itself —
+   `bg-surface` → `background-color: var(--surface-base)` — so the per-theme blocks below are what a
+   component's class resolves to at runtime, and a new theme is a new block of variables, nothing else.
+   Alpha modifiers work (`text-ink/40` → color-mix of the theme's own ink), which is the sanctioned
+   replacement for the app's `text-white/40` habit — but see tests/themeTokensOnly.test.ts: a faded
+   label must still clear 4.5:1, so `text-muted` is the answer far more often than `text-ink/40`.
+
+   The names are ROLES, not colours: `ink` is the primary text whatever its hue, `line` the hairline,
+   `on-accent` the text that sits on a solid accent. `scripts/themeColourBaseline.mjs` is the ratchet
+   that keeps every literal out of new code and drives the old ones to zero, file by file. */
+@theme inline {
+  --color-surface: var(--surface-base);
+  --color-card: var(--surface-card);
+  --color-raised: var(--surface-raised);
+  --color-ink: var(--text-primary);
+  --color-body: var(--text-body);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-line: var(--border-soft);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--brand-accent-strong);
+  --color-success: var(--brand-success-text);
+  --color-warn: var(--brand-warn-text);
+  --color-danger: var(--brand-danger-text);
+  --color-info: var(--brand-info-text);
+  /* Text on a SOLID accent/success/danger fill. Every theme's accents are saturated mid-tones, so
+     white is the readable choice on all of them — a token rather than `text-white` so the ratchet
+     can tell "white by design" from "white because the app was dark". */
+  --color-on-accent: #ffffff;
+}
+
 /* Disable the browser's left/right swipe back/forward navigation — it was
    triggering accidental history navigation. Custom swipe (open/close the
    sidebar) is handled in JS. */
@@ -106,8 +143,13 @@ button, [role='button'], nav, header, footer {
     --text-primary: #ffffff;   /* headings / strong text    */
     --text-body: #c9d1d9;      /* body text                 */
     --text-muted: #8b949e;     /* secondary text            */
-    --text-faint: #484f58;     /* placeholder / faint       */
+    /* AUDIT 2026-09-18: #484f58 was 2.09:1 on a card — 330 usages of placeholder/faint text that
+       nobody could read on the DEFAULT theme. #838d97 clears 4.5 on base, card and raised while
+       staying visibly lighter than --text-muted, so the hierarchy survives. */
+    --text-faint: #838d97;     /* placeholder / faint       */
     --border-soft: rgba(255, 255, 255, 0.1);
+    /* Native controls (select, date, scrollbar) follow the theme instead of the OS default. */
+    color-scheme: dark;
     --accent: #818cf8;
     /* BRAND TEXT ON A SURFACE (added 2026-09-13). Tailwind's light brand shades are foreground
        colours ~1,459 places in this app, and the compat layer deliberately leaves brand colours
@@ -130,8 +172,9 @@ button, [role='button'], nav, header, footer {
     --text-primary: #0f172a;
     --text-body: #1e293b;
     --text-muted: #475569;
-    --text-faint: #64748b;
+    --text-faint: #5b6b82;     /* audit 2026-09-18: #64748b was 4.23 on --surface-raised */
     --border-soft: #e2e8f0;
+    color-scheme: light;
     --accent: #4f46e5;
     /* LIGHT — the theme the admin reported unreadable on 2026-09-13. Each is the 700 shade, which
        clears WCAG AA against both --surface-card (#ffffff) and --surface-raised (#eef2f7). */
@@ -151,9 +194,10 @@ button, [role='button'], nav, header, footer {
     --text-primary: #f7f9f9;
     --text-body: #e1e8ed;
     --text-muted: #8899a6;
-    --text-faint: #5b7083;
+    --text-faint: #8d9cad;     /* audit 2026-09-18: #5b7083 was 2.95 on a card */
     --border-soft: #38444d;
-    --accent: #1d9bf0;
+    color-scheme: dark;
+    --accent: #3aa9f4;  /* audit 2026-09-18: #1d9bf0 was 4.497 on --surface-raised */
     /* DIM is a dark theme, so the original light Tailwind shades already read correctly. */
     --brand-accent-text: #a5b4fc;
     --brand-accent-strong: #818cf8;
@@ -170,11 +214,16 @@ button, [role='button'], nav, header, footer {
     --surface-card: #eee8d5;
     --surface-raised: #e4ddc7;
     --text-primary: #073642;
-    --text-body: #586e75;
-    --text-muted: #657b83;
-    --text-faint: #93a1a1;
+    /* AUDIT 2026-09-18: the Solarized text values (#586e75 / #657b83 / #93a1a1 / #268bd2) put 11 of
+       this theme's 30 text×surface pairs below AA — body text 4.39 on a card, faint 2.18 — and every
+       one of its 84 audited screens failed. Low contrast is Solarized's signature, not comfort. These
+       keep the cream surfaces and give the text the depth the cream needs. */
+    --text-body: #41535a;
+    --text-muted: #4f646c;
+    --text-faint: #4f6060;
     --border-soft: #dfd9c6;
-    --accent: #268bd2;
+    color-scheme: light;
+    --accent: #175b8b;
     /* COMFORT is a light cream, so it needs the dark shades for the same reason LIGHT does. */
     --brand-accent-text: #4338ca;
     --brand-accent-strong: #4338ca;
@@ -204,6 +253,7 @@ button, [role='button'], nav, header, footer {
     --text-muted: #ffffff;
     --text-faint: #ffff00;
     --border-soft: #ffff00;
+    color-scheme: dark;
     --accent: #ffff00;
   }
 

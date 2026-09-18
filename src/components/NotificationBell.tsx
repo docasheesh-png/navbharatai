@@ -170,11 +170,11 @@ export function NotificationBell({ user, onOpenReports }: {
         onClick={toggle}
         aria-label="Notifications"
         title="Messages from NavBharatAI"
-        className="relative p-2 rounded-xl text-[#8b949e] hover:text-white hover:bg-white/5 transition-colors"
+        className="relative p-2 rounded-xl text-muted hover:text-ink hover:bg-raised transition-colors"
       >
         <Bell className="w-5 h-5" />
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-on-accent text-[9px] font-black flex items-center justify-center">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
@@ -194,10 +194,10 @@ export function NotificationBell({ user, onOpenReports }: {
             `100vw - 1.5rem` guarantees equal margins on both sides — the panel can never overflow
             either edge, wherever the bell sits in the header.
           */}
-          <div className="fixed right-3 top-12 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl">
-            <div className="sticky top-0 bg-[#161b22] border-b border-white/10">
+          <div className="fixed right-3 top-12 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-2xl border border-line bg-card shadow-2xl">
+            <div className="sticky top-0 bg-card border-b border-line">
               <div className="flex items-center justify-between gap-2 px-4 py-3">
-                <span className="text-sm font-black text-white truncate">
+                <span className="text-sm font-black text-ink truncate">
                   {selecting ? `${selected.size} selected` : 'Notifications'}
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -208,7 +208,7 @@ export function NotificationBell({ user, onOpenReports }: {
                   {!selecting && items.length > 0 && (
                     <button
                       onClick={() => setSelecting(true)}
-                      className="px-2.5 py-1 rounded-lg border border-white/10 text-[11px] font-bold text-[#8b949e] hover:text-white hover:bg-white/5 transition-colors"
+                      className="px-2.5 py-1 rounded-lg border border-line text-[11px] font-bold text-muted hover:text-ink hover:bg-raised transition-colors"
                     >
                       Select
                     </button>
@@ -219,7 +219,7 @@ export function NotificationBell({ user, onOpenReports }: {
                         <button
                           onClick={() => setConfirming(true)}
                           disabled={busy}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/15 border border-red-500/30 text-[11px] font-bold text-red-300 hover:bg-red-500/25 disabled:opacity-50 transition-colors"
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/15 border border-red-500/30 text-[11px] font-bold text-danger hover:bg-red-500/25 disabled:opacity-50 transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           Delete ({selected.size})
@@ -227,7 +227,7 @@ export function NotificationBell({ user, onOpenReports }: {
                       )}
                       <button
                         onClick={cancelSelection}
-                        className="px-2.5 py-1 rounded-lg border border-white/10 text-[11px] font-bold text-[#8b949e] hover:text-white hover:bg-white/5 transition-colors"
+                        className="px-2.5 py-1 rounded-lg border border-line text-[11px] font-bold text-muted hover:text-ink hover:bg-raised transition-colors"
                       >
                         Cancel
                       </button>
@@ -237,7 +237,7 @@ export function NotificationBell({ user, onOpenReports }: {
                     <button
                       onClick={() => setOpen(false)}
                       aria-label="Close notifications"
-                      className="p-1 text-[#8b949e] hover:text-white rounded-lg hover:bg-white/5"
+                      className="p-1 text-muted hover:text-ink rounded-lg hover:bg-raised"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -250,10 +250,10 @@ export function NotificationBell({ user, onOpenReports }: {
                 <div className="px-4 pb-2.5">
                   <button
                     onClick={() => setSelected(allSelected ? new Set() : new Set(items.map((n) => n.id)))}
-                    className="flex items-center gap-1.5 text-[11px] font-bold text-[#8b949e] hover:text-white transition-colors"
+                    className="flex items-center gap-1.5 text-[11px] font-bold text-muted hover:text-ink transition-colors"
                   >
                     {allSelected
-                      ? <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                      ? <CheckSquare className="w-3.5 h-3.5 text-success" />
                       : <Square className="w-3.5 h-3.5" />}
                     {allSelected ? 'Clear selection' : 'Select all'}
                   </button>
@@ -269,19 +269,19 @@ export function NotificationBell({ user, onOpenReports }: {
             {confirming && (
               <div className="px-4 py-3 border-b border-red-500/20 bg-red-500/5 space-y-2.5">
                 <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <AlertTriangle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
                   <div className="min-w-0">
-                    <p className="text-[12px] font-bold text-white">
+                    <p className="text-[12px] font-bold text-ink">
                       Delete {selected.size} message{selected.size === 1 ? '' : 's'}?
                     </p>
-                    <p className="text-[11px] text-[#8b949e] leading-relaxed mt-1">
+                    <p className="text-[11px] text-muted leading-relaxed mt-1">
                       {selected.size === 1 ? 'It is' : 'They are'} removed from your inbox only — other
                       people keep {selected.size === 1 ? 'it' : 'them'}. This cannot be undone.
                     </p>
                   </div>
                 </div>
                 {failed && (
-                  <p className="text-[11px] text-amber-300 font-semibold">
+                  <p className="text-[11px] text-warn font-semibold">
                     Could not delete just now — nothing was removed. Please try again.
                   </p>
                 )}
@@ -289,14 +289,14 @@ export function NotificationBell({ user, onOpenReports }: {
                   <button
                     onClick={() => void confirmDelete()}
                     disabled={busy}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-50 transition-colors"
+                    className="flex-1 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-on-accent text-[11px] font-black uppercase tracking-wider disabled:opacity-50 transition-colors"
                   >
                     {busy ? 'Deleting…' : 'OK, delete'}
                   </button>
                   <button
                     onClick={() => { setConfirming(false); setFailed(false); }}
                     disabled={busy}
-                    className="flex-1 px-3 py-1.5 rounded-lg border border-white/10 text-[#c9d1d9] text-[11px] font-black uppercase tracking-wider hover:bg-white/5 disabled:opacity-50 transition-colors"
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-line text-body text-[11px] font-black uppercase tracking-wider hover:bg-raised disabled:opacity-50 transition-colors"
                   >
                     Cancel
                   </button>
@@ -305,15 +305,15 @@ export function NotificationBell({ user, onOpenReports }: {
             )}
 
             {items.length === 0 ? (
-              <div className="px-4 py-8 text-center text-[12px] text-[#8b949e]">No messages yet.</div>
+              <div className="px-4 py-8 text-center text-[12px] text-muted">No messages yet.</div>
             ) : (
-              <div className="divide-y divide-white/5">
+              <div className="divide-y divide-line">
                 {items.map((n) => {
                   const picked = selected.has(n.id);
                   const row = (
                     <>
-                      <span className="block text-[13px] text-white leading-relaxed whitespace-pre-wrap break-words">{n.message}</span>
-                      <span className="block text-[10px] text-[#8b949e] mt-1.5">{new Date(n.createdAt).toLocaleString()}</span>
+                      <span className="block text-[13px] text-ink leading-relaxed whitespace-pre-wrap break-words">{n.message}</span>
+                      <span className="block text-[10px] text-muted mt-1.5">{new Date(n.createdAt).toLocaleString()}</span>
                     </>
                   );
                   // Not selecting: a plain row. It becomes a BUTTON only when the message carries an
@@ -325,10 +325,10 @@ export function NotificationBell({ user, onOpenReports }: {
                         <button
                           key={n.id}
                           onClick={() => { setOpen(false); onOpenReports(); }}
-                          className="w-full text-left px-4 py-3 hover:bg-white/[0.04] transition-colors"
+                          className="w-full text-left px-4 py-3 hover:bg-raised transition-colors"
                         >
                           {row}
-                          <span className="block text-[10px] font-bold text-emerald-300 mt-1">Tap to open →</span>
+                          <span className="block text-[10px] font-bold text-success mt-1">Tap to open →</span>
                         </button>
                       );
                     }
@@ -337,7 +337,7 @@ export function NotificationBell({ user, onOpenReports }: {
                   return (
                     <label
                       key={n.id}
-                      className={`flex items-start gap-2.5 px-4 py-3 cursor-pointer transition-colors ${picked ? 'bg-emerald-500/5' : 'hover:bg-white/[0.02]'}`}
+                      className={`flex items-start gap-2.5 px-4 py-3 cursor-pointer transition-colors ${picked ? 'bg-emerald-500/5' : 'hover:bg-raised'}`}
                     >
                       {/* A real checkbox, so it is keyboard-reachable and announced by screen readers.
                           The whole row is the label, which makes it easy to hit on a phone. */}

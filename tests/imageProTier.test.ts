@@ -4,6 +4,7 @@ import {
   imageProMode, imageProCount, imageProQuotedInr, imageProConfigured,
   imageProAuthHeaders, buildImageProRequest, parseImageProResponse,
   imageProFailureMessage, parseDataUrl, base64Bytes, initImageTooLarge,
+  IMAGE_PRO_COST_USD_DEFAULT, imageProCostUsd, imageProMargin, imageProMarginWarning,
 } from '../src/server/lib/imageProGen';
 
 const PX = { w: 1024, h: 1024 };
@@ -189,5 +190,72 @@ describe('🔒 WHITE-LABEL LAW — no user-facing string may name the vendor or 
     // "Working result or free" is only credible if the user is TOLD, at the moment it matters.
     expect(imageProFailureMessage('failed')).toMatch(/nothing was charged/i);
     expect(imageProFailureMessage('timeout')).toMatch(/nothing was charged/i);
+  });
+});
+
+describe('💰 the real cost is ON THE CARD, and the margin cannot invert silently', () => {
+  it('the admin’s invoice number is the default', () => {
+    // $0.014/image, given by the admin 2026-09-18. A model may not be on a ladder without its price.
+    expect(imageProCostUsd({} as never)).toBe(0.014);
+    expect(IMAGE_PRO_COST_USD_DEFAULT).toBe(0.014);
+  });
+
+  it('₹2 comfortably covers it across every plausible exchange rate', () => {
+    for (const rate of [85, 87, 90, 95, 100]) {
+      const m = imageProMargin(rate, {} as never);
+      expect(m.healthy, `unhealthy at ₹${rate}/$`).toBe(true);
+      expect(m.marginInr, `no margin at ₹${rate}/$`).toBeGreaterThan(0);
+    }
+  });
+
+  it('reports the BREAK-EVEN rate, which is the number that could actually falsify it', () => {
+    // ₹2 ÷ $0.014 = ₹142.9/$ — the rupee would have to fall by two-thirds. A ratio alone flatters;
+    // a break-even point can be checked against the real world.
+    expect(imageProMargin(87, {} as never).breakEvenUsdInr).toBeCloseTo(142.857, 2);
+  });
+
+  it('the maths is right at a known rate, not just directionally right', () => {
+    const m = imageProMargin(87, {} as never);
+    expect(m.costInr).toBeCloseTo(1.218, 3);
+    expect(m.marginInr).toBeCloseTo(0.782, 3);
+    expect(m.ratio).toBeCloseTo(1.642, 2);
+  });
+
+  it('🔴 a cost that overtakes the price WARNS — it never quietly bleeds', () => {
+    // The E2B_USD_PER_HOUR shape: an env value always beats the code, so warning is the only thing
+    // the code can do. Here the provider has repriced 10x.
+    const warning = imageProMarginWarning(87, { IMAGE_PRO_COST_USD: '0.14' } as never);
+    expect(warning).toBeTruthy();
+    expect(warning).toContain('NO LONGER COVERS COST');
+    expect(warning).toContain('IMAGE_PRO_COST_USD');
+    expect(imageProMargin(87, { IMAGE_PRO_COST_USD: '0.14' } as never).healthy).toBe(false);
+  });
+
+  it('a healthy margin produces NO warning — a guard that always fires is one nobody reads', () => {
+    expect(imageProMarginWarning(87, {} as never)).toBeNull();
+  });
+
+  it('🔒 a MALFORMED cost falls back to the known price, never to zero', () => {
+    // Number('') is 0, and a zero cost reports INFINITE margin on the very panel that exists to
+    // catch a bad margin — the failure being guarded against, wearing a green tick.
+    for (const bad of ['', '   ', 'abc', '0', '-1', 'NaN']) {
+      expect(imageProCostUsd({ IMAGE_PRO_COST_USD: bad } as never), `"${bad}"`).toBe(0.014);
+    }
+    expect(imageProMargin(87, { IMAGE_PRO_COST_USD: '0' } as never).ratio).toBeCloseTo(1.642, 2);
+  });
+
+  it('🔒 a junk exchange rate cannot produce NaN money', () => {
+    for (const bad of [0, -5, NaN, Infinity] as number[]) {
+      const m = imageProMargin(bad, {} as never);
+      expect(Number.isFinite(m.costInr), `rate ${bad}`).toBe(true);
+      expect(Number.isFinite(m.marginInr), `rate ${bad}`).toBe(true);
+    }
+  });
+
+  it('🔒 the warning is ADMIN-ONLY text and must never be shown to a user', () => {
+    // It names OUR cost, which is exactly what the White-Label Law keeps off a user's screen. This
+    // pins the intent so a later change cannot casually return it in a response body.
+    const warning = imageProMarginWarning(87, { IMAGE_PRO_COST_USD: '0.14' } as never) || '';
+    expect(warning).toMatch(/^\[IMAGE PRO\]/);
   });
 });

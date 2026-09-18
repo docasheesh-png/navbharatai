@@ -48,6 +48,18 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODE_FAILED',
   // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).
   'VERDICT_HELD_BY_RUN',
+  // HOW A BUILD ENDED IS NOT A FINDING ABOUT THE APP (abortOutcome.ts, 2026-09-18). These are recorded
+  // at error severity so the report is honest that the build did not finish — but a cost ceiling, a
+  // futility breaker, a deploy drain, a reclaimed lock, a reaper sweep or the user's own Stop says
+  // nothing about the app's code, and counting one as a "build-breaking blocker" on the user's health
+  // card is the provider-error-as-app-blocker class (autopsy 4efab9d7) through a new door.
+  'OUTCOME_USER_STOPPED', 'OUTCOME_COST_CEILING', 'OUTCOME_FUTILE', 'OUTCOME_DEPLOY_DRAIN',
+  'OUTCOME_SUPERSEDED', 'OUTCOME_REAPED',
+  // …and the two the deadline finalizer already wrote, for the same reason (the siblings, rule 3): the
+  // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
+  // The release gate is RED on `buildOk:false` regardless, so this changes no verdict — only the
+  // "N build-breaking blocker(s)" count a stopped build used to print about itself.
+  'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT',
 ]);
 
 /**
@@ -2802,6 +2814,9 @@ export function stoppedByUser(issues: readonly BuildIssue[] | null | undefined):
   return issues.some((i) => {
     if (typeof i?.message !== 'string') return false;
     if (i.code === 'USER_STOPPED_BUILD') return !i.message.includes('not by the user');
+    // The outcome the abort funnel records for the user's own stop (abortOutcome.ts, 2026-09-18) — a
+    // platform-composed stop is recorded under OUTCOME_STOPPED instead, so this code IS the user.
+    if (i.code === 'OUTCOME_USER_STOPPED') return true;
     // 🔴 THE SAME FACT UNDER A SECOND CODE, AND THIS READER KNEW ONLY ONE (report cc8c9075).
     //
     // `USER_STOPPED_BUILD` is written by the /stop ROUTE — a separate request, against a different

@@ -1086,6 +1086,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         workspaceId: b.workspaceId, ok: b.ok ?? null, prompt: b.prompt, rootCause: b.rootCause,
         // The build's OWN verdict code beats our reading of its prose — see buildFailureCategory.ts.
         outcomeCode: b.outcomeCode, outcomeSeverity: b.outcomeSeverity, appSeenRunning: b.appSeenRunning,
+        userStopped: b.userStopped,
       })));
       res.json({
         ...report,

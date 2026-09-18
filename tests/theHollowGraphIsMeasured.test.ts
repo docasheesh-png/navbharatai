@@ -8,25 +8,32 @@ import {
 } from '../src/server/AgentV3/WorkspaceMemory';
 
 /**
- * 🔎 THE HOLLOW GRAPH, MEASURED BEFORE IT IS FILLED (open root cause #2, PROGRESS.md 2026-09-17).
+ * 🔎 THE HOLLOW GRAPH — MEASURED 2026-09-17, FILLED 2026-09-18 ON THE MEASUREMENT.
  *
  * A cold resume (`restoreWorkspaceMemory`) indexes every previously-known file with a PLACEHOLDER,
- * because the snapshot stores paths and not content. That puts the file into `graph.files` — and
- * `warmIndexFiles` builds its `known` set from `graph.files` and skips what is already there. So a
- * restored file keeps EMPTY facts (no imports, no exports, no components, no routes) for the whole
- * build, and `recall`, `evaluate`, the architecture analysis and the readiness score all reason
- * about a project that looks to them like a list of blank files.
+ * because the snapshot stores paths and not content. That put the file into `graph.files` — and
+ * `warmIndexFiles` built its `known` set from `graph.files` and skipped what was already there. So a
+ * restored file kept EMPTY facts (no imports, no exports, no components, no routes) for the whole
+ * build, and `recall`, `evaluate`, the contract card, the architecture invariants and grounding
+ * centrality all reasoned about a project that looked to them like a list of blank files.
  *
  * ⚠️ THE TWO COMMENTS AT THE RESTORE SITE CONTRADICTED EACH OTHER, and the FALSE one is the one a
  * reader would act on: *"warmIndexFiles will fill them later"* sat directly above *"so warmIndexFiles
- * skips already-known files."* Only the second is true.
+ * skips already-known files."* The code did the second.
  *
- * 🔴 THE FIX IS DELIBERATELY NOT SHIPPED. Filling the graph moves a real build's verdict in BOTH
- * directions — a restored import can fire `unresolvedImport`, a 25-point hard blocker ⇒ `ready:false`
- * ⇒ `ok:false` ⇒ "working app or free" ⇒ ₹0 on an app that works; while the hollow graph makes every
- * component look un-imported, which is `PENALTY.orphanComponent` against every resumed build. Which
- * dominates has never been measured. These tests pin the MEASUREMENT and pin that behaviour did not
- * change, which is what lets the decision be made on a number instead of on an argument.
+ * ✅ THE FIX SHIPPED, AND THE NUMBER IS WHY. This header used to end "🔴 THE FIX IS DELIBERATELY NOT
+ * SHIPPED … which dominates has never been measured." Report `2ec15a71` measured it on a real
+ * free-tier user's edit: **30 of 31 files stubbed**, with the contract card holding no symbols, the
+ * invariants down to "1 observed rule" and grounding at "3 files, ~211 tokens of a 4000 budget" —
+ * after which the model rewrote `App.tsx` with its own `Item` interface although `types.ts` already
+ * exported `PriceItem`, orphaning `data.ts` and creating a cycle. The build reported ok:true.
+ *
+ * The recorded worry — a filled import firing `unresolvedImport` (a 20-point blocker) ⇒ ₹0 on a
+ * working app — was wrong twice: a file left unreached by `maxFiles` STAYS in `graph.files` as a stub
+ * so imports to it still resolve (pinned below), and the readiness path that owns that penalty reads
+ * the DURABLE project content rather than this graph — in that report its tool was never invoked.
+ * The hollow graph was in fact producing the OPPOSITE false penalty, since a stub imports nothing and
+ * so makes every component look un-imported. These tests now pin the FILL, and keep the measurement.
  */
 
 describe('a restored file is tracked as a stub, and stops being one when real content arrives', () => {
@@ -65,20 +72,43 @@ describe('a restored file is tracked as a stub, and stops being one when real co
   });
 });
 
-describe('behaviour is UNCHANGED — the stub is measured, not filled', () => {
+describe('the stub is FILLED now — the measurement came in and settled it', () => {
   const read = async (p: string) =>
     p === 'src/App.tsx' ? "import Button from './Button';\nexport function App() { return null; }" : 'export const y = 2;';
 
-  it('warmIndexFiles still SKIPS a stubbed file — this is the defect, pinned as-is', () => {
+  /**
+   * ⚠️ THIS CASE WAS INVERTED ON PURPOSE, 2026-09-18. It used to read "warmIndexFiles still SKIPS a
+   * stubbed file — this is the defect, pinned as-is", and said in its own body: "If a future change
+   * starts filling stubs, THIS is the assertion that must be updated deliberately — with the
+   * measurement in hand — rather than drifting."
+   *
+   * The measurement arrived: report `2ec15a71`, a real free-tier user's edit, recorded
+   * `GRAPH_RESTORED_STUBS` at **30 of 31 files** — and in the same report the three mechanisms that
+   * read this graph to prevent a bad edit had all degraded together (contract card: no symbols;
+   * invariants: "1 observed rule"; grounding: "3 files, ~211 tokens of a 4000 budget"). The model
+   * then rewrote `App.tsx` with its own `Item` interface while `types.ts` already exported
+   * `PriceItem`, orphaning `data.ts`. So the assertion is updated with the evidence, as instructed.
+   */
+  it('warmIndexFiles REFILLS a stubbed file — it is not a known file', async () => {
     const m = new WorkspaceMemory();
     m.indexFile('src/App.tsx', RESTORED_STUB);
-    return warmIndexFiles(m, ['src/App.tsx', 'src/Other.ts'], read).then((indexed) => {
-      // If a future change starts filling stubs, THIS is the assertion that must be updated
-      // deliberately — with the measurement in hand — rather than drifting.
-      expect(indexed).toEqual(['src/Other.ts']);
-      expect(m.restoredStubPaths()).toEqual(['src/App.tsx']);
-      expect(m.graph().imports['src/App.tsx'] ?? []).not.toContain('./Button');
-    });
+    const indexed = await warmIndexFiles(m, ['src/App.tsx', 'src/Other.ts'], read);
+    expect(indexed).toContain('src/App.tsx');
+    expect(indexed).toContain('src/Other.ts');
+    expect(m.restoredStubPaths()).toEqual([]);          // no blind spot left
+    expect(m.graph().imports['src/App.tsx'] ?? []).toContain('./Button');
+    expect(m.graph().components).toContain('App');       // the facts the card and invariants read
+  });
+
+  it('a file left UNREACHED by the cap keeps its stub, so imports to it still resolve', async () => {
+    // The risk the earlier refusal named: a partial fill firing a false `unresolvedImport`. It cannot
+    // — an unreached file stays in `graph.files`, so it is still a resolution target.
+    const m = new WorkspaceMemory();
+    m.indexFile('src/A.ts', RESTORED_STUB);
+    m.indexFile('src/B.ts', RESTORED_STUB);
+    await warmIndexFiles(m, ['src/A.ts', 'src/B.ts'], read, { maxFiles: 1 });
+    expect(m.graph().files).toContain('src/B.ts');
+    expect(m.restoredStubPaths()).toEqual(['src/B.ts']);
   });
 
   it('a file the resume never knew about is indexed for real, exactly as before', async () => {

@@ -14040,12 +14040,19 @@ async function noteBuildOutcome(
             // exports, no components, no routes) for the whole build. Everything built on the graph
             // then reasons about a project that looks like a list of blank files.
             //
-            // The FIX is deliberately not shipped here: filling the graph moves a real build's verdict
-            // in BOTH directions (a restored import can fire `unresolvedImport`, a 25-point hard
-            // blocker ⇒ ₹0 on a working app; while a hollow graph makes every component look
-            // un-imported ⇒ `PENALTY.orphanComponent` against every resumed build), and which one
-            // dominates has never been measured. This line is that measurement — admin-only, no
-            // behaviour change, nothing branches on it. Best-effort inside the same try.
+            // ✅ THE FIX SHIPPED 2026-09-18, and this line is what settled it. It used to read "the FIX
+            // is deliberately not shipped here … which one dominates has never been measured".
+            // Report 2ec15a71 measured it: **30 of 31 files stubbed** on a real user's edit, with the
+            // contract card, the architecture invariants ("1 observed rule") and grounding ("3 files,
+            // ~211 tokens of a 4000 budget") all degraded together — and the model then rewrote
+            // `App.tsx` with its own invented types, orphaning the project's `data.ts`.
+            //
+            // The recorded worry (a filled import firing `unresolvedImport` ⇒ ₹0 on a working app) was
+            // wrong twice over: a file not reached under `maxFiles` stays in `graph.files` as a stub so
+            // imports still resolve, and the readiness path that owns that penalty reads the DURABLE
+            // project content, not this graph — in that report it was never even invoked. See
+            // `warmIndexFiles`. This line STAYS as the instrument: it should now read 0 stubs on a
+            // resumed edit, and a non-zero count means the refill did not reach them.
             const stubs = wsMem.restoredStubPaths();
             if (stubs.length > 0) {
               const total = wsMem.graph().files.length;

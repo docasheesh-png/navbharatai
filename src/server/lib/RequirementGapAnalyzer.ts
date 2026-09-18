@@ -47,7 +47,7 @@ const DOMAINS: DomainDef[] = [
     key: 'ecommerce',
     // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
     // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.
-    re: /\bshops?\b|shopping|\bstores?\b|ecommerce|e-commerce|\bcarts?\b|checkout|\bproduct\b|\border\b|inventory|marketplace|catalog|\bdukaan\b|\bdukan\b|\bdukandar\b|\bkirana\b|\bbazaar\b|\bbazar\b|\bsaaman\b|\bsamaan\b/i,
+    re: /\bshops?\b|shopping|\bstores?\b|e[-\s]?commerce|\bcarts?\b|checkout|\bproduct\b|\border\b|inventory|marketplace|catalog|\bdukaan\b|\bdukan\b|\bdukandar\b|\bkirana\b|\bbazaar\b|\bbazar\b|\bsaaman\b|\bsamaan\b/i,
     features: [
       { label: 'payments + refunds', re: /pay|payment|checkout|stripe|razorpay|refund/i },
       { label: 'product catalog + search', re: /catalog|search|filter|browse/i },

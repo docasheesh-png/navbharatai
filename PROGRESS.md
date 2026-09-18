@@ -66599,3 +66599,88 @@ watermark (a chrome hex used as text, which has no row and is not ours to invent
 TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over another grey — the AA
 lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
 theme, which still wants a `bg-success` fill token rather than per-button patches.
+
+## 2026-09-18 — "hospital management system" was scored 5, the same as the word "hi" (the admin's failure table, part 2)
+
+Part 1 (#3076) made every build ENDING nameable. This is the first fix aimed at the failure RATE
+itself, and it came from asking a plain question about the admin's table: *what do the worst rows have
+in common?* Booking 100%, Logistics 100%, Events 100%, SaaS 76.9%, Education 75%, Healthcare 57.1%,
+Ecommerce 54.5%, Restaurant 50% — **every one of them is a domain a real user names in two or three
+words.**
+
+**Measured on `main` before touching anything** (`analyzeRequest({ prompt })`, the deterministic sizer
+the build route calls at `routes/agentv3.ts:11845`):
+
+| prompt | score | taskType |
+|---|---|---|
+| `ecommerce website` | 58 | complex_app ✅ |
+| `build a SaaS platform` | 58 | complex_app ✅ |
+| **`hospital management system`** | **5** | **chat** |
+| **`school management system`** | **5** | **chat** |
+| **`restaurant billing app`** | **5** | **chat** |
+| **`courier tracking app`** | **5** | **chat** |
+| **`event management website`** | **5** | **chat** |
+| **`E commerce website`** | **5** | **chat** |
+| `hi` | 5 | chat |
+
+**5 is the score of the word "hi".** `COMPLEX_APP_SIGNAL` lists the words a DEVELOPER writes — saas,
+crm, checkout, auth, backend — and real users write none of them. Those prompts matched no signal
+anywhere in the sizing path and fell through `detectTaskType`'s final `return 'chat'`.
+
+**What a 5 buys, traced through the route rather than assumed:** `scoreToTier(5) = 'gemini'` →
+`maxStepsDefault` **80 instead of 150** (~12582) · `classifyForSimpleLane('gemini')` true, so the
+**one-shot/simple lane** (~15055) and **no blueprint** (~13980) · `decideComplexity(score 5)` →
+`simple`, so the build **opens on the cheapest flash rung** instead of KIMI · `complexityFromPrompt`
+counts 1 module + 1 feature → **magnitude 2, the fast lane and a calculator's ETA**. A hospital
+management system was built with everything sized for a greeting.
+
+🔑 **THE PLATFORM ALREADY KNEW, AND THAT IS WHY THE FIX IS SMALL.** `analyzeRequirementGaps` — the
+classifier the admin's own Failure Category panel uses to LABEL those rows — answers `healthcare`,
+`education`, `restaurant`, `logistics`, `events` for the very same strings. One module knew it was a
+hospital app while the module deciding how much engine to spend called it chat. `namesBusinessDomain`
+(in `appComplexitySignals.ts`, the file whose own header exists to stop exactly this drift) asks the
+owner of the fact. **A third keyword list would have been the drift, not the cure.**
+
+🔒 **Two guards, both narrowing, both in the predicate rather than left to callers:** a PAGE-scoped
+deliverable is still a page ("a landing page for a hospital"), and a SIMPLE deliverable is still
+simple ("a todo app for my restaurant"). It is deliberately NOT folded into `isComplexAppPrompt`,
+which is consulted BEFORE `debugging` and `simple_app`; this is asked LAST, where the previous line
+was an unconditional `return 'chat'`, so no verdict that already existed can move.
+
+**Blast radius, measured over a 38-prompt corpus with the change stashed and unstashed: 28 unchanged,
+10 changed.** Eight are the intended domain promotions. Two are debug turns in a domain
+(`fix the login error in my hospital app`) whose taskType/score/tier are untouched and whose ETA
+magnitude rose 2 → 12 — and that is the module's PRE-EXISTING behaviour, verified: `fix the checkout
+bug` was already 12 before this change, because `complexityFromPrompt` has never had a debugging
+guard and its own comment states the floor "only ever RAISES the estimate".
+
+🔎 **Sibling hunted (rule 3): `e-?commerce` has no space in it.** The real prompt from autopsy
+`c6e4c6ff` was `"E commerce website"`. Both `COMPLEX_APP_SIGNAL` and the domain analyser's own
+ecommerce list missed that spelling; both now read `e[-\s]?commerce`. ⚠️ This also moves such prompts
+from the panel's **General** row into **Ecommerce**, which is more accurate and will shift both rows.
+
+**Test:** `tests/aDomainAppIsNotAGreeting.test.ts` (17), including a derived invariant — a recognised
+domain with no page/simple deliverable is never scored as chat — so a domain added later stays covered
+without editing this test.
+
+⚠️ **THE REVERSION PROBE CAUGHT MY OWN TEST BEING DECORATIVE, and it is recorded rather than quietly
+fixed.** Four of five probes failed correctly; deleting the PAGE guard left all 16 cases GREEN,
+because every page prompt I had chosen ("a landing page for a hospital") is also matched by the SIMPLE
+list. `PAGE_SCOPED` now holds the prompts only that guard catches — "a coming soon page for my
+restaurant", "one-pager for my gym", "portfolio website for a doctor", "a splash page for my clinic" —
+and deleting the guard now fails. **A guard no test can kill is a guard nobody knows is working.**
+
+🔴 **AND A WRONG MEASUREMENT IS CIRCULATING — recorded because a later session will otherwise act on
+it.** PR #3077 (another session, open at the time of writing) states in its open-root-cause section
+that `'build an ecommerce website with cart, checkout, payments, orders, admin'` scores *"5, taskType
+chat"* and concludes the complexity router is dead for that whole class of prompt. Called correctly
+that prompt scores **58 / complex_app**. `analyzeRequest` takes `{ prompt }`, not a bare string; given
+a string it reads `input?.prompt ?? ''`, sizes the EMPTY prompt, and returns 5/chat for anything at
+all. **I made the identical mistake myself minutes earlier and caught it only by reading the
+signature** — which is why this is a note about a shared trap, not about that session. Their FIRST
+measurement (`'E commerce website'` → 5) is genuinely correct and is fixed here.
+
+**Still open, not guessed at (rule 6):** whether these domains' failure rate actually falls. This
+change makes the engine size them correctly; only the next few days of the Failure Category panel can
+say whether that converts into builds that work. The honest thing to watch is those eight rows'
+failure rate and their heal counts, against the extra cost of opening on KIMI.

@@ -14227,6 +14227,12 @@ async function noteBuildOutcome(
         // work to resume from" and the user was told their files were saved. Only files the MODEL
         // authored count as work.
         hasExistingFiles: () => modelAuthoredPaths(writtenFiles).length > 0,
+        // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
+        // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
+        editingExistingApp: isEditMode,
+        onNote: (note: { code: string; message: string; detail?: string }) => {
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
+        },
         system: architectSystem,
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.

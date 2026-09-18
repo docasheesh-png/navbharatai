@@ -45,7 +45,7 @@ describe('every professional gets the compact header (locked)', () => {
   });
 
   it('uses the shorter header row', () => {
-    expect(chat).toContain('px-4 py-2 border-b border-white/5');
+    expect(chat).toContain('px-4 py-2 border-b border-line'); // border on the token since PR J; the claim is the compact PADDING
     expect(chat).not.toContain('px-4 py-3 border-b border-white/5');
   });
 
@@ -55,7 +55,7 @@ describe('every professional gets the compact header (locked)', () => {
   });
 
   it('keeps the composer compact', () => {
-    expect(chat).toContain('px-3 py-2 border-t border-white/5');
+    expect(chat).toContain('px-3 py-2 border-t border-line'); // same: only the border class moved to the token
   });
 });
 

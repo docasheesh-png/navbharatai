@@ -126,10 +126,10 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
   };
 
   const stepMark = (status: RoadmapStepStatus) => {
-    if (status === 'done') return <Check className="w-3 h-3 text-emerald-400" />;
+    if (status === 'done') return <Check className="w-3 h-3 text-success" />;
     if (status === 'current') return <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />;
     if (status === 'next') return <span className="w-2 h-2 rounded-full bg-sky-400 inline-block animate-pulse" />;
-    return <span className="w-2 h-2 rounded-full border border-zinc-600 inline-block" />;
+    return <span className="w-2 h-2 rounded-full border border-line inline-block" />;
   };
 
   return (
@@ -139,7 +139,7 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
         onClick={toggle}
         title={hasRoadmap ? 'Your app roadmap & next-step ideas' : 'Ideas for what to build next'}
         className={`relative h-7 w-7 flex items-center justify-center rounded-lg border transition-colors ${
-          open ? 'border-amber-500 text-amber-300 bg-amber-950/30' : 'border-zinc-700 text-amber-300/80 hover:text-amber-200 hover:border-amber-600 bg-zinc-900'
+          open ? 'border-amber-500 text-warn bg-amber-500/10' : 'border-line text-warn hover:text-warn hover:border-amber-600 bg-card'
         }`}
       >
         <Lightbulb className="w-4 h-4" />
@@ -151,52 +151,52 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-72 max-h-[62vh] supports-[height:100dvh]:max-h-[62dvh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl z-50">
+        <div className="absolute bottom-full right-0 mb-2 w-72 max-h-[62vh] supports-[height:100dvh]:max-h-[62dvh] overflow-y-auto rounded-xl border border-line bg-surface shadow-2xl z-50">
           {/* ── ROADMAP (guided step-by-step big-app journey) ── */}
           {hasRoadmap && (
-            <div className="border-b border-zinc-800">
-              <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
+            <div className="border-b border-line">
+              <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-line bg-surface">
                 <div className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-sky-400" />
-                  <span className="text-[12px] font-bold text-white">Your app roadmap</span>
+                  <MapPin className="w-3.5 h-3.5 text-info" />
+                  <span className="text-[12px] font-bold text-ink">Your app roadmap</span>
                 </div>
-                <span className="text-[10px] text-zinc-500">{roadmap!.currentStep}/{roadmap!.totalSteps}</span>
+                <span className="text-[10px] text-faint">{roadmap!.currentStep}/{roadmap!.totalSteps}</span>
               </div>
               {roadmap!.userMessage && (
-                <p className="px-3 pt-2 text-[10.5px] text-zinc-400 leading-relaxed">{roadmap!.userMessage}</p>
+                <p className="px-3 pt-2 text-[10.5px] text-muted leading-relaxed">{roadmap!.userMessage}</p>
               )}
               <div className="flex flex-col p-1.5 gap-0.5">
                 {roadmap!.steps.map((s) => (
                   <div
                     key={s.n}
-                    className={`flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${s.status === 'next' ? 'border border-sky-800/60 bg-sky-950/20' : ''}`}
+                    className={`flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${s.status === 'next' ? 'border border-sky-800/60 bg-sky-500/10' : ''}`}
                   >
                     <span className="mt-1 shrink-0">{stepMark(s.status)}</span>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[11.5px] font-semibold ${s.status === 'done' ? 'text-zinc-500 line-through' : 'text-zinc-100'}`}>{s.n}. {s.title}</span>
+                        <span className={`text-[11.5px] font-semibold ${s.status === 'done' ? 'text-faint line-through' : 'text-body'}`}>{s.n}. {s.title}</span>
                         {s.infraCeiling && (
-                          <span className="text-[8px] font-black uppercase tracking-wider text-orange-300/90 bg-orange-950/40 px-1 py-0.5 rounded" title="Needs extra infrastructure — built as an honest separate step">needs setup</span>
+                          <span className="text-[8px] font-black uppercase tracking-wider text-warn bg-orange-500/10 px-1 py-0.5 rounded" title="Needs extra infrastructure — built as an honest separate step">needs setup</span>
                         )}
                       </div>
-                      <div className="text-[10px] text-zinc-500 leading-snug">{s.goal}</div>
+                      <div className="text-[10px] text-faint leading-snug">{s.goal}</div>
                     </div>
                   </div>
                 ))}
               </div>
               {roadmap!.note && (
-                <p className="px-3 pb-1 text-[10px] text-zinc-500 italic leading-snug">{roadmap!.note}</p>
+                <p className="px-3 pb-1 text-[10px] text-faint italic leading-snug">{roadmap!.note}</p>
               )}
               <div className="p-1.5">
                 {roadmap!.complete ? (
-                  <div className="text-center text-[11px] font-semibold text-emerald-400 py-1.5">🎉 All steps done!</div>
+                  <div className="text-center text-[11px] font-semibold text-success py-1.5">🎉 All steps done!</div>
                 ) : (
                   <button
                     onClick={buildNextStep}
-                    className="w-full rounded-lg border border-sky-700 bg-sky-950/40 hover:bg-sky-900/40 px-2.5 py-2 text-left transition-colors"
+                    className="w-full rounded-lg border border-sky-700 bg-sky-500/10 hover:bg-sky-500/10 px-2.5 py-2 text-left transition-colors"
                   >
-                    <div className="text-[11.5px] font-bold text-sky-200">▶ Build next step: {roadmap!.steps.find((s) => s.n === roadmap!.nextStep)?.title}</div>
-                    <div className="text-[10px] text-sky-400/70 mt-0.5">Drops it into the box — review, then send.</div>
+                    <div className="text-[11.5px] font-bold text-info">▶ Build next step: {roadmap!.steps.find((s) => s.n === roadmap!.nextStep)?.title}</div>
+                    <div className="text-[10px] text-info mt-0.5">Drops it into the box — review, then send.</div>
                   </button>
                 )}
               </div>
@@ -206,23 +206,23 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
           {/* ── GENERIC "what to build next" ideas ── */}
           {suggestions.length > 0 && (
             <>
-              <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
+              <div className="sticky top-0 flex items-center justify-between px-3 py-2 border-b border-line bg-surface">
                 <div className="flex items-center gap-1.5">
-                  <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-[12px] font-bold text-white">What to build next</span>
+                  <Lightbulb className="w-3.5 h-3.5 text-warn" />
+                  <span className="text-[12px] font-bold text-ink">What to build next</span>
                 </div>
                 <div className="flex items-center gap-0.5">
                   {canRotate && (
-                    <button onClick={refreshSuggestions} title="Show other ideas" className="p-1 rounded hover:bg-zinc-800 text-amber-300/80 hover:text-amber-200 active:scale-90 transition-transform">
+                    <button onClick={refreshSuggestions} title="Show other ideas" className="p-1 rounded hover:bg-raised text-warn hover:text-warn active:scale-90 transition-transform">
                       <RefreshCw className="w-3.5 h-3.5" />
                     </button>
                   )}
-                  <button onClick={() => setOpen(false)} title="Close" className="p-0.5 rounded hover:bg-zinc-800 text-zinc-400">
+                  <button onClick={() => setOpen(false)} title="Close" className="p-0.5 rounded hover:bg-raised text-muted">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
-              <p className="px-3 pt-2 pb-1 text-[10.5px] text-zinc-500 leading-relaxed">
+              <p className="px-3 pt-2 pb-1 text-[10.5px] text-faint leading-relaxed">
                 Only ideas for your app — tap one to drop it into the box, then edit or send it.{canRotate ? ' Tap ♻ for more.' : ''}
               </p>
               <div className="flex flex-col p-1.5 gap-1">
@@ -230,15 +230,15 @@ export function NextSuggestionsBulb({ workspaceId, ready, onPick }: Props) {
                   <button
                     key={s.id}
                     onClick={() => { onPick(s.prompt); setOpen(false); }}
-                    className="text-left rounded-lg border border-zinc-800 bg-zinc-900/60 hover:border-amber-700/60 hover:bg-zinc-900 px-2.5 py-2 transition-colors group"
+                    className="text-left rounded-lg border border-line bg-raised hover:border-amber-700/60 hover:bg-card px-2.5 py-2 transition-colors group"
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[12px] font-semibold text-zinc-100 group-hover:text-white">{s.title}</span>
+                      <span className="text-[12px] font-semibold text-body group-hover:text-ink">{s.title}</span>
                       {s.kind === 'domain' && (
-                        <span className="text-[8px] font-black uppercase tracking-widest text-amber-300/90 bg-amber-950/40 px-1 py-0.5 rounded">For this app</span>
+                        <span className="text-[8px] font-black uppercase tracking-widest text-warn bg-amber-500/10 px-1 py-0.5 rounded">For this app</span>
                       )}
                     </div>
-                    <div className="text-[10.5px] text-zinc-500 leading-snug mt-0.5">{s.detail}</div>
+                    <div className="text-[10.5px] text-faint leading-snug mt-0.5">{s.detail}</div>
                   </button>
                 ))}
               </div>

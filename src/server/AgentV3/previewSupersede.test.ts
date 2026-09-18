@@ -60,23 +60,30 @@ describe("🔒 the app's own declared port is a VETO, not another port to free",
 describe('🔒 the wiring — a veto nobody passes is not a veto', () => {
   const dispatcher = readFileSync(join(process.cwd(), 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
 
-  it('update_preview reads the app\'s own declared port before superseding', () => {
+  /**
+   * ⚠️ These three assertions were written against the SINGULAR veto and are updated, not weakened:
+   * the veto became a SET on 2026-09-18 (report `1a7f4a58` — a full-stack app whose frontend was
+   * killed to bless its own API). The intent is unchanged in every one of them — read it, pass it,
+   * and never let reading it break a build. `tests/theVetoIsSingularTheAppIsPlural.test.ts` holds the
+   * plural behaviour itself.
+   */
+  it('update_preview reads the app\'s own declared ports before superseding', () => {
     const at = dispatcher.indexOf('const decision = decideSupersede(');
     expect(at).toBeGreaterThan(-1);
     // Read BEFORE the decision, not after — the decision is what consumes it.
     const before = dispatcher.slice(Math.max(0, at - 2000), at);
-    expect(before).toContain('declaredPortFrom(portFiles)');
+    expect(before).toContain('declaredPortsFrom(portFiles)');
     expect(before).toContain('DECLARED_PORT_FILES');
   });
 
-  it('and passes it into the decision', () => {
-    expect(dispatcher).toContain('decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPort })');
+  it('and passes them into the decision', () => {
+    expect(dispatcher).toContain('decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPorts })');
   });
 
-  it('🔒 a failed read leaves it NULL — a port hint must never break a build', () => {
-    const at = dispatcher.indexOf('let sourceDeclaredPort: number | null = null;');
+  it('🔒 a failed read leaves it EMPTY — a port hint must never break a build', () => {
+    const at = dispatcher.indexOf('let sourceDeclaredPorts: number[] = [];');
     expect(at).toBeGreaterThan(-1);
-    const body = dispatcher.slice(at, at + 900);
+    const body = dispatcher.slice(at, at + 1200);
     expect(body).toContain('catch');
     expect(body).toContain('withTimeout(');
   });

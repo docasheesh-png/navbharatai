@@ -32,7 +32,14 @@ import {
 const ACCOUNT = 'doc.asheesh@icloud.com';
 const TYPO = 'doc.asheesh@iclod.com';
 
-/** The prompt the admin was given to test project mode: a big-software noun plus 10 bullets. */
+/**
+ * The prompt the admin was given to test project mode: a big-software noun plus 10 bullets.
+ *
+ * ⚠️ `bullets` became `features` on 2026-09-18 and the counter learned to read an INLINE list too
+ * ("…with students, teachers, attendance, …"), because it could previously see only bullet LINES and
+ * therefore fired for none of fourteen realistic prompts. This bulleted form is unchanged and still
+ * counts 10 — that non-regression is half of what these cases are for.
+ */
 const SCHOOL_ERP = `Build a full-fledged school management system (ERP).
 - Student admission and profiles
 - Teacher and staff management
@@ -56,7 +63,7 @@ describe('megaProjectSignals — the thresholds, and the verdict they produce', 
   it('the admin test prompt fires: a big-software noun with 10 enumerated lines', () => {
     const s = megaProjectSignals(SCHOOL_ERP);
     expect(s.bigNoun).toBe(true);
-    expect(s.bullets).toBe(10);
+    expect(s.features).toBe(10);
     expect(s.fires).toBe(true);
   });
 
@@ -64,7 +71,7 @@ describe('megaProjectSignals — the thresholds, and the verdict they produce', 
     // "ek social media website banao": the noun is there, the spec is not.
     const s = megaProjectSignals('build a social network website');
     expect(s.bigNoun).toBe(true);
-    expect(s.bullets).toBe(0);
+    expect(s.features).toBe(0);
     expect(s.fires).toBe(false);
   });
 
@@ -169,7 +176,7 @@ describe('projectModeDiagnosis — the four causes of the same silence, now dist
   it('below threshold: quotes the REAL counts and the exact numbers needed', () => {
     const d = projectModeDiagnosis({ ...base, flagRaw: 'on', prompt: 'build a social network website' });
     expect(d.skipReason).toBe('below-threshold');
-    expect(d.detail).toMatch(/0 enumerated feature lines/);
+    expect(d.detail).toMatch(/0 enumerated feature parts/);
     expect(d.detail).toMatch(/big-software noun: yes/);
     expect(d.detail).toContain(String(MEGA_BULLETS_WITH_NOUN));
     expect(d.detail).toContain(String(MEGA_BULLETS_ALONE));
@@ -177,7 +184,7 @@ describe('projectModeDiagnosis — the four causes of the same silence, now dist
 
   it('the counts it prints are the ones the gate decided on, never a second derivation', () => {
     const d = projectModeDiagnosis({ ...base, flagRaw: 'on' });
-    expect(d.detail).toContain(`${megaProjectSignals(SCHOOL_ERP).bullets} enumerated feature lines`);
+    expect(d.detail).toContain(`${megaProjectSignals(SCHOOL_ERP).features} enumerated feature parts`);
   });
 
   it('is advisory and total: every branch returns a string, and nothing throws', () => {

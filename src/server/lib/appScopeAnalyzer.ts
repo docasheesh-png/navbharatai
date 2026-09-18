@@ -16,6 +16,8 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
+import { countEnumeratedFeatures } from '../AgentV3/enumeratedFeatures';
+
 export type AppSize = 'small' | 'large';
 
 export interface AppScope {
@@ -81,12 +83,25 @@ const CLEARLY_SMALL = /\b(calculator|to-?do|todo|task list|timer|stopwatch|count
  * AI-written PRD) is a mega app dressed as a detailed prompt. Counts numbered/bulleted list items and
  * "and"/comma-joined feature verbs, capped. LENGTH alone is deliberately NOT used (a detailed prompt for a
  * small app is still small); this counts distinct asks, not words.
+ *
+ * 🔎 SIBLING FIXED 2026-09-18. This counter and `megaProjectSignals` (AgentV3/ProjectPlan.ts) are the
+ * two live gates that decide a build is too big for one pass, and BOTH were measured blind to a comma:
+ * bullet lines here, bullet lines there, plus loose verbs. "school ERP with students, teachers,
+ * attendance, fees, exams, timetable, library, transport" scored ZERO — eight named modules, and the
+ * only thing this function could see was the single word "with", halved away. Both now ask
+ * `countEnumeratedFeatures`, which reads a bulleted spec AND the one-line comma list a real user types.
+ *
+ * ⚠️ It is a MAX, not a sum, deliberately: a bulleted PRD already counts once through `numbered`, and
+ * adding the shared count on top would double it and push ordinary prompts over FEATURE_COUNT_MEGA.
+ * This gate spends a real planner call (up to a minute, on every user's build, since
+ * AGENTV3_MEGA_ROADMAP is on by default), so it may only ever become MORE right, never more eager.
  */
 function featureCount(text: string): number {
   const numbered = (text.match(/^\s*(?:\d+[.)]|[-*•])\s+\S/gm) || []).length;
   const verbs = (text.match(/\b(add|build|create|include|with|support|allow|enable|manage|integrate)\b/gi) || []).length;
   // Numbered lists are the strongest signal; verbs are a softer one (halved).
-  return numbered + Math.floor(verbs / 2);
+  const legacy = numbered + Math.floor(verbs / 2);
+  return Math.max(legacy, countEnumeratedFeatures(text));
 }
 
 const FEATURE_COUNT_MEGA = 8; // a spec asking for ~8+ distinct features is treated as large

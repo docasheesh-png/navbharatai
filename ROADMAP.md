@@ -840,7 +840,7 @@ Measured against that bar, most of the current bill is already correct. What fol
 |---|---|---|---|
 | **E2B sandboxes** | **~15,000** | E2B dashboard, 30-day window (`CLAUDE.md`) | ✅ for paid builds, since `AGENTV3_BILL_SANDBOX=on` |
 | **Cloud Run** | **~2,078** | admin's console, period unconfirmed | ❌ platform overhead |
-| **Artifact Registry** | was ~32% of the bill | `cloudbuild.yaml` Step 5 — pruning already added | ❌ pure waste, now bounded |
+| **Artifact Registry** | was ~32% of the bill | the in-build prune was REMOVED 2026-09-18 (it raced the deploy) — a native cleanup policy replaces it | ❌ pure waste; UNBOUNDED until that console policy exists |
 | **Firestore** | unmeasured | — | ❌ mostly platform |
 | **Free gift** | ₹163 real per new account | `payments.ts` + `giftPlan.ts` | ❌ by design (acquisition) |
 

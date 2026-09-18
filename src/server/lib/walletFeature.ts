@@ -32,6 +32,11 @@ export const WALLET_FEATURES = [
   { id: 'app-assistant', label: "Your app's own assistant" },
   { id: 'api', label: 'Developer API' },
   { id: 'voice', label: 'Voice chat' },
+  // Pro image generation (admin 2026-09-18). Its own row rather than folding into 'tools', because a
+  // ₹2 fixed-price image is a different purchase from a metered tool run and a user checking "what
+  // did I spend on images?" must be able to see it. Label is NavBharatAI's own name for it — the
+  // model behind it may never appear here (white-label law; this file's header says so).
+  { id: 'image-pro', label: 'Pro image generation' },
   { id: 'other', label: 'Other' },
 ] as const;
 

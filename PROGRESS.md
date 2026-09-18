@@ -67573,3 +67573,104 @@ counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail;
 3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
    system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
    ASKED what it needs is a product question, not a threshold one.
+---
+
+## 2026-09-18 — Autopsy `1a7f4a58` (Qiikr): the platform killed the app's own frontend and previewed its API
+
+**Free Weak build, KIMI `kimi-k2.7-code`, 36.6 min, `ok: true`, billed ₹613.08.** A full-stack
+classifieds marketplace: a Vite frontend on **5173** and an Express API on **3001**. Both are the
+app's own. The build ended with `RELEASE_GATE: UNKNOWN`, a preview serving `Cannot GET /`, and a
+`GREEN_GUARD_RESTORED` rollback.
+
+### The root cause, proven by reproduction rather than reasoning
+
+Replaying the report's own `package.json` and `.env.example` through the shipped code:
+
+```
+declaredPortsFrom({ package.json })                 → null      ← the bug
+declaredPortsFrom({ package.json, .env.example })   → 3001      ← the BACKEND
+decideSupersede({ newPort: 3001, recipe: 5173 })    → staleports [5173], retireRecipe true
+```
+
+Two independent defects, and the build needed both to fail:
+
+1. **A script that delegates hides every port the app declares.** The app's `--port 5173` is explicit
+   and rank-1 — and it lives in `dev:client`, behind
+   `"dev": "concurrently \"npm run dev:server\" \"npm run dev:client\""`. `fromScripts` read the text
+   of `dev` and stopped at the `npm run` boundary, so the strongest signal in the file was invisible.
+   Delegation via `concurrently` / `npm-run-all` is the NORMAL way to write a full-stack dev script.
+2. **The supersede veto is singular where the fact is plural.** "Never kill the port the app itself
+   declares" is the right rule; `declaredPortFrom` can name only the strongest port, so on a
+   two-process app the veto protects one and leaves the other killable **by construction**. Here it
+   protected the API (3001, read from `.env.example`) and freed the frontend.
+
+So when the agent restarted the backend alone while diagnosing the database, `update_preview :3001`
+killed the Vite server and retired the recipe pointing at it. The preview then served `Cannot GET /`
+— that Express app only serves static files under `NODE_ENV=production`, which the agent itself
+correctly diagnosed at minute 30. Minutes 18–31 went on chasing it; the build ran out of budget one
+`update_preview` call short of the fix.
+
+### Fixed at the class
+
+- `declaredPortsFrom` follows `npm run` / `pnpm run` / `yarn run` / `bun run` / `npm-run-all` / `run-p`
+  delegation, bounded at depth 3 and cycle-safe. A bare `yarn <word>` is deliberately NOT a delegation
+  — reading `yarn add express` as a script called "add" would answer about something that is not the app.
+- `decideSupersede` takes `sourceDeclaredPorts` — the whole SET. Both fields are honoured and unioned,
+  so a caller passing only the singular one behaves exactly as before. Widening a veto can only ever
+  REFUSE to kill, which this file already argues is the safe direction.
+- `recipeMatchesApp` simplified: a recipe naming a port this app declares is never stale. The old
+  second clause (`newPort !== declared`) was how ONE port had to express "the app is on its own port",
+  and on a full-stack app it retired the frontend's recipe the moment the API was verified.
+- `server/src/index.ts` added to `DECLARED_PORT_FILES` — the report's Express entry point was at
+  exactly that path, and the list held `server/index.ts` and `src/server/index.ts` but not the
+  combination.
+
+`tests/theVetoIsSingularTheAppIsPlural.test.ts` (21 cases). Proven by reversion in both halves:
+removing the delegation walk turns 6 red; reverting the veto to the single strongest port turns 2 red.
+
+### ⚠️ Stated plainly, because a reversion proof said so
+
+For **this** app the delegation fix alone is sufficient — once `--port 5173` is found it outranks the
+env example, so even the singular veto would have saved it. The plural veto is still the DNA fix, and
+the test proves why with a real shape: an app stating its frontend port in `vite.config.ts` (rank 4)
+and its API port in `.env.example` (rank 2) reproduces the original bug exactly. The singular
+version's correctness depends on which of the app's two ports happens to rank higher, and the ranking
+was designed to answer a different question.
+
+### 🔴 Still open (rule 6) — recorded, not guessed at
+
+- **THE PREVIEW IS STILL AIMED AT THE API, and this fix does not change that.** It stops the frontend
+  being KILLED and stops its recipe being RETIRED — so the preview door, which resolves through the
+  recipe, still leads to the frontend for every later view. But the in-build `preview` event follows
+  the port the agent explicitly asked for. The agent asked for 3001 because `portSweep.sweepFoundSummary`
+  told it to: *"Your app is running on port 3001, not the 5173 this project's framework normally uses"*
+  — a sentence that is simply false when both ports are the app's. **The real fix is the missing
+  subsystem below**, and guessing at it in `portSweep` alone would thread declared ports through
+  `E2BActuator.ts`, which PR #3086 is editing right now.
+- **THE MISSING SUBSYSTEM: nothing answers "which of this app's ports is the one a human should look
+  at?"** Three subsystems hold parts of the answer and none is asked the question: `PortDiscovery`
+  knows what is LISTENING (a fact about a process), `declaredPort` knows what the app CLAIMS, and
+  `serviceGraph` knows the services and their ports — and is explicitly advisory, *"nothing is started
+  from it yet"*. Worth recording exactly: in this report the graph printed `Single service: qiikr
+  (frontend on port 5173)` while the supersede line printed `superseded now that the current app is
+  verified on port 3001`. **Two subsystems, one report, opposite conclusions, and the wrong one had
+  the kill switch.** ⚠️ The graph was not actually right, either — it produced 5173 from
+  `DEFAULT_PORTS.frontend`, not by reading the app, and called a two-process project single-service.
+  This is the port-shaped instance of the EVIDENCE LEDGER root cause opened by autopsy `697b38ee`.
+- **`npx prisma studio` burned 300 seconds** — 8.2% of the build's wall clock — on a server started
+  with `&` inside a command E2B ran to its five-minute deadline. Same class as PR #3086's `timeout 5`
+  finding (a command's shape versus its words); left to that PR's author rather than raced.
+- **Three orphaned `tsx watch` processes** survived the agent's own `pkill` and produced the
+  `EADDRINUSE` that cost a further ~90s restart.
+- **`DESIGN_PARTIALLY_HEALED` was a false positive, and the model was right about it.** The detector
+  flagged `LIST_WITHOUT_EMPTY_STATE` on `CreateListing.tsx` — a FORM page. The model said so in the
+  report (*"CreateListing.tsx is a form page, so the user's note about 'a list with no empty state' is
+  a bit confusing"*), complied anyway, and the repair improved 0 of 1 pages after 5 model calls and 62
+  seconds. A detector a model can out-reason is a detector that costs money to obey.
+- **`PREVIEW_ERROR: Cannot read properties of null (reading 'useState')` recurs here**, the same
+  signature left unexplained by autopsy `95598899`. Still unexplained — it needs the failing file's
+  contents, which this report does not carry either. **Two sightings now, so it is a pattern rather
+  than a one-off.**
+- **Billing:** ₹613.08 charged on a free wallet for a build whose `RELEASE_GATE` is `UNKNOWN` and
+  whose preview never rendered. `ok: true`, so "working app or free" never fired. Whether an UNKNOWN
+  gate should bill in full is an admin decision, not a code one — raised, not changed.

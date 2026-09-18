@@ -207,7 +207,11 @@ describe('🔒 the wiring — a veto nobody passes is not a veto', () => {
     const at = dispatcher.indexOf('const decision = decideSupersede(');
     expect(at).toBeGreaterThan(-1);
     const before = dispatcher.slice(Math.max(0, at - 2000), at);
-    expect(before).toContain('declaredPortsFrom(portFiles)');
+    // ⚠️ The needle moved from `declaredPortsFrom` to `appPortsFrom` on 2026-09-18: the derivation was
+    // CENTRALIZED so the service graph and this veto cannot disagree (admin: "ab yeh nahi ana
+    // chahiye"). `appPortsFrom` returns the union of the graph's ports and the declared ones, so this
+    // is the same read, from one place. The intent of the assertion is unchanged.
+    expect(before).toContain('appPortsFrom(portFiles)');
     expect(before).toContain('DECLARED_PORT_FILES');
   });
 

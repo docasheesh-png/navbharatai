@@ -1,3 +1,4 @@
+import { isSecondaryAppPort, type AppPortMap } from '../../../appPorts';
 // SMART PREVIEW PORT — when the port we expected is silent, find the one the app is REALLY on.
 //
 // ADMIN 2026-08-15: "preview port ko smart switch banao, ek port par hard fix nahi rakho — ek jagah
@@ -115,7 +116,24 @@ export function shouldSweep(expectedPortUp: boolean): boolean {
  * It names both ports, because "we looked in the wrong place" is a materially different fact from
  * "your app was broken" — and for ten minutes of that build, the engine believed the second one.
  */
-export function sweepFoundSummary(expected: number | null, found: number): string {
+export function sweepFoundSummary(expected: number | null, found: number, appPorts?: AppPortMap | null): string {
+  /**
+   * 🔴 "YOUR APP IS RUNNING ON PORT X" WAS A FALSE SENTENCE ON EVERY FULL-STACK APP (autopsy
+   * `1a7f4a58`, 2026-09-18; admin: *"ab yeh nahi ana chahiye"*).
+   *
+   * The build was a Vite web app on 5173 beside an Express API on 3001. The agent restarted the API
+   * alone, the sweep found 3001, and this function announced *"Your app is running on port 3001, not
+   * the 5173 this project's framework normally uses — the preview now points at 3001."* Both ports
+   * were the app's own. Nothing had moved; a SECOND PROCESS of the same app had come up.
+   *
+   * The agent believed the sentence, pointed the preview at the API, and the user's preview served
+   * `Cannot GET /` for the remaining eighteen minutes of a 36-minute build.
+   */
+  if (appPorts && isSecondaryAppPort(appPorts, found)) {
+    return `Port ${found} is this project's API/secondary service, not its web page — this app runs `
+      + `more than one process and its web page is served on port ${appPorts.preview}. `
+      + `Nothing has moved. Point the preview at ${appPorts.preview} once that server is up.`;
+  }
   return expected && expected !== found
     ? `Your app is running on port ${found}, not the ${expected} this project's framework normally uses — the preview now points at ${found}.`
     : `Your app is running on port ${found} — the preview now points at it.`;

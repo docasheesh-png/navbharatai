@@ -66079,6 +66079,64 @@ rule, `disabled:bg-white/10` and `disabled:text-white/25` with no light-theme re
 with no gradient stop). All four were added to the compat layers rather than designed around — a
 disabled SEND button rendering white-on-white would have told a light-theme user the button had
 vanished, not that it was disabled.
+
+## 2026-09-18 — THE "OTHER" BUCKET, ROOT-CAUSED: seven of nine abort causes ended a build with NO outcome (admin's failure table)
+
+The admin sent the Failure Category table — **381 built, 153 failed** — and asked for failures to be
+driven to zero at "deep DNA level". The top reason for the biggest row (General, 106 failures) was
+*"Other (not yet in the known pattern list)"*, **45 times**; Healthcare, Events and Logistics likewise.
+A failure nobody can name cannot be fixed at any level, so that bucket was the first DNA step.
+
+**Root cause, read out of the code and then measured.** Nine things abort a build (`AbortCause`).
+`AgentRunner` sees the signal and returns `ok:false` with an honest sentence — but never touches the
+timeline. The route recorded an `OUTCOME_*` for exactly TWO causes (watchdog, advisory-cap — both in
+`finalizeOnDeadline`). The other seven — the user's Stop, the cost ceiling, the futility breaker, a
+deploy drain, a reclaimed lock, the reaper, an unrecorded abort — reached `deriveRootCause` with no
+outcome, were headlined by their loudest UNRELATED warning (a provider fallback, a benched rung, a
+read of a file not yet written), and the classifier filed that sentence as "Other". Verified: every
+one of the 18 abort sentences and every `deriveRootCause` fallback sentence run through
+`classifyFailureReason` with no code came back `other`. This is the sibling of the 2026-09-17
+empty-build fix, which found "the ONLY verdict flip in the ROUTE that recorded none" — the abort branch
+lives in the runner, and it flips seven ways.
+
+**Fixed at the class, not the instance.** `src/server/AgentV3/abortOutcome.ts` maps EVERY cause to its
+outcome in one `switch` with a `never` check — a tenth cause cannot be added without deciding what it
+records. The route records it at the ONE abort funnel (beside the b89ba6f8 `USER_STOPPED_BUILD`
+back-fill), guarded on "no outcome on the timeline yet" so a deadline ending never carries two. New
+codes: `OUTCOME_USER_STOPPED` (info), `OUTCOME_COST_CEILING`, `OUTCOME_FUTILE`, `OUTCOME_DEPLOY_DRAIN`,
+`OUTCOME_SUPERSEDED`, `OUTCOME_REAPED`; `unknown` and a platform-composed stop reuse `OUTCOME_STOPPED`.
+Labelled in `OUTCOME_REASONS`, categorised in `OUTCOME_TO_CATEGORY` (the parity test enforces both).
+
+**Three consequences carried through, so the fix does not trade one problem for another:**
+- 🔒 How a build ENDED is not a finding about the APP. All eight stop codes (the six new ones plus
+  the two the finalizer writes) are in `PROCESS_ONLY_CODES`, so a cost ceiling is no longer printed
+  as "1 build-breaking blocker" on the user's health card — the provider-error-as-app-blocker class
+  (4efab9d7) through a new door. The release gate is RED on `buildOk:false` regardless; no verdict moves.
+- ✅ **The fourth population the failure panel said it could not separate is separated.** The card's
+  own text read *"Builds the USER stopped are not separated out yet — the engine knows the difference
+  but does not record it"*. It records it now, and the store also reads legacy records' own
+  `USER_STOPPED_BUILD` / `CANCELLED_BUILD_CHARGED` lines (`userStopped` on `AllDiagnosticsEntry`, via
+  the same `stoppedByUser` the gate uses — never a guess from duration or wording). A user's Stop is
+  neither a failure nor a success: it leaves the failure count, the rate, the domain rows and the
+  reason table, and has its own column ("Stopped by the user"). ⚠️ **This will LOWER the headline
+  failure count on the next panel read** — that is the removal of a mislabelling, not of failures.
+- Legacy records with no code get stable names for the engine's OWN fallback sentences:
+  `no-cause-recorded` ("no specific error was captured" / "ended without recording an outcome"),
+  `futile` (the breaker's warning), `user-stopped` (the deriveRootCause sentence).
+
+**Test:** `tests/everyAbortCauseRecordsAnOutcome.test.ts` (18): pins the BUG as measured (all 18
+sentences → `other`), derives the cause list from the union in the source, checks every outcome is
+known to both maps and never a blocker, the panel split reconciles with the new column, and the
+route wiring. **Reversion-proven twice**: removing the route funnel fails the wiring case; removing
+the process-only entries fails the blocker case.
+
+**Honest limits (rule 6).** (1) This names the 45; it does not yet fix what stopped them — the next
+panel read will say which of cost-ceiling / futile / reaper / deploy-drain dominates, and THAT is
+what to fix next. (2) Old records keep their old headline: a legacy aborted build whose loudest
+warning was a provider sentence stays "Other" until it is rebuilt — nothing here rewrites stored
+reports. (3) "Failure → 0" is not a truthful target and was said so to the admin: a user's Stop, a
+deploy drain and a wallet's cost ceiling will always end some builds; the honest target is that every
+ending is NAMED and every named engine failure is driven down.
 ## 2026-09-18 — AUTOPSY of report `2ec15a71` (a real user's hospital-app edit) — and the hollow graph is FILLED
 
 **The build:** a free-tier user's EDIT to a hospital price-list app. Prompt (verbatim): *"Or bhi medicine

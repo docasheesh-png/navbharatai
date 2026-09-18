@@ -27,6 +27,8 @@ interface VerdictSplit {
   builtButJudgedFailed: number;
   succeeded: number;
   unjudged: number;
+  /** Absent on a server that predates the split of user-stopped builds. */
+  userStopped?: number;
   evidenceUnknown: number;
   appDeliveredPct: number | null;
   reportedOkPct: number | null;
@@ -155,6 +157,12 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
                     note: '',
                     tone: 'text-success',
                   },
+                  ...(typeof data.verdictSplit.userStopped === 'number' ? [{
+                    label: 'Stopped by the user',
+                    value: data.verdictSplit.userStopped,
+                    note: 'the person ended it — neither a failure nor a success, and in no other column',
+                    tone: 'text-info',
+                  }] : []),
                 ].map((r) => (
                   <div key={r.label}>
                     <p className="text-[9px] font-black uppercase tracking-widest text-faint">{r.label}</p>
@@ -194,9 +202,9 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
               </div>
               <p className="mt-3 text-[9px] leading-relaxed text-faint">
                 Builds nobody could judge either way are left out of both figures, so the target cannot be hit by
-                counting unknowns. Builds the USER stopped are not separated out yet — the engine knows the difference but does not
-                record it in the report, and guessing it would put an invented number in the one figure meant to
-                end guessing.
+                counting unknowns. Builds the USER stopped are read off each build's own record (the abort funnel
+                records it; older records carry the stop line the settle path wrote) — never guessed from duration
+                or wording — and sit in their own column, outside both the failure rate and the reason table.
               </p>
             </div>
           )}

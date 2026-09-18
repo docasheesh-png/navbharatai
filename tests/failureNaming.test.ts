@@ -166,8 +166,10 @@ describe('Phase 1 — a failure rate split into what can actually be fixed', () 
     const card = readFileSync(join(process.cwd(), 'src/components/admin/FailureCategoryCard.tsx'), 'utf8');
     expect(card).toContain('verdictSplit');
     expect(card).toContain('Worked, called failed');
-    // And it must say plainly what it still cannot separate, rather than implying the split is total.
-    expect(card).toContain('Builds the USER stopped are not separated out yet');
+    // The fourth population is separated since 2026-09-18 (abortOutcome.ts) — the card must show it as
+    // its own column and must no longer claim it cannot be separated.
+    expect(card).toContain('Stopped by the user');
+    expect(card).not.toContain('not separated out yet');
   });
 });
 

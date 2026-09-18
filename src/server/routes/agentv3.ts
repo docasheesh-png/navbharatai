@@ -339,6 +339,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
+import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
@@ -15700,6 +15701,34 @@ async function noteBuildOutcome(
               : 'The user asked for this build to stop, and it was stopped.',
             detail: 'Recorded from the build\'s abort signal — Stop and Unsend reach the run only that way.',
           });
+        }
+      } catch { /* the record must never be what breaks the build it is describing */ }
+
+      // ── …AND EVERY ABORT CAUSE RECORDS AN OUTCOME (the "Other" bucket, admin 2026-09-18) ──────────
+      //
+      // The back-fill above copies the user's stop onto the timeline. It was the only cause that got
+      // one: of the nine `AbortCause`s, only the two deadline causes recorded an `OUTCOME_*` (in
+      // `finalizeOnDeadline`), so a build ended by the cost ceiling, the futility breaker, a deploy
+      // drain, a reclaimed lock, the reaper, an unrecorded abort — or the user — reached
+      // `deriveRootCause` with no outcome, was headlined by its loudest unrelated warning, and landed on
+      // the admin's failure panel as "Other (not yet in the known pattern list)": 45 of the biggest
+      // row's 106 failures. `abortOutcome.ts` is the one mapping, exhaustive over the union.
+      //
+      // ⚠️ Recorded only when the signal was aborted AND no outcome is on the timeline yet — the
+      // finalizer writes its own for the deadline causes, and one ending must never carry two.
+      try {
+        if (abort.signal.aborted && !outcomeCodeOf(buildDiag.report().issues)) {
+          const outcome = abortOutcomeFor(abortCauseOf(abort.signal), { platformComposed: isPlatformFixRequest(prompt) });
+          if (outcome) {
+            buildDiag.record({
+              phase: 'build', severity: outcome.severity, code: outcome.code, message: outcome.message,
+              // A stop is a stop: nothing healed it, so it is not "resolved" — a report must not be able
+              // to summarise a halted build as one that recovered. The user's own stop is the exception:
+              // there is nothing outstanding about a build the person chose to end.
+              autoResolved: outcome.code === ABORT_OUTCOME_CODES.userStopped,
+              detail: 'Recorded from the build\'s abort signal, the one door every abort goes through.',
+            });
+          }
         }
       } catch { /* the record must never be what breaks the build it is describing */ }
 

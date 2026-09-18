@@ -8,6 +8,7 @@
 // the impure orchestration (capture → repair runner → re-capture) lives in the build route.
 
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
+import { appSourceFrame, siteTag } from './runtimeErrorSite';
 import { renderRepairGuidance } from './RuntimeErrorClassify';
 import { envFlag } from '../lib/envFlag';
 
@@ -15,6 +16,15 @@ export interface RuntimeError {
   t: number;
   kind: string;
   text: string;
+  /**
+   * The browser's own stack for this error, when the capture site had one (autopsy 95598899).
+   *
+   * OPTIONAL BY CONSTRUCTION, and that is not laziness: a `console.error(...)` has no stack, an older
+   * sandbox daemon still running the previous script emits none, and a `requestfailed` never had one.
+   * Absent therefore means "not captured" and the report says nothing — it must never become a guess.
+   * Nothing keys, dedupes or filters on this field; it is evidence for a reader, not a decision input.
+   */
+  stack?: string;
 }
 
 /**
@@ -211,10 +221,15 @@ export function filterActionableErrors(errors: unknown): RuntimeError[] {
     const key = text.slice(0, 200);
     if (seen.has(key)) continue;
     seen.add(key);
+    // ⚠️ This builds a NEW object rather than passing `e` through, so a field not named here is
+    // silently dropped — which is how the stack would have been lost even after the capture kept it.
+    const rawStack = (e as RuntimeError).stack;
+    const stack = typeof rawStack === 'string' ? rawStack.trim() : '';
     out.push({
       t: typeof (e as RuntimeError).t === 'number' ? (e as RuntimeError).t : 0,
       kind: typeof (e as RuntimeError).kind === 'string' ? (e as RuntimeError).kind : 'error',
       text,
+      ...(stack ? { stack } : {}),
     });
   }
   return out;
@@ -224,7 +239,14 @@ export function filterActionableErrors(errors: unknown): RuntimeError[] {
 export function formatRuntimeErrors(errors: RuntimeError[], max = 20): string {
   // P-AI.11 — append a parsed file:line:col + type hint (when extractable from the error text) so
   // the repair pass can jump straight to the failing location instead of re-deriving it.
-  return errors.slice(0, max).map((e) => `- [${e.kind}] ${e.text}${locationTag(e.text)}`).join('\n');
+  //
+  // …and when the TEXT carries no location, ask the STACK (autopsy 95598899). A React runtime crash's
+  // message is one sentence with no path in it, which is exactly the case that used to reach the
+  // repair pass and the report with no file at all. Text wins when it has one, so every error that
+  // already read well is byte-identical.
+  return errors.slice(0, max)
+    .map((e) => `- [${e.kind}] ${e.text}${locationTag(e.text) || siteTag(appSourceFrame(e.stack))}`)
+    .join('\n');
 }
 
 /**
@@ -388,13 +410,25 @@ export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerify
   // admin report tells a genuinely-broken preview apart from console chatter instead of a flat count.
   const fatal = fatalRuntimeErrorCount(errors);
   const fatalNote = fatal > 0 ? ` ${fatal} of them crash the app at runtime.` : '';
+  // 🔎 NAME THE FIRST ONE, AND WHERE IT IS (autopsy 95598899, admin 2026-09-18).
+  //
+  // This record used to be a COUNT and nothing else, so a report could say "1 runtime error remained"
+  // and leave the next reader — a person or the next autopsy — with no sentence, no file and no way
+  // to act. That is what closed `95598899` as unexplained. The text was always to hand; the file now
+  // is too, via the stack the capture sites stopped discarding.
+  const first = errors.find((e) => e && String(e.text || '').trim());
+  const where = first ? (locationTag(first.text) || siteTag(appSourceFrame(first.stack))) : '';
+  const firstText = first ? first.text.replace(/\s+/g, ' ').trim() : '';
+  const firstNote = first
+    ? ` First: ${firstText.length > 220 ? `${firstText.slice(0, 217)}…` : firstText}${where}.`
+    : '';
   return {
     phase: 'autofix',
     severity: 'warning',
     code: 'RUNTIME_ERRORS_REMAIN',
     message:
       `${errors.length} runtime error(s) remained after the auto-fix budget was spent — the app was built, ` +
-      `but these were detected in the browser at runtime and may still be present.${fatalNote}`,
+      `but these were detected in the browser at runtime and may still be present.${fatalNote}${firstNote}`,
     autoResolved: false,
   };
 }

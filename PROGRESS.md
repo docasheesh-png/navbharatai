@@ -67270,6 +67270,34 @@ after a botched restore is exactly the false green this repo warns about.
 
 **Next in this series (admin: "ek ek kar ke sabhi build karo"):** F (reviewer cheap on green), then
 E (time-to-first-render + who wrote after green), then B/C on E's numbers. D never.
+
+## 2026-09-18 — Option E: who wrote after the app was green (`TIME_TO_FIRST_RENDER`, `POST_GREEN_WRITES`)
+
+Third of the series, stacked on Option A (it needs A's first-render moment). Before either stronger
+protection is built — verify-and-revert on every post-green write, or arming the freeze before the
+~36-pass gate stretch — this answers the question both depend on, because **as of today no report
+shows a pass breaking a green app** (and #3084 found the same for the loop and shipped
+`READY_BEFORE_END` first).
+
+- `TIME_TO_FIRST_RENDER` — recorded once on A's proof (`BuildDiagnostics.recordTimeToFirstRender`),
+  the render-side sibling of `TIME_TO_FIRST_CALL`. "4 minutes" is now a number.
+- `greenFreeze.setWriteObserver` — a second observer at the SAME chokepoint as the refusal observer,
+  fired on every ALLOWED `assertWriteAllowed` with `currentPass()` (null = the build loop). One
+  place, so nothing is threaded through the twenty sites that persist a file; infra paths excluded.
+- `postGreenWrites.ts` (pure) — the ledger, grouped by writer, read against the END verdict
+  (`endVerdictFrom(previewGreen, previewProvenBroken)`, green wins as in Green Stop). Severity is the
+  finding: nothing wrote / wrote-and-rendered / unchecked → info; **wrote and PROVEN BROKEN → warning
+  naming the writers.** Bounded at 2,000 entries and `MAX_NAMED_PASSES` = 6 in the line.
+- Both codes registered as `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — measurements of the engine,
+  never findings about the user's app.
+
+**What decides B/C:** a run of real builds. If `POST_GREEN_WRITES` warnings appear and name the same
+writers, that writer class is the target (a gate pass → C with evidence; the build loop → B). If they
+do not appear, the 10–20 minutes are not breakage and "make the first draft right" is the lever.
+
+**Tests:** `tests/whoWroteAfterTheAppWasGreen.test.ts` — the grouping, all four verdict lines, the
+observer at the chokepoint (allowed vs refused are disjoint; infra excluded; a throwing observer
+never breaks a write; dispose), idempotent timing, and source-anchored wiring guards.
 ---
 
 ## 2026-09-18 — 🔴 FOUR VARIABLES HELD ONE FACT, AND THE TWO PRODUCERS DID NOT AGREE (evidence ledger, 7th appearance)
@@ -67428,6 +67456,78 @@ billing subtraction were each removed in turn and the matching cases observed to
 pinned-literal guards were updated (not loosened) because the throw site gained a wrapper and the
 billing return gained a field — each with the reason recorded in place, per the trail those same
 comments already carry.
+## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)
+
+**Admin:** *"woh crash report wala kaam bhi kar do"* — make a runtime crash bring its own file, so no
+autopsy is blocked on missing evidence again.
+
+### The gap, stated as the autopsy that hit it
+
+Build `95598899` left the app throwing `Cannot read properties of null (reading 'useState')`. The
+report recorded the SENTENCE and nothing else, so that autopsy could not name the file, could not read
+it, and closed the cause **unexplained** — honest, and a wasted report.
+
+The information existed at capture time and was dropped one property short:
+
+```js
+page.on('pageerror', e => rec('pageerror', e && e.message || e));   //  e.stack, never read
+```
+
+…in **three** independently-written capture sites (the console bridge, the page-route check, the
+journey runner), plus two more that scaffold the user's own test files.
+
+🔑 **AND A MESSAGE CAN NEVER CARRY IT.** `locationTag` / `parseLocation` already pull a `file:line:col`
+out of error TEXT, which is why a Vite compile error reads well in the report. A React runtime crash's
+message is one sentence with no path in it, so that parser correctly returned nothing — **the
+information was never in the string it was given.** That is why this reads as "the parser is fine" on
+inspection and still leaves every crash unattributed.
+
+### The fix
+
+- **`runtimeErrorSite.ts`** (new, pure) answers the question nobody had asked: *which frame is the
+  app's OWN code?* It REUSES `parseLocation` per frame and adds only the decision — skip
+  `node_modules` / `.vite` / `@vite` / `@react-refresh` / `@fs` / `@id` / extensions, strip the origin
+  and Vite's HMR query, return repo-relative. `null` when the stack names none, never a guess.
+- **The bridge stops discarding it**: `rec` takes a bounded stack, `pageerror` passes `e.stack`, the
+  NDJSON reader carries it back out as OPTIONAL (an older daemon still running emits none, and a
+  `console.error` never had one).
+- **`RuntimeError.stack`** survives `filterActionableErrors` — which builds a NEW object, and is
+  exactly how the field would have been lost after the capture started keeping it.
+- **The report line now names the first error and where it is.** `RUNTIME_ERRORS_REMAIN` was a COUNT
+  and nothing else.
+
+🔒 **The stack fills a GAP, never overrides.** `locationTag(text) || siteTag(stack)` — every error that
+already read well is byte-identical, and a reversion proof pins the order.
+
+### Scope, and why it stops where it does (rule 3, and the concurrency rule)
+
+`PageRouteCheck.ts` and `journeyDerivation.ts` have the identical defect and are **deliberately not
+touched**: **PR #3088 is editing `PageRouteCheck.ts` right now** (it changes `summarizePageCheck`'s
+return shape), and the journey runner is written as its deliberate mirror — fixing one alone would
+leave the pair inconsistent for whoever lands the other. Both also need a parallel `stacks` array
+rather than a one-line change, because their errors are plain strings embedded in report sentences.
+**Recorded as the named sibling, to do together once #3088 lands.**
+
+`e2eScaffold.ts` and `authFlowSpec.ts` are NOT in this class: their error strings are written into the
+USER's own generated test files, a different contract.
+
+### Tests
+
+`tests/theStackNamedTheFile.test.ts` — **25 cases** built on that crash's real React+Vite stack: the
+extraction, every not-our-code frame it must refuse, the conservative keep, the bounded deep stack, the
+filter, the repair prompt, the report line, white-label, and four **source-level reversion guards**
+(the capture is a sandbox script string no unit test can execute). **Proven by five reversions** —
+the daemon dropping the stack, the filter dropping it, the stack overriding the text, no origin strip,
+no vendor skip — each turns the suite red.
+
+⚠️ **A defect in my own module, found by my own test and recorded rather than quietly swapped:**
+`FILE_LOC`'s character class contains digits, so `http://localhost:5173/src/App.tsx` matched from the
+PORT and produced `5173/src/App.tsx` — a path that exists nowhere. The origin is stripped before the
+shared parser is asked; `FILE_LOC` itself is untouched, so no existing caller changed.
+
+**What to watch on the first real builds:** `RUNTIME_ERRORS_REMAIN` lines carrying `[at src/…]`. A
+crash with no tag is a stack that genuinely named no app frame — which the report now says rather than
+implies.
 ## 2026-09-18 — A hover that repeats the resting background is not a hover (follow-up to #3070)
 
 **Found while auditing #3070 for the admin's standing instruction that no PR may compromise another
@@ -67470,3 +67570,84 @@ restoring one `hover:bg-raised` fails the scanner by name, and setting `--surfac
 **Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
 in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
 appears it fails rather than shipping silently.
+## 2026-09-18 — `AGENTV3_PROJECT_MODE=on`, and the door it opens was bolted (the gate read bullets; users write commas)
+
+The admin set `AGENTV3_PROJECT_MODE=on` in Cloud Run — the two-month-old pending decision recorded in
+`CLAUDE.md`, taken on this session's recommendation. **The first thing done after the switch was to
+measure what it had actually switched on, and the answer was: almost nothing.**
+
+**Measured on `main`, before touching a line** (`megaProjectSignals`, 14 realistic prompts):
+
+| prompt | fires? | why |
+|---|---|---|
+| `school ERP with students, teachers, attendance, fees, exams, timetable, library, transport` | **no** | bullets = **0** |
+| `ek hospital management system banao jisme OPD, IPD, pharmacy, billing, lab reports, doctor schedule, patient history sab ho` | **no** | bullets = **0** |
+| `banao ek full fledged ERP for my factory with production, inventory, purchase, sales, accounts, payroll, quality, dispatch` | **no** | bullets = **0** |
+| `Build a hospital management system:\n- patients\n- doctors\n- …` | yes | 8 bullet LINES |
+
+**Zero of fourteen.** `bullets` was `split('\n').filter(/^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/)` — a count of
+markdown list LINES. `ProjectPlan.test.ts`'s own passing case is a hospital system written as a
+bulleted spec. **The gate was built to read a DEVELOPER's spec; a real user writes one line with
+commas.**
+
+🔑 **THIS IS THE SAME CLASS AS THE FIX SHIPPED HOURS EARLIER THE SAME DAY.** `COMPLEX_APP_SIGNAL`
+listed the words a developer writes (saas, crm, checkout) and scored `hospital management system` **5**
+— the score of the word "hi". That was fixed in the SIZER (`namesBusinessDomain`). The two GATES that
+decide "is this a project?" were never hunted, and both were blind the same way:
+
+| gate | feeds | what it could see |
+|---|---|---|
+| `megaProjectSignals` (`AgentV3/ProjectPlan.ts`) | Software Project Mode (`AGENTV3_PROJECT_MODE`) | bullet lines only |
+| `featureCount` (`lib/appScopeAnalyzer.ts`) | the mega-app roadmap (`AGENTV3_MEGA_ROADMAP`, **on by default**) | bullet lines + loose verbs |
+
+On the school-ERP prompt the second one scored **0**: eight named modules, and the only thing it could
+match was the single word "with", halved to nothing.
+
+### The fix — one counter, centralized (rule 4 step 2: fix the class)
+
+`src/server/AgentV3/enumeratedFeatures.ts` — `countEnumeratedFeatures`, PURE. It reads a bulleted spec
+**and** the way a person actually types a list: inline `a, b, c`, `a and b`, Hinglish `a aur b`, and
+the list-opening connectives that separate the REQUEST from the LIST (`with`, `jisme`, `including`,
+`:` …), so *"ek hospital management system banao jisme OPD, IPD, …"* counts the modules and not the ask.
+
+🔒 **STRICT BY CONSTRUCTION, because both consumers are GATES and over-counting costs real money:**
+a run needs `MIN_RUN_ITEMS = 3` pieces before any of it counts (one comma in a sentence enumerates
+nothing); an item is at most `MAX_ITEM_WORDS = 5` words (a comma-joined SENTENCE inflates nothing);
+items are de-duplicated; the count is bounded at `MAX_COUNTED = 40`.
+
+**⚠️ `MEGA_BULLETS_WITH_NOUN` moved 8 → 6, and 6 is borrowed, not invented:** `complexityFromPrompt`
+already floors a named complex app's `featureCount` at six — this repo's own standing answer to "how
+many parts before this is a complex app". Here it is the weaker half of an AND, since a big-software
+noun must be present too.
+
+**Measured margin (the whole justification):** every ordinary app prompt counts **0–2**; every real
+project prompt counts **5–8**. Six sits in the gap, not on an edge.
+
+### 🔎 Sibling fixed in the same change (rule 3)
+
+`featureCount` in `appScopeAnalyzer.ts` now takes `Math.max(legacy, countEnumeratedFeatures(text))` —
+**a MAX, never a sum**: a bulleted PRD already counts once through `numbered`, and adding the shared
+count on top would double it and push ordinary prompts over `FEATURE_COUNT_MEGA`. That gate spends a
+real planner call (up to a minute) on every user's build, so it may only ever become more right, never
+more eager. **Measured blast radius: three project prompts flipped to `analyze`, ZERO ordinary prompts
+flipped.** No spend increase on ordinary builds.
+
+### Test
+
+`tests/theGateReadsBulletsUsersWriteCommas.test.ts` — 17 cases. It pins the bug as measured (both real
+corpora, not synthetic strings), and its ORDINARY corpus is the precision lock: a later widening that
+drags a todo app into either gate fails CI. **Reversion-proven in all three halves:** bullet-only
+counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail; restored → 17 pass.
+
+### Still open, not guessed at (rule 6)
+
+1. **Whether Software Project Mode actually builds these apps better is unmeasured** — it has still
+   never completed a real build. This change only means the door now opens for the requests it was
+   written for. The honest thing to watch is the `PROJECT_MODE` report line and whether module plans
+   appear and advance.
+2. **The three gaps recorded on 2026-07-04 are unchanged:** an IMPORTED repo never creates a plan; a
+   reopened incomplete plan needs a typed "continue"; contract DRIFT is caught only by the whole-
+   workspace `tsc`, not by a dedicated contract check.
+3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
+   system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
+   ASKED what it needs is a product question, not a threshold one.

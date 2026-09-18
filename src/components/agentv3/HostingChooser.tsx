@@ -1178,7 +1178,7 @@ export function HostingChooser({
                         {cfgErrors.length > 0 && <ul className="text-[10.5px] text-danger list-disc pl-4">{cfgErrors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
                         {cfgNote && <p className="text-[10.5px] text-success">{cfgNote}</p>}
                         <button onClick={() => void saveSettings()} disabled={cfgBusy}
-                          className="self-start px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-ink text-[11px] font-semibold disabled:opacity-50">
+                          className="self-start px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-ink text-[11px] font-semibold disabled:opacity-50">
                           {cfgBusy ? 'Saving…' : 'Save settings'}
                         </button>
                       </>

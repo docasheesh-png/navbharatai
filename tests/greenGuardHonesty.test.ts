@@ -73,7 +73,15 @@ describe('and it is wired where the summary still reaches the user', () => {
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('the guard records what it undid', () => {
-    expect(route).toContain('greenGuardRestoreFacts = { restored: Object.keys(plan.write).length, removed: plan.remove.length };');
+    // Re-anchored 2026-09-18: the facts gained `fromThisBuild` (inBuildGreen.ts — a first build whose
+    // own earlier render came back is owed a different sentence), so the literal is now multi-line.
+    // The claim is unchanged: restored and removed are recorded from the plan that ran.
+    const at = route.indexOf('greenGuardRestoreFacts = {');
+    expect(at).toBeGreaterThan(0);
+    const facts = route.slice(at, at + 400);
+    expect(facts).toContain('restored: Object.keys(plan.write).length');
+    expect(facts).toContain('removed: plan.remove.length');
+    expect(facts).toContain('fromThisBuild: snapshotIsFromThisBuild(');
   });
 
   it('and the correction is applied at the late mutation point, before the charge line', () => {

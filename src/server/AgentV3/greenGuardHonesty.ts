@@ -30,6 +30,12 @@ export interface GreenGuardRestoreFacts {
   restored: number;
   /** Files the failed attempt had added, and which were removed again. */
   removed: number;
+  /**
+   * The version put back was recorded by THIS build (inBuildGreen.ts) — the app rendered partway
+   * through and a later step broke it. Then "your change was not kept" is false: the request WAS
+   * delivered, and what was undone is the engine's own later work. A different sentence is owed.
+   */
+  fromThisBuild?: boolean;
 }
 
 /** Did the guard actually undo anything? A restore that changed nothing is not worth saying. */
@@ -47,7 +53,20 @@ export function greenGuardUndidWork(f: GreenGuardRestoreFacts | null | undefined
  */
 export function greenGuardSummaryCorrection(f: GreenGuardRestoreFacts): string {
   const parts: string[] = [];
-  parts.push('⚠️ **Your change was not kept.**');
+  if (f.fromThisBuild) {
+    parts.push(IN_BUILD_GREEN_MARK);
+    parts.push(
+      'Your app was rendering partway through this build, and a later step broke it — so that earlier, '
+      + `working version was put back: ${f.restored} file(s) restored${f.removed > 0 ? ` and ${f.removed} later file(s) removed` : ''}. `
+      + 'What you see is the version that rendered. The later changes are saved separately and were not thrown away.',
+    );
+    parts.push(
+      'If something you asked for is missing from this version, say which one and I will add it on top of the '
+      + 'working app — one step at a time, checking it still runs after each.',
+    );
+    return parts.join('\n\n');
+  }
+  parts.push(GREEN_GUARD_MARK);
   parts.push(
     'The app stopped working with it, so the last version that DID work was put back — '
     + `${f.restored} file(s) restored${f.removed > 0 ? ` and ${f.removed} new one(s) removed` : ''}. `
@@ -67,9 +86,11 @@ export function greenGuardSummaryCorrection(f: GreenGuardRestoreFacts): string {
  * watchdog finalizer), and two copies of "your change was not kept" reads like a malfunction.
  */
 export const GREEN_GUARD_MARK = '⚠️ **Your change was not kept.**';
+/** The in-build variant's marker — a different sentence, the same idempotency. */
+export const IN_BUILD_GREEN_MARK = '⚠️ **A later step broke your app, so the version that was working came back.**';
 
 export function withGreenGuardCorrection(summary: string, f: GreenGuardRestoreFacts): string {
   const s = String(summary ?? '');
-  if (s.includes(GREEN_GUARD_MARK)) return s;
+  if (s.includes(GREEN_GUARD_MARK) || s.includes(IN_BUILD_GREEN_MARK)) return s;
   return `${greenGuardSummaryCorrection(f)}\n\n---\n\n${s}`;
 }

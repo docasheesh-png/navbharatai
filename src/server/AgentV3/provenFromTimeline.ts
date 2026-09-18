@@ -39,6 +39,7 @@
  * PURE. No I/O, no clock, never throws.
  */
 import type { CheckOutcome } from './releaseGate';
+import { APP_RENDERED_CODE } from './renderProof';
 
 /** The one shape of a recorded fact this reader needs. Structural, so any issue list fits. */
 export interface RecordedFact {
@@ -68,6 +69,15 @@ const PREVIEW_ADDRESS_CODES = new Set(['PREVIEW_PUBLISHED', 'PLATFORM_PREVIEW_UP
 export interface TimelineProof {
   /** Only ever `'passed'` — this reader promotes, and never demotes or fails a check. */
   pages?: Extract<CheckOutcome, 'passed'>;
+  /**
+   * The app itself was seen RENDERING in a real browser — written by `renderProof.appRenderedRecord`,
+   * which is where the "real browser only" rule lives. Only ever `'passed'`, same as `pages`.
+   *
+   * ⚠️ This is a STRONGER claim than `previewUrlPublished` and must not be confused with it: an
+   * address that is listening is not an app that painted, which is the distinction `PREVIEW_PUBLISHED`
+   * was reworded to respect (*"Whether the app itself renders is checked next"*).
+   */
+  preview?: Extract<CheckOutcome, 'passed'>;
   /** Changes how an unproven preview is EXPLAINED, never the verdict. */
   previewUrlPublished?: boolean;
 }
@@ -91,6 +101,10 @@ export function provenFromTimeline(
     // code would be some new, weaker sense of the word, and must not silently count as proof — the
     // safe answer to a shape we do not recognise is to say nothing.
     if (code === APP_RAN_IN_A_BROWSER && f.severity === 'info') out.pages = 'passed';
+    // Same discipline as the line above: `APP_RENDERED` is written as `info` by its one producer, and
+    // a future warning carrying the code would be a weaker sense of the word that must not pass as
+    // proof.
+    if (code === APP_RENDERED_CODE && f.severity === 'info') out.preview = 'passed';
     if (PREVIEW_ADDRESS_CODES.has(code)) out.previewUrlPublished = true;
   }
   return out;

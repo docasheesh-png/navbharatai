@@ -67185,6 +67185,211 @@ The module's existing 20 cases pass unchanged.
 - **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+## 2026-09-18 — Option F: a suggestion costs a suggestion's price (`AGENTV3_GREEN_REVIEW_LEAN`)
+
+Second of the series (admin: *"ek ek kar ke sabhi build karo"*). Measured on b6f88a72 from the raw
+token counts, not report fields: the reviewer made **40 calls**, read `src/App.tsx` **six times** and
+`src/index.css` five (each time told by the tool "you already have it"), spent **523,374 input tokens
+= 34.4% of the build's LLM spend ≈ ₹12.6**, and returned **`responseChars: 0` on every call**. And on
+that green app Green Stop had already made it suggest-only — no repair could run, nothing it said
+could fail the build.
+
+**The rule, reused — never a second "is the app green?" question.** `greenReviewPlan` is
+`!reviewerShouldWrite(...)`: exactly when the review can only suggest, it is also lean.
+- **Hard step cap** `GREEN_REVIEW_MAX_STEPS = 12` — a second `makeSubAgentSpawn({ ...subAgentDeps,
+  maxSteps })`. The deps object was hoisted so one wiring serves both spawns (the arity test
+  `subAgentGetsTheWholeWiring` re-anchored on the object, reason recorded in place).
+- **Budget** `reviewerBudgetMs(…, { previewGreen })` capped at `GREEN_REVIEW_BUDGET_MS = 45_000` — the
+  floor the function already refuses to go under, so a green review is never given LESS than a
+  not-green one at the wall-clock margin, only never more.
+- **The reviewer is TOLD** (`reviewBuild({ mode: 'suggest' })`): proven to render, suggest-only, read
+  each file once, do not survey, do not call `second_opinion`. The instruction became the pure,
+  exported `reviewerInstruction` so this can be asserted rather than trusted; full mode is
+  byte-identical to a review with no mode at all (test-locked).
+- Report code `REVIEW_LEAN`. Kill switch `AGENTV3_GREEN_REVIEW_LEAN=off`.
+
+**Untouched, on purpose:** where the reviewer can WRITE — not green AND (build failed OR proven
+broken) — full budget, full steps, full powers. The cut is in tokens, never strictness.
+
+⚠️ **A wrong expectation in my own first test, caught by the derived case.** I wrote that "not green,
+not proven broken, build ok" keeps the full review. `reviewerShouldWrite` says otherwise — that is the
+*could not look* state, and since 2026-08-23 ignorance is not a licence to edit, so it was already
+suggest-only. The plan correctly makes it lean; the hand-written table was wrong and the derived
+test (plan.mode === 'suggest' ⇔ !canWrite, all eight states) is what caught it. Recorded rather
+than quietly corrected.
+
+`second_opinion` needed no change: the child dispatcher is built with it withheld (SubAgent.ts,
+"positions 7-10"), which is why the Gita reviewer's call to it took 0 s.
+
+**Tests:** `tests/aSuggestionCostsASuggestionsPrice.test.ts` — 16 cases + source-anchored wiring
+guard. **Proven by reversion four ways:** the plan not asked · the budget not told · the green cap
+removed · the plan ignoring the write rule (bites two cases).
+## 2026-09-18 — Option A: a working app is never lost to later edits in the SAME build (`AGENTV3_IN_BUILD_GREEN`)
+
+Admin, verbatim: *"navbharatai dwara app banne ke baad tutni nahi chahiye!!!!!"* — the same sentence
+they wrote on 2026-08-09, which GreenGuard answered for TURNS. Read from the route's end-of-build
+call: `before: { green: hasSnapshot }` where `hasSnapshot` is a **previous** build's green snapshot.
+So on a first build — app rendering at minute 2, broken by a later step at minute 6 — there was
+nothing to restore from. Verified in the Gita build (b6f88a72): `GREEN_GUARD_SAVE` fired at t+365 s,
+after everything; no snapshot existed at t+128 s when the app first rendered.
+
+**The principle, extended one level down: a build's OWN first proven render is a last known good too.**
+
+- `inBuildGreen.ts` (pure): the evidence bar is the late check's own three refusals — never curl,
+  never inconclusive, never server-down (`isProvenGreenRender`); `shouldAttemptInBuildProof` bounds
+  attempts (one in flight, 15 s gap, stop once proven, never after abort); `attemptOutcome` names the
+  write race apart from "not yet" and "could not tell".
+- The route runs the proof BESIDE the loop (fire-and-forget on `preview` / successful `tool_result`),
+  collects the tree, and saves it to **`greenWorkspaceKey(workspaceId)` — the same key the
+  end-of-build GreenGuard reads.** No second store, no second decision. One browser open per attempt,
+  zero model calls.
+- 🔒 The snapshot must be of the tree that RENDERED: `inBuildWriteTick` is bumped on every captured
+  write and compared before the browser opens and after the files are collected. A change discards
+  the attempt (`IN_BUILD_GREEN_RACED`). A snapshot that was never proven would be restored as "the
+  working version" — worse than none.
+- Honesty: `decideGreenGuard` takes `turnStartedAt`; with `before.at` from this build the restore
+  reason says *"rendered earlier in this build"*. `greenGuardSummaryCorrection` gains `fromThisBuild`
+  — *"your change was not kept"* is FALSE for a first build whose own earlier version came back; the
+  user is told a later step broke it and the rendering version is what they see, later work saved
+  separately. Both markers are idempotent on the settle/watchdog double path.
+
+**What it does NOT do, stated plainly (and why):** it does not freeze writes and does not stop the
+build — a rendering app is not a finished app (a manifest may plan 20 files with 8 written). Only
+the worst case changes. It does not save the 10–20 minutes; that is Option E's measurement and then
+B/C on evidence. ⚠️ Semantics: the last known good is now the LATEST PROVEN RENDER, which on an edit
+turn may be a mid-edit state that renders — GreenGuard's own rule applied inside the turn.
+
+**Tests:** `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts` — 25 cases, including a source-anchored
+wiring guard (the proof is armed BEFORE `await runner.run(buildPrompt)`, saves to GreenGuard's key,
+checks the write race, tells the guard when the build began). **Proven by reversion, four ways**, each
+restored and re-verified: the save key · the write-tick bump · `turnStartedAt` · the curl refusal.
+⚠️ One reversion's restore silently failed on the first pass (a probe string collided with existing
+text); caught by grepping the file, redone with hard-stop restores. Recorded because "the tests pass"
+after a botched restore is exactly the false green this repo warns about.
+`tests/greenGuardHonesty.test.ts` re-anchored on the multi-line facts (reason recorded in place).
+
+**Next in this series (admin: "ek ek kar ke sabhi build karo"):** F (reviewer cheap on green), then
+E (time-to-first-render + who wrote after green), then B/C on E's numbers. D never.
+---
+
+## 2026-09-18 — 🔴 FOUR VARIABLES HELD ONE FACT, AND THE TWO PRODUCERS DID NOT AGREE (evidence ledger, 7th appearance)
+
+**Admin:** *"ab next kya kya kaam bacha hai??"* — this is the first of the three items left from the
+`95598899` autopsy, and the one that turned out to have a real defect behind it rather than only a
+tidy-up.
+
+### What was left, and what hunting the sibling found
+
+The recorded item was narrow: *"`RUNTIME_UNCHECKED` still reaches the report through a threaded
+`previewRendered` boolean rather than through `provenFromTimeline` — same fact, two paths."* Reading
+the route for that threading found the paths were not two but **four**, and that they disagreed:
+
+| | `previewVerifiedRendered` | `browserRenderProven` | `buildObs.previewRendered` | the ledger |
+|---|---|---|---|---|
+| the preview verify loop | set | set | set | — |
+| **the render rescue** | set | set | **never set** | — |
+
+The two adjacent branches of ONE `if` read two different copies — `verifiedNoChangeSummary` is passed
+`previewVerifiedRendered`, and ten lines below `emptyBuildFailureSummary` is passed
+`buildObs.previewRendered`.
+
+### What the missing assignment actually cost — checked one reader at a time
+
+- 🔴 **The failure card the admin asked for could never fire for a rescued build.** The `result`
+  event's `appRendered` is that third copy, and `appRanDespiteFailedVerdict` requires it `true`. A
+  rescued app whose verdict a LATER flip returned to `ok: false` — a **stopped** build is exactly such
+  a case, since `runProvenApp` does not hold a flip for one — therefore showed the plain failure card
+  and its *"finish/fix the build so the app works end-to-end"* button. That is the admin's own
+  2026-09-14 mechanism verbatim: *"ham aise builds ko fix with ai press hote hi SACH ME TOD DETE
+  HAI"*. The half built to be durable was disarmed by a missing line.
+- 🔴 **The admin Monitor under-counted it** — both exits report `previewAllowed` from the same copy.
+- ⚠️ **The cancelled-build bill reads it too** (`appRendered: buildObs.previewRendered === true`), so a
+  Stop arriving after the rescue under-charges for an app the browser had just watched rendering —
+  against the standing 2026-09-15 rule. **Reachable by ordering; not observed in a report**, and
+  recorded as the weaker claim it is.
+- ✅ **`emptyBuildFailureSummary` was NOT affected, and saying so closes the obvious wrong
+  conclusion** — my own first reading of this. `renderRescueEligible` requires `filesWritten > 0`, and
+  that summary returns `null` on `fileCount > 0` **before** it ever reads the render. The argument is
+  dead on the rescue path.
+
+### The fix — the ledger's WRITE half, for the one fact that had none
+
+`renderProof.ts` records `APP_RENDERED` — *"a real browser opened this app and it rendered"* — and
+`provenFromTimeline` reads it back as `preview: 'passed'`. The route now has **one writer**,
+`markAppRendered(source, where)`, which sets every local copy and files the ledger fact; both
+producers call it and no producer assigns by hand any more.
+
+🔒 **Why a recorded fact and not a fourth boolean.** A boolean must be assigned at every producer, so
+a new producer is one forgotten line from this bug — which is what happened. **The 50/50 half is that
+hand-assigning is now gone**, not that the missing line was added.
+
+🔒 **Only a real browser counts, and that rule lives in the module, not at the call sites** — the same
+line `browserRenderProven` and the green-freeze latch already drew (a curl fallback's empty-shell
+render is not proof, adversarial review 2026-08-12). A non-browser source records **nothing**, rather
+than a weaker fact a later reader could mistake for proof.
+
+🔒 **It cannot move a verdict it should not.** The gate fill is fill-only (`=== 'not-run'`), so a
+preview recorded as `failed` keeps its failure; the record is `info` + `autoResolved`, so
+`shippingIssueCount` (severity-filtered) can never count it and `buildFindingSuggestions` skips it —
+registered in `NEVER_SUGGEST` as well, matching `RUNTIME_VERIFIED`.
+
+### Tests
+
+`tests/fourVariablesForOneFact.test.ts` — **22 cases**: the write half's browser-only rule, a
+writer→reader ROUND TRIP with no literal in between (the anti-drift case), the read half promoting
+only, the two producers' wiring, the consumers, and the reader this did NOT affect. **Proven by four
+independent reversions**: dropping the copy from the writer, deleting the reader's mapping, letting
+curl count as proof, and making the gate fill unconditional — each turns the suite red.
+
+### 🔴 Still open (rule 6)
+
+- **The ledger's write half is now real for ONE fact.** `typecheck`, `tests` and this render proof are
+  read back; an explicit `proved(fact, source)` every actor calls is still the subsystem.
+- **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
+  contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+## 2026-09-18 — A hover that repeats the resting background is not a hover (follow-up to #3070)
+
+**Found while auditing #3070 for the admin's standing instruction that no PR may compromise another
+feature.** The theme migration was clean on every axis it measured — literals down 11,487 → 2,825, AA
+green on all three themes, embedded snippets untouched — and it still shipped a real interaction
+regression that none of its gates could see.
+
+**The defect, in one line: the app's old idiom was `bg-white/10 hover:bg-white/15`, and BOTH alphas map
+to the single `bg-raised` token.** So the codemod emitted `bg-raised hover:bg-raised` **105 times**, and
+on **76 of those controls there was no other hover feedback of any kind** — a button simply stopped
+answering the pointer. Nothing failed anywhere: the classes are valid, `tsc` and the suite are silent on
+behaviour, the ratchet counts *literals* rather than *outcomes*, and every contrast check passed because
+the hover colour was, by construction, the colour that had already passed.
+
+🔒 **Fixed as one collapsed mapping, not as 105 sites.** Two real surfaces per theme — `--surface-raised-hover`
+and `--surface-well-hover` — exposed through `@theme inline` as `bg-raised-hover` / `bg-well-hover`, and
+the 107 class attributes rewritten to use them (29 files). A site whose hover was already a *different*
+surface was left alone, and a template literal carrying markup was skipped, because that is somebody
+else's app — the same exclusion `maskEmbeddedSources` makes.
+
+**The rule the values follow, so a fourth theme does not have to re-derive it: a hover moves the surface
+toward the theme's INSET end (the `well` direction), never toward its text.** On dark that is darker, on
+light darker, and on High contrast the only direction black can move. Contrast therefore *improves* on
+hover on every theme, which is what let this ship without re-tuning the palette.
+
+⚠️ **One palette value did have to move, and it is worth recording why.** Light's `--text-faint` was set
+to `#5b6b82` by the 2026-09-18 audit precisely because `#64748b` measured 4.23 on `--surface-raised` — and
+`#5b6b82` measures **4.40 on the new hover surface**, i.e. the hover state would have re-created the exact
+defect that audit removed, one step later. It is now `#57677e` (4.73), still lighter than `--text-muted`,
+so the body > muted > faint hierarchy is unchanged. `surface-raised-hover` was added to the AA lock's
+`SURFACES` list, so all ten text tokens are checked against it for every theme from now on.
+
+**Tests:** `tests/hoverIsNotANoOp.test.ts` (7 cases). It asserts no client file pairs a resting surface
+with the same surface on hover, that each theme declares both hover surfaces, and that the lift is large
+enough to SEE (> 7%) — a token differing in its last hex digit would otherwise pass and be invisible,
+which is the same "nothing failed" outcome in a new costume. **Reversion-proven in both halves:**
+restoring one `hover:bg-raised` fails the scanner by name, and setting `--surface-raised-hover` back to
+`--surface-raised` fails both the repeat check and the lift check.
+
+**Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
+in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
+appears it fails rather than shipping silently.
 ## 2026-09-18 — `AGENTV3_PROJECT_MODE=on`, and the door it opens was bolted (the gate read bullets; users write commas)
 
 The admin set `AGENTV3_PROJECT_MODE=on` in Cloud Run — the two-month-old pending decision recorded in

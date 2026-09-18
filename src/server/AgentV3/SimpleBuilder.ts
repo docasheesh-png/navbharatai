@@ -33,7 +33,7 @@ import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
-import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, preambleBailReason } from './FastLaneBudget';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
   path: string;
@@ -943,7 +943,31 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // deterministic import/export reconcilers below then repair; a starved build phase produces no app
       // at all).
       const contractCap = shareContract ? preambleCapMs(overallMs, Date.now() - laneStartedAt, configuredPlanCap) : 0;
-      if (shareContract && contractCap > 0) {
+      // HOISTED ABOVE THE CONTRACT (autopsy c6e4c6ff). Every input is already known here — the manifest
+      // is parsed and `depOrder` is a static option — and the tier projection is what decides whether
+      // the OPTIONAL contract pass is affordable at all. Computed once and reused by the doomed check
+      // further down, so the two can never disagree about how many tiers this build runs.
+      const depOrder = deps.depOrder !== false;
+      const tiers = depOrder ? [0, 1, 2] : [0];
+      const populatedTiers = depOrder
+        ? tiers.filter((t) => manifest.some((s) => generationTier(s.path) === t)).length
+        : 1;
+      // 🔴 THE BEST-EFFORT PASS MUST NOT BE WHAT DOOMS THE LANE. On the reported build the lane could
+      // finish after planning (49 + 147 = 196s of 240s) and could not after the contract (96 + 147 =
+      // 243s) — so the optional pass bought the bail that then threw the contract away with everything
+      // else, and a 26.7-minute full-builder rebuild followed. The contract is already declared
+      // skippable a few lines up for exactly this reason; this applies that rule to the tier budget.
+      const contractAffordable = canAffordSharedContract({
+        preambleCallMs: planCallMs,
+        tiers: populatedTiers,
+        elapsedMs: Date.now() - laneStartedAt,
+        overallMs,
+        contractCapMs: contractCap,
+      });
+      if (shareContract && contractCap > 0 && !contractAffordable) {
+        deps.log?.('⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.');
+      }
+      if (shareContract && contractCap > 0 && contractAffordable) {
         deps.log?.('Designing the shared types & component contract…');
         try {
           contract = (await withTimeout(
@@ -1027,17 +1051,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // then components (1), then the shell/entry (2); each tier runs in parallel internally and is
       // fed the REAL source of all earlier tiers. When depOrder is off, or only one tier is present,
       // this is exactly today's single parallel batch.
-      const depOrder = deps.depOrder !== false;
-      const tiers = depOrder ? [0, 1, 2] : [0];
       // ARITHMETICALLY DOOMED BEFORE FILE ONE (dukaan report 2026-08-12). The between-tiers check below
       // needs a COMPLETED tier to measure, so it cannot protect a lane whose FIRST tier never finishes —
       // which is precisely what a timing-out provider produces. That build's plan call took 86.6s; three
       // tiers at that latency need ~260s against a 240s budget, and the lane still sat for its full 240
       // seconds and produced nothing. Only the tiers that actually have files are counted, so a manifest
       // that happens to be single-tier is judged on the one stage it will really run.
-      const populatedTiers = depOrder
-        ? tiers.filter((t) => manifest.some((s) => generationTier(s.path) === t)).length
-        : 1;
+      // ⚠️ `depOrder` / `tiers` / `populatedTiers` are computed ABOVE the contract now — the contract's
+      // own affordability needs the same projection, and one computation cannot drift from itself.
       if (!canFinishAfterPreamble({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })) {
         // No file has been generated yet, so there is nothing to salvage — this is the same handoff the
         // timeout was going to perform, minutes earlier and without burning the budget to reach it.

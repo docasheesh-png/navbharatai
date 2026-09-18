@@ -161,7 +161,7 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
                     label: 'Stopped by the user',
                     value: data.verdictSplit.userStopped,
                     note: 'the person ended it — neither a failure nor a success, and in no other column',
-                    tone: 'text-sky-300',
+                    tone: 'text-info',
                   }] : []),
                 ].map((r) => (
                   <div key={r.label}>

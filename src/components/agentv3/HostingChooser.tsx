@@ -1426,6 +1426,51 @@ export function HostingChooser({
             </p>
           </div>
 
+          {/*
+            Path 4 — PUT IT ON APP MART (admin 2026-09-18: "publish on app mart button wapas lao").
+
+            🔴 THIS BUTTON IS A DOOR, NOT A SECOND PUBLISH FORM, AND THE DIFFERENCE IS THE WHOLE
+            POINT. An embedded App Mart publish CARD used to live in this sheet and was removed
+            deliberately (#2986, admin's own instruction: hosting and App Mart are two separate
+            decisions on their own screens). Re-creating that card would also re-create a SECOND
+            caller of `/api/navstore/publish` — and `NavAppStore.tsx`'s own comment records that it
+            is "now the ONLY caller of the endpoint that bug was fixed for" (the 2026-08-27
+            infinity-loading report). One publish implementation, reachable from here.
+
+            So it navigates, carrying BOTH the tab and THIS app, so the user lands on the publish
+            form with their app already chosen rather than on Browse hunting for it.
+          */}
+          <div className="rounded-xl border border-violet-800/50 bg-violet-500/10 p-4 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold text-ink">Put it on App Mart</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-accent-text bg-violet-500/10 px-2 py-0.5 rounded-full">STORE</span>
+            </div>
+            <p className="text-[11.5px] text-muted leading-relaxed">
+              List this app on NavBharatAI&apos;s own store, where anyone can open it instantly — no
+              install, no Play Store.
+            </p>
+            <ul className="text-[11px] text-muted flex flex-col gap-1 mt-0.5">
+              <li>• Free to list · opens in one tap</li>
+              <li>• Your name, icon &amp; description</li>
+              <li>• Reviewed before it goes live</li>
+            </ul>
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('navbharat:navigate', {
+                  detail: { view: 'appstore', storeTab: 'publish', storeWorkspaceId: workspaceId },
+                }));
+                onClose();
+              }}
+              className="mt-auto w-full py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-on-accent text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+            >
+              <Rocket className="w-3.5 h-3.5" />
+              Publish on App Mart
+            </button>
+            <p className="text-[11px] text-faint leading-relaxed">
+              Opens App Mart with this app selected — publishing there is a separate step from hosting.
+            </p>
+          </div>
+
         </div>
 
         {/* Full-stack note + sync law */}

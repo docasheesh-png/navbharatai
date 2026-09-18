@@ -67,6 +67,15 @@ export interface ViewPanelsProps {
    *  tell you if this stops being passed to a panel below — hence the test that checks it. */
   effectiveDeviceMode: 'mobile' | 'tablet' | 'desktop';
   activeView: ViewType;
+  /**
+   * Where App Mart should OPEN, when the caller knew (the publish sheet's "Publish on App Mart"
+   * button, admin 2026-09-18). Absent ⇒ the store opens on Browse exactly as before.
+   *
+   * ⚠️ `_lz` erases prop types, so the compiler cannot tell you if these stop reaching NavAppStore —
+   * the same hazard `effectiveDeviceMode` documents above, and the reason a test asserts the wiring.
+   */
+  storeInitialTab?: 'browse' | 'publish' | 'mine' | 'review';
+  storePublishWorkspaceId?: string | null;
   generatedCode: string;
   setGeneratedCode: (code: string) => void;
   files: FileSystem;
@@ -156,7 +165,7 @@ export interface ViewPanelsProps {
 
 export function ViewPanels({
   effectiveDeviceMode,
-  activeView, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
+  activeView, storeInitialTab, storePublishWorkspaceId, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
@@ -643,7 +652,7 @@ export function ViewPanels({
           the real thing: upload an .apk, and install apps other people have published. */}
       {activeView === 'appstore' && (
         <div className="flex-1 h-full overflow-hidden">
-          <NavAppStore />
+          <NavAppStore initialTab={storeInitialTab} initialPublishWorkspaceId={storePublishWorkspaceId} />
         </div>
       )}
 

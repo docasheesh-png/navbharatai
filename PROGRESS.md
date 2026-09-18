@@ -68486,3 +68486,71 @@ report's `billedUsd: 6.389103` — which is what makes these the real figures ra
 - **A high `MARKUP_WAIVED_NO_PREVIEW` rate is not a billing problem — it is the engine failing to
   prove its own work.** That is the number to watch, and the honest reading of it is that we are
   giving away margin because our own verification could not look, not because users' apps are broken.
+
+---
+
+## 2026-09-18 — A PASS that delivered nothing is our cost, never the user's bill (the ₹12 the turn-level fix could not reach)
+
+The turn-level half shipped earlier today and **said in its own header that it could not reach this
+case**, which is where the money actually was. Build `b6f88a72`'s post-build reviewer made **40 calls,
+spent 523,374 input tokens = 34.4% of the build (≈₹12), returned `responseChars: 0` on every one** —
+and then timed out with no verdict at all. Its turns were **not starved**: they completed and made
+tool calls, reading `src/App.tsx` six times. Every TURN produced something. **The PASS produced nothing.**
+
+That was inexpressible, because `ProviderUsageLedger` recorded which VENDOR was paid and never what
+FOR. "Leave the reviewer's barren pass out of the bill" had nowhere to be written down.
+
+### `billingPhase.ts` — the missing dimension
+
+An `AsyncLocalStorage` zone, the mechanism `aiSpendZone.ts` and `noClaudeZone.ts` already use and for
+the reason `aiSpendZone` states: threading a label through every call site is fragile by design, and
+the heal gates that forgot to thread `onTurnComplete` had their tokens filed under `'other'` for
+months. The reviewer opens the zone ONCE; its sub-agent inherits it with no line of its own.
+
+🔑 **The property that makes it correct for an ABANDONED pass:** `raceTimeout` walks away from the
+reviewer and the reviewer keeps spending. Because the zone propagates through awaits, those late turns
+are still tagged — and because "this phase was barren" is applied at SETTLE rather than by mutating
+the ledger, tokens arriving *after* the verdict are covered by it too. A pass we walked away from is
+exactly the money this exists to find.
+
+⚠️ **NOT `runInPass`.** Same mechanism, different question: that one decides whether a pass may WRITE
+to a green app. Overloading it would tie two unrelated policies to one string — a pass that must be
+allowed to write but billed, or billed but not allowed to write, could not then be expressed.
+
+### The verdict, and the three places it must not reach
+
+`barrenPhases.add(PHASE_POST_BUILD_REVIEW)` sits at exactly ONE branch: the `REVIEW_INCOMPLETE` one,
+where the reviewer timed out or errored, the grace window did not collect it, and `salvageReview`
+found nothing in its own narration. **`REVIEW_LATE` and `REVIEW_PARTIAL` stay billable** — both
+DELIVERED something, and *"we walked away from it"* is not the same fact as *"it produced nothing"*.
+The unattributed remainder carries no phase at all, so a verdict can never reach it. A test asserts
+the single call site and its distance from the other two branches.
+
+🔒 **A barren phase and a starved turn OVERLAP without subtracting twice.** A barren slice is unbilled
+in its ENTIRETY, which is a UNION and not a sum — adding the two rules would hand back money we never
+spent. Idempotent by construction, so the two may overlap freely.
+
+🔒 **The ledger SPLITS rather than relabels** (keyed provider + model + phase, still NUL-separated —
+that separator is a byte none of the three can contain, which is what makes the key exact). Verified
+before relying on it: every consumer of `entries()` aggregates (`realProviderCostUsd`, `ledgerCostUsd`,
+and `priceProviderUsage`, which sums **by provider**), so more rows change no total.
+
+Both settle paths — the normal one and the deadline finalizer — take the SAME verdict; CLAUDE.md's
+Fix 67 is what those two drifting apart already cost once. The verdict set is declared **above**
+`finalizeOnDeadline` so the closure is correct by PLACEMENT rather than by timing.
+
+⚠️ **Only one phase is named, deliberately.** The reviewer is the only pass whose "delivered nothing"
+verdict already exists in the route. Inventing that verdict for the other passes would be a guess, and
+a guess that hands money back is still a guess. Adding a phase is one `runInBillingPhase` call **plus**
+the rule that decides it is barren — never a rule alone.
+
+`tests/aBarrenPassIsNotTheUsersBill.test.ts` — 23 cases, proven by three reversions (the verdict, the
+zone tag, the subtraction). The ledger's 4th argument became an options object in the same change, so
+`producedNothing` and `phase` do not become a fifth and sixth positional.
+
+### What it is worth, honestly
+
+On `b6f88a72` this is the ₹12 of real cost — **₹50 of the user's ₹152.90 bill at ×4**. But #3093
+(the lean reviewer on a green app) has since landed, so on a green build that spend should now
+largely not happen at all. This is the net beneath it: the saving is not spending the tokens, and
+this only guarantees that when they ARE spent for nothing, the user does not pay for them.

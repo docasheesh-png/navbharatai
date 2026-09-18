@@ -316,6 +316,7 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost } from '../AgentV3/unbilledTurns';
+import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -1718,6 +1719,13 @@ export function decideBuildBilledUsd(
    * "real Opus × 2", and quietly changing a confirmed price is not mine to do.
    */
   sandboxUsd = 0,
+  /**
+   * Phases this build established delivered nothing (see `billingPhase.ts`). Their slices leave the
+   * base the markup is applied to and stay in `realCostUsd`, exactly as a barren TURN does.
+   *
+   * Defaults to empty, so every existing caller — and every test — bills precisely as before.
+   */
+  barrenPhases: BarrenPhases = NO_BARREN_PHASES,
 ): {
   effectiveBilledUsd: number;
   reconciledProviderUsage: Record<string, { inputTokens: number; outputTokens: number }>;
@@ -1755,7 +1763,7 @@ export function decideBuildBilledUsd(
   // build b6f88a72 — a post-build reviewer that spent ~520,000 input tokens and returned not one
   // character). `splitUnbilledCost` prices both halves through the SAME rate card and DERIVES the
   // absorbed figure as the difference, so an explanation can never diverge from the amount charged.
-  const costSplit = splitUnbilledCost(providerLedger.entries(), realCostRemainder);
+  const costSplit = splitUnbilledCost(providerLedger.entries(), realCostRemainder, barrenPhases);
   const tokenCost = costSplit.realCostUsd;
   const billableTokenCost = costSplit.billableCostUsd;
   const vmCost = Math.max(0, sandboxUsd || 0);
@@ -11425,6 +11433,21 @@ async function noteBuildOutcome(
     // the build block, and the deadline finalizer — defined above it, called after it — needs the
     // same fact the settle path uses, or the two would price one build by different rules.
     const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number; expectsArtifacts?: boolean } = {};
+    /**
+     * Phases this build has POSITIVELY ESTABLISHED delivered nothing a caller could use, so their
+     * spend is ours and not the user's (see `billingPhase.ts`).
+     *
+     * Declared HERE, beside `billingCtx` and for exactly the reason its comment gives: `finalizeOnDeadline`
+     * lives in this scope and must bill from the SAME verdict the normal settle uses — CLAUDE.md's Fix 67
+     * is what those two drifting apart already cost once. Declaring it lower would also leave the
+     * finalizer closing over a `const` in its temporal dead zone, which is safe only for as long as
+     * nobody calls that function synchronously; a scope that is correct by placement beats one that is
+     * correct by timing.
+     *
+     * ⚠️ A phase goes in here only on a POSITIVE finding — never because a pass was slow, expensive,
+     * or merely disappointing. Empty is today's billing, to the paisa.
+     */
+    const barrenPhases = new Set<string>();
     // PLATFORM TELEMETRY (2026-08-23) — what the admin Monitor needs from a build, readable by BOTH
     // exits. It lives here, above the deadline finalizer, on purpose: `previewVerifiedRendered` is a
     // `let` declared much further down, so a finalizer that fires before that line runs would hit its
@@ -11515,7 +11538,8 @@ async function noteBuildOutcome(
       if (ok && billingCtx.providerLedger) {
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
-          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, watchdogLivePreview.usd);
+          // The SAME barren-phase verdict the normal settle uses — Fix 67 is what these two drifting apart cost.
+          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, watchdogLivePreview.usd, barrenPhases);
           /**
            * THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin 2026-09-18). Applied HERE as well as at
            * the settle for the reason Fix 67 exists at all: these two paths decide the same build's
@@ -12279,10 +12303,22 @@ async function noteBuildOutcome(
         // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
         // line in the rate card price it at the full input rate (identical to before).
         const cacheRead = Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0 ? (cacheReadInputTokens ?? 0) : 0;
-        // `producedNothing` travels as the ledger's 4th argument, not inside `usage` — the tokens
-        // are added in FULL either way (we paid them); the flag only records the same counts a
-        // second time in the slice's `unbilled` subset, which is the only thing the bill subtracts.
-        providerLedger.add(used, cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage, model, usage.producedNothing === true);
+        // Both facts travel as the ledger's OPTIONS argument, not inside `usage` — the tokens are
+        // added in FULL either way (we paid them). `producedNothing` records the same counts a second
+        // time in the slice's `unbilled` subset; `phase` says which part of the build spent them, so a
+        // whole pass can later be judged to have delivered nothing. Both are read at SETTLE, and only
+        // by the code that builds the USER's bill.
+        //
+        // 🔑 The phase is read from the surrounding zone rather than passed by the caller, which is what
+        // makes it correct for an ABANDONED pass: `raceTimeout` walks away from the reviewer, the
+        // reviewer keeps spending, and those late turns are still inside its zone.
+        const phase = currentBillingPhase() ?? undefined;
+        providerLedger.add(
+          used,
+          cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage,
+          model,
+          { producedNothing: usage.producedNothing === true, ...(phase ? { phase } : {}) },
+        );
         // …and accumulate the build total for the diagnostics report's cache-hit rate line.
         if (cacheRead > 0) {
           billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
@@ -19399,7 +19435,13 @@ async function noteBuildOutcome(
             if (e.type === 'narration' && e.agent === 'reviewer' && typeof e.text === 'string') reviewerSaid.push(e.text);
             else if (e.type === 'agent_done' && e.agent === 'reviewer' && typeof e.summary === 'string') reviewerSaid.push(e.summary);
           }, false); // no replay — only this review's own words, never an earlier turn's
-          const reviewPromise = reviewBuild({
+          // 🔑 THE REVIEWER'S SPEND IS ATTRIBUTED TO THE REVIEWER (admin 2026-09-18, build b6f88a72:
+          // 40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on every one, and
+          // then no verdict at all — all of it billed at ×4). The zone is inherited by every awaited
+          // descendant, so the sub-agent's calls carry it without a line of their own; and because it
+          // survives `raceTimeout` giving up, a reviewer we WALKED AWAY FROM keeps tagging its turns.
+          // Nothing here decides whether to charge — see the REVIEW_INCOMPLETE branch below.
+          const reviewPromise = runInBillingPhase(PHASE_POST_BUILD_REVIEW, async () => reviewBuild({
               userRequest: prompt,
               fileTree: rFiles,
               fileSample: rSample,
@@ -19409,7 +19451,7 @@ async function noteBuildOutcome(
               // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
               // spent re-reading code they did not touch.
               changedFiles: [...writtenFiles.keys()],
-          });
+          }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
           } catch (e) {
@@ -19454,6 +19496,16 @@ async function noteBuildOutcome(
               // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
               // build, which is exactly the caveat the health card should carry. It is a warning, not
               // an error, so it can never block a working app from shipping.
+              // 🔴 THIS BRANCH IS THE VERDICT, AND IT IS THE ONLY ONE. The reviewer timed out (or
+              // errored), the grace window did not collect it, and `salvageReview` found nothing in
+              // its own narration — so this pass produced NOTHING a caller could use, and its tokens
+              // stop being the user's bill from here.
+              //
+              // ⚠️ Deliberately NOT the sibling branches: `REVIEW_LATE` landed inside the grace and
+              // `REVIEW_PARTIAL` recovered real findings from the narration. Both DELIVERED something,
+              // so both stay billable — "we walked away from it" is not the same fact as "it produced
+              // nothing", and only the second is a reason to hand money back.
+              barrenPhases.add(PHASE_POST_BUILD_REVIEW);
               try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             }
@@ -20143,7 +20195,7 @@ async function noteBuildOutcome(
         // so the gap between real cost and bill is EXPLAINED rather than merely visible — a number
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
-      } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd);
+      } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
       // Pro build. Uses the reconciled per-provider tokens, so the cost graph and the bill agree.

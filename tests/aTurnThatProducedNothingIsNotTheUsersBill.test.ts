@@ -118,7 +118,7 @@ describe('splitUnbilledCost — two halves priced by ONE rate card', () => {
 describe('the ledger records a barren turn TWICE — never instead of', () => {
   it('keeps the full tokens in usage and mirrors them into unbilled', () => {
     const ledger = createProviderUsageLedger();
-    ledger.add('KIMI', { inputTokens: 300, outputTokens: 0 }, KIMI, true);
+    ledger.add('KIMI', { inputTokens: 300, outputTokens: 0 }, KIMI, { producedNothing: true });
     ledger.add('KIMI', { inputTokens: 700, outputTokens: 500 }, KIMI);
     const [entry] = ledger.entries();
     expect(entry.usage).toEqual({ inputTokens: 1000, outputTokens: 500 });
@@ -130,7 +130,7 @@ describe('the ledger records a barren turn TWICE — never instead of', () => {
 
   it('OUR cost, and the mid-build cost ceiling, still see every barren token', () => {
     const ledger = createProviderUsageLedger();
-    ledger.add('KIMI', { inputTokens: 1_000_000, outputTokens: 0 }, KIMI, true);
+    ledger.add('KIMI', { inputTokens: 1_000_000, outputTokens: 0 }, KIMI, { producedNothing: true });
     // A ceiling that could not see abandoned spend is a ceiling a runaway build walks straight past.
     expect(ledgerCostUsd(ledger.entries())).toBeCloseTo(0.95, 6);
     expect(realProviderCostUsd(ledger.entries())).toBeCloseTo(0.95, 6);
@@ -145,8 +145,8 @@ describe('the ledger records a barren turn TWICE — never instead of', () => {
 
   it('accumulates the cache share of a barren turn too', () => {
     const ledger = createProviderUsageLedger();
-    ledger.add('KIMI', { inputTokens: 500, outputTokens: 0, cacheReadInputTokens: 400 }, KIMI, true);
-    ledger.add('KIMI', { inputTokens: 500, outputTokens: 0, cacheReadInputTokens: 100 }, KIMI, true);
+    ledger.add('KIMI', { inputTokens: 500, outputTokens: 0, cacheReadInputTokens: 400 }, KIMI, { producedNothing: true });
+    ledger.add('KIMI', { inputTokens: 500, outputTokens: 0, cacheReadInputTokens: 100 }, KIMI, { producedNothing: true });
     expect(ledger.entries()[0].unbilled).toEqual({ inputTokens: 1000, outputTokens: 0, cacheReadInputTokens: 500 });
   });
 });
@@ -313,7 +313,7 @@ describe('MultiProviderTurnRunner — the tokens reach the ledger on BOTH paths'
       { name: 'KIMI', runner: rescuer, modelId: KIMI },
     ], {
       onTurnComplete: (used, usage, model, cacheRead) => {
-        ledger.add(used, cacheRead ? { ...usage, cacheReadInputTokens: cacheRead } : usage, model, usage.producedNothing === true);
+        ledger.add(used, cacheRead ? { ...usage, cacheReadInputTokens: cacheRead } : usage, model, { producedNothing: usage.producedNothing === true });
       },
     }).runTurn(PARAMS);
 

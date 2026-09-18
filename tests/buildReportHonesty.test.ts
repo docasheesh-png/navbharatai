@@ -107,10 +107,18 @@ describe('the release gate must be TOLD when a real browser rendered the app', (
     expect(declaredAt).toBeLessThan(rescueAt);
   });
 
-  it('sets it where the browser render is actually proven', () => {
+  // ⚠️ UPDATED 2026-09-18, INTENT UNCHANGED AND STRENGTHENED. This case asserted the hand-assignment
+  // `previewVerifiedRendered = true;` beside the rescue. That assignment is gone because it was the
+  // defect: three copies of one fact, assigned by hand, and the rescue set two of them (see
+  // renderProof.ts). The rescue still proves the render in exactly this place — it now does it through
+  // the ONE writer, which sets every copy and files the ledger fact, so a producer can no longer set
+  // some and not others.
+  it('proves it where the browser render is actually proven — through the one writer', () => {
     const rescueAt = src.indexOf("code: 'RENDER_RESCUE',");
     const window = src.slice(Math.max(0, rescueAt - 1200), rescueAt);
-    expect(window).toContain('previewVerifiedRendered = true;');
+    expect(window).toContain("markAppRendered(shot.source, 'render rescue')");
+    const writer = src.slice(src.indexOf('const markAppRendered = ('));
+    expect(writer.slice(0, 600)).toContain('previewVerifiedRendered = true');
   });
 
   it('still feeds the gate from that one flag', () => {

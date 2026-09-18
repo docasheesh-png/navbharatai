@@ -99,7 +99,12 @@ export async function listReports(opts: { status?: ReportStatus; limit?: number 
       );
     }
     const snap = await d.collection(COLLECTION).limit(500).get();
-    const rows = snap.docs.map((doc) => ({ ...(doc.data() as UserReport), id: doc.id }));
+    // A doc with no `at` is not a report — an old status-only ghost (see setReportStatus) — and would
+    // render as a blank row in the admin's User Reports tab. The status branch above orders by `at`, so
+    // Firestore already excludes such docs there; this is the unordered read's equivalent.
+    const rows = snap.docs
+      .filter((doc) => typeof (doc.data() as UserReport)?.at === 'number')
+      .map((doc) => ({ ...(doc.data() as UserReport), id: doc.id }));
     return newestFirstBy(rows, 'at').slice(0, limit);
   } catch {
     return [];
@@ -123,9 +128,11 @@ export async function setReportStatus(id: string, status: ReportStatus, adminNot
   const d = db();
   if (!d) return false;
   try {
-    await d.collection(COLLECTION).doc(id).set(
+    // An UPDATE, never a merge-set: this marks a report that must already exist, and `set(…, { merge: true })`
+    // would MINT a report holding only a status when it does not — a blank row in the admin's User
+    // Reports tab (the DeploymentStore.setStatus class, 2026-09-18). A missing report is "not marked".
+    await d.collection(COLLECTION).doc(id).update(
       { status, handledAt: Date.now(), ...(adminNote ? { adminNote: adminNote.slice(0, 1000) } : {}) },
-      { merge: true },
     );
     return true;
   } catch {

@@ -162,7 +162,10 @@ export async function setCheckpointLabel(workspaceId: string, sha: string, rawLa
       .doc(workspaceId)
       .collection('items')
       .doc(id)
-      .set({ label: normalizeCheckpointLabel(rawLabel) }, { merge: true });
+      // An UPDATE, never a merge-set: a label on a checkpoint that does not exist would MINT a checkpoint
+      // holding only a name (the DeploymentStore.setStatus class, 2026-09-18). NOT_FOUND → false, which is
+      // exactly the honesty this function's own contract promises.
+      .update({ label: normalizeCheckpointLabel(rawLabel) });
     return true;
   } catch {
     return false;

@@ -402,24 +402,24 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
     return true;
   });
 
-  const difficultyColor = (d: string) => d === 'Easy' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : d === 'Medium' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-red-400 bg-red-500/10 border-red-500/20';
+  const difficultyColor = (d: string) => d === 'Easy' ? 'text-success bg-emerald-500/10 border-emerald-500/20' : d === 'Medium' ? 'text-warn bg-amber-500/10 border-amber-500/20' : 'text-danger bg-red-500/10 border-red-500/20';
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-blue-600/20 rounded-xl flex items-center justify-center">
-          <Package className="w-5 h-5 text-blue-400" />
+          <Package className="w-5 h-5 text-info" />
         </div>
         <div>
-          <h2 className="font-semibold text-white text-base">API Marketplace</h2>
-          <p className="text-xs text-white/40">One-click integrations — Maps, Weather, Payments, AI and more</p>
+          <h2 className="font-semibold text-ink text-base">API Marketplace</h2>
+          <p className="text-xs text-faint">One-click integrations — Maps, Weather, Payments, AI and more</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-white/40">{APIS.length} APIs</span>
+          <span className="text-xs text-faint">{APIS.length} APIs</span>
           <button
             onClick={() => setShowFavorites(!showFavorites)}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${showFavorites ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-white/10 bg-white/5 text-white/40'}`}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${showFavorites ? 'border-amber-500/40 bg-amber-500/10 text-warn' : 'border-line bg-raised text-faint'}`}
           >
             <Star className="w-3 h-3" /> Favorites ({favorites.length})
           </button>
@@ -427,11 +427,11 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
       </div>
 
       {/* Search + Filters */}
-      <div className="px-4 py-3 border-b border-white/5 bg-[#161b22] space-y-2">
+      <div className="px-4 py-3 border-b border-line bg-card space-y-2">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
           <input
-            className="w-full bg-[#0d1117] border border-white/10 rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-blue-500/50"
+            className="w-full bg-surface border border-line rounded-xl pl-9 pr-4 py-2 text-sm text-ink placeholder-faint focus:outline-none focus:border-blue-500/50"
             placeholder="Search APIs... (e.g. payment, weather, auth)"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -443,7 +443,7 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
               key={cat}
               onClick={() => setSelectedCategory(cat)}
               className={`shrink-0 text-xs px-3 py-1 rounded-full border transition-all whitespace-nowrap ${
-                selectedCategory === cat ? 'border-blue-500/50 bg-blue-500/15 text-blue-300' : 'border-white/10 bg-white/5 text-white/40 hover:border-white/20'
+                selectedCategory === cat ? 'border-blue-500/50 bg-blue-500/15 text-info' : 'border-line bg-raised text-faint hover:border-line'
               }`}
             >
               {APIS.find(a => a.category === cat)?.categoryEmoji || '🔧'} {cat}
@@ -457,8 +457,8 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
         <div className="flex-1 overflow-y-auto p-3">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
-              <Package className="w-10 h-10 text-white/10" />
-              <p className="text-sm text-white/30">{showFavorites ? 'No favorites yet' : 'No APIs found'}</p>
+              <Package className="w-10 h-10 text-faint" />
+              <p className="text-sm text-faint">{showFavorites ? 'No favorites yet' : 'No APIs found'}</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
@@ -467,32 +467,32 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
                   key={api.id}
                   onClick={() => setSelectedApi(api)}
                   className={`text-left p-3.5 rounded-xl border transition-all ${
-                    selectedApi?.id === api.id ? 'border-blue-500/50 bg-blue-500/5' : 'border-white/5 bg-[#161b22] hover:border-white/10'
+                    selectedApi?.id === api.id ? 'border-blue-500/50 bg-blue-500/5' : 'border-line bg-card hover:border-line'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-1 mb-1.5">
                     <div>
-                      <span className="text-sm font-medium text-white">{api.categoryEmoji} {api.name}</span>
+                      <span className="text-sm font-medium text-ink">{api.categoryEmoji} {api.name}</span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {api.popular && <Star className="w-3 h-3 text-amber-400 fill-amber-400" />}
+                      {api.popular && <Star className="w-3 h-3 text-warn fill-amber-400" />}
                       <button
                         onClick={e => { e.stopPropagation(); toggleFavorite(api.id); }}
-                        className={favorites.includes(api.id) ? 'text-amber-400' : 'text-white/20 hover:text-amber-400'}
+                        className={favorites.includes(api.id) ? 'text-warn' : 'text-faint hover:text-warn'}
                       >
                         <Star className={`w-3 h-3 ${favorites.includes(api.id) ? 'fill-amber-400' : ''}`} />
                       </button>
                     </div>
                   </div>
-                  <p className="text-[11px] text-white/40 mb-2 line-clamp-2">{api.description}</p>
+                  <p className="text-[11px] text-faint mb-2 line-clamp-2">{api.description}</p>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md border font-medium ${api.free ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md border font-medium ${api.free ? 'text-success bg-emerald-500/10 border-emerald-500/20' : 'text-warn bg-amber-500/10 border-amber-500/20'}`}>
                       {api.free ? 'Free' : 'Paid'}
                     </span>
                     <span className={`text-[9px] px-1.5 py-0.5 rounded-md border ${difficultyColor(api.difficulty)}`}>
                       {api.difficulty}
                     </span>
-                    <span className="text-[9px] text-white/20 bg-white/5 px-1.5 py-0.5 rounded-md">{api.category}</span>
+                    <span className="text-[9px] text-faint bg-raised px-1.5 py-0.5 rounded-md">{api.category}</span>
                   </div>
                 </button>
               ))}
@@ -501,33 +501,33 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
         </div>
 
         {/* Detail Panel */}
-        <div className="w-[38%] border-l border-white/5 flex flex-col overflow-hidden">
+        <div className="w-[38%] border-l border-line flex flex-col overflow-hidden">
           {!selectedApi ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
-              <Code className="w-12 h-12 text-white/5" />
-              <p className="text-sm text-white/20">Click an API card</p>
-              <p className="text-xs text-white/10">Code snippet and setup guide will appear here</p>
+              <Code className="w-12 h-12 text-faint" />
+              <p className="text-sm text-faint">Click an API card</p>
+              <p className="text-xs text-faint">Code snippet and setup guide will appear here</p>
             </div>
           ) : (
             <>
-              <div className="p-4 border-b border-white/5">
+              <div className="p-4 border-b border-line">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
-                    <h3 className="font-semibold text-white flex items-center gap-1.5">
+                    <h3 className="font-semibold text-ink flex items-center gap-1.5">
                       <span>{selectedApi.categoryEmoji}</span> {selectedApi.name}
                     </h3>
-                    <p className="text-xs text-white/40 mt-0.5">{selectedApi.description}</p>
+                    <p className="text-xs text-faint mt-0.5">{selectedApi.description}</p>
                   </div>
-                  <button onClick={() => setSelectedApi(null)} className="text-white/20 hover:text-white/50">
+                  <button onClick={() => setSelectedApi(null)} className="text-faint hover:text-muted">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
                 <div className="flex gap-1.5 flex-wrap">
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full border font-medium ${selectedApi.free ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
+                  <span className={`text-[9px] px-2 py-0.5 rounded-full border font-medium ${selectedApi.free ? 'text-success bg-emerald-500/10 border-emerald-500/20' : 'text-warn bg-amber-500/10 border-amber-500/20'}`}>
                     {selectedApi.free ? '✓ Free' : '$ Paid'}
                   </span>
                   <span className={`text-[9px] px-2 py-0.5 rounded-full border ${difficultyColor(selectedApi.difficulty)}`}>{selectedApi.difficulty}</span>
-                  {selectedApi.popular && <span className="text-[9px] px-2 py-0.5 rounded-full border border-amber-500/20 text-amber-300 bg-amber-500/10">⭐ Popular</span>}
+                  {selectedApi.popular && <span className="text-[9px] px-2 py-0.5 rounded-full border border-amber-500/20 text-warn bg-amber-500/10">⭐ Popular</span>}
                 </div>
               </div>
 
@@ -535,36 +535,36 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
               <div className="flex-1 overflow-y-auto">
                 <div className="p-3">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] text-white/40 uppercase tracking-wider">Code Snippet</span>
-                    <button onClick={() => copySnippet(selectedApi)} className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-colors ${copiedId === selectedApi.id ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/40 hover:text-white/70 bg-white/5'}`}>
+                    <span className="text-[10px] text-faint uppercase tracking-wider">Code Snippet</span>
+                    <button onClick={() => copySnippet(selectedApi)} className={`text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-colors ${copiedId === selectedApi.id ? 'text-success bg-emerald-500/10' : 'text-faint hover:text-body bg-raised'}`}>
                       {copiedId === selectedApi.id ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
                     </button>
                   </div>
-                  <pre className="bg-[#0d1117] border border-white/5 rounded-xl p-3 text-[9px] font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all">{selectedApi.snippet}</pre>
+                  <pre className="bg-surface border border-line rounded-xl p-3 text-[9px] font-mono text-success overflow-x-auto whitespace-pre-wrap break-all">{selectedApi.snippet}</pre>
                 </div>
 
                 {selectedApi.envKey && (
                   <div className="px-3 pb-3">
-                    <p className="text-[10px] text-white/40 uppercase tracking-wider mb-1.5">Environment Variable</p>
-                    <div className="flex items-center gap-2 bg-[#0d1117] border border-white/5 rounded-lg px-3 py-2">
-                      <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <code className="text-xs text-amber-300 font-mono flex-1">{selectedApi.envKey}=your_key_here</code>
+                    <p className="text-[10px] text-faint uppercase tracking-wider mb-1.5">Environment Variable</p>
+                    <div className="flex items-center gap-2 bg-surface border border-line rounded-lg px-3 py-2">
+                      <Shield className="w-3.5 h-3.5 text-warn shrink-0" />
+                      <code className="text-xs text-warn font-mono flex-1">{selectedApi.envKey}=your_key_here</code>
                       <button onClick={() => { navigator.clipboard.writeText(`${selectedApi.envKey}=`); }}>
-                        <Copy className="w-3 h-3 text-white/30 hover:text-white/60" />
+                        <Copy className="w-3 h-3 text-faint hover:text-muted" />
                       </button>
                     </div>
-                    <p className="text-[9px] text-white/20 mt-1">⚠️ Keep the key in server-side .env — never write it in the frontend</p>
+                    <p className="text-[9px] text-faint mt-1">⚠️ Keep the key in server-side .env — never write it in the frontend</p>
                   </div>
                 )}
 
                 {/* Setup Steps */}
                 <div className="px-3 pb-3">
-                  <p className="text-[10px] text-white/40 uppercase tracking-wider mb-2">Quick Setup</p>
+                  <p className="text-[10px] text-faint uppercase tracking-wider mb-2">Quick Setup</p>
                   <div className="space-y-1.5">
                     {selectedApi.steps.map((step, i) => (
                       <div key={i} className="flex items-start gap-2">
-                        <span className="w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 text-[9px] flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
-                        <p className="text-[10px] text-white/50">{step}</p>
+                        <span className="w-4 h-4 rounded-full bg-blue-500/20 text-info text-[9px] flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                        <p className="text-[10px] text-muted">{step}</p>
                       </div>
                     ))}
                   </div>
@@ -572,16 +572,16 @@ export function APIMarketplace({ onCodeInsert }: { onCodeInsert: (code: string) 
               </div>
 
               {/* Actions */}
-              <div className="p-3 border-t border-white/5 flex gap-2">
+              <div className="p-3 border-t border-line flex gap-2">
                 <button
                   onClick={() => onCodeInsert(selectedApi.snippet)}
-                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-colors text-on-accent"
                 >
                   <Plus className="w-3.5 h-3.5" /> Insert in Code
                 </button>
                 <button
                   onClick={() => toggleFavorite(selectedApi.id)}
-                  className={`px-3 py-2 rounded-xl border text-xs transition-all ${favorites.includes(selectedApi.id) ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-white/10 bg-white/5 text-white/40'}`}
+                  className={`px-3 py-2 rounded-xl border text-xs transition-all ${favorites.includes(selectedApi.id) ? 'border-amber-500/40 bg-amber-500/10 text-warn' : 'border-line bg-raised text-faint'}`}
                 >
                   <Star className={`w-3.5 h-3.5 ${favorites.includes(selectedApi.id) ? 'fill-amber-400' : ''}`} />
                 </button>

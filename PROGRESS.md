@@ -66345,3 +66345,37 @@ already owns.
 check fails 3; removing the wash and themed-surface checks fails 3; the hover-guard case fails on its
 own. Two scanners were written for the sibling hunt and both now report clean across every client
 file: *a theme token inside a fixed subtree*, and *white text on a light fixed fill*.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR I of N: twelve more files, and a price that only read on one theme
+
+**Twelve files, one codemod run each, no new rules needed** — the first batch since the sweep began
+where the rules already in place were enough: APIMarketplace 79 → 1 · DeveloperApiCard 78 → 0 ·
+CostEstimator 77 → 5 · TeamCollaboration 76 → 0 · TestPanel 75 → 0 · ScreenshotToCode 74 → 1 ·
+AppAnalytics 73 → 7 · CursorPopup 73 → 1 · WebAppPlayer 66 → 1 · HistoryView 63 → 3 ·
+FailureCategoryCard 62 → 0 · APKBuilder 62 → 1. Baseline **3,663 → 2,825** (146 files).
+
+**✅ The APK view is an OPEN ITEM NOW CLOSED.** PR F recorded it as "still open, not in this batch's
+files" at 5 severe / 5 fail on Light. It is **zero on all three themes** after this batch.
+
+**🔴 The one real defect the crawl found was not a migration bug — it was a design one, and it is the
+exact class this whole project exists to remove.** `CostEstimator` lists cloud providers and painted
+each **price** in that vendor's brand hex (`style={{ color: p.color }}`). A brand colour as text can
+only ever read on one theme: Vercel's `#374151` measured **1.68:1 on Dark** and Supabase's `#3fcf8e`
+**1.99:1 on Light**, on the single most important number on that screen. The price now takes
+`text-ink`; the brand colour still identifies the provider on the emoji chip above it, which is a
+FILL and therefore reads on both. Nothing is lost — the provider is already named in full beside it.
+
+**What the codemod correctly declined to touch, each verified by eye:** WebAppPlayer's `bg-white`
+iframe (the user's own app canvas), HistoryView's `bg-[#1f242c]` menu with its `text-red-400` delete
+item (a fixed dark menu keeping its brand ink, per PR H's rule), and CursorPopup's `text-[#21262d]`
+watermark (a chrome hex used as text, which has no row and is not ours to invent).
+
+**Crawl, 12 views × three themes, before vs after:** APIMarketplace 1/30/0 → 0/0/0 on Light and
+1/9/21 → 0/0/0 on Dark and Contrast; CostEstimator 0/60/10 → 0/0/0 on Light after the price fix; APK
+0/5/5 → 0/0/0. Totals across the batch: Light severe **97 → 0**, Dark severe 21 → 0, Contrast 22 → 0.
+
+**Still open after this batch, unchanged and named so nobody re-discovers them:** Code Studio's
+`Editor.tsx` tabs and Monaco's own `vs-dark` theme on Light (a separate product decision);
+TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over another grey — the AA
+lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
+theme, which still wants a `bg-success` fill token rather than per-button patches.

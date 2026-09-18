@@ -228,10 +228,10 @@ function totalUSD(bd: CostBreakdown): number {
 }
 
 function badge(usd: number): { label: string; color: string } {
-  if (usd === 0) return { label: 'Free Tier', color: 'bg-green-900/60 text-green-300 border border-green-700' };
-  if (usd < 20) return { label: 'Affordable', color: 'bg-blue-900/60 text-blue-300 border border-blue-700' };
-  if (usd < 100) return { label: 'Mid Range', color: 'bg-yellow-900/60 text-yellow-300 border border-yellow-700' };
-  return { label: 'Enterprise', color: 'bg-red-900/60 text-red-300 border border-red-700' };
+  if (usd === 0) return { label: 'Free Tier', color: 'bg-green-500/10 text-success border border-green-700' };
+  if (usd < 20) return { label: 'Affordable', color: 'bg-blue-500/10 text-info border border-blue-700' };
+  if (usd < 100) return { label: 'Mid Range', color: 'bg-yellow-500/10 text-warn border border-yellow-700' };
+  return { label: 'Enterprise', color: 'bg-red-500/10 text-danger border border-red-700' };
 }
 
 function computePlatforms(profile: AppProfile): PlatformCost[] {
@@ -363,22 +363,22 @@ export const CostEstimator: React.FC = () => {
     setProfile((p) => ({ ...p, [field]: !p[field] }));
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-white font-sans overflow-hidden">
+    <div className="flex flex-col h-full bg-surface text-ink font-sans overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 shrink-0">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-line shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xl">💰</span>
-          <span className="font-semibold text-base text-white/90">Cloud Cost Estimator</span>
-          <span className="text-xs text-white/40 ml-2">Know your app's hosting cost</span>
+          <span className="font-semibold text-base text-body">Cloud Cost Estimator</span>
+          <span className="text-xs text-faint ml-2">Know your app's hosting cost</span>
         </div>
         <div className="flex items-center gap-3">
           {/* Annual toggle */}
           <button
             onClick={() => setAnnual((v) => !v)}
-            className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 text-xs text-body hover:text-ink transition-colors"
           >
             {annual ? (
-              <ToggleRight size={18} className="text-blue-400" />
+              <ToggleRight size={18} className="text-info" />
             ) : (
               <ToggleLeft size={18} />
             )}
@@ -387,7 +387,7 @@ export const CostEstimator: React.FC = () => {
           {/* Export */}
           <button
             onClick={handleDownload}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-xs text-white/80 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised border border-line rounded-md text-xs text-body transition-colors"
           >
             <Download size={13} />
             Download Report
@@ -398,11 +398,11 @@ export const CostEstimator: React.FC = () => {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* ─── Left: App Profile (~320px) ─── */}
-        <div className="w-80 shrink-0 border-r border-white/10 flex flex-col overflow-y-auto">
+        <div className="w-80 shrink-0 border-r border-line flex flex-col overflow-y-auto">
           <div className="p-4 space-y-5">
             {/* App Type */}
             <div>
-              <p className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">App Type</p>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">App Type</p>
               <div className="grid grid-cols-2 gap-2">
                 {APP_TYPES.map((at) => (
                   <button
@@ -410,12 +410,12 @@ export const CostEstimator: React.FC = () => {
                     onClick={() => setProfile((p) => ({ ...p, appType: at.id }))}
                     className={`p-2 rounded-lg border text-left transition-all ${
                       profile.appType === at.id
-                        ? 'border-blue-500 bg-blue-500/10 text-white'
-                        : 'border-white/10 bg-[#161b22] text-white/60 hover:border-white/20'
+                        ? 'border-blue-500 bg-blue-500/10 text-ink'
+                        : 'border-line bg-card text-muted hover:border-line'
                     }`}
                   >
                     <div className="text-xs font-medium">{at.label}</div>
-                    <div className="text-[10px] text-white/40 mt-0.5">{at.desc}</div>
+                    <div className="text-[10px] text-faint mt-0.5">{at.desc}</div>
                   </button>
                 ))}
               </div>
@@ -424,8 +424,8 @@ export const CostEstimator: React.FC = () => {
             {/* MAU Slider */}
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-white/50">Monthly Active Users</span>
-                <span className="text-xs font-mono text-blue-400">{LOG_LABELS[mauIdx]}</span>
+                <span className="text-xs text-muted">Monthly Active Users</span>
+                <span className="text-xs font-mono text-info">{LOG_LABELS[mauIdx]}</span>
               </div>
               <input
                 type="range"
@@ -436,7 +436,7 @@ export const CostEstimator: React.FC = () => {
                 onChange={(e) => setMauIdx(Number(e.target.value))}
                 className="w-full accent-blue-500"
               />
-              <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
+              <div className="flex justify-between text-[10px] text-faint mt-0.5">
                 {LOG_LABELS.map((l) => <span key={l}>{l}</span>)}
               </div>
             </div>
@@ -444,8 +444,8 @@ export const CostEstimator: React.FC = () => {
             {/* Storage */}
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-white/50">Storage Needed</span>
-                <span className="text-xs font-mono text-blue-400">{profile.storage} GB</span>
+                <span className="text-xs text-muted">Storage Needed</span>
+                <span className="text-xs font-mono text-info">{profile.storage} GB</span>
               </div>
               <input
                 type="range"
@@ -456,7 +456,7 @@ export const CostEstimator: React.FC = () => {
                 onChange={(e) => setProfile((p) => ({ ...p, storage: Number(e.target.value) }))}
                 className="w-full accent-blue-500"
               />
-              <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
+              <div className="flex justify-between text-[10px] text-faint mt-0.5">
                 <span>0.1 GB</span><span>1 TB</span>
               </div>
             </div>
@@ -464,8 +464,8 @@ export const CostEstimator: React.FC = () => {
             {/* API Calls */}
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-white/50">API Calls / Month</span>
-                <span className="text-xs font-mono text-blue-400">{profile.apiCalls}M</span>
+                <span className="text-xs text-muted">API Calls / Month</span>
+                <span className="text-xs font-mono text-info">{profile.apiCalls}M</span>
               </div>
               <input
                 type="range"
@@ -476,7 +476,7 @@ export const CostEstimator: React.FC = () => {
                 onChange={(e) => setProfile((p) => ({ ...p, apiCalls: Number(e.target.value) }))}
                 className="w-full accent-blue-500"
               />
-              <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
+              <div className="flex justify-between text-[10px] text-faint mt-0.5">
                 <span>1K</span><span>100M</span>
               </div>
             </div>
@@ -484,8 +484,8 @@ export const CostEstimator: React.FC = () => {
             {/* Bandwidth */}
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-white/50">Bandwidth / Month</span>
-                <span className="text-xs font-mono text-blue-400">
+                <span className="text-xs text-muted">Bandwidth / Month</span>
+                <span className="text-xs font-mono text-info">
                   {profile.bandwidth >= 1024
                     ? `${(profile.bandwidth / 1024).toFixed(1)} TB`
                     : `${profile.bandwidth} GB`}
@@ -500,18 +500,18 @@ export const CostEstimator: React.FC = () => {
                 onChange={(e) => setProfile((p) => ({ ...p, bandwidth: Number(e.target.value) }))}
                 className="w-full accent-blue-500"
               />
-              <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
+              <div className="flex justify-between text-[10px] text-faint mt-0.5">
                 <span>1 GB</span><span>10 TB</span>
               </div>
             </div>
 
             {/* Region */}
             <div>
-              <p className="text-xs text-white/50 mb-1">Region</p>
+              <p className="text-xs text-muted mb-1">Region</p>
               <select
                 value={profile.region}
                 onChange={(e) => setProfile((p) => ({ ...p, region: e.target.value as Region }))}
-                className="w-full bg-[#161b22] border border-white/10 rounded-md px-3 py-2 text-sm text-white/80 focus:outline-none focus:border-blue-500"
+                className="w-full bg-card border border-line rounded-md px-3 py-2 text-sm text-body focus:outline-none focus:border-blue-500"
               >
                 {REGIONS.map((r) => (
                   <option key={r.id} value={r.id}>{r.label}</option>
@@ -521,7 +521,7 @@ export const CostEstimator: React.FC = () => {
 
             {/* Features */}
             <div>
-              <p className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">Features</p>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Features</p>
               <div className="space-y-2">
                 {(
                   [
@@ -536,15 +536,15 @@ export const CostEstimator: React.FC = () => {
                   <label key={key} className="flex items-center gap-2 cursor-pointer group">
                     <button
                       onClick={() => toggle(key)}
-                      className="shrink-0 text-blue-400"
+                      className="shrink-0 text-info"
                     >
                       {profile[key] ? (
-                        <CheckCircle2 size={15} className="text-blue-400" />
+                        <CheckCircle2 size={15} className="text-info" />
                       ) : (
-                        <Circle size={15} className="text-white/30 group-hover:text-white/50" />
+                        <Circle size={15} className="text-faint group-hover:text-muted" />
                       )}
                     </button>
-                    <span className="text-xs text-white/60 group-hover:text-white/80 transition-colors">{label}</span>
+                    <span className="text-xs text-muted group-hover:text-body transition-colors">{label}</span>
                   </label>
                 ))}
               </div>
@@ -556,14 +556,14 @@ export const CostEstimator: React.FC = () => {
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {/* Recommendation Banner */}
-            <div className="flex items-center justify-between bg-green-900/30 border border-green-700/50 rounded-xl px-4 py-3">
+            <div className="flex items-center justify-between bg-green-500/10 border border-green-700/50 rounded-xl px-4 py-3">
               <div className="flex items-center gap-2">
-                <Star size={15} className="text-green-400 shrink-0" />
-                <span className="text-sm text-green-300">
+                <Star size={15} className="text-success shrink-0" />
+                <span className="text-sm text-success">
                   For your app{' '}
-                  <span className="font-semibold text-white">{cheapest.name}</span>{' '}
+                  <span className="font-semibold text-ink">{cheapest.name}</span>{' '}
                   sabse sasta rahega:{' '}
-                  <span className="font-mono font-bold text-green-300">
+                  <span className="font-mono font-bold text-success">
                     {fmt(cheapest.total, annual).inr}/month
                   </span>
                 </span>
@@ -589,8 +589,8 @@ export const CostEstimator: React.FC = () => {
                   return (
                     <div
                       key={p.id}
-                      className={`bg-[#161b22] rounded-xl border transition-all ${
-                        isCheapest ? 'border-green-700/60' : 'border-white/10'
+                      className={`bg-card rounded-xl border transition-all ${
+                        isCheapest ? 'border-green-700/60' : 'border-line'
                       }`}
                     >
                       <div className="flex items-center gap-3 p-3">
@@ -603,9 +603,9 @@ export const CostEstimator: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-sm text-white">{p.name}</span>
+                            <span className="font-medium text-sm text-ink">{p.name}</span>
                             {isCheapest && (
-                              <span className="text-[10px] bg-green-900/50 text-green-300 border border-green-700/50 px-1.5 py-0.5 rounded">
+                              <span className="text-[10px] bg-green-500/10 text-success border border-green-700/50 px-1.5 py-0.5 rounded">
                                 Best
                               </span>
                             )}
@@ -613,14 +613,18 @@ export const CostEstimator: React.FC = () => {
                               {b.label}
                             </span>
                           </div>
-                          <div className="text-[11px] text-white/40 mt-0.5">{p.bestFor}</div>
+                          <div className="text-[11px] text-faint mt-0.5">{p.bestFor}</div>
                         </div>
                         {/* Price */}
                         <div className="text-right shrink-0">
-                          <div className="text-base font-bold font-mono" style={{ color: p.color }}>
+                          {/* The PRICE is the content, so it takes a theme token — a vendor's brand hex as
+                              text can only read on one theme (Vercel's #374151 was 1.68:1 on Dark,
+                              Supabase's #3fcf8e 1.99:1 on Light). The brand colour still identifies the
+                              provider on the emoji chip above, which is a fill and reads on both. */}
+                          <div className="text-base font-bold font-mono text-ink">
                             {inr}
                           </div>
-                          <div className="text-xs text-white/40 font-mono">{usd}/mo</div>
+                          <div className="text-xs text-faint font-mono">{usd}/mo</div>
                         </div>
                       </div>
 
@@ -629,17 +633,17 @@ export const CostEstimator: React.FC = () => {
                         <div className="grid grid-cols-5 gap-1 text-[10px]">
                           {(
                             [
-                              { key: 'hosting', label: 'Hosting', color: 'bg-blue-500' },
-                              { key: 'database', label: 'Database', color: 'bg-purple-500' },
+                              { key: 'hosting', label: 'Hosting', color: 'bg-blue-500 text-on-accent' },
+                              { key: 'database', label: 'Database', color: 'bg-purple-500 text-on-accent' },
                               { key: 'storage', label: 'Storage', color: 'bg-yellow-500' },
-                              { key: 'auth', label: 'Auth', color: 'bg-pink-500' },
-                              { key: 'bandwidth', label: 'Bandwidth', color: 'bg-cyan-500' },
+                              { key: 'auth', label: 'Auth', color: 'bg-pink-500 text-on-accent' },
+                              { key: 'bandwidth', label: 'Bandwidth', color: 'bg-cyan-500 text-on-accent' },
                             ] as { key: keyof CostBreakdown; label: string; color: string }[]
                           ).map(({ key, label, color }) => (
                             <div key={key} className="text-center">
-                              <div className="text-white/40 mb-0.5">{label}</div>
+                              <div className="text-faint mb-0.5">{label}</div>
                               <div className={`h-1 rounded-full mb-0.5 ${color} opacity-60`} />
-                              <div className="text-white/60 font-mono">
+                              <div className="text-muted font-mono">
                                 {fmtLine(p.breakdown[key], annual).split(' ')[0]}
                               </div>
                             </div>
@@ -652,16 +656,16 @@ export const CostEstimator: React.FC = () => {
             </div>
 
             {/* Assumptions Panel */}
-            <div className="bg-[#161b22] rounded-xl border border-white/10 overflow-hidden">
+            <div className="bg-card rounded-xl border border-line overflow-hidden">
               <button
                 onClick={() => setAssumptionsOpen((v) => !v)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm text-white/60 hover:text-white/80 transition-colors"
+                className="w-full flex items-center justify-between px-4 py-3 text-sm text-muted hover:text-body transition-colors"
               >
                 <span className="font-medium">Assumptions &amp; Notes</span>
                 {assumptionsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
               {assumptionsOpen && (
-                <div className="px-4 pb-4 grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] text-white/50 border-t border-white/5 pt-3">
+                <div className="px-4 pb-4 grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] text-muted border-t border-line pt-3">
                   {[
                     '1 DB read ≈ 0.5 KB data transfer',
                     'Average session duration = 5 min',
@@ -681,7 +685,7 @@ export const CostEstimator: React.FC = () => {
                     'Bandwidth rates after free tier apply',
                   ].map((note, i) => (
                     <div key={i} className="flex items-start gap-1.5">
-                      <span className="text-white/20 mt-0.5">•</span>
+                      <span className="text-faint mt-0.5">•</span>
                       <span>{note}</span>
                     </div>
                   ))}

@@ -216,7 +216,7 @@ const BarChartSVG: React.FC<{ data: ActivityDay[]; days: number }> = ({ data, da
       {/* Tooltip */}
       {tooltip.visible && (
         <div
-          className="absolute pointer-events-none z-10 px-2 py-1 rounded text-xs text-white"
+          className="absolute pointer-events-none z-10 px-2 py-1 rounded text-xs text-ink"
           style={{
             left: tooltip.x + 8,
             top: tooltip.y - 32,
@@ -225,8 +225,8 @@ const BarChartSVG: React.FC<{ data: ActivityDay[]; days: number }> = ({ data, da
             whiteSpace: 'nowrap',
           }}
         >
-          <span className="font-semibold text-indigo-400">{tooltip.builds} builds</span>
-          <span className="ml-1 text-gray-400">{tooltip.date}</span>
+          <span className="font-semibold text-accent-text">{tooltip.builds} builds</span>
+          <span className="ml-1 text-muted">{tooltip.date}</span>
         </div>
       )}
     </div>
@@ -366,28 +366,28 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       label: 'Total Apps Built',
       value: totalApps,
       icon: <Rocket size={20} />,
-      accent: 'text-indigo-400',
+      accent: 'text-accent-text',
       bgAccent: 'bg-indigo-500/10 border-indigo-500/20',
     },
     {
       label: 'AI Conversations',
       value: aiConversations,
       icon: <MessageSquare size={20} />,
-      accent: 'text-emerald-400',
+      accent: 'text-success',
       bgAccent: 'bg-emerald-500/10 border-emerald-500/20',
     },
     {
       label: 'Code Generated',
       value: `${codeGenKB} KB`,
       icon: <Code size={20} />,
-      accent: 'text-violet-400',
+      accent: 'text-accent-text',
       bgAccent: 'bg-violet-500/10 border-violet-500/20',
     },
     {
       label: 'Tokens Used (est.)',
       value: tokensUsed >= 1000 ? `${(tokensUsed / 1000).toFixed(1)}K` : tokensUsed,
       icon: <Zap size={20} />,
-      accent: 'text-amber-400',
+      accent: 'text-warn',
       bgAccent: 'bg-amber-500/10 border-amber-500/20',
     },
   ];
@@ -411,11 +411,11 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <BarChart2 size={22} className="text-indigo-400" />
+          <h1 className="text-xl font-bold text-ink flex items-center gap-2">
+            <BarChart2 size={22} className="text-accent-text" />
             Analytics Dashboard
           </h1>
-          <p className="text-gray-500 mt-0.5 text-xs">
+          <p className="text-faint mt-0.5 text-xs">
             Tumhare NavBharatAI workspace ka usage overview
           </p>
         </div>
@@ -438,8 +438,8 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
                 onClick={() => setTimeRange(tab.id)}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                   timeRange === tab.id
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    ? 'bg-indigo-600 text-on-accent'
+                    : 'text-muted hover:text-ink hover:bg-raised'
                 }`}
               >
                 {tab.label}
@@ -450,7 +450,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           {/* Refresh */}
           <button
             onClick={handleRefresh}
-            className="p-2 rounded-lg border text-gray-400 hover:text-white transition-colors"
+            className="p-2 rounded-lg border text-muted hover:text-ink transition-colors"
             style={{ borderColor: '#30363d', background: 'var(--surface-card)' }}
             title="Refresh data"
           >
@@ -472,7 +472,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
             </div>
             <div>
               <div className={`text-2xl font-bold ${card.accent}`}>{card.value}</div>
-              <div className="text-xs text-gray-500 mt-0.5">{card.label}</div>
+              <div className="text-xs text-faint mt-0.5">{card.label}</div>
             </div>
           </div>
         ))}
@@ -485,10 +485,10 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Activity size={16} className="text-indigo-400" />
-            <h2 className="font-semibold text-white text-sm">Build Activity</h2>
+            <Activity size={16} className="text-accent-text" />
+            <h2 className="font-semibold text-ink text-sm">Build Activity</h2>
           </div>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-faint">
             Last {chartDays} days
           </span>
         </div>
@@ -499,36 +499,36 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {buildPerf && buildPerf.totalJobs > 0 && (
         <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
           <div className="flex items-center gap-2 mb-4">
-            <Activity size={16} className="text-emerald-400" />
-            <h2 className="font-semibold text-white text-sm">Build Performance</h2>
-            <span className="text-xs text-gray-500 ml-auto">Last {buildPerf.terminalJobs} completed builds</span>
+            <Activity size={16} className="text-success" />
+            <h2 className="font-semibold text-ink text-sm">Build Performance</h2>
+            <span className="text-xs text-faint ml-auto">Last {buildPerf.terminalJobs} completed builds</span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
-              <div className="text-2xl font-bold text-emerald-400">{Math.round(buildPerf.successRate * 100)}%</div>
-              <div className="text-xs text-gray-500 mt-0.5">Success rate</div>
+              <div className="text-2xl font-bold text-success">{Math.round(buildPerf.successRate * 100)}%</div>
+              <div className="text-xs text-faint mt-0.5">Success rate</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-red-400">{Math.round(buildPerf.failureRate * 100)}%</div>
-              <div className="text-xs text-gray-500 mt-0.5">Failure rate</div>
+              <div className="text-2xl font-bold text-danger">{Math.round(buildPerf.failureRate * 100)}%</div>
+              <div className="text-xs text-faint mt-0.5">Failure rate</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-indigo-400">{(buildPerf.avgDurationMs / 1000).toFixed(1)}s</div>
-              <div className="text-xs text-gray-500 mt-0.5">Avg duration</div>
+              <div className="text-2xl font-bold text-accent-text">{(buildPerf.avgDurationMs / 1000).toFixed(1)}s</div>
+              <div className="text-xs text-faint mt-0.5">Avg duration</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-amber-400">{(buildPerf.p95DurationMs / 1000).toFixed(1)}s</div>
-              <div className="text-xs text-gray-500 mt-0.5">p95 duration</div>
+              <div className="text-2xl font-bold text-warn">{(buildPerf.p95DurationMs / 1000).toFixed(1)}s</div>
+              <div className="text-xs text-faint mt-0.5">p95 duration</div>
             </div>
           </div>
           {buildPerf.topFailureTypes.length > 0 && (
             <div className="mt-4">
-              <div className="text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wide">Top failure types</div>
+              <div className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Top failure types</div>
               <div className="space-y-1.5">
                 {buildPerf.topFailureTypes.map((f, i) => (
                   <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="text-gray-300 font-mono truncate" title={f.type}>{f.type}</span>
-                    <span className="text-red-400 font-bold shrink-0">{f.count}</span>
+                    <span className="text-muted font-mono truncate" title={f.type}>{f.type}</span>
+                    <span className="text-danger font-bold shrink-0">{f.count}</span>
                   </div>
                 ))}
               </div>
@@ -541,20 +541,20 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {optimizer && optimizer.suggestions.length > 0 && (
         <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
           <div className="flex items-center gap-2 mb-4">
-            <Activity size={16} className="text-violet-400" />
-            <h2 className="font-semibold text-white text-sm">Build Optimizer</h2>
-            <span className="text-xs text-gray-500 ml-auto">Suggestions from your build history</span>
+            <Activity size={16} className="text-accent-text" />
+            <h2 className="font-semibold text-ink text-sm">Build Optimizer</h2>
+            <span className="text-xs text-faint ml-auto">Suggestions from your build history</span>
           </div>
           <div className="space-y-2">
             {optimizer.suggestions.map((s) => (
-              <div key={s.id} className="flex items-start gap-3 bg-black/30 rounded-xl p-3">
+              <div key={s.id} className="flex items-start gap-3 bg-well rounded-xl p-3">
                 <span className={`mt-0.5 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 ${
-                  s.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                  : s.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                  : 'bg-white/5 border-white/10 text-gray-400'}`}>{s.severity}</span>
+                  s.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                  : s.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                  : 'bg-raised border-line text-muted'}`}>{s.severity}</span>
                 <div>
-                  <div className="text-xs font-bold text-white">{s.title}</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5">{s.detail}</div>
+                  <div className="text-xs font-bold text-ink">{s.title}</div>
+                  <div className="text-[11px] text-faint mt-0.5">{s.detail}</div>
                 </div>
               </div>
             ))}
@@ -566,30 +566,30 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {reliability && reliability.totalFailures > 0 && (
         <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
           <div className="flex items-center gap-2 mb-4">
-            <Activity size={16} className="text-sky-400" />
-            <h2 className="font-semibold text-white text-sm">Build Reliability</h2>
-            <span className="text-xs text-gray-500 ml-auto">{reliability.totalFailures} failure{reliability.totalFailures === 1 ? '' : 's'} analysed</span>
+            <Activity size={16} className="text-info" />
+            <h2 className="font-semibold text-ink text-sm">Build Reliability</h2>
+            <span className="text-xs text-faint ml-auto">{reliability.totalFailures} failure{reliability.totalFailures === 1 ? '' : 's'} analysed</span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
-              <div className="text-2xl font-bold text-amber-400">
+              <div className="text-2xl font-bold text-warn">
                 {reliability.mttdSampleSize > 0 ? `${(reliability.mttdMs / 60000).toFixed(1)}m` : '—'}
               </div>
-              <div className="text-xs text-gray-500 mt-0.5">MTTD (detect)</div>
+              <div className="text-xs text-faint mt-0.5">MTTD (detect)</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-sky-400">
+              <div className="text-2xl font-bold text-info">
                 {reliability.mttrSampleSize > 0 ? `${(reliability.mttrMs / 60000).toFixed(1)}m` : '—'}
               </div>
-              <div className="text-xs text-gray-500 mt-0.5">MTTR (repair)</div>
+              <div className="text-xs text-faint mt-0.5">MTTR (repair)</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-emerald-400">{Math.round(reliability.recoveryRate * 100)}%</div>
-              <div className="text-xs text-gray-500 mt-0.5">Recovery rate</div>
+              <div className="text-2xl font-bold text-success">{Math.round(reliability.recoveryRate * 100)}%</div>
+              <div className="text-xs text-faint mt-0.5">Recovery rate</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-red-400">{reliability.unresolvedFailures}</div>
-              <div className="text-xs text-gray-500 mt-0.5">Unresolved</div>
+              <div className="text-2xl font-bold text-danger">{reliability.unresolvedFailures}</div>
+              <div className="text-xs text-faint mt-0.5">Unresolved</div>
             </div>
           </div>
         </div>
@@ -601,11 +601,11 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
         style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}
       >
         <div className="flex items-center gap-2 mb-4">
-          <Clock size={16} className="text-emerald-400" />
-          <h2 className="font-semibold text-white text-sm">Recent Sessions</h2>
+          <Clock size={16} className="text-success" />
+          <h2 className="font-semibold text-ink text-sm">Recent Sessions</h2>
         </div>
         {recentSessions.length === 0 ? (
-          <div className="text-xs text-gray-500 py-6 text-center">
+          <div className="text-xs text-faint py-6 text-center">
             No sessions yet — start a chat or build an app and it will appear here.
           </div>
         ) : (
@@ -615,20 +615,20 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
               return (
                 <div
                   key={session.id}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg group hover:bg-white/5 transition-colors"
+                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg group hover:bg-raised transition-colors"
                   style={{ background: 'var(--surface-base)' }}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium text-gray-200 truncate">{session.title}</div>
-                    <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2">
+                    <div className="text-xs font-medium text-body truncate">{session.title}</div>
+                    <div className="text-[11px] text-faint mt-0.5 flex items-center gap-2">
                       <span>{formatTimestamp(session.lastUpdated)}</span>
-                      <span className="text-indigo-400/70">NavBharatAI</span>
+                      <span className="text-accent-text">NavBharatAI</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <MessageSquare size={11} className="text-gray-600" />
-                    <span className="text-[11px] text-gray-500">{msgCount}</span>
-                    <ChevronRight size={12} className="text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
+                    <MessageSquare size={11} className="text-faint" />
+                    <span className="text-[11px] text-faint">{msgCount}</span>
+                    <ChevronRight size={12} className="text-faint opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
                   </div>
                 </div>
               );

@@ -107,20 +107,20 @@ function formatDuration(ms: number) {
 function StatusBadge({ status, progress }: { status: BuildRecord['status']; progress: number }) {
   if (status === 'completed') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-success text-[10px] font-bold border border-emerald-500/20">
         <CheckCircle2 className="w-3 h-3" /> Completed
       </span>
     );
   }
   if (status === 'failed') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px] font-bold border border-red-500/20">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-danger text-[10px] font-bold border border-red-500/20">
         <Circle className="w-3 h-3" /> Failed
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-bold border border-amber-500/20">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-warn text-[10px] font-bold border border-amber-500/20">
       <AlertCircle className="w-3 h-3" /> Cancelled {progress > 0 ? `(${progress}%)` : ''}
     </span>
   );
@@ -373,14 +373,14 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
   if (!user) {
     return (
-      <div className="flex-1 bg-[#0d1117] flex items-center justify-center">
-        <p className="text-[#8b949e] text-sm">Sign in to view your profile.</p>
+      <div className="flex-1 bg-surface flex items-center justify-center">
+        <p className="text-muted text-sm">Sign in to view your profile.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 bg-[#0d1117] overflow-y-auto">
+    <div className="flex-1 bg-surface overflow-y-auto">
       {/* It portals to document.body, so where it sits in this tree does not matter — what matters is
           that it is OUTSIDE the conditional early-returns above, or a signed-out render would unmount
           a sheet mid-verification. */}
@@ -399,43 +399,43 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
       <div className={`${panelWidth(effectiveDeviceMode)} mx-auto px-4 py-8 ${effectiveDeviceMode === 'desktop' ? panelColumns(effectiveDeviceMode) : 'space-y-6'}`}>
 
         {/* ── Profile Card ─────────────────────────────────────────────────── */}
-        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-4">
+        <div className="bg-card border border-line rounded-3xl p-6 space-y-4">
           <div className="flex items-start gap-4">
             {/* Avatar */}
             <div className="relative shrink-0">
               {avatarUrl ? (
-                <img src={avatarUrl} alt={displayName} className="w-20 h-20 rounded-2xl object-cover border border-white/10" referrerPolicy="no-referrer" />
+                <img src={avatarUrl} alt={displayName} className="w-20 h-20 rounded-2xl object-cover border border-line" referrerPolicy="no-referrer" />
               ) : (
                 <div className="w-20 h-20 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
-                  <span className="text-3xl font-black text-indigo-400">{displayName.charAt(0).toUpperCase()}</span>
+                  <span className="text-3xl font-black text-accent-text">{displayName.charAt(0).toUpperCase()}</span>
                 </div>
               )}
             </div>
 
             {/* Info */}
             <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-black text-white truncate">{displayName}</h1>
-              <p className="text-xs text-[#8b949e] mt-0.5">{user.email}</p>
+              <h1 className="text-xl font-black text-ink truncate">{displayName}</h1>
+              <p className="text-xs text-muted mt-0.5">{user.email}</p>
               {/* Mobile status, at a glance next to the name — the ACTION button for it lives in the
                   Verifications card below, so there is exactly one "Verify" per step, not two doing
                   the same thing. `phoneNumber` is on the auth record only once a credential is really
                   linked, so its presence IS the verification; nothing here asks the server or can
                   disagree with it (admin 2026-08-22). */}
               {user.phoneNumber && (
-                <p className="text-[11px] mt-1 flex items-center gap-1.5 text-emerald-400 font-mono">
+                <p className="text-[11px] mt-1 flex items-center gap-1.5 text-success font-mono">
                   <Smartphone className="w-3 h-3" /> {maskPhone(user.phoneNumber)} · verified
                 </p>
               )}
-              <p className="text-[10px] text-[#484f58] mt-1 font-mono">Member since {memberSince}</p>
+              <p className="text-[10px] text-faint mt-1 font-mono">Member since {memberSince}</p>
               {saveSuccess && (
-                <span className="text-[10px] text-emerald-400 font-bold mt-1 block">✓ Profile saved</span>
+                <span className="text-[10px] text-success font-bold mt-1 block">✓ Profile saved</span>
               )}
             </div>
 
             {!editing && (
               <button
                 onClick={startEdit}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/8 border border-white/10 rounded-xl text-[11px] font-bold text-white transition-all"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-raised hover:bg-raised border border-line rounded-xl text-[11px] font-bold text-ink transition-all"
               >
                 <Edit3 className="w-3.5 h-3.5" /> Edit
               </button>
@@ -444,60 +444,60 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
           {/* Edit Form */}
           {editing && (
-            <div className="space-y-3 border-t border-white/5 pt-4">
+            <div className="space-y-3 border-t border-line pt-4">
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Display Name</label>
+                <label className="text-[10px] font-black text-muted uppercase tracking-widest">Display Name</label>
                 <input
                   value={editName}
                   onChange={e => setEditName(e.target.value)}
                   maxLength={80}
                   placeholder="Your name"
-                  className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Bio</label>
+                <label className="text-[10px] font-black text-muted uppercase tracking-widest">Bio</label>
                 <textarea
                   value={editBio}
                   onChange={e => setEditBio(e.target.value)}
                   maxLength={300}
                   rows={2}
                   placeholder="A short description about yourself"
-                  className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50 resize-none"
+                  className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50 resize-none"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Phone</label>
+                  <label className="text-[10px] font-black text-muted uppercase tracking-widest">Phone</label>
                   <input
                     value={editPhone}
                     onChange={e => setEditPhone(e.target.value)}
                     maxLength={20}
                     placeholder="+91 XXXXX XXXXX"
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                    className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">Photo URL</label>
+                  <label className="text-[10px] font-black text-muted uppercase tracking-widest">Photo URL</label>
                   <input
                     value={editPhotoUrl}
                     onChange={e => setEditPhotoUrl(e.target.value)}
                     placeholder="https://…"
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                    className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
                   />
                 </div>
               </div>
-              {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+              {saveError && <p className="text-xs text-danger">{saveError}</p>}
               <div className="flex items-center gap-2 pt-1">
                 <button
                   onClick={saveProfile}
                   disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black transition-all disabled:opacity-50"
                 >
                   {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
                   Save Changes
                 </button>
-                <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 bg-white/5 hover:bg-white/8 text-[#8b949e] rounded-xl text-xs font-bold transition-all">
+                <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 bg-raised hover:bg-raised text-muted rounded-xl text-xs font-bold transition-all">
                   <X className="w-3.5 h-3.5" /> Cancel
                 </button>
               </div>
@@ -506,14 +506,14 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
           {/* Bio display */}
           {!editing && profile?.bio && (
-            <p className="text-sm text-[#8b949e] border-t border-white/5 pt-3">{profile.bio}</p>
+            <p className="text-sm text-muted border-t border-line pt-3">{profile.bio}</p>
           )}
 
           {/* Connected accounts */}
-          <div className="flex items-center gap-3 border-t border-white/5 pt-3">
-            <span className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">Connected:</span>
+          <div className="flex items-center gap-3 border-t border-line pt-3">
+            <span className="text-[10px] font-bold text-faint uppercase tracking-widest">Connected:</span>
             {user.providerData.map(p => (
-              <span key={p.providerId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/5 text-[10px] font-bold text-[#8b949e] border border-white/10">
+              <span key={p.providerId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-raised text-[10px] font-bold text-muted border border-line">
                 {p.providerId === 'google.com' ? '🔵 Google' : p.providerId === 'github.com' ? '⚫ GitHub' : p.providerId}
               </span>
             ))}
@@ -526,11 +526,11 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             `capRupees` — the server's own `REFERRER_LIFETIME_CAP_TOKENS` — and never typed here, so
             an admin who retunes the cap cannot leave a stale number promising money on this screen. */}
         {referral.enabled && (
-          <div className="bg-[#161b22] border border-amber-500/20 rounded-3xl p-6 space-y-3.5">
+          <div className="bg-card border border-amber-500/20 rounded-3xl p-6 space-y-3.5">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <Gift className="w-4 h-4 text-amber-400 shrink-0" />
-                <h2 className="text-xs font-black text-white uppercase tracking-widest">
+                <Gift className="w-4 h-4 text-warn shrink-0" />
+                <h2 className="text-xs font-black text-ink uppercase tracking-widest">
                   Refer &amp; earn tokens worth ₹{referral.capRupees}
                 </h2>
               </div>
@@ -542,8 +542,8 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
               </button>
             </div>
 
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0d1117] px-5 py-3.5">
-              <span className="font-mono text-base font-black tracking-widest text-amber-400">{referral.code ?? '—'}</span>
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-line bg-surface px-5 py-3.5">
+              <span className="font-mono text-base font-black tracking-widest text-warn">{referral.code ?? '—'}</span>
               <button
                 disabled={!referral.code}
                 onClick={() => {
@@ -551,7 +551,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                   setCodeCopied(true);
                   setTimeout(() => setCodeCopied(false), 2000);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-white/10 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-4 py-2 text-[10px] font-black uppercase tracking-widest text-ink transition-all hover:bg-raised disabled:opacity-40"
               >
                 <Copy className="h-3 w-3" /> {codeCopied ? 'Copied' : 'Copy'}
               </button>
@@ -576,11 +576,11 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             >
               <Share2 className="h-3.5 w-3.5" /> Share
             </button>
-            {shareNote && <p className="text-[11px] font-semibold text-amber-300">{shareNote}</p>}
+            {shareNote && <p className="text-[11px] font-semibold text-warn">{shareNote}</p>}
 
-            <p className="text-[11px] font-bold text-[#8b949e]">
-              Earned so far: <span className="text-emerald-400">₹{referral.earnedRupees}</span> of ₹{referral.capRupees}
-              {referral.capReached && <span className="ml-1 text-amber-400">— you have reached the maximum.</span>}
+            <p className="text-[11px] font-bold text-muted">
+              Earned so far: <span className="text-success">₹{referral.earnedRupees}</span> of ₹{referral.capRupees}
+              {referral.capReached && <span className="ml-1 text-warn">— you have reached the maximum.</span>}
             </p>
           </div>
         )}
@@ -589,70 +589,70 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             One real button per step — click it, the verification actually starts, and a step already
             done shows as done. Verifying all three (plus applying a friend's referral code, in the
             Refer a Friend screen) is what the referral bonus is paid against. */}
-        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-3">
+        <div className="bg-card border border-line rounded-3xl p-6 space-y-3">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-xs font-black text-white uppercase tracking-widest">Verifications</h2>
+            <ShieldCheck className="w-4 h-4 text-accent-text" />
+            <h2 className="text-xs font-black text-ink uppercase tracking-widest">Verifications</h2>
           </div>
-          <p className="text-[11px] text-[#8b949e] -mt-1">
+          <p className="text-[11px] text-muted -mt-1">
             Verifying these keeps your account recoverable — and each one unlocks part of your referral bonus.
           </p>
 
           <div className="space-y-2 pt-1">
             {/* Email */}
-            <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5">
+            <div className="bg-surface rounded-2xl p-4 border border-line">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <Mail className="w-4 h-4 text-[#8b949e] shrink-0" />
+                  <Mail className="w-4 h-4 text-muted shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-white">Email verification</p>
-                    <p className="text-[10px] text-[#484f58] truncate">{user.email || 'No email on this account'}</p>
+                    <p className="text-xs font-bold text-ink">Email verification</p>
+                    <p className="text-[10px] text-faint truncate">{user.email || 'No email on this account'}</p>
                   </div>
                 </div>
                 {emailVerified ? (
-                  <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                  <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-success text-[10px] font-bold border border-emerald-500/20">
                     <CheckCircle2 className="w-3 h-3" /> Verified
                   </span>
                 ) : user.email ? (
                   <button
                     onClick={emailSent ? refreshEmailStatus : handleVerifyEmail}
                     disabled={verifyBusy === 'email'}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
                   >
                     {verifyBusy === 'email' && <Loader2 className="w-3 h-3 animate-spin" />}
                     {emailSent ? 'Refresh' : 'Verify'}
                   </button>
                 ) : (
-                  <span className="shrink-0 text-[10px] font-bold text-[#484f58]">Not available</span>
+                  <span className="shrink-0 text-[10px] font-bold text-faint">Not available</span>
                 )}
               </div>
               {emailSent && !emailVerified && (
-                <p className="text-[10px] text-amber-400/90 mt-2">
+                <p className="text-[10px] text-warn mt-2">
                   We sent a link to {user.email}. Open it, then press Refresh here.
                 </p>
               )}
               {verifyError?.which === 'email' && (
-                <p className="text-[10px] text-red-400 mt-2">{verifyError.text}</p>
+                <p className="text-[10px] text-danger mt-2">{verifyError.text}</p>
               )}
             </div>
 
             {/* Phone */}
-            <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5 flex items-center justify-between gap-3">
+            <div className="bg-surface rounded-2xl p-4 border border-line flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <Smartphone className="w-4 h-4 text-[#8b949e] shrink-0" />
+                <Smartphone className="w-4 h-4 text-muted shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-white">Phone verification</p>
-                  <p className="text-[10px] text-[#484f58] truncate">{user.phoneNumber ? maskPhone(user.phoneNumber) : 'Not linked yet'}</p>
+                  <p className="text-xs font-bold text-ink">Phone verification</p>
+                  <p className="text-[10px] text-faint truncate">{user.phoneNumber ? maskPhone(user.phoneNumber) : 'Not linked yet'}</p>
                 </div>
               </div>
               {user.phoneNumber ? (
-                <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-success text-[10px] font-bold border border-emerald-500/20">
                   <CheckCircle2 className="w-3 h-3" /> Verified
                 </span>
               ) : (
                 <button
                   onClick={() => setVerifyOpen(true)}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
                 >
                   Verify
                 </button>
@@ -660,24 +660,24 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             </div>
 
             {/* GitHub */}
-            <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5">
+            <div className="bg-surface rounded-2xl p-4 border border-line">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <Github className="w-4 h-4 text-[#8b949e] shrink-0" />
+                  <Github className="w-4 h-4 text-muted shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-white">GitHub verification</p>
-                    <p className="text-[10px] text-[#484f58] truncate">Lets you import and deploy your own repos too</p>
+                    <p className="text-xs font-bold text-ink">GitHub verification</p>
+                    <p className="text-[10px] text-faint truncate">Lets you import and deploy your own repos too</p>
                   </div>
                 </div>
                 {githubLinked ? (
-                  <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                  <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-success text-[10px] font-bold border border-emerald-500/20">
                     <CheckCircle2 className="w-3 h-3" /> Connected
                   </span>
                 ) : (
                   <button
                     onClick={handleConnectGithub}
                     disabled={verifyBusy === 'github'}
-                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
                   >
                     {verifyBusy === 'github' && <Loader2 className="w-3 h-3 animate-spin" />}
                     Connect
@@ -685,7 +685,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                 )}
               </div>
               {verifyError?.which === 'github' && (
-                <p className="text-[10px] text-red-400 mt-2">{verifyError.text}</p>
+                <p className="text-[10px] text-danger mt-2">{verifyError.text}</p>
               )}
             </div>
           </div>
@@ -694,10 +694,10 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
         {/* ── Published Apps (admin 2026-09-17) ────────────────────────────────
             Above the wallet, because it is the only section on this page about something the person
             MADE. Each row opens in the real browser, never inside the app's own WebView. */}
-        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-4">
+        <div className="bg-card border border-line rounded-3xl p-6 space-y-4">
           <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-xs font-black text-white uppercase tracking-widest">Your Published Apps</h2>
+            <Globe className="w-4 h-4 text-success" />
+            <h2 className="text-xs font-black text-ink uppercase tracking-widest">Your Published Apps</h2>
           </div>
           <PublishedAppsCard
             rows={publishedApps ?? []}
@@ -709,43 +709,43 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
         </div>
 
         {/* ── Wallet Summary ───────────────────────────────────────────────── */}
-        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-4">
+        <div className="bg-card border border-line rounded-3xl p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-indigo-400" />
-              <h2 className="text-xs font-black text-white uppercase tracking-widest">Wallet & Usage</h2>
+              <Wallet className="w-4 h-4 text-accent-text" />
+              <h2 className="text-xs font-black text-ink uppercase tracking-widest">Wallet & Usage</h2>
             </div>
-            <button onClick={onNavigateToBilling} className="flex items-center gap-1 text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors">
+            <button onClick={onNavigateToBilling} className="flex items-center gap-1 text-[10px] font-bold text-accent-text hover:text-accent-text transition-colors">
               Manage Billing <ChevronRight className="w-3 h-3" />
             </button>
           </div>
 
           {loading ? (
-            <div className="flex items-center gap-2 text-[#484f58] text-xs">
+            <div className="flex items-center gap-2 text-faint text-xs">
               <TirangaLoader className="w-3.5 h-3.5" /> Loading…
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5 space-y-1">
-                <p className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">Balance</p>
-                <p className="text-2xl font-black text-white">₹{(wallet?.remainingBalance ?? 0).toFixed(2)}</p>
+              <div className="bg-surface rounded-2xl p-4 border border-line space-y-1">
+                <p className="text-[10px] font-bold text-faint uppercase tracking-widest">Balance</p>
+                <p className="text-2xl font-black text-ink">₹{(wallet?.remainingBalance ?? 0).toFixed(2)}</p>
               </div>
-              <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5 space-y-1">
-                <p className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">This Month</p>
-                <p className="text-2xl font-black text-amber-400">
+              <div className="bg-surface rounded-2xl p-4 border border-line space-y-1">
+                <p className="text-[10px] font-bold text-faint uppercase tracking-widest">This Month</p>
+                <p className="text-2xl font-black text-warn">
                   {monthlySpend ? `₹${(monthlySpend.totalCostUsd * 84).toFixed(2)}` : '₹0.00'}
                 </p>
-                <p className="text-[10px] text-[#484f58]">{monthlySpend?.totalBuilds ?? 0} builds</p>
+                <p className="text-[10px] text-faint">{monthlySpend?.totalBuilds ?? 0} builds</p>
               </div>
-              <div className="bg-[#0d1117] rounded-2xl p-4 border border-white/5 space-y-1 col-span-2 sm:col-span-1">
-                <p className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">Monthly Budget</p>
+              <div className="bg-surface rounded-2xl p-4 border border-line space-y-1 col-span-2 sm:col-span-1">
+                <p className="text-[10px] font-bold text-faint uppercase tracking-widest">Monthly Budget</p>
                 {!editBudget ? (
                   <>
-                    <p className="text-2xl font-black text-white">
+                    <p className="text-2xl font-black text-ink">
                       {profile?.budgetLimitInr ? `₹${profile.budgetLimitInr}` : '—'}
                     </p>
                     <button onClick={() => { setEditBudget(true); setBudgetInput(String(profile?.budgetLimitInr ?? '')); }}
-                      className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300">
+                      className="text-[10px] font-bold text-accent-text hover:text-accent-text">
                       {profile?.budgetLimitInr ? 'Change limit' : 'Set a limit'}
                     </button>
                   </>
@@ -755,14 +755,14 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                       value={budgetInput}
                       onChange={e => setBudgetInput(e.target.value)}
                       placeholder="0 = no limit"
-                      className="w-24 bg-[#161b22] border border-white/20 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      className="w-24 bg-card border border-line rounded-lg px-2 py-1 text-sm text-ink focus:outline-none focus:border-indigo-500"
                     />
                     <button onClick={saveBudget} disabled={savingBudget}
-                      className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-[10px] font-bold disabled:opacity-50">
+                      className="px-2 py-1 bg-indigo-600 text-on-accent rounded-lg text-[10px] font-bold disabled:opacity-50">
                       {savingBudget ? '…' : 'OK'}
                     </button>
                     <button onClick={() => setEditBudget(false)}
-                      className="px-2 py-1 bg-white/5 text-[#8b949e] rounded-lg text-[10px] font-bold">
+                      className="px-2 py-1 bg-raised text-muted rounded-lg text-[10px] font-bold">
                       Cancel
                     </button>
                   </div>
@@ -780,10 +780,10 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                     a.severity === 'critical'
                       ? 'bg-red-500/10 border-red-500/30'
                       : 'bg-amber-500/10 border-amber-500/30'}`}>
-                  <AlertTriangle className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-400' : 'text-amber-400'}`} />
+                  <AlertTriangle className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-danger' : 'text-warn'}`} />
                   <div>
-                    <p className={`text-xs font-black ${a.severity === 'critical' ? 'text-red-300' : 'text-amber-300'}`}>{a.title}</p>
-                    <p className="text-[11px] text-[#8b949e] mt-0.5">{a.detail}</p>
+                    <p className={`text-xs font-black ${a.severity === 'critical' ? 'text-danger' : 'text-warn'}`}>{a.title}</p>
+                    <p className="text-[11px] text-muted mt-0.5">{a.detail}</p>
                   </div>
                 </div>
               ))}
@@ -792,10 +792,10 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
         </div>
 
         {/* ── Build History ────────────────────────────────────────────────── */}
-        <div className="bg-[#161b22] border border-white/5 rounded-3xl p-6 space-y-4">
+        <div className="bg-card border border-line rounded-3xl p-6 space-y-4">
           <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-xs font-black text-white uppercase tracking-widest">Build History</h2>
+            <Clock className="w-4 h-4 text-accent-text" />
+            <h2 className="text-xs font-black text-ink uppercase tracking-widest">Build History</h2>
           </div>
 
           {/* Period tabs */}
@@ -804,7 +804,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${period === p ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${period === p ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-surface border-line text-muted hover:border-line'}`}
               >
                 {periodLabel(p)}
               </button>
@@ -815,17 +815,17 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
           {period === 'custom' && (
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2">
-                <label className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">From</label>
+                <label className="text-[10px] font-bold text-faint uppercase tracking-widest">From</label>
                 <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-                  className="bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50" />
+                  className="bg-surface border border-line rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-indigo-500/50" />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">To</label>
+                <label className="text-[10px] font-bold text-faint uppercase tracking-widest">To</label>
                 <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-                  className="bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50" />
+                  className="bg-surface border border-line rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-indigo-500/50" />
               </div>
               <button onClick={() => fetchHistory('custom', customFrom, customTo)}
-                className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all">
+                className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-bold transition-all">
                 <CalendarDays className="w-3 h-3" /> Apply
               </button>
             </div>
@@ -835,14 +835,14 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
           {historySummary && historySummary.totalBuilds > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { label: 'Total', value: historySummary.totalBuilds, color: 'text-white' },
-                { label: 'Completed', value: historySummary.completedBuilds, color: 'text-emerald-400' },
-                { label: 'Failed', value: historySummary.failedBuilds, color: 'text-red-400' },
-                { label: 'Spent', value: `₹${historySummary.totalCostInr.toFixed(2)}`, color: 'text-amber-400' },
+                { label: 'Total', value: historySummary.totalBuilds, color: 'text-ink' },
+                { label: 'Completed', value: historySummary.completedBuilds, color: 'text-success' },
+                { label: 'Failed', value: historySummary.failedBuilds, color: 'text-danger' },
+                { label: 'Spent', value: `₹${historySummary.totalCostInr.toFixed(2)}`, color: 'text-warn' },
               ].map(s => (
-                <div key={s.label} className="bg-[#0d1117] rounded-xl p-3 border border-white/5 text-center">
+                <div key={s.label} className="bg-surface rounded-xl p-3 border border-line text-center">
                   <p className={`text-lg font-black ${s.color}`}>{s.value}</p>
-                  <p className="text-[10px] text-[#484f58] font-bold uppercase tracking-widest">{s.label}</p>
+                  <p className="text-[10px] text-faint font-bold uppercase tracking-widest">{s.label}</p>
                 </div>
               ))}
             </div>
@@ -850,11 +850,11 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
           {/* History table */}
           {historyLoading ? (
-            <div className="flex items-center gap-2 text-[#484f58] text-xs py-4">
+            <div className="flex items-center gap-2 text-faint text-xs py-4">
               <TirangaLoader className="w-3.5 h-3.5" /> Loading history…
             </div>
           ) : historyRecords.length === 0 ? (
-            <div className="text-center py-8 text-[#484f58] text-sm">
+            <div className="text-center py-8 text-faint text-sm">
               <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
               No builds found for this period.
             </div>
@@ -864,31 +864,31 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                 <thead>
                   <tr>
                     {['Build', 'Date', 'Duration', 'Files', 'Cost', 'Status'].map(h => (
-                      <th key={h} className="text-left text-[10px] font-black text-[#484f58] uppercase tracking-widest pb-2 px-2">{h}</th>
+                      <th key={h} className="text-left text-[10px] font-black text-faint uppercase tracking-widest pb-2 px-2">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {pagedHistoryRecords.visible.map(r => (
                     <tr key={r.id} className="group">
-                      <td className="bg-[#0d1117] rounded-l-xl px-3 py-3 text-white font-medium max-w-[180px]">
+                      <td className="bg-surface rounded-l-xl px-3 py-3 text-ink font-medium max-w-[180px]">
                         <span className="truncate block">{r.title || 'Untitled build'}</span>
                       </td>
-                      <td className="bg-[#0d1117] px-3 py-3 text-[#8b949e] text-xs whitespace-nowrap">
+                      <td className="bg-surface px-3 py-3 text-muted text-xs whitespace-nowrap">
                         {formatDate(r.createdAt)}
                       </td>
-                      <td className="bg-[#0d1117] px-3 py-3 text-[#8b949e] text-xs whitespace-nowrap">
+                      <td className="bg-surface px-3 py-3 text-muted text-xs whitespace-nowrap">
                         {r.durationMs > 0 ? formatDuration(r.durationMs) : '—'}
                       </td>
-                      <td className="bg-[#0d1117] px-3 py-3 text-[#8b949e] text-xs">
+                      <td className="bg-surface px-3 py-3 text-muted text-xs">
                         {r.fileCount > 0 ? r.fileCount : '—'}
                       </td>
-                      <td className="bg-[#0d1117] px-3 py-3 font-mono text-xs whitespace-nowrap">
+                      <td className="bg-surface px-3 py-3 font-mono text-xs whitespace-nowrap">
                         {r.costInr > 0
-                          ? <span className="text-white">₹{r.costInr.toFixed(2)}</span>
-                          : <span className="text-emerald-400 font-bold">Free</span>}
+                          ? <span className="text-ink">₹{r.costInr.toFixed(2)}</span>
+                          : <span className="text-success font-bold">Free</span>}
                       </td>
-                      <td className="bg-[#0d1117] rounded-r-xl px-3 py-3">
+                      <td className="bg-surface rounded-r-xl px-3 py-3">
                         <StatusBadge status={r.status} progress={r.progressPercent} />
                       </td>
                     </tr>
@@ -904,25 +904,25 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={onNavigateToBilling}
-            className="flex items-center gap-3 bg-[#161b22] border border-white/5 rounded-2xl p-4 hover:border-indigo-500/30 transition-all group"
+            className="flex items-center gap-3 bg-card border border-line rounded-2xl p-4 hover:border-indigo-500/30 transition-all group"
           >
-            <Zap className="w-5 h-5 text-orange-400" />
+            <Zap className="w-5 h-5 text-warn" />
             <div className="text-left">
-              <p className="text-sm font-black text-white">Add Balance</p>
-              <p className="text-[10px] text-[#484f58]">Recharge via UPI / Card</p>
+              <p className="text-sm font-black text-ink">Add Balance</p>
+              <p className="text-[10px] text-faint">Recharge via UPI / Card</p>
             </div>
-            <ChevronRight className="w-4 h-4 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors" />
+            <ChevronRight className="w-4 h-4 text-faint ml-auto group-hover:text-accent-text transition-colors" />
           </button>
           <button
             onClick={onNavigateToSettings}
-            className="flex items-center gap-3 bg-[#161b22] border border-white/5 rounded-2xl p-4 hover:border-indigo-500/30 transition-all group"
+            className="flex items-center gap-3 bg-card border border-line rounded-2xl p-4 hover:border-indigo-500/30 transition-all group"
           >
-            <User className="w-5 h-5 text-indigo-400" />
+            <User className="w-5 h-5 text-accent-text" />
             <div className="text-left">
-              <p className="text-sm font-black text-white">App Settings</p>
-              <p className="text-[10px] text-[#484f58]">Keys, database, deploy</p>
+              <p className="text-sm font-black text-ink">App Settings</p>
+              <p className="text-[10px] text-faint">Keys, database, deploy</p>
             </div>
-            <ChevronRight className="w-4 h-4 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors" />
+            <ChevronRight className="w-4 h-4 text-faint ml-auto group-hover:text-accent-text transition-colors" />
           </button>
         </div>
 
@@ -930,10 +930,10 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             belong at the bottom of the page a non-technical user meets first. Not copied: one door. */}
 
         {/* ── Logout ───────────────────────────────────────────────────────── */}
-        <div className="border-t border-white/5 pt-4">
+        <div className="border-t border-line pt-4">
           <button
             onClick={onLogout}
-            className="flex items-center gap-2 text-[#484f58] hover:text-red-400 transition-colors text-sm font-bold"
+            className="flex items-center gap-2 text-faint hover:text-danger transition-colors text-sm font-bold"
           >
             <LogOut className="w-4 h-4" /> Sign Out
           </button>

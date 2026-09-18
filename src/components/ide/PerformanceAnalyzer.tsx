@@ -345,28 +345,28 @@ function ScoreRing({ score, label }: { score: number; label: string }) {
 }
 
 const STATUS_ICON: Record<Check['status'], React.ReactNode> = {
-  pass: <CheckCircle2 size={14} className="text-green-500 shrink-0 mt-0.5" />,
-  warn: <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />,
-  fail: <X size={14} className="text-red-500 shrink-0 mt-0.5" />,
-  info: <Lightbulb size={14} className="text-blue-400 shrink-0 mt-0.5" />,
+  pass: <CheckCircle2 size={14} className="text-success shrink-0 mt-0.5" />,
+  warn: <AlertTriangle size={14} className="text-warn shrink-0 mt-0.5" />,
+  fail: <X size={14} className="text-danger shrink-0 mt-0.5" />,
+  info: <Lightbulb size={14} className="text-info shrink-0 mt-0.5" />,
 };
 
 const STATUS_TEXT: Record<Check['status'], string> = {
-  pass: 'text-green-400',
-  warn: 'text-amber-300',
-  fail: 'text-red-400',
-  info: 'text-blue-300',
+  pass: 'text-success',
+  warn: 'text-warn',
+  fail: 'text-danger',
+  info: 'text-info',
 };
 
 function CheckList({ title, checks }: { title: string; checks: Check[] }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="rounded-lg border border-[#30363d] overflow-hidden">
+    <div className="rounded-lg border border-line overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-[#1c2128] transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-raised transition-colors"
       >
-        <span className="text-sm font-semibold text-[#e6edf3]">{title}</span>
+        <span className="text-sm font-semibold text-body">{title}</span>
         {open ? <ChevronUp size={16} color="#8b949e" /> : <ChevronDown size={16} color="#8b949e" />}
       </button>
       {open && (
@@ -376,7 +376,7 @@ function CheckList({ title, checks }: { title: string; checks: Check[] }) {
               {STATUS_ICON[c.status]}
               <span className={`text-xs ${STATUS_TEXT[c.status]}`}>
                 {c.label}
-                {c.detail && <span className="text-[#8b949e] ml-1">— {c.detail}</span>}
+                {c.detail && <span className="text-muted ml-1">— {c.detail}</span>}
               </span>
             </li>
           ))}
@@ -387,9 +387,9 @@ function CheckList({ title, checks }: { title: string; checks: Check[] }) {
 }
 
 const PRIORITY_BADGE: Record<Recommendation['priority'], string> = {
-  high: 'bg-red-900/50 text-red-300 border border-red-700',
-  medium: 'bg-amber-900/50 text-amber-300 border border-amber-700',
-  low: 'bg-blue-900/50 text-blue-300 border border-blue-700',
+  high: 'bg-red-500/10 text-danger border border-red-700',
+  medium: 'bg-amber-500/10 text-warn border border-amber-700',
+  low: 'bg-blue-500/10 text-info border border-blue-700',
 };
 
 const PRIORITY_LABEL: Record<Recommendation['priority'], string> = {
@@ -401,21 +401,21 @@ const PRIORITY_LABEL: Record<Recommendation['priority'], string> = {
 function RecommendationCard({ rec }: { rec: Recommendation }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="rounded-lg border border-[#30363d] p-3 space-y-2">
+    <div className="rounded-lg border border-line p-3 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[rec.priority]}`}>
           {PRIORITY_LABEL[rec.priority]}
         </span>
-        <span className="text-xs text-[#e6edf3] font-medium">{rec.title}</span>
+        <span className="text-xs text-body font-medium">{rec.title}</span>
       </div>
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="text-[10px] text-[#58a6ff] hover:underline"
+        className="text-[10px] text-info hover:underline"
       >
         {expanded ? 'Hide snippet' : 'Show fix'}
       </button>
       {expanded && (
-        <pre className="text-[10px] bg-[#0d1117] border border-[#30363d] rounded p-2 overflow-x-auto text-green-300 whitespace-pre-wrap">
+        <pre className="text-[10px] bg-surface border border-line rounded p-2 overflow-x-auto text-success whitespace-pre-wrap">
           {rec.snippet}
         </pre>
       )}
@@ -579,21 +579,21 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
 
   return (
     <div
-      className="flex flex-col h-full overflow-hidden text-[#e6edf3]"
+      className="flex flex-col h-full overflow-hidden text-body"
       style={{ background: 'var(--surface-base)', fontFamily: 'sans-serif' }}
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-4 py-3 border-b border-[#30363d] shrink-0"
+        className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0"
         style={{ background: 'var(--surface-card)' }}
       >
         <div className="flex items-center gap-2">
-          <Gauge size={18} className="text-indigo-400" />
-          <span className="font-semibold text-sm text-[#e6edf3]">Performance Analyzer</span>
+          <Gauge size={18} className="text-accent-text" />
+          <span className="font-semibold text-sm text-body">Performance Analyzer</span>
         </div>
         <div className="flex items-center gap-2">
           {result && (
-            <span className="text-[10px] text-[#8b949e] flex items-center gap-1">
+            <span className="text-[10px] text-muted flex items-center gap-1">
               <Clock size={11} />
               {new Date(result.analyzedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </span>
@@ -606,7 +606,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             target="_blank"
             rel="noopener noreferrer"
             aria-disabled={!measureUrl.trim()}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] transition-colors ${measureUrl.trim() ? 'text-[#58a6ff] hover:bg-[#21262d]' : 'text-[#484f58] cursor-not-allowed pointer-events-none'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-line transition-colors ${measureUrl.trim() ? 'text-info hover:bg-raised' : 'text-faint cursor-not-allowed pointer-events-none'}`}
             title={measureUrl.trim() ? 'Open the full report on pagespeed.web.dev' : 'Enter a live URL below first'}
           >
             <BarChart2 size={13} />
@@ -615,7 +615,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           {!realApp && (
             <button
               onClick={() => setPasteModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] text-[#e6edf3] hover:bg-[#21262d] transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-line text-body hover:bg-raised transition-colors"
             >
               <Clipboard size={13} />
               Paste Code
@@ -624,7 +624,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           <button
             onClick={handleAnalyze}
             disabled={!codeToAnalyze || isAnalyzing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
           >
             {isAnalyzing ? (
               <>
@@ -649,25 +649,25 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           <div className="rounded-xl border border-indigo-500/30 p-4" style={{ background: '#12141c' }}>
             <div className="flex items-center gap-2 mb-1">
               <Gauge size={15} className="text-indigo-400" />
-              <span className="text-sm font-semibold text-[#e6edf3]">Live performance — real Lighthouse metrics</span>
+              <span className="text-sm font-semibold text-on-accent">Live performance — real Lighthouse metrics</span>
             </div>
-            <p className="text-[11px] text-[#8b949e] mb-3">Measures your actually-running app (Core Web Vitals: LCP, CLS, TBT…) via Google Lighthouse. Needs a public URL — your live preview or a deployed site.</p>
+            <p className="text-[11px] text-on-accent mb-3">Measures your actually-running app (Core Web Vitals: LCP, CLS, TBT…) via Google Lighthouse. Needs a public URL — your live preview or a deployed site.</p>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 value={measureUrl}
                 onChange={(e) => setMeasureUrl(e.target.value)}
                 placeholder="https://your-app.example.com  (live preview or deployed URL)"
-                className="flex-1 min-w-[220px] rounded-md border border-[#30363d] bg-[#0d1117] text-xs text-[#e6edf3] px-3 py-2 focus:outline-none focus:border-indigo-500"
+                className="flex-1 min-w-[220px] rounded-md border border-line bg-surface text-xs text-body px-3 py-2 focus:outline-none focus:border-indigo-500"
               />
-              <div className="flex rounded-md border border-[#30363d] overflow-hidden text-xs">
+              <div className="flex rounded-md border border-line overflow-hidden text-xs">
                 {(['mobile', 'desktop'] as const).map((s) => (
-                  <button key={s} onClick={() => setStrategy(s)} className={`px-3 py-2 ${strategy === s ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-[#21262d]'}`}>{s === 'mobile' ? 'Mobile' : 'Desktop'}</button>
+                  <button key={s} onClick={() => setStrategy(s)} className={`px-3 py-2 ${strategy === s ? 'bg-indigo-600 text-on-accent' : 'text-on-accent hover:bg-raised'}`}>{s === 'mobile' ? 'Mobile' : 'Desktop'}</button>
                 ))}
               </div>
               <button
                 onClick={runLiveMeasure}
                 disabled={!measureUrl.trim() || liveLoading}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
               >
                 {liveLoading ? <><TirangaLoader className="w-3 h-3" /> Measuring…</> : <><Play size={12} /> Measure live</>}
               </button>
@@ -676,31 +676,31 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
               <p className="mt-2 text-[11px] text-amber-300/80">Open your app's live preview once (or deploy it) to get a public URL, then measure real performance here.</p>
             )}
             {liveError && <p className="mt-2 text-[11px] text-red-400">{liveError}</p>}
-            {liveLoading && <p className="mt-3 text-[11px] text-[#8b949e]">Running Lighthouse on the live page — this takes ~10–30s…</p>}
+            {liveLoading && <p className="mt-3 text-[11px] text-on-accent">Running Lighthouse on the live page — this takes ~10–30s…</p>}
             {live && !liveLoading && (
               <div className="mt-4 space-y-4">
                 <div className="flex flex-wrap gap-5 justify-center">
                   {([['performance', 'Performance'], ['accessibility', 'Accessibility'], ['seo', 'SEO'], ['bestPractices', 'Best Practices']] as const).map(([k, label]) => {
                     const v = live[k];
                     return v == null
-                      ? <div key={k} className="flex flex-col items-center justify-center gap-2" style={{ width: 120, height: 146 }}><span className="text-2xl text-[#484f58]">—</span><span className="text-xs text-[#8b949e]">{label}</span></div>
+                      ? <div key={k} className="flex flex-col items-center justify-center gap-2" style={{ width: 120, height: 146 }}><span className="text-2xl text-on-accent">—</span><span className="text-xs text-on-accent">{label}</span></div>
                       : <ScoreRing key={k} score={v} label={label} />;
                   })}
                 </div>
                 {VITAL_ORDER.some(({ key }) => live[key]) && (
-                  <div className="rounded-lg border border-[#30363d] p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e] mb-2">Core Web Vitals (measured)</p>
+                  <div className="rounded-lg border border-line p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-on-accent mb-2">Core Web Vitals (measured)</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {VITAL_ORDER.filter(({ key }) => live[key]).map(({ key, label }) => (
-                        <div key={key} className="rounded-md bg-[#0d1117] border border-[#30363d] px-2.5 py-2">
-                          <div className="text-sm font-semibold text-[#e6edf3]">{live[key]}</div>
-                          <div className="text-[10px] text-[#8b949e] leading-tight">{label}</div>
+                        <div key={key} className="rounded-md bg-surface border border-line px-2.5 py-2">
+                          <div className="text-sm font-semibold text-on-accent">{live[key]}</div>
+                          <div className="text-[10px] text-on-accent leading-tight">{label}</div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
-                <p className="text-[10px] text-[#8b949e]">Measured on {live.finalUrl || measureUrl} ({live.strategy}) via Google Lighthouse.</p>
+                <p className="text-[10px] text-on-accent">Measured on {live.finalUrl || measureUrl} ({live.strategy}) via Google Lighthouse.</p>
               </div>
             )}
           </div>
@@ -708,20 +708,20 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           {/* Static code checks (offline heuristics) — a quick, no-URL lint of the HTML source. Honest:
               this is NOT the performance measurement above; for a React SPA it sees only the static shell. */}
           <div className="flex items-center gap-2 pt-1">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#8b949e]">Static code checks (offline)</span>
-            <span className="text-[10px] text-[#6e7681]">— quick HTML/SEO/a11y lint, no URL needed</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Static code checks (offline)</span>
+            <span className="text-[10px] text-faint">— quick HTML/SEO/a11y lint, no URL needed</span>
           </div>
           {/* Empty State */}
           {!result && !isAnalyzing && (
             <div className="flex flex-col items-center justify-center h-full gap-4 py-16">
-              <Gauge size={56} className="text-[#30363d]" />
-              <p className="text-sm text-[#8b949e] text-center max-w-xs leading-relaxed">
+              <Gauge size={56} className="text-faint" />
+              <p className="text-sm text-muted text-center max-w-xs leading-relaxed">
                 {realApp ? 'Tap "Analyze" to score your app.' : (appSourceGuidance(appSource.kind) + ' Or paste code.')}
               </p>
               {!realApp && (
                 <button
                   onClick={() => setPasteModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 transition-colors text-on-accent"
                 >
                   <Clipboard size={15} />
                   Paste Code
@@ -734,15 +734,15 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           {isAnalyzing && (
             <div className="flex flex-col items-center justify-center h-48 gap-3">
               <TirangaLoader className="w-8 h-8" />
-              <span className="text-sm text-[#8b949e]">Analyzing code...</span>
+              <span className="text-sm text-muted">Analyzing code...</span>
             </div>
           )}
 
           {/* Scores */}
           {result && !isAnalyzing && (
             <>
-              <div className="rounded-xl border border-[#30363d] p-5" style={{ background: 'var(--surface-card)' }}>
-                <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest mb-4">Score Overview</h2>
+              <div className="rounded-xl border border-line p-5" style={{ background: 'var(--surface-card)' }}>
+                <h2 className="text-xs font-semibold text-muted uppercase tracking-widest mb-4">Score Overview</h2>
                 <div className="flex flex-wrap gap-6 justify-center">
                   <ScoreRing score={result.performance.score} label="Performance" />
                   <ScoreRing score={result.accessibility.score} label="Accessibility" />
@@ -753,7 +753,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
 
               {/* Detailed Findings 2-col */}
               <div>
-                <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest mb-3">Detailed Findings</h2>
+                <h2 className="text-xs font-semibold text-muted uppercase tracking-widest mb-3">Detailed Findings</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ background: 'var(--surface-card)', borderRadius: 12, padding: 16, border: '1px solid #30363d' }}>
                   <CheckList title="Performance" checks={result.performance.checks} />
                   <CheckList title="Accessibility" checks={result.accessibility.checks} />
@@ -764,14 +764,14 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
 
               {/* History */}
               {history.length > 0 && (
-                <div className="rounded-xl border border-[#30363d] overflow-hidden" style={{ background: 'var(--surface-card)' }}>
+                <div className="rounded-xl border border-line overflow-hidden" style={{ background: 'var(--surface-card)' }}>
                   <button
                     onClick={() => setHistoryOpen((v) => !v)}
-                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-[#1c2128] transition-colors"
+                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-raised transition-colors"
                   >
                     <div className="flex items-center gap-2">
-                      <BarChart2 size={14} className="text-[#8b949e]" />
-                      <span className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest">Score History</span>
+                      <BarChart2 size={14} className="text-muted" />
+                      <span className="text-xs font-semibold text-muted uppercase tracking-widest">Score History</span>
                     </div>
                     {historyOpen ? <ChevronUp size={15} color="#8b949e" /> : <ChevronDown size={15} color="#8b949e" />}
                   </button>
@@ -789,10 +789,10 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
         {/* Recommendations Panel */}
         {result && !isAnalyzing && recommendations.length > 0 && (
           <div
-            className="shrink-0 border-l border-[#30363d] overflow-y-auto p-4 space-y-3"
+            className="shrink-0 border-l border-line overflow-y-auto p-4 space-y-3"
             style={{ width: 300, background: 'var(--surface-card)' }}
           >
-            <h2 className="text-xs font-semibold text-[#8b949e] uppercase tracking-widest sticky top-0 pb-2" style={{ background: 'var(--surface-card)' }}>
+            <h2 className="text-xs font-semibold text-muted uppercase tracking-widest sticky top-0 pb-2" style={{ background: 'var(--surface-card)' }}>
               Recommendations
             </h2>
             {(['high', 'medium', 'low'] as const).map((priority) => {
@@ -800,7 +800,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
               if (group.length === 0) return null;
               return (
                 <div key={priority} className="space-y-2">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
                     {PRIORITY_LABEL[priority]}
                   </p>
                   {group.map((rec, i) => (
@@ -815,14 +815,14 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
 
       {/* Paste Modal */}
       {pasteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim">
           <div
-            className="rounded-xl border border-[#30363d] p-5 flex flex-col gap-4 w-[520px] max-w-[95vw]"
+            className="rounded-xl border border-line p-5 flex flex-col gap-4 w-[520px] max-w-[95vw]"
             style={{ background: 'var(--surface-card)' }}
           >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-sm text-[#e6edf3]">Paste HTML Code</span>
-              <button onClick={() => setPasteModal(false)} className="text-[#8b949e] hover:text-white">
+              <span className="font-semibold text-sm text-body">Paste HTML Code</span>
+              <button onClick={() => setPasteModal(false)} className="text-muted hover:text-ink">
                 <X size={18} />
               </button>
             </div>
@@ -830,20 +830,20 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
               value={pasteValue}
               onChange={(e) => setPasteValue(e.target.value)}
               placeholder="Paste your HTML code here..."
-              className="w-full h-56 rounded-lg border border-[#30363d] bg-[#0d1117] text-xs text-[#e6edf3] p-3 font-mono resize-none focus:outline-none focus:border-indigo-500"
+              className="w-full h-56 rounded-lg border border-line bg-surface text-xs text-body p-3 font-mono resize-none focus:outline-none focus:border-indigo-500"
               autoFocus
             />
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setPasteModal(false)}
-                className="px-4 py-2 rounded-lg text-xs border border-[#30363d] text-[#8b949e] hover:text-white hover:bg-[#21262d] transition-colors"
+                className="px-4 py-2 rounded-lg text-xs border border-line text-muted hover:text-ink hover:bg-raised transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handlePasteConfirm}
                 disabled={!pasteValue.trim()}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
               >
                 Analyze
               </button>

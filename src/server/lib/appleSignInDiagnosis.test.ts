@@ -151,7 +151,9 @@ describe('the check has a real way in', () => {
     // Tailwind scans source text, so `text-${tone}-400` is simply never generated and the element ends
     // up unstyled while the code reads as correct.
     expect(dash).not.toMatch(/text-\$\{tone\}/);
-    expect(dash).toContain("const icon = ok ? 'text-emerald-400' : unknown ? 'text-amber-400' : 'text-red-400';");
+    // Semantic tokens since the theme replacement (2026-09-18): the same three verdicts, readable on
+    // every theme, still three full class names.
+    expect(dash).toContain("const icon = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';");
   });
 
   it('every AI in the app can find it, per the AppKnowledgeBase rule', () => {

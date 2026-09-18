@@ -182,7 +182,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
 
   return (
     <div
-      className="h-full flex flex-col bg-[#08090c] text-white overflow-hidden"
+      className="h-full flex flex-col bg-surface text-ink overflow-hidden"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -195,13 +195,13 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
         {empty ? (
           // The Google-homepage moment: one wordmark, one line, four suggestions, nothing else.
           <div className="h-full flex flex-col items-center justify-center px-6 text-center select-none">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400/20 to-fuchsia-500/20 border border-white/10 flex items-center justify-center mb-6">
-              <Sparkles className="w-7 h-7 text-amber-300" />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400/20 to-fuchsia-500/20 border border-line flex items-center justify-center mb-6 text-on-accent">
+              <Sparkles className="w-7 h-7 text-warn" />
             </div>
             <h1 className="text-[30px] sm:text-[38px] font-semibold tracking-tight bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-transparent">
               NavBharatAI Pro
             </h1>
-            <p className="mt-3 text-sm text-white/40 max-w-md">
+            <p className="mt-3 text-sm text-faint max-w-md">
               Describe an image, or attach one to work from. Sharper, more faithful results — ₹{PRICE_INR} per image.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-2 max-w-2xl">
@@ -209,7 +209,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
                 <button
                   key={sug}
                   onClick={() => { setPrompt(sug); taRef.current?.focus(); }}
-                  className="text-xs text-white/60 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 rounded-full px-3.5 py-2 transition-colors min-w-0 max-w-full truncate"
+                  className="text-xs text-muted hover:text-ink bg-raised hover:bg-raised border border-line rounded-full px-3.5 py-2 transition-colors min-w-0 max-w-full truncate"
                 >
                   {sug}
                 </button>
@@ -220,17 +220,17 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
           <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-10">
             {results.map((r) => (
               <figure key={r.id} className="space-y-3">
-                <div className="flex items-center gap-2 text-[11px] text-white/35 min-w-0">
-                  <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5">{MODE_LABEL[r.mode]}</span>
+                <div className="flex items-center gap-2 text-[11px] text-faint min-w-0">
+                  <span className="shrink-0 rounded-full border border-line bg-raised px-2 py-0.5">{MODE_LABEL[r.mode]}</span>
                   {r.prompt && <span className="truncate" title={r.prompt}>{r.prompt}</span>}
                 </div>
-                <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/40">
+                <div className="rounded-2xl overflow-hidden border border-line bg-well">
                   <img src={r.url} alt={r.prompt || 'Generated image'} className="w-full h-auto block" />
                 </div>
                 <figcaption className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => void download(r)}
-                    className="text-[11px] flex items-center gap-1.5 text-white/60 hover:text-white border border-white/10 hover:border-white/25 rounded-lg px-2.5 py-1.5 transition-colors"
+                    className="text-[11px] flex items-center gap-1.5 text-muted hover:text-ink border border-line hover:border-line rounded-lg px-2.5 py-1.5 transition-colors"
                   >
                     <Download className="w-3 h-3" /> Save
                   </button>
@@ -238,28 +238,28 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
                       back into the input as the next request's reference. */}
                   <button
                     onClick={() => { setRef(r.url); taRef.current?.focus(); }}
-                    className="text-[11px] flex items-center gap-1.5 text-white/60 hover:text-white border border-white/10 hover:border-white/25 rounded-lg px-2.5 py-1.5 transition-colors"
+                    className="text-[11px] flex items-center gap-1.5 text-muted hover:text-ink border border-line hover:border-line rounded-lg px-2.5 py-1.5 transition-colors"
                   >
                     <ImagePlus className="w-3 h-3" /> Use as reference
                   </button>
                   <button
                     onClick={() => { setPrompt(r.prompt); setSize(r.size); taRef.current?.focus(); }}
-                    className="text-[11px] flex items-center gap-1.5 text-white/60 hover:text-white border border-white/10 hover:border-white/25 rounded-lg px-2.5 py-1.5 transition-colors"
+                    className="text-[11px] flex items-center gap-1.5 text-muted hover:text-ink border border-line hover:border-line rounded-lg px-2.5 py-1.5 transition-colors"
                   >
                     <RefreshCw className="w-3 h-3" /> Try again
                   </button>
                   {/* Real money, shown on the thing it bought — never a running total the user has to
                       reconstruct from a bill later. */}
-                  <span className="text-[11px] text-white/25 ml-auto shrink-0">
+                  <span className="text-[11px] text-faint ml-auto shrink-0">
                     {r.chargedInr > 0 ? `₹${r.chargedInr}` : 'No charge'}
                   </span>
                 </figcaption>
               </figure>
             ))}
             {busy && (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] aspect-square flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-6 h-6 text-amber-300 animate-spin" />
-                <p className="text-xs text-white/40">Working on your image…</p>
+              <div className="rounded-2xl border border-line bg-raised aspect-square flex flex-col items-center justify-center gap-3">
+                <Loader2 className="w-6 h-6 text-warn animate-spin" />
+                <p className="text-xs text-faint">Working on your image…</p>
               </div>
             )}
             <div ref={feedEndRef} />
@@ -268,33 +268,33 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
       </div>
 
       {/* ── The footer input ───────────────────────────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-white/5 bg-[#08090c]/95 backdrop-blur px-4 sm:px-6 py-4">
+      <div className="shrink-0 border-t border-line bg-surface backdrop-blur px-4 sm:px-6 py-4">
         <div className="max-w-3xl mx-auto space-y-2.5">
           {error && (
-            <div className="flex items-start gap-2 text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">
+            <div className="flex items-start gap-2 text-[11px] text-danger bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">
               <span className="min-w-0 flex-1">{error}</span>
-              <button onClick={() => setError('')} className="shrink-0 text-rose-300/60 hover:text-rose-200"><X className="w-3 h-3" /></button>
+              <button onClick={() => setError('')} className="shrink-0 text-danger hover:text-danger"><X className="w-3 h-3" /></button>
             </div>
           )}
 
           {ref && (
-            <div className="flex items-center gap-2.5 bg-white/[0.04] border border-white/10 rounded-xl p-2 w-fit max-w-full">
+            <div className="flex items-center gap-2.5 bg-raised border border-line rounded-xl p-2 w-fit max-w-full">
               <img src={ref} alt="Reference" className="w-10 h-10 rounded-lg object-cover shrink-0" />
               <div className="min-w-0">
-                <div className="text-[11px] text-white/70 truncate">Working from this image</div>
-                <div className="text-[10px] text-white/35 truncate">
+                <div className="text-[11px] text-body truncate">Working from this image</div>
+                <div className="text-[10px] text-faint truncate">
                   {prompt.trim() ? 'Your words will direct the edit' : 'Add words to direct it, or send as-is'}
                 </div>
               </div>
-              <button onClick={() => setRef(null)} className="shrink-0 text-white/40 hover:text-white p-1"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setRef(null)} className="shrink-0 text-faint hover:text-ink p-1"><X className="w-3.5 h-3.5" /></button>
             </div>
           )}
 
-          <div className="flex items-end gap-2 bg-white/[0.04] border border-white/10 focus-within:border-amber-400/40 rounded-[26px] pl-2 pr-2 py-2 transition-colors">
+          <div className="flex items-end gap-2 bg-raised border border-line focus-within:border-amber-400/40 rounded-[26px] pl-2 pr-2 py-2 transition-colors">
             <button
               onClick={() => fileRef.current?.click()}
               title="Attach an image to work from"
-              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-white/45 hover:text-white hover:bg-white/10 transition-colors"
+              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink hover:bg-raised transition-colors"
             >
               <ImagePlus className="w-4.5 h-4.5" />
             </button>
@@ -316,13 +316,13 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void generate(); }
               }}
               placeholder={ref ? 'Describe the change, or press send to re-imagine…' : 'Describe the image you want…'}
-              className="flex-1 min-w-0 bg-transparent resize-none text-sm text-white placeholder-white/25 focus:outline-none py-2 leading-6"
+              className="flex-1 min-w-0 bg-transparent resize-none text-sm text-ink placeholder-faint focus:outline-none py-2 leading-6"
             />
             <button
               onClick={() => void generate()}
               disabled={!mode || busy}
               title={mode ? `Generate — ₹${PRICE_INR}` : 'Describe an image, or attach one'}
-              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-amber-400 text-black disabled:bg-white/10 disabled:text-white/25 hover:bg-amber-300 transition-colors"
+              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-amber-400 text-black disabled:bg-raised disabled:text-faint hover:bg-amber-300 transition-colors"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
             </button>
@@ -336,15 +336,15 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
                 title={s.desc}
                 className={`text-[11px] rounded-full px-2.5 py-1 border transition-colors min-w-0 ${
                   size === s.id
-                    ? 'border-amber-400/50 bg-amber-400/10 text-amber-200'
-                    : 'border-white/10 text-white/40 hover:text-white/70 hover:border-white/20'
+                    ? 'border-amber-400/50 bg-amber-400/10 text-warn'
+                    : 'border-line text-faint hover:text-body hover:border-line'
                 }`}
               >
                 {s.label}
               </button>
             ))}
-            <span className="ml-auto text-[11px] text-white/30 flex items-center gap-1.5 shrink-0">
-              {mode ? <span className="text-white/45">{MODE_LABEL[mode]}</span> : null}
+            <span className="ml-auto text-[11px] text-faint flex items-center gap-1.5 shrink-0">
+              {mode ? <span className="text-muted">{MODE_LABEL[mode]}</span> : null}
               <span aria-hidden>·</span>
               <Wand2 className="w-3 h-3" /> ₹{PRICE_INR} per image
             </span>

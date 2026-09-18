@@ -317,12 +317,12 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
 
   return createPortal(
     <div
-      className="fixed inset-0 bg-[#0d1117] flex flex-col"
+      className="fixed inset-0 bg-surface flex flex-col"
       style={{ zIndex: PLAYER_Z, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       {/* Slim bar — the only NavBharatAI chrome. The app owns the rest of the screen. */}
       <div
-        className="flex items-center gap-2 px-3 border-b border-white/10 bg-[#0d1117] flex-shrink-0"
+        className="flex items-center gap-2 px-3 border-b border-line bg-surface flex-shrink-0"
         style={{
           // The bar is a fixed 2.75rem of tappable content PLUS the device's notch inset ABOVE it.
           // Now that the player really does start at the top of the screen, ✕ would otherwise sit
@@ -332,13 +332,13 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
           paddingTop: 'env(safe-area-inset-top, 0px)',
         }}
       >
-        <span className="text-sm font-semibold text-white truncate flex-1">{meta?.name || 'Loading…'}</span>
+        <span className="text-sm font-semibold text-ink truncate flex-1">{meta?.name || 'Loading…'}</span>
         {html && (
           <button
             onClick={() => (price > 0 ? setConfirmingBuy(true) : void remix())}
             disabled={remixing}
             title="Copy this app into your own NavBharatAI and change it however you like"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-bold transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent text-[11px] font-bold transition-colors"
           >
             <Sparkles size={12} /> {remixing ? 'Copying…' : price > 0 ? `₹${price} · Make it yours` : 'Make it yours'}
           </button>
@@ -350,7 +350,7 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
               ? 'Game mode is ON — long-press and double-tap zoom are off so playing feels like an app. Tap to allow selecting and copying text.'
               : 'Game mode is OFF — you can select and copy text. Tap to go back to app-like play.'}
             aria-pressed={gameMode}
-            className={`p-2 rounded-lg transition-colors ${gameMode ? 'text-emerald-400 hover:bg-white/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+            className={`p-2 rounded-lg transition-colors ${gameMode ? 'text-success hover:bg-raised' : 'text-muted hover:text-ink hover:bg-raised'}`}
           >
             {gameMode ? <Gamepad2 size={15} /> : <Type size={15} />}
           </button>
@@ -360,10 +360,10 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
             the clipboard, which on a phone is indistinguishable from a dead button. The creator's own
             "Copy link" in My apps is unaffected. ⚠️ A VIEWER now has no way to share an app they liked;
             if that is ever wanted back, the app's DETAIL sheet is the calmer home for it, not this bar. */}
-        <button onClick={() => setReporting(true)} title="Report this app" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
+        <button onClick={() => setReporting(true)} title="Report this app" className="p-2 rounded-lg text-muted hover:text-ink hover:bg-raised transition-colors">
           <Flag size={15} />
         </button>
-        <button onClick={onClose} title="Close" className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors">
+        <button onClick={onClose} title="Close" className="p-2 rounded-lg text-muted hover:text-ink hover:bg-raised transition-colors">
           <X size={16} />
         </button>
       </div>
@@ -384,23 +384,23 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
         ) : needsPassword ? (
           <div className="h-full flex items-center justify-center p-6">
             <div className="w-full max-w-xs text-center">
-              <Lock size={22} className="mx-auto mb-3 text-white/30" />
-              <p className="text-sm text-white mb-1 font-medium">This app is private</p>
-              <p className="text-xs text-white/50 mb-4">Enter the password its creator set.</p>
+              <Lock size={22} className="mx-auto mb-3 text-faint" />
+              <p className="text-sm text-ink mb-1 font-medium">This app is private</p>
+              <p className="text-xs text-muted mb-4">Enter the password its creator set.</p>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && password) void open(password); }}
                 autoFocus
-                className="w-full bg-[#161b22] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500 mb-2"
+                className="w-full bg-card border border-line rounded-lg px-3 py-2.5 text-sm text-ink outline-none focus:border-indigo-500 mb-2"
                 placeholder="Password"
               />
-              {error && <p className="text-xs text-rose-400 mb-2">{error}</p>}
+              {error && <p className="text-xs text-danger mb-2">{error}</p>}
               <button
                 onClick={() => void open(password)}
                 disabled={!password || opening}
-                className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-semibold transition-colors"
+                className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent text-sm font-semibold transition-colors"
               >
                 {opening ? 'Opening…' : 'Open app'}
               </button>
@@ -409,14 +409,14 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
         ) : error ? (
           <div className="h-full flex items-center justify-center p-6 text-center">
             <div>
-              <p className="text-sm text-white/80 mb-3">{error}</p>
-              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm text-white transition-colors">Back to the store</button>
+              <p className="text-sm text-body mb-3">{error}</p>
+              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-raised hover:bg-raised text-sm text-ink transition-colors">Back to the store</button>
             </div>
           </div>
         ) : (
           <div className="h-full flex flex-col items-center justify-center gap-3">
             <div className="w-10 h-10 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(40, '#4f6ef7') }} />
-            <p className="text-xs text-white/40">Opening the app…</p>
+            <p className="text-xs text-faint">Opening the app…</p>
           </div>
         )}
 
@@ -425,29 +425,29 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
             sentence is finally true in App Mart too. The app stays free to USE either way, which is
             said here rather than left for the user to discover. */}
         {needsPlan && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6" onClick={() => setNeedsPlan(null)}>
-            <div className="w-full max-w-sm bg-[#161b22] border border-indigo-500/30 rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
-              <p className="text-sm font-semibold text-white mb-1">
+          <div className="absolute inset-0 bg-scrim flex items-center justify-center p-6" onClick={() => setNeedsPlan(null)}>
+            <div className="w-full max-w-sm bg-card border border-indigo-500/30 rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm font-semibold text-ink mb-1">
                 {needsPlan.signIn ? 'Sign in to make this app yours' : 'Remixing is part of a hosting plan'}
               </p>
-              <p className="text-xs text-white/60 leading-relaxed mb-3">{needsPlan.message}</p>
-              <p className="text-[11px] text-white/50 bg-white/5 rounded-lg px-2.5 py-2 mb-3 leading-relaxed">
+              <p className="text-xs text-muted leading-relaxed mb-3">{needsPlan.message}</p>
+              <p className="text-[11px] text-muted bg-raised rounded-lg px-2.5 py-2 mb-3 leading-relaxed">
                 A plan also connects your own domain, keeps more of your apps published, removes the
                 “Made with NavBharatAI” badge, and keeps NavBharatAI ad-free for you. It is paid from
                 your normal wallet balance — there is no card to add.
               </p>
               <div className="flex gap-2 justify-end">
-                <button onClick={() => setNeedsPlan(null)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Not now</button>
+                <button onClick={() => setNeedsPlan(null)} className="px-3 py-1.5 rounded-lg text-xs text-muted hover:text-ink transition-colors">Not now</button>
                 {/* Plans live in Wallet & Billing, which is outside this overlay — so the player
                     closes and hands over, rather than pretending to open a panel it does not own. */}
                 <button
                   onClick={() => { setNeedsPlan(null); onClose(); }}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-bold transition-colors"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs text-on-accent font-bold transition-colors"
                 >
                   {needsPlan.priceInr > 0 ? `See plans — from ₹${needsPlan.priceInr}/month` : 'See plans'}
                 </button>
               </div>
-              <p className="mt-2 text-[10px] text-white/35 leading-relaxed">
+              <p className="mt-2 text-[10px] text-faint leading-relaxed">
                 Open Wallet &amp; Billing from the sidebar menu → Plans.
               </p>
             </div>
@@ -456,31 +456,31 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
 
         {/* Paid-remix confirm — price and NON-REFUNDABLE stated BEFORE the purchase, never after. */}
         {confirmingBuy && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6" onClick={() => setConfirmingBuy(false)}>
-            <div className="w-full max-w-sm bg-[#161b22] border border-white/10 rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
-              <p className="text-sm font-semibold text-white mb-1">Make “{meta?.name}” yours — ₹{price}</p>
-              <p className="text-xs text-white/60 leading-relaxed mb-2">
+          <div className="absolute inset-0 bg-scrim flex items-center justify-center p-6" onClick={() => setConfirmingBuy(false)}>
+            <div className="w-full max-w-sm bg-card border border-line rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm font-semibold text-ink mb-1">Make “{meta?.name}” yours — ₹{price}</p>
+              <p className="text-xs text-muted leading-relaxed mb-2">
                 You get the full app in your own NavBharatAI, to change and build on however you like.
                 Paid from your wallet; most of it goes to the app&apos;s creator.
               </p>
-              <p className="text-xs font-semibold text-amber-300 bg-amber-950/30 rounded-lg px-2.5 py-2 mb-3">
+              <p className="text-xs font-semibold text-warn bg-amber-500/10 rounded-lg px-2.5 py-2 mb-3">
                 Non-refundable. You can keep using the app right here for free — buy only if you want it as your own.
               </p>
               {(meta?.apiVarsUsed?.length ?? 0) > 0 && (
                 /* "api sell nahi hogi" (admin): the creator's keys never ship — said BEFORE money
                    moves, because finding out after paying is how trust dies. */
-                <p className="text-[11px] text-white/50 bg-white/5 rounded-lg px-2.5 py-2 mb-3">
+                <p className="text-[11px] text-muted bg-raised rounded-lg px-2.5 py-2 mb-3">
                   This app uses external APIs. The creator&apos;s API keys are <b>not included</b> — after buying,
                   you add your own (NavBharatAI will ask for them when you build).
                 </p>
               )}
-              {error && <p className="text-xs text-rose-400 mb-2">{error}</p>}
+              {error && <p className="text-xs text-danger mb-2">{error}</p>}
               <div className="flex gap-2 justify-end">
-                <button onClick={() => setConfirmingBuy(false)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Not now</button>
+                <button onClick={() => setConfirmingBuy(false)} className="px-3 py-1.5 rounded-lg text-xs text-muted hover:text-ink transition-colors">Not now</button>
                 <button
                   onClick={() => void remix()}
                   disabled={remixing}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs text-white font-bold transition-colors"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs text-on-accent font-bold transition-colors"
                 >{remixing ? 'Buying…' : `Buy for ₹${price}`}</button>
               </div>
             </div>
@@ -490,27 +490,27 @@ export const WebAppPlayer: React.FC<WebAppPlayerProps> = ({ appId, onClose }) =>
         {/* Report dialog — small, honest, and decoupled from money: a report is the store's immune
             system (takedown path), never a refund path. */}
         {reporting && (
-          <div className="absolute inset-0 bg-black/60 flex items-center justify-center p-6" onClick={() => setReporting(false)}>
-            <div className="w-full max-w-sm bg-[#161b22] border border-white/10 rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-scrim flex items-center justify-center p-6" onClick={() => setReporting(false)}>
+            <div className="w-full max-w-sm bg-card border border-line rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
               {reportDone ? (
-                <p className="text-sm text-emerald-400 text-center py-4">Report sent — a person will look at it.</p>
+                <p className="text-sm text-success text-center py-4">Report sent — a person will look at it.</p>
               ) : (
                 <>
-                  <p className="text-sm font-semibold text-white mb-1">Report this app</p>
-                  <p className="text-xs text-white/50 mb-3">Say briefly what is wrong (scam, stolen work, broken, abusive…). A person reviews every report.</p>
+                  <p className="text-sm font-semibold text-ink mb-1">Report this app</p>
+                  <p className="text-xs text-muted mb-3">Say briefly what is wrong (scam, stolen work, broken, abusive…). A person reviews every report.</p>
                   <textarea
                     value={reportText}
                     onChange={(e) => setReportText(e.target.value)}
                     rows={3}
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-indigo-500 resize-none mb-3"
+                    className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-ink outline-none focus:border-indigo-500 resize-none mb-3"
                   />
                   {/* The refusal the server actually gave. Without this the button looked broken. */}
                   {reportError && (
-                    <p className="text-xs text-rose-400 mb-3" role="alert">{reportError}</p>
+                    <p className="text-xs text-danger mb-3" role="alert">{reportError}</p>
                   )}
                   <div className="flex gap-2 justify-end">
-                    <button onClick={() => setReporting(false)} className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white transition-colors">Cancel</button>
-                    <button onClick={() => void sendReport()} disabled={reportText.trim().length < 5 || reportBusy} className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-xs text-white font-semibold transition-colors">{reportBusy ? 'Sending…' : 'Send report'}</button>
+                    <button onClick={() => setReporting(false)} className="px-3 py-1.5 rounded-lg text-xs text-muted hover:text-ink transition-colors">Cancel</button>
+                    <button onClick={() => void sendReport()} disabled={reportText.trim().length < 5 || reportBusy} className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-xs text-on-accent font-semibold transition-colors">{reportBusy ? 'Sending…' : 'Send report'}</button>
                   </div>
                 </>
               )}

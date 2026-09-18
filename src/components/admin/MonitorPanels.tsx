@@ -108,30 +108,30 @@ export function logStamp(ts: number | undefined, spanDays: boolean): string {
 
 const REFRESH_MS = 30_000;
 
-const PANEL = 'bg-[#161b22] border border-white/10 rounded-[1.5rem] p-5';
-const PANEL_TITLE = 'text-[11px] font-black text-white uppercase tracking-widest';
-const PANEL_SUB = 'text-[9px] text-[#8b949e] font-bold uppercase tracking-widest mt-0.5';
+const PANEL = 'bg-card border border-line rounded-[1.5rem] p-5';
+const PANEL_TITLE = 'text-[11px] font-black text-ink uppercase tracking-widest';
+const PANEL_SUB = 'text-[9px] text-muted font-bold uppercase tracking-widest mt-0.5';
 
 const PROVIDER_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16'];
 
 function toneClass(tone: 'good' | 'warn' | 'bad' | 'unknown'): string {
-  return tone === 'good' ? 'text-emerald-400'
-    : tone === 'warn' ? 'text-amber-400'
-    : tone === 'bad' ? 'text-red-400'
-    : 'text-[#8b949e]';
+  return tone === 'good' ? 'text-success'
+    : tone === 'warn' ? 'text-warn'
+    : tone === 'bad' ? 'text-danger'
+    : 'text-muted';
 }
 
-function Tile({ label, value, sub, tone = 'text-white', Icon }: {
+function Tile({ label, value, sub, tone = 'text-ink', Icon }: {
   label: string; value: string; sub: string; tone?: string; Icon: React.ComponentType<any>;
 }) {
   return (
-    <div className="bg-[#161b22] border border-white/10 rounded-[1.25rem] p-4">
+    <div className="bg-card border border-line rounded-[1.25rem] p-4">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest">{label}</p>
-        <Icon className="w-3.5 h-3.5 text-[#484f58] shrink-0" />
+        <p className="text-[9px] text-muted font-black uppercase tracking-widest">{label}</p>
+        <Icon className="w-3.5 h-3.5 text-faint shrink-0" />
       </div>
       <h3 className={`text-2xl font-black tracking-tight mt-1.5 font-mono ${tone}`}>{value}</h3>
-      <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-wider mt-1.5">{sub}</p>
+      <p className="text-[9px] text-muted font-bold uppercase tracking-wider mt-1.5">{sub}</p>
     </div>
   );
 }
@@ -152,7 +152,7 @@ function ChartFrame({ points, windowHours, height = 120, children }: {
       </svg>
       <div className="flex justify-between mt-1.5">
         {ticks.map((i) => (
-          <span key={i} className="text-[8px] text-[#484f58] font-mono">
+          <span key={i} className="text-[8px] text-faint font-mono">
             {timeLabel(points[i]?.t ?? 0, windowHours)}
           </span>
         ))}
@@ -164,8 +164,8 @@ function ChartFrame({ points, windowHours, height = 120, children }: {
 /** The one place the screen refuses to draw. Shown instead of a chart when the feed is not live. */
 function FeedNotice({ state, windowLabel }: { state: 'loading' | 'unavailable' | 'idle'; windowLabel: string }) {
   const tone = state === 'unavailable'
-    ? 'bg-amber-500/5 border-amber-500/30 text-amber-200'
-    : 'bg-black/20 border-white/10 text-[#8b949e]';
+    ? 'bg-amber-500/5 border-amber-500/30 text-warn'
+    : 'bg-well border-line text-muted';
   return (
     <div className={`rounded-xl border px-4 py-6 text-center ${tone}`}>
       <p className="text-[11px] leading-relaxed">{feedMessage(state, windowLabel)}</p>
@@ -266,25 +266,25 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
   return (
     <div className="space-y-5">
       {/* ── Control bar: the time range and the refresh state, like any monitoring console ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#161b22] border border-white/10 rounded-[1.25rem] px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-card border border-line rounded-[1.25rem] px-4 py-3">
         <div className="flex items-center gap-2.5">
-          <Activity className="w-4 h-4 text-indigo-400" />
+          <Activity className="w-4 h-4 text-accent-text" />
           <div>
-            <h2 className="text-xs font-black text-white uppercase tracking-widest">Live Monitor</h2>
-            <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest">
+            <h2 className="text-xs font-black text-ink uppercase tracking-widest">Live Monitor</h2>
+            <p className="text-[9px] text-muted font-bold uppercase tracking-widest">
               {lastLoadedAt ? `Updated ${new Date(lastLoadedAt).toLocaleTimeString('en-IN', { hour12: false })}` : 'Loading…'}
               {data?.instanceUptimeSeconds != null && ` · server up ${humanDuration(data.instanceUptimeSeconds * 1000)}`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-black/40 border border-white/10 p-0.5">
+          <div className="flex rounded-lg bg-well border border-line p-0.5">
             {RANGE_OPTIONS.map((r) => (
               <button
                 key={r.hours}
                 onClick={() => setHours(r.hours)}
                 className={`px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-colors ${
-                  hours === r.hours ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}
+                  hours === r.hours ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink'}`}
               >
                 {r.hours >= 168 ? '7d' : r.hours >= 24 ? '24h' : `${r.hours}h`}
               </button>
@@ -293,7 +293,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           <button
             onClick={() => setAutoRefresh((v) => !v)}
             className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-colors ${
-              autoRefresh ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-white/5 border-white/10 text-[#8b949e]'}`}
+              autoRefresh ? 'bg-emerald-500/10 border-emerald-500/30 text-success' : 'bg-raised border-line text-muted'}`}
             title="Refresh every 30 seconds"
           >
             {autoRefresh ? 'Auto 30s' : 'Auto off'}
@@ -301,7 +301,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           <button
             onClick={() => void load()}
             disabled={loading}
-            className="p-1.5 rounded-lg bg-white/5 border border-white/10 text-[#8b949e] hover:text-white disabled:opacity-40"
+            className="p-1.5 rounded-lg bg-raised border border-line text-muted hover:text-ink disabled:opacity-40"
             aria-label="Refresh now"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -316,69 +316,69 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         <div className={`rounded-[1.5rem] border p-5 ${
           data.serverLoad.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
           : data.serverLoad.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
-          : 'bg-[#161b22] border-white/10'}`}>
+          : 'bg-card border-line'}`}>
           <div className="flex items-start justify-between gap-3 mb-4">
             <div className="min-w-0">
               <h3 className={PANEL_TITLE}>Server load</h3>
-              <p className="text-[11px] text-white/80 mt-1 leading-relaxed">
+              <p className="text-[11px] text-body mt-1 leading-relaxed">
                 {serverLoadHeadline(data.serverLoad.level, data.serverLoad.reason)}
               </p>
               {/* The caveat that keeps this honest: several instances run at once, and a request
                   lands on whichever answers. This describes THAT one. */}
-              <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest mt-1.5">
+              <p className="text-[9px] text-faint font-bold uppercase tracking-widest mt-1.5">
                 One server instance — several run at once, and each request lands on whichever answers
               </p>
             </div>
             <span className={`shrink-0 text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-              data.serverLoad.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-              : data.serverLoad.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
+              data.serverLoad.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
+              : data.serverLoad.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
               {data.serverLoad.level === 'ok' ? 'healthy' : data.serverLoad.level}
             </span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Waiting time</div>
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Waiting time</div>
               <div className={`text-lg font-black font-mono mt-0.5 ${
-                data.serverLoad.eventLoopP99Ms == null ? 'text-[#8b949e]'
-                : data.serverLoad.eventLoopP99Ms >= 250 ? 'text-red-400'
-                : data.serverLoad.eventLoopP99Ms >= 100 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                data.serverLoad.eventLoopP99Ms == null ? 'text-muted'
+                : data.serverLoad.eventLoopP99Ms >= 250 ? 'text-danger'
+                : data.serverLoad.eventLoopP99Ms >= 100 ? 'text-warn' : 'text-success'}`}>
                 {data.serverLoad.eventLoopP99Ms == null ? '—' : `${data.serverLoad.eventLoopP99Ms}ms`}
               </div>
-              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">
+              <div className="text-[8px] text-faint font-bold uppercase tracking-wider mt-1">
                 Worst case{data.serverLoad.eventLoopP50Ms != null && ` · usual ${data.serverLoad.eventLoopP50Ms}ms`}
               </div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">CPU</div>
-              <div className="text-lg font-black font-mono mt-0.5 text-white">
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">CPU</div>
+              <div className="text-lg font-black font-mono mt-0.5 text-ink">
                 {data.serverLoad.cpuPercent == null ? '—' : `${data.serverLoad.cpuPercent}%`}
               </div>
-              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">Of one core</div>
+              <div className="text-[8px] text-faint font-bold uppercase tracking-wider mt-1">Of one core</div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Memory</div>
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Memory</div>
               <div className={`text-lg font-black font-mono mt-0.5 ${
-                (data.serverLoad.memoryPercent ?? 0) >= 90 ? 'text-red-400'
-                : (data.serverLoad.memoryPercent ?? 0) >= 75 ? 'text-amber-400' : 'text-white'}`}>
+                (data.serverLoad.memoryPercent ?? 0) >= 90 ? 'text-danger'
+                : (data.serverLoad.memoryPercent ?? 0) >= 75 ? 'text-warn' : 'text-ink'}`}>
                 {data.serverLoad.memoryPercent == null ? formatBytes(data.serverLoad.memoryRssBytes) : `${data.serverLoad.memoryPercent}%`}
               </div>
-              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">
+              <div className="text-[8px] text-faint font-bold uppercase tracking-wider mt-1">
                 {formatBytes(data.serverLoad.memoryRssBytes)}
                 {data.serverLoad.memoryLimitBytes ? ` of ${formatBytes(data.serverLoad.memoryLimitBytes)}` : ' · limit unknown'}
               </div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Handling now</div>
-              <div className="text-lg font-black font-mono mt-0.5 text-sky-400">{data.serverLoad.inFlightRequests}</div>
-              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">Requests in flight</div>
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Handling now</div>
+              <div className="text-lg font-black font-mono mt-0.5 text-info">{data.serverLoad.inFlightRequests}</div>
+              <div className="text-[8px] text-faint font-bold uppercase tracking-wider mt-1">Requests in flight</div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Running for</div>
-              <div className="text-lg font-black font-mono mt-0.5 text-white">
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Running for</div>
+              <div className="text-lg font-black font-mono mt-0.5 text-ink">
                 {humanDuration(data.serverLoad.uptimeSeconds * 1000)}
               </div>
-              <div className="text-[8px] text-[#484f58] font-bold uppercase tracking-wider mt-1">Since last deploy</div>
+              <div className="text-[8px] text-faint font-bold uppercase tracking-wider mt-1">Since last deploy</div>
             </div>
           </div>
         </div>
@@ -434,7 +434,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           // provider answered. Hardcoding "Running now — billed by the minute" here is what let an
           // unmeasured number claim money was leaving; the fallback says unknown rather than guessing.
           sub={data?.liveSandboxNote || (data?.liveSandboxes == null ? 'Could not ask the sandbox provider — unknown, not zero.' : 'Running now — billed by the minute')}
-          tone={data?.liveSandboxes == null ? 'text-amber-400' : (data.liveSandboxes > 0 ? 'text-sky-400' : 'text-white')}
+          tone={data?.liveSandboxes == null ? 'text-warn' : (data.liveSandboxes > 0 ? 'text-info' : 'text-ink')}
           Icon={Server}
         />
         <Tile
@@ -453,7 +453,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
                 ? 'Rate disagrees with the machine — see below'
                 : 'Our infrastructure, not a user charge'
           }
-          tone={sandboxRateConfigured === false ? 'text-[#8b949e]' : sandboxRateNote ? 'text-amber-400' : 'text-orange-400'}
+          tone={sandboxRateConfigured === false ? 'text-muted' : sandboxRateNote ? 'text-warn' : 'text-warn'}
           Icon={IndianRupee}
         />
         <Tile
@@ -467,7 +467,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         // A wrong cost figure is worse than a missing one, because it is the one an admin acts on.
         // Shown in full rather than summarised: the sentence carries both numbers and the exact key
         // to change, so the fix does not require coming back here to ask what the real rate was.
-        <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+        <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-warn">
           {sandboxRateNote}
         </p>
       ) : null}
@@ -479,13 +479,13 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         <div className={`rounded-[1.25rem] border px-4 py-3 flex items-start gap-3 ${
           data.emailAlerts.configured
             ? 'bg-emerald-500/5 border-emerald-500/25'
-            : 'bg-[#161b22] border-white/10'}`}>
-          <Bell className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${data.emailAlerts.configured ? 'text-emerald-400' : 'text-[#484f58]'}`} />
+            : 'bg-card border-line'}`}>
+          <Bell className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${data.emailAlerts.configured ? 'text-success' : 'text-faint'}`} />
           <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-white">
+            <p className="text-[10px] font-black uppercase tracking-widest text-ink">
               Alerts {data.emailAlerts.configured ? 'reach you by app and email' : 'reach you in the app only'}
             </p>
-            <p className="text-[10px] text-[#8b949e] mt-0.5 leading-relaxed">
+            <p className="text-[10px] text-muted mt-0.5 leading-relaxed">
               {data.emailAlerts.configured
                 ? `The notification bell, plus email to ${data.emailAlerts.recipients} address${data.emailAlerts.recipients === 1 ? '' : 'es'}.`
                 : `${data.emailAlerts.reason} Until then a problem overnight is seen when you next open the app.`}
@@ -501,12 +501,12 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           IT Rules actually require, and nobody would ever be told. */}
       {data?.compliance && !data.compliance.grievanceOfficerNamed && (
         <div className="rounded-[1.25rem] border border-amber-500/40 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
-          <Scale className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-400" />
+          <Scale className="w-3.5 h-3.5 mt-0.5 shrink-0 text-warn" />
           <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-amber-200">
+            <p className="text-[10px] font-black uppercase tracking-widest text-warn">
               Grievance Officer not named
             </p>
-            <p className="text-[10px] text-amber-100/70 mt-0.5 leading-relaxed">
+            <p className="text-[10px] text-warn mt-0.5 leading-relaxed">
               {data.compliance.grievanceWarning}
             </p>
           </div>
@@ -517,11 +517,11 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
       {alerts.length > 0 && (
         <div className="bg-red-500/5 border border-red-500/30 rounded-[1.25rem] p-4 space-y-2">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+            <AlertTriangle className="w-3.5 h-3.5 text-danger" />
             <h3 className={PANEL_TITLE}>Active alerts</h3>
           </div>
           {alerts.map((a: any, i: number) => (
-            <p key={a?.id ?? i} className="text-[11px] text-red-200 leading-relaxed">
+            <p key={a?.id ?? i} className="text-[11px] text-danger leading-relaxed">
               {a?.message || a?.headline || JSON.stringify(a)}
             </p>
           ))}
@@ -537,8 +537,8 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               <p className={PANEL_SUB}>Succeeded vs failed, per {Math.round((data?.timeline?.bucketMs ?? 300_000) / 60_000)} min</p>
             </div>
             <div className="flex items-center gap-2.5 text-[8px] font-black uppercase tracking-wider">
-              <span className="flex items-center gap-1 text-emerald-400"><span className="w-2 h-2 rounded-sm bg-emerald-500" />OK</span>
-              <span className="flex items-center gap-1 text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500" />Failed</span>
+              <span className="flex items-center gap-1 text-success"><span className="w-2 h-2 rounded-sm bg-emerald-500 text-on-accent" />OK</span>
+              <span className="flex items-center gap-1 text-danger"><span className="w-2 h-2 rounded-sm bg-red-500 text-on-accent" />Failed</span>
             </div>
           </div>
           {chartsLive ? (
@@ -558,7 +558,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               <h3 className={PANEL_TITLE}>AI spend</h3>
               <p className={PANEL_SUB}>Real provider cost per bucket</p>
             </div>
-            <span className="text-[9px] font-mono text-amber-400">
+            <span className="text-[9px] font-mono text-warn">
               {chartsLive ? formatInr(microUsdToInr(totals.costMicroUsd, usdInr)) : '—'}
             </span>
           </div>
@@ -584,7 +584,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               <h3 className={PANEL_TITLE}>Token throughput</h3>
               <p className={PANEL_SUB}>Input + output tokens per bucket</p>
             </div>
-            <span className="text-[9px] font-mono text-sky-400">{chartsLive ? compactNumber(totals.tokens) : '—'}</span>
+            <span className="text-[9px] font-mono text-info">{chartsLive ? compactNumber(totals.tokens) : '—'}</span>
           </div>
           {chartsLive ? (
             <ChartFrame points={points} windowHours={hours} height={100}>
@@ -608,7 +608,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               <h3 className={PANEL_TITLE}>Build duration</h3>
               <p className={PANEL_SUB}>Average time a user waited</p>
             </div>
-            <span className="text-[9px] font-mono text-violet-400">{chartsLive ? humanDuration(totals.avgBuildMs) : '—'}</span>
+            <span className="text-[9px] font-mono text-accent-text">{chartsLive ? humanDuration(totals.avgBuildMs) : '—'}</span>
           </div>
           {chartsLive ? (
             <ChartFrame points={points} windowHours={hours} height={100}>
@@ -630,7 +630,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
             <p className={PANEL_SUB}>Admin-only — never shown to a user</p>
           </div>
           {providers.length === 0 ? (
-            <p className="text-[10px] text-[#8b949e] font-bold uppercase py-6 text-center">
+            <p className="text-[10px] text-muted font-bold uppercase py-6 text-center">
               {chartsLive ? 'No engine activity in this window' : 'Awaiting telemetry'}
             </p>
           ) : (
@@ -653,9 +653,9 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
                   <div key={p.name} className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PROVIDER_COLORS[i % PROVIDER_COLORS.length] }} />
-                      <span className="text-[10px] font-mono text-white/80 uppercase truncate">{p.name}</span>
+                      <span className="text-[10px] font-mono text-body uppercase truncate">{p.name}</span>
                     </span>
-                    <span className="text-[10px] font-mono text-[#8b949e] shrink-0">
+                    <span className="text-[10px] font-mono text-muted shrink-0">
                       {formatInr(microUsdToInr(p.costUsd * 1_000_000, usdInr))} · {compactNumber(p.tokens)}
                     </span>
                   </div>
@@ -674,11 +674,11 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
             </div>
             {health?.grade && (
               <span className={`text-[9px] font-black uppercase px-2 py-1 rounded-full border ${
-                health.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                : health.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-sky-400'
-                : health.grade === 'fair' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                : health.grade === 'unknown' ? 'bg-white/5 border-white/10 text-[#8b949e]'
-                : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                health.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
+                : health.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-info'
+                : health.grade === 'fair' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                : health.grade === 'unknown' ? 'bg-raised border-line text-muted'
+                : 'bg-red-500/10 border-red-500/30 text-danger'}`}>
                 {health.grade}
               </span>
             )}
@@ -691,23 +691,23 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
                   { label: 'Reliability', value: health.reliability, good: (v: number) => v >= 75 },
                   { label: 'Risk', value: health.risk, good: (v: number) => v <= 25 },
                 ] as const).map((m) => (
-                  <div key={m.label} className="bg-black/30 rounded-xl p-3 text-center">
-                    <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">{m.label}</div>
+                  <div key={m.label} className="bg-well rounded-xl p-3 text-center">
+                    <div className="text-[8px] text-muted uppercase font-black tracking-widest">{m.label}</div>
                     <div className={`text-xl font-black font-mono mt-1 ${
-                      m.value == null ? 'text-[#8b949e]' : m.good(m.value) ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      m.value == null ? 'text-muted' : m.good(m.value) ? 'text-success' : 'text-warn'}`}>
                       {m.value == null ? '—' : m.value}
                     </div>
                   </div>
                 ))}
               </div>
               {Array.isArray(health.missing) && health.missing.length > 0 && (
-                <p className="text-[8px] text-[#484f58] font-bold uppercase tracking-widest mt-2.5">
+                <p className="text-[8px] text-faint font-bold uppercase tracking-widest mt-2.5">
                   No data yet for: {health.missing.join(', ')} — excluded from the score, not faked.
                 </p>
               )}
             </>
           ) : (
-            <p className="text-[10px] text-[#8b949e] font-bold uppercase py-6 text-center">
+            <p className="text-[10px] text-muted font-bold uppercase py-6 text-center">
               {data?.healthError ? `Unavailable — ${data.healthError}` : 'Awaiting telemetry'}
             </p>
           )}
@@ -725,9 +725,9 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               </div>
               <div className="space-y-2">
                 {finopsFindings.slice(0, 6).map((f: any, i: number) => (
-                  <div key={f?.id ?? i} className="bg-black/30 rounded-xl p-3">
-                    <div className="text-[11px] font-bold text-white">{f?.title || f?.headline || 'Finding'}</div>
-                    {f?.detail && <div className="text-[10px] text-[#8b949e] mt-0.5 leading-relaxed">{f.detail}</div>}
+                  <div key={f?.id ?? i} className="bg-well rounded-xl p-3">
+                    <div className="text-[11px] font-bold text-ink">{f?.title || f?.headline || 'Finding'}</div>
+                    {f?.detail && <div className="text-[10px] text-muted mt-0.5 leading-relaxed">{f.detail}</div>}
                   </div>
                 ))}
               </div>
@@ -741,17 +741,17 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
               </div>
               <div className="space-y-2">
                 {insights.slice(0, 6).map((i: any, idx: number) => (
-                  <div key={i?.id ?? idx} className="flex items-start gap-2.5 bg-black/30 rounded-xl p-3">
+                  <div key={i?.id ?? idx} className="flex items-start gap-2.5 bg-well rounded-xl p-3">
                     <span className={`mt-0.5 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-full border shrink-0 ${
-                      i?.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                      : i?.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                      : i?.severity === 'good' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : 'bg-white/5 border-white/10 text-[#8b949e]'}`}>
+                      i?.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                      : i?.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                      : i?.severity === 'good' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
+                      : 'bg-raised border-line text-muted'}`}>
                       {i?.severity ?? 'info'}
                     </span>
                     <div className="min-w-0">
-                      <div className="text-[11px] font-bold text-white">{i?.headline}</div>
-                      <div className="text-[10px] text-[#8b949e] mt-0.5 leading-relaxed">{i?.detail}</div>
+                      <div className="text-[11px] font-bold text-ink">{i?.headline}</div>
+                      <div className="text-[10px] text-muted mt-0.5 leading-relaxed">{i?.detail}</div>
                     </div>
                   </div>
                 ))}
@@ -768,26 +768,26 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
             <h3 className={PANEL_TITLE}>Server logs</h3>
             <p className={PANEL_SUB}>Newest first · admin-only</p>
           </div>
-          <Cpu className="w-3.5 h-3.5 text-[#484f58]" />
+          <Cpu className="w-3.5 h-3.5 text-faint" />
         </div>
         {logs === null ? (
-          <p className="text-[10px] text-[#8b949e] font-bold uppercase py-6 text-center">
+          <p className="text-[10px] text-muted font-bold uppercase py-6 text-center">
             Log stream unavailable right now — this says nothing about platform health.
           </p>
         ) : logs.length === 0 ? (
-          <p className="text-[10px] text-[#8b949e] font-bold uppercase py-6 text-center">No log entries recorded</p>
+          <p className="text-[10px] text-muted font-bold uppercase py-6 text-center">No log entries recorded</p>
         ) : (
           <div className="max-h-64 overflow-y-auto font-mono text-[10px] space-y-1 pr-1">
             {logs.map((l, i) => (
-              <div key={i} className="flex gap-2.5 items-start hover:bg-white/5 rounded px-1.5 py-0.5">
-                <span className="text-[#484f58] shrink-0">
+              <div key={i} className="flex gap-2.5 items-start hover:bg-raised rounded px-1.5 py-0.5">
+                <span className="text-faint shrink-0">
                   {logStamp(l.ts, logsSpanDays)}
                 </span>
                 <span className={`shrink-0 font-black uppercase ${
-                  l.level === 'error' ? 'text-red-400' : l.level === 'warn' ? 'text-amber-400' : 'text-sky-400'}`}>
+                  l.level === 'error' ? 'text-danger' : l.level === 'warn' ? 'text-warn' : 'text-info'}`}>
                   {(l.level || 'info').toUpperCase()}
                 </span>
-                <span className="text-[#c9d1d9] break-all">{l.event ? `${l.event} — ` : ''}{l.message}</span>
+                <span className="text-body break-all">{l.event ? `${l.event} — ` : ''}{l.message}</span>
               </div>
             ))}
           </div>
@@ -804,25 +804,25 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
             </p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Builds</div>
-              <div className="text-lg font-black font-mono text-white mt-0.5">{data.snapshot.builds?.total ?? 0}</div>
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Builds</div>
+              <div className="text-lg font-black font-mono text-ink mt-0.5">{data.snapshot.builds?.total ?? 0}</div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Success</div>
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Success</div>
               <div className={`text-lg font-black font-mono mt-0.5 ${toneClass(rateTone(data.snapshot.builds?.total ? data.snapshot.builds.successRate : null))}`}>
                 {data.snapshot.builds?.total ? percent(data.snapshot.builds.successRate) : '—'}
               </div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Avg build</div>
-              <div className="text-lg font-black font-mono text-white mt-0.5">
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Avg build</div>
+              <div className="text-lg font-black font-mono text-ink mt-0.5">
                 {data.snapshot.builds?.total ? humanDuration(data.snapshot.builds.avgMs) : '—'}
               </div>
             </div>
-            <div className="bg-black/30 rounded-xl p-3">
-              <div className="text-[8px] text-[#8b949e] uppercase font-black tracking-widest">Engine cost</div>
-              <div className="text-lg font-black font-mono text-amber-400 mt-0.5">
+            <div className="bg-well rounded-xl p-3">
+              <div className="text-[8px] text-muted uppercase font-black tracking-widest">Engine cost</div>
+              <div className="text-lg font-black font-mono text-warn mt-0.5">
                 {formatInr(microUsdToInr((data.snapshot.totalCostUsd || 0) * 1_000_000, usdInr))}
               </div>
             </div>
@@ -831,7 +831,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
       )}
 
       {error && (
-        <p className="text-[10px] text-amber-300/80 font-bold uppercase tracking-wider text-center">
+        <p className="text-[10px] text-warn font-bold uppercase tracking-wider text-center">
           Live telemetry error: {error}
         </p>
       )}

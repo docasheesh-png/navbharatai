@@ -310,8 +310,8 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
             onClick={() => { setSource(s.id); setProblem(''); }}
             className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-xs font-semibold transition-colors ${
               source === s.id
-                ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
-                : 'border-white/10 bg-white/[0.02] text-gray-400 hover:border-white/20'
+                ? 'border-amber-500/60 bg-amber-500/10 text-warn'
+                : 'border-line bg-raised text-muted hover:border-line'
             }`}
           >
             {s.icon} {s.label}
@@ -320,7 +320,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
       </div>
 
       {source === 'navbharat' ? (
-        <div className="rounded-2xl border border-white/8 bg-[#0d1117]">
+        <div className="rounded-2xl border border-line bg-surface">
           <AppTargetPicker
             sessionId={appSessionId}
             onSessionChange={setAppSessionId}
@@ -335,35 +335,35 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
           />
         </div>
       ) : !ghToken ? (
-        <div className="flex flex-col items-start gap-3 rounded-2xl border border-white/8 bg-[#0d1117] p-4">
-          <p className="text-xs leading-relaxed text-gray-400">
+        <div className="flex flex-col items-start gap-3 rounded-2xl border border-line bg-surface p-4">
+          <p className="text-xs leading-relaxed text-muted">
             Connect your GitHub account to add payments to a repository you already have. NavBharatAI
             commits to that repository on your behalf — nothing else.
           </p>
           {onConnectGitHub && (
             <button
               onClick={onConnectGitHub}
-              className="flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/15"
+              className="flex items-center gap-2 rounded-xl bg-raised px-4 py-2.5 text-xs font-semibold text-ink hover:bg-raised"
             >
               <Github size={14} /> Connect GitHub
             </button>
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-[#0d1117] p-3">
+        <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-3">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Repository</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Repository</span>
             {reposLoading ? (
-              <span className="flex items-center gap-2 py-2 text-xs text-gray-500">
+              <span className="flex items-center gap-2 py-2 text-xs text-faint">
                 <Loader2 size={12} className="animate-spin" /> Loading your repositories…
               </span>
             ) : repos.length === 0 ? (
-              <span className="py-2 text-xs text-gray-500">No repositories found on that account.</span>
+              <span className="py-2 text-xs text-faint">No repositories found on that account.</span>
             ) : (
               <select
                 value={repoFullName}
                 onChange={(e) => setRepoFullName(e.target.value)}
-                className="w-full appearance-none rounded-lg border border-white/12 bg-[#0d1117] px-3 py-2.5 text-[13px] text-gray-100 outline-none"
+                className="w-full appearance-none rounded-lg border border-line bg-surface px-3 py-2.5 text-[13px] text-body outline-none"
               >
                 {repos.map((r) => <option key={r.fullName} value={r.fullName}>{r.fullName}</option>)}
               </select>
@@ -371,17 +371,17 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
               Page to add the payment button to
             </span>
             {ghFilesLoading ? (
-              <span className="flex items-center gap-2 py-2 text-xs text-gray-500">
+              <span className="flex items-center gap-2 py-2 text-xs text-faint">
                 <Loader2 size={12} className="animate-spin" /> Reading the repository…
               </span>
             ) : !ghFiles ? (
-              <span className="py-2 text-xs text-gray-500">Choose a repository first.</span>
+              <span className="py-2 text-xs text-faint">Choose a repository first.</span>
             ) : Object.keys(ghFiles).filter(isHtml).length === 0 ? (
-              <span className="py-2 text-xs text-amber-300">
+              <span className="py-2 text-xs text-warn">
                 That repository has no HTML page. A payment button has to go on a page — pick another
                 repository, or add the code to your own component from the snippet shown at the end.
               </span>
@@ -389,7 +389,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
               <select
                 value={ghPath}
                 onChange={(e) => setGhPath(e.target.value)}
-                className="w-full appearance-none rounded-lg border border-white/12 bg-[#0d1117] px-3 py-2.5 text-[13px] text-gray-100 outline-none"
+                className="w-full appearance-none rounded-lg border border-line bg-surface px-3 py-2.5 text-[13px] text-body outline-none"
               >
                 {Object.keys(ghFiles).filter(isHtml).map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -414,19 +414,19 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
         <button
           key={m.id}
           onClick={() => { setMethod(m.id); setCreds({}); setProblem(''); setStep('details'); }}
-          className="flex flex-col items-start gap-1 rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-left transition-colors hover:border-amber-500/40 hover:bg-amber-500/[0.06]"
+          className="flex flex-col items-start gap-1 rounded-2xl border border-line bg-raised p-4 text-left transition-colors hover:border-amber-500/40 hover:bg-amber-500/[0.06]"
         >
           <div className="flex w-full items-center gap-2">
-            <span className="text-sm font-bold text-gray-100">{m.label}</span>
+            <span className="text-sm font-bold text-body">{m.label}</span>
             {m.noServerNeeded && (
-              <span className="rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-semibold text-green-300">
+              <span className="rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-semibold text-success">
                 No server needed
               </span>
             )}
-            <ChevronRight size={14} className="ml-auto shrink-0 text-gray-500" />
+            <ChevronRight size={14} className="ml-auto shrink-0 text-faint" />
           </div>
-          <p className="text-xs leading-relaxed text-gray-400">{m.summary}</p>
-          <p className="text-[11px] font-medium text-amber-300/80">{m.cost}</p>
+          <p className="text-xs leading-relaxed text-muted">{m.summary}</p>
+          <p className="text-[11px] font-medium text-warn">{m.cost}</p>
         </button>
       ))}
     </div>
@@ -434,15 +434,15 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
 
   const renderDetailsStep = () => (
     <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-white/8 bg-[#0d1117] p-4">
-        <p className="text-sm font-bold text-gray-100">{spec.label}</p>
-        <p className="mt-1 text-xs leading-relaxed text-gray-400">{spec.summary}</p>
+      <div className="rounded-2xl border border-line bg-surface p-4">
+        <p className="text-sm font-bold text-body">{spec.label}</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted">{spec.summary}</p>
         {spec.dashboardLink && (
           <a
             href={spec.dashboardLink}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-300 hover:text-amber-200"
+            className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-semibold text-warn hover:text-warn"
           >
             <ExternalLink size={12} /> Open the dashboard to get these values
           </a>
@@ -452,7 +452,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
       <div className="flex flex-col gap-4">
         {spec.fields.map((f) => (
           <label key={f.key} className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
               {f.label}{f.optional ? ' (optional)' : ''}
             </span>
             <input
@@ -461,11 +461,11 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
               value={creds[f.key] || ''}
               placeholder={f.placeholder}
               onChange={(e) => setCreds((p) => ({ ...p, [f.key]: e.target.value }))}
-              className="w-full rounded-xl border border-white/10 bg-[#0d1117] px-3.5 py-3 font-mono text-[13px] text-gray-100 placeholder:text-gray-600 outline-none focus:border-amber-500/50"
+              className="w-full rounded-xl border border-line bg-surface px-3.5 py-3 font-mono text-[13px] text-body placeholder:text-faint outline-none focus:border-amber-500/50"
             />
             {f.where && (
-              <span className="text-[11px] leading-relaxed text-gray-500">
-                Where to find this: <span className="text-gray-400">{f.where}</span>
+              <span className="text-[11px] leading-relaxed text-faint">
+                Where to find this: <span className="text-muted">{f.where}</span>
               </span>
             )}
           </label>
@@ -473,7 +473,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
 
         {method === 'upi' && (
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
               Amount in ₹ (optional)
             </span>
             <input
@@ -482,25 +482,25 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
               value={amount}
               placeholder="Leave empty to let the customer type it"
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-[#0d1117] px-3.5 py-3 text-[13px] text-gray-100 placeholder:text-gray-600 outline-none focus:border-amber-500/50"
+              className="w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-[13px] text-body placeholder:text-faint outline-none focus:border-amber-500/50"
             />
           </label>
         )}
       </div>
 
       {upiTypo && (
-        <p className="flex items-start gap-2 text-xs leading-relaxed text-amber-300">
+        <p className="flex items-start gap-2 text-xs leading-relaxed text-warn">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
           That UPI ID does not look right — it should look like <span className="font-mono">yourname@okaxis</span>.
         </p>
       )}
 
       {spec.fields.some((f) => f.secret) && (
-        <p className="flex items-start gap-2 rounded-xl border border-indigo-500/15 bg-indigo-500/[0.06] p-3 text-[11px] leading-relaxed text-gray-400">
-          <ShieldCheck size={13} className="mt-0.5 shrink-0 text-indigo-400" />
+        <p className="flex items-start gap-2 rounded-xl border border-indigo-500/15 bg-indigo-500/[0.06] p-3 text-[11px] leading-relaxed text-muted">
+          <ShieldCheck size={13} className="mt-0.5 shrink-0 text-accent-text" />
           {userId ? (
             <span>
-              Your secret key is encrypted into <span className="font-semibold text-white">Settings → Secrets &amp; Keys</span>,
+              Your secret key is encrypted into <span className="font-semibold text-ink">Settings → Secrets &amp; Keys</span>,
               never written into your app&apos;s files, and cleared from this screen once it is stored.
             </span>
           ) : (
@@ -520,8 +520,8 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
         {busy ? <Loader2 size={16} className="animate-spin" /> : <IndianRupee size={16} />}
         {busy ? 'Adding it to your app…' : 'Add it to my app'}
       </button>
-      <p className="text-center text-[11px] text-gray-500">
-        Writes to <span className="font-mono text-gray-400">{targetPath || '—'}</span> in {targetLabel}
+      <p className="text-center text-[11px] text-faint">
+        Writes to <span className="font-mono text-muted">{targetPath || '—'}</span> in {targetLabel}
       </p>
     </div>
   );
@@ -534,31 +534,31 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
         <div className={`flex items-start gap-3 rounded-2xl border p-4 ${
           o.ok ? 'border-green-500/25 bg-green-500/[0.07]' : 'border-red-500/25 bg-red-500/[0.07]'
         }`}>
-          {o.ok ? <Check size={16} className="mt-0.5 shrink-0 text-green-400" /> : <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-400" />}
+          {o.ok ? <Check size={16} className="mt-0.5 shrink-0 text-success" /> : <AlertTriangle size={16} className="mt-0.5 shrink-0 text-danger" />}
           <div className="min-w-0">
-            <p className={`text-sm font-bold ${o.ok ? 'text-green-300' : 'text-red-300'}`}>
+            <p className={`text-sm font-bold ${o.ok ? 'text-success' : 'text-danger'}`}>
               {o.ok ? `Added to ${o.where}` : 'Nothing was changed'}
             </p>
             {o.ok ? (
-              <ul className="mt-1.5 space-y-0.5 text-xs text-gray-400">
+              <ul className="mt-1.5 space-y-0.5 text-xs text-muted">
                 {o.written.map((p) => <li key={p} className="break-all font-mono">{p}</li>)}
               </ul>
             ) : (
-              <p className="mt-1 text-xs leading-relaxed text-gray-400">{o.error}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">{o.error}</p>
             )}
-            {o.ok && o.undoHint && <p className="mt-2 text-[11px] text-gray-500">{o.undoHint}</p>}
+            {o.ok && o.undoHint && <p className="mt-2 text-[11px] text-faint">{o.undoHint}</p>}
           </div>
         </div>
 
         {o.vault !== 'none' && o.vault !== 'skipped' && (
           <div className={`flex items-start gap-2.5 rounded-xl border p-3 text-[11px] leading-relaxed ${
-            o.vault === 'saved' ? 'border-indigo-500/20 bg-indigo-500/[0.06] text-gray-400' : 'border-amber-500/25 bg-amber-500/[0.07] text-amber-200'
+            o.vault === 'saved' ? 'border-indigo-500/20 bg-indigo-500/[0.06] text-muted' : 'border-amber-500/25 bg-amber-500/[0.07] text-warn'
           }`}>
-            <ShieldCheck size={13} className="mt-0.5 shrink-0 text-indigo-400" />
+            <ShieldCheck size={13} className="mt-0.5 shrink-0 text-accent-text" />
             {o.vault === 'saved' ? (
               <span>
                 Saved to Settings → Secrets &amp; Keys as{' '}
-                <span className="font-mono text-gray-300">{o.vaultNames.join(', ')}</span>. NavBharatAI
+                <span className="font-mono text-muted">{o.vaultNames.join(', ')}</span>. NavBharatAI
                 uses these automatically when it builds your app.
               </span>
             ) : (
@@ -571,12 +571,12 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
         )}
 
         {o.ok && o.generated && (
-          <div className="flex flex-col gap-2 rounded-2xl border border-white/8 bg-[#0d1117] p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-300">What to do next</p>
+          <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted">What to do next</p>
             <ol className="space-y-2">
               {o.generated.nextSteps.map((s, i) => (
-                <li key={i} className="flex gap-2 text-xs leading-relaxed text-gray-400">
-                  <span className="font-bold text-amber-400">{i + 1}.</span> {s}
+                <li key={i} className="flex gap-2 text-xs leading-relaxed text-muted">
+                  <span className="font-bold text-warn">{i + 1}.</span> {s}
                 </li>
               ))}
             </ol>
@@ -586,18 +586,18 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
         {o.ok && o.generated?.server && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                 {o.generated.serverFileName} — this must run on your server
               </span>
               <button
                 onClick={() => copy(o.generated!.server!, 'server')}
-                className="flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200"
+                className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:text-body"
               >
                 {copied === 'server' ? <Check size={11} /> : <Copy size={11} />}
                 {copied === 'server' ? 'Copied' : 'Copy'}
               </button>
             </div>
-            <pre className="max-h-64 overflow-auto rounded-xl border border-white/8 bg-[#0d1117] p-3 text-[11px] leading-relaxed text-gray-300">
+            <pre className="max-h-64 overflow-auto rounded-xl border border-line bg-surface p-3 text-[11px] leading-relaxed text-muted">
               {o.generated.server}
             </pre>
           </div>
@@ -605,7 +605,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
 
         <button
           onClick={() => { setOutcome(null); setStep('method'); setCreds({}); setProblem(''); }}
-          className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-300 hover:border-white/20"
+          className="w-full rounded-xl border border-line px-4 py-3 text-sm font-semibold text-muted hover:border-line"
         >
           Add another payment method
         </button>
@@ -622,29 +622,29 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-[#0d1117]">
-      <div className="flex items-center gap-2.5 border-b border-white/8 px-4 py-3">
+    <div className="flex h-full flex-col overflow-hidden bg-surface">
+      <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
         {backTo[step] && (
           <button
             onClick={() => { setProblem(''); setStep(backTo[step]!); }}
-            className="rounded-lg p-1.5 text-gray-400 hover:bg-white/5 hover:text-gray-200"
+            className="rounded-lg p-1.5 text-muted hover:bg-raised hover:text-body"
             aria-label="Go back"
           >
             <ArrowLeft size={16} />
           </button>
         )}
-        <IndianRupee size={16} className="shrink-0 text-amber-400" />
+        <IndianRupee size={16} className="shrink-0 text-warn" />
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-gray-100">{heading[step]}</p>
+          <p className="truncate text-sm font-bold text-body">{heading[step]}</p>
           {step !== 'app' && step !== 'done' && (
-            <p className="truncate text-[11px] text-gray-500">{targetLabel} · {targetPath}</p>
+            <p className="truncate text-[11px] text-faint">{targetLabel} · {targetPath}</p>
           )}
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {problem && (
-          <p className="mb-4 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs leading-relaxed text-amber-200">
+          <p className="mb-4 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs leading-relaxed text-warn">
             <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {problem}
           </p>
         )}

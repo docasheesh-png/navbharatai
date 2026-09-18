@@ -177,24 +177,24 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
   const rows = data?.rows ?? [];
 
   return (
-    <div className="bg-[#161b22] border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
+    <div className="bg-card border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <IndianRupee className="w-4 h-4 text-indigo-400" />
-          <h4 className="text-sm font-black text-white tracking-tight">Build costs — real cost vs bill, by tier and app size</h4>
-          <span className="text-[10px] text-[#8b949e] font-bold">last {data?.window ?? 30} builds, newest first, measured from each build's own record — admin only</span>
+          <IndianRupee className="w-4 h-4 text-accent-text" />
+          <h4 className="text-sm font-black text-ink tracking-tight">Build costs — real cost vs bill, by tier and app size</h4>
+          <span className="text-[10px] text-muted font-bold">last {data?.window ?? 30} builds, newest first, measured from each build's own record — admin only</span>
         </div>
         <div className="flex items-center gap-3">
           {/* A card that never says WHEN it was read looks identical whether it is live or an hour
               stale — which is exactly how a frozen window went unnoticed. */}
           {data?.readAt ? (
-            <span className="text-[9px] font-bold text-[#6e7681] whitespace-nowrap">read {new Date(data.readAt).toLocaleTimeString('en-IN')}</span>
+            <span className="text-[9px] font-bold text-faint whitespace-nowrap">read {new Date(data.readAt).toLocaleTimeString('en-IN')}</span>
           ) : null}
           <button
             type="button"
             onClick={() => void fetchCosts()}
             disabled={loading}
-            className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -202,21 +202,21 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
         </div>
       </div>
 
-      <p className="text-[11px] text-[#8b949e] font-semibold">{costHeadline(data, error)}</p>
+      <p className="text-[11px] text-muted font-semibold">{costHeadline(data, error)}</p>
 
       {data && (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+        <div className="rounded-xl border border-line bg-raised p-3 space-y-2">
           <div className="flex items-center gap-2">
             {(() => {
               const d = data.trend?.realInr.delta;
-              if (d === null || d === undefined) return <Minus className="w-3.5 h-3.5 text-[#6e7681]" />;
+              if (d === null || d === undefined) return <Minus className="w-3.5 h-3.5 text-faint" />;
               return d < 0
-                ? <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
-                : d > 0 ? <TrendingUp className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-[#6e7681]" />;
+                ? <TrendingDown className="w-3.5 h-3.5 text-success" />
+                : d > 0 ? <TrendingUp className="w-3.5 h-3.5 text-danger" /> : <Minus className="w-3.5 h-3.5 text-faint" />;
             })()}
-            <h5 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">Are we making progress?</h5>
+            <h5 className="text-[10px] font-black uppercase tracking-widest text-muted">Are we making progress?</h5>
           </div>
-          <p className="text-[11px] text-[#c9d1d9] font-semibold">{trendHeadline(data.trend)}</p>
+          <p className="text-[11px] text-body font-semibold">{trendHeadline(data.trend)}</p>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {([
               ['Real cost (ours)', deltaLabel(data.trend?.realInr, 'inr'), data.trend?.realInr.delta, false],
@@ -225,16 +225,16 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
               ['Heals', deltaLabel(data.trend?.heals, 'plain'), data.trend?.heals.delta, false],
               ['Success rate', deltaLabel(data.trend?.successRate, 'plain', true), data.trend?.successRate.delta, true],
             ] as [string, string, number | null | undefined, boolean][]).map(([label, text, delta, higherIsBetter]) => (
-              <div key={label} className="rounded-lg bg-white/[0.04] px-2 py-1.5">
-                <p className="text-[9px] font-black uppercase tracking-widest text-[#6e7681]">{label}</p>
+              <div key={label} className="rounded-lg bg-raised px-2 py-1.5">
+                <p className="text-[9px] font-black uppercase tracking-widest text-faint">{label}</p>
                 <p className={`text-[10px] font-bold ${
-                  delta === null || delta === undefined || delta === 0 ? 'text-[#8b949e]'
-                    : (higherIsBetter ? delta > 0 : delta < 0) ? 'text-emerald-400' : 'text-red-400'
+                  delta === null || delta === undefined || delta === 0 ? 'text-muted'
+                    : (higherIsBetter ? delta > 0 : delta < 0) ? 'text-success' : 'text-danger'
                 }`}>{text}</p>
               </div>
             ))}
           </div>
-          <p className="text-[9px] text-[#6e7681] leading-snug">
+          <p className="text-[9px] text-faint leading-snug">
             Newest half against the half before it, within this window. A half needs at least 3 builds before a
             difference is reported — below that it says so instead of printing a number. Lower is better everywhere
             except success rate.
@@ -243,17 +243,17 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
       )}
 
       {error && (
-        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 p-3">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <p className="text-[10px] text-[#8b949e] font-semibold">{error}</p>
+        <div className="flex items-start gap-2 rounded-xl border border-line bg-raised p-3">
+          <AlertTriangle className="w-3.5 h-3.5 text-warn shrink-0 mt-0.5" />
+          <p className="text-[10px] text-muted font-semibold">{error}</p>
         </div>
       )}
 
       {cells.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="w-full text-[11px] text-[#c9d1d9]">
+          <table className="w-full text-[11px] text-body">
             <thead>
-              <tr className="text-[9px] font-black uppercase tracking-widest text-[#8b949e] border-b border-white/10">
+              <tr className="text-[9px] font-black uppercase tracking-widest text-muted border-b border-line">
                 <th className="text-left py-2 pr-3">Tier</th>
                 <th className="text-left py-2 pr-3">App size</th>
                 <th className="text-right py-2 pr-3">Builds</th>
@@ -267,14 +267,14 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
             </thead>
             <tbody>
               {cells.map((c) => (
-                <tr key={`${c.tier}-${c.size}`} className="border-b border-white/5">
-                  <td className="py-2 pr-3 font-bold text-white">{c.tierName}</td>
+                <tr key={`${c.tier}-${c.size}`} className="border-b border-line">
+                  <td className="py-2 pr-3 font-bold text-ink">{c.tierName}</td>
                   <td className="py-2 pr-3">{SIZE_LABEL[c.size] ?? c.size}</td>
                   <td className="py-2 pr-3 text-right">{c.n}</td>
                   <td className="py-2 pr-3 text-right">{c.failed}</td>
                   <td className="py-2 pr-3 text-right">{avgWithSample(c.avgRealInr, c.nMeasured)}</td>
                   <td className="py-2 pr-3 text-right">{avgWithSample(c.avgBilledInr, c.nBilled)}</td>
-                  <td className={`py-2 pr-3 text-right ${c.avgMarginInr !== null && c.avgMarginInr < 0 ? 'text-red-400' : ''}`}>{avgWithSample(c.avgMarginInr, c.nMargin)}</td>
+                  <td className={`py-2 pr-3 text-right ${c.avgMarginInr !== null && c.avgMarginInr < 0 ? 'text-danger' : ''}`}>{avgWithSample(c.avgMarginInr, c.nMargin)}</td>
                   <td className="py-2 pr-3 text-right">{c.avgHeals === null ? '—' : c.avgHeals}</td>
                   <td className="py-2 text-right">{c.avgMinutes === null ? '—' : c.avgMinutes}</td>
                 </tr>
@@ -285,7 +285,7 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
       )}
 
       {data && (
-        <div className="text-[10px] text-[#6e7681] leading-snug space-y-1">
+        <div className="text-[10px] text-faint leading-snug space-y-1">
           <p>{data.sizeRule}</p>
           <p>{data.note}</p>
           <p>Rate used: ₹{data.usdInr} per USD.</p>
@@ -294,13 +294,13 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
 
       {rows.length > 0 && (
         <details open={showRows} onToggle={(e) => setShowRows((e.currentTarget as HTMLDetailsElement).open)}>
-          <summary className="cursor-pointer text-[10px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white">
+          <summary className="cursor-pointer text-[10px] font-black uppercase tracking-widest text-muted hover:text-ink">
             Every build in this window ({rows.length})
           </summary>
           <div className="overflow-x-auto mt-2">
-            <table className="w-full text-[11px] text-[#c9d1d9]">
+            <table className="w-full text-[11px] text-body">
               <thead>
-                <tr className="text-[9px] font-black uppercase tracking-widest text-[#8b949e] border-b border-white/10">
+                <tr className="text-[9px] font-black uppercase tracking-widest text-muted border-b border-line">
                   <th className="text-left py-2 pr-3">When</th>
                   <th className="text-left py-2 pr-3">Tier</th>
                   <th className="text-left py-2 pr-3">Size</th>
@@ -316,16 +316,16 @@ export function BuildCostCard({ adminToken }: { adminToken: string }): React.Rea
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={`${r.workspaceId}-${r.startedAt}`} className="border-b border-white/5">
+                  <tr key={`${r.workspaceId}-${r.startedAt}`} className="border-b border-line">
                     <td className="py-1.5 pr-3 whitespace-nowrap">{r.startedAt ? new Date(r.startedAt).toLocaleString('en-IN') : '—'}</td>
-                    <td className="py-1.5 pr-3 font-bold text-white">{r.tierName}</td>
+                    <td className="py-1.5 pr-3 font-bold text-ink">{r.tierName}</td>
                     <td className="py-1.5 pr-3">{SIZE_LABEL[r.size] ?? r.size}</td>
                     <td className="py-1.5 pr-3 text-right">{r.files}</td>
-                    <td className={`py-1.5 pr-3 ${r.ok === false ? 'text-red-400' : r.ok === true ? 'text-emerald-400' : 'text-[#8b949e]'}`}>{r.ok === null ? 'unsettled' : r.ok ? 'ok' : 'failed'}</td>
+                    <td className={`py-1.5 pr-3 ${r.ok === false ? 'text-danger' : r.ok === true ? 'text-success' : 'text-muted'}`}>{r.ok === null ? 'unsettled' : r.ok ? 'ok' : 'failed'}</td>
                     <td className="py-1.5 pr-3 text-right whitespace-nowrap">{realCostLabel(r)}</td>
                     <td className="py-1.5 pr-3 text-right">{r.sandboxInr === null ? '—' : inr(r.sandboxInr)}</td>
                     <td className="py-1.5 pr-3 text-right whitespace-nowrap">{billLabel(r)}</td>
-                    <td className={`py-1.5 pr-3 text-right ${r.marginInr !== null && r.marginInr < 0 ? 'text-red-400' : ''}`}>{inr(r.marginInr)}</td>
+                    <td className={`py-1.5 pr-3 text-right ${r.marginInr !== null && r.marginInr < 0 ? 'text-danger' : ''}`}>{inr(r.marginInr)}</td>
                     <td className="py-1.5 pr-3 text-right">{r.heals}</td>
                     <td className="py-1.5 text-right">{r.minutes === null ? '—' : r.minutes}</td>
                   </tr>

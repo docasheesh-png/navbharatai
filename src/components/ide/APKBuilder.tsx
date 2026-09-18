@@ -220,18 +220,18 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
       <div className={`${panelWidth(effectiveDeviceMode)} mx-auto`}>
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">
-            <Smartphone size={20} className="text-white" />
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-on-accent">
+            <Smartphone size={20} className="text-on-accent" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">Android App Builder</h1>
-            <p className="text-sm text-white/50">Set your app’s name and icon, then build a real installable app below.</p>
+            <h1 className="text-xl font-bold text-ink">Android App Builder</h1>
+            <p className="text-sm text-muted">Set your app’s name and icon, then build a real installable app below.</p>
           </div>
         </div>
 
         {/* WHICH app is being packaged. Without this the builder had no idea — it used whatever
             preview was open, under a hardcoded name. */}
-        <div className="rounded-xl border border-white/10 mb-4" style={{ background: 'var(--surface-card)' }}>
+        <div className="rounded-xl border border-line mb-4" style={{ background: 'var(--surface-card)' }}>
           <AppTargetPicker
             apps={apps}
             appsLoading={appsLoading}
@@ -243,15 +243,15 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
         </div>
 
         {/* ── App Information — the ONE form. Everything here reaches the real build below. ── */}
-        <div className="rounded-xl border border-white/10 p-5 sm:p-6" style={{ background: 'var(--surface-card)' }}>
-          <h2 className="text-lg font-semibold text-white mb-1">App Information</h2>
-          <p className="text-xs text-white/45 mb-5">Your app’s name, package, icon and colour — used by the build below.</p>
+        <div className="rounded-xl border border-line p-5 sm:p-6" style={{ background: 'var(--surface-card)' }}>
+          <h2 className="text-lg font-semibold text-ink mb-1">App Information</h2>
+          <p className="text-xs text-muted mb-5">Your app’s name, package, icon and colour — used by the build below.</p>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-white/50 mb-1">App Name *</label>
+              <label className="block text-xs text-muted mb-1">App Name *</label>
               <input
-                className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                className="w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus:border-indigo-500"
                 style={{ background: 'var(--surface-base)' }}
                 value={info.appName}
                 onChange={(e) => { nameTouched.current = true; updateInfo({ appName: e.target.value }); }}
@@ -259,9 +259,9 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               />
             </div>
             <div>
-              <label className="block text-xs text-white/50 mb-1">Package Name</label>
+              <label className="block text-xs text-muted mb-1">Package Name</label>
               <input
-                className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm text-white/60 focus:outline-none focus:border-indigo-500"
+                className="w-full rounded-lg border border-line px-3 py-2 text-sm text-muted focus:outline-none focus:border-indigo-500"
                 style={{ background: 'var(--surface-base)' }}
                 value={info.packageName}
                 onChange={(e) => setInfo((p) => ({ ...p, packageName: e.target.value }))}
@@ -269,43 +269,43 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               {/* Live preview of the id the build will REALLY use — catch a bad package name here, not after
                   a five-minute build. Only shown when it differs from what the user typed. */}
               {!pkgAdvisory.ok && (
-                <p className="mt-1 text-[11px] leading-snug text-amber-300/90">
-                  Will be saved as <span className="font-mono text-amber-200">{pkgAdvisory.effective}</span>
+                <p className="mt-1 text-[11px] leading-snug text-warn">
+                  Will be saved as <span className="font-mono text-warn">{pkgAdvisory.effective}</span>
                   {pkgAdvisory.reason ? ` — ${pkgAdvisory.reason}` : ''}
                 </p>
               )}
               {pkgAdvisory.ok && (
-                <p className="mt-1 text-[11px] text-emerald-400/80">✓ Valid package name.</p>
+                <p className="mt-1 text-[11px] text-success">✓ Valid package name.</p>
               )}
             </div>
           </div>
 
           {/* Background colour */}
           <div className="mt-4">
-            <label className="block text-xs text-white/50 mb-1">Background Colour</label>
+            <label className="block text-xs text-muted mb-1">Background Colour</label>
             <div className="flex items-center gap-2">
               <input
                 type="color"
-                className="w-10 h-10 rounded-lg border border-white/10 cursor-pointer p-0.5"
+                className="w-10 h-10 rounded-lg border border-line cursor-pointer p-0.5"
                 style={{ background: 'var(--surface-base)' }}
                 value={info.primaryColor}
                 onChange={(e) => updateInfo({ primaryColor: e.target.value })}
               />
-              <span className="text-sm font-mono text-white/60">{info.primaryColor}</span>
-              <span className="text-[11px] text-white/35">Used as your app’s background and splash colour.</span>
+              <span className="text-sm font-mono text-muted">{info.primaryColor}</span>
+              <span className="text-[11px] text-faint">Used as your app’s background and splash colour.</span>
             </div>
           </div>
 
           {/* Icon picker */}
           <div className="mt-5">
-            <label className="block text-xs text-white/50 mb-2">App Icon</label>
+            <label className="block text-xs text-muted mb-2">App Icon</label>
 
             {/* A REAL icon (admin 2026-07-27). The emoji row below is still handy as a quick
                 placeholder, but Play needs a 512x512 image — an emoji drawn with whatever font
                 the build machine has is not an app icon. */}
             <div className="flex items-center gap-3 mb-3">
               <div
-                className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl border border-white/10 flex-shrink-0 overflow-hidden"
+                className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl border border-line flex-shrink-0 overflow-hidden"
                 style={{ background: info.primaryColor + '33' }}
               >
                 {iconDataUrl
@@ -327,21 +327,21 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={iconBusy}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-white/15 hover:bg-white/5 disabled:opacity-40 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-line hover:bg-raised disabled:opacity-40 transition-colors"
                 >
                   <Upload size={13} /> Upload
                 </button>
                 <button
                   onClick={() => void acceptIcon(() => readIconFromClipboard())}
                   disabled={iconBusy}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-white/15 hover:bg-white/5 disabled:opacity-40 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-line hover:bg-raised disabled:opacity-40 transition-colors"
                 >
                   {iconBusy ? <Loader2 size={13} className="animate-spin" /> : <Clipboard size={13} />} Paste
                 </button>
                 {onMakeIcon && (
                   <button
                     onClick={onMakeIcon}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-on-accent transition-colors"
                   >
                     <Sparkles size={13} /> Make icon
                   </button>
@@ -349,7 +349,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
                 {iconDataUrl && (
                   <button
                     onClick={() => { setIconDataUrl(''); setIconNote(''); setIconFailed(false); }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-white/15 hover:bg-white/5 text-white/60 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-line hover:bg-raised text-muted transition-colors"
                   >
                     Remove
                   </button>
@@ -357,13 +357,13 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               </div>
             </div>
 
-            <p className="text-[11px] text-white/40 leading-relaxed mb-2">
+            <p className="text-[11px] text-faint leading-relaxed mb-2">
               Use a square picture, at least 512×512. "Make icon" opens AI Image Gen — copy the
               image it creates, then come back and press Paste.
             </p>
 
             {iconNote && (
-              <p className={`text-xs leading-relaxed mb-3 px-3 py-2 rounded-lg ${iconFailed ? 'text-amber-300' : 'text-green-300'}`}
+              <p className={`text-xs leading-relaxed mb-3 px-3 py-2 rounded-lg ${iconFailed ? 'text-warn' : 'text-success'}`}
                  style={{ background: iconFailed ? 'rgba(245,158,11,0.1)' : 'rgba(63,185,80,0.1)' }}>
                 {iconNote}
               </p>
@@ -375,7 +375,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
                   key={e}
                   onClick={() => updateInfo({ icon: e })}
                   className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center border transition-all
-                    ${info.icon === e && !iconDataUrl ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 hover:border-white/30'}`}
+                    ${info.icon === e && !iconDataUrl ? 'border-indigo-500 bg-indigo-500/20' : 'border-line hover:border-line'}`}
                 >
                   {e}
                 </button>
@@ -385,10 +385,10 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
         </div>
 
         {/* Visual bridge: the form above FEEDS the real build below — one flow, not two. */}
-        <div className="flex items-center justify-center gap-2 my-3 text-white/40 text-xs">
-          <ArrowDown size={14} className="text-indigo-400" />
+        <div className="flex items-center justify-center gap-2 my-3 text-faint text-xs">
+          <ArrowDown size={14} className="text-accent-text" />
           <span>Your app info flows into the build below</span>
-          <ArrowDown size={14} className="text-indigo-400" />
+          <ArrowDown size={14} className="text-accent-text" />
         </div>
 
         {/* THE BUILD — a real Android app, built on real machines, downloaded here. It uses the App
@@ -418,7 +418,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
             file again" and "put it on App Mart", and routing the first through a publish page would
             be a detour. Costs nothing to open — see MyBuiltApps. */}
         {githubToken && (
-          <div className="rounded-xl border border-white/10 bg-black/20 p-3 mb-4">
+          <div className="rounded-xl border border-line bg-well p-3 mb-4">
             <MyBuiltApps ghHeaders={myAppsHeaders} />
           </div>
         )}
@@ -426,14 +426,14 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
         {/* Step-by-step publishing walkthrough for a first-time, non-technical publisher. Opened from
             the build panel's "Show me how to publish" button. */}
         {guideOpen && (
-          <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-3 mb-4">
+          <div className="rounded-xl border border-line bg-well p-3 space-y-3 mb-4">
             <div className="flex gap-2">
               {(['android', 'ios'] as const).map((p) => (
                 <button
                   key={p}
                   onClick={() => setGuidePlatform(p)}
                   className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                    guidePlatform === p ? 'bg-indigo-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'
+                    guidePlatform === p ? 'bg-indigo-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised'
                   }`}
                 >
                   {p === 'android' ? 'Play Store' : 'App Store'}
@@ -441,12 +441,12 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
               ))}
             </div>
 
-            {guideErr && <p className="text-[11px] text-red-400">{guideErr}</p>}
-            {!guide && !guideErr && <p className="text-[11px] text-white/50">Loading the guide…</p>}
+            {guideErr && <p className="text-[11px] text-danger">{guideErr}</p>}
+            {!guide && !guideErr && <p className="text-[11px] text-muted">Loading the guide…</p>}
 
             {guide?.filter((g) => g.platform === guidePlatform).map((g) => (
               <div key={g.platform} className="space-y-3">
-                <p className="text-[11px] text-amber-300/90 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                <p className="text-[11px] text-warn leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
                   <span className="font-bold">Before you start: </span>{g.upfront}
                 </p>
                 {g.steps.map((s, i) => (
@@ -455,25 +455,25 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
                       onClick={() => toggleStep(s.id)}
                       aria-label={doneSteps[s.id] ? `Mark step ${i + 1} as not done` : `Mark step ${i + 1} as done`}
                       className={`mt-0.5 shrink-0 w-5 h-5 rounded-md border text-[10px] font-bold transition-colors ${
-                        doneSteps[s.id] ? 'bg-green-600 border-green-500 text-white' : 'border-white/25 text-transparent hover:border-white/50'
+                        doneSteps[s.id] ? 'bg-green-600 border-green-500 text-on-accent' : 'border-line text-transparent hover:border-white/50'
                       }`}
                     >
                       ✓
                     </button>
                     <div className={`flex-1 min-w-0 ${doneSteps[s.id] ? 'opacity-50' : ''}`}>
-                      <p className="text-[12px] font-semibold text-white/90">{i + 1}. {s.title}</p>
-                      <p className="text-[11px] text-white/60 leading-relaxed mt-0.5">{s.detail}</p>
+                      <p className="text-[12px] font-semibold text-body">{i + 1}. {s.title}</p>
+                      <p className="text-[11px] text-muted leading-relaxed mt-0.5">{s.detail}</p>
                       {s.youShouldSee && (
-                        <p className="text-[11px] text-green-400/80 mt-1">You should see: {s.youShouldSee}</p>
+                        <p className="text-[11px] text-success mt-1">You should see: {s.youShouldSee}</p>
                       )}
                       <div className="flex flex-wrap gap-1.5 mt-1.5">
-                        {s.cost && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{s.cost}</span>}
-                        {s.takes && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">{s.takes}</span>}
-                        {s.navbharatDoesThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">NavBharatAI does this</span>}
-                        {s.youMustDoThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">Only you can do this</span>}
+                        {s.cost && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-warn">{s.cost}</span>}
+                        {s.takes && <span className="text-[10px] px-1.5 py-0.5 rounded bg-raised text-muted">{s.takes}</span>}
+                        {s.navbharatDoesThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-success">NavBharatAI does this</span>}
+                        {s.youMustDoThis && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-accent-text">Only you can do this</span>}
                       </div>
                       {s.link && (
-                        <a href={s.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-400 hover:text-indigo-300 underline mt-1 inline-block">
+                        <a href={s.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-accent-text hover:text-accent-text underline mt-1 inline-block">
                           Open the page →
                         </a>
                       )}

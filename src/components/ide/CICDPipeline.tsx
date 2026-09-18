@@ -23,8 +23,8 @@ interface PipelineStep {
 }
 
 const STEP_ICONS: Record<StepType, any> = { checkout: GitBranch, install: Download, test: Shield, build: Settings, deploy: Rocket, notify: Zap, custom: Settings };
-const STEP_COLORS: Record<StepType, string> = { checkout: 'text-blue-400', install: 'text-amber-400', test: 'text-emerald-400', build: 'text-violet-400', deploy: 'text-rose-400', notify: 'text-cyan-400', custom: 'text-white/40' };
-const STATUS_COLORS: Record<StepStatus, string> = { idle: 'bg-white/10 text-white/40', running: 'bg-amber-500/20 text-amber-400', pass: 'bg-emerald-500/20 text-emerald-400', fail: 'bg-red-500/20 text-red-400', skip: 'bg-white/5 text-white/20' };
+const STEP_COLORS: Record<StepType, string> = { checkout: 'text-info', install: 'text-warn', test: 'text-success', build: 'text-accent-text', deploy: 'text-danger', notify: 'text-info', custom: 'text-faint' };
+const STATUS_COLORS: Record<StepStatus, string> = { idle: 'bg-raised text-faint', running: 'bg-amber-500/20 text-warn', pass: 'bg-emerald-500/20 text-success', fail: 'bg-red-500/20 text-danger', skip: 'bg-raised text-faint' };
 
 const DEFAULT_STEPS: PipelineStep[] = [
   { id: '1', type: 'checkout', name: 'Checkout Code', command: 'git checkout $BRANCH', enabled: true, status: 'idle', envVars: [{ key: 'BRANCH', value: 'main' }] },
@@ -221,39 +221,39 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
   const selectedStepData = steps.find(s => s.id === selectedStep);
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center">
-          <Rocket className="w-5 h-5 text-violet-400" />
+          <Rocket className="w-5 h-5 text-accent-text" />
         </div>
         <div className="min-w-0">
-          <h2 className="font-semibold text-white text-base">CI/CD Pipeline</h2>
-          <p className="text-xs text-white/40 leading-snug">Visual pipeline builder — GitHub Actions, Cloud Build, GitLab CI</p>
+          <h2 className="font-semibold text-ink text-base">CI/CD Pipeline</h2>
+          <p className="text-xs text-faint leading-snug">Visual pipeline builder — GitHub Actions, Cloud Build, GitLab CI</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           {/* This is a pipeline BUILDER — the real deliverable is the CI YAML, which your provider
               runs (admin autopsy 2026-07-21). The old "Run Pipeline" button faked pass/fail + console
               logs in the browser; nothing was ever executed. Download the real YAML instead. */}
-          <button onClick={downloadYaml} className="flex items-center gap-1.5 px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-all whitespace-nowrap">
+          <button onClick={downloadYaml} className="flex items-center gap-1.5 px-4 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-all whitespace-nowrap text-on-accent">
             <Download className="w-4 h-4" /> Download YAML
           </button>
         </div>
       </div>
 
       {/* Sub-header: config */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-2.5 border-b border-white/5 bg-[#161b22] sm:flex-wrap">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-2.5 border-b border-line bg-card sm:flex-wrap">
         <div className="flex items-center gap-2 flex-1 sm:flex-none min-w-0">
-          <span className="text-[11px] text-white/40 shrink-0">App:</span>
-          <input className="flex-1 sm:flex-none bg-transparent border-b border-white/20 text-sm sm:text-xs text-white px-1 py-1 focus:outline-none focus:border-violet-500/50 sm:w-28 min-w-0" value={appName} onChange={e => setAppName(e.target.value)} />
+          <span className="text-[11px] text-faint shrink-0">App:</span>
+          <input className="flex-1 sm:flex-none bg-transparent border-b border-line text-sm sm:text-xs text-ink px-1 py-1 focus:outline-none focus:border-violet-500/50 sm:w-28 min-w-0" value={appName} onChange={e => setAppName(e.target.value)} />
         </div>
         <div className="flex items-center gap-2 flex-1 sm:flex-none min-w-0">
-          <span className="text-[11px] text-white/40 shrink-0">Env:</span>
-          <input className="flex-1 sm:flex-none bg-transparent border-b border-white/20 text-sm sm:text-xs text-white px-1 py-1 focus:outline-none focus:border-violet-500/50 sm:w-24 min-w-0" value={envName} onChange={e => setEnvName(e.target.value)} />
+          <span className="text-[11px] text-faint shrink-0">Env:</span>
+          <input className="flex-1 sm:flex-none bg-transparent border-b border-line text-sm sm:text-xs text-ink px-1 py-1 focus:outline-none focus:border-violet-500/50 sm:w-24 min-w-0" value={envName} onChange={e => setEnvName(e.target.value)} />
         </div>
         <div className="flex gap-1.5 sm:ml-auto overflow-x-auto -mx-1 px-1 pb-0.5">
           {(['github', 'cloudbuild', 'gitlab'] as Platform[]).map(p => (
-            <button key={p} onClick={() => setPlatform(p)} className={`shrink-0 text-[11px] px-3 py-1.5 rounded-lg border capitalize whitespace-nowrap transition-all ${platform === p ? 'border-violet-500/50 bg-violet-500/10 text-violet-300' : 'border-white/10 text-white/30 hover:border-white/20'}`}>
+            <button key={p} onClick={() => setPlatform(p)} className={`shrink-0 text-[11px] px-3 py-1.5 rounded-lg border capitalize whitespace-nowrap transition-all ${platform === p ? 'border-violet-500/50 bg-violet-500/10 text-accent-text' : 'border-line text-faint hover:border-line'}`}>
               {p === 'github' ? 'GitHub Actions' : p === 'cloudbuild' ? 'Cloud Build' : 'GitLab CI'}
             </button>
           ))}
@@ -262,64 +262,64 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
 
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
         {/* Pipeline Steps */}
-        <div className="w-full md:w-72 flex-shrink-0 max-h-[40vh] supports-[height:100dvh]:max-h-[40dvh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-white/5 overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
-            <span className="text-[11px] text-white/30 uppercase tracking-wider">Steps ({steps.filter(s => s.enabled).length} active)</span>
-            <button onClick={() => setShowAddStep(!showAddStep)} className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1 py-1">
+        <div className="w-full md:w-72 flex-shrink-0 max-h-[40vh] supports-[height:100dvh]:max-h-[40dvh] md:max-h-none flex flex-col border-b md:border-b-0 md:border-r border-line overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-line">
+            <span className="text-[11px] text-faint uppercase tracking-wider">Steps ({steps.filter(s => s.enabled).length} active)</span>
+            <button onClick={() => setShowAddStep(!showAddStep)} className="text-[11px] text-accent-text hover:text-accent-text flex items-center gap-1 py-1">
               <Plus className="w-3 h-3" /> Add
             </button>
           </div>
 
           {showAddStep && (
-            <div className="mx-2 my-1.5 bg-[#161b22] border border-violet-500/20 rounded-xl p-2.5">
-              <select className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white mb-2 focus:outline-none" value={newStepType} onChange={e => setNewStepType(e.target.value as StepType)}>
+            <div className="mx-2 my-1.5 bg-card border border-violet-500/20 rounded-xl p-2.5">
+              <select className="w-full bg-surface border border-line rounded-lg px-2 py-1.5 text-xs text-ink mb-2 focus:outline-none" value={newStepType} onChange={e => setNewStepType(e.target.value as StepType)}>
                 {STEP_TYPE_OPTIONS.map(o => <option key={o.type} value={o.type}>{o.label}</option>)}
               </select>
               <div className="flex gap-1.5">
-                <button onClick={addStep} className="flex-1 py-2 bg-violet-600 rounded-lg text-[11px]"><Check className="w-3 h-3 inline mr-1" />Add</button>
-                <button onClick={() => setShowAddStep(false)} className="px-3 py-2 bg-white/5 rounded-lg text-[11px] text-white/40"><X className="w-3 h-3" /></button>
+                <button onClick={addStep} className="flex-1 py-2 bg-violet-600 rounded-lg text-[11px] text-on-accent"><Check className="w-3 h-3 inline mr-1" />Add</button>
+                <button onClick={() => setShowAddStep(false)} className="px-3 py-2 bg-raised rounded-lg text-[11px] text-faint"><X className="w-3 h-3" /></button>
               </div>
             </div>
           )}
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1 relative">
             {/* Connector line */}
-            <div className="absolute left-[28px] top-4 bottom-4 w-px bg-white/5" />
+            <div className="absolute left-[28px] top-4 bottom-4 w-px bg-raised" />
             {steps.map((step, idx) => {
               const Icon = STEP_ICONS[step.type];
               const isSelected = selectedStep === step.id;
               return (
                 <div key={step.id} className="relative pl-7">
                   <div className={`absolute left-3 top-3.5 w-3.5 h-3.5 rounded-full flex items-center justify-center z-10 ${
-                    step.status === 'pass' ? 'bg-emerald-500' : step.status === 'fail' ? 'bg-red-500' : step.status === 'running' ? 'bg-amber-500 animate-pulse' : step.status === 'skip' ? 'bg-white/10' : 'bg-[#161b22] border border-white/20'
+                    step.status === 'pass' ? 'bg-emerald-500 text-on-accent' : step.status === 'fail' ? 'bg-red-500 text-on-accent' : step.status === 'running' ? 'bg-amber-500 animate-pulse text-on-accent' : step.status === 'skip' ? 'bg-raised' : 'bg-card border border-line'
                   }`}>
-                    {step.status === 'pass' && <Check className="w-2 h-2 text-white" />}
-                    {step.status === 'fail' && <X className="w-2 h-2 text-white" />}
-                    {step.status === 'running' && <TirangaLoader className="w-2 h-2 text-white" />}
-                    {(step.status === 'idle' || step.status === 'skip') && <span className="text-[7px] text-white/40">{idx + 1}</span>}
+                    {step.status === 'pass' && <Check className="w-2 h-2 text-ink" />}
+                    {step.status === 'fail' && <X className="w-2 h-2 text-ink" />}
+                    {step.status === 'running' && <TirangaLoader className="w-2 h-2 text-ink" />}
+                    {(step.status === 'idle' || step.status === 'skip') && <span className="text-[7px] text-faint">{idx + 1}</span>}
                   </div>
                   <button
                     onClick={() => setSelectedStep(isSelected ? null : step.id)}
                     className={`w-full flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all ${
-                      isSelected ? 'border-violet-500/40 bg-violet-500/5' : 'border-white/5 bg-[#161b22] hover:border-white/10'
+                      isSelected ? 'border-violet-500/40 bg-violet-500/5' : 'border-line bg-card hover:border-line'
                     } ${!step.enabled ? 'opacity-40' : ''}`}
                   >
                     <Icon className={`w-3.5 h-3.5 shrink-0 ${STEP_COLORS[step.type]}`} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-white truncate">{step.name}</p>
-                      <p className="text-[10px] text-white/30 truncate font-mono">{step.command}</p>
+                      <p className="text-xs text-ink truncate">{step.name}</p>
+                      <p className="text-[10px] text-faint truncate font-mono">{step.command}</p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {step.duration && <span className="text-[10px] text-white/20">{(step.duration / 1000).toFixed(1)}s</span>}
-                      <button onClick={e => { e.stopPropagation(); toggleStep(step.id); }} className={`w-5 h-3 rounded-full transition-all ${step.enabled ? 'bg-violet-500' : 'bg-white/10'}`}>
+                      {step.duration && <span className="text-[10px] text-faint">{(step.duration / 1000).toFixed(1)}s</span>}
+                      <button onClick={e => { e.stopPropagation(); toggleStep(step.id); }} className={`w-5 h-3 rounded-full transition-all ${step.enabled ? 'bg-violet-500 text-on-accent' : 'bg-raised'}`}>
                         <div className={`w-2.5 h-2.5 bg-white rounded-full shadow transition-transform ${step.enabled ? 'translate-x-2' : 'translate-x-0.5'}`} />
                       </button>
                     </div>
                   </button>
 
                   {selectedStep === step.id && step.log && (
-                    <div className="mt-1 mx-0.5 bg-[#0d1117] rounded-lg p-2 border border-white/5">
-                      <pre className="text-[10px] font-mono text-emerald-300 whitespace-pre-wrap">{step.log}</pre>
+                    <div className="mt-1 mx-0.5 bg-surface rounded-lg p-2 border border-line">
+                      <pre className="text-[10px] font-mono text-success whitespace-pre-wrap">{step.log}</pre>
                     </div>
                   )}
                 </div>
@@ -335,55 +335,55 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-center gap-3 mb-2">
                 {(() => { const Icon = STEP_ICONS[selectedStepData.type]; return <Icon className={`w-5 h-5 ${STEP_COLORS[selectedStepData.type]}`} />; })()}
-                <p className="text-sm font-semibold text-white">Edit Step</p>
-                <button onClick={() => deleteStep(selectedStepData.id)} className="ml-auto flex items-center gap-1 text-xs text-red-400 hover:text-red-300">
+                <p className="text-sm font-semibold text-ink">Edit Step</p>
+                <button onClick={() => deleteStep(selectedStepData.id)} className="ml-auto flex items-center gap-1 text-xs text-danger hover:text-danger">
                   <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>
               </div>
 
               <div>
-                <label className="text-[11px] text-white/40 uppercase tracking-wider mb-1.5 block">Step Name</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500/50" value={selectedStepData.name} onChange={e => updateSelected({ name: e.target.value })} />
+                <label className="text-[11px] text-faint uppercase tracking-wider mb-1.5 block">Step Name</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-violet-500/50" value={selectedStepData.name} onChange={e => updateSelected({ name: e.target.value })} />
               </div>
 
               <div>
-                <label className="text-[11px] text-white/40 uppercase tracking-wider mb-1.5 block">Command</label>
-                <input className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-violet-500/50" value={selectedStepData.command} onChange={e => updateSelected({ command: e.target.value })} />
+                <label className="text-[11px] text-faint uppercase tracking-wider mb-1.5 block">Command</label>
+                <input className="w-full bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:border-violet-500/50" value={selectedStepData.command} onChange={e => updateSelected({ command: e.target.value })} />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-[11px] text-white/40 uppercase tracking-wider">Environment Variables</label>
-                  <button onClick={addEnvVar} className="text-[11px] text-violet-400 flex items-center gap-0.5"><Plus className="w-3 h-3" /> Add</button>
+                  <label className="text-[11px] text-faint uppercase tracking-wider">Environment Variables</label>
+                  <button onClick={addEnvVar} className="text-[11px] text-accent-text flex items-center gap-0.5"><Plus className="w-3 h-3" /> Add</button>
                 </div>
                 <div className="space-y-1.5">
                   {selectedStepData.envVars.map((env, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input className="w-36 bg-[#161b22] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-amber-300 font-mono focus:outline-none" placeholder="KEY" value={env.key} onChange={e => updateEnvVar(i, 'key', e.target.value)} />
-                      <span className="text-white/20 text-xs">=</span>
-                      <input className="flex-1 bg-[#161b22] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none" placeholder="value" value={env.value} onChange={e => updateEnvVar(i, 'value', e.target.value)} />
-                      <button onClick={() => removeEnvVar(i)} className="p-1 text-white/20 hover:text-red-400"><X className="w-3 h-3" /></button>
+                      <input className="w-36 bg-card border border-line rounded-lg px-2 py-1.5 text-xs text-warn font-mono focus:outline-none" placeholder="KEY" value={env.key} onChange={e => updateEnvVar(i, 'key', e.target.value)} />
+                      <span className="text-faint text-xs">=</span>
+                      <input className="flex-1 bg-card border border-line rounded-lg px-2 py-1.5 text-xs text-ink focus:outline-none" placeholder="value" value={env.value} onChange={e => updateEnvVar(i, 'value', e.target.value)} />
+                      <button onClick={() => removeEnvVar(i)} className="p-1 text-faint hover:text-danger"><X className="w-3 h-3" /></button>
                     </div>
                   ))}
-                  {selectedStepData.envVars.length === 0 && <p className="text-[11px] text-white/20">No env vars. Add with button above.</p>}
+                  {selectedStepData.envVars.length === 0 && <p className="text-[11px] text-faint">No env vars. Add with button above.</p>}
                 </div>
               </div>
 
               <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3">
-                <p className="text-[11px] text-amber-300 mb-1.5">⚠️ Security Tip</p>
-                <p className="text-[11px] text-white/40 leading-relaxed">Keep sensitive values (API keys, passwords) in GitHub Secrets / Secret Manager. Never write them directly in YAML.</p>
+                <p className="text-[11px] text-warn mb-1.5">⚠️ Security Tip</p>
+                <p className="text-[11px] text-faint leading-relaxed">Keep sensitive values (API keys, passwords) in GitHub Secrets / Secret Manager. Never write them directly in YAML.</p>
               </div>
             </div>
           ) : (
             /* YAML Preview */
             <div className="flex flex-col h-full overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 bg-[#161b22]">
-                <span className="text-xs text-white/50">{filePath}</span>
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-line bg-card">
+                <span className="text-xs text-muted">{filePath}</span>
                 <div className="flex gap-2">
-                  <button onClick={copyYaml} className={`flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border transition-all ${yamlCopied ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-white/10 text-white/40 bg-white/5'}`}>
+                  <button onClick={copyYaml} className={`flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border transition-all ${yamlCopied ? 'border-emerald-500/40 text-success bg-emerald-500/10' : 'border-line text-faint bg-raised'}`}>
                     {yamlCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy</>}
                   </button>
-                  <button onClick={downloadYaml} className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-white/10 text-white/40 bg-white/5 hover:text-white transition-all">
+                  <button onClick={downloadYaml} className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-line text-faint bg-raised hover:text-ink transition-all">
                     <Download className="w-3 h-3" /> Download
                   </button>
                 </div>
@@ -391,19 +391,19 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
 
               {/* Put the file where it actually runs. A workflow sitting in Downloads does nothing —
                   this commits it straight into the user's own repository, on its own default branch. */}
-              <div className="flex flex-col gap-2.5 px-4 py-3 border-b border-white/5 bg-[#0d1117]">
+              <div className="flex flex-col gap-2.5 px-4 py-3 border-b border-line bg-surface">
                 {cannotCommitReason ? (
-                  <p className="flex items-start gap-2 text-[11px] leading-relaxed text-white/40">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
+                  <p className="flex items-start gap-2 text-[11px] leading-relaxed text-faint">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-warn" />
                     {cannotCommitReason}
                   </p>
                 ) : !ghToken ? (
                   <div className="flex flex-wrap items-center gap-2.5">
-                    <p className="flex-1 min-w-[180px] text-[11px] leading-relaxed text-white/40">
+                    <p className="flex-1 min-w-[180px] text-[11px] leading-relaxed text-faint">
                       Connect GitHub and NavBharatAI can commit this file into your repository for you.
                     </p>
                     {onConnectGitHub && (
-                      <button onClick={onConnectGitHub} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-[11px] font-medium text-white whitespace-nowrap">
+                      <button onClick={onConnectGitHub} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-raised hover:bg-raised text-[11px] font-medium text-ink whitespace-nowrap">
                         <Github className="w-3.5 h-3.5" /> Connect GitHub
                       </button>
                     )}
@@ -411,16 +411,16 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
                 ) : (
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     {reposLoading ? (
-                      <span className="flex items-center gap-2 text-[11px] text-white/40 py-1.5">
+                      <span className="flex items-center gap-2 text-[11px] text-faint py-1.5">
                         <Loader2 className="w-3 h-3 animate-spin" /> Loading your repositories…
                       </span>
                     ) : repos.length === 0 ? (
-                      <span className="text-[11px] text-white/40 py-1.5">No repositories found on that account.</span>
+                      <span className="text-[11px] text-faint py-1.5">No repositories found on that account.</span>
                     ) : (
                       <select
                         value={repoFullName}
                         onChange={e => { setRepoFullName(e.target.value); setCommitResult(null); }}
-                        className="flex-1 min-w-0 appearance-none bg-[#161b22] border border-white/10 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-violet-500/50"
+                        className="flex-1 min-w-0 appearance-none bg-card border border-line rounded-lg px-3 py-2.5 text-xs text-ink focus:outline-none focus:border-violet-500/50"
                       >
                         {repos.map(r => <option key={r.fullName} value={r.fullName}>{r.fullName}</option>)}
                       </select>
@@ -428,7 +428,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
                     <button
                       onClick={commitToRepo}
                       disabled={committing || !repoFullName}
-                      className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium text-white whitespace-nowrap"
+                      className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium text-on-accent whitespace-nowrap"
                     >
                       {committing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Github className="w-3.5 h-3.5" />}
                       {committing ? 'Committing…' : 'Commit to my repo'}
@@ -436,7 +436,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
                   </div>
                 )}
                 {commitResult && (
-                  <p className={`flex items-start gap-2 text-[11px] leading-relaxed ${commitResult.ok ? 'text-emerald-300' : 'text-red-300'}`}>
+                  <p className={`flex items-start gap-2 text-[11px] leading-relaxed ${commitResult.ok ? 'text-success' : 'text-danger'}`}>
                     {commitResult.ok ? <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />}
                     {commitResult.message}
                   </p>
@@ -444,7 +444,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
               </div>
 
               <div className="flex-1 overflow-auto p-4">
-                <pre className="text-[11px] leading-relaxed font-mono text-emerald-300 whitespace-pre inline-block min-w-full">{yaml}</pre>
+                <pre className="text-[11px] leading-relaxed font-mono text-success whitespace-pre inline-block min-w-full">{yaml}</pre>
               </div>
             </div>
           )}

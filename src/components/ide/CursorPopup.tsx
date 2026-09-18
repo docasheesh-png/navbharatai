@@ -139,47 +139,47 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
          transform: 'translate(-50%, -50%)',
       }}
       className={cn(
-        "bg-[#161b22]/98 border border-white/10 rounded-2xl shadow-3xl overflow-hidden select-none backdrop-blur-2xl flex flex-col",
+        "bg-card border border-line rounded-2xl shadow-3xl overflow-hidden select-none backdrop-blur-2xl flex flex-col",
         "w-[260px] pointer-events-auto"
       )}
     >
       {/* Row 1: Controller Hub */}
-      <div className="grid grid-cols-3 border-b border-white/5 bg-white/[0.02]">
+      <div className="grid grid-cols-3 border-b border-line bg-raised">
         <button 
           onClick={() => { if(editor) editor.focus(); onClose(); }}
-          className="flex flex-col items-center justify-center gap-1.5 py-4 hover:bg-white/5 border-r border-white/5 transition-all group"
+          className="flex flex-col items-center justify-center gap-1.5 py-4 hover:bg-raised border-r border-line transition-all group"
         >
-          <Keyboard className="w-4 h-4 text-[#8b949e] group-hover:text-white" />
-          <span className="text-[7px] font-black uppercase tracking-widest text-[#484f58] group-hover:text-[#8b949e]">Keyboard</span>
+          <Keyboard className="w-4 h-4 text-muted group-hover:text-ink" />
+          <span className="text-[7px] font-black uppercase tracking-widest text-faint group-hover:text-muted">Keyboard</span>
         </button>
 
         <button 
           onClick={() => { onToggleKeyboard(); onClose(); }}
           className={cn(
-            "flex flex-col items-center justify-center gap-1.5 py-4 border-r border-white/5 transition-all group",
-            isKeyboardOpen ? "bg-indigo-500/10" : "hover:bg-white/5"
+            "flex flex-col items-center justify-center gap-1.5 py-4 border-r border-line transition-all group",
+            isKeyboardOpen ? "bg-indigo-500/10" : "hover:bg-raised"
           )}
         >
-          <Layers className={cn("w-4 h-4 group-hover:text-white", isKeyboardOpen ? "text-indigo-400" : "text-[#8b949e]")} />
-          <span className="text-[7px] font-black uppercase tracking-widest text-[#484f58] group-hover:text-[#8b949e]">Shortcut</span>
+          <Layers className={cn("w-4 h-4 group-hover:text-ink", isKeyboardOpen ? "text-accent-text" : "text-muted")} />
+          <span className="text-[7px] font-black uppercase tracking-widest text-faint group-hover:text-muted">Shortcut</span>
         </button>
 
         <button 
           onClick={() => handleAction('undo')}
           className="flex flex-col items-center justify-center gap-1.5 py-4 hover:bg-amber-500/10 transition-all group"
         >
-          <RotateCcw className="w-4 h-4 text-[#8b949e] group-hover:text-amber-500 group-active:rotate-[-90deg] transition-transform" />
-          <span className="text-[7px] font-black uppercase tracking-widest text-[#484f58] group-hover:text-amber-500">Undo</span>
+          <RotateCcw className="w-4 h-4 text-muted group-hover:text-warn group-active:rotate-[-90deg] transition-transform" />
+          <span className="text-[7px] font-black uppercase tracking-widest text-faint group-hover:text-warn">Undo</span>
         </button>
       </div>
 
       {/* Row 2: Logic Block */}
-      <div className="grid grid-cols-3 border-b border-white/5 bg-black/10">
+      <div className="grid grid-cols-3 border-b border-line bg-well">
         <button 
           onClick={() => toggleMode('select')}
           className={cn(
-            "flex flex-col items-center justify-center gap-1.5 py-3 border-r border-white/5 transition-all group",
-            mode === 'select' ? "bg-indigo-500/20 text-indigo-400" : "hover:bg-white/5 text-[#484f58] hover:text-[#8b949e]"
+            "flex flex-col items-center justify-center gap-1.5 py-3 border-r border-line transition-all group",
+            mode === 'select' ? "bg-indigo-500/20 text-accent-text" : "hover:bg-raised text-faint hover:text-muted"
           )}
         >
           <CheckSquare className="w-3.5 h-3.5" />
@@ -189,8 +189,8 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
         <button 
           onClick={() => toggleMode('deselect')}
           className={cn(
-            "flex flex-col items-center justify-center gap-1.5 py-3 border-r border-white/5 transition-all group",
-            mode === 'deselect' ? "bg-red-500/20 text-red-400" : "hover:bg-white/5 text-[#484f58] hover:text-[#8b949e]"
+            "flex flex-col items-center justify-center gap-1.5 py-3 border-r border-line transition-all group",
+            mode === 'deselect' ? "bg-red-500/20 text-danger" : "hover:bg-raised text-faint hover:text-muted"
           )}
         >
           <Eraser className="w-3.5 h-3.5" />
@@ -201,7 +201,7 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
           onClick={() => setIsChordActive(!isChordActive)}
           className={cn(
             "flex flex-col items-center justify-center gap-1.5 py-3 transition-all",
-            isChordActive ? "bg-red-600 text-white shadow-inner font-black" : "hover:bg-white/5 text-[#484f58] hover:text-white"
+            isChordActive ? "bg-red-600 text-on-accent shadow-inner font-black" : "hover:bg-raised text-faint hover:text-ink"
           )}
         >
           <span className="text-xs font-black italic">C</span>
@@ -210,35 +210,35 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
       </div>
 
       {/* Row 3: Navigation Strip */}
-      <div className="flex items-center p-1.5 gap-1.5 bg-black/40">
+      <div className="flex items-center p-1.5 gap-1.5 bg-well">
         <div className="flex-1 grid grid-cols-5 gap-1">
           <button 
             onClick={() => handleAction('left')}
-            className="flex h-9 items-center justify-center bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 active:scale-90 transition-all text-white/40 hover:text-white"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('right')}
-            className="flex h-9 items-center justify-center bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 active:scale-90 transition-all text-white/40 hover:text-white"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowRight className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('up')}
-            className="flex h-9 items-center justify-center bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 active:scale-90 transition-all text-white/40 hover:text-white"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowUp className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('down')}
-            className="flex h-9 items-center justify-center bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 active:scale-90 transition-all text-white/40 hover:text-white"
+            className="flex h-9 items-center justify-center bg-raised border border-line rounded-xl hover:bg-raised active:scale-90 transition-all text-faint hover:text-ink"
           >
             <ArrowDown className="w-4 h-4" />
           </button>
           <button 
             onClick={() => handleAction('all')}
-            className="flex h-9 items-center justify-center bg-indigo-500/10 border border-indigo-500/20 rounded-xl hover:bg-indigo-500/20 text-indigo-400 text-[8px] font-black uppercase tracking-[0.2em] active:scale-90 transition-all"
+            className="flex h-9 items-center justify-center bg-indigo-500/10 border border-indigo-500/20 rounded-xl hover:bg-indigo-500/20 text-accent-text text-[8px] font-black uppercase tracking-[0.2em] active:scale-90 transition-all"
           >
             ALL
           </button>
@@ -246,14 +246,14 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
       </div>
 
       {/* Footer / Meta */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-white/5 border-t border-white/5 overflow-visible">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-raised border-t border-line overflow-visible">
         <div className="flex items-center gap-2">
            <span className="text-[7px] font-black uppercase tracking-[0.4em] text-[#21262d] italic">Bharat Arc Node</span>
-           <div className="h-2 w-px bg-white/5" />
+           <div className="h-2 w-px bg-raised" />
            <div className="relative">
               <button 
                 onClick={() => setIsSizeDropdownOpen(!isSizeDropdownOpen)}
-                className="text-[8px] font-black text-[#484f58] hover:text-[#8b949e] flex items-center gap-0.5"
+                className="text-[8px] font-black text-faint hover:text-muted flex items-center gap-0.5"
               >
                 {scale}x <ChevronDown className="w-2 h-2" />
               </button>
@@ -263,15 +263,15 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute bottom-full left-0 mb-2 bg-[#0d1117] border border-white/10 rounded-lg shadow-2xl overflow-hidden min-w-[60px] z-[10001]"
+                    className="absolute bottom-full left-0 mb-2 bg-surface border border-line rounded-lg shadow-2xl overflow-hidden min-w-[60px] z-[10001]"
                   >
                     {[0.5, 1, 2].map(s => (
                       <button
                         key={s}
                         onClick={() => { setScale(s); setIsSizeDropdownOpen(false); }}
                         className={cn(
-                          "w-full px-2 py-1.5 text-[8px] font-black text-left hover:bg-white/5 transition-colors",
-                          scale === s ? "text-indigo-400 bg-indigo-500/10" : "text-[#8b949e]"
+                          "w-full px-2 py-1.5 text-[8px] font-black text-left hover:bg-raised transition-colors",
+                          scale === s ? "text-accent-text bg-indigo-500/10" : "text-muted"
                         )}
                       >
                         {s}X
@@ -284,7 +284,7 @@ export const CursorPopup: React.FC<CursorPopupProps> = ({
         </div>
         <button 
           onClick={onClose}
-          className="p-1 hover:bg-white/5 rounded text-[#484f58] hover:text-red-500 transition-all"
+          className="p-1 hover:bg-raised rounded text-faint hover:text-danger transition-all"
         >
           <X className="w-3.5 h-3.5" />
         </button>

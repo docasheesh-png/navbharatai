@@ -65825,6 +65825,104 @@ does ask. `AppKnowledgeBase` updated in the same commit.
 🔴 **What this deliberately does NOT change:** the ~24 SCAFFOLDS stay a finite list, and that is
 correct — they are FRAMEWORKS (React, Vue, Svelte…), of which there really are about twenty-five. The
 thing that must never be a list is what an app is ABOUT, and that is now generated.
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR A of N: tokens, the ratchet, and the palette fixed (admin: "pura theme system badlo, plan ke hisab se shuru karo")
+
+**The audit that ordered it** (same day, published as an artifact for the admin): 72 screens × 5 themes
+= 420 screenshots on desktop and mobile, every visible text node's computed colour measured against
+its real composited background. **236 invisible (< 1.5:1), 1,557 near-invisible (< 3:1), 2,089 below
+AA.** Comfort failed on 84/84 screens; Light had 80 invisible nodes; Dark/Dim/Contrast each had
+hundreds of near-invisible ones. Plus a code census: **14,620 hardcoded colour-class usages** (1,335
+distinct) across 474 client files, and 387 inline `style={{ color }}` values.
+
+**The root cause, which is why this is a replacement and not a fourth patch.** There was no theme
+system. The UI was written in GitHub-dark literals and `theme-compat.css` re-mapped an ALLOWLIST of
+them (241 selectors) to CSS variables. That file had been patched for "a category I missed" on
+2026-08-08 (`bg-zinc-950`), 2026-08-16 (`text-white/N` ×566 and every `hover:` ×704) and 2026-09-13
+(brand text ×1,459, then the 100/200 shades ×250) — and the audit found the next 1,347. An allowlist
+cannot be complete against an open-ended set of class names. Three theme systems coexisted
+(`getThemeClasses()` in 7 files, the compat allowlist, and 354 correct `var(--…)` usages) and none of
+them knew about the others. The "dark theme mein hazaron jagah kuch nahi dikhta" the admin sees is not
+even a remap gap: it is the app's own idiom of writing every small label as `text-white/20`–`/40`,
+which is 1.9–2.2:1 on EVERY theme by construction.
+
+**PR A — what shipped:**
+- **`@theme inline` in `index.css`**: `bg-surface / bg-card / bg-raised`, `text-ink / text-body /
+  text-muted / text-faint`, `border-line`, `text-accent / text-accent-text`, `text-success / text-warn
+  / text-danger / text-info`, `text-on-accent`. Each utility emits the theme VARIABLE (`inline`), so
+  the per-`html[data-theme]` blocks are what a class resolves to at runtime — a new theme is a block of
+  variables and nothing else. Verified in the built CSS, not assumed.
+- **`color-scheme` per theme** — native selects, date pickers and scrollbars followed the OS, not the
+  app, on every theme. One line each.
+- **Palette fixed where the palette itself was the bug**: Dark `--text-faint` #484f58 → #838d97
+  (2.09 → 5.13 on a card; 330 usages of placeholder/faint text that nobody could read on the DEFAULT
+  theme), Dim faint and accent, Light faint on raised, and Comfort's whole Solarized text set (body
+  4.39 → 6.57, muted 3.64 → 5.08, faint 2.18 → 4.5+, accent 3.0 → 5.9). `tests/themeTokensOnly.test.ts`
+  now asserts every theme's 10 text × 3 surface pairs ≥ 4.5:1, reading the palette OUT of index.css.
+- **🔒 THE RATCHET — `scripts/themeColourBaseline.mjs` + `tests/fixtures/themeColourBaseline.json`.**
+  Every client file's count of literal colours (white/black, the grey families, GitHub hexes, brand
+  TEXT shades, arbitrary `[#hex]`, inline style colours; solid brand FILLS deliberately excluded — they
+  are the same in every theme) is recorded per file. The test fails ABOVE the baseline (a new literal)
+  and BELOW it (an improvement not locked in — run `--write`). A file absent from the baseline has a
+  baseline of zero, so **every new file is token-only from its first line.** 11,487 literals in 173
+  files today; the number can only go down; at zero, `theme-compat.css` is deleted.
+- **First file migrated as the pipeline's proof**: `TestingNotice.tsx` (the "in active testing" card
+  on every Home) — `getThemeClasses` gone, `bg-card border-line text-ink`, held at zero by the test.
+
+**Reversion-proven three ways**: a `text-white` added to the migrated file fails the ratchet; Comfort's
+old body colour restored fails the AA lock; `inline` removed from `@theme` fails the pipeline guard.
+
+**Next (the plan, in order):** PR B — five themes to three (Light / Dark / High-contrast; Dim is Dark
+in blue and Comfort is broken by design) with stored-value migration and `getThemeClasses` removed
+from its seven callers. PR C onward — migrate files to tokens, heaviest first (AdminDashboard 1,073,
+AgentV3Panel 598, GitPanel 485, ComponentLibrary 442, SettingsPanel 316 …), each PR lowering the
+baseline. Last — the audit crawl itself in CI so an invisible text node fails the PR that adds it.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR B of N: five themes to three, `getThemeClasses` gone, the status bar fixed on the way
+
+**What changed, and why each half exists.**
+- **Light · Dark · High contrast.** `src/lib/theme.ts` is now 40 lines: the `ThemeMode` union, the three
+  `THEME_MODES`, `LEGACY_THEME_MAP` (`dim → dark`, `comfort → light`) and `normalizeThemeMode`, which
+  also answers `null` for anything no version of the app ever wrote (`''`, `'sepia'`, `'DARK'`) so the
+  caller asks the OS instead of stamping `data-theme="sepia"` and getting the default palette by
+  accident. Comfort went because the audit found it failing on 84 of 84 screens — low contrast is
+  Solarized's signature, not comfort; Dim went because it was Dark in blue: two more palettes to keep
+  readable for a reader Dark already served.
+- **The migration happens where the value is READ, in both readers.** `useSettings` normalises the
+  stored value and writes the successor back once; the pre-paint script in `index.html` — which reads
+  the same key before React exists — maps the same two names and never stamps anything but the three
+  live values. Verified in a real browser on the built `dist/`: stored `dim` → `data-theme="dark"`,
+  storage rewritten to `dark`, root background `rgb(13,17,23)` = `--surface-base`; stored `comfort` →
+  `light`; stored `sepia` → the OS preference; `color-scheme` right on all three; zero page errors.
+- **`getThemeClasses` is deleted, with its prop plumbing.** It handed each caller a per-theme bag of
+  colour literals (`bg-[#0d1117]`, `text-[#657b83]`, …) — the literal class the ratchet exists to
+  remove — and App.tsx threaded it as `themeClasses` into SidebarNav, TopNav, NBIChatPanel,
+  SettingsPanel and as `bgClass` into DonationPanel; HomeView, OtherAIView and CodeStudio called it
+  themselves. All eight now use the tokens directly (`bg-surface text-body` on the root, `bg-card
+  border-line` on the bars) — byte-equivalent on screen, since the compat layer was remapping those
+  literals to the same variables, and no JavaScript needs to know which theme it is in. `theme.ts`
+  goes 33 → 0 literals and SettingsPanel 316 → 304 in the baseline.
+- **High contrast's brand hues are distinct.** The first version painted success, warning, danger and
+  info all `#ffff00`, so a red "failed" and a green "saved" were the same colour to the one audience
+  that chose this theme to read better. Now `#5cff9d` / `#ffc233` / `#ff8585` / `#6ee0ff`, each ≥ 7:1
+  (AAA) on black, four distinct values by test.
+- **The picker.** Three buttons; the unselected style is on tokens; the swatches (the Light swatch must
+  be white even on Dark) live in CSS as `.theme-swatch[data-swatch]` rather than as class literals.
+  Verified in the browser: three swatches at their theme's colour under every current theme, and a
+  click on High contrast flips the attribute and storage together.
+- **🔎 A sibling found on the way (rule 3): the native status bar treated High contrast as a light
+  theme** — `statusBarStyleForTheme` returned dark icons and a `#ffffff` bar above a black app. Now
+  Dark, High contrast (and a not-yet-migrated `dim`) get light icons on their own surface colour.
+  Test-locked in `nativeShell.test.ts`.
+- **AppKnowledgeBase**: the General Settings entry names the three themes and says Dim/Comfort users
+  are carried over automatically, so every assistant answers "mera Comfort theme kahan gaya?" honestly.
+
+**Reversion-proven three ways**: a retired `comfort` block restored to `index.css` fails
+`themeSystem.test.ts`; the migration removed from the pre-paint script fails the same file; two High
+contrast hues made equal fails `themeTokensOnly.test.ts`.
+
+**What this PR does NOT do**: migrate any file's literals beyond the lines it touched (that is PR C+,
+heaviest first), or delete `theme-compat.css` (at zero). Stacked on PR A (#3070); pushed only after A
+merges, so #3070 stays exactly what its CI ran.
 ---
 
 ## 2026-09-18 — 🔴 THE BUILD-COST WINDOW WAS WORKSPACES, NOT BUILDS (admin report)
@@ -66095,3 +66193,351 @@ $0.1656/hr"*, so the env is correct, and the smaller figure is the **build's 346
 rather than the machine's 710 s. Two honest measures of different things. Checking the code instead of
 publishing the arithmetic is the only reason the admin did not receive a false alarm about their own
 Cloud Run.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR C of N: the codemod, proven on the heaviest file (AdminDashboard 1,073 → 1)
+
+**The instrument.** `scripts/themeMigrate.mjs` — one explicit literal → token table applied
+mechanically, variants (`hover:`, `md:`, `group-hover:`, `placeholder:`) preserved verbatim. The
+heaviest files use ~110 distinct literals and the top twenty carry 80% of the usages, so a table is
+reviewable in a way 1,073 hand edits are not, and it is the same answer in every file.
+- **EXACT rows** (455 in AdminDashboard): the literal is one `theme-compat.css` already remaps to a
+  palette variable and the token's utility emits the SAME variable. `tests/themeMigrate.test.ts`
+  proves this against the compat file itself — it parses the selectors, takes the LAST rule for each
+  class exactly as the cascade does, and asserts `TOKEN_VAR[token] === compatVar[literal]`. That
+  test is what demoted `border-white/10` from EXACT to FIX: compat's last rule for it is a 10% mix
+  of `--text-primary`, not `--border-soft` (identical on dark, a shade apart on light).
+- **FIX rows** (675): the audit's unreadable idioms moved to the readable token on purpose —
+  `text-white/40` → `text-faint` (was 1.9–2.2:1 on every theme), `text-emerald-400` as text →
+  `text-success`, `bg-black/30` inside a card → `bg-well`, `bg-black/70` on a modal → `bg-scrim`,
+  `bg-white/5` → `bg-raised`, the neutral status dot `bg-zinc-500` → `bg-faint`, an underline
+  `decoration-white/20` → `decoration-line`. Opacity on brand text is dropped: it only lowers contrast.
+- **White on a solid brand fill stays white** — the compat exception (`.bg-indigo-600.text-white`)
+  is mirrored: `text-white` in the same quoted span as a 500–700 fill (or an 80%+ one, or a
+  gradient) becomes `text-on-accent`. **A fill chosen by a ternary INSIDE the template** (line 3240:
+  `` `text-white ${banned ? 'bg-emerald-600' : 'bg-rose-600'}` ``) is handled only when EVERY
+  branch is a fill; a mixed one is left untouched and listed as "split by hand". The first run
+  turned that line into dark-on-emerald on Light — caught by reading the diff, and it is why the
+  three-way `fillContext` exists.
+- **Arbitrary opacity is normalised first** (`bg-white/[0.02]` → `bg-white/2` → `bg-raised`),
+  because the LITERAL regex reads only the `bg-white` part and mapping that alone would have left
+  `bg-raised/[0.02]` — a 2% raised surface nobody can see.
+- **Left, and said so:** one `text-black` on an amber button (black on amber is right on every
+  theme; there is no token for it and inventing one for one usage is not worth it).
+
+**The proof in the browser.** The audit crawler (admin flag set, three themes) on the admin view,
+pre-migration build vs migrated build: **131 text nodes each; dark 0/0/0, contrast 0/0/0, light
+sev 3 / fail 2 — the same five nodes, the same ratios, and pixel-identical screenshots.** The five
+light-theme misses are outside this file (the sidebar's grey header block and the Live Monitor's
+range pills) and are the next files' problem, not this one's.
+
+**Two new tokens:** `--surface-well` / `bg-well` (per theme) and `--scrim` / `bg-scrim` (one value,
+every theme — a backdrop dims what is behind it). Added to the `@theme inline` guard's list.
+
+**Baseline:** 11,517 → 10,445 literals (172 files). Stacked on A+B in #3070; committed and pushed
+after that merges so the PR the admin was asked to merge stays what its CI ran.
+
+**Addendum (same PR, after `main` moved):** #3071 landed `ImageStudioPro.tsx` (63 literals) and six
+more in `AIImageGenerator.tsx` while A+B waited, and the ratchet caught both on the merged state — a
+file absent from the baseline is at zero, exactly as designed. The merge commit on #3070 records them
+(they predate the rule on `main`); this PR then migrates them with the same codemod: **81 → 9 and
+63 → 6**, the remainder being `text-black` on a light control, a near-black stage `bg-[#08090c]` and a
+white gradient over an image — hand decisions, listed by the tool. The image-studio render test and
+the Pro-tier tests pass on the migrated files.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR D of N: the next six files, and the codemod's table grown by what they exposed
+
+**Six files, one run each:** AgentV3Panel 598 → 5 · GitPanel 485 → 12 · ComponentLibrary 444 → 27
+(then 20 by hand) · SettingsPanel 304 → 5 · AIChat 275 → 8 · BillingPanel 265 → 1. Baseline
+**10,385 → 8,052** (173 files). Every remaining literal is listed by the tool and is one of: a
+light-styled preview canvas (`bg-white text-gray-900` — the component preview frames the USER'S
+component on white, deliberately), `text-black` on a light control, the tricolour flag's own three
+hexes in AgentV3Panel, and a terminal green.
+
+**What these six files taught the table, each row test-locked in `themeMigrate.test.ts`:**
+- **The grey families compat never covered** (`text-zinc-600`, `text-stone-400`, `text-neutral-400`,
+  `border-stone-800`, `bg-stone-900`, `bg-zinc-900/60`, `hover:border-zinc-500`, …) — these did not
+  follow the theme AT ALL today (a zinc-600 label stays #52525b on Light). FIX rows, by role.
+- **Hex brand text** the hue table cannot see (`#ff8080`/`#fda4af`/`#f85149` → danger, `#58a6ff`/
+  `#60a5fa`/`#2496ed` → info, `#a259ff` → accent) and hex chrome (`#0b0e14`, `#1f2937`, `#1c2430`,
+  `#1e293b` …) by role.
+- **A gradient stop INTO the chrome follows the theme** (`to-[#161b22]` → `to-card`). This is the
+  Billing page's four plan cards: on Light they ended in a GitHub-dark corner with unreadable labels
+  on it — visible in the before/after screenshots. A brand or white stop is left: a design choice.
+- **A hex BRAND fill is a solid fill** (`bg-[#24292e]`, GitHub black): its white label stays white.
+- **A label directly inside a filled box** — `<div className="… bg-indigo-600 …">` on the line above,
+  a `<span className="text-white">` with no background of its own — stays white. The same-element
+  rule cannot see a parent; the Settings footer's "NB" badge went dark-on-indigo on Light on the first
+  run, and the compat layer had the identical blind spot.
+- **A faint grey wash** (`hover:bg-stone-500/15`) is the same lift as `bg-white/5` → `bg-raised`.
+- **ComponentLibrary's inline `style={{ background: '#1f2937', color: '#9ca3af' }}`** chips and
+  modal chrome — unreachable by any class rule — moved to `var(--surface-raised)` /
+  `var(--text-muted)` / `var(--scrim)` by hand; the "copied" toast to `bg-emerald-600 text-on-accent`
+  (a success-TEXT token as a fill would be light green under white text on Dark).
+
+**The proof in the browser** (audit crawler, six views × three themes, pre-PR-D build vs migrated):
+**dark and contrast: zero misses before, zero after, all six views** — after one catch the crawl
+itself made: the first hand edit put the "Add to my app" button on `var(--accent)`, which is a
+per-theme TEXT accent (light indigo on Dark, yellow on High contrast) and so white-on-it failed
+on both dark themes; a solid button is `bg-indigo-600 text-on-accent`, the tolerated brand fill.
+Light, summed: invisible
+**6 → 1**, severe **5 → 0**, AA-fail **15 → 13**. The one "invisible" left is the crawler misreading
+a gradient button's background as the page's white (the label is white on the gradient); the
+thirteen fails are the sidebar's grey header block (`SidebarNav`, 2 per view — next PR) and one
+near-miss badge at 4.37. Billing on Light went from two dark plan cards with invisible labels to
+white cards with readable ones.
+
+**One guard re-anchored:** `themeSystem.test.ts` asserted AgentV3Panel's root LITERAL `bg-zinc-950`
+plus its compat remap; it now asserts the token `bg-surface` and the literal's ABSENCE — strictly
+stronger. Stacked on C; pushed after #3070 merges.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR E of N: the navigation chrome — the two misses on EVERY page were one class
+
+**Four files, one run each:** SidebarNav 59 → 2 · TopNav 72 → 0 · HomeView 38 → 0 · MonitorPanels
+142 → 0. Baseline **8,023 → 7,714** (169 files — four more at zero drop out of the list entirely).
+
+**The finding:** every crawled page on Light carried the same two AA failures — "Enterprise AI
+Workspace" and "navBharat-AI" on a grey block, #b6b7b9. The block was `bg-[#0d1117]/30` on the
+sidebar header: a 30% GitHub-dark wash, which the compat layer never remapped (it covers the solid
+literal, not its opacity variants), so on Light it painted a 30% near-black smear over white and the
+labels sat in it. The codemod's chrome-with-opacity rule (`bg-[#0d1117]/N`, N < 80 → `bg-raised`)
+is exactly this case; nothing was hand-edited. The Live Monitor's range pills (`1H · 24H · 7D`,
+2.66:1 on Light) were the same class in MonitorPanels.
+
+**The proof in the browser** (audit crawler, five views × three themes, pre-E build vs migrated):
+dark and contrast zero misses before and after. Light, per view — **Home 2 inv / 1 sev / 4 fail →
+0 / 0 / 2 · Settings 0/0/2 → 0/0/0 · Billing 0/0/3 → 0/0/1 · Admin 0/3/2 → 0/0/0 · Git 1/0/2 →
+1/0/0.** Settings and Admin are now fully clean on Light. What is left is ONE shape: Home's two
+("Free Forever", "App Mart") and Billing's one ("⚡ RECHARGE") are all `text-success` badges on a 15%
+emerald tint — Light's `--brand-success-text` #047857 is 4.37:1 on that tint, a hair under AA. That is
+a PALETTE fact, not three call sites, and it is fixed at the palette (below). Git's "invisible" is the
+crawler misreading a gradient button's background as the page's white (the label is white on the
+gradient).
+
+**The palette fix (same PR):** Light's `--brand-success-text` / `-strong` move from emerald-700
+(#047857) to emerald-800 (#065f46): 4.37 → 6.13 on the 15% emerald tint a success badge sits on,
+7.68 on white, 6.83 on the raised surface. Warn, danger, info and accent were checked on their own
+tints the same way (6.28 / 5.28 / 4.98 / 6.24) and left alone — none is under the line. One guard
+re-anchored: `appMart.test.ts` asserted the description's `hidden sm:block` rule with the old colour
+class riding along in the same string; it now names the token, and the claim it makes is unchanged.
+**After the palette fix, re-crawled:** Home, Settings, Billing and Admin are at **zero misses on all
+three themes** — the first time any crawled page has been clean on Light.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR F of N: nine more files — and the finding that embedded source is SOMEBODY ELSE'S app
+
+**🔴 The finding first, because PR D shipped it wrong and this PR corrects it.** `ComponentLibrary.tsx`
+holds 19 copyable HTML snippets (the Component Library's own catalogue — a navbar, a login card, a
+footer) as template literals, and `SyncedTemplates.ts` holds whole starter projects the same way. The
+codemod in PR D rewrote the snippets' classes to our tokens (`bg-gray-900` → `bg-card`,
+`text-white` → `text-ink`), and the census counted SyncedTemplates' 219 literals as NavBharatAI UI. Both
+are wrong for the same reason: **that markup runs in the USER'S app, on plain Tailwind, where `bg-card`
+means nothing** — a user copying "Navbar Dark" would have received a component with no background.
+The preview iframe's `<body class>` was rewritten too, so the library's own previews would have lost
+their surface. Found by scanning the migrated files for template literals containing markup, before
+the D commit reached `main`; nothing was ever served.
+- **Fixed at the class, not the instance:** `maskEmbeddedSources` in `themeColourBaseline.mjs` blanks
+  every template literal whose body is markup (`className=`, `class=`, an HTML tag) — NavBharatAI's own
+  UI never puts JSX inside a backtick string; what does is source that belongs to somebody else's app.
+  The census skips it and the codemod never rewrites inside it, from ONE function, so the two cannot
+  disagree. A class-list template (`` `px-2 ${x} text-white` ``) has no markup and is still migrated.
+- **ComponentLibrary restored from before PR D and re-migrated under the rule**: snippets and the
+  preview wrapper byte-identical to the original plain-Tailwind markup; the panel's own UI on tokens;
+  the inline-style hand edits re-applied. 1 literal left (the light preview canvas, deliberate).
+- **The census got more honest everywhere:** SyncedTemplates 219 → 0 (all starter source),
+  AICodeReview 91 → 43, AITestingSuite 57 → 17, PluginSystem 69 → 32, MultiPageBuilder 46 → 35,
+  previewUtils 46 → 32, SDAChat 145 → 129, App.tsx 29 → 26, paymentSetup 8 → 0 — every drop is a
+  template literal of generated or sample source that was never NavBharatAI's UI. Test-locked in
+  `themeMigrate.test.ts` (four cases: not counted, not rewritten, the class-list template still
+  migrates, a whole starter file counts for nothing).
+
+**Nine files, one run each:** HostingChooser 218 → 3 · NavAppStore 207 → 0 · ProfilePage 191 → 2 ·
+PreviewSurface 186 → 6 · ProjectInsightsPanel 167 → 2 · BotBuilder 166 → 8 · DatabaseStudio 159 → 0 ·
+AppModals 154 → 2 · CodeStudio 150 → 4. Baseline **7,714 → 5,738** (165 files).
+
+**🔴 The crawl caught a regression the codemod's own rule created, and the fix is a rule, not a line.**
+The first run of F put Code Studio's status bar (`bg-[#007acc]`, a fixed VS-Code blue) on `text-muted`:
+"UTF-8" measured **1.47:1** on Dark. Two gaps, both in `scripts/themeMigrate.mjs`: a hex fill that is
+not in the chrome tables (`#007acc`, `#161b22`-style rows are chrome; `#007acc` is a brand fill) was not
+recognised as a fill at all, and a grey label on a line BELOW the fill's opening line was judged as if
+it stood on the page surface. Now: `hasHexBrandFill` treats every non-chrome `bg-[#hex]` as a fixed
+fill; `fillScopes` walks the file with an indentation stack so a label nested anywhere under a solid
+fill knows it; and a grey text literal in that position becomes `text-on-accent`. The nine files were
+restored from HEAD and re-run under the fixed codemod, so every one of them carries the fix, not a
+hand patch. **The sibling hunt across A–E found two more of the same class** in `SettingsPanel.tsx`
+(the avatar initial and the hover "+" on the `bg-indigo-600` bot tile, both `text-ink` on indigo since
+PR D) — fixed to `text-on-accent`. Test-locked (45 cases in `themeMigrate.test.ts`, including the
+status-bar shape and a label two lines under its box).
+
+**Crawled nine views × three themes, before vs after F** (App Store, Profile, Preview, BotBuilder,
+Database, Studio, Deploy, Files, Components): **no view worse on any theme.** Dark severe 2 → 0, fail
+17 → 15; Contrast severe 3 → 0, fail 13 → 12; Light severe 6 → 3, fail 25 → 21. Profile, Preview,
+Database, Deploy, Files and Components are at zero on all three themes. What remains is NOT in F's
+files, named so the next PR does not re-find it: (1) Studio's editor tabs are `Editor.tsx`
+(`bg-[#2d2d2d] text-[#969696]` — compat re-maps the text to Light's muted grey and leaves the fixed
+dark tab behind it: 1.82:1) and the "Explorer" label is `FileExplorer.tsx`'s `text-white/50`; both
+are later-PR files. (2) Monaco's own `mtk10` tokens on Light (the editor keeps `vs-dark`) — the
+editor's theme, not ours; a Light editor theme is a separate decision. (3) 🟡 **A systemic one for a
+later PR: white on `bg-emerald-600` / `bg-green-600` is 3.65:1 / 3.22:1 on EVERY theme** (App Store's
+"Browse", BotBuilder's "Go Live" and "Whatsapp"). That is the brand fill, not the theme system — a
+`bg-success` fill token at emerald-700 (≥ 4.5 with white) would fix the class in one place; recorded
+here rather than hand-patched three buttons.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR G of N: ten more files, and three rules the crawl demanded
+
+**Ten files, one run each, then the crawl:** SecurityScan 86 → 0 · WhitelabelBranding 129 → 0 · SDAChat 128 → 0
+· PWANotifications 128 → 0 · FilesPanel 127 → 0 · FigmaImporter 124 → 6 (Figma's own brand purple — a
+logo mark, deliberate) · NbaiDomainConnect 122 → 0 · CICDPipeline 116 → 1 (a toggle knob, not text) ·
+StoreBuildPanel 112 → 0 · LiveCollaboration 112 → 0. Every migrated file (A–G, 33 of them) was then re-run
+under the widened rules below. Baseline **5,738 → 4,581** (157 files). ⚠️ The census itself got STRICTER in
+this PR (two new literal classes, below), so the number is not comparable one-for-one with F's — the
+unmigrated files gained counts while the migrated ones lost them; the direction of every migrated file
+is down and the ratchet holds each file at its new number.
+
+**🔴 SecurityScan carried a PRIVATE theme system.** A local `useState<'dark' | 'light'>` with its own
+"Light Mode" button and 23 `theme === 'dark' ? … : …` ternaries — a second, panel-local theme fighting
+the app's. Under "pura theme system badlo" that is exactly the thing to remove: the button and the state
+are gone, every ternary collapsed to its dark branch, and the codemod mapped those literals to tokens,
+so the panel now follows the ONE app theme like every other screen.
+
+**Three rules the crawl demanded, each from a real miss, each test-locked (`themeMigrate.test.ts`):**
+1. **A label that INHERITS its colour on a solid fill.** "Download YAML" on `bg-violet-600` and "New
+   Room" on `bg-blue-600` carried no text class at all — the old dark UI's `text-white` root was doing the
+   work, and the migrated root is `text-body`, so on Light the label went near-black on violet (3.0:1).
+   A RESTING, unprefixed fill with no text colour of its own now gets `text-on-accent` stated on the
+   element; a `hover:` fill on a flat button does not (it would pin white text for the resting state),
+   and gradient TEXT (`bg-clip-text`) is not a fill. Re-running the rule over A–F added it in 100+
+   places — the same latent defect everywhere a filled button relied on inheritance.
+2. **An inline `style={{ backgroundColor: brand }}` is a fixed fill.** The white-label preview's buttons
+   sit on the USER's chosen colour; the codemod had turned their `text-white` into `text-ink`. A `var(--…)`
+   background follows the theme and is deliberately NOT a fill.
+3. **Dark tints and dark shades.** `bg-emerald-900/30` is a wash on Dark and a mid-dark smear on Light
+   (the theme cannot lighten a 900 shade); `text-emerald-600` is 3.3:1 on Dark. Both are now LITERALS the
+   census counts, and the codemod maps a brand tint ≤ 60% to the 500 shade at 10% and a 600/700 text shade
+   to its role token. Past 60% a dark tint is an opaque PANEL (AgentV3Panel's `bg-red-950/95` error
+   overlay) and is left for a hand — the first cut turned three of those into 10% washes and was reverted
+   before it was committed.
+
+**Two smaller findings, fixed at the class:** (a) a QUOTED string that opens an HTML tag is embedded
+markup too — SDAChat's printable clinical report is assembled with `.replace()` into single-quoted
+`<h1 style=…>` strings, and a NESTED template (`<table>${rows.map(() => `<tr>…`)}`) is ONE literal, which
+the first mask read as alternating segments; `templateLiteralSpans` is nesting-aware and the quoted-string
+rule joined `maskEmbeddedSources`. (b) PWANotifications' service-worker sample used fixed GitHub-dark
+syntax colours (`#79c0ff`) inside a `<pre>` that had just become `bg-surface` — light blue on white; the
+three spans now use the palette's own info/success/faint variables.
+
+**Crawled 23 views × three themes against each view's last known state: no view worse on any theme.**
+SDA chat, CI/CD and Live Collaboration to zero on all three (CI/CD was 14 severe on Light); Whitelabel
+9 → 1 severe, and what remains is the mock browser rendered in the USER's own palette. Home, Settings,
+Billing, Admin, Profile, Preview, Database, Deploy, Files, Components, Security, PWA, Figma stay at zero.
+Still open and NOT in G's files: the `apk` view (APKBuilder, later PR), ConnectMyWebsitePanel's
+`text-red-200/90` on a red tint (1.18:1 on Light, later PR), Studio's `Editor.tsx` tabs and Monaco, and
+the systemic white-on-`emerald-600` fill recorded under F.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR H of N: thirteen files, and the rule that a FIXED box fixes everything inside it
+
+**🔴 The finding came from the first file of the batch, and it was MY OWN PR G rule misfiring.**
+`SEOOptimizer.tsx` renders Google-search, Facebook-card and Twitter-card PREVIEWS — mockups of three
+other companies' surfaces. PR G's "a resting fill names its own label colour" rule stamped
+**`text-on-accent` (white) onto Facebook's `bg-[#f0f2f5]`**, which is near-white: 1.1:1, invisible. And
+the Twitter card's `text-white` title became `text-ink`, which goes near-black on Light — inside a box
+that is `bg-black` on every theme. Caught before either reached `main`.
+
+**Two root causes, both general, both now fixed in `scripts/themeMigrate.mjs`:**
+1. **A FIXED background fixes everything inside it.** `bg-black`, `bg-white` and any non-chrome
+   `bg-[#hex]` are colours the theme can never repaint (`mapToken` already refuses to map them), so
+   every colour NESTED in that subtree is fixed too. `fillScopes` now opens a scope for all three —
+   previously only a hex or a brand hue did, which is exactly why a `text-white` four levels under
+   `bg-black` was themed into invisibility.
+2. **The fill's LUMINANCE decides the label, never an assumption.** `fixedFill()` computes WCAG
+   luminance: white must clear 4.5:1 against the fill to be a legitimate label. A **light** fixed fill
+   returns `'light'` and the codemod then **leaves its labels exactly as written** — neither white nor
+   a dark token is ours to choose inside somebody else's mockup. SEOOptimizer's 26 remaining literals
+   are precisely those three previews, left whole and counted by the ratchet.
+
+**Two more looseness bugs found by the sibling hunt, each fixed at the class:**
+- 🔴 **A WASH gradient is not a fill.** `SOLID_FILL` matched `bg-gradient-` unconditionally, so a 1px
+  gradient BORDER around a `bg-surface` card, and a translucent tint like
+  `from-indigo-950/40 to-black/30`, both opened a "fixed fill" scope. A scan of the whole client
+  flagged 7 labels under such wrappers (AgentV3Panel's Full-Team card, GitPanel's two hubs) — all
+  false alarms, but the looseness would have painted the NEXT file's labels white.
+  `gradientIsWash()` now stands them down, and **an element declaring its own themed surface
+  (`bg-card`) ends any fixed subtree it sits in**, whatever encloses it.
+- 🔴 **A HOVER background is not the element's own background.** The nesting guard read
+  `hover:bg-emerald-500/10` as "this element has its own background" and skipped it — so
+  DoseCalculator's suggestion rows got `text-ink` inside a fixed `bg-[#0a1018]` dropdown, invisible on
+  Light. The guard now tests for a RESTING background only, the same distinction PR G's `RESTING_FILL`
+  already drew. The one row already written was repaired by hand; every future file is covered by the
+  rule.
+
+**Thirteen files:** APITester 107 → 0 · DoseCalculator 106 → 1 · MonetizationWizard 96 → 2 (black text
+on amber, correct as written) · SEOOptimizer 92 → 26 (the three previews) · AuthComponent 90 → 10 ·
+PerformanceAnalyzer 86 → 1 · LocalizationManager 83 → 0 · SecretManager 82 → 0 · DiffViewer 81 → 0 ·
+FileExplorer 81 → 0, plus three the sweep caught on the way: DonationPanel 37 → 6 · OtherAIView 15 → 0
+· NBIChatPanel 14 → 0. Baseline **4,581 → 3,663** (150 files).
+
+**Two MORE the crawl caught after the first gate was already green, both class bugs, both fixed at the
+source rather than by hand:**
+- 🔴 **An INLINE fixed background opens a subtree too.** `fillScopes` read only `className=`, so
+  PerformanceAnalyzer's live-metrics panel — `style={{ background: '#12141c' }}`, a near-black box —
+  had its labels themed: `text-body` measured **1.26:1** on Light. `inlineFillKind()` now measures an
+  inline background the same way `fixedFill()` measures a class one, and opens the scope. An inline
+  colour that is an EXPRESSION (`config.primaryColor`, the user's own brand) stays 'dark' — the
+  behaviour PR G shipped and the crawl verified.
+- 🔴 **A background under FIXED hex ink is never themed.** SEOOptimizer's meta-tag code block is
+  `bg-[#0d1117] text-[#a5d6ff]` — a dark block with pale-blue syntax, coherent as written. The codemod
+  themed the background and left the ink, giving pale blue on near-white: **1.47:1**. `mapToken` now
+  refuses to map a background when the same element carries a fixed hex text colour it has no row for.
+  Neither half is ours to guess, so the pair stays whole and the ratchet counts it.
+
+**And a THIRD round, because the re-crawl kept paying:** two more Light misses, one class between
+them — **a brand-coloured label on a FIXED fill must keep its literal.** PerformanceAnalyzer's
+`text-amber-400` became `text-warn`, which is dark amber on Light: **2.59:1** on that same near-black
+panel. Figma's `text-[#a259ff]` logo became `text-accent-text` on its own `bg-[#1e1333]` chip, and
+DonationPanel's labels the same on `bg-indigo-600`. Both the hue row and the hex-brand row now return
+NULL when the element sits on a fixed fill: the box never repaints, so neither may the ink.
+⚠️ **The same round corrected a wrong conclusion of my own from an hour earlier.** I had reasoned that
+SEOOptimizer's `bg-[#0d1117] text-[#a5d6ff]` code block was "coherent as written" and left the pair
+whole — but `theme-compat.css` line 25 REPAINTS `bg-[#0d1117]` per theme, so on Light the block went
+near-white under a pale-blue ink and stayed at 1.47:1. While the compat layer exists, no GitHub-dark
+literal is self-coherent. That block is now `bg-surface text-info`, themed on both halves, which is
+the same fix PR G applied to the service-worker sample. The general rule (never theme a background
+under unmappable fixed ink) stands and is still right; it simply cannot rescue a literal compat
+already owns.
+
+**Test-locked and proven by reversion** in `themeMigrate.test.ts` (67 cases in that file): removing the luminance
+check fails 3; removing the wash and themed-surface checks fails 3; the hover-guard case fails on its
+own. Two scanners were written for the sibling hunt and both now report clean across every client
+file: *a theme token inside a fixed subtree*, and *white text on a light fixed fill*.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR I of N: twelve more files, and a price that only read on one theme
+
+**Twelve files, one codemod run each, no new rules needed** — the first batch since the sweep began
+where the rules already in place were enough: APIMarketplace 79 → 1 · DeveloperApiCard 78 → 0 ·
+CostEstimator 77 → 5 · TeamCollaboration 76 → 0 · TestPanel 75 → 0 · ScreenshotToCode 74 → 1 ·
+AppAnalytics 73 → 7 · CursorPopup 73 → 1 · WebAppPlayer 66 → 1 · HistoryView 63 → 3 ·
+FailureCategoryCard 62 → 0 · APKBuilder 62 → 1. Baseline **3,663 → 2,825** (146 files).
+
+**✅ The APK view is an OPEN ITEM NOW CLOSED.** PR F recorded it as "still open, not in this batch's
+files" at 5 severe / 5 fail on Light. It is **zero on all three themes** after this batch.
+
+**🔴 The one real defect the crawl found was not a migration bug — it was a design one, and it is the
+exact class this whole project exists to remove.** `CostEstimator` lists cloud providers and painted
+each **price** in that vendor's brand hex (`style={{ color: p.color }}`). A brand colour as text can
+only ever read on one theme: Vercel's `#374151` measured **1.68:1 on Dark** and Supabase's `#3fcf8e`
+**1.99:1 on Light**, on the single most important number on that screen. The price now takes
+`text-ink`; the brand colour still identifies the provider on the emoji chip above it, which is a
+FILL and therefore reads on both. Nothing is lost — the provider is already named in full beside it.
+
+**What the codemod correctly declined to touch, each verified by eye:** WebAppPlayer's `bg-white`
+iframe (the user's own app canvas), HistoryView's `bg-[#1f242c]` menu with its `text-red-400` delete
+item (a fixed dark menu keeping its brand ink, per PR H's rule), and CursorPopup's `text-[#21262d]`
+watermark (a chrome hex used as text, which has no row and is not ours to invent).
+
+**Crawl, 12 views × three themes, before vs after:** APIMarketplace 1/30/0 → 0/0/0 on Light and
+1/9/21 → 0/0/0 on Dark and Contrast; CostEstimator 0/60/10 → 0/0/0 on Light after the price fix; APK
+0/5/5 → 0/0/0. Totals across the batch: Light severe **97 → 0**, Dark severe 21 → 0, Contrast 22 → 0.
+
+**Still open after this batch, unchanged and named so nobody re-discovers them:** Code Studio's
+`Editor.tsx` tabs and Monaco's own `vs-dark` theme on Light (a separate product decision);
+TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over another grey — the AA
+lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
+theme, which still wants a `bg-success` fill token rather than per-button patches.

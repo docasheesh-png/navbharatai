@@ -180,12 +180,12 @@ export const SecretManager: React.FC<{
     <div
       id="secret-manager-container"
       className={embedded
-        ? 'p-4 space-y-4 text-white'
-        : 'p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] space-y-6 text-white min-h-screen'}
+        ? 'p-4 space-y-4 text-ink'
+        : 'p-6 bg-card border border-line rounded-[2.5rem] space-y-6 text-ink min-h-screen'}
     >
       {!embedded && (
         <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-2">
-          <Lock className="w-6 h-6 text-indigo-400" /> Secret Management
+          <Lock className="w-6 h-6 text-accent-text" /> Secret Management
         </h2>
       )}
 
@@ -218,8 +218,8 @@ export const SecretManager: React.FC<{
                 answers to questions a non-technical owner is not asking while looking at this screen. The
                 promise they actually care about is who can see the value, so that is the only promise the
                 screen makes, and the rest is left to the screen itself to demonstrate. */}
-            <p className="text-xs text-gray-300 leading-relaxed bg-indigo-500/5 p-3 rounded-lg border border-indigo-500/10">
-              Your keys and their values are saved <strong className="text-indigo-200">encrypted</strong> — nobody can see them except you.
+            <p className="text-xs text-muted leading-relaxed bg-indigo-500/5 p-3 rounded-lg border border-indigo-500/10">
+              Your keys and their values are saved <strong className="text-accent-text">encrypted</strong> — nobody can see them except you.
               Your apps use them automatically.
             </p>
 
@@ -234,12 +234,12 @@ export const SecretManager: React.FC<{
                 so. The full reasoning — including why the control is narrowed rather than deleted — is in
                 lib/secretScope.ts. */}
             {control === 'fixed' && (
-              <div className="space-y-2 rounded-xl border border-white/5 bg-black/20 p-3">
+              <div className="space-y-2 rounded-xl border border-line bg-well p-3">
                 <div className="space-y-1">
-                  <span className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">Credentials for</span>
+                  <span className="block text-[11px] uppercase tracking-widest text-faint font-bold">Credentials for</span>
                   {/* A statement, not a choice. `title` carries the full name for an app whose derived name is
                       its entire opening prompt — the clamp is what stopped it running off the edge. */}
-                  <p className="text-sm font-semibold text-gray-100 truncate" title={currentAppName || undefined}>
+                  <p className="text-sm font-semibold text-body truncate" title={currentAppName || undefined}>
                     {shortAppName(currentAppName) || 'This app'}
                   </p>
                 </div>
@@ -252,9 +252,9 @@ export const SecretManager: React.FC<{
                     onChange={(e) => setShareWithAll(e.target.checked)}
                     className="mt-0.5 accent-indigo-500"
                   />
-                  <span className="text-xs text-gray-300 leading-snug">
+                  <span className="text-xs text-muted leading-snug">
                     Also use new keys in my other apps
-                    <span className="block text-[11px] text-gray-500">For a key you reuse everywhere, like an AI or payment key.</span>
+                    <span className="block text-[11px] text-faint">For a key you reuse everywhere, like an AI or payment key.</span>
                   </span>
                 </label>
               </div>
@@ -263,7 +263,7 @@ export const SecretManager: React.FC<{
             {/* SAY WHERE A NEW KEY IS ABOUT TO GO — always, in every mode, and never only when a control
                 happens to be on screen. The answer matters most exactly when there is no control to imply it. */}
             {control !== 'picker' && (
-              <p className="text-[11px] text-gray-500 leading-snug">
+              <p className="text-[11px] text-faint leading-snug">
                 {scopeSentence({
                   control,
                   appName: currentAppName,
@@ -298,12 +298,12 @@ export const SecretManager: React.FC<{
                 <button
                   onClick={() => void checkAllKeys()}
                   disabled={isVerifying}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-700 text-[11px] font-bold uppercase tracking-widest text-gray-300 hover:text-white hover:border-gray-500 disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-line text-[11px] font-bold uppercase tracking-widest text-muted hover:text-ink hover:border-line disabled:opacity-50"
                 >
                   <ShieldCheck size={14} /> {isVerifying ? 'Checking…' : 'Check my keys'}
                 </button>
                 {checkedAt && !isVerifying && (
-                  <span className="text-[10px] text-gray-500">Checked {checkedAt}</span>
+                  <span className="text-[10px] text-faint">Checked {checkedAt}</span>
                 )}
               </div>
             )}
@@ -321,22 +321,22 @@ export const SecretManager: React.FC<{
                 both FILTERS the list above and chooses where the next NEW key is saved. Removing that line
                 would leave the second behaviour with nothing on screen to reveal it. */}
             {control === 'picker' && (
-              <div className="space-y-1 rounded-xl border border-white/5 bg-black/20 p-3">
-                <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-gray-500 font-bold">
+              <div className="space-y-1 rounded-xl border border-line bg-well p-3">
+                <label htmlFor="secret-scope" className="block text-[11px] uppercase tracking-widest text-faint font-bold">
                   Show credentials for
                 </label>
                 <select
                   id="secret-scope"
                   value={scope}
                   onChange={(e) => setScope(e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 p-3 rounded text-sm"
+                  className="w-full bg-card border border-line p-3 rounded text-sm"
                 >
                   <option value="">All apps (shared)</option>
                   {apps.map((a) => (
                     <option key={a.id} value={a.id}>{shortAppName(a.title)}</option>
                   ))}
                 </select>
-                <p className="pt-1 text-[11px] leading-snug text-gray-500">
+                <p className="pt-1 text-[11px] leading-snug text-faint">
                   {scopeSentence({
                     control,
                     appName: currentAppName,
@@ -583,21 +583,21 @@ const CredentialTable: React.FC<{
   const visibleIds = new Set(metas.map((m) => m.id));
   const visible = (rows ?? []).filter((r) => visibleIds.has(r.id));
 
-  const boxClass = 'w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-2 font-mono text-xs outline-none focus:border-indigo-500/40';
+  const boxClass = 'w-full rounded-lg border border-line bg-well px-2.5 py-2 font-mono text-xs outline-none focus:border-indigo-500/40';
 
   if (rows === null) {
-    return <p className="py-6 text-center text-xs text-gray-500">Opening your keys…</p>;
+    return <p className="py-6 text-center text-xs text-faint">Opening your keys…</p>;
   }
 
   return (
     <div className="space-y-2">
       {error && (
-        <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+        <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-danger">
           <AlertTriangle size={14} className="mt-px shrink-0" /> {error}
         </p>
       )}
       {notice && !error && (
-        <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-emerald-300">
+        <p className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5 text-[11px] leading-snug text-success">
           <ShieldCheck size={14} className="mt-px shrink-0" /> {notice}
         </p>
       )}
@@ -606,15 +606,15 @@ const CredentialTable: React.FC<{
           the narrowest screens, where the rows stack and a two-column header would lie about the layout. */}
       {(visible.length > 0 || newRows.length > 0) && (
         <div className="hidden sm:flex items-center gap-2 px-0.5 pt-1">
-          <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-gray-500">Secret / API key</span>
-          <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-gray-500">Value</span>
+          <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-faint">Secret / API key</span>
+          <span className="flex-1 text-[10px] font-bold uppercase tracking-widest text-faint">Value</span>
           <span className="w-9 shrink-0" />
         </div>
       )}
 
       {visible.length === 0 && newRows.length === 0 && (
         metasError ? (
-          <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-red-300">
+          <p className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-2.5 text-[11px] leading-snug text-danger">
             <AlertTriangle size={14} className="mt-px shrink-0" />
             <span>
               {metasError}{' '}
@@ -622,7 +622,7 @@ const CredentialTable: React.FC<{
             </span>
           </p>
         ) : (
-          <p className="py-6 text-center text-xs text-gray-500">No credentials saved yet. Add your first one below.</p>
+          <p className="py-6 text-center text-xs text-faint">No credentials saved yet. Add your first one below.</p>
         )
       )}
 
@@ -632,7 +632,7 @@ const CredentialTable: React.FC<{
         const meta = metas.find((m) => m.id === row.id);
         const dirty = isDirty(row);
         return (
-          <div key={row.id} className="rounded-xl border border-white/5 bg-[#0d1117] p-2.5">
+          <div key={row.id} className="rounded-xl border border-line bg-surface p-2.5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
               {/* ⓘ AT THE START OF EVERY CREDENTIAL (admin 2026-09-13: *"ek 'i' button ho har ek
                   credidential ke starting me, jis par click karne se ek tick ✅ toggle dikhe, 'apply for
@@ -645,8 +645,8 @@ const CredentialTable: React.FC<{
                 aria-expanded={infoOpen === row.id}
                 className={`shrink-0 self-start rounded-lg border p-2 ${
                   infoOpen === row.id
-                    ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200'
-                    : 'border-white/10 text-gray-400 hover:text-white'
+                    ? 'border-indigo-500/40 bg-indigo-500/10 text-accent-text'
+                    : 'border-line text-muted hover:text-ink'
                 }`}
               >
                 <Info size={14} />
@@ -658,7 +658,7 @@ const CredentialTable: React.FC<{
                 readOnly
                 value={row.secret_name}
                 aria-label={`Name of ${row.secret_name}`}
-                className={`${boxClass} flex-1 text-indigo-200`}
+                className={`${boxClass} flex-1 text-accent-text`}
               />
               {/* COLUMN 2 — the value, editable in place: click it and type. It was readOnly until
                   2026-09-13, so rotating a key meant deleting the row and retyping its name, and a typo
@@ -670,12 +670,12 @@ const CredentialTable: React.FC<{
                   onChange={(e) => setDraft((d) => ({ ...d, [row.id]: e.target.value }))}
                   placeholder={row.readable ? '' : 'Saved, but this value cannot be read back — type a new one to replace it'}
                   aria-label={`Value of ${row.secret_name}`}
-                  className={`${boxClass} text-gray-200 placeholder-amber-400/60 ${dirty ? 'border-amber-400/50' : ''}`}
+                  className={`${boxClass} text-body placeholder-amber-400/60 ${dirty ? 'border-amber-400/50' : ''}`}
                 />
                 <button
                   onClick={() => setShown((m) => ({ ...m, [row.id]: !m[row.id] }))}
                   aria-label={isShown ? `Hide ${row.secret_name}` : `Show ${row.secret_name}`}
-                  className="shrink-0 rounded-lg border border-white/10 p-2 text-gray-400 hover:text-white"
+                  className="shrink-0 rounded-lg border border-line p-2 text-muted hover:text-ink"
                 >
                   {isShown ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -690,13 +690,13 @@ const CredentialTable: React.FC<{
                     <button
                       onClick={() => void remove(row.id)}
                       disabled={deleting === row.id}
-                      className="rounded-lg bg-red-600 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-red-500 disabled:opacity-50"
+                      className="rounded-lg bg-red-600 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-on-accent hover:bg-red-500 disabled:opacity-50"
                     >
                       {deleting === row.id ? '…' : 'Delete'}
                     </button>
                     <button
                       onClick={() => setConfirming('')}
-                      className="rounded-lg border border-white/10 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:text-white"
+                      className="rounded-lg border border-line px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted hover:text-ink"
                     >
                       Keep
                     </button>
@@ -705,7 +705,7 @@ const CredentialTable: React.FC<{
                   <button
                     onClick={() => setConfirming(row.id)}
                     aria-label={`Delete ${row.secret_name}`}
-                    className="rounded-lg border border-white/10 p-2 text-red-400 hover:border-red-500/40 hover:text-red-300"
+                    className="rounded-lg border border-line p-2 text-danger hover:border-red-500/40 hover:text-danger"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -730,9 +730,9 @@ const CredentialTable: React.FC<{
                       onChange={(e) => void applyToAllApps(row.id, e.target.checked)}
                       className="mt-0.5 accent-indigo-500 disabled:opacity-40"
                     />
-                    <span className="text-xs leading-snug text-gray-200">
+                    <span className="text-xs leading-snug text-body">
                       Apply to all my apps
-                      <span className="block text-[11px] text-gray-400">
+                      <span className="block text-[11px] text-muted">
                         {scoping === row.id
                           ? 'Saving…'
                           : isShared
@@ -748,16 +748,16 @@ const CredentialTable: React.FC<{
             })()}
 
             <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 px-0.5">
-              <span className="text-[10px] text-gray-500">
+              <span className="text-[10px] text-faint">
                 {/* 🏷️ THE CAPTION UNDER EVERY SHARED KEY (admin 2026-09-13: *"us credentials ke niche
                     chota chota likha ho 'for all app'"*) — so the state the ⓘ panel sets is legible
                     without opening anything. `ownerLabel` already produced this sentence; what changed is
                     that it is no longer conditional: the old `showOwner` prop was false for an account
                     with no app list, which left a shared key looking identical to an app-scoped one. */}
                 {dirty
-                  ? <span className="text-amber-300">Changed — press “Save and sync”.</span>
+                  ? <span className="text-warn">Changed — press “Save and sync”.</span>
                   : (!meta?.workspace_id
-                    ? <span className="text-indigo-300/80">For all apps</span>
+                    ? <span className="text-accent-text">For all apps</span>
                     : (meta ? `Only ${ownerLabel(meta)}` : ''))}
               </span>
               {/* A key with no verdict shows NOTHING — absence of a badge means "not checked", which is
@@ -766,9 +766,9 @@ const CredentialTable: React.FC<{
               {verdict && (
                 <span
                   className={`text-[10px] leading-snug ${
-                    verdict.status === 'working' ? 'text-emerald-400'
-                      : verdict.status === 'rejected' ? 'text-red-400'
-                        : 'text-gray-500'
+                    verdict.status === 'working' ? 'text-success'
+                      : verdict.status === 'rejected' ? 'text-danger'
+                        : 'text-faint'
                   }`}
                 >
                   {verdict.message}
@@ -795,14 +795,14 @@ const CredentialTable: React.FC<{
                 onChange={(e) => setNewRows((list) => list.map((r) => (r.key === fresh.key ? { ...r, name: e.target.value } : r)))}
                 placeholder="OPENAI_API_KEY"
                 aria-label="New credential name"
-                className={`${boxClass} flex-1 text-indigo-200 placeholder-gray-600`}
+                className={`${boxClass} flex-1 text-accent-text placeholder-faint`}
               />
               <input
                 value={fresh.value}
                 onChange={(e) => setNewRows((list) => list.map((r) => (r.key === fresh.key ? { ...r, value: e.target.value } : r)))}
                 placeholder="Paste the value"
                 aria-label="New credential value"
-                className={`${boxClass} flex-1 text-gray-200 placeholder-gray-600`}
+                className={`${boxClass} flex-1 text-body placeholder-faint`}
               />
               <div className="shrink-0 self-end sm:self-start">
                 {/* An unsaved row has nothing in the vault to destroy, so its bin removes it at once —
@@ -810,31 +810,31 @@ const CredentialTable: React.FC<{
                 <button
                   onClick={() => setNewRows((list) => list.filter((r) => r.key !== fresh.key))}
                   aria-label="Remove this new row"
-                  className="rounded-lg border border-white/10 p-2 text-red-400 hover:border-red-500/40 hover:text-red-300"
+                  className="rounded-lg border border-line p-2 text-danger hover:border-red-500/40 hover:text-danger"
                 >
                   <Trash2 size={16} />
                 </button>
               </div>
             </div>
             {recipe && (
-              <div className="mt-2 space-y-1 rounded-lg border border-white/10 bg-black/30 p-2.5 text-[11px] leading-relaxed text-gray-400">
+              <div className="mt-2 space-y-1 rounded-lg border border-line bg-well p-2.5 text-[11px] leading-relaxed text-muted">
                 <p>
-                  <span className="text-gray-500">Get it from </span>
-                  <a href={recipe.option.link} target="_blank" rel="noopener noreferrer" className="text-indigo-300 underline underline-offset-2">
+                  <span className="text-faint">Get it from </span>
+                  <a href={recipe.option.link} target="_blank" rel="noopener noreferrer" className="text-accent-text underline underline-offset-2">
                     {recipe.option.linkLabel}
                   </a>
-                  <span className="text-gray-500"> → {recipe.option.path}</span>
+                  <span className="text-faint"> → {recipe.option.path}</span>
                 </p>
-                <p className="text-gray-500">{recipe.variable.where}</p>
-                <p className="text-gray-500">{recipe.option.cost}</p>
+                <p className="text-faint">{recipe.variable.where}</p>
+                <p className="text-faint">{recipe.option.cost}</p>
                 {recipe.variable.serverOnly && (
                   // Said BEFORE they paste, because after the fact the only honest advice is "rotate it".
-                  <p className="text-amber-300/90">
+                  <p className="text-warn">
                     Server-side only — do not add a VITE_ or NEXT_PUBLIC_ prefix to this one, or its value is
                     published inside your app for every visitor to read.
                   </p>
                 )}
-                {recipe.recipe.keyless && <p className="text-emerald-400/90">💡 {recipe.recipe.keyless}</p>}
+                {recipe.recipe.keyless && <p className="text-success">💡 {recipe.recipe.keyless}</p>}
               </div>
             )}
           </div>
@@ -844,7 +844,7 @@ const CredentialTable: React.FC<{
       {/* ── THE TWO BUTTONS AT THE BOTTOM, in the order the admin asked for them ───────────────────── */}
       <button
         onClick={() => setNewRows((list) => [...list, { key: `new-${Date.now()}-${list.length}`, name: '', value: '' }])}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 px-4 py-3 text-xs font-bold uppercase tracking-widest text-gray-300 hover:border-indigo-500/40 hover:text-white"
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line px-4 py-3 text-xs font-bold uppercase tracking-widest text-muted hover:border-indigo-500/40 hover:text-ink"
       >
         <Plus size={16} /> Add new credentials
       </button>
@@ -852,12 +852,12 @@ const CredentialTable: React.FC<{
       <button
         onClick={() => void saveAndSync()}
         disabled={saving}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-xs font-bold uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-xs font-bold uppercase tracking-widest text-on-accent hover:bg-indigo-500 disabled:opacity-50"
       >
         {saving ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
         {saving ? 'Saving and syncing…' : pendingCount > 0 ? `Save and sync (${pendingCount})` : 'Save and sync'}
       </button>
-      <p className="text-center text-[10px] leading-snug text-gray-500">
+      <p className="text-center text-[10px] leading-snug text-faint">
         Saves every change above, then re-reads your vault so what you see is exactly what your builds will use.
       </p>
     </div>

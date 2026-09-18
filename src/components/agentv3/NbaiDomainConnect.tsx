@@ -1050,12 +1050,12 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <button onClick={onBack} className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-colors" title="Back">
+        <button onClick={onBack} className="w-7 h-7 rounded-lg bg-raised hover:bg-raised flex items-center justify-center text-muted hover:text-ink transition-colors" title="Back">
           <ChevronLeft className="w-4 h-4" />
         </button>
         <div>
-          <h3 className="text-sm font-bold text-white">Connect your own domain</h3>
-          <p className="text-[11px] text-zinc-400">Point your domain at this app on NavBharatAI — free HTTPS included.</p>
+          <h3 className="text-sm font-bold text-ink">Connect your own domain</h3>
+          <p className="text-[11px] text-muted">Point your domain at this app on NavBharatAI — free HTTPS included.</p>
         </div>
       </div>
 
@@ -1064,8 +1064,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           still here" — is carried by the screen itself; this line only says the status is not
           confirmed YET. It deliberately never says connected or verified: see domainDraftCache.ts. */}
       {draftNotice(!!draft?.domain, confirmed) && (
-        <p className="text-[11px] text-zinc-500 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse shrink-0" />
+        <p className="text-[11px] text-faint flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-faint animate-pulse shrink-0" />
           {draftNotice(!!draft?.domain, confirmed)}
         </p>
       )}
@@ -1074,7 +1074,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           waiting a minute and retyping a domain that was never lost. Your records are below either
           way — the server keeps them, which is exactly what they were saved for. */}
       {statusUnavailable && (
-        <p className="text-[11px] text-amber-400/90 flex items-start gap-1.5">
+        <p className="text-[11px] text-warn flex items-start gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-1" />
           Your domain and its DNS records are saved — NavBharatAI just could not check the live status
           this moment. Nothing is lost; press Check status again in a minute.
@@ -1088,36 +1088,36 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           onChange={(e) => setDomain(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') connect(); }}
           placeholder="e.g. myshop.com"
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/60"
+          className="flex-1 bg-card border border-line rounded-lg px-3 py-2 text-sm text-ink outline-none focus:border-emerald-500/60"
         />
         <button
           onClick={connect}
           disabled={!domainValid || busy}
-          className="px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shrink-0"
+          className="px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-xs font-bold flex items-center gap-1.5 shrink-0"
         >
           {busy ? <TirangaLoader className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
           {busy ? 'Starting…' : 'Connect'}
         </button>
       </div>
       {domain && !domainValid && (
-        <p className="text-[10px] text-red-400">Enter a valid domain like myshop.com (no https://, no slashes).</p>
+        <p className="text-[10px] text-danger">Enter a valid domain like myshop.com (no https://, no slashes).</p>
       )}
 
       {error && needsPlan && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
-          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+          <Info className="w-3.5 h-3.5 text-warn shrink-0 mt-0.5" />
           <div className="min-w-0">
-            <p className="text-[11px] text-amber-100/90">{error}</p>
-            <p className="mt-1 text-[10px] text-amber-200/60">Open the Billing panel → Plans to activate it, then come back and tap Connect.</p>
+            <p className="text-[11px] text-warn">{error}</p>
+            <p className="mt-1 text-[10px] text-warn">Open the Billing panel → Plans to activate it, then come back and tap Connect.</p>
           </div>
         </div>
       )}
       {error && !needsPlan && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
-          <Info className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+          <Info className="w-3.5 h-3.5 text-danger shrink-0 mt-0.5" />
           <div className="min-w-0">
-            <p className="text-[11px] text-red-200/90">{error}</p>
-            {errorDetail && <p className="mt-1 text-[10px] text-red-200/50 break-words">[{errorDetail}]</p>}
+            <p className="text-[11px] text-danger">{error}</p>
+            {errorDetail && <p className="mt-1 text-[10px] text-danger break-words">[{errorDetail}]</p>}
           </div>
         </div>
       )}
@@ -1140,17 +1140,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               <div className={`flex flex-col gap-2 px-3 py-3 rounded-xl border ${stage.tone === 'ok' ? 'bg-green-500/10 border-green-500/25' : 'bg-amber-500/10 border-amber-500/25'}`}>
                 <div className="flex items-center gap-2 min-w-0">
                   {stage.tone === 'ok'
-                    ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
+                    ? <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
                     : <TirangaLoader className="w-4 h-4 shrink-0" />}
-                  <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-green-200' : 'text-amber-100'}`}>{stage.headline}</span>
+                  <span className={`text-[12px] font-bold ${stage.tone === 'ok' ? 'text-success' : 'text-warn'}`}>{stage.headline}</span>
                 </div>
-                <p className="text-[11px] text-zinc-300/80 leading-relaxed">{stage.note}</p>
+                <p className="text-[11px] text-muted leading-relaxed">{stage.note}</p>
                 {/* www ↔ apex (ROADMAP §13, 1.2). Its own line, under the verdict, never inside it:
                     a twin still waiting for its record must not make a finished domain read as
                     unfinished — and a finished twin is worth saying, because "does www work?" is
                     the second thing everyone tries. */}
                 {result.alternate && (
-                  <p className={`text-[10.5px] leading-relaxed ${result.alternate.active ? 'text-green-200/90' : 'text-zinc-400'}`}>
+                  <p className={`text-[10.5px] leading-relaxed ${result.alternate.active ? 'text-success' : 'text-muted'}`}>
                     {result.alternate.active
                       ? <>✓ <span className="font-mono">{result.alternate.host}</span> works too — it sends visitors here.</>
                       : result.alternate.ownershipState === 'unknown'
@@ -1162,7 +1162,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     way back — the other app silently losing its domain is the one thing a one-tap move
                     must never do quietly. */}
                 {result.movedFrom && (
-                  <p className="text-[10.5px] text-amber-100/90 leading-relaxed">
+                  <p className="text-[10.5px] text-warn leading-relaxed">
                     This domain was moved here from another app of yours — that app no longer serves it. To move it back, open that app and connect it there.
                   </p>
                 )}
@@ -1178,7 +1178,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 {stage.action === 'publish' && (
                   <button
                     onClick={onBack}
-                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold"
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-[12px] font-bold"
                   >
                     Go to Publish
                   </button>
@@ -1189,7 +1189,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 {stage.action === 'deploy-backend' && onDeployBackend && (
                   <button
                     onClick={onDeployBackend}
-                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold"
+                    className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-[12px] font-bold"
                   >
                     Go to Deploy backend
                   </button>
@@ -1203,8 +1203,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 {result.dnsCheck?.summary && (
                   <p className={`text-[11px] leading-relaxed rounded-lg px-2.5 py-2 border ${
                     result.dnsCheck.allSeen
-                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-100'
-                      : 'bg-zinc-800/60 border-zinc-700 text-zinc-300'}`}>
+                      ? 'bg-emerald-500/10 border-emerald-500/25 text-success'
+                      : 'bg-raised border-line text-muted'}`}>
                     {result.dnsCheck.allSeen ? '✓ ' : ''}{result.dnsCheck.summary}
                   </p>
                 )}
@@ -1215,7 +1215,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 {result.issues && result.issues.length > 0 && (
                   <div className="flex flex-col gap-1">
                     {result.issues.map((msg, i) => (
-                      <p key={i} className="text-[11px] leading-relaxed text-amber-100/90">• {msg}</p>
+                      <p key={i} className="text-[11px] leading-relaxed text-warn">• {msg}</p>
                     ))}
                   </div>
                 )}
@@ -1224,7 +1224,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     support question is answered by them, but they must never be the headline.
                     `last checked` is what makes the button above honest: it re-reads the hosting
                     service's answer, and cannot force that service to re-run its own DNS sweep. */}
-                <p className="text-[9px] text-zinc-500/80 font-mono">
+                <p className="text-[9px] text-faint font-mono">
                   ownership: {short(result.ownershipState)} · host: {short(result.hostState)} · SSL: {short(result.sslState)}
                   {result.lastCheckedAt ? ` · last checked ${new Date(result.lastCheckedAt).toLocaleString()}` : ''}
                 </p>
@@ -1249,45 +1249,45 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           {(result.active || result.backendPointed === true) && (
             <button
               onClick={() => setDnsSectionOpen((v) => !v)}
-              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700 hover:border-zinc-500 text-zinc-300 text-[11px] font-bold transition-colors"
+              className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-raised border border-line hover:border-line text-muted text-[11px] font-bold transition-colors"
             >
-              <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
+              <Check className="w-3.5 h-3.5 text-success shrink-0" />
               DNS records
-              <span className="text-zinc-500 font-normal">{dnsSectionOpen ? '— hide' : '— all done, tap to view'}</span>
+              <span className="text-faint font-normal">{dnsSectionOpen ? '— hide' : '— all done, tap to view'}</span>
             </button>
           )}
           {shouldShowDnsSetup(result.active || result.backendPointed === true, dnsSectionOpen) && (
           <>
           {result.autoDns && (
             <div className="px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex flex-col gap-2">
-              <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
+              <span className="text-[10px] font-black text-accent-text uppercase tracking-widest">Or: automatic setup (one-time nameserver change)</span>
               {!autoNs && (
                 <>
-                  <p className="text-[11px] text-zinc-300">
+                  <p className="text-[11px] text-muted">
                     NavBharatAI can add these records for you. You change your domain's nameservers ONCE at
                     your registrar (GoDaddy, Hostinger, anywhere) — after that, we manage the DNS records
                     automatically, now and for every future update.
                   </p>
-                  <p className="text-[10px] text-amber-200/80">
+                  <p className="text-[10px] text-warn">
                     ⚠️ Changing nameservers moves ALL DNS for this domain to NavBharatAI — custom email or
                     other records set at your registrar will need re-adding here. Skip this and use the
                     manual records above if that worries you.
                   </p>
                   <button onClick={autoDnsStart} disabled={autoBusy}
-                    className="self-start px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                    className="self-start px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent text-xs font-bold">
                     {autoBusy ? 'Starting…' : 'Set up automatically'}
                   </button>
                 </>
               )}
               {autoNs && (
                 <>
-                  <p className="text-[11px] text-zinc-300">Set these two nameservers at your registrar (replace the existing ones):</p>
+                  <p className="text-[11px] text-muted">Set these two nameservers at your registrar (replace the existing ones):</p>
                   {autoNs.map((ns, i) => (
                     <Field key={ns} label={`Nameserver ${i + 1}`} value={ns} k={`ns${i}`} copied={copied} onCopy={copy} />
                   ))}
                   <div className="flex items-center gap-2">
                     <button onClick={autoDnsSync} disabled={autoBusy}
-                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent text-xs font-bold">
                       {autoBusy ? 'Checking…' : 'Check & apply records'}
                     </button>
                     {/* The line that used to say "0 records applied automatically" for BOTH complete
@@ -1297,31 +1297,31 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                       // completion while the service is still refusing the domain — the exact pairing in the
                       // admin's screenshot: a green "nothing left to do" under a red `ownership: mismatch`.
                       const s = autoDnsSummary({ zoneStatus: autoZoneStatus, added: autoAdded, removed: autoRemoved, desired: autoDesired, missing: autoMissing, ownershipState: result?.ownershipState, publishBlocked: result?.publishBlocked });
-                      const tone = s.tone === 'ok' ? 'text-green-300' : s.tone === 'warn' ? 'text-amber-300' : 'text-zinc-400';
+                      const tone = s.tone === 'ok' ? 'text-success' : s.tone === 'warn' ? 'text-warn' : 'text-muted';
                       return <span className={`text-[10px] leading-relaxed ${tone}`}>{s.text}</span>;
                     })()}
                   </div>
                   <div className="flex flex-col gap-1.5 pt-1 border-t border-indigo-500/20">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Where did you buy this domain?</span>
+                    <span className="text-[10px] font-bold text-muted uppercase tracking-widest">Where did you buy this domain?</span>
                     <div className="flex items-center gap-2 flex-wrap">
                       <select
                         value={registrarId}
                         onChange={(e) => setRegistrarId(e.target.value)}
                         aria-label="Your domain registrar"
-                        className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500/60"
+                        className="bg-card border border-line rounded-lg px-2 py-1.5 text-xs text-ink outline-none focus:border-indigo-500/60"
                       >
                         <option value="">Select…</option>
                         {REGISTRARS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
                       {registrarById(registrarId)?.panelUrl && (
                         <a href={registrarById(registrarId)!.panelUrl} target="_blank" rel="noreferrer"
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-xs font-bold">
                           Open {registrarById(registrarId)!.name} →
                         </a>
                       )}
                     </div>
                     {registrarById(registrarId) && (
-                      <p className="text-[10px] text-zinc-400">{registrarById(registrarId)!.steps}</p>
+                      <p className="text-[10px] text-muted">{registrarById(registrarId)!.steps}</p>
                     )}
                   </div>
                 </>
@@ -1338,7 +1338,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               So when automatic setup is live, the manual list is DEMOTED and prefixed with the truth. */}
           {autoZoneStatus === 'active' && (
             <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
-              <p className="text-[11px] text-amber-100 leading-relaxed">
+              <p className="text-[11px] text-warn leading-relaxed">
                 <span className="font-bold">You do not need to add these by hand.</span> Your domain now uses
                 NavBharatAI&apos;s nameservers, so we write these records for you — and any record you add at
                 your registrar&apos;s DNS page is ignored from now on. The list below is only for reference.
@@ -1352,17 +1352,17 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               {needsStandaloneApplyButton(autoZoneStatus, !!result.autoDns && !!autoNs) && (
                 <div className="flex items-center gap-2 flex-wrap pt-1">
                   <button onClick={autoDnsSync} disabled={autoBusy}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold">
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent text-xs font-bold">
                     {autoBusy ? 'Checking…' : 'Check & apply records'}
                   </button>
-                  <span className="text-[10px] text-amber-100/80 leading-relaxed">
+                  <span className="text-[10px] text-warn leading-relaxed">
                     Writes every record below into your domain for you, and clears any wrong one left behind.
                   </span>
                 </div>
               )}
             </div>
           )}
-          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+          <span className="text-[10px] font-black text-faint uppercase tracking-widest">
             {autoZoneStatus === 'active' ? 'For reference: the records we manage for you' : 'Or: add these DNS records yourself at your registrar'}
           </span>
           {/* STABLE record list (admin 2026-08-19: "DNS record bhulne nahi chahiye"). Prefer the server's
@@ -1375,14 +1375,14 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
             // Freshly-attached domains often report their records a few seconds AFTER create (the
             // hosting API prepares them asynchronously). "No records needed" read as "done" while
             // ownership sat pending — admin screenshot 2026-08-06. Say what is actually happening.
-            <p className="text-[11px] text-zinc-400">
+            <p className="text-[11px] text-muted">
               {result.active
                 ? 'No records needed — this domain is fully set up.'
                 : 'Your records are being prepared — tap "Check" below in a few seconds to load them.'}
             </p>
           )}
           {doneCount > 0 && (
-            <p className="text-[10px] text-green-300/90">✓ {doneCount} record{doneCount === 1 ? '' : 's'} you added {doneCount === 1 ? 'is' : 'are'} verified{pendingCount > 0 ? ` — ${pendingCount} more to add below.` : ' — nothing more to add.'}</p>
+            <p className="text-[10px] text-success">✓ {doneCount} record{doneCount === 1 ? '' : 's'} you added {doneCount === 1 ? 'is' : 'are'} verified{pendingCount > 0 ? ` — ${pendingCount} more to add below.` : ' — nothing more to add.'}</p>
           )}
           {shown.map((rec, i) => rec.done ? (
             /**
@@ -1398,15 +1398,15 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
              */
             <details key={i} className="px-3 py-1.5 rounded-lg bg-green-500/5 border border-green-500/20 group/rec">
               <summary className="flex items-center gap-2 cursor-pointer list-none marker:hidden">
-                <Check className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">{rec.type}</span>
-                <span className="text-[11px] text-zinc-400 font-mono truncate">{relativeRecordName(rec.name, cleanDomain)}</span>
+                <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-success">{rec.type}</span>
+                <span className="text-[11px] text-muted font-mono truncate">{relativeRecordName(rec.name, cleanDomain)}</span>
                 {/* "Verified" only when our resolver actually saw it — see recordBadge. */}
-                <span className="ml-auto text-[10px] text-green-300 shrink-0">{recordBadge(rec, result.dnsCheck)}</span>
+                <span className="ml-auto text-[10px] text-success shrink-0">{recordBadge(rec, result.dnsCheck)}</span>
                 {/* Says what the click DOES. A bare chevron on a row nobody expects to be clickable is
                     how a feature stays undiscovered. */}
-                <span className="text-[10px] text-zinc-500 shrink-0 group-open/rec:hidden">show</span>
-                <span className="text-[10px] text-zinc-500 shrink-0 hidden group-open/rec:inline">hide</span>
+                <span className="text-[10px] text-faint shrink-0 group-open/rec:hidden">show</span>
+                <span className="text-[10px] text-faint shrink-0 hidden group-open/rec:inline">hide</span>
               </summary>
               <div className="flex flex-col gap-1 pt-2">
                 {/* The SAME three copyable fields the pending card shows — a verified record is not a
@@ -1417,7 +1417,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 {/* SIBLING of the pending card's instruction (registrarEditsApply): a record we wrote
                     into our own zone is not "live at your registrar", and saying so would send someone
                     looking for it in a panel that no longer holds it. */}
-                <p className="text-[10px] text-zinc-500">
+                <p className="text-[10px] text-faint">
                   {registrarEditsApply(autoZoneStatus)
                     ? 'Already live at your registrar — this is here so you can copy it again if you ever need to re-add it.'
                     : 'Already live — NavBharatAI holds this record for your domain. It is here so you can copy it again if you ever need it.'}
@@ -1425,10 +1425,10 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               </div>
             </details>
           ) : (
-            <div key={i} className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 flex flex-col gap-1">
+            <div key={i} className="px-3 py-2 rounded-lg bg-card border border-line flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">{rec.type}</span>
-                {rec.note && <span className="text-[10px] text-zinc-500">{rec.note}</span>}
+                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-success">{rec.type}</span>
+                {rec.note && <span className="text-[10px] text-faint">{rec.note}</span>}
               </div>
               {/* THE CARD SHOWS EXACTLY WHAT GETS PASTED (admin 2026-08-09: "jo jo copy paste hoga,
                   wahi wahi dikhna chahiye — mere users non-technical hain"). Registrar forms lead
@@ -1444,15 +1444,15 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                   registrarEditsApply. Once the zone is delegated to us this instruction described an
                   action that could not work, directly under the notice saying so. */}
               {registrarEditsApply(autoZoneStatus) ? (
-                <p className="text-[10px] text-zinc-500">
-                  At your registrar: in the "Type" dropdown choose <span className="font-bold text-zinc-300">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
+                <p className="text-[10px] text-faint">
+                  At your registrar: in the "Type" dropdown choose <span className="font-bold text-muted">{rec.type}</span>, copy Name and Value into their boxes, and leave TTL as-is.
                   {relativeRecordName(rec.name, cleanDomain) === '@' && (
                     <> ("@" simply means your domain, {cleanDomain} — every registrar form understands it.)</>
                   )}
                 </p>
               ) : (
-                <p className="text-[10px] text-zinc-500">
-                  NavBharatAI adds this one for you — press <span className="font-bold text-zinc-300">Check &amp; apply records</span> above.
+                <p className="text-[10px] text-faint">
+                  NavBharatAI adds this one for you — press <span className="font-bold text-muted">Check &amp; apply records</span> above.
                   Typing it at your registrar will not work: this domain&apos;s DNS is managed here now.
                 </p>
               )}
@@ -1463,46 +1463,46 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
 
           {result.domainConnect && (
             <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20 flex flex-col gap-2">
-              <span className="text-[10px] font-black text-sky-300 uppercase tracking-widest">Or: one-click at your registrar</span>
+              <span className="text-[10px] font-black text-info uppercase tracking-widest">Or: one-click at your registrar</span>
               {!dcCheck && (
                 <button onClick={domainConnectCheck} disabled={autoBusy}
-                  className="self-start px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-xs font-bold">
+                  className="self-start px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-on-accent text-xs font-bold">
                   {autoBusy ? 'Checking…' : 'Check if my registrar supports one-click'}
                 </button>
               )}
               {dcCheck && dcCheck.supported && dcCheck.applyUrl && (
                 <a href={dcCheck.applyUrl} target="_blank" rel="noreferrer"
-                  className="self-start px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold">
+                  className="self-start px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-on-accent text-xs font-bold">
                   Approve at {dcCheck.providerName || 'your registrar'} →
                 </a>
               )}
               {dcCheck && !dcCheck.supported && (
-                <p className="text-[11px] text-zinc-400">{dcCheck.reason}</p>
+                <p className="text-[11px] text-muted">{dcCheck.reason}</p>
               )}
             </div>
           )}
 
           {result.hostingerDns && (
             <div className="px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-500/20 flex flex-col gap-2">
-              <span className="text-[10px] font-black text-violet-300 uppercase tracking-widest">Or: I'm on Hostinger</span>
+              <span className="text-[10px] font-black text-accent-text uppercase tracking-widest">Or: I'm on Hostinger</span>
               {hostingerDone === null ? (
                 <>
-                  <p className="text-[11px] text-zinc-300">
+                  <p className="text-[11px] text-muted">
                     Paste an API token from Hostinger hPanel (Account → API). It is used once to add these
                     records to your zone and never stored.
                   </p>
                   <div className="flex gap-2">
                     <input value={hostingerToken} onChange={(e) => setHostingerToken(e.target.value)}
                       placeholder="Hostinger API token" type="password" autoComplete="off"
-                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-violet-500/60" />
+                      className="flex-1 bg-card border border-line rounded-lg px-3 py-1.5 text-xs text-ink outline-none focus:border-violet-500/60" />
                     <button onClick={hostingerApply} disabled={autoBusy || !hostingerToken.trim()}
-                      className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-bold shrink-0">
+                      className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-on-accent text-xs font-bold shrink-0">
                       {autoBusy ? 'Applying…' : 'Apply records'}
                     </button>
                   </div>
                 </>
               ) : (
-                <p className="text-[11px] text-green-300">✓ {hostingerDone} record{hostingerDone === 1 ? '' : 's'} sent to Hostinger — tap "Check" below once DNS refreshes.</p>
+                <p className="text-[11px] text-success">✓ {hostingerDone} record{hostingerDone === 1 ? '' : 's'} sent to Hostinger — tap "Check" below once DNS refreshes.</p>
               )}
             </div>
           )}
@@ -1510,7 +1510,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
           {/* The status + Check button now live at the TOP of this block (see the comment there);
               a second copy here would be two sources of truth for one state. What remains is the
               closing reassurance, which belongs after the reference material. */}
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
+          <p className="text-[10px] text-faint leading-relaxed">
             DNS changes can take a few minutes to a few hours{result.active ? '' : ' — this is your registrar and the public internet catching up, not something on our side you can speed up'}. Publish your app once after connecting, so the
             domain serves your latest build. HTTPS is issued automatically once the records resolve.
           </p>
@@ -1524,7 +1524,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
             <button
               onClick={checkStatus}
               disabled={checking}
-              className="self-start flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white text-[13px] font-bold transition-colors"
+              className="self-start flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-500 disabled:opacity-40 text-on-accent text-[13px] font-bold transition-colors"
             >
               {checking ? <TirangaLoader className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
               {checking ? 'Checking…' : 'Check now'}
@@ -1569,19 +1569,19 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                   disabled={!!publishBusy}
                   className={`self-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors disabled:opacity-50 ${
                     p.primary
-                      ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                      : 'border border-zinc-700 text-zinc-200 hover:bg-zinc-800'
+                      ? 'bg-indigo-600 hover:bg-indigo-500 text-on-accent'
+                      : 'border border-line text-body hover:bg-raised'
                   }`}
                 >
                   {publishBusy ? <TirangaLoader className="w-4 h-4" /> : <Rocket className="w-4 h-4" />}
                   {publishBusy ? 'Publishing…' : p.label}
                   {/* THE END OF THE DOT TRAIL — this is the button that clears it. */}
                   {!publishBusy && needsPublishDot(freshness) && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" aria-label="You have unpublished changes" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 text-on-accent" aria-label="You have unpublished changes" />
                   )}
                 </button>
                 )}
-                {p.note && <p className="text-[11px] text-zinc-400 leading-relaxed">{p.note}</p>}
+                {p.note && <p className="text-[11px] text-muted leading-relaxed">{p.note}</p>}
                 {/* WHAT HAPPENED WHEN THEY PRESSED IT (admin 2026-08-24: "yeh theek se deploy ho hi
                     nahi raha hai").
 
@@ -1597,7 +1597,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     Precedence is deliberate: a refusal that stopped this attempt outranks the text of
                     the last one, which the host has not cleared because the request never started. */}
                 {(publishBlocked || publishResult) && (
-                  <p className={`text-[11px] leading-relaxed whitespace-pre-wrap break-words ${publishBlocked ? 'text-amber-300' : 'text-zinc-300'}`}>
+                  <p className={`text-[11px] leading-relaxed whitespace-pre-wrap break-words ${publishBlocked ? 'text-warn' : 'text-muted'}`}>
                     {publishBlocked || publishResult}
                   </p>
                 )}
@@ -1619,8 +1619,8 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 rel="noreferrer"
                 className={`self-start flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors ${
                   tone === 'live'
-                    ? 'bg-green-600 hover:bg-green-500 text-white'
-                    : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                    ? 'bg-green-600 hover:bg-green-500 text-on-accent'
+                    : 'border border-line text-muted hover:bg-raised'
                 }`}
               >
                 <Globe className="w-4 h-4" />
@@ -1638,24 +1638,24 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
               🔒 The consequence is stated BEFORE the field, in plain English, and the word must be
               typed exactly. See `unpublishArmed` for why a typed word and not a second tap. */}
           {result.active && onUnpublish && result.publish?.live && (
-            <div className="mt-1 pt-3 border-t border-zinc-800 flex flex-col gap-2">
+            <div className="mt-1 pt-3 border-t border-line flex flex-col gap-2">
               {!unpubOpen ? (
                 <button
                   onClick={() => { setUnpubOpen(true); setUnpubMsg(''); setUnpubTyped(''); }}
-                  className="self-start text-[11px] text-zinc-500 hover:text-red-400 underline underline-offset-2 transition-colors"
+                  className="self-start text-[11px] text-faint hover:text-danger underline underline-offset-2 transition-colors"
                 >
                   Take this website offline
                 </button>
               ) : (
                 <>
-                  <p className="text-[11.5px] text-red-200 leading-relaxed">
+                  <p className="text-[11.5px] text-danger leading-relaxed">
                     <span className="font-bold">This will delete your website.</span>{' '}
                     {cleanDomain} will stop working, and anyone you shared the link with will no longer
                     be able to open it. Your app and its files are safe — you can publish it again later
                     — but this cannot be undone right now.
                   </p>
-                  <p className="text-[11px] text-zinc-400">
-                    Type <span className="font-mono font-bold text-red-300">{UNPUBLISH_WORD}</span> to confirm:
+                  <p className="text-[11px] text-muted">
+                    Type <span className="font-mono font-bold text-danger">{UNPUBLISH_WORD}</span> to confirm:
                   </p>
                   <input
                     value={unpubTyped}
@@ -1664,7 +1664,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     autoComplete="off"
                     spellCheck={false}
                     aria-label={`Type ${UNPUBLISH_WORD} to confirm taking the website offline`}
-                    className="self-start w-40 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-[12px] font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-red-500"
+                    className="self-start w-40 px-2.5 py-1.5 rounded-lg bg-card border border-line text-[12px] font-mono text-body placeholder:text-faint focus:outline-none focus:border-red-500"
                   />
                   <div className="flex items-center gap-2">
                     <button
@@ -1686,7 +1686,7 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                         }
                       }}
                       disabled={!unpublishArmed(unpubTyped) || unpubBusy}
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-[12px] font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent text-[12px] font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {unpubBusy ? <TirangaLoader className="w-3.5 h-3.5" /> : null}
                       {unpubBusy ? 'Taking it offline…' : 'Unpublish'}
@@ -1694,12 +1694,12 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                     <button
                       onClick={() => { setUnpubOpen(false); setUnpubTyped(''); setUnpubMsg(''); }}
                       disabled={unpubBusy}
-                      className="px-3 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-[12px] font-bold"
+                      className="px-3 py-2 rounded-xl border border-line text-muted hover:bg-raised text-[12px] font-bold"
                     >
                       Cancel
                     </button>
                   </div>
-                  {unpubMsg && <p className="text-[11px] text-amber-300 leading-relaxed">{unpubMsg}</p>}
+                  {unpubMsg && <p className="text-[11px] text-warn leading-relaxed">{unpubMsg}</p>}
                 </>
               )}
             </div>
@@ -1757,10 +1757,10 @@ function short(state: string): string {
 function Field({ label, value, k, copied, onCopy }: { label: string; value: string; k: string; copied: string | null; onCopy: (v: string, k: string) => void; }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[9px] text-zinc-500 w-10 shrink-0 uppercase">{label}</span>
-      <code className="flex-1 min-w-0 truncate text-[11px] font-mono text-zinc-200 bg-black/40 rounded px-2 py-1">{value}</code>
-      <button onClick={() => onCopy(value, k)} className="shrink-0 text-zinc-400 hover:text-white" title="Copy">
-        {copied === k ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+      <span className="text-[9px] text-faint w-10 shrink-0 uppercase">{label}</span>
+      <code className="flex-1 min-w-0 truncate text-[11px] font-mono text-body bg-well rounded px-2 py-1">{value}</code>
+      <button onClick={() => onCopy(value, k)} className="shrink-0 text-muted hover:text-ink" title="Copy">
+        {copied === k ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
     </div>
   );

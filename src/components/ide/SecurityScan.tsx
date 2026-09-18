@@ -31,7 +31,6 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
   const [report, setReport] = useState<string | null>(null);
   const [history, setHistory] = useState<{ date: string; target: string }[]>([]);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   /**
    * THE PROGRESS IS THE SERVER'S, NOT A TIMER (admin 2026-08-21: "isko asli bana do").
@@ -133,11 +132,11 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
   };
 
   return (
-    <div className={cn("flex flex-col h-full overflow-hidden transition-colors", theme === 'dark' ? "bg-[#0d1117]" : "bg-gray-50")}>
+    <div className={cn("flex flex-col h-full overflow-hidden transition-colors", "bg-surface")}>
       {/* Scan Header */}
       <div className={cn(
         "border-b transition-all duration-300 relative overflow-hidden",
-        theme === 'dark' ? "border-white/5 bg-[#161b22]" : "border-gray-200 bg-white",
+        "border-line bg-card",
         isHeaderCollapsed ? "p-1 md:p-1.5 px-2.5 md:px-8" : "p-2 md:p-8"
       )}>
         <div className={cn(
@@ -147,21 +146,15 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
           <div className="flex items-center justify-between w-full md:w-auto">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <ShieldAlert className={cn("text-indigo-500 transition-all", isHeaderCollapsed ? "w-3 h-3 md:w-4 md:h-4" : "w-5 h-5 md:w-8 md:h-8")} />
-                <span className={cn("font-bold", theme === 'dark' ? "text-white" : "text-gray-900")}>
+                <ShieldAlert className={cn("text-accent-text transition-all", isHeaderCollapsed ? "w-3 h-3 md:w-4 md:h-4" : "w-5 h-5 md:w-8 md:h-8")} />
+                <span className={cn("font-bold", "text-ink")}>
                   {!isHeaderCollapsed ? "Security Auditor Hub" : "Auditor"}
                 </span>
               </div>
-              <button
-                  onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg", 
-                    theme === 'dark' ? "bg-white/5 text-white hover:bg-white/10" : "bg-gray-200 text-gray-900 hover:bg-gray-300"
-                  )}
-              >{theme === 'dark' ? 'Light' : 'Dark'} Mode</button>
             </div>
             <button 
               onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
-              className="p-1 hover:bg-white/5 rounded-lg text-[#8b949e] transition-colors"
+              className="p-1 hover:bg-raised rounded-lg text-muted transition-colors"
             >
               {isHeaderCollapsed ? <ChevronDown className="w-3.5 h-3.5 md:w-5 md:h-5" /> : <ChevronUp className="w-4 h-4 md:w-5 md:h-5" />}
             </button>
@@ -172,14 +165,14 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
             isHeaderCollapsed ? "md:flex-1 md:justify-end flex-row w-full md:w-auto" : "flex-wrap w-full md:w-auto"
           )}>
             <div className={cn("relative transition-all", isHeaderCollapsed ? "flex-1 md:max-w-[340px]" : "flex-1 md:w-64")}>
-              <Globe className={cn("absolute left-2.5 top-1/2 -translate-y-1/2 text-[#484f58]", isHeaderCollapsed ? "w-2.5 h-2.5" : "w-4 h-4")} />
+              <Globe className={cn("absolute left-2.5 top-1/2 -translate-y-1/2 text-faint", isHeaderCollapsed ? "w-2.5 h-2.5" : "w-4 h-4")} />
               <input 
                 value={target}
                 placeholder="Target URL / Domain / System Link to Scan..."
                 onChange={(e) => setTarget(e.target.value)}
                 className={cn(
                   "w-full border rounded-lg md:rounded-2xl text-[9px] md:text-xs font-bold outline-none focus:border-indigo-500 transition-all placeholder:font-normal",
-                  theme === 'dark' ? "bg-black/40 border-white/10 text-white placeholder:text-[#30363d]" : "bg-white border-gray-300 text-gray-900 placeholder:text-gray-400",
+                  "bg-well border-line text-ink placeholder:text-faint",
                   isHeaderCollapsed ? "py-1 pl-7 pr-2" : "py-2 md:py-3 pl-8 md:pl-11 pr-4"
                 )}
               />
@@ -188,9 +181,9 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
               onClick={performScan}
               disabled={isScanning}
               className={cn(
-                "rounded-lg md:rounded-2xl text-[8px] md:text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 border border-white/10",
+                "rounded-lg md:rounded-2xl text-[8px] md:text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1 border border-line",
                 isHeaderCollapsed ? "px-2.5 py-1" : "px-4 md:px-8 py-2 md:py-3",
-                isScanning ? "bg-indigo-600/50 text-white cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 active:scale-95"
+                isScanning ? "bg-indigo-600/50 text-ink cursor-not-allowed" : "bg-indigo-600 text-on-accent hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 active:scale-95"
               )}
             >
               {isScanning ? <TirangaLoader className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5 fill-current" />}
@@ -220,15 +213,15 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                    <TirangaLoader className="w-4 h-4" />
-                   <span className="text-xs font-black uppercase tracking-widest text-[#8b949e]">{status}</span>
+                   <span className="text-xs font-black uppercase tracking-widest text-muted">{status}</span>
                 </div>
-                <span className={cn("text-xs font-bold", theme === 'dark' ? "text-white" : "text-gray-900")}>{Math.round(progress)}%</span>
+                <span className={cn("text-xs font-bold", "text-ink")}>{Math.round(progress)}%</span>
               </div>
-              <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-2 bg-raised rounded-full overflow-hidden">
                 <motion.div 
                   initial={{ width: 0 }}
                   animate={{ width: `${progress}%` }}
-                  className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400"
+                  className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400 text-on-accent"
                 />
               </div>
 
@@ -239,19 +232,19 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                   <div key={st.id} className="flex items-center gap-2 text-[11px]">
                     <span className={cn(
                       'w-4 shrink-0 text-center',
-                      st.state === 'done' ? 'text-emerald-400' : st.state === 'failed' ? 'text-amber-400' : 'text-white/25',
+                      st.state === 'done' ? 'text-success' : st.state === 'failed' ? 'text-warn' : 'text-faint',
                     )}>
                       {st.state === 'done' ? '✓' : st.state === 'failed' ? '!' : '·'}
                     </span>
-                    <span className={cn(st.state === 'waiting' ? 'text-white/35' : theme === 'dark' ? 'text-white/80' : 'text-gray-700')}>
+                    <span className={cn(st.state === 'waiting' ? 'text-faint' : 'text-body')}>
                       {st.label}
                     </span>
                     {st.state === 'done' && typeof st.found === 'number' && (
-                      <span className={cn('ml-auto font-bold', st.found > 0 ? 'text-amber-300' : 'text-emerald-400')}>
+                      <span className={cn('ml-auto font-bold', st.found > 0 ? 'text-warn' : 'text-success')}>
                         {st.found > 0 ? `${st.found} found` : 'clear'}
                       </span>
                     )}
-                    {st.state === 'failed' && <span className="ml-auto text-amber-300">could not run</span>}
+                    {st.state === 'failed' && <span className="ml-auto text-warn">could not run</span>}
                   </div>
                 ))}
               </div>
@@ -263,7 +256,7 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-[#484f58] flex items-center gap-2">
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-faint flex items-center gap-2">
                 Scan Report
               </h3>
               <div className="flex items-center gap-2">
@@ -288,7 +281,7 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                       void deliverTextFile(`security-scan-${slug}-${stamp}.md`, report, 'text/markdown');
                     }}
                     disabled={!report}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[#8b949e]"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-raised rounded-lg text-[10px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
                  >
                     <Download className="w-3.5 h-3.5" /> Download Report
                  </button>
@@ -302,27 +295,27 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
                 an opinion. The verdict line says how many of the checks completed, so "no issues" from
                 a scan that lost a stage can never read like a clean bill of health. */}
             {verdict && !isScanning && (
-              <div className={cn('border rounded-3xl p-5 transition-colors', theme === 'dark' ? 'bg-[#161b22] border-white/5' : 'bg-white border-gray-200')}>
-                <p className={cn('text-sm font-black', findings.length ? 'text-amber-300' : 'text-emerald-400')}>{verdict}</p>
+              <div className={cn('border rounded-3xl p-5 transition-colors', 'bg-card border-line')}>
+                <p className={cn('text-sm font-black', findings.length ? 'text-warn' : 'text-success')}>{verdict}</p>
                 {findings.length > 0 && (
                   <div className="mt-3 space-y-2">
                     {findings.slice(0, 40).map((f, i) => (
-                      <div key={`${f.file}:${f.line}:${i}`} className="rounded-xl border border-white/5 bg-black/20 p-3">
+                      <div key={`${f.file}:${f.line}:${i}`} className="rounded-xl border border-line bg-well p-3">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={cn(
                             'text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border',
-                            f.severity === 'critical' ? 'border-rose-500/40 text-rose-300'
-                              : f.severity === 'high' ? 'border-amber-500/40 text-amber-300'
-                              : 'border-white/15 text-white/50',
+                            f.severity === 'critical' ? 'border-rose-500/40 text-danger'
+                              : f.severity === 'high' ? 'border-amber-500/40 text-warn'
+                              : 'border-line text-muted',
                           )}>{f.severity}</span>
-                          <span className="text-[11px] font-mono text-[#8b949e] break-all">{f.file}:{f.line}</span>
+                          <span className="text-[11px] font-mono text-muted break-all">{f.file}:{f.line}</span>
                         </div>
-                        <p className={cn('text-xs mt-1.5', theme === 'dark' ? 'text-white' : 'text-gray-900')}>{f.problem}</p>
-                        <p className="text-[11px] text-[#8b949e] mt-1">{f.suggestion}</p>
+                        <p className={cn('text-xs mt-1.5', 'text-ink')}>{f.problem}</p>
+                        <p className="text-[11px] text-muted mt-1">{f.suggestion}</p>
                       </div>
                     ))}
                     {findings.length > 40 && (
-                      <p className="text-[11px] text-[#8b949e]">…and {findings.length - 40} more.</p>
+                      <p className="text-[11px] text-muted">…and {findings.length - 40} more.</p>
                     )}
                   </div>
                 )}
@@ -330,77 +323,77 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
             )}
 
             {!report && !isScanning ? (
-              <div className={cn("border rounded-3xl p-12 text-center space-y-4 transition-colors", theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200 shadow-sm")}>
-                 <div className={cn("w-16 h-16 rounded-full flex items-center justify-center mx-auto", theme === 'dark' ? "bg-white/5" : "bg-gray-100")}>
-                    <ShieldCheck className={cn("w-8 h-8", theme === 'dark' ? "text-[#484f58]" : "text-gray-400")} />
+              <div className={cn("border rounded-3xl p-12 text-center space-y-4 transition-colors", "bg-card border-line")}>
+                 <div className={cn("w-16 h-16 rounded-full flex items-center justify-center mx-auto", "bg-raised")}>
+                    <ShieldCheck className={cn("w-8 h-8", "text-faint")} />
                  </div>
-                 <h4 className={cn("font-bold", theme === 'dark' ? "text-white" : "text-gray-900")}>Ready for Audit</h4>
-                 <p className={cn("text-sm max-w-xs mx-auto", theme === 'dark' ? "text-[#8b949e]" : "text-gray-600")}>Enter a target URL or project path to start a defensive security audit.</p>
+                 <h4 className={cn("font-bold", "text-ink")}>Ready for Audit</h4>
+                 <p className={cn("text-sm max-w-xs mx-auto", "text-muted")}>Enter a target URL or project path to start a defensive security audit.</p>
               </div>
             ) : report ? (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={cn("border rounded-3xl p-8 prose prose-invert prose-xs max-w-none transition-colors", 
-                  theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200"
+                  "bg-card border-line"
                 )}
               >
-                <div className={cn("markdown-body", theme === 'light' && "text-gray-900")}>
+                <div className={"markdown-body"}>
                   <Markdown>{report}</Markdown>
                 </div>
               </motion.div>
             ) : (
-              <div className={cn("border rounded-3xl p-12 text-center space-y-4 transition-colors", theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200 shadow-sm")}>
+              <div className={cn("border rounded-3xl p-12 text-center space-y-4 transition-colors", "bg-card border-line")}>
                  <TirangaLoader className="w-12 h-12 mx-auto" />
-                 <h4 className={cn("font-bold uppercase tracking-widest", theme === 'dark' ? "text-white" : "text-gray-900")}>Auditing In Progress</h4>
-                 <p className="text-[#8b949e] text-[10px] font-black uppercase">Executing Defensive Protocols...</p>
+                 <h4 className={cn("font-bold uppercase tracking-widest", "text-ink")}>Auditing In Progress</h4>
+                 <p className="text-muted text-[10px] font-black uppercase">Executing Defensive Protocols...</p>
               </div>
             )}
           </div>
 
           <div className="space-y-8">
-            <div className={cn("border rounded-3xl p-6 space-y-6 transition-colors", theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200 shadow-sm")}>
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-[#484f58]">Auditor Status</h3>
+            <div className={cn("border rounded-3xl p-6 space-y-6 transition-colors", "bg-card border-line")}>
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-faint">Auditor Status</h3>
               <div className="space-y-4">
-                 <div className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors", theme === 'dark' ? "bg-black/40 border-white/5" : "bg-gray-50 border-gray-200")}>
-                    <span className="text-[10px] font-black text-[#8b949e] uppercase">Identity</span>
-                    <span className="text-xs font-bold text-indigo-400">Security Auditor</span>
+                 <div className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors", "bg-well border-line")}>
+                    <span className="text-[10px] font-black text-muted uppercase">Identity</span>
+                    <span className="text-xs font-bold text-accent-text">Security Auditor</span>
                  </div>
-                 <div className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors", theme === 'dark' ? "bg-black/40 border-white/5" : "bg-gray-50 border-gray-200")}>
-                    <span className="text-[10px] font-black text-[#8b949e] uppercase">Specialization</span>
-                    <span className="text-xs font-bold text-emerald-400">Defensive Ops</span>
+                 <div className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors", "bg-well border-line")}>
+                    <span className="text-[10px] font-black text-muted uppercase">Specialization</span>
+                    <span className="text-xs font-bold text-success">Defensive Ops</span>
                  </div>
-                 <div className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors", theme === 'dark' ? "bg-black/40 border-white/5" : "bg-gray-50 border-gray-200")}>
-                    <span className="text-[10px] font-black text-[#8b949e] uppercase">Mode</span>
-                    <span className="text-xs font-bold text-emerald-500">Autonomous</span>
+                 <div className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors", "bg-well border-line")}>
+                    <span className="text-[10px] font-black text-muted uppercase">Mode</span>
+                    <span className="text-xs font-bold text-success">Autonomous</span>
                  </div>
               </div>
             </div>
 
-            <div className={cn("border rounded-3xl p-6 space-y-6 transition-colors", theme === 'dark' ? "bg-[#161b22] border-white/5" : "bg-white border-gray-200 shadow-sm")}>
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-[#484f58]">Audit History</h3>
+            <div className={cn("border rounded-3xl p-6 space-y-6 transition-colors", "bg-card border-line")}>
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-faint">Audit History</h3>
               <div className="space-y-3">
                  {history.length > 0 ? history.map((h, i) => (
-                    <div key={i} className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors group", theme === 'dark' ? "bg-black/20 border-white/5" : "bg-gray-50 border-gray-200")}>
+                    <div key={i} className={cn("flex items-center justify-between p-3 rounded-xl border transition-colors group", "bg-well border-line")}>
                        <div className="flex flex-col overflow-hidden">
-                          <span className={cn("text-[10px] font-bold truncate", theme === 'dark' ? "text-white" : "text-gray-900")}>{h.target}</span>
-                          <span className="text-[8px] text-[#484f58] uppercase font-black">{h.date}</span>
+                          <span className={cn("text-[10px] font-bold truncate", "text-ink")}>{h.target}</span>
+                          <span className="text-[8px] text-faint uppercase font-black">{h.date}</span>
                        </div>
-                       <History className="w-3.5 h-3.5 text-[#484f58] group-hover:text-white transition-colors flex-shrink-0" />
+                       <History className="w-3.5 h-3.5 text-faint group-hover:text-ink transition-colors flex-shrink-0" />
                     </div>
                  )) : (
-                    <div className="text-center py-4 text-[10px] text-[#484f58] font-bold uppercase">No history found</div>
+                    <div className="text-center py-4 text-[10px] text-faint font-bold uppercase">No history found</div>
                  )}
               </div>
             </div>
 
-            <div className="p-6 bg-indigo-600 rounded-3xl relative overflow-hidden group hover:scale-[1.02] transition-transform cursor-pointer">
+            <div className="p-6 bg-indigo-600 rounded-3xl relative overflow-hidden group hover:scale-[1.02] transition-transform cursor-pointer text-on-accent">
                <div className="relative z-10 space-y-3">
-                  <Shield className="w-8 h-8 text-white/50" />
-                  <h4 className="text-white font-black uppercase tracking-tighter">Security Lab</h4>
-                  <p className="text-white/80 text-[10px] font-medium leading-relaxed">Learn about defensive security patterns and harden your infrastructure.</p>
+                  <Shield className="w-8 h-8 text-on-accent" />
+                  <h4 className="text-on-accent font-black uppercase tracking-tighter">Security Lab</h4>
+                  <p className="text-on-accent text-[10px] font-medium leading-relaxed">Learn about defensive security patterns and harden your infrastructure.</p>
                </div>
-               <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full group-hover:scale-150 transition-transform"></div>
+               <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-raised rounded-full group-hover:scale-150 transition-transform"></div>
             </div>
           </div>
         </div>

@@ -384,6 +384,16 @@ describe('status bar follows the app theme', () => {
     expect(statusBarColorForTheme('light')).toBe('#ffffff');
   });
 
+  it('high contrast is a BLACK surface, so it needs light icons on a black bar (was a white bar with dark icons)', () => {
+    expect(statusBarStyleForTheme('contrast')).toBe('light');
+    expect(statusBarColorForTheme('contrast')).toBe('#000000');
+  });
+
+  it('a not-yet-migrated saved "dim" still gets the dark treatment on first paint', () => {
+    expect(statusBarStyleForTheme('dim')).toBe('light');
+    expect(statusBarColorForTheme('dim')).toBe('#0d1117');
+  });
+
   it('an unknown or missing theme falls back to the light treatment, never to nothing', () => {
     for (const t of [null, undefined, '', 'sepia']) {
       expect(statusBarStyleForTheme(t)).toBe('dark');

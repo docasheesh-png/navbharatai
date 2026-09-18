@@ -101,7 +101,7 @@ const CopyButton: React.FC<{ text: string; className?: string }> = ({ text, clas
   return (
     <button
       onClick={handleCopy}
-      className={`p-1.5 rounded transition-colors ${copied ? 'text-green-400' : 'text-gray-400 hover:text-white'} ${className}`}
+      className={`p-1.5 rounded transition-colors ${copied ? 'text-success' : 'text-muted hover:text-ink'} ${className}`}
       title="Copy"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -131,22 +131,22 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ title, filename, code }) => {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/(self\.|event\.|clients\.|navigator\.|fetch|async|await|const|function|return|new)/g, '<span style="color:#79c0ff">$1</span>')
-    .replace(/('[^']*'|"[^"]*")/g, '<span style="color:#a5d6ff">$1</span>')
-    .replace(/(\/\/[^\n]*)/g, '<span style="color:#8b949e">$1</span>');
+    .replace(/(self\.|event\.|clients\.|navigator\.|fetch|async|await|const|function|return|new)/g, '<span style="color:var(--brand-info-text)">$1</span>')
+    .replace(/('[^']*'|"[^"]*")/g, '<span style="color:var(--brand-success-text)">$1</span>')
+    .replace(/(\/\/[^\n]*)/g, '<span style="color:var(--text-faint)">$1</span>');
 
   return (
-    <div className="rounded-lg border border-white/10 overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 bg-[#0d1117] border-b border-white/10">
+    <div className="rounded-lg border border-line overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface border-b border-line">
         <div>
-          <span className="text-xs font-semibold text-white">{title}</span>
-          <span className="ml-2 text-xs text-gray-500 font-mono">{filename}</span>
+          <span className="text-xs font-semibold text-ink">{title}</span>
+          <span className="ml-2 text-xs text-faint font-mono">{filename}</span>
         </div>
         <div className="flex gap-1">
           <CopyButton text={code} />
           <button
             onClick={handleDownload}
-            className="p-1.5 rounded text-gray-400 hover:text-white transition-colors"
+            className="p-1.5 rounded text-muted hover:text-ink transition-colors"
             title="Download"
           >
             <Download size={14} />
@@ -154,7 +154,7 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ title, filename, code }) => {
         </div>
       </div>
       <pre
-        className="p-4 text-xs font-mono overflow-x-auto leading-relaxed text-gray-300 bg-[#0d1117]"
+        className="p-4 text-xs font-mono overflow-x-auto leading-relaxed text-muted bg-surface"
         dangerouslySetInnerHTML={{ __html: highlighted }}
       />
     </div>
@@ -255,25 +255,25 @@ async function subscribeToPush() {
   const renderSetup = () => (
     <div className="space-y-4">
       {/* Notification Settings */}
-      <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-4">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Settings size={15} className="text-indigo-400" /> Notification Settings
+      <div className="rounded-lg border border-line bg-card p-4 space-y-4">
+        <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+          <Settings size={15} className="text-accent-text" /> Notification Settings
         </h3>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">App Name (manifest)</label>
+            <label className="block text-xs text-muted mb-1">App Name (manifest)</label>
             <input
-              className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-surface border border-line rounded px-3 py-1.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500"
               value={settings.appName}
               onChange={e => updateSetting('appName', e.target.value)}
               placeholder="My PWA App"
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Default Notification Title</label>
+            <label className="block text-xs text-muted mb-1">Default Notification Title</label>
             <input
-              className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-surface border border-line rounded px-3 py-1.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500"
               value={settings.defaultTitle}
               onChange={e => updateSetting('defaultTitle', e.target.value)}
               placeholder="New Update"
@@ -283,7 +283,7 @@ async function subscribeToPush() {
 
         {/* Emoji Picker */}
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Notification Icon</label>
+          <label className="block text-xs text-muted mb-1">Notification Icon</label>
           <div className="flex flex-wrap gap-1.5 mb-2">
             {EMOJI_OPTIONS.map(em => (
               <button
@@ -292,7 +292,7 @@ async function subscribeToPush() {
                 className={`w-8 h-8 rounded text-lg flex items-center justify-center transition-colors border ${
                   settings.iconEmoji === em && !settings.customIconUrl
                     ? 'border-indigo-500 bg-indigo-500/20'
-                    : 'border-white/10 hover:border-white/30'
+                    : 'border-line hover:border-line'
                 }`}
               >
                 {em}
@@ -300,7 +300,7 @@ async function subscribeToPush() {
             ))}
           </div>
           <input
-            className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-surface border border-line rounded px-3 py-1.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500"
             value={settings.customIconUrl}
             onChange={e => updateSetting('customIconUrl', e.target.value)}
             placeholder="Custom icon URL (overrides emoji)"
@@ -308,9 +308,9 @@ async function subscribeToPush() {
         </div>
 
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Badge Icon URL</label>
+          <label className="block text-xs text-muted mb-1">Badge Icon URL</label>
           <input
-            className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+            className="w-full bg-surface border border-line rounded px-3 py-1.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500"
             value={settings.badgeUrl}
             onChange={e => updateSetting('badgeUrl', e.target.value)}
             placeholder="/badge-icon.png"
@@ -318,14 +318,14 @@ async function subscribeToPush() {
         </div>
 
         {/* VAPID Keys */}
-        <div className="border-t border-white/10 pt-4 space-y-3">
+        <div className="border-t border-line pt-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-              <Key size={13} className="text-yellow-400" /> VAPID Keys
+            <span className="text-xs font-semibold text-muted flex items-center gap-1.5">
+              <Key size={13} className="text-warn" /> VAPID Keys
             </span>
             <button
               onClick={handleGenerateVapid}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-xs text-on-accent font-medium transition-colors"
             >
               <RefreshCw size={12} /> Generate VAPID Keys
             </button>
@@ -333,28 +333,28 @@ async function subscribeToPush() {
           {settings.vapidKeys && (
             <div className="space-y-2">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Public Key</label>
-                <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded px-3 py-1.5">
-                  <code className="flex-1 text-xs text-green-400 font-mono truncate">{settings.vapidKeys.publicKey}</code>
+                <label className="block text-xs text-faint mb-1">Public Key</label>
+                <div className="flex items-center gap-2 bg-surface border border-line rounded px-3 py-1.5">
+                  <code className="flex-1 text-xs text-success font-mono truncate">{settings.vapidKeys.publicKey}</code>
                   <CopyButton text={settings.vapidKeys.publicKey} />
                 </div>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Private Key</label>
-                <div className="flex items-center gap-2 bg-[#0d1117] border border-white/10 rounded px-3 py-1.5">
-                  <code className="flex-1 text-xs text-red-400 font-mono truncate">
+                <label className="block text-xs text-faint mb-1">Private Key</label>
+                <div className="flex items-center gap-2 bg-surface border border-line rounded px-3 py-1.5">
+                  <code className="flex-1 text-xs text-danger font-mono truncate">
                     {settings.showPrivateKey ? settings.vapidKeys.privateKey : '•'.repeat(42)}
                   </code>
                   <button
                     onClick={() => updateSetting('showPrivateKey', !settings.showPrivateKey)}
-                    className="text-gray-400 hover:text-white transition-colors"
+                    className="text-muted hover:text-ink transition-colors"
                   >
                     {settings.showPrivateKey ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                   <CopyButton text={settings.vapidKeys.privateKey} />
                 </div>
               </div>
-              <p className="text-xs text-yellow-500/80 bg-yellow-500/10 border border-yellow-500/20 rounded px-3 py-2">
+              <p className="text-xs text-warn bg-yellow-500/10 border border-yellow-500/20 rounded px-3 py-2">
                 ⚠️ Store VAPID keys on the server, never expose them client-side
               </p>
             </div>
@@ -363,9 +363,9 @@ async function subscribeToPush() {
       </div>
 
       {/* Permission Timing */}
-      <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Clock size={15} className="text-blue-400" /> Permission Request Timing
+      <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+          <Clock size={15} className="text-info" /> Permission Request Timing
         </h3>
         {(['onload', 'interaction', 'custom'] as PermissionTiming[]).map(t => (
           <label key={t} className="flex items-center gap-3 cursor-pointer">
@@ -377,10 +377,10 @@ async function subscribeToPush() {
               onChange={() => updateSetting('permissionTiming', t)}
               className="accent-indigo-500"
             />
-            <span className="text-sm text-gray-300">
+            <span className="text-sm text-muted">
               {t === 'onload' && 'On page load'}
               {t === 'interaction' && (
-                <>After user interaction <span className="text-xs text-indigo-400 ml-1">← recommended</span></>
+                <>After user interaction <span className="text-xs text-accent-text ml-1">← recommended</span></>
               )}
               {t === 'custom' && 'Custom delay'}
             </span>
@@ -390,20 +390,20 @@ async function subscribeToPush() {
                 min={1}
                 value={settings.customDelay}
                 onChange={e => updateSetting('customDelay', Number(e.target.value))}
-                className="w-16 bg-[#0d1117] border border-white/10 rounded px-2 py-0.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                className="w-16 bg-surface border border-line rounded px-2 py-0.5 text-xs text-ink focus:outline-none focus:border-indigo-500"
               />
             )}
             {t === 'custom' && settings.permissionTiming === 'custom' && (
-              <span className="text-xs text-gray-500">seconds</span>
+              <span className="text-xs text-faint">seconds</span>
             )}
           </label>
         ))}
       </div>
 
       {/* Notification Types */}
-      <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Bell size={15} className="text-purple-400" /> Notification Types
+      <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+          <Bell size={15} className="text-accent-text" /> Notification Types
         </h3>
         {NOTIFICATION_TYPES.map(t => (
           <label key={t.key} className="flex items-center gap-3 cursor-pointer">
@@ -415,7 +415,7 @@ async function subscribeToPush() {
               }
               className="accent-indigo-500 w-4 h-4"
             />
-            <span className="text-sm text-gray-300">{t.label}</span>
+            <span className="text-sm text-muted">{t.label}</span>
           </label>
         ))}
       </div>
@@ -445,10 +445,10 @@ async function subscribeToPush() {
             disabled={!generatedCode}
             className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg font-medium text-sm transition-colors ${
               injected
-                ? 'bg-green-600 text-white'
+                ? 'bg-green-600 text-on-accent'
                 : generatedCode
-                ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                : 'bg-white/5 text-gray-500 cursor-not-allowed'
+                ? 'bg-indigo-600 hover:bg-indigo-500 text-on-accent'
+                : 'bg-raised text-faint cursor-not-allowed'
             }`}
           >
             {injected ? (
@@ -459,7 +459,7 @@ async function subscribeToPush() {
           </button>
         )}
         {!generatedCode && onCodeUpdate && (
-          <p className="text-xs text-center text-gray-600">Generate an app first to inject this</p>
+          <p className="text-xs text-center text-faint">Generate an app first to inject this</p>
         )}
       </div>
     );
@@ -483,48 +483,48 @@ async function subscribeToPush() {
     };
 
     const permBadge = () => {
-      if (permission === 'granted') return <span className="flex items-center gap-1 text-green-400"><CheckCircle2 size={13} /> Granted</span>;
-      if (permission === 'denied') return <span className="flex items-center gap-1 text-red-400"><X size={13} /> Denied</span>;
-      if (permission === 'unsupported') return <span className="text-gray-500">Not Supported</span>;
-      return <span className="flex items-center gap-1 text-yellow-400"><Clock size={13} /> Default</span>;
+      if (permission === 'granted') return <span className="flex items-center gap-1 text-success"><CheckCircle2 size={13} /> Granted</span>;
+      if (permission === 'denied') return <span className="flex items-center gap-1 text-danger"><X size={13} /> Denied</span>;
+      if (permission === 'unsupported') return <span className="text-faint">Not Supported</span>;
+      return <span className="flex items-center gap-1 text-warn"><Clock size={13} /> Default</span>;
     };
 
     return (
       <div className="space-y-4">
         {/* Permission Test */}
-        <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Bell size={15} className="text-indigo-400" /> Browser Permission Test
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <Bell size={15} className="text-accent-text" /> Browser Permission Test
           </h3>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-400">Current Status:</span>
+            <span className="text-xs text-muted">Current Status:</span>
             <span className="text-xs font-medium">{permBadge()}</span>
           </div>
           <button
             onClick={handleRequestPermission}
-            className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white transition-colors"
+            className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-on-accent transition-colors"
           >
             Request Permission
           </button>
         </div>
 
         {/* Send Test */}
-        <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <TestTube size={15} className="text-purple-400" /> Test Notification
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <TestTube size={15} className="text-accent-text" /> Test Notification
           </h3>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Title</label>
+            <label className="block text-xs text-muted mb-1">Title</label>
             <input
-              className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-surface border border-line rounded px-3 py-1.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500"
               value={testTitle}
               onChange={e => setTestTitle(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Body</label>
+            <label className="block text-xs text-muted mb-1">Body</label>
             <input
-              className="w-full bg-[#0d1117] border border-white/10 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-surface border border-line rounded px-3 py-1.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500"
               value={testBody}
               onChange={e => setTestBody(e.target.value)}
             />
@@ -534,26 +534,26 @@ async function subscribeToPush() {
             disabled={permission !== 'granted'}
             className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
               permission === 'granted'
-                ? 'bg-purple-600 hover:bg-purple-500 text-white'
-                : 'bg-white/5 text-gray-500 cursor-not-allowed'
+                ? 'bg-purple-600 hover:bg-purple-500 text-on-accent'
+                : 'bg-raised text-faint cursor-not-allowed'
             }`}
           >
             Send Test
           </button>
           {permission !== 'granted' && (
-            <p className="text-xs text-center text-gray-600">Grant permission first</p>
+            <p className="text-xs text-center text-faint">Grant permission first</p>
           )}
         </div>
 
         {/* Browser Support */}
-        <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Globe size={15} className="text-blue-400" /> Browser Support
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <Globe size={15} className="text-info" /> Browser Support
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-gray-500 border-b border-white/10">
+                <tr className="text-faint border-b border-line">
                   <th className="text-left py-2 pr-4">Browser</th>
                   <th className="text-center py-2 px-2">Push API</th>
                   <th className="text-center py-2 px-2">Notifications</th>
@@ -562,8 +562,8 @@ async function subscribeToPush() {
               </thead>
               <tbody>
                 {BROWSER_SUPPORT.map(row => (
-                  <tr key={row.browser} className="border-b border-white/5 last:border-0">
-                    <td className="py-2 pr-4 text-gray-300">{row.browser}</td>
+                  <tr key={row.browser} className="border-b border-line last:border-0">
+                    <td className="py-2 pr-4 text-muted">{row.browser}</td>
                     <td className="py-2 px-2 text-center">{row.push ? '✅' : '❌'}</td>
                     <td className="py-2 px-2 text-center">{row.notif ? '✅' : '❌'}</td>
                     <td className="py-2 px-2 text-center">{row.sw ? '✅' : '❌'}</td>
@@ -575,9 +575,9 @@ async function subscribeToPush() {
         </div>
 
         {/* PWA Checklist */}
-        <div className="rounded-lg border border-white/10 bg-[#161b22] p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Smartphone size={15} className="text-green-400" /> To be PWA-ready:
+        <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <Smartphone size={15} className="text-success" /> To be PWA-ready:
           </h3>
           {PWA_CHECKLIST.map(item => (
             <label key={item} className="flex items-center gap-3 cursor-pointer">
@@ -587,7 +587,7 @@ async function subscribeToPush() {
                 onChange={e => setCheckedItems(prev => ({ ...prev, [item]: e.target.checked }))}
                 className="accent-green-500 w-4 h-4"
               />
-              <span className={`text-sm ${checkedItems[item] ? 'line-through text-gray-500' : 'text-gray-300'}`}>
+              <span className={`text-sm ${checkedItems[item] ? 'line-through text-faint' : 'text-muted'}`}>
                 {item}
               </span>
             </label>
@@ -606,26 +606,26 @@ async function subscribeToPush() {
   ];
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-white">
+    <div className="flex flex-col h-full bg-surface text-ink">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10">
-        <Bell size={18} className="text-indigo-400" />
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-line">
+        <Bell size={18} className="text-accent-text" />
         <div>
-          <h2 className="text-sm font-semibold text-white">PWA Push Notifications</h2>
-          <p className="text-xs text-gray-500">Generate service worker, manifest and subscription code</p>
+          <h2 className="text-sm font-semibold text-ink">PWA Push Notifications</h2>
+          <p className="text-xs text-faint">Generate service worker, manifest and subscription code</p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-white/10 px-4">
+      <div className="flex border-b border-line px-4">
         {TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors -mb-px ${
               activeTab === tab.id
-                ? 'border-indigo-500 text-indigo-400'
-                : 'border-transparent text-gray-500 hover:text-gray-300'
+                ? 'border-indigo-500 text-accent-text'
+                : 'border-transparent text-faint hover:text-muted'
             }`}
           >
             {tab.icon}

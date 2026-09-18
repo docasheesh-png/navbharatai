@@ -1,7 +1,7 @@
 /**
  * DNA-level theme system regression guards (admin 2026-07-14).
  *
- * The 5-theme system works by: <html data-theme> (single source) → a semantic CSS-variable palette per
+ * The theme system (three themes since 2026-09-18 — Light, Dark, High contrast) works by: <html data-theme> (single source) → a semantic CSS-variable palette per
  * theme in index.css → an UNLAYERED compat layer (theme-compat.css) that remaps the app's dominant
  * hardcoded GitHub-dark literals to those vars, so the WHOLE app recolours (desktop + mobile) on one
  * attribute switch. These static assertions fail loudly if any load-bearing piece is removed/altered —
@@ -17,8 +17,8 @@ const compat = read('src/styles/theme-compat.css');
 const indexHtml = read('index.html');
 const appTsx = read('src/App.tsx');
 
-describe('theme palette — index.css defines all 5 themes as CSS-variable blocks', () => {
-  for (const theme of ['dark', 'light', 'dim', 'comfort', 'contrast'] as const) {
+describe('theme palette — index.css defines all 3 themes as CSS-variable blocks', () => {
+  for (const theme of ['dark', 'light', 'contrast'] as const) {
     it(`html[data-theme="${theme}"] defines the semantic palette (surface + text vars)`, () => {
       const block = new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{[^}]*--surface-base[^}]*--text-primary`, 's');
       // dark is defined on the `:root, html[data-theme="dark"]` shared block — allow either.
@@ -34,10 +34,19 @@ describe('theme palette — index.css defines all 5 themes as CSS-variable block
     expect(contrast).toMatch(/--text-body:\s*#ffffff/);
   });
 
-  it('COMFORT has its own distinct solarized palette (not name-only — bug 3)', () => {
-    const comfort = indexCss.match(/html\[data-theme="comfort"\]\s*\{([^}]*)\}/s)?.[1] ?? '';
-    expect(comfort).toMatch(/--surface-base:\s*#fdf6e3/);
-    expect(comfort).not.toMatch(/#0d1117/); // distinct from dark
+  it('🔒 the retired Dim and Comfort palettes are GONE from the stylesheet, not merely unlisted', () => {
+    // A block that survives here would make a stale data-theme="comfort" render a theme the picker
+    // cannot reach; the migration in useSettings/index.html is what serves those users now.
+    expect(indexCss).not.toMatch(/data-theme="dim"/);
+    expect(indexCss).not.toMatch(/data-theme="comfort"/);
+  });
+
+  it('the pre-paint script in index.html migrates a saved dim/comfort and never stamps an unknown theme', () => {
+    const script = indexHtml.match(/localStorage\.getItem\('theme'\)[^\n]*/)?.[0] ?? '';
+    expect(script).toContain("'dim'");
+    expect(script).toContain("'comfort'");
+    // Whatever storage holds, the attribute is one of the three live themes.
+    expect(script).toMatch(/t === 'light' \|\| t === 'contrast' \? t : 'dark'/);
   });
 
   it('legacy --theme-* names are kept as aliases so existing consumers still follow the theme', () => {
@@ -113,10 +122,14 @@ describe('theme-compat.css — the darkest chrome family follows the theme (Pro 
     expect(compat).toMatch(/\.hover\\:bg-zinc-900:hover[\s\S]{0,200}var\(--surface-card\)/);
   });
 
-  it('the v5 panel root literal is genuinely covered (the reported symptom cannot return)', () => {
+  it('the v5 panel root follows the theme by TOKEN now (the reported symptom cannot return)', () => {
+    // Until the theme replacement (2026-09-18) this asserted the literal `bg-zinc-950` plus its compat
+    // remap. The panel is migrated: the root names the surface token, which resolves to the same
+    // variable the remap did, and the literal is gone from the file — a strictly stronger guarantee.
     const panel = read('src/components/agentv3/AgentV3Panel.tsx');
-    expect(panel).toMatch(/bg-zinc-950/); // the root still uses the literal…
-    expect(compat).toMatch(/html\[data-theme\]\s*\.bg-zinc-950\b/); // …and the compat layer remaps it.
+    expect(panel).toMatch(/\bbg-surface\b/);
+    expect(panel).not.toMatch(/bg-zinc-950/);
+    expect(compat).toMatch(/html\[data-theme\]\s*\.bg-zinc-950\b/); // the remap stays for files not yet migrated
   });
 
   it('the fixed-dark escape hatch exists but no surface currently claims it (the comment tells the truth)', () => {

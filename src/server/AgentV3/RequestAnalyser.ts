@@ -143,6 +143,52 @@ function detectTaskType(p: string): TaskType {
   return 'chat';
 }
 
+/**
+ * PURE. TRUE when NONE of this module's signals matched — the request was read, and nothing in it was
+ * recognised.
+ *
+ * 🔴 WHY THIS IS A SEPARATE FACT FROM `signalsCouldNotRead`, and why the difference cost a real build
+ * (autopsy c6e4c6ff, 2026-09-18). `detectTaskType` ends in `return 'chat'`, so it answers `chat` to two
+ * completely different questions: "this IS a chat message" (the greeting pattern matched) and "I did not
+ * recognise ANY of this". Both then score **5** — the score of the word "hi" — with `ambiguous` false,
+ * so the second opinion never opens and the biggest app on the list starts on the cheapest rung.
+ *
+ * Measured on the real patterns, and the gap is a space:
+ *
+ *     'ecommerce website'           → complex_app, 58   (COMPLEX_APP_SIGNAL has `e-?commerce`)
+ *     'e-commerce website'          → complex_app, 58
+ *     'E commerce website'          → chat, 5           ← the build that failed
+ *     'hospital management system'  → chat, 5           ← no pattern names it at all
+ *
+ * ⚠️ The answer is NOT to keep widening the keyword list. That list is a fixed vocabulary against an
+ * open-ended set of things people build — the same shape as the allowlist the theme system had to
+ * abandon, and as the sixteen hand-written domains the knowledge layer stopped being. A list can always
+ * be one word short; what it can do honestly is SAY when it recognised nothing.
+ *
+ * 🔒 DERIVED FROM `detectTaskType` ITSELF, never a second copy of the patterns. A re-listed set of
+ * regexes would agree on the day it was written and not afterwards — this repo has paid for that twice
+ * (four drifted `safeRelPath`s, two complex-app detectors). Adding or changing a signal automatically
+ * changes this answer, because it asks the real function.
+ *
+ * A GREETING IS NOT "unrecognised" — it matched, and "hi" must not buy a model call.
+ */
+export function signalsMatchedNothing(prompt: string): boolean {
+  const p = String(prompt ?? '').toLowerCase();
+  if (!p.trim()) return false;
+  // 💸 A SCRAP IS NOT AN UNRECOGNISED REQUEST — it is a scrap, and it must not buy a model call.
+  // Caught by `complexityRouting.test.ts`'s own cost guard, which failed on `'ऐप'` when this
+  // predicate first shipped without the bar. `MIN_LETTERS_TO_JUDGE_SCRIPT` is BORROWED rather than
+  // re-chosen because it is the same question measured the same way — "is there enough text here to
+  // conclude anything at all?" — and the sibling test `signalsCouldNotRead` already answers it with
+  // this exact constant. ⚠️ The cost is real and conservative on purpose: a genuinely short app name
+  // ("zomato clone", 11 letters) stays unasked and keeps today's behaviour, which is the direction
+  // that spends nothing.
+  const letters = p.match(/\p{L}/gu) ?? [];
+  if (letters.length < MIN_LETTERS_TO_JUDGE_SCRIPT) return false;
+  if (RE.greeting.test(p)) return false;
+  return detectTaskType(p) === 'chat';
+}
+
 /** Base complexity by task type (before feature adjustments). */
 const BASE_SCORE: Record<TaskType, number> = {
   chat: 5,

@@ -2887,6 +2887,22 @@ Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-serie
     keywords: ['2fa', 'mfa', 'two-factor', 'totp', 'authenticator', 'google authenticator', 'authy', 'otp', 'admin security', 'second factor', 'do factor', 'suraksha', 'login security'],
   },
   {
+    id: 'admin-built-apps',
+    name: 'Built apps — every user\'s app, with a preview, unpublish and ban (admin only)',
+    path: 'Admin Dashboard → Security tab → Built apps (admin only)',
+    description: `The moderation list of EVERY app any user has built with NavBharatAI Pro — published or not — newest first, 12 at a time:
+• Lists all users' built apps from the durable file store (an app that was built and never published is listed too), with its publish state: Live, Offline, Banned, Held, Paused or Not published
+• Loads 12 at a time with a "Load 12 more" button — never the whole list at once
+• PREVIEW on every row, live or offline: shows the saved copy of the last successful build when one exists, else renders the app's saved files in the admin's own browser — without waking the owner's machine
+• Search by full app id, owner uid or public link (looked up directly); a fragment filters the apps already loaded
+• Filter by state (Live / Offline / Banned / Held / Paused)
+• Unpublish takes a live site offline (the owner can publish again); Ban removes it permanently (the workspace can never publish again)
+• Live apps whose owner deleted the workspace are shown in their own strip so they can still be moderated`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Security tab → Built apps. Press Preview on any row to see the app; press "Load 12 more" for the next page; type a full app id, owner uid or link and press Enter to look one up; use the state dropdown to filter. Unpublish or Ban ask for confirmation (Ban needs a reason).',
+    relatedFeatures: ['admin-metrics', 'admin-mfa', 'admin-monitor'],
+    keywords: ['built apps', 'published apps', 'all apps', 'sabhi apps', 'preview app', 'admin preview', 'unpublish', 'ban app', 'takedown', 'moderation', 'security tab', 'user apps', 'load more', '12 at a time', 'offline app preview'],
+  },
+  {
     id: 'admin-audience',
     name: 'Who came to NavBharatAI (website visits + app opens, admin only)',
     path: 'Admin Dashboard → Monitor tab → "Who came to NavBharatAI" (admin only)',

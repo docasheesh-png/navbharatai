@@ -7,7 +7,8 @@ import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay
 import { PublishedAppsCard } from './profile/PublishedAppsCard';
 import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { adultOptInSummary } from '../lib/adultContent';
-import { appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy } from '../lib/adminAppModeration';
+import { confirmCopy } from '../lib/adminAppModeration';
+import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -799,50 +800,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   /**
-   * PUBLISHED APPS — the moderation list (admin 2026-09-17: *"published app ko, admin jab chahe
-   * unpublish ya ban kar sake"*).
-   *
-   * 🔴 THE SERVER FOR THIS HAS EXISTED ALL ALONG AND NOTHING EVER CALLED IT. `GET
-   * /api/admin/deployments` and the takedown beside it were built with the Phase 0 abuse guard, fully
-   * working, and no screen anywhere in the app reached either — verified three ways before this panel
-   * was written, because rebuilding a working server would have been the expensive mistake here. So
-   * the ONLY thing missing was the door, and this is the door.
+   * BUILT APPS — the moderation list, since 2026-09-18 EVERY user's built app, twelve at a time, each
+   * with a preview (`admin/BuiltAppsPanel.tsx`). The list, its paging and its previews live there; what
+   * stays here is the CONFIRMATION DIALOG for Unpublish / Ban and the call that runs it — the dialog's
+   * copy is the safeguard against a permanent mistake (adminAppModeration.ts) and was not moved.
    *
    * ⚠️ The two actions are deliberately NOT the same button:
    *   • Unpublish — the site goes offline and the OWNER can publish it again. The everyday action.
    *   • Ban       — the site goes offline and the workspace can NEVER publish again. Permanent, and
    *                  nothing in this panel or any other can undo it.
-   * A moderator reaches for the first far more often than the second, which is why the second is the
-   * one that has to be typed into rather than tapped.
    */
-  const [deployments, setDeployments] = useState<Array<{
-    workspaceId: string; userId?: string; status?: string; url?: string; updatedAt?: number;
-    fileCount?: number; sizeMb?: number; firstParty?: boolean;
-  }> | null>(null);
-  const [deploymentsError, setDeploymentsError] = useState('');
-  const [deploymentsLoading, setDeploymentsLoading] = useState(false);
-  const [deployStatusFilter, setDeployStatusFilter] = useState('');
-  const [deployQuery, setDeployQuery] = useState('');
   /** The app awaiting confirmation, and which of the two actions was asked for. */
   const [moderating, setModerating] = useState<{ workspaceId: string; action: 'unpublish' | 'ban' } | null>(null);
   const [moderateReason, setModerateReason] = useState('');
   const [moderateBusy, setModerateBusy] = useState(false);
-
-  const fetchDeployments = useCallback(async () => {
-    setDeploymentsLoading(true);
-    try {
-      const q = deployStatusFilter ? `?status=${encodeURIComponent(deployStatusFilter)}&limit=200` : '?limit=200';
-      const r = await fetch(`/api/admin/deployments${q}`, { headers });
-      const d = await r.json();
-      if (Array.isArray(d?.deployments)) { setDeployments(d.deployments); setDeploymentsError(''); return; }
-      // An unreadable list is NOT an empty one — showing "no published apps" over a failed read would
-      // tell the admin the opposite of the truth on the screen they moderate from.
-      setDeployments(null);
-      setDeploymentsError(d?.error || 'Could not read the published-app list.');
-    } catch (e) { console.error(e); setDeployments(null); setDeploymentsError('Could not read the published-app list.'); }
-    finally { setDeploymentsLoading(false); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, deployStatusFilter]);
+  /** Told to the panel after an action lands, so it re-reads THAT row in place instead of reloading page one. */
+  const [moderated, setModerated] = useState<{ workspaceId: string; tick: number } | null>(null);
 
   /**
    * Run the confirmed action. Both routes delete the LIVE site first and only then touch the
@@ -868,19 +841,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         toast(d?.error || 'Failed — the live site was NOT confirmed removed.');
       }
     } catch (e) { console.error(e); toast('Failed — the live site was NOT confirmed removed.'); }
-    finally { setModerateBusy(false); void fetchDeployments(); }
+    finally { setModerateBusy(false); setModerated({ workspaceId, tick: Date.now() }); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, moderating, moderateReason, fetchDeployments]);
+  }, [adminToken, moderating, moderateReason]);
 
-  /**
-   * The rows actually on screen. The STATUS filter is applied by the server (it is a real query on
-   * the store) and the TEXT search here, because a moderator working from a report types whichever
-   * of the three identifiers the reporter happened to send them.
-   */
-  const visibleDeployments = useMemo(
-    () => (deployments || []).filter((d) => matchesAppQuery(d, deployQuery)),
-    [deployments, deployQuery],
-  );
 
   const reclaimChannel = useCallback(async (channelId: string) => {
     setReclaiming(channelId);
@@ -1510,7 +1474,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } catch (e) { console.error(e); setMfaStatus(null); }
   }, [adminToken]);
 
-  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); void fetchDeployments(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags, fetchDeployments]);
+  useEffect(() => { if (activeTab === 'security') { fetchMfaStatus(); fetchLicenceExposure(); void fetchAdultOptIns(); void fetchSafetyFlags(); } }, [activeTab, fetchMfaStatus, fetchLicenceExposure, fetchAdultOptIns, fetchSafetyFlags]);
 
   const startMfaEnroll = async () => {
     setMfaBusy(true);
@@ -4546,146 +4510,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SECURITY TAB ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
-              {/* ── PUBLISHED APPS — unpublish or ban (admin 2026-09-17) ──────────────────────
-                  *"published app ko, admin jab chahe unpublish ya ban kar sake!"*
-
-                  🔴 THE SERVER COULD ALREADY DO THIS AND NOTHING CALLED IT. `POST …/takedown` has
-                  existed since 2026-08-21; no client in the repo ever reached it, so from the admin's
-                  side the capability did not exist. A capability with no way to invoke it is exactly
-                  what CLAUDE.md's second absolute rule forbids, and this panel is the missing half.
-
-                  ⚠️ THE TWO BUTTONS ARE NOT SIBLINGS, and the layout says so on purpose:
-                  Unpublish is the ordinary action and sits in plain grey; Ban is permanent — the
-                  workspace can NEVER publish again — so it is red, it is second, and its
-                  confirmation is a different sentence rather than the same one with a word swapped.
-                  See `adminAppModeration.ts` for why that copy lives outside this file. */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-5 space-y-3">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h3 className="flex items-center gap-2 text-sm font-black text-ink uppercase tracking-tight">
-                    <Globe size={15} className="text-info" /> Published apps
-                    {Array.isArray(deployments) && (
-                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-line text-muted">
-                        {deployments.filter((d) => appStatusView(d.status).live).length} live
-                      </span>
-                    )}
-                  </h3>
-                  <button
-                    onClick={() => void fetchDeployments()}
-                    disabled={deploymentsLoading}
-                    className="px-3 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-ink hover:border-sky-500/40 transition-all disabled:opacity-40"
-                  >
-                    {deploymentsLoading ? 'Loading…' : 'Refresh'}
-                  </button>
-                </div>
-                <p className="text-[11px] text-muted leading-relaxed">
-                  Every app users have published. <span className="text-body">Unpublish</span> takes a site
-                  off the internet and the owner can publish it again themselves.{' '}
-                  <span className="text-danger">Ban</span> removes it and stops that workspace publishing ever
-                  again — permanent, and nothing here can undo it.
-                </p>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="relative flex-1 min-w-[180px]">
-                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-                    <input
-                      value={deployQuery}
-                      onChange={(e) => setDeployQuery(e.target.value)}
-                      placeholder="Search by app id, owner or link"
-                      className="w-full bg-well border border-line rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-ink placeholder:text-faint focus:outline-none focus:border-sky-500/40"
-                    />
-                  </div>
-                  <select
-                    value={deployStatusFilter}
-                    onChange={(e) => setDeployStatusFilter(e.target.value)}
-                    className="bg-well border border-line rounded-lg px-2.5 py-1.5 text-[11px] text-ink focus:outline-none focus:border-sky-500/40"
-                  >
-                    <option value="">All states</option>
-                    <option value="active">Live only</option>
-                    <option value="unpublished">Offline</option>
-                    <option value="taken_down">Banned</option>
-                    <option value="held">Held</option>
-                  </select>
-                </div>
-
-                {/* An unreadable list is reported as unreadable. Showing an empty list here would tell
-                    the admin "nothing is published", which on a moderation screen is the worst
-                    possible lie. */}
-                {deploymentsError && (
-                  <p className="text-[11px] text-warn">
-                    {deploymentsError}{' '}
-                    <button onClick={() => void fetchDeployments()} className="underline">Retry</button>
-                  </p>
-                )}
-                {!deploymentsError && deployments !== null && visibleDeployments.length === 0 && (
-                  <p className="text-[11px] text-muted">
-                    {deployments.length === 0 ? 'No published apps yet.' : 'Nothing matches that search.'}
-                  </p>
-                )}
-
-                {!deploymentsError && visibleDeployments.length > 0 && (
-                  <div className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
-                    {visibleDeployments.slice(0, 200).map((d) => {
-                      const view = appStatusView(d.status);
-                      return (
-                        <div key={d.workspaceId} className="rounded-xl bg-well border border-line px-3 py-2.5">
-                          <div className="flex items-start justify-between gap-3 flex-wrap">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                                  view.tone === 'live' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
-                                  : view.tone === 'banned' ? 'bg-red-500/10 border-red-500/30 text-danger'
-                                  : view.tone === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
-                                  : 'bg-raised border-line text-muted'}`}>
-                                  {view.label}
-                                </span>
-                                <span className="text-[11px] font-mono text-body truncate">{d.workspaceId}</span>
-                              </div>
-                              <p className="text-[10px] text-muted mt-1 leading-relaxed">{view.meaning}</p>
-                              <div className="flex items-center gap-2.5 mt-1 flex-wrap">
-                                {d.url && (
-                                  <a href={d.url} target="_blank" rel="noreferrer"
-                                     className="inline-flex items-center gap-1 text-[10px] text-info hover:underline">
-                                    <ExternalLink size={10} /> Open the app
-                                  </a>
-                                )}
-                                {d.userId && (
-                                  <button onClick={() => void openAccount(d.userId as string)}
-                                          className="text-[10px] text-muted hover:text-ink underline">
-                                    Owner
-                                  </button>
-                                )}
-                                {typeof d.updatedAt === 'number' && d.updatedAt > 0 && (
-                                  <span className="text-[10px] text-faint">
-                                    {new Date(d.updatedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {canUnpublish(d.status) && (
-                                <button
-                                  onClick={() => { setModerating({ workspaceId: d.workspaceId, action: 'unpublish' }); setModerateReason(''); }}
-                                  className="px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised-hover border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink"
-                                >
-                                  Unpublish
-                                </button>
-                              )}
-                              {canBan(d.status) && (
-                                <button
-                                  onClick={() => { setModerating({ workspaceId: d.workspaceId, action: 'ban' }); setModerateReason(''); }}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600/10 hover:bg-red-600/20 border border-red-500/30 text-[10px] font-black uppercase tracking-wider text-danger"
-                                >
-                                  <BanIcon size={11} /> Ban
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              {/* ── BUILT APPS — every user's, twelve at a time, each with a preview (admin 2026-09-18) ──
+                  *"sabhi users ki build app dikhni chahiye … 12-12 ke set me … sabhi ka preview chalna chahiye."*
+                  The list, its paging and its previews are `admin/BuiltAppsPanel.tsx`; the Unpublish / Ban
+                  confirmation stays in this file (see `moderating` above) and the panel only asks for it. */}
+              <BuiltAppsPanel
+                headers={headers}
+                openAccount={(uid) => void openAccount(uid)}
+                toast={toast}
+                onModerate={(workspaceId, action) => { setModerating({ workspaceId, action }); setModerateReason(''); }}
+                moderated={moderated}
+              />
 
               {/* ── THE SAFETY QUEUE ───────────────────────────────────────────────────────────
                   🔒 NOT a chat browser, and the difference is structural: a clean message writes no

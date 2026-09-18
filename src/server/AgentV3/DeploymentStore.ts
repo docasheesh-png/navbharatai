@@ -106,6 +106,16 @@ export interface DeploymentRecord {
   orphaned?: boolean;
 }
 
+/**
+ * A record as read from Firestore, with its identity taken from the DOCUMENT ID — which IS the
+ * workspace id by construction — rather than trusted to the body. A body can lose the field (the
+ * status-only docs described at `setStatus`); the id cannot.
+ */
+function recordFromDoc(d: FirebaseFirestore.DocumentSnapshot): DeploymentRecord {
+  const data = (d.data() || {}) as DeploymentRecord;
+  return { ...data, workspaceId: typeof data.workspaceId === 'string' && data.workspaceId ? data.workspaceId : d.id };
+}
+
 class DeploymentStore {
   private db: admin.firestore.Firestore | null = null;
 
@@ -224,7 +234,7 @@ class DeploymentStore {
     const limit = Math.max(1, Math.min(500, opts?.limit ?? 100));
     try {
       const snap = await db.collection('agentv3_deployments').orderBy('updatedAt', 'desc').limit(limit).get();
-      const all = snap.docs.map((d) => d.data() as DeploymentRecord);
+      const all = snap.docs.map((d) => recordFromDoc(d));
       // Hitting the cap means there may be more we never saw. Filtering by status happens AFTER, so
       // completeness is judged on the raw page — a status filter narrowing 500 rows to 3 must not be
       // mistaken for a small, fully-read registry.
@@ -244,7 +254,7 @@ class DeploymentStore {
     try {
       const snap = await db.collection('agentv3_deployments').where('userId', '==', userId).limit(cap).get();
       return snap.docs
-        .map((d) => d.data() as DeploymentRecord)
+        .map((d) => recordFromDoc(d))
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     } catch {
       return [];
@@ -263,8 +273,8 @@ class DeploymentStore {
     if (!db || !workspaceId) return;
     try {
       await db.collection('agentv3_deployments').doc(workspaceId)
-        .set({ orphaned: true, updatedAt: Date.now() }, { merge: true });
-    } catch { /* best-effort — a purge must never fail on this */ }
+        .update({ orphaned: true, updatedAt: Date.now() });
+    } catch { /* best-effort — a purge must never fail on this; a missing record has nothing to mark */ }
   }
 
   /**
@@ -281,34 +291,111 @@ class DeploymentStore {
     const db = this.getDb();
     if (!db || !workspaceId) return false;
     try {
-      await db.collection('agentv3_deployments').doc(workspaceId).set(
-        {
-          ...(Array.isArray(patch.outboundOrigins) ? { outboundOrigins: patch.outboundOrigins } : {}),
-          ...(typeof patch.outboundNote === 'string' ? { outboundNote: patch.outboundNote } : {}),
-          // 🔒 Only ever raises the flag, never lowers it — a later clean scan must not erase a flag
-          // the CONTENT scanner raised for a different reason entirely.
-          ...(patch.flagged === true ? { flagged: true } : {}),
-          updatedAt: Date.now(),
-        },
-        { merge: true },
-      );
+      await db.collection('agentv3_deployments').doc(workspaceId).update({
+        ...(Array.isArray(patch.outboundOrigins) ? { outboundOrigins: patch.outboundOrigins } : {}),
+        ...(typeof patch.outboundNote === 'string' ? { outboundNote: patch.outboundNote } : {}),
+        // 🔒 Only ever raises the flag, never lowers it — a later clean scan must not erase a flag
+        // the CONTENT scanner raised for a different reason entirely.
+        ...(patch.flagged === true ? { flagged: true } : {}),
+        updatedAt: Date.now(),
+      });
       return true;
     } catch {
       return false;
     }
   }
 
+  /**
+   * 🔴 AN UPDATE, NOT A MERGE-SET — and the difference put blank rows on the admin's screen (2026-09-18).
+   *
+   * `set(…, { merge: true })` CREATES the document when it is absent. Unpublish and restore both call
+   * this for whatever workspace id they were handed, so a moderation on an app whose registry record
+   * had already been deleted (a purged workspace, a takedown that ran before the record was written)
+   * minted a doc holding ONLY `{ status, updatedAt }` — no workspaceId, no url, no owner. The list then
+   * rendered it as a "LIVE" or "OFFLINE" row with nothing after the badge and no link to open. A status
+   * describes a publish; it cannot be the first thing written about one. `update()` throws NOT_FOUND on
+   * a missing doc, which is reported as `false` — the honest answer, since nothing was updated.
+   * `markOrphaned` and `setOutboundVerdict` had the same shape and were fixed in the same change.
+   */
   async setStatus(workspaceId: string, status: DeploymentStatus): Promise<boolean> {
     const db = this.getDb();
     if (!db || !workspaceId) return false;
     try {
-      await db.collection('agentv3_deployments').doc(workspaceId).set(
-        { status, updatedAt: Date.now() },
-        { merge: true },
-      );
+      await db.collection('agentv3_deployments').doc(workspaceId).update({ status, updatedAt: Date.now() });
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * ONE PAGE of the registry (admin Security → Built apps, a state filter). Without a status the page
+   * is newest-first and resumes from a document snapshot; WITH a status it is an equality filter ordered
+   * by document id (the one ordering an equality filter can page on without a composite index — the
+   * registry has none and the in-memory filtering above exists precisely to avoid needing one). The
+   * caller is told which ordering it got. `ok: false` is a failed read, never an empty registry.
+   */
+  async listPage(opts: { status?: DeploymentStatus; limit: number; afterDocId?: string | null }): Promise<{
+    ok: boolean;
+    records: DeploymentRecord[];
+    nextAfterDocId: string | null;
+    order: 'newest' | 'id';
+  }> {
+    const db = this.getDb();
+    const order: 'newest' | 'id' = opts.status ? 'id' : 'newest';
+    if (!db) return { ok: false, records: [], nextAfterDocId: null, order };
+    const size = Math.max(1, Math.min(48, Math.floor(opts.limit) || 12));
+    try {
+      const col = db.collection('agentv3_deployments');
+      let q = opts.status
+        ? col.where('status', '==', opts.status).orderBy(admin.firestore.FieldPath.documentId()).limit(size)
+        : col.orderBy('updatedAt', 'desc').limit(size);
+      if (opts.afterDocId) {
+        if (opts.status) {
+          q = q.startAfter(opts.afterDocId);
+        } else {
+          const snap = await col.doc(opts.afterDocId).get();
+          if (!snap.exists) return { ok: true, records: [], nextAfterDocId: null, order };
+          q = q.startAfter(snap);
+        }
+      }
+      const snap = await q.get();
+      const records = snap.docs.map((d) => recordFromDoc(d));
+      const last = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null;
+      return { ok: true, records, nextAfterDocId: snap.docs.length < size ? null : last, order };
+    } catch {
+      return { ok: false, records: [], nextAfterDocId: null, order };
+    }
+  }
+
+  /**
+   * Published apps whose OWNER DELETED THE WORKSPACE (`orphaned: true`). They have no durable files
+   * left, so the built-apps list — which is keyed on those files — cannot reach them, and a live site
+   * nobody can moderate is the hole `markOrphaned` was written to close. One equality query, bounded.
+   */
+  async listOrphaned(limit = 50): Promise<DeploymentRecord[]> {
+    const db = this.getDb();
+    if (!db) return [];
+    try {
+      const snap = await db.collection('agentv3_deployments')
+        .where('orphaned', '==', true)
+        .limit(Math.max(1, Math.min(200, limit)))
+        .get();
+      return snap.docs.map((d) => recordFromDoc(d));
+    } catch {
+      return [];
+    }
+  }
+
+  /** The record published at exactly this URL, if any — the lookup a report's link needs. */
+  async findByUrl(url: string): Promise<DeploymentRecord | null> {
+    const db = this.getDb();
+    if (!db || !url) return null;
+    try {
+      const snap = await db.collection('agentv3_deployments').where('url', '==', url).limit(1).get();
+      return snap.empty ? null : recordFromDoc(snap.docs[0]);
+    } catch {
+      return null;
     }
   }
 }

@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 # ...and a node_modules that is a SYMLINK, which the trailing slash above does NOT match.
 # A `git add -A` beside one therefore COMMITS it, and a checkout then replaces the real
 # directory with a link to an absolute path that exists on no other machine — which is exactly

@@ -160,7 +160,7 @@ import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../Ag
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
-import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
+import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
 import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
@@ -9429,7 +9429,11 @@ async function noteBuildOutcome(
         const roleRecall = (() => {
           try { return sessionRecallContextLine(getWorkspaceMemory(roleWorkspaceId).snapshot().episodes); } catch { return ''; }
         })();
-        const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked);
+        // 🧭 THE PLAN THE USER CAN SEE, AND THE QUESTIONS WORTH ASKING (admin 2026-09-17). Deterministic,
+        // no model call, and empty for everything but a FRESH app in PLAN mode with a real domain —
+        // see `plannerDomainBrief`, which holds the reasoning and the three bounds.
+        const domainBrief = plannerDomainBrief(chatRole, prompt, { projectIsEmpty: Object.keys(roleFiles).length === 0 });
+        const system = LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked) + domainBrief;
         const roleRouter = AIRouterManager.getRouter('free');
         const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
         const fullReply = response.content || '';

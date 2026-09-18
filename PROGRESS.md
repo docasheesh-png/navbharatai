@@ -65539,6 +65539,45 @@ question, not a defect — but it is the same registry shape, and the classifica
 so the question cannot be lost again. The other nine are platform-owned (leases, day buckets, monthly
 counters, cross-fleet learning) and correct as they are; each carries its reason in the table rather than
 in somebody's memory.
+### 2026-09-17 — PLAN MODE SHOWS THE PLAN AND ASKS: the domain knowledge finally reaches the planner
+
+Two admin asks on one day turned out to be **one change**: *"agar cheez clear nahi hai ki kya banana
+hai, to user se direct puchna chahiye"* and, on being told Lovable/Bolt show a plan before building,
+*"to ham bhi dikha sakte hi … 'plan' wale option me yeh sikha sakte hai?"* — pointing at the composer's
+**Build · Plan · Advise** dropdown (`chatMode`, `AgentV3Panel.tsx:179`), explicitly **not** the
+in-build "1/5" step plan.
+
+🔎 **The find: `RequirementGapAnalyzer` has known since 2026-07-19 that a hospital implies RBAC, an
+audit trail, EMR privacy and scheduling — and `renderRequirementGaps`'s own doc comment says the block
+is "for the PLANNER/agent to act on". Nothing ever gave it to the planner.** It was wired only into the
+BUILDER, where by the 2026-07-20 decision it must be friction-free and never ask (*"skip it silently
+rather than asking"*). The analysis is unchanged by this PR; only its audience is new.
+
+🔑 **Why Plan mode is the right lane and the build lane is not, stated so nobody reopens it later.**
+Someone who typed a build order wants an app, not an interview — that decision stands and is
+test-pinned here. But a user who deliberately switched to PLAN asked for the opposite: to think first.
+The same questions that are friction in one lane are the entire point of the other.
+
+**`plannerDomainBrief` (`RoleChats.ts`, pure, no model call, no I/O)** — the plan comes FIRST in plain
+words, then **at most 3** questions, and the reply must offer "you decide" so the plan is never held
+back. It fires only for a **fresh** app (`projectIsEmpty`) with a real domain, so planning a change
+inside a live project is never interrupted. India guidance rides the same gate: when the user's OWN
+words say ₹ / GST / UPI / Hindi, the plan assumes Indian rails instead of dollars and Stripe.
+
+**Tests:** `tests/plannerShowsPlanAndAsks.test.ts` (13), reversion-proven in both halves.
+⚠️ **Two of them failed first, and both were MY wrong assumptions, not the code:** `todo` is a real
+`productivity` domain (so a todo list legitimately gets a brief — the test now uses genuinely
+domain-less prompts), and my "not Stripe" regex was nonsense against text that literally reads *"not
+Stripe/PayPal"*. Recorded because a test written on a wrong assumption pins the wrong behaviour.
+`AppKnowledgeBase` entry `agentv3_roles_queue` updated in the same change, as the rule requires.
+
+🔴 **OPEN, found while testing and deliberately NOT fixed here (rule 6):** `"ek shop ka billing app
+banao GST ke sath"` classifies as **`saas`**, not ecommerce/restaurant — the domain regexes are
+English-only (`\bshops?\b` matches, but `saas` outscores it on "billing"), and **`"dukaan"` matches no
+domain at all.** On a Hindi-first product that is a real gap. It is NOT touched here because those
+same regexes drive the LIVE builder (`AGENTV3_REQUIREMENT_AWARE=on`), so changing them changes what
+real builds produce — a separate change with its own blast radius and its own corpus test. The India
+half already fires correctly on GST/₹, which is the more valuable of the two.
 ### 2026-09-17 — 🇮🇳 "dukaan" is now a shop: the domain regexes learn Hindi, and `billing` stops selecting a domain
 
 Admin: *"dukaan wala bhi banao"* — the open item recorded an hour earlier while wiring Plan mode.

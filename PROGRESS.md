@@ -65677,3 +65677,57 @@ restaurant at 7. The principled fix is a tie-break that prefers the domain whose
 SPECIFIC word (`dhaba`) over a GENERIC one (`order`), but that changes the tie-break for every domain
 pair and therefore what real builds produce. It needs its own change and its own corpus sweep — not a
 rider on this one.
+
+---
+
+## 2026-09-18 — The admin build-report ⓘ popover was CLIPPED BY ITS OWN ROW, not mis-sized (PR #3069)
+
+Admin, with a screenshot of the all-builds list on their 393 px phone showing the Sender panel cut off
+at the right edge: *"dono build report ke andar jo i button hai. woh theek se kam nahi kar raha. popup
+crop ho raha hai. can you please fix"*.
+
+🔴 **ROOT CAUSE — STRUCTURAL, AND NO WIDTH COULD HAVE FIXED IT.** The panel was
+`absolute top-full right-0` **inside the row**, and BOTH report lists wrap every row in
+`border rounded-xl overflow-hidden` (`AdminDashboard.tsx:4077` all-builds, `:4376` submitted) — a box
+exactly one row tall. An absolutely positioned descendant is clipped by any `overflow: hidden` ancestor
+in its containing-block chain, so a panel laid out ENTIRELY BELOW the row was cut off **by
+construction**, on every screen, every time. Two things compounded it: the all-builds list adds
+`max-h-[28rem] overflow-y-auto` (`:4075`), and per CSS a non-`visible` axis makes the other compute to
+`auto` — so that box clips horizontally too; and on a phone the row's `shrink-0` controls overflow the
+card, carrying the ⓘ button (and the panel right-anchored to it) past the right edge.
+
+⚠️ **THE IRONY WORTH RECORDING: this component EXISTS to fix a crop.** It was built on 2026-09-14
+because a nine-column table ran 513 px past the same phone's right edge. The replacement moved the
+detail off the row and then put it in a box that could not show it.
+
+**THE FIX IS THE CLASS, NOT THE INSTANCE.** Deleting `overflow-hidden` from the two cards would fix
+today's two lists and leave the next list to rediscover this. Instead the panel is **portalled to
+`<body>`** and positioned `fixed` from the button's own rect, so no ancestor of the row can clip it
+however many scrollers a future list adds. The placement arithmetic is a pure function in its own
+module (`src/components/admin/reportInfoPlacement.ts`) that **CLAMPS TO THE VIEWPORT** rather than
+merely right-aligning — right-alignment alone reproduces the bug whenever the button itself is
+off-screen, which is precisely the reported case. It flips above the row near the bottom of the screen
+but **never into a smaller space than the one below**.
+
+Two consequences of portalling that are easy to miss and are handled: "outside press" must consult the
+PANEL as well as the wrapper (the panel is no longer a DOM descendant of it, so checking the wrapper
+alone would close it the instant it was touched), and repositioning listens **on capture**, because the
+list scrolls inside its own box and a bubbling `window` scroll listener never hears that.
+
+**Proven by reversion, both halves:** dropping the clamp fails 3 placement cases including the reported
+one; removing the portal fails the source guard. The guard strips comments before asserting — the header
+comment DESCRIBES the old `absolute top-full` positioning, and a guard that could not tell code from
+prose failed on its own explanation (it did, on the first run).
+
+🔎 **SIBLINGS HUNTED (rule 3), and honestly: none of the same class.** The only two other
+below-the-anchor popovers in the client are `GitPanel.tsx:907` and `APITester.tsx:407`. The GitPanel
+card at `:868` closes at `:873`, so that dropdown is NOT inside it — its clipping ancestor is a tall
+scroll column, where a dropdown scrolling with its content is ordinary behaviour; the APITester one is a
+small method selector near the top of a full-height panel. Checked by tracing the nesting, not assumed.
+
+⚠️ **NOTED, NOT FIXED HERE:** the ⓘ `<button>` still sits inside the all-builds row's own `<button>`,
+which is invalid HTML. It is harmless in this client-rendered SPA (React uses DOM APIs, not the HTML
+parser, so no early-close happens) and it is not what caused the crop — recorded rather than folded in.
+
+Gate on the final merged state: typecheck · noUnusedImports · typecheck:server · vitest
+**25554 passed | 1 skipped** · build · test:bundle · boot:check · deps:server-gate — all green.

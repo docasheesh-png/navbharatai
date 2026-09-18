@@ -359,6 +359,7 @@ import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, la
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
+import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
 import { futilityMinutes, initialFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
@@ -18377,6 +18378,17 @@ async function noteBuildOutcome(
           const proven = buildDiag.agentRunEvidence();
           if (gateEvidence.typecheck === 'not-run' && proven.typecheck) gateEvidence.typecheck = proven.typecheck;
           if (gateEvidence.tests === 'not-run' && proven.tests) gateEvidence.tests = proven.tests;
+        } catch { /* evidence recovery is best-effort and must never touch a build */ }
+        // THE SAME READ, over the other half of the ledger (autopsy 697b38ee, 6th appearance). The
+        // command log settles typecheck and tests; the facts an ACTOR proved — the app loaded in a
+        // real browser, an address really went up — are recorded on the build's own timeline and were
+        // read back by nobody. See provenFromTimeline.ts, including why this cannot change a bill.
+        try {
+          const seen = provenFromTimeline(buildDiag.report().issues);
+          if (gateEvidence.pages === 'not-run' && seen.pages) gateEvidence.pages = seen.pages;
+          if (gateEvidence.previewUrlPublished === undefined && seen.previewUrlPublished !== undefined) {
+            gateEvidence.previewUrlPublished = seen.previewUrlPublished;
+          }
         } catch { /* evidence recovery is best-effort and must never touch a build */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.

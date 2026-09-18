@@ -66752,3 +66752,100 @@ The guard is what makes that discoverable instead of silent.
 📌 Note for whoever reads this next: `ImageStudioPro.tsx` was migrated to design tokens by another
 session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
 this change is server-side only.
+
+---
+
+## 2026-09-18 — 🔴 THE EVIDENCE LEDGER IS READ BACK (autopsy 697b38ee, SIXTH appearance — the write half already existed)
+
+**Admin:** *"navbharatai ab production me hai, worldclass apps se competition me hai … app ko us level
+ko match karne ke liye ya usse accha banane ke liye kuch aur behtar karo."*
+
+### Choosing the lever from evidence, not from ambition
+
+Three of my own recorded open items were re-checked against `main` first, and **two of them were wrong
+or already done** — recorded here because acting on either would have wasted a cycle:
+
+1. **Cold-resume blindness (`GRAPH_RESTORED_STUBS`, 30/30 placeholder facts)** — **ALREADY FIXED** the
+   same day by another session (report `2ec15a71`, `warmIndexFiles`). Found by reading the code, not by
+   trusting my own note.
+2. **"Overwriting `index.html` destroys the preview bridge, which caused the `useState of null`"** —
+   🔴 **THIS CLAIM OF MINE DOES NOT SURVIVE CHECKING, and I reported it to the admin as a root cause.**
+   The LIVE bridge is re-injected at dev-server start (`E2BActuator`, every boot), and the failing
+   preview was the **in-browser** renderer, which builds its own document with its own importmap
+   (`ReactPreview.ts`) and never reads the app's `index.html` for React. The real cause of that
+   `useState of null` is **not established**, and saying so is the honest position — it was a
+   plausible-sounding inference, which is exactly the "not invented is weaker than checked" lesson
+   this file already records about the E2B rate.
+3. **The graph-vs-disk area is TAKEN** — PR #3077 is open there (another session). Not touched.
+
+### The lever actually chosen — and it is the constitution's own named gap
+
+CLAUDE.md names the missing subsystem, verbatim, and has since 2026-09-14:
+
+> *"there is no shared EVIDENCE LEDGER. The agent's shell commands and the platform's gates keep
+> private notions of what has been proven, and the gates trust only their own … Until one ledger exists
+> that any actor writes a proven fact into and every verdict reads from, this class returns."*
+
+`PROGRESS.md` records it **six separate times**. It is the class behind every recent autopsy where a
+**working app was graded as unproven** — which, against Lovable/Bolt/v0, is the single most expensive
+thing this engine does: a competitor that watches your app run and then tells you it cannot say whether
+it works has lost the user, whatever else it did well.
+
+🔑 **THE FINDING THAT MADE IT SMALL: the WRITE half already exists.** `agentRunEvidence.ts` closed the
+shell-command half on 2026-09-17 and its own docblock names what it left — *"That proof does not live
+in the shell-command log at all — it is held by the page checks — so it needs the ledger's WRITE half."*
+But every actor that proves something **already records it**: `RUNTIME_VERIFIED` when the app was loaded
+in a real browser with no errors, `PREVIEW_PUBLISHED` / `PLATFORM_PREVIEW_UP` when an address really went
+up. **The build's own issue timeline IS the ledger. Nothing read it back.** The route already proves the
+pattern — `stoppedByUser` is read off that same timeline so the gate and `rootCause` *"can never tell the
+reader different stories about one build"*.
+
+So this is not a new store threaded through twelve call sites; it is the missing READ, wired at the one
+place a gate already asks what was proven.
+
+### The fix — `provenFromTimeline.ts`, wired beside `agentRunEvidence`
+
+- **`RUNTIME_VERIFIED` ⇒ `pages: 'passed'`.** ⚠️ **Mapped to `pages`, NOT `preview`, deliberately.** It
+  has exactly two producers and they disagree about the preview: `runtimeRecordFromPageChecks` fires
+  precisely when the live preview session is NOT up and says so in its own message. *"Did the app's own
+  page routes render in a real browser?"* is established by **both**, so it is the strongest claim that
+  is true either way. Telling the producers apart by parsing our own prose would be a parser over a
+  sentence we are free to reword.
+- **`PREVIEW_PUBLISHED` / `PLATFORM_PREVIEW_UP` ⇒ `previewUrlPublished`** — wording only, by that
+  field's own documented contract. It fixes the Fight-3D sentence the interface already records.
+- **A sibling module, not a branch inside `agentRunEvidence`**: that one answers *"what does the COMMAND
+  LOG settle?"* and parses shell output; this one answers *"what did an ACTOR record as proven?"* and
+  reads issue codes. One name over two sources of truth would leave a caller unable to tell which kind
+  of evidence it was trusting.
+
+🔒 **IT CANNOT CHANGE A BILL, CHECKED RATHER THAN ASSUMED.** A gate goes RED only on `!buildOk`, a check
+recorded `'failed'`, or blockers — and RED is what flips a build to `ok: false` and therefore FREE. This
+reader only promotes `'not-run'` → `'passed'`, which removes no failure and adds none. A RED build stays
+RED and free; an UNKNOWN build becomes YELLOW. **It moves the sentence, never the money** — and all four
+cases are in the suite.
+
+⚠️ **It also cannot reach GREEN on its own**, and that limit is kept on purpose: GREEN needs a journey to
+have held up, because an app that paints beautifully and saves nothing renders exactly as well as one
+that works.
+
+### Tests
+
+`tests/theLedgerIsReadBack.test.ts` — **16 cases**, built from the engine's REAL records
+(`runtimeVerifiedRecord()`, `runtimeRecordFromPageChecks()`) rather than hand-written fixtures, so a
+change to what the actors emit fails this suite instead of silently unhooking it.
+**Reversion-proven on four independent reverts**: the route's read, the severity guard, the
+`pages`-vs-`preview` mapping, and fill-vs-overwrite.
+
+### 🔴 Still open (rule 6)
+
+- **The ledger is still a READ over records that were designed as prose, not as proof.** Two readers now
+  exist (`agentRunEvidence` for the command log, `provenFromTimeline` for the timeline) and they share no
+  vocabulary. The complete subsystem is an explicit `proved(fact, source)` call an actor makes — this
+  change earns the right to it by showing the read works, and does not pretend to be it.
+- **`RUNTIME_UNCHECKED` still reaches the report through a threaded `previewRendered` boolean**
+  (`AutoFix.runtimeUncheckedRecord`) rather than through this reader. Same fact, second path; unifying
+  them touches the autofix call site and belongs with the write half.
+- **The `useState of null` from autopsy 95598899 is UNEXPLAINED** — see above. It needs the failing
+  file contents, which the report does not carry.
+- **The cancelled-build bill** (₹23.81 charged for a build that left the app broken) is unchanged and
+  still open.

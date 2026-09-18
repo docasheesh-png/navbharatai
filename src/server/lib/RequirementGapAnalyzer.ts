@@ -32,7 +32,7 @@ interface DomainDef {
 const DOMAINS: DomainDef[] = [
   {
     key: 'healthcare',
-    re: /hospital|clinic|patient|\bemr\b|\behr\b|health|medical|doctor|pharmacy|appointment|\blab\b|diagnos|\baspatal\b|\bmareez\b|\bdawai\b|\bdavai\b|\bdavakhana\b|\bilaj\b|\bchikitsa\b|\bswasthya\b/i,
+    re: /hospital|clinic|patient|\bemr\b|\behr\b|health|medical|doctor|pharmacy|appointment|\blab\b|diagnos|\baspatal\b|\bmareez\b|\bdawai\b|\bdavai\b|\bdavakhana\b|\bilaj\b|\bchikitsa\b|\bswasthya\b|अस्पताल|क्लिनिक|मरीज|दवाई|दवाखाना|इलाज|चिकित्सा|स्वास्थ्य|डॉक्टर/i,
     features: [
       { label: 'role-based access (staff / doctor / admin)', re: /role|rbac|permission|staff|admin|access control/i },
       { label: 'audit log of record changes', re: /audit|history|log|track changes/i },
@@ -47,7 +47,7 @@ const DOMAINS: DomainDef[] = [
     key: 'ecommerce',
     // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
     // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.
-    re: /\bshops?\b|shopping|\bstores?\b|e[-\s]?commerce|\bcarts?\b|checkout|\bproduct\b|\border\b|inventory|marketplace|catalog|\bdukaan\b|\bdukan\b|\bdukandar\b|\bkirana\b|\bbazaar\b|\bbazar\b|\bsaaman\b|\bsamaan\b/i,
+    re: /\bshops?\b|shopping|\bstores?\b|e[-\s]?commerce|\bcarts?\b|checkout|\bproduct\b|\border\b|inventory|marketplace|catalog|\bdukaan\b|\bdukan\b|\bdukandar\b|\bkirana\b|\bbazaar\b|\bbazar\b|\bsaaman\b|\bsamaan\b|दुकान|दुकानदार|किराना|बाजार|बाज़ार|सामान|ऑर्डर/i,
     features: [
       { label: 'payments + refunds', re: /pay|payment|checkout|stripe|razorpay|refund/i },
       { label: 'product catalog + search', re: /catalog|search|filter|browse/i },
@@ -111,7 +111,7 @@ const DOMAINS: DomainDef[] = [
     key: 'education',
     // `\btutor` is closed to `\btutors?\b|tutoring`: the open prefix matched "tutorial", so any app
     // described as having a tutorial was classified as an education platform.
-    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|e-?learning|classroom|\bexam\b|\btutors?\b|tutoring|coaching|edtech|syllabus|curriculum|\bvidyalaya\b|\bpathshala\b|\bpadhai\b|\bshikshak\b|\bchhatra\b|\bkaksha\b/i,
+    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|e-?learning|classroom|\bexam\b|\btutors?\b|tutoring|coaching|edtech|syllabus|curriculum|\bvidyalaya\b|\bpathshala\b|\bpadhai\b|\bshikshak\b|\bchhatra\b|\bkaksha\b|विद्यालय|पाठशाला|पढ़ाई|शिक्षक|छात्र|कक्षा|स्कूल|कॉलेज|परीक्षा/i,
     features: [
       { label: 'roles (student / teacher / admin)', re: /role|rbac|permission|teacher|admin|staff/i },
       { label: 'courses & lessons / content', re: /course|lesson|module|content|curriculum|syllabus/i },
@@ -123,7 +123,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'logistics',
-    re: /logistic|delivery|courier|shipment|\bfleet\b|\bdriver\b|dispatch|last.?mile|parcel|consignment|freight|warehouse|\bgodown\b|\bvahan\b|\bgaadi\b|\bmaal\b/i,
+    re: /logistic|delivery|courier|shipment|\bfleet\b|\bdriver\b|dispatch|last.?mile|parcel|consignment|freight|warehouse|\bgodown\b|\bvahan\b|\bgaadi\b|\bmaal\b|गोदाम|वाहन|गाड़ी|कूरियर|डिलीवरी/i,
     features: [
       { label: 'shipment / order tracking', re: /track|status|trace|realtime|live/i },
       { label: 'driver / agent app & assignment', re: /driver|agent|assign|dispatch|rider/i },
@@ -135,7 +135,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'restaurant',
-    re: /restaurant|\bcafe\b|\bmenu\b|\bdine\b|kitchen|\bkot\b|food.?order|eatery|canteen|\bpos\b|\bdhaba\b|\bbhojan\b|\bkhana\b|\brasoi\b|\bthali\b|\bnashta\b/i,
+    re: /restaurant|\bcafe\b|\bmenu\b|\bdine\b|kitchen|\bkot\b|food.?order|eatery|canteen|\bpos\b|\bdhaba\b|\bbhojan\b|\bkhana\b|\brasoi\b|\bthali\b|\bnashta\b|ढाबा|भोजन|खाना|रसोई|थाली|नाश्ता|रेस्टोरेंट|मेन्यू|मेनू/i,
     features: [
       { label: 'menu management', re: /menu|dish|item|category|price/i },
       { label: 'table / order management (dine-in + takeaway)', re: /table|order|takeaway|dine|counter/i },
@@ -149,7 +149,7 @@ const DOMAINS: DomainDef[] = [
   // wins keeps all existing classifications byte-identical (e.g. "rent/ticket" still resolve to booking).
   {
     key: 'fintech',
-    re: /fintech|\bwallet\b|\bupi\b|\bloan\b|lending|\bbank(ing)?\b|\bemi\b|insurance|remittance|payout|\bledger\b|expense track|budgeting|neobank|\bkyc\b|\budhaar\b|\budhari\b|\bkhata\b|\bbahi\b|\blenden\b|\bbyaj\b|\bkarz\b|\bkist\b/i,
+    re: /fintech|\bwallet\b|\bupi\b|\bloan\b|lending|\bbank(ing)?\b|\bemi\b|insurance|remittance|payout|\bledger\b|expense track|budgeting|neobank|\bkyc\b|\budhaar\b|\budhari\b|\bkhata\b|\bbahi\b|\blenden\b|\bbyaj\b|\bkarz\b|\bkist\b|उधार|खाता|बही|लेनदेन|ब्याज|कर्ज|किस्त/i,
     features: [
       { label: 'KYC / identity verification', re: /kyc|verif|identity|aadhaar|pan|document/i },
       { label: 'transaction ledger + statements', re: /ledger|transaction|statement|history|balance/i },
@@ -162,7 +162,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'real-estate',
-    re: /real.?estate|property|realty|\blisting\b|apartment|\bflat\b|\bvilla\b|broker|landlord|mortgage|homes?\s+for\s+(sale|rent)|\bmakan\b|\bkiraya\b|\bkirayedar\b|\bzameen\b|\bjameen\b/i,
+    re: /real.?estate|property|realty|\blisting\b|apartment|\bflat\b|\bvilla\b|broker|landlord|mortgage|homes?\s+for\s+(sale|rent)|\bmakan\b|\bkiraya\b|\bkirayedar\b|\bzameen\b|\bjameen\b|मकान|किराया|किरायेदार|जमीन|ज़मीन/i,
     features: [
       { label: 'property listings + photos', re: /listing|property|photo|image|gallery|media/i },
       { label: 'search & filters (price / location / beds)', re: /search|filter|location|price|bedroom|\bbhk\b/i },
@@ -175,7 +175,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'fitness',
-    re: /fitness|\bgym\b|workout|\btrainer\b|\byoga\b|wellness|nutrition|\bcalorie|exercise|bodybuild|crossfit|\bpilates\b|\bvyayam\b|\bkasrat\b/i,
+    re: /fitness|\bgym\b|workout|\btrainer\b|\byoga\b|wellness|nutrition|\bcalorie|exercise|bodybuild|crossfit|\bpilates\b|\bvyayam\b|\bkasrat\b|व्यायाम|कसरत|जिम/i,
     features: [
       { label: 'membership plans + billing', re: /member|plan|subscri|billing|fee|pay/i },
       { label: 'class / session scheduling', re: /class|session|schedul|slot|calendar|book/i },
@@ -188,7 +188,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'events',
-    re: /\bevent\b|conference|festival|concert|meetup|webinar|\bexpo\b|\bgala\b|seminar|\bsummit\b|\bshaadi\b|\bshadi\b|\bvivah\b|\bsamaroh\b|\bmela\b/i,
+    re: /\bevent\b|conference|festival|concert|meetup|webinar|\bexpo\b|\bgala\b|seminar|\bsummit\b|\bshaadi\b|\bshadi\b|\bvivah\b|\bsamaroh\b|\bmela\b|शादी|विवाह|समारोह|मेला|कार्यक्रम/i,
     features: [
       { label: 'event listings + agenda / schedule', re: /listing|agenda|schedul|program|session|speaker/i },
       { label: 'ticket types + capacity', re: /ticket|capacity|seat|tier|pass/i },
@@ -201,7 +201,7 @@ const DOMAINS: DomainDef[] = [
   },
   {
     key: 'jobs',
-    re: /\bjob\b|recruit|hiring|\bcareers?\b|applicant|\bresume\b|\bcv\b|vacancy|employer|candidate|\bats\b|job.?board|placement|\bnaukri\b|\brozgar\b|\bbharti\b|\bniyukti\b/i,
+    re: /\bjob\b|recruit|hiring|\bcareers?\b|applicant|\bresume\b|\bcv\b|vacancy|employer|candidate|\bats\b|job.?board|placement|\bnaukri\b|\brozgar\b|\bbharti\b|\bniyukti\b|नौकरी|रोजगार|रोज़गार|भर्ती|नियुक्ति/i,
     features: [
       { label: 'job postings + search / filters', re: /post|listing|search|filter|categor|location/i },
       { label: 'applications + resume upload', re: /appl|resume|\bcv\b|upload|attach/i },

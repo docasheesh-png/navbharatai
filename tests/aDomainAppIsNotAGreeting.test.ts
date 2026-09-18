@@ -224,3 +224,81 @@ describe('the question is actually asked, at both call sites', () => {
     expect(analyser, 'a second copy of the list is the drift this fix removes').not.toMatch(/simpleApp:\s*\/\\b\(calculator/);
   });
 });
+
+/**
+ * 🔴 THE SAME CLASS, ONE SCRIPT OVER — and it is the India-first half.
+ *
+ * `RequirementGapAnalyzer` already speaks Hindi **fluently**: `aspatal`, `mareez`, `dawai`, `ilaj`,
+ * `chikitsa`, `swasthya`, `dhaba`, `bhojan`, `rasoi`, `thali`, `nashta`, `dukaan`, `kirana`,
+ * `bazaar`, `saaman`, `godown`, `vahan`, `gaadi`, `udhaar`, `khata`, `bahi`, `byaj`, `kist`,
+ * `makan`, `kiraya`, `zameen`, `vyayam`, `kasrat`, `shaadi`, `vivah`, `samaroh`, `mela`, `naukri`,
+ * `rozgar`, `bharti`, `vidyalaya`, `pathshala`, `padhai`, `shikshak`, `chhatra`, `kaksha` — **every
+ * one of them in Latin letters only.**
+ *
+ * So `dukaan ka billing app banao` was sized correctly and `अस्पताल प्रबंधन सिस्टम` scored 5, the
+ * same as "hi". A person typing Hindi in Hindi got the weaker engine. Measured before the fix:
+ * `अस्पताल प्रबंधन सिस्टम` → 5/chat, `स्कूल मैनेजमेंट सिस्टम` → 5/chat, `रेस्टोरेंट बिलिंग ऐप` → 5/chat.
+ *
+ * ⚠️ `रेस्टोरेंट बिलिंग ऐप` is the sharpest of the three: it is too SHORT for `signalsCouldNotRead`
+ * (which needs 12 letters before it will judge a script), so it was caught by neither the
+ * unreadable-script floor nor any domain — invisible to both mechanisms at once.
+ *
+ * 🔒 THE RULE THIS CHANGE FOLLOWS, so it stays auditable: **every Devanagari term added is the same
+ * word as a romanized term already accepted by that domain.** No new concept is introduced, so the
+ * module's existing precision decisions carry over unchanged — which is what the parity case below
+ * asserts mechanically rather than by listing.
+ *
+ * ⚠️ TWO WORDS WERE DELIBERATELY LEFT OUT, and the reason is the one `\b` cannot help with here:
+ * JavaScript's word boundary is ASCII, so a Devanagari term matches inside longer words. `माल`
+ * (goods) sits inside `मालिक` (owner) and `योग` (yoga) inside `उपयोग` (usage) and `योगदान`
+ * (contribution) — each would have turned ordinary Hindi into a logistics or fitness app.
+ */
+describe('a domain app written in Devanagari is not a greeting either', () => {
+  const DEVANAGARI_APPS: Array<[string, string]> = [
+    ['अस्पताल प्रबंधन सिस्टम', 'healthcare'],
+    ['स्कूल मैनेजमेंट सिस्टम', 'education'],
+    ['रेस्टोरेंट बिलिंग ऐप', 'restaurant'],
+    ['दुकान का बिलिंग ऐप', 'ecommerce'],
+  ];
+
+  it('each is sized as the multi-module app it is, and lands in the right domain', () => {
+    for (const [p, domain] of DEVANAGARI_APPS) {
+      expect(analyzeRequirementGaps(p).domain, p).toBe(domain);
+      expect(analyzeRequest({ prompt: p }).taskType, p).toBe('complex_app');
+      expect(analyzeRequest({ prompt: p }).complexityScore, p).toBeGreaterThan(40);
+    }
+  });
+
+  it('🔒 PARITY — the two spellings of one word reach the same domain, derived rather than listed', () => {
+    // If a Devanagari term ever names a domain its romanized twin does not, one of the two is a new
+    // concept smuggled in under a spelling change — which is exactly what this change promises not
+    // to do. Each pair is (already-accepted romanized term, the Devanagari spelling of that word).
+    const PAIRS: Array<[string, string]> = [
+      ['aspatal', 'अस्पताल'], ['mareez', 'मरीज'], ['ilaj', 'इलाज'], ['chikitsa', 'चिकित्सा'],
+      ['dhaba', 'ढाबा'], ['bhojan', 'भोजन'], ['rasoi', 'रसोई'], ['thali', 'थाली'],
+      ['dukaan', 'दुकान'], ['kirana', 'किराना'], ['saaman', 'सामान'],
+      ['vidyalaya', 'विद्यालय'], ['shikshak', 'शिक्षक'], ['kaksha', 'कक्षा'],
+      ['godown', 'गोदाम'], ['vahan', 'वाहन'],
+      ['khata', 'खाता'], ['byaj', 'ब्याज'], ['kist', 'किस्त'],
+      ['makan', 'मकान'], ['kiraya', 'किराया'],
+      ['vyayam', 'व्यायाम'], ['kasrat', 'कसरत'],
+      ['shaadi', 'शादी'], ['vivah', 'विवाह'], ['samaroh', 'समारोह'],
+      ['naukri', 'नौकरी'], ['bharti', 'भर्ती'],
+    ];
+    for (const [roman, devanagari] of PAIRS) {
+      const a = analyzeRequirementGaps(roman).domain;
+      const b = analyzeRequirementGaps(devanagari).domain;
+      expect(a, `"${roman}" should already name a domain`).not.toBe(GENERAL_DOMAIN);
+      expect(b, `"${devanagari}" is the same word as "${roman}"`).toBe(a);
+    }
+  });
+
+  it('🔒 ordinary Hindi is NOT an app — the words that sit inside longer words were left out', () => {
+    for (const p of [
+      'नमस्ते कैसे हो', 'एक कैलकुलेटर बनाओ', 'मेरा नाम क्या है',
+      'इसका उपयोग कैसे करें',   // contains योग
+      'योगदान कैसे करूँ',        // contains योग
+      'मालिक कौन है',            // contains माल
+    ]) expect(analyzeRequirementGaps(p).domain, p).toBe(GENERAL_DOMAIN);
+  });
+});

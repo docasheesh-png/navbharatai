@@ -66079,6 +66079,120 @@ rule, `disabled:bg-white/10` and `disabled:text-white/25` with no light-theme re
 with no gradient stop). All four were added to the compat layers rather than designed around — a
 disabled SEND button rendering white-on-white would have told a light-theme user the button had
 vanished, not that it was disabled.
+## 2026-09-18 — AUTOPSY of report `2ec15a71` (a real user's hospital-app edit) — and the hollow graph is FILLED
+
+**The build:** a free-tier user's EDIT to a hospital price-list app. Prompt (verbatim): *"Or bhi medicine
+or equipment add karo jitne bhi medicine or equipment hospital me chahiye hote or kisi bhi bimari me use
+hote hai wo saare add karo"*. 5.8 min, `ok: true`, **one file changed** (`src/App.tsx`), billed **₹96.4**
+(real cost $0.235 + sandbox $0.016, ×4 markup), delivered by `kimi-k2.7-code` on the Weak ladder.
+
+### The five buckets (honest counts, no inflation)
+
+- ✅ **Self-healed: 0.** `autoResolved: 0`. **And that is the finding, not a clean bill** — nothing
+  healed because nothing FAILED. The damage was silent.
+- 🔀 **Worked around: 1.** `glm-4.7-flashx` (the planned lead rung) was *"answering far below a usable
+  rate after 18s — abandoned mid-answer"*; the throughput bench benched it and KIMI did all 24 calls.
+  The bench WORKED — but 18 s and an abandoned answer were spent, and **this is the first real evidence
+  on FlashX since it was put in front of Weak/Normal on 2026-09-17.** Its coding quality is still
+  unmeasured; here it never produced at a usable rate at all.
+- ⏭️ **Skipped: 2**, both honest — `E2E_SCAFFOLD_SKIPPED` (project already has e2e tests) and
+  `JOURNEY_NOT_DERIVED`.
+- ❌ **Still broken: 4.** (1) the **schema mismatch** below; (2) `INTEGRITY_CIRCULAR_DEP`
+  `data.ts → types.ts → data.ts`; (3) `DESIGN_CONSISTENCY` 78/100 (23 distinct colours); (4)
+  `ACCESSIBILITY` — one form field with no label, in `SearchBar.tsx`.
+- 🥵 **Struggle: 3.** The benched lead rung; **one call of 175 s** (9,701 output tokens — 50% of the
+  whole build in a single call, at a healthy 55 tok/s, so this one is legitimate work); and the ETA,
+  which promised 2–4 min and took 5.8 — **2.0× its own midpoint and over its band** (`etaAccuracy`,
+  the instrument added yesterday, firing for the first time on real data; correctly `evidenced: false`,
+  so no false number was ever shown to the user).
+
+### 🔴 THE DEFECT THAT SHIPPED, and the chain that produced it
+
+The reviewer found it and could only warn: `src/App.tsx` was rewritten with its **own** `Item`
+interface (`type`, `category`, `governmentPrice`, `retailPrice`) while the project's `src/types.ts`
+already exported `PriceItem` (`category`, `price`, `unit`) and `src/data.ts` exported
+`initialData: PriceItem[]`. Result: **`data.ts` orphaned**, a **circular import**, and 137 items
+embedded inside `App.tsx`. Meanwhile `tsc` was clean, `npm run build` passed, vitest passed 4/4,
+`RUNTIME_VERIFIED` and `GREEN_GUARD_SAVE` both fired, and the user was told *"137 items add ho gaye…
+Browser console ✅ clean — koi error nahi"*.
+
+**Why the engine was blind, in one line: `GRAPH_RESTORED_STUBS` recorded 30 of 31 files carrying
+placeholder facts — and THREE prevention mechanisms read that graph, so all three degraded at once,
+each provably in the same report:**
+
+| mechanism | reads | what the report shows |
+|---|---|---|
+| project contract card ("which module owns this symbol") | `graph().symbols` | stubs carry none ⇒ no symbol→module map ⇒ the model invented its own types |
+| architecture invariants ("how is THIS project built?") | `g.imports` | **"1 observed architecture rule"** |
+| grounding centrality | `graph().imports` | **"3 files, ~211 tokens (budget 4000)"** |
+
+The card exists *precisely* to prevent invented imports — its own comment says it "Runs AFTER
+warmIndexFiles (the graph is warm)". The graph was not warm, and nothing said so.
+
+### ✅ FIXED — and the refusal that preceded it is why this one is trustworthy
+
+`warmIndexFiles` built `known` from `graph.files`; a stub IS in `graph.files`, so every restored file
+was filtered out and kept empty facts for the whole build. **A stubbed file is no longer a known file.**
+
+Yesterday's entry recorded this fix as deliberately NOT shipped, because filling could fire
+`unresolvedImport` (a 20-point blocker ⇒ ₹0 on a working app) and *"which one dominates has never been
+measured"*. The measurement arrived, and it showed the worry was wrong twice over:
+- a file left unreached by `maxFiles` **stays in `graph.files` as a stub**, so imports to it still
+  resolve — no false unresolved import is possible (now pinned by its own test);
+- the readiness path that owns that penalty reads the **durable project content**, not this graph —
+  and in this report its tool was **never invoked** (the build called `read_file`, `grep`, `evaluate`,
+  `edit_file`, `bash`, `update_preview`, `screenshot`, `console_errors`, `update_todo` — no readiness
+  check at all).
+
+And the hollow graph was causing the **opposite** false penalty all along: a stub imports nothing, so
+every component looked un-imported (`orphanComponent`) on every resumed build. Filling removes false
+penalties and makes real ones real. My own test had said: *"If a future change starts filling stubs,
+THIS is the assertion that must be updated deliberately — with the measurement in hand."* It was.
+Reversion-proven: reverting `WorkspaceMemory.ts` fails both new cases.
+
+### 🔎 STEP 2 — the missing subsystem, named
+
+Everything needed to catch this was already in the report: the graph knew it was hollow, grounding knew
+it had spent 211 of 4,000 tokens, the reviewer found the mismatch, the integrity pass found the cycle.
+**Nothing connects "my knowledge of this project is hollow" to "so do not let a one-file rewrite invent
+its own types".** The engine edited an existing app while blind to it and the only thing that noticed
+was an advisory reviewer that cannot block or repair. The fill removes the blindness; the missing
+subsystem is still a **pre-edit knowledge gate** — on an edit of an existing project, refuse to proceed
+on a mostly-stubbed graph until it is rehydrated. Recorded as the next step, not guessed at.
+
+### 🔴 Open, NOT fixed, and why each is a decision rather than a patch
+
+1. **`requestAnalysis` called this `taskType: "chat"`, `complexityScore: 5`** — for a request that
+   produced 137 items and 9,701 output tokens over 5.8 minutes. `COMPLEXITY_ROUTING` therefore opened
+   on the cheapest rung (which then crawled). The scorer measures the PROMPT's text, and *"add all the
+   medicines a hospital needs"* is 147 characters with no enumerated features — **prompt complexity and
+   WORK size diverge maximally for exhaustive content generation.** A fix routes more builds to KIMI at
+   ~13× the input price on the tier NavBharatAI pays for itself, so it is the admin's call, on more
+   than one report.
+2. **The in-browser preview crashed** — `PREVIEW_ERROR`, severity error: `Cannot read properties of
+   null (reading 'useState')`, `source: in-browser`, **165 s after the build ended**, on an app that had
+   just rendered in a real browser. That is our renderer, not the user's app. `shouldFailoverToLive`
+   exists for exactly this and the live server was up — **but the report does not record whether the
+   failover fired, so what the user actually saw is unknown.** Not diagnosable from one report, and
+   `ReactPreview.ts` is not a file to change on a guess.
+3. **One unlabelled input caused two findings.** `SearchBar.tsx` has a form field with no label, which
+   fails WCAG 1.3.1 **and** is why `JOURNEY_NOT_DERIVED` fired ("no name, id, placeholder, label or
+   test id"), which is why `RELEASE_GATE` could only reach YELLOW ("whether it actually SAVES anything
+   is untested"). It is in the USER's app, so it is not ours to edit — but it is a strong argument for
+   the builder emitting addressable inputs by default, since one missing attribute cost the gate its
+   only journey.
+4. **The sandbox was 94% idle** (11.2 min up, 0.6 min of our operations, 10.5 min idle), and the
+   machine "came up resumed". Billing charged the build's own 346 s rather than the machine's 710 s, so
+   the user was not charged for our idle time and NavBharatAI absorbed ~$0.017 — the right call, and
+   visible only in the admin report.
+
+⚠️ **A WRONG INFERENCE I ALMOST PUBLISHED, recorded because the method matters more than the result.**
+The report carries two sandbox costs — $0.03266 and $0.015942 — and I read the 2.05× gap as proof that
+`E2B_USD_PER_HOUR` was still the half-true `0.083`. It is not: the report's own line prints *"at
+$0.1656/hr"*, so the env is correct, and the smaller figure is the **build's 346 s** at that same rate
+rather than the machine's 710 s. Two honest measures of different things. Checking the code instead of
+publishing the arithmetic is the only reason the admin did not receive a false alarm about their own
+Cloud Run.
 
 ## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR C of N: the codemod, proven on the heaviest file (AdminDashboard 1,073 → 1)
 

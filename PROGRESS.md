@@ -67308,3 +67308,84 @@ curl count as proof, and making the gate fill unconditional — each turns the s
   read back; an explicit `proved(fact, source)` every actor calls is still the subsystem.
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+---
+
+## 2026-09-18 — A turn that produced NOTHING is our cost, never the user's bill
+
+**The admin's question, verbatim: *"kya ham ₹ kuch jyada hi charge to nahi kar rahe hai??"*** The
+honest answer was that the 4× markup is defensible — at ₹152.90 that build was still far below Bolt
+(~₹360 for the same token volume) and Lovable (₹720–₹1,440 per feature) — and that applying it to
+work which delivered nothing is not.
+
+**The evidence, from build `b6f88a72` (verified from raw token counts, not report fields):** real cost
+$0.398342 (LLM $0.381374 + E2B $0.016968) = ₹38.24, billed $1.593365 = ₹152.90 at ₹95.96/$. Of that,
+the post-build reviewer consumed **~520,000 input tokens — 34% of the build, ≈₹12 — and returned
+`responseChars: 0` on every single call.** The user paid ×4 on it.
+
+### The class: `turnStarvedItsBudget` already names the turn. Its tokens went two different wrong ways.
+
+`floorBudget.ts`'s predicate — no text, no tool call, and either truncated or reasoning-only — is the
+exact definition of "carried nothing a caller can use". What happened to those tokens depended on
+which runner produced them, and both outcomes were wrong in **opposite** directions:
+
+- **A runner that THROWS** (`OpenAiToolRunner`, i.e. every GLM/Kimi rung) rejects before
+  `onTurnComplete` is reached, so the tokens reached **neither the ledger nor the build sink** — real
+  money paid to a provider, recorded nowhere, invisible to the admin cost card *and* to
+  `buildCostCeiling`'s mid-build stop. This is the "abandoned provider call recorded as zero tokens"
+  open root cause from the `b6f88a72` autopsy, closed here.
+- **A runner that does NOT throw** (the Claude path — `AgentRunner` carries its own net at the loop
+  level) returns the starved turn as a plain success, so its tokens went into the sink, the ledger,
+  **and straight onto the user's bill at the full markup.**
+
+### The rule, in one sentence
+
+Those tokens are counted **in full** as OUR cost, and subtracted from the base the user's markup is
+applied to. `src/server/AgentV3/unbilledTurns.ts` owns the whole concept (pure: `billableEntries`,
+`splitUnbilledCost`, `markAbandonedTurn`, `abandonedTurnUsage`); `ProviderModelEntry.unbilled` is an
+optional SUBSET of `usage`, never a deduction from it, so `realProviderCostUsd`, `ledgerCostUsd`,
+`byProvider()` and `total()` all keep seeing every rupee.
+
+🔒 **A clamp that shrank OUR number too would hide our own bleeding on the exact panel used to judge
+it** — the `E2B_USD_PER_HOUR` shape. So the gap is not merely visible, it is *explained*: both the
+normal settle and the watchdog finalizer record `UNBILLED_BARREN_WORK` naming the absorbed rupees.
+The code is in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — what we chose not to charge for is an
+accounting fact about our engine, never a finding about the user's app (the
+provider-error-as-app-blocker class, autopsy `4efab9d7`, through yet another door).
+
+🔑 **Reported through `onTurnComplete`, not a second channel.** The abandoned turn's usage rides the
+error (`markAbandonedTurn`, a non-enumerable Symbol so it can never leak into a serialised error
+body) and is handed to the one callback every build turn and every heal turn already passes through.
+A parallel channel is precisely how the heal gates' tokens went unattributed for months.
+
+⚠️ **The case that decides whether this is safe, and it is test-locked:** a reviewer sub-agent reading
+files returns **tool calls and no text**. `turnStarvedItsBudget` is FALSE the moment any tool call
+exists, so that work stays billable. Billing it as "produced nothing" would make the engine's real
+work free — the opposite error, and a far more expensive one.
+
+### What this does and does not deliver — stated plainly
+
+**On `b6f88a72` itself this change would have saved the user ₹0.** That build ran on Kimi, whose
+runner throws on starvation, so its reviewer's calls were not starved turns at all — they completed,
+made tool calls, and the *pass* ended barren when it timed out. That is a different thing, and this
+change does not touch it.
+
+🔴 **STILL OPEN, and it is where the ₹50 actually is:** there is no per-PASS attribution in the
+ledger. `ProviderUsageLedger` knows which VENDOR was paid, never what FOR, so "leave the reviewer's
+barren pass out of the bill" is not expressible today. The design is a thin billing-phase
+`AsyncLocalStorage` (the `aiSpendZone.ts` shape, deliberately NOT overloading `runInPass`, which
+answers a different question) read by `captureTurnUsage`, with the route marking a phase barren where
+it already records `REVIEW_INCOMPLETE`. `REVIEW_PARTIAL` and `REVIEW_LATE` must NOT count as barren —
+a salvaged verdict means something was produced.
+
+⚠️ **And none of this is the cost fix.** It is rule 5's honesty layer. The real saving is not spending
+those tokens at all — a reviewer that cannot write to a green app should not be reading the whole
+project at full budget either — which is a separate change, already specified to another session
+alongside the EARLY GREEN latch ordering.
+
+Test-locked in `tests/aTurnThatProducedNothingIsNotTheUsersBill.test.ts` (29 cases), each behavioural
+half proven by reversion: the success-path mark, the catch-path report, the ledger's subset, and the
+billing subtraction were each removed in turn and the matching cases observed to fail. Four existing
+pinned-literal guards were updated (not loosened) because the throw site gained a wrapper and the
+billing return gained a field — each with the reason recorded in place, per the trail those same
+comments already carry.

@@ -103,6 +103,9 @@ const NEVER_SUGGEST = new Set([
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',
   'PREVIEW_SERVER_RESTARTED',
+  // "₹X of engine work produced nothing and was not billed" is our own accounting, not something
+  // the user could ever act on.
+  'UNBILLED_BARREN_WORK',
 ]);
 
 /**

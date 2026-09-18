@@ -42,6 +42,10 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
 const PROCESS_ONLY_CODES = new Set([
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
+  // What we chose not to charge for is an accounting fact about OUR engine (unbilledTurns.ts).
+  // Counting it as a finding about the user's app is the provider-error-as-app-blocker class
+  // (autopsy 4efab9d7) through yet another door.
+  'UNBILLED_BARREN_WORK',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).

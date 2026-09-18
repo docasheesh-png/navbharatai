@@ -67184,3 +67184,43 @@ The module's existing 20 cases pass unchanged.
   real subsystem; today there are two readers sharing no vocabulary.
 - **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+## 2026-09-18 — Option F: a suggestion costs a suggestion's price (`AGENTV3_GREEN_REVIEW_LEAN`)
+
+Second of the series (admin: *"ek ek kar ke sabhi build karo"*). Measured on b6f88a72 from the raw
+token counts, not report fields: the reviewer made **40 calls**, read `src/App.tsx` **six times** and
+`src/index.css` five (each time told by the tool "you already have it"), spent **523,374 input tokens
+= 34.4% of the build's LLM spend ≈ ₹12.6**, and returned **`responseChars: 0` on every call**. And on
+that green app Green Stop had already made it suggest-only — no repair could run, nothing it said
+could fail the build.
+
+**The rule, reused — never a second "is the app green?" question.** `greenReviewPlan` is
+`!reviewerShouldWrite(...)`: exactly when the review can only suggest, it is also lean.
+- **Hard step cap** `GREEN_REVIEW_MAX_STEPS = 12` — a second `makeSubAgentSpawn({ ...subAgentDeps,
+  maxSteps })`. The deps object was hoisted so one wiring serves both spawns (the arity test
+  `subAgentGetsTheWholeWiring` re-anchored on the object, reason recorded in place).
+- **Budget** `reviewerBudgetMs(…, { previewGreen })` capped at `GREEN_REVIEW_BUDGET_MS = 45_000` — the
+  floor the function already refuses to go under, so a green review is never given LESS than a
+  not-green one at the wall-clock margin, only never more.
+- **The reviewer is TOLD** (`reviewBuild({ mode: 'suggest' })`): proven to render, suggest-only, read
+  each file once, do not survey, do not call `second_opinion`. The instruction became the pure,
+  exported `reviewerInstruction` so this can be asserted rather than trusted; full mode is
+  byte-identical to a review with no mode at all (test-locked).
+- Report code `REVIEW_LEAN`. Kill switch `AGENTV3_GREEN_REVIEW_LEAN=off`.
+
+**Untouched, on purpose:** where the reviewer can WRITE — not green AND (build failed OR proven
+broken) — full budget, full steps, full powers. The cut is in tokens, never strictness.
+
+⚠️ **A wrong expectation in my own first test, caught by the derived case.** I wrote that "not green,
+not proven broken, build ok" keeps the full review. `reviewerShouldWrite` says otherwise — that is the
+*could not look* state, and since 2026-08-23 ignorance is not a licence to edit, so it was already
+suggest-only. The plan correctly makes it lean; the hand-written table was wrong and the derived
+test (plan.mode === 'suggest' ⇔ !canWrite, all eight states) is what caught it. Recorded rather
+than quietly corrected.
+
+`second_opinion` needed no change: the child dispatcher is built with it withheld (SubAgent.ts,
+"positions 7-10"), which is why the Gita reviewer's call to it took 0 s.
+
+**Tests:** `tests/aSuggestionCostsASuggestionsPrice.test.ts` — 16 cases + source-anchored wiring
+guard. **Proven by reversion four ways:** the plan not asked · the budget not told · the green cap
+removed · the plan ignoring the write rule (bites two cases).

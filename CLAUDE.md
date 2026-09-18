@@ -2256,6 +2256,24 @@ the flag entries above promise.
   page's self-retry is CAPPED (~2 min) because a door hit RESUMES a paused sandbox — uncapped, an
   abandoned open tab would fight the idle reaper forever at real E2B cost; (2) `off` stops both minting
   and answering, and the client falls back to the old stored-URL behaviour byte-identically.
+- **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
+  **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
+  post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
+  build — yet it ran at full budget and the full 40-step sub-agent cap: on the Gita build **40 calls,
+  `src/App.tsx` read six times, 523,374 input tokens = 34% of the build's LLM spend, zero characters
+  back.** Now `greenReviewPlan` (`greenReviewPolicy.ts`) is that SAME write rule reused — never a
+  second "is it green?" question — and exactly when the review can only suggest it is also lean: a
+  hard step cap (`GREEN_REVIEW_MAX_STEPS` = 12, a second `makeSubAgentSpawn` from the hoisted
+  `subAgentDeps`), a 45 s budget (`GREEN_REVIEW_BUDGET_MS`, the existing floor, via
+  `reviewerBudgetMs(…, { previewGreen })`), and an instruction that says so (`reviewBuild({ mode:
+  'suggest' })`, built by the now-pure `reviewerInstruction`). ⚠️ **Where the reviewer can WRITE —
+  not green AND (build failed OR proven broken) — nothing changes: full budget, full steps.** The cut
+  is in TOKENS, never in strictness. ⚠️ "Could not look" (not green, not proven broken, build ok) is
+  ALSO lean, on purpose: Green Stop already made it suggest-only (*ignorance is not a licence to
+  edit*, 2026-08-23), so an offer costs an offer's price there too. Report code `REVIEW_LEAN`.
+  Test-locked and reversion-proven four ways in `tests/aSuggestionCostsASuggestionsPrice.test.ts`.
+  **What to watch:** reviewer token share on green builds (34% → single digits expected), and that
+  the reviewer's findings on NOT-green builds are as complete as before.
 - **`AGENTV3_JOURNEY_CHECK`** (default ON, set `off` to disable) — after a successful build with a live
   preview, derives a real user journey from the app's OWN markup and runs it in the sandbox's pre-baked
   browser: fill the form, submit, **reload, and check the item is still there**. That last step is the

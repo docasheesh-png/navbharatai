@@ -14,6 +14,11 @@
 // context-file selection. The route wires it into a lock-free read-only lane.
 
 import { MAX_QUEUE_ITEMS } from './BuildQueue';
+import {
+  analyzeRequirementGaps,
+  shouldSurfaceRequirementGaps,
+  indiaFirstGuidance,
+} from '../lib/RequirementGapAnalyzer';
 
 export type ChatRole = 'planner' | 'advisor';
 
@@ -54,6 +59,75 @@ export function roleSystemPrompt(role: ChatRole): string {
     'subset of file contents, not every byte). Turn actionable findings into concrete fix/test ' +
     'commands for the builder.\n\n' + STEPS_CONTRACT
   );
+}
+
+/** The most questions a plan may ever ask. A plan that interrogates is not a plan. */
+export const PLANNER_MAX_QUESTIONS = 3;
+
+/**
+ * 🧭 THE PLANNER FINALLY GETS THE DOMAIN KNOWLEDGE THIS REPO ALREADY HAD (admin, 2026-09-17).
+ *
+ * Two things the admin asked for on the same day turn out to be one change:
+ *   1. *"agar cheez clear nahi hai ki kya banana hai, to user se direct puchna chahiye"*
+ *   2. *"Lovable/Bolt user ko plan dikhate hain build se pehle … 'plan' wale option me yeh sikha
+ *      sakte hai?"*
+ *
+ * `RequirementGapAnalyzer` has known since 2026-07-19 that "hospital app" implies RBAC, an audit log,
+ * EMR privacy and scheduling — and that a restaurant implies menu, KOT and GST. Its `render` function's
+ * own doc comment says the block is *"for the planner/agent to act on"*. **Nothing ever gave it to the
+ * planner.** The analysis was wired only into the BUILDER, where it is deliberately friction-free and
+ * must never ask a question (`buildRequirementGuidance`, "skip it silently rather than asking").
+ *
+ * 🔑 WHY PLAN MODE IS THE RIGHT PLACE, AND THE BUILD LANE IS NOT. The 2026-07-20 decision that the
+ * builder never asks is correct and is NOT being reopened: someone who typed a build order wants an
+ * app, not an interview. But a user who has deliberately switched to PLAN has asked for the opposite —
+ * they want to think first. The same questions that would be friction in one lane are the entire point
+ * of the other. So the analysis is unchanged; only its audience is new.
+ *
+ * 🔒 THREE BOUNDS, because a plan that interrogates is worse than one that assumes:
+ *   • at most `PLANNER_MAX_QUESTIONS`, and only those whose answer would change what gets built;
+ *   • the PLAN comes first and is never held back waiting for answers — the user can ignore every
+ *     question and say "you decide", which the reply is required to offer;
+ *   • it fires only for a FRESH app (`projectIsEmpty`) and only when `shouldSurfaceRequirementGaps`
+ *     finds a real domain with genuinely-missing features. Planning a change inside a live project
+ *     gets nothing — "does it need login?" is noise to someone who already has login.
+ *
+ * India guidance rides the same gate: when the user's OWN words name the market (₹ / GST / UPI /
+ * Hindi), the plan should assume Indian rails rather than dollars and Stripe.
+ *
+ * PURE — no I/O, no model call. The analyser is deterministic regex work, so this costs nothing.
+ */
+export function plannerDomainBrief(
+  role: ChatRole,
+  prompt: string,
+  opts: { projectIsEmpty: boolean },
+): string {
+  if (role !== 'planner' || !opts.projectIsEmpty) return '';
+  const gaps = analyzeRequirementGaps(prompt);
+  const surface = shouldSurfaceRequirementGaps(gaps);
+  if (!surface && !gaps.india) return '';
+
+  const parts: string[] = [];
+  if (surface) {
+    const feats = gaps.likelyMissing.slice(0, 6);
+    const questions = gaps.clarifyingQuestions.slice(0, PLANNER_MAX_QUESTIONS);
+    parts.push([
+      `== WHAT THIS KIND OF APP USUALLY NEEDS (this reads like a ${gaps.domain} app) ==`,
+      'Commonly needed for this kind of app, and NOT stated in the request:',
+      ...feats.map((f) => `- ${f}`),
+      '',
+      'HOW TO USE THIS, and the limits matter as much as the list:',
+      '1. Open with the PLAN itself, in plain words the user would use — what you understood they want,',
+      '   the screens and the features you intend to build. No jargon, no file names.',
+      `2. Then ask AT MOST ${PLANNER_MAX_QUESTIONS} questions, and only ones whose answer would genuinely`,
+      '   change what gets built. Never ask about something they already told you.',
+      '3. Say in one short line that they can simply tell you to decide, and you will use sensible',
+      '   defaults for the rest — the plan must never be held back waiting for answers.',
+      ...(questions.length ? ['', 'Questions worth choosing from:', ...questions.map((q) => `- ${q}`)] : []),
+    ].join('\n'));
+  }
+  if (gaps.india) parts.push(indiaFirstGuidance(gaps.domain));
+  return parts.length ? `\n\n${parts.join('\n\n')}` : '';
 }
 
 const STEPS_FENCE_RE = /```steps\s*\n([\s\S]*?)```/;

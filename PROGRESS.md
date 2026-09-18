@@ -66684,3 +66684,155 @@ measurement (`'E commerce website'` → 5) is genuinely correct and is fixed her
 change makes the engine size them correctly; only the next few days of the Failure Category panel can
 say whether that converts into builds that work. The honest thing to watch is those eight rows'
 failure rate and their heal counts, against the extra cost of opening on KIMI.
+---
+
+## 2026-09-18 — 🔴 THE ENGINE OVERRODE ITS OWN MODEL'S HONEST ANSWER AND REWROTE A USER'S APP (autopsy 95598899)
+
+**Workspace:** a 35-file Qiikr classifieds marketplace, free tier, weak ladder.
+**Prompt:** *"Make a video of parrot talking about the benefits of fruits in urdu"*.
+
+### Ledger (5 buckets)
+
+- ✅ **Self-healed (2):** the GLM family bench fired correctly after two consecutive 60 s timeouts
+  (`PROVIDER_BENCHED`), and the ladder reached KIMI. The throughput/timeout machinery worked.
+- 🔀 **Worked around (2):** both GLM fallbacks. **120 s of a 227 s build — 53% — was spent inside
+  two dead GLM calls.** The first GLM call had succeeded in 7.9 s, so this is not a keyless rung.
+- ⏭️ **Skipped (1):** the platform's injected preview bridge was destroyed when `index.html` was
+  overwritten; the model noticed and tried to re-add it by hand.
+- ❌ **Still broken (3):** `RELEASE_GATE` RED, `GREEN_GUARD_UNVERIFIED`, and `PREVIEW_ERROR —
+  Cannot read properties of null (reading 'useState')`. **The user's app is broken.**
+- 🥵 **Struggle:** the whole run. The user typed *"This app not working leave it"* and then *"No
+  parrot or no app, don't work on any project"* to make it stop, **and was charged ₹23.81.**
+
+### 🔴 Root cause — `toolUses.length === 0` is not evidence of a stall
+
+The first model answered **correctly, completely, in 8 seconds**: NavBharatAI builds web apps and
+cannot make videos — did the user want the Qiikr app continued, or something else? Zero tool calls,
+`finish_reason: end_turn`. **That should have ended the build.**
+
+`AgentRunner`'s NUDGE-TO-BUILD fired instead. It exists for a real bug (a model that narrates
+*"here's my plan… now I'll create index.html"* and never acts) and its only test for that bug was
+`no tool calls yet`. **An answer is indistinguishable from a stall through that test.** So the engine
+replied to its own model, verbatim:
+
+> *"Do NOT just describe or delegate in prose — ACT NOW … Start by writing the entry file (e.g.
+> index.html or src/main)."*
+
+And that is precisely what followed, against somebody's working app: `index.html`, `src/main.tsx`,
+`src/App.tsx`, `src/index.css` overwritten, an `rm` attempted on `src/`, the preview bridge lost, the
+app left throwing `useState` of null.
+
+🔑 **The engine had already said the right thing and then did the opposite.** The same build recorded
+*"✏️ Editing your existing app (35 source files) — I'll make targeted changes, not rebuild it."*
+Nothing enforced that sentence.
+
+⚠️ **THE NUDGE OUTLIVES THE MODEL IT WAS AIMED AT.** GLM produced the refusal, then timed out twice
+and was benched; **KIMI inherited the same transcript, read the nudge as an instruction, and
+complied.** A nudge written for a stalling model became an order to a model that had never stalled.
+
+🔎 **AND THE REPO'S OWN REFUSAL TEST WOULD HAVE CAUGHT IT.** `looksLikeRefusal` (`promptSafety.ts`)
+matches that turn's *"I cannot create videos"* — and it is consulted at three places in
+`routes/agentv3.ts`, all of them AFTER the build (retry, upsell, delivery). **The nudge never asked
+it.** Same class as the money audit's: a rule applied in one place and not its sibling.
+
+### The fix (`nudgeToBuild.ts`, both halves of the 50/50 law)
+
+1. **The trigger — an answer is never nudged.** `decideBuildNudge` asks what the turn WAS before
+   overriding it: `turnDeclined` (reusing `looksLikeRefusal`, never a second copy) or
+   `turnAskedTheUser` (the LAST non-empty line ends in `?` / `？` / `؟`). Either ends the turn with
+   the model's own words.
+2. **The condition — a nudge can no longer order a rewrite.** On an edit (`editingExistingApp`, the
+   route's `isEditMode`) the wording drops *"start by writing the entry file"* entirely and adds
+   *"this project ALREADY EXISTS … do NOT rewrite, replace or delete the existing app or its entry
+   files"*. It still says ACT NOW — it is not a softer nudge.
+3. **Honesty (rule 5):** `BUILD_NUDGE_STOOD_DOWN` on the admin report, via a new optional `onNote`
+   hook. Without it, a turn that was not nudged is indistinguishable from one where the nudge never
+   applied — and the decision would leave no trace at all.
+
+🔒 **The asymmetry, which must not be reversed:** standing down wrongly costs ONE turn — the build
+ends with the model's own words, `ok: false`, **no charge** by the billing law, and the user
+re-sends. Nudging wrongly costs a working app. Same shape as the READ-THE-MOOD rule.
+
+### ⚠️ A defect in my own first draft, recorded because its test caught it
+
+`turnAskedTheUser` originally tested `/[?]$/` on the last line — and the real turn ends
+`**Or clarify if you need something different?**`, a bold list item, so the clearest question in the
+whole transcript scored as "not a question". A model writing markdown is the normal case, not an edge
+one; trailing `* _ \` ) ] " '` are now stripped before the test.
+
+### Tests
+
+`tests/aRefusalIsNotAStall.test.ts` — **22 cases**, reversion-proven on five independent reverts
+(both stand-downs, the per-mode wording, the markdown strip, the route's edit signal, the runner's
+call site); between them they fail 7 cases.
+
+### 🔴 Still open (rule 6)
+
+- **The user was charged ₹23.81 for a build that broke their app.** `CANCELLED_BUILD_CHARGED` halved
+  it on delivery `files-saved` — which counts files WRITTEN, not value delivered, and here the files
+  written destroyed a working app while the release gate went RED. "Working app or free" is not
+  satisfied by "files were saved". Fixing this means teaching the cancelled-build biller the
+  difference between progress and damage, which is a separate change with its own billing risk.
+- **Overwriting `index.html` destroys the platform's injected preview bridge**, and the recovery is
+  the model re-adding it by hand from memory. That is what produced the `useState` of null. The
+  platform should re-inject on serve rather than rely on the model; not attempted here.
+- **`GRAPH_RESTORED_STUBS`: 30 of 30 files carried PLACEHOLDER facts on this cold resume** — "they
+  contribute nothing to recall, evaluate, the architecture analysis or the readiness score". The
+  engine was structurally blind to the app it was about to replace. Likely the reason nothing
+  downstream objected, and a real systemic gap.
+- **Two 60 s GLM timeouts = 53% of the build's wall clock.** The bench worked as designed (2 strikes,
+  family-keyed); the cost is the two strikes themselves. Lowering the first-strike cost is a
+  provider-timeout question, not this autopsy's.
+
+### Proactive layer (step 6) — the one lever above all others
+
+**Most "continue / fix the error" builds are the engine cleaning up its own mess, and this report is
+the sharpest example yet: the engine created the mess by refusing to accept an answer.** The lever is
+not a better nudge — it is that *every place the engine overrides a model's judgement must first ask
+what the model actually said.* The nudge was the only such override found; if another is added, it
+inherits this rule or it inherits this autopsy.
+## 2026-09-18 — Pro image cost: the open margin question, CLOSED by the admin's number
+
+The 2026-09-18 entry above recorded an OPEN item: *"the ₹2 margin is unverified from inside the code …
+only the provider's invoice can answer"*. The admin answered it the same day — **$0.014 per image** —
+so this closes it, and the stale caveat in `imageProGen.ts` was DELETED rather than left standing.
+
+🔴 **Deleting it was the point, not tidiness.** This repo has paid twice for a doc that kept asserting
+something already settled: an idle-minutes default that read *"NOT taken, admin's call"* eight days
+after it was taken, and an E2B rate whose derivation *"could not fail"*. A caveat that has been
+answered is not humility — a later session reads it as current and either re-asks a settled question
+or reasons from a premise that is no longer true.
+
+**The margin, at the live rate:**
+
+| USD/INR | cost/image | margin | ratio |
+|---|---|---|---|
+| 85 | ₹1.190 | ₹0.810 | 1.68× |
+| 87 | ₹1.218 | ₹0.782 | 1.64× |
+| 95 | ₹1.330 | ₹0.670 | 1.50× |
+
+**The number that matters is the BREAK-EVEN EXCHANGE RATE: ₹2 ÷ $0.014 = ₹142.9 per dollar** — the
+rupee would have to fall by two-thirds before a Pro image stopped covering its own cost. That is stated
+as a thing which could be falsified, rather than as a reassuring ratio. (The E2B lesson applied to our
+own reasoning: a derivation is only verified once it predicts something it could have got wrong.)
+
+**What shipped:** `IMAGE_PRO_COST_USD_DEFAULT = 0.014` with an env override, `imageProMargin()` (pure)
+and `imageProMarginWarning()`, which the route logs ONCE per process — loudly via `console.error` when
+the price has stopped covering cost, quietly as a confirmation line when it has not.
+
+🔒 **Two failure modes closed deliberately.** A MALFORMED `IMAGE_PRO_COST_USD` falls back to the known
+$0.014 and never to zero — `Number('')` is 0, and a zero cost reports INFINITE margin on the very panel
+that exists to catch a bad one, i.e. the failure being guarded against wearing a green tick. And a junk
+exchange rate cannot produce NaN money. Both reversion-proven.
+
+⚠️ **The warning is ADMIN-ONLY text** — it names our own cost, which is exactly what the White-Label
+Law keeps off a user's screen. It belongs in a server log and the admin panel, never in a response.
+
+🔴 **STILL OPEN, and unchanged by this:** no HOST is chosen, so `IMAGE_PRO_ENDPOINT` and
+`IMAGE_PRO_KEY` remain unset and the paid tier is honestly unavailable. $0.014 is the MODEL's price;
+which host serves it is a separate decision, and a host that marks it up would move every number above.
+The guard is what makes that discoverable instead of silent.
+
+📌 Note for whoever reads this next: `ImageStudioPro.tsx` was migrated to design tokens by another
+session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
+this change is server-side only.

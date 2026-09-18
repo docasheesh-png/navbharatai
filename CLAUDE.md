@@ -1469,11 +1469,23 @@ the code (it is actually read somewhere) on 2026-07-11.
   "kimi-k2.7-code always reasons" purely because the id failed a `startsWith('glm-')` check, handing an
   unbounded budget to a vendor nobody has measured. So the new predicate is FALSE for every non-GLM
   vendor, which keeps today's clamp for them exactly.
-  🔴 **STILL OPEN (rule 6): the Kimi sibling.** Report 58fe8254 shows the same `outputTokens: 4833`
-  starvation three times on Kimi, so the class is not GLM-only — but this repo holds no capability fact
-  for Moonshot's models, and inventing one would be a guess. The honest generic fix (remember a rung
-  that starved and unclamp its NEXT call) needs cross-turn state the per-rung runner construction does
-  not currently carry. Recorded, not guessed at.
+  ✅ **THE KIMI SIBLING IS CLOSED — corrected 2026-09-18, because this paragraph still said it was
+  open and sent a session to rebuild what already exists.** It read: *"STILL OPEN (rule 6): the Kimi
+  sibling … this repo holds no capability fact for Moonshot's models, and inventing one would be a
+  guess. The honest generic fix (remember a rung that starved and unclamp its NEXT call) needs
+  cross-turn state the per-rung runner construction does not currently carry."* **Both halves now
+  exist**, verified against `main` rather than taken from this file:
+  • **The capability fact is MEASURED, not guessed** — `MEASURED_ALWAYS_REASONS = ['kimi-k2.7-code']`
+    in `providers/glmThinking.ts`, derived from two independent admin reports (`58fe8254`, four
+    starvations; `d98dae01`, two more) and matching `-highspeed` by prefix because it is the same model
+    served faster. `kimi-k3` is deliberately NOT in it — nobody has measured it.
+  • **The cross-turn state exists** — `rememberStarvedWhileClamped` / `modelStarvedWhileClamped`
+    (`providers/OpenAiToolRunner.ts`), a per-process memory fed from the starvation throw and read at
+    `reconcileFloorBudget`'s `alwaysReasons`, so a model that starves ONCE while clamped is never
+    clamped again in that process.
+  ⚠️ **The lesson is safeguard #6 applied to this file itself: a "STILL OPEN" note is a claim with a
+  date on it, and the code moves under it.** Re-grep before acting on one — an open item that is
+  actually closed costs a session the same investigation twice, and this one nearly did.
   🔒 **Honesty half:** a rung that starves with the clamp ALREADY LIFTED must not be reported as "our
   own ceiling" — that sentence would send the next autopsy to fix arithmetic that is already correct.
   `isUnclampedStarvation` splits the two wordings in `BuildDiagnostics`. Test-locked and proven by

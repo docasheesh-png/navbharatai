@@ -66600,6 +66600,90 @@ TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over an
 lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
 theme, which still wants a `bg-success` fill token rather than per-button patches.
 
+## 2026-09-18 — "hospital management system" was scored 5, the same as the word "hi" (the admin's failure table, part 2)
+
+Part 1 (#3076) made every build ENDING nameable. This is the first fix aimed at the failure RATE
+itself, and it came from asking a plain question about the admin's table: *what do the worst rows have
+in common?* Booking 100%, Logistics 100%, Events 100%, SaaS 76.9%, Education 75%, Healthcare 57.1%,
+Ecommerce 54.5%, Restaurant 50% — **every one of them is a domain a real user names in two or three
+words.**
+
+**Measured on `main` before touching anything** (`analyzeRequest({ prompt })`, the deterministic sizer
+the build route calls at `routes/agentv3.ts:11845`):
+
+| prompt | score | taskType |
+|---|---|---|
+| `ecommerce website` | 58 | complex_app ✅ |
+| `build a SaaS platform` | 58 | complex_app ✅ |
+| **`hospital management system`** | **5** | **chat** |
+| **`school management system`** | **5** | **chat** |
+| **`restaurant billing app`** | **5** | **chat** |
+| **`courier tracking app`** | **5** | **chat** |
+| **`event management website`** | **5** | **chat** |
+| **`E commerce website`** | **5** | **chat** |
+| `hi` | 5 | chat |
+
+**5 is the score of the word "hi".** `COMPLEX_APP_SIGNAL` lists the words a DEVELOPER writes — saas,
+crm, checkout, auth, backend — and real users write none of them. Those prompts matched no signal
+anywhere in the sizing path and fell through `detectTaskType`'s final `return 'chat'`.
+
+**What a 5 buys, traced through the route rather than assumed:** `scoreToTier(5) = 'gemini'` →
+`maxStepsDefault` **80 instead of 150** (~12582) · `classifyForSimpleLane('gemini')` true, so the
+**one-shot/simple lane** (~15055) and **no blueprint** (~13980) · `decideComplexity(score 5)` →
+`simple`, so the build **opens on the cheapest flash rung** instead of KIMI · `complexityFromPrompt`
+counts 1 module + 1 feature → **magnitude 2, the fast lane and a calculator's ETA**. A hospital
+management system was built with everything sized for a greeting.
+
+🔑 **THE PLATFORM ALREADY KNEW, AND THAT IS WHY THE FIX IS SMALL.** `analyzeRequirementGaps` — the
+classifier the admin's own Failure Category panel uses to LABEL those rows — answers `healthcare`,
+`education`, `restaurant`, `logistics`, `events` for the very same strings. One module knew it was a
+hospital app while the module deciding how much engine to spend called it chat. `namesBusinessDomain`
+(in `appComplexitySignals.ts`, the file whose own header exists to stop exactly this drift) asks the
+owner of the fact. **A third keyword list would have been the drift, not the cure.**
+
+🔒 **Two guards, both narrowing, both in the predicate rather than left to callers:** a PAGE-scoped
+deliverable is still a page ("a landing page for a hospital"), and a SIMPLE deliverable is still
+simple ("a todo app for my restaurant"). It is deliberately NOT folded into `isComplexAppPrompt`,
+which is consulted BEFORE `debugging` and `simple_app`; this is asked LAST, where the previous line
+was an unconditional `return 'chat'`, so no verdict that already existed can move.
+
+**Blast radius, measured over a 38-prompt corpus with the change stashed and unstashed: 28 unchanged,
+10 changed.** Eight are the intended domain promotions. Two are debug turns in a domain
+(`fix the login error in my hospital app`) whose taskType/score/tier are untouched and whose ETA
+magnitude rose 2 → 12 — and that is the module's PRE-EXISTING behaviour, verified: `fix the checkout
+bug` was already 12 before this change, because `complexityFromPrompt` has never had a debugging
+guard and its own comment states the floor "only ever RAISES the estimate".
+
+🔎 **Sibling hunted (rule 3): `e-?commerce` has no space in it.** The real prompt from autopsy
+`c6e4c6ff` was `"E commerce website"`. Both `COMPLEX_APP_SIGNAL` and the domain analyser's own
+ecommerce list missed that spelling; both now read `e[-\s]?commerce`. ⚠️ This also moves such prompts
+from the panel's **General** row into **Ecommerce**, which is more accurate and will shift both rows.
+
+**Test:** `tests/aDomainAppIsNotAGreeting.test.ts` (17), including a derived invariant — a recognised
+domain with no page/simple deliverable is never scored as chat — so a domain added later stays covered
+without editing this test.
+
+⚠️ **THE REVERSION PROBE CAUGHT MY OWN TEST BEING DECORATIVE, and it is recorded rather than quietly
+fixed.** Four of five probes failed correctly; deleting the PAGE guard left all 16 cases GREEN,
+because every page prompt I had chosen ("a landing page for a hospital") is also matched by the SIMPLE
+list. `PAGE_SCOPED` now holds the prompts only that guard catches — "a coming soon page for my
+restaurant", "one-pager for my gym", "portfolio website for a doctor", "a splash page for my clinic" —
+and deleting the guard now fails. **A guard no test can kill is a guard nobody knows is working.**
+
+🔴 **AND A WRONG MEASUREMENT IS CIRCULATING — recorded because a later session will otherwise act on
+it.** PR #3077 (another session, open at the time of writing) states in its open-root-cause section
+that `'build an ecommerce website with cart, checkout, payments, orders, admin'` scores *"5, taskType
+chat"* and concludes the complexity router is dead for that whole class of prompt. Called correctly
+that prompt scores **58 / complex_app**. `analyzeRequest` takes `{ prompt }`, not a bare string; given
+a string it reads `input?.prompt ?? ''`, sizes the EMPTY prompt, and returns 5/chat for anything at
+all. **I made the identical mistake myself minutes earlier and caught it only by reading the
+signature** — which is why this is a note about a shared trap, not about that session. Their FIRST
+measurement (`'E commerce website'` → 5) is genuinely correct and is fixed here.
+
+**Still open, not guessed at (rule 6):** whether these domains' failure rate actually falls. This
+change makes the engine size them correctly; only the next few days of the Failure Category panel can
+say whether that converts into builds that work. The honest thing to watch is those eight rows'
+failure rate and their heal counts, against the extra cost of opening on KIMI.
 ---
 
 ## 2026-09-18 — 🔴 THE ENGINE OVERRODE ITS OWN MODEL'S HONEST ANSWER AND REWROTE A USER'S APP (autopsy 95598899)
@@ -66805,6 +66889,142 @@ Flag `AGENTV3_DONE_SIGNAL=off` reverts to the pre-change behaviour exactly; tuna
 `AGENTV3_DONE_SIGNAL_EVERY` (10) and `_MIN_STEP` (8) fall back to their defaults on a blank or
 malformed value, never to zero. Tests: `tests/theDoneSignal.test.ts` (25 cases), both wiring halves
 proven by reversion.
+---
+
+## 2026-09-18 — 🔴 THE EVIDENCE LEDGER IS READ BACK (autopsy 697b38ee, SIXTH appearance — the write half already existed)
+
+**Admin:** *"navbharatai ab production me hai, worldclass apps se competition me hai … app ko us level
+ko match karne ke liye ya usse accha banane ke liye kuch aur behtar karo."*
+
+### Choosing the lever from evidence, not from ambition
+
+Three of my own recorded open items were re-checked against `main` first, and **two of them were wrong
+or already done** — recorded here because acting on either would have wasted a cycle:
+
+1. **Cold-resume blindness (`GRAPH_RESTORED_STUBS`, 30/30 placeholder facts)** — **ALREADY FIXED** the
+   same day by another session (report `2ec15a71`, `warmIndexFiles`). Found by reading the code, not by
+   trusting my own note.
+2. **"Overwriting `index.html` destroys the preview bridge, which caused the `useState of null`"** —
+   🔴 **THIS CLAIM OF MINE DOES NOT SURVIVE CHECKING, and I reported it to the admin as a root cause.**
+   The LIVE bridge is re-injected at dev-server start (`E2BActuator`, every boot), and the failing
+   preview was the **in-browser** renderer, which builds its own document with its own importmap
+   (`ReactPreview.ts`) and never reads the app's `index.html` for React. The real cause of that
+   `useState of null` is **not established**, and saying so is the honest position — it was a
+   plausible-sounding inference, which is exactly the "not invented is weaker than checked" lesson
+   this file already records about the E2B rate.
+3. **The graph-vs-disk area is TAKEN** — PR #3077 is open there (another session). Not touched.
+
+### The lever actually chosen — and it is the constitution's own named gap
+
+CLAUDE.md names the missing subsystem, verbatim, and has since 2026-09-14:
+
+> *"there is no shared EVIDENCE LEDGER. The agent's shell commands and the platform's gates keep
+> private notions of what has been proven, and the gates trust only their own … Until one ledger exists
+> that any actor writes a proven fact into and every verdict reads from, this class returns."*
+
+`PROGRESS.md` records it **six separate times**. It is the class behind every recent autopsy where a
+**working app was graded as unproven** — which, against Lovable/Bolt/v0, is the single most expensive
+thing this engine does: a competitor that watches your app run and then tells you it cannot say whether
+it works has lost the user, whatever else it did well.
+
+🔑 **THE FINDING THAT MADE IT SMALL: the WRITE half already exists.** `agentRunEvidence.ts` closed the
+shell-command half on 2026-09-17 and its own docblock names what it left — *"That proof does not live
+in the shell-command log at all — it is held by the page checks — so it needs the ledger's WRITE half."*
+But every actor that proves something **already records it**: `RUNTIME_VERIFIED` when the app was loaded
+in a real browser with no errors, `PREVIEW_PUBLISHED` / `PLATFORM_PREVIEW_UP` when an address really went
+up. **The build's own issue timeline IS the ledger. Nothing read it back.** The route already proves the
+pattern — `stoppedByUser` is read off that same timeline so the gate and `rootCause` *"can never tell the
+reader different stories about one build"*.
+
+So this is not a new store threaded through twelve call sites; it is the missing READ, wired at the one
+place a gate already asks what was proven.
+
+### The fix — `provenFromTimeline.ts`, wired beside `agentRunEvidence`
+
+- **`RUNTIME_VERIFIED` ⇒ `pages: 'passed'`.** ⚠️ **Mapped to `pages`, NOT `preview`, deliberately.** It
+  has exactly two producers and they disagree about the preview: `runtimeRecordFromPageChecks` fires
+  precisely when the live preview session is NOT up and says so in its own message. *"Did the app's own
+  page routes render in a real browser?"* is established by **both**, so it is the strongest claim that
+  is true either way. Telling the producers apart by parsing our own prose would be a parser over a
+  sentence we are free to reword.
+- **`PREVIEW_PUBLISHED` / `PLATFORM_PREVIEW_UP` ⇒ `previewUrlPublished`** — wording only, by that
+  field's own documented contract. It fixes the Fight-3D sentence the interface already records.
+- **A sibling module, not a branch inside `agentRunEvidence`**: that one answers *"what does the COMMAND
+  LOG settle?"* and parses shell output; this one answers *"what did an ACTOR record as proven?"* and
+  reads issue codes. One name over two sources of truth would leave a caller unable to tell which kind
+  of evidence it was trusting.
+
+🔒 **IT CANNOT CHANGE A BILL, CHECKED RATHER THAN ASSUMED.** A gate goes RED only on `!buildOk`, a check
+recorded `'failed'`, or blockers — and RED is what flips a build to `ok: false` and therefore FREE. This
+reader only promotes `'not-run'` → `'passed'`, which removes no failure and adds none. A RED build stays
+RED and free; an UNKNOWN build becomes YELLOW. **It moves the sentence, never the money** — and all four
+cases are in the suite.
+
+⚠️ **It also cannot reach GREEN on its own**, and that limit is kept on purpose: GREEN needs a journey to
+have held up, because an app that paints beautifully and saves nothing renders exactly as well as one
+that works.
+
+### Tests
+
+`tests/theLedgerIsReadBack.test.ts` — **16 cases**, built from the engine's REAL records
+(`runtimeVerifiedRecord()`, `runtimeRecordFromPageChecks()`) rather than hand-written fixtures, so a
+change to what the actors emit fails this suite instead of silently unhooking it.
+**Reversion-proven on four independent reverts**: the route's read, the severity guard, the
+`pages`-vs-`preview` mapping, and fill-vs-overwrite.
+
+### 🔴 Still open (rule 6)
+
+- **The ledger is still a READ over records that were designed as prose, not as proof.** Two readers now
+  exist (`agentRunEvidence` for the command log, `provenFromTimeline` for the timeline) and they share no
+  vocabulary. The complete subsystem is an explicit `proved(fact, source)` call an actor makes — this
+  change earns the right to it by showing the read works, and does not pretend to be it.
+- **`RUNTIME_UNCHECKED` still reaches the report through a threaded `previewRendered` boolean**
+  (`AutoFix.runtimeUncheckedRecord`) rather than through this reader. Same fact, second path; unifying
+  them touches the autofix call site and belongs with the write half.
+- **The `useState of null` from autopsy 95598899 is UNEXPLAINED** — see above. It needs the failing
+  file contents, which the report does not carry.
+- **The cancelled-build bill** (₹23.81 charged for a build that left the app broken) is unchanged and
+  still open.
+### …and the same class one script over — Devanagari (same day, same PR)
+
+Hunting the sibling of the fix above found the India-first half, and the framing is the finding:
+**`RequirementGapAnalyzer` already speaks Hindi fluently — in Latin letters only.** Its patterns carry
+`aspatal`, `mareez`, `dawai`, `ilaj`, `chikitsa`, `swasthya`, `dhaba`, `bhojan`, `rasoi`, `thali`,
+`nashta`, `dukaan`, `kirana`, `bazaar`, `saaman`, `godown`, `vahan`, `gaadi`, `udhaar`, `khata`,
+`bahi`, `byaj`, `kist`, `makan`, `kiraya`, `zameen`, `vyayam`, `kasrat`, `shaadi`, `vivah`,
+`samaroh`, `mela`, `naukri`, `rozgar`, `bharti`, `vidyalaya`, `pathshala`, `padhai`, `shikshak`,
+`chhatra`, `kaksha` — and not one of them in the script those words are actually written in.
+
+Measured before the fix: `dukaan ka billing app banao` → **58**, while `अस्पताल प्रबंधन सिस्टम` →
+**5**, `स्कूल मैनेजमेंट सिस्टम` → **5**, `रेस्टोरेंट बिलिंग ऐप` → **5**. A person typing Hindi in
+Hindi got the weaker engine; the same person typing it in English letters got the right one.
+
+⚠️ `रेस्टोरेंट बिलिंग ऐप` is the sharpest case: at three words it is **too short for
+`signalsCouldNotRead`** (12-letter minimum), so it was caught by neither the unreadable-script floor
+nor any domain — invisible to both mechanisms at once.
+
+🔒 **The rule the change follows, so it stays auditable: every Devanagari term added is the same word
+as a romanized term already accepted by that domain.** No new concept enters, so the module's existing
+precision decisions carry over — asserted mechanically by a PARITY case (both spellings must reach the
+same domain) rather than by listing.
+
+⚠️ **Two words were deliberately left out, for a reason `\b` cannot fix here:** JavaScript's word
+boundary is ASCII, so a Devanagari term matches inside longer words. `माल` (goods) sits inside `मालिक`
+(owner) and `योग` (yoga) inside `उपयोग` (usage) and `योगदान` (contribution) — each would have turned
+ordinary Hindi into a logistics or fitness app. Both are covered by a false-positive case.
+
+**Reversion-proven**: deleting one domain's Devanagari alternation fails two named cases.
+
+⚠️ **THE FULL SUITE CAUGHT A TEST THAT WAS PINNING THE BUG — the third such correction to that one
+case, and the reason the gate runs last.** `tests/complexityRouting.test.ts` asserted
+`taskType === 'chat'` for the Devanagari prompt *"एक अस्पताल प्रबंधन ऐप बनाओ…"* — an accurate
+description of the code the morning it was written, and the wrong thing to hold still once the module
+could read it. **The assertion was NOT relaxed to match**: the case's real claim is about a request
+the scorer genuinely cannot read, so its fixture is now a DRAWING app (no business domain in any
+script) which satisfies every original assertion unchanged — fallthrough `chat`, `unreadable`, a score
+floored above 20 by six enumerated parts, and an ask the score alone would never buy. The hospital
+prompt moved into a new case that pins the IMPROVEMENT (`complex_app`, > 40, still honestly marked
+`unreadable` because the `RE` signals still cannot read it — the DOMAIN classifier can).
 ## 2026-09-18 — Autopsy c6e4c6ff ("E commerce website", free Weak): a rendering app failed and made FREE over a file it had already deleted
 
 **The build.** Prompt `"E commerce website"`, Weak tier, delivered by KIMI `kimi-k2.7-code`, 26.7 minutes,
@@ -66894,3 +67114,73 @@ minutes.
 **Not fixed here on purpose:** `analyzeRequest`'s score also drives `startTier` and `escalationPath` for
 every build, so changing it trades one problem for a possible other (the 2026-09-13 rule) and needs its
 own change with its own evidence. Recorded, not guessed at.
+
+---
+
+## 2026-09-18 — 🔴 AN UNVERIFIED EDIT IS NOT A DELIVERY: the ₹23.81 charged for damage (autopsy 95598899)
+
+**Admin:** *"jo bacha hai woh kaam complete karo."* This is the largest item left from that autopsy, and
+the only one with real money on it.
+
+### What the bill did
+
+The user had a working 35-file marketplace. The turn overwrote four of its entry files, left the release
+gate **RED** and the app throwing `Cannot read properties of null (reading 'useState')` on load. They
+typed *"No parrot or no app, don't work on any project"* to stop it — and `decideCancelledBuildBill`
+returned the `files-saved` rate: **half of the work done, ₹23.81, for damage.**
+
+### Root cause — `files-saved` reads "files were written" as "value was delivered"
+
+Every branch of that module asks the right question — *what is the user holding?* — and the answers
+were right for every case it had: a rendering app is charged in full; nothing written is free; only our
+own template is free. **The case it could not see is the one where the user holds LESS than they
+started with.**
+
+On a FRESH build the half-charge is fair: the user now has something they did not have before and can
+resume from it. On an EDIT it can be exactly backwards, and with no verified render **nobody, including
+us, can say which.** Charging for an unverified mutation of an app that was working is precisely what
+*"working app or free"* exists to forbid — and the party that cannot show the app is fine should not be
+the one paid.
+
+### The fix — one fact, one branch, placed with care
+
+`editingExistingApp` (the route's own `isEditMode`, already in scope) is now a fact the rule reads, and
+an unverified edit returns **₹0** with a new honest delivery value, `unverified-edit`.
+
+🔒 **The ORDERING is the whole design.** It sits BELOW `appRendered`, so a **verified** edit is still
+charged in **full** — the admin's own 2026-09-15 rule (*"app bani = preview chala"*) is untouched. It
+sits below `files === 0` so a fresh build holding only our template keeps its own, more specific reason.
+And rule 3 is unbroken: every branch starts from the already-decided number, so a cancel can still only
+ever cost LESS than finishing.
+
+⚠️ **The exploit was considered and does not pay.** "Edit, stop before verification, get it free" costs
+the user a broken or unverified app to save a half-charge — and a verified edit is still billed in full,
+so the only way to reach ₹0 is to genuinely receive nothing provable.
+
+### ⚠️ A hole in my own test, found by the reversion proof and worth recording
+
+My wiring case asserted `route.toContain('editingExistingApp: isEditMode,')` — and it **PASSED with the
+billing call site deleted**, because `AgentRunner`'s options carry a field of the same name three
+thousand lines away (I added it myself in PR #3078). A wiring test any call site can satisfy tests
+nothing. It is now scoped to the `decideCancelledBuildBill({…})` argument object, and the reversion
+bites.
+
+### Tests
+
+`tests/anUnverifiedEditIsNotADelivery.test.ts` — **13 cases**, using that report's exact numbers
+(`filesWritten: 4`, `decidedBilledUsd: 0.248124`). **Reversion-proven on three independent reverts**:
+removing the branch, unwiring the route, and moving the branch above `appRendered` (which would silently
+make every verified edit free — no behavioural case above would have caught it alone, which is why the
+ORDER is pinned in the source as well).
+
+The module's existing 20 cases pass unchanged.
+
+### 🔴 Still open
+
+- **`RUNTIME_UNCHECKED` still reaches the report through a threaded `previewRendered` boolean**
+  (`AutoFix.runtimeUncheckedRecord`) rather than through `provenFromTimeline` — same fact, two paths.
+  Unifying them belongs with the evidence ledger's write half, not with a billing change.
+- **The evidence ledger's WRITE half** — an explicit `proved(fact, source)` an actor calls — remains the
+  real subsystem; today there are two readers sharing no vocabulary.
+- **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
+  contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.

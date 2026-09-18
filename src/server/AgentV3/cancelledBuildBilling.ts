@@ -62,7 +62,7 @@
 import type { AbortCause } from './buildAbortCause';
 
 /** What the user is holding at the moment they stopped. */
-export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing';
+export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'unverified-edit';
 
 export interface CancelledBuildFacts {
   /** From `abortCauseOf(signal)` — never guessed, never defaulted to the user. */
@@ -89,6 +89,27 @@ export interface CancelledBuildFacts {
   preseededUnchanged?: number;
   /** Did the platform OPEN the app in a real browser and see it render? */
   appRendered: boolean;
+  /**
+   * Was this turn EDITING an app that already existed, rather than building a new one?
+   *
+   * 🔴 THE CASE THIS MODULE COULD NOT SEE (autopsy 95598899, 2026-09-18). A user with a working
+   * 35-file marketplace was charged **₹23.81** at the `files-saved` rate for a turn that overwrote
+   * four of its entry files, left the release gate RED and the app throwing on load. They typed
+   * *"No parrot or no app, don't work on any project"* to stop it.
+   *
+   * `files-saved` reads "files were written" as "value was delivered", and on a FRESH build that is
+   * fair: the user now holds something they did not have before and can resume from it. On an EDIT
+   * it can be exactly backwards — **they may hold LESS than they started with**, and with no verified
+   * render nobody, including us, can say which. Charging for an unverified mutation of an app that
+   * was working is the precise thing *"working app or free"* exists to forbid.
+   *
+   * ⚠️ It is read AFTER `appRendered`, deliberately: an edit that WAS seen running is still charged
+   * in full (admin 2026-09-15, *"app bani = preview chala"*). This only covers the unverified case.
+   *
+   * Absent means false — a caller that does not know is treated as a fresh build, which is today's
+   * behaviour exactly.
+   */
+  editingExistingApp?: boolean;
   /** The honest real-cost bill the normal billing model already computed for this build. */
   decidedBilledUsd: number;
 }
@@ -189,6 +210,22 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
     return {
       billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true,
       reason: 'user stopped the build before any file of their own was produced — only the platform template existed and nothing rendered, so not charged',
+      userMessage: null,
+    };
+  }
+
+  // 🔴 RULE 5 (autopsy 95598899) — AN UNVERIFIED EDIT MAY HAVE TAKEN SOMETHING AWAY.
+  //
+  // Every branch above asks "what is the user holding?" and this is the one answer the module could
+  // not give: on an edit, files written with no verified render may mean their working app is now
+  // broken. We cannot show it is not, and the party that cannot show it should not be the one paid.
+  //
+  // It sits below `appRendered` so a VERIFIED edit is still charged in full, and below `files === 0`
+  // so a fresh build with only our template keeps its own, more specific reason.
+  if (f.editingExistingApp === true) {
+    return {
+      billedUsd: 0, discountPct: 100, delivery: 'unverified-edit', applies: true,
+      reason: 'user stopped an edit of an existing app before it could be verified running — the app may be in a worse state than it started, so not charged',
       userMessage: null,
     };
   }

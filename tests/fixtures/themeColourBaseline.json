@@ -22,7 +22,6 @@
   "src/components/VerifyPhoneSheet.tsx": 25,
   "src/components/admin/AdminCopyButton.tsx": 11,
   "src/components/admin/AudienceCard.tsx": 33,
-  "src/components/admin/BuildCostCard.tsx": 29,
   "src/components/admin/FailureCategoryCard.tsx": 62,
   "src/components/admin/LoadBoard.tsx": 55,
   "src/components/admin/MonitorPanels.tsx": 142,

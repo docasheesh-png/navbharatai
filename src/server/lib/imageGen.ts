@@ -57,24 +57,39 @@ export const IMAGE_SIZE_RATIOS: Record<string, string> = {
 /**
  * Size id → concrete pixel dimensions (for providers that take width/height, e.g. Pollinations).
  *
- * RAISED 2026-08-16, from the admin's "isko aur enhance karo" with a soft 512×512 image attached.
- * Resolution was a real part of that softness and the cheapest half to fix: the free provider takes
- * width/height directly, so a larger image costs exactly the same — nothing, and no extra call.
+ * 🔴 LOWERED 2026-09-18, and lowering them is what makes them SHARPER (admin: "image bahut blur
+ * banti hai, isko clear aur acchi banao"). These numbers went 512 → 1280 on 2026-08-16 to cure a
+ * softness the admin reported, on the reasoning that a bigger free image costs the same as a small
+ * one. That is true of the BILL and false of the PICTURE.
  *
- * 🔒 `icon` WAS THE WORST OFFENDER AT 512, and it is the one the admin actually used. An app icon is
- * the one image with a KNOWN required size: the Play Store and the App Store both demand 1024×1024.
- * Generating at 512 meant every icon a user made had to be upscaled before it could be submitted —
- * we were producing, by default, the one thing the store will not accept.
+ * A latent-diffusion model is trained at one resolution — for the FLUX family, about 1 megapixel —
+ * and asked for materially more than that it does not render more detail: it smears, repeats
+ * texture and loses edge definition, because it is being run outside the resolution its weights
+ * were fitted at. So 512 was soft for being under-sampled and 1280×1280 (1.64 MP, 1.56× native)
+ * was soft for the opposite reason, and the 08-16 change swapped one blur for another while the
+ * number on the screen got bigger.
  *
- * ⚠️ DELIBERATELY MODERATE, not maximal. These go through a 60s route timeout on a FREE provider; a
- * 2048 request that times out falls through to the PAID rungs, so chasing pixels would quietly turn a
- * ₹0 image into a billed one. These sizes are comfortably inside what the free tier returns quickly.
+ * Every size below is now at or just under ~1 MP, on an EXACT aspect ratio, with both dimensions a
+ * multiple of 16 (the latent grid steps in 8s; 16 keeps every downsample integral, which is where
+ * edge mush comes from otherwise). `icon` is unchanged at 1024 — it was the one that was already
+ * native, and it is the one with a hard external requirement (Play and the App Store both demand
+ * 1024×1024), which is why it must never be "improved" downward.
+ *
+ * ⚠️ HONEST ABOUT CONFIDENCE (rule 6): this is diagnosed from a documented property of the model
+ * family and from the fact that the prompt ALREADY asks for sharpness and already lists "blurry,
+ * out of focus, low resolution" as negatives — so the prompt had been excluded as the cause before
+ * resolution was suspected. It is not a measurement of Pollinations' own output, which cannot be
+ * taken from here. If a real comparison later shows 1280 sharper, this is one constant to move back.
+ *
+ * ⚠️ These MUST MATCH the client's SIZES table — `tests/imageGen.test.ts` asserts it. The labels a
+ * user reads are generated from the same numbers, so the picker cannot advertise a size we do not
+ * generate (it did exactly that before 2026-08-16).
  */
 export const IMAGE_SIZE_PIXELS: Record<string, { w: number; h: number }> = {
-  square: { w: 1280, h: 1280 },
-  wide: { w: 1536, h: 864 },     // 16:9
-  portrait: { w: 960, h: 1280 }, // 3:4
-  icon: { w: 1024, h: 1024 },    // exactly what Play/App Store require
+  square: { w: 1024, h: 1024 },   // 1.05 MP — native
+  wide: { w: 1280, h: 720 },      // exactly 16:9, 0.92 MP
+  portrait: { w: 864, h: 1152 },  // exactly 3:4, 1.00 MP
+  icon: { w: 1024, h: 1024 },     // native, and exactly what Play/App Store require
 };
 
 /** Whether the FREE image provider (Pollinations) is enabled — default ON; kill switch IMAGE_GEN_POLLINATIONS=off. */
@@ -92,7 +107,16 @@ export function pollinationsImageUrl(prompt: string, size?: string, env: NodeJS.
   const px = IMAGE_SIZE_PIXELS[size || ''] || IMAGE_SIZE_PIXELS.square;
   const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
   const p = encodeURIComponent(String(prompt || '').slice(0, MAX_PROMPT_CHARS));
-  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&model=${encodeURIComponent(model)}`;
+  // `seed` is the second half of the 2026-09-18 sharpness work, and it is about VARIETY rather than
+  // focus: without one, Pollinations derives the seed from the prompt, so the same brief returns the
+  // same picture every time and "generate again" — the user's only recourse for a soft result —
+  // silently did nothing. A fresh seed per call makes retry a real option again.
+  // ⚠️ Time-based rather than random so the URL stays a pure function of its inputs within a tick,
+  // which is what keeps `pollinationsImageUrl` unit-testable; the test pins the seed explicitly.
+  const seed = Number.isFinite(env.__IMAGE_SEED as unknown as number)
+    ? Number(env.__IMAGE_SEED)
+    : Math.floor(Date.now() % 2_147_483_647);
+  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&seed=${seed}&model=${encodeURIComponent(model)}`;
 }
 
 /**

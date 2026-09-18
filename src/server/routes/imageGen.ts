@@ -11,6 +11,18 @@ import {
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import {
+  IMAGE_PRO_PRICE_INR, IMAGE_PRO_TIMEOUT_MS, imageProConfigured, imageProEndpoint, imageProAuthHeaders,
+  imageProMode, imageProCount, imageProQuotedInr, buildImageProRequest, parseImageProResponse,
+  imageProFailureMessage, initImageTooLarge, parseDataUrl,
+} from '../lib/imageProGen';
+import { IMAGE_SIZE_PIXELS } from '../lib/imageGen';
+import { getServerDb } from '../lib/serverDb';
+import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { walletTooEmptyForTurn } from '../professionals/passGate';
+import { isProfessionalFreeUser } from '../professionals/professionalPaid';
+import { debitWalletRolledUp } from '../lib/walletDebit';
+import { featureRollupRef, featureLabel } from '../lib/walletFeature';
 
 /**
  * AI Image Gen — the REAL /api/image/generate route (admin autopsy 2026-07-20).
@@ -43,6 +55,24 @@ const schema = vobject({
 // anonymous ceiling is belt-and-braces in case the sign-in check is ever relaxed.
 const imageGenLimiter = () => rateLimiter({
   name: 'imagegen', authed: 40, anon: 0, anonGlobalPerHour: 0, noun: 'image generations',
+});
+
+
+// ── PRO (paid) image generation ────────────────────────────────────────────────────────────────
+// Admin 2026-09-18: "paid walo ko inhance karna hai … 2₹/image fee rakhni hai."
+const proSchema = vobject({
+  prompt: vstring({ optional: true, max: 2_000 }),
+  size: vstring({ optional: true, max: 40 }),
+  // A reference image as a data URL — this is what makes image→image and image+text→image real
+  // rather than a label. Generous max because a phone photo base64s large; the route rejects
+  // anything over 8 MB by BYTES (initImageTooLarge) rather than by string length.
+  initImage: vstring({ optional: true, max: 14_000_000 }),
+  strength: vstring({ optional: true, max: 10 }),
+  count: vstring({ optional: true, max: 3 }),
+});
+
+const proLimiter = () => rateLimiter({
+  name: 'imagegenpro', authed: 30, anon: 0, anonGlobalPerHour: 0, noun: 'Pro image generations',
 });
 
 export function registerImageGenRoutes(app: Express): void {
@@ -230,6 +260,180 @@ export function registerImageGenRoutes(app: Express): void {
       });
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s image engine is briefly busy — please try again.' });
+    }
+  });
+
+  /**
+   * POST /api/image/pro/generate — the PAID tier (admin 2026-09-18).
+   *
+   * Handles all three jobs the admin asked for, with the mode DERIVED from the payload rather than
+   * from a fourth control the user has to get right: words alone → text-to-image; a reference alone
+   * → image-to-image; both → a directed edit.
+   *
+   * 🔴 THE MONEY ORDER IS THE POINT, and it is the one thing not to rearrange:
+   *   1. refuse an empty wallet BEFORE any provider is called (THE ONE-WALLET LAW — a chat turn has
+   *      no later pre-flight gate to catch an overdraft, and neither does this);
+   *   2. generate;
+   *   3. charge ONLY for images genuinely delivered, and never for a failure or a timeout
+   *      ("working result or free", the same law a failed build obeys).
+   * Charging first would risk billing a request that then failed; charging for a batch that
+   * half-delivered would bill for pictures nobody got.
+   */
+  app.post('/api/image/pro/generate', proLimiter(), validateBody(proSchema), async (req: Request, res: Response) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const proReq = {
+      prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
+      size: typeof body.size === 'string' ? body.size : undefined,
+      initImage: typeof body.initImage === 'string' ? body.initImage : undefined,
+      strength: body.strength !== undefined ? Number(body.strength) : undefined,
+      count: body.count !== undefined ? Number(body.count) : undefined,
+    };
+
+    const mode = imageProMode(proReq);
+    if (!mode) {
+      res.status(400).json({ error: 'Add a prompt, or attach an image to work from.' });
+      return;
+    }
+    if (proReq.initImage && !parseDataUrl(proReq.initImage)) {
+      res.status(400).json({ error: 'That attachment is not an image we can read. Please attach a PNG or JPEG.' });
+      return;
+    }
+    if (proReq.initImage && initImageTooLarge(proReq.initImage)) {
+      res.status(413).json({ error: 'That image is too large — please attach one under 8 MB.' });
+      return;
+    }
+    if (!imageProConfigured()) {
+      // Honest not-available (rule 2). Never a silent fall back to the FREE provider: that would
+      // charge ₹2 for the picture the user could have had for nothing, on the tier they switched to
+      // precisely because they wanted something better.
+      res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
+      return;
+    }
+
+    const account = await requireAccountForCostlyAi(req, 'Pro image generation');
+    if (!account.ok) {
+      res.status(account.status).json(account.body);
+      return;
+    }
+
+    const count = imageProCount(proReq);
+    const quotedInr = imageProQuotedInr(proReq);
+    const freeListed = isProfessionalFreeUser(account.uid, account.email);
+
+    // STEP 1 — the wallet, before a single provider call.
+    if (!freeListed) {
+      const balanceInr = await readWalletBalanceInr(
+        firestoreWalletReader(getServerDb() as never), account.uid,
+      ).catch(() => null);
+      // `null` (unreadable) is allowed through on purpose — fail-open, exactly as the build gate and
+      // the chat gate do. Refusing a paying user over a Firestore blip costs more than one image.
+      if (walletTooEmptyForTurn(balanceInr)) {
+        res.status(402).json({
+          error: `Your balance is empty. This would cost ₹${quotedInr} (₹${IMAGE_PRO_PRICE_INR} per image) — add credit, or switch the toggle to Free.`,
+          code: 'wallet_empty',
+          balanceInr: balanceInr ?? 0,
+          priceInr: IMAGE_PRO_PRICE_INR,
+          quotedInr,
+        });
+        return;
+      }
+    }
+
+    // STEP 2 — generate.
+    const px = IMAGE_SIZE_PIXELS[proReq.size || ''] || IMAGE_SIZE_PIXELS.square;
+    // The same art direction the free tier gets. A paid image is a better MODEL, not a worse brief —
+    // dropping the craft layer here would have made Pro sharper and less well composed at once.
+    const crafted = craftImagePrompt({
+      prompt: String(proReq.prompt || ''),
+      size: proReq.size,
+    });
+    const finalPrompt = proReq.prompt ? withInlineNegative(crafted) : '';
+
+    let delivered: Array<{ image: string; mimeType: string }> = [];
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), IMAGE_PRO_TIMEOUT_MS);
+      try {
+        const r = await fetch(imageProEndpoint(), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...imageProAuthHeaders() },
+          body: JSON.stringify(buildImageProRequest({ ...proReq, prompt: finalPrompt }, px)),
+          signal: ctl.signal,
+        });
+        if (!r.ok) {
+          // The vendor's own status and body stay in the SERVER log and never reach the user.
+          console.error(`[IMAGE PRO] host returned HTTP ${r.status}`);
+          res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+          return;
+        }
+        const parsed = parseImageProResponse(await r.json());
+        if (!parsed) {
+          console.error('[IMAGE PRO] host returned no image in a 200 response');
+          res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+          return;
+        }
+        if ('url' in parsed) {
+          // Server-proxied, exactly like the free provider: the bytes are fetched here and re-served
+          // as a data URL, so the user's browser never talks to the vendor and the result carries no
+          // third-party origin. White-label is a network fact here, not only a wording one.
+          const img = await fetch(parsed.url, { signal: ctl.signal });
+          const ct = img.headers.get('content-type') || 'image/png';
+          if (!img.ok || !ct.startsWith('image/')) {
+            console.error(`[IMAGE PRO] fetching the returned image failed (HTTP ${img.status}, ${ct})`);
+            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+            return;
+          }
+          const buf = Buffer.from(await img.arrayBuffer());
+          if (buf.length === 0) {
+            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+            return;
+          }
+          delivered = [{ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct }];
+        } else {
+          delivered = [{ image: `data:${parsed.mimeType};base64,${parsed.base64}`, mimeType: parsed.mimeType }];
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err: unknown) {
+      const aborted = err instanceof Error && /abort/i.test(err.message);
+      console.error(`[IMAGE PRO] ${aborted ? 'timed out' : 'threw'}: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
+      res.status(504).json({ error: imageProFailureMessage(aborted ? 'timeout' : 'failed'), code: 'pro_failed' });
+      return;
+    }
+
+    if (delivered.length === 0) {
+      res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+      return;
+    }
+
+    // STEP 3 — charge for what was actually delivered, never for what was asked for.
+    // ⚠️ `delivered.length`, not `count`: a host that honours num_images partially must not bill for
+    // the pictures it did not return. Today it returns one image per call, so this is one charge —
+    // written against the delivered array anyway, so a future batching change cannot quietly overbill.
+    const chargedInr = freeListed ? 0 : delivered.length * IMAGE_PRO_PRICE_INR;
+    res.json({
+      images: delivered.map((d) => d.image),
+      image: delivered[0].image,
+      mimeType: delivered[0].mimeType,
+      mode,
+      count: delivered.length,
+      chargedInr,
+      // The engine is always NavBharatAI to a user — the model that ran is admin-only, in the log.
+      engine: 'NavBharatAI Pro',
+    });
+
+    if (chargedInr > 0) {
+      // After the answer and never awaited into it: a money-path failure must not cost the user the
+      // image they already have. The same rule the professional turn obeys.
+      void debitWalletRolledUp(getServerDb() as never, account.uid, {
+        billedInr: chargedInr,
+        rollupRef: featureRollupRef('image-pro', Date.now()),
+        description: featureLabel('image-pro'),
+        feature: 'image-pro',
+      }).then((r) => {
+        if (!r.ok) console.error(`[IMAGE PRO] wallet debit FAILED for ${account.uid}: ${r.error} — image served, not charged.`);
+      }).catch(() => { /* logged above; never throws into the request */ });
     }
   });
 }

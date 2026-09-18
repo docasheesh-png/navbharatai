@@ -65825,3 +65825,159 @@ does ask. `AppKnowledgeBase` updated in the same commit.
 🔴 **What this deliberately does NOT change:** the ~24 SCAFFOLDS stay a finite list, and that is
 correct — they are FRAMEWORKS (React, Vue, Svelte…), of which there really are about twenty-five. The
 thing that must never be a list is what an app is ABOUT, and that is now generated.
+---
+
+## 2026-09-18 — 🔴 THE BUILD-COST WINDOW WAS WORKSPACES, NOT BUILDS (admin report)
+
+**Admin, verbatim:** *"yeh report fix hai, har build ke bad update nahi ho rahi. hame pata hi nahi lag
+raha ki ham progress kar rahe ya nahi!!"* — the admin panel's **Build costs — real cost vs bill, by
+tier and app size** card, permanently reading *"30 builds read; real cost measured on 29"*.
+
+### Root cause — a window that meant something other than its own label
+
+`/api/admin/build-costs` called `listRecentFullReports`, which reads the **PARENT** documents of
+`workspace_diagnostics_v3`. There is exactly **one per WORKSPACE**, holding that workspace's LATEST
+report, and `saveDiagnostics` **overwrites it on every build**.
+
+So "last 30 builds" was really **"the latest build of each of the 30 most recently active
+workspaces"** — and the gap between those two is precisely the thing the admin was trying to see:
+
+- **Iterating inside one workspace — which is what testing the engine IS — produces ONE row, not
+  twenty.** Twenty builds later the document COUNT has not moved, so `reportsRead` is still 30 and
+  the table is still the same shape.
+- The card was therefore **structurally incapable of showing progress**, because progress is exactly
+  a sequence of builds in the same workspace getting cheaper, faster and needing fewer heals — the
+  one signal this query throws away.
+
+🔑 **The per-build record already existed and nothing read it.** `saveDiagnosticsHistory` has been
+writing every settled build to `<workspace>/history/<startedAt>` (wired in `routes/agentv3.ts`), and
+`upsertDiagnosticsHistoryProgress` writes each turn as it runs. The data was never missing; only the
+reader was pointed at the wrong collection.
+
+### The fix
+
+1. **`listRecentBuildReports` (`DiagnosticsStore.ts`)** — the last N **builds** across workspaces,
+   read from the history subcollections.
+   - 🔒 **Scanning the top N workspaces is EXACT, not a heuristic:** parents are ordered by latest
+     save, so for a workspace at position N+1 to hold one of the newest N builds, every workspace
+     above it would have to hold only older builds — impossible, since each holds at least one build
+     saved more recently.
+   - ⚠️ **Orders by `documentId()`, exactly as `listDiagnosticsHistory` already does, so it needs NO
+     Firestore index.** The obvious alternative — an ordered `collectionGroup('history')` query —
+     needs a collection-group index, this repo ships no `firestore.indexes.json`, and its absence is
+     a RUNTIME error, not a compile one.
+   - Both sweeps are `.select()` projections (document refs only, the cheapest read Firestore has);
+     only the winning builds are fetched whole, in one batched `getAll`.
+   - A build still **running** is excluded (`endedAt === undefined`) — it has no settled billing, so
+     counting it would drag every average toward "not measured". It reappears at settle, same doc id.
+   - One unreadable workspace cannot empty the card; a totally unreadable history falls back to the
+     old per-workspace view and **says so** (`source: 'latest-per-workspace'`), because a window that
+     quietly means something else is the bug being fixed.
+
+2. **`costTrend` (`buildCostLedger.ts`)** — the admin's actual question. The tier × size table gives
+   one average over the whole window and therefore cannot answer "is it getting better": a run of
+   cheap builds and a run of dear ones produce the same mean. The trend splits the window in half by
+   time and compares real cost, bill, minutes, heals and success rate.
+   - 🔒 **`MIN_TREND_SAMPLE = 3` per half**, or the delta is `null` and the card says "not enough
+     builds yet" — with two builds a side, "cost halved" is noise wearing a decimal point.
+   - ⚠️ **`successRate` is the ONE metric where higher is better**; every other delta is an
+     improvement when NEGATIVE, and `deltaLabel` must not treat them alike.
+
+3. **Honesty (rule 5).** The card now shows **when it was read** — a card that never says so looks
+   identical whether it is live or an hour stale, which is how a frozen window went unnoticed — and
+   names the per-workspace fallback explicitly when it is what was returned.
+
+### What did NOT change
+
+The tier × size table, every label rule (`avgWithSample`, `realCostLabel`, `billLabel`), the
+admin-token gate, and the White-Label boundary: real cost and margin remain admin-only.
+
+### Tests
+
+`tests/theWindowWasWorkspacesNotBuilds.test.ts` — **20 cases**, reversion-proven on four independent
+reverts (the route's reader, the sample floor, the fallback naming, the in-progress filter); between
+them they fail 5 cases.
+
+⚠️ **One EXISTING assertion was updated rather than left red**, and this is recorded because changing
+a test to match new behaviour is normally forbidden: `BuildCostCard.test.tsx` pinned the route to
+`listRecentFullReports`. Its stated intent — "reads the FULL stored reports, not the metadata
+projection (which has no call log)" — is **unchanged and still enforced**; only the function name
+moved, because the new reader is also whole-report, just per build. The comment in that test says so.
+
+### 🔴 Still open (rule 6)
+
+- **The card still refreshes only on mount or on the Refresh button.** A timer poll would cost a
+  projection sweep per tick for a screen nobody is watching most of the time, so the read stamp makes
+  staleness visible instead. If the admin wants it live, that is a deliberate next change.
+- **History is never pruned.** `MAX_HISTORY_ITEMS = 20` is a listing default, not a retention cap —
+  no code deletes old history documents. Harmless today (it is what makes this fix possible) and
+  worth a retention decision before the collection is large.
+## 2026-09-18 — AI Image Gen: a flex-overflow, a resolution mistake that made images blurrier, and the paid tier (PR pending)
+
+Admin, four items in one message: the STYLE column overlapping its neighbour, free images coming out
+"bahut blur", a free⇄paid toggle in place of the static "Free" badge, and a paid tier on **FLUX.2
+Klein 4B at ₹2/image with a world-class UI of its own** — "google home page jaisa … par results
+inputbox ke upar ane chahiye aur inputbox niche footer me ho", handling text→image, image→image and
+image+text→image.
+
+**1. The STYLE overlap was `min-width: auto`.** A flex item will not shrink below its content, so the
+label column held each chip wider than its `grid-cols-3` cell and spilled over the neighbour. The cell
+was never too small — the child would not fit into it. `min-w-0` on the button and the text column
+restores shrinking; `truncate` decides the boundary. The **Size row one grid over is the identical
+shape** with the file's longest label (`1536×864`) and is fixed in the same change (rule 3) though it
+was never reported.
+
+🔴 **2. THE BLUR WAS OUR OWN RESOLUTION REQUEST, AND THE PREVIOUS FIX HAD MADE IT WORSE.** The prompt
+was excluded as the cause first — it already asks for "sharp" and already lists "blurry, out of focus,
+low resolution" as negatives. On **2026-08-16** these sizes went 512 → 1280 to cure a softness the
+admin had reported, reasoning that a bigger free image costs the same as a small one. **True of the
+bill, false of the picture.** A latent-diffusion model asked for materially more than the ~1 MP it was
+trained at does not render more detail — it smears and repeats texture. So 512 was soft for being
+under-sampled and 1280×1280 (1.64 MP) was soft for the *opposite* reason, and the admin reported the
+blur again with the bigger numbers already live. Sizes are now at or just under native ~1 MP, on exact
+aspect ratios, every dimension a multiple of 16; `icon` stays 1024 (already native, and a hard store
+requirement). A **per-call seed** is the other half: without one Pollinations derives the seed from the
+prompt, so the same brief returned the same picture and "generate again" — the user's only recourse for
+a soft result — did nothing at all.
+
+⚠️ **The 864px-short-edge pin encoded the very premise being corrected**, so it is replaced in-file
+with the real invariant (megapixels inside the trained band) plus two constraints it never had. The
+regression it actually guarded — a return to 512 — is still caught by the band's lower bound.
+
+**3. The toggle is a CONTROL where a LABEL used to be**, persisted, defaulting to free, and rendered
+*outside* the free-only header block — because every Pro failure message tells the user to switch back
+to Free, and that instruction has to be followable. A test pins that ordering: hiding the toggle in Pro
+would make it a one-way door.
+
+**4. The paid tier.** `imageProGen.ts` + `POST /api/image/pro/generate` + `ImageStudioPro.tsx`.
+- **The mode is DERIVED from the payload, not chosen** — words alone, a reference alone, or both. A
+  bare reference stays closer to the original (strength 0.65) than a directed edit (0.85); if those two
+  are ever equal, one of the two jobs is being done badly.
+- **The money order is the point:** refuse an empty wallet BEFORE any provider call (an image request
+  has no later pre-flight gate), generate, then charge only for images genuinely delivered — against
+  `delivered.length`, never the requested count. A failure or timeout charges ₹0 and says so.
+- **Half-configured is NOT configured:** both a key and an endpoint, and a whitespace-only key reads as
+  unset (the `BRAVE_API_KEY` lesson). Missing either gives an honest "Pro is not switched on" — never a
+  silent fall back to the free provider, which would charge ₹2 for a picture available for nothing.
+- **White-label by construction:** one failure-message function, no user-facing string names the model
+  or vendor, and a URL result is fetched server-side and re-served as a data URL so the browser never
+  touches the vendor. "Unconfigured" and "host errored" deliberately read alike.
+
+🔴 **TWO THINGS THE ADMIN MUST DECIDE, recorded rather than guessed (rule 6).**
+- **`IMAGE_PRO_ENDPOINT` + `IMAGE_PRO_KEY` are unset, so the paid tier is honestly unavailable today.**
+  The model is served by several hosts and no host was chosen; the adapter is endpoint-configured with
+  defensive parsing for the four response shapes in use (`images[].url`, `data[].b64_json`,
+  `result.sample`, `output[]`), so whichever the admin signs up for works without a deploy.
+- **THE ₹2 MARGIN IS UNVERIFIED FROM INSIDE THE CODE.** ₹2 is the admin's set price, so the user is
+  told ₹2 and charged ₹2 and nothing is invented — but whether ₹2 clears what the host charges per
+  image is a question only the provider's invoice can answer. This is deliberately NOT the real-cost +
+  markup model a build uses: an image provider returns no token usage to price from, and the
+  one-wallet law forbids estimating one.
+
+**Gate on the final state:** typecheck · noUnusedImports · typecheck:server · vitest **25615 passed |
+1 skipped**, 0 FAIL · build · test:bundle · boot:check · deps:server-gate — all green. The first full
+run caught three real failures in the repo's anti-rot sweeps (`text-[30px]`/`text-[38px]` with no rem
+rule, `disabled:bg-white/10` and `disabled:text-white/25` with no light-theme remap, `to-white/60`
+with no gradient stop). All four were added to the compat layers rather than designed around — a
+disabled SEND button rendering white-on-white would have told a light-theme user the button had
+vanished, not that it was disabled.

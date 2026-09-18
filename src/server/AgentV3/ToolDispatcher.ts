@@ -148,6 +148,7 @@ import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessRep
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
+import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
@@ -1415,13 +1416,35 @@ export class ToolDispatcher {
   private async seedGraphFromWorkspace(): Promise<void> {
     try {
       const mem = getWorkspaceMemory(this.workspaceId);
-      const tree = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+      // ⚠️ A LISTING THAT THREW IS NOT AN EMPTY WORKSPACE (autopsy c6e4c6ff). This used to be
+      // `.catch(() => [])`, which answered the same `[]` for both — harmless while the seeder only
+      // ADDED, and a whole-graph wipe the moment it also removes. `null` carries the failure through
+      // to `prunableGraphPaths`, which refuses it; the seeding half below treats it as empty exactly
+      // as before, so the add path is byte-identical.
+      const listed = await this.actuator.listFiles(this.workspaceId).catch(() => null);
+      const tree = listed ?? [];
       const EXCLUDE = /(^|\/)(node_modules|\.git|dist|build|\.next|__pycache__|coverage)\//;
       // Code (for import resolution) + index.html (runnability/SEO) + key configs.
       const INDEXABLE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|css|scss|json)$/i;
+      const indexable = (p: string): boolean => !EXCLUDE.test(p) && INDEXABLE.test(p);
       const known = new Set(mem.graph().files);
+      // THE GRAPH MUST MATCH THE DISK, HOWEVER A FILE LEFT IT (autopsy c6e4c6ff — a deleted
+      // `src/routes/orders.ts` failed a rendering app on its own dead imports and made it free).
+      // PR #3014 taught the graph about deletion along ONE road, a recognised single-file `rm`; a
+      // directory delete, a rename, `git clean` and a delete inside an npm script all still left a
+      // zombie. This is the same question asked where it is answerable for every road at once — the
+      // real tree and the graph are both already in hand here, immediately before the gate judges.
+      // PROPOSES ONLY: `reconcileDeletions` confirms each candidate with a direct sandbox read
+      // before the graph forgets it, so this cannot narrow a gate on a listing's say-so.
+      try {
+        const stale = prunableGraphPaths([...known], listed, indexable);
+        if (stale.length > 0) await this.reconcileDeletions(stale);
+        else if (pruneWasRefused([...known], listed, indexable)) {
+          this.state?.appendTerminal(pruneRefusedMessage());
+        }
+      } catch { /* reconciliation is best-effort — a failure leaves today's stale-but-safe graph */ }
       const targets = tree
-        .filter((p) => !EXCLUDE.test(p) && INDEXABLE.test(p) && !known.has(p))
+        .filter((p) => indexable(p) && !known.has(p))
         .slice(0, 500);
       // PARALLEL + per-file timeout (audit P0-C): reading up to 500 files one-at-a-time over the
       // sandbox cost 50-160s and could hang on a single stalled read. Read in bounded-concurrency

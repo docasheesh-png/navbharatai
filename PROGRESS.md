@@ -66541,3 +66541,44 @@ watermark (a chrome hex used as text, which has no row and is not ours to invent
 TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over another grey — the AA
 lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
 theme, which still wants a `bg-success` fill token rather than per-button patches.
+
+## 2026-09-18 — #3070 MERGED, and PR J: twenty-five files on the new `main`
+
+**The admin merged #3070 at 10:06 UTC** — steps A through I, 55 files, literals 11,487 → 2,825, five
+themes down to three, the ratchet and the codemod live on `main` and deploying to Cloud Run. This
+branch was restarted from the merged `main` per the constitution's merged-PR rule rather than stacked
+on the old history.
+
+**Twenty-five files in one run, the largest batch yet because the remaining files are small:**
+ConnectedServices 60 → 0 · CodeMinifier 58 → 11 · VoiceToApp 56 → 0 · LoadBoard 55 → 0 · ReportSheet
+54 → 2 · HostingPlanCard 54 → 0 · AppLockSettings 54 → 0 · VirtualKeyboard 52 → 7 ·
+ActivityTimelineRow 51 → 0 · AuthSettings 51 → 0 · StorageSettings 49 → 0 · NextSuggestionsBulb 48 → 1
+· ProfessionalChat 48 → 2 · CodeVersioning 46 → 3 · RepoAnalystTool 46 → 0 · ReportsListView 45 → 0 ·
+**Editor 44 → 5** · PublishToNavStore 44 → 0 · DatabaseSettings 44 → 0 · AICodeReview 43 → 3 ·
+SecretRequestCard 42 → 1 · AppLockGate 41 → 0 · NotificationBell 39 → 0 · ReferralPanel 39 → 3 ·
+BotBuildHelp 36 → 4. Baseline **2,825 → 1,668** (132 files).
+
+**✅ A second open item closed: Code Studio's editor TABS.** PR F recorded them as a later-PR file at
+**1.82:1** on Light — `bg-[#2d2d2d] text-[#969696]`, a fixed dark tab whose grey label compat remapped
+to Light's muted grey. `Editor.tsx` was in this batch and the tab is now `bg-[#2d2d2d] text-on-accent`:
+white on the fixed dark tab, correct on every theme. (Monaco's own `vs-dark` syntax theme on Light is a
+separate product decision and stays open.)
+
+**🔴 One more refinement of the fixed-subtree rule, and the bug hiding underneath it.** AICodeReview's
+connect-error strip is `text-warn bg-amber-500/10` inside a fixed `bg-[#0f141b]` header. A 10% tint does
+not replace the box beneath it, so on Light a dark-amber label sat on near-black. The "does this element
+have its own background?" guard now requires a **resting, OPAQUE** background (`hasOwnOpaqueBackground`).
+- ⚠️ **And the first version of that helper was right by accident, which the reversion proof caught.**
+  Its value pattern `[\w[\]#.]+` has no hyphen, so on `bg-amber-500/10` it matched only `amber`, failed
+  the trailing lookahead on the `-`, and returned false — the right answer for the wrong reason, and the
+  WRONG answer for every opaque hyphenated fill (`bg-indigo-600` read as "no background at all"). The
+  reversion test did not fail when I deleted the opacity check, which is the only reason I looked. **A
+  test that passes when you delete the line it is meant to protect is not a test.** Both halves are now
+  proven by reversion separately, and the whole batch was restored and re-migrated under the fix.
+
+**Three source guards re-anchored, each with the reason recorded in place:** `themeBrandText.test.ts`
+asserted the hosting slab carried `bg-[#21262d]` — it now names `bg-raised` directly instead of relying
+on compat to remap a GitHub-dark literal, so the test's own claim ("a surface class the theme layer
+maps, not a black overlay") is satisfied more strongly than before; and `mobileNav.test.ts` x2 asserted
+`border-white/5` inside strings whose real claim is the compact header and composer PADDING, so only
+the border class moved to `border-line`.

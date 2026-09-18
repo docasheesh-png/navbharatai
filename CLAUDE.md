@@ -2770,6 +2770,8 @@ is now enforced at the source, by CI.**
   **brand-coloured label keeps its literal** — `text-amber-400` stays, because `text-warn` is dark
   amber on Light and the panel under it is near-black on every theme (2.59:1); same for a hex brand
   ink such as Figma's `#a259ff` on its own dark chip.
+  A **translucent tint** (`bg-amber-500/10`) is not a surface either — the fixed box shows through it,
+  so "does this element have its own background?" means a resting, OPAQUE one (`hasOwnOpaqueBackground`).
   ⚠️ **While `theme-compat.css` still exists, a GitHub-dark literal is NOT self-coherent** — compat
   repaints `bg-[#0d1117]` per theme, so a fixed ink left on it goes invisible on Light. A code block
   whose background compat owns must have its ink themed too (`bg-surface text-info`), not frozen.

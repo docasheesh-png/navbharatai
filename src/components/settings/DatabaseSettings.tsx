@@ -131,8 +131,8 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
   return (
     <div className="space-y-6">
       <div className="px-1 py-4">
-        <h2 className="text-2xl font-black text-white tracking-tight">Database</h2>
-        <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Connect your own database provider</p>
+        <h2 className="text-2xl font-black text-ink tracking-tight">Database</h2>
+        <p className="text-[11px] text-faint font-bold uppercase tracking-[0.2em] mt-1">Connect your own database provider</p>
       </div>
 
       {/* ONE-TAP path (ROADMAP #1 Phase 1). Renders nothing when this deployment has no Supabase OAuth
@@ -140,14 +140,14 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
           button that cannot work. Users who already have a project keep using the form unchanged. */}
       <SupabaseConnectCard workspaceId={workspaceId} onProvisioned={() => setActiveMarker({ provider: 'supabase' })} />
 
-      <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl">
+      <div className="bg-card border border-line rounded-[2.5rem] p-8 space-y-6 shadow-2xl">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center shrink-0">
-            <Database className="w-6 h-6 text-indigo-400" />
+            <Database className="w-6 h-6 text-accent-text" />
           </div>
           <div>
-            <h3 className="font-black text-white text-sm uppercase tracking-wider">Your Database</h3>
-            <p className="text-[10px] text-[#8b949e] font-medium mt-0.5">
+            <h3 className="font-black text-ink text-sm uppercase tracking-wider">Your Database</h3>
+            <p className="text-[10px] text-muted font-medium mt-0.5">
               Credentials are encrypted in Secrets &amp; Keys. NavBharatAI Pro detects your connected database and wires that exact provider into your app&apos;s .env automatically — it never creates a new one, and NavBharatAI never uses your database for itself.
             </p>
           </div>
@@ -155,11 +155,11 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
 
         {/* Provider selector */}
         <div>
-          <label className="text-[11px] text-[#8b949e] font-semibold block mb-2 uppercase tracking-wider">Provider</label>
+          <label className="text-[11px] text-muted font-semibold block mb-2 uppercase tracking-wider">Provider</label>
           <select
             value={provider}
             onChange={e => { setProvider(e.target.value as DbProvider); setFormCreds({}); }}
-            className="w-full bg-[#0d1117] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500/50"
+            className="w-full bg-surface border border-line rounded-2xl px-4 py-3 text-sm text-ink focus:outline-none focus:border-indigo-500/50"
           >
             {DB_PROVIDERS.map(p => (
               <option key={p.id} value={p.id}>{p.label}</option>
@@ -171,15 +171,15 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
             (admin 2026-08-06: "user jo chahe db use kare"), and a longer list of bare brand names is a
             worse choice than a short one — most users have not heard of half of them. */}
         {currentDef?.blurb && (
-          <p className="text-[11px] text-[#8b949e] leading-relaxed -mt-2">{currentDef.blurb}</p>
+          <p className="text-[11px] text-muted leading-relaxed -mt-2">{currentDef.blurb}</p>
         )}
 
         {/* Security note: fields start blank on purpose — saved values live encrypted, not in the browser. */}
         {hasSavedConfig && (
           <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-indigo-500/5 border border-indigo-500/15">
-            <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-            <p className="text-[11px] text-[#8b949e] leading-relaxed">
-              This database is saved. For your security, values aren&apos;t shown here — leave a field <span className="text-white font-semibold">blank to keep its current value</span>, or type a new one to update it.
+            <ShieldCheck className="w-4 h-4 text-accent-text shrink-0 mt-0.5" />
+            <p className="text-[11px] text-muted leading-relaxed">
+              This database is saved. For your security, values aren&apos;t shown here — leave a field <span className="text-ink font-semibold">blank to keep its current value</span>, or type a new one to update it.
             </p>
           </div>
         )}
@@ -188,21 +188,21 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
         <div className="space-y-4">
           {currentDef?.fields.map(field => (
             <div key={field.key}>
-              <label className="text-[11px] text-[#8b949e] font-semibold block mb-2 uppercase tracking-wider">{field.label}</label>
+              <label className="text-[11px] text-muted font-semibold block mb-2 uppercase tracking-wider">{field.label}</label>
               <input
                 type={['key', 'secret', 'password', 'anonkey'].some(k => field.key.toLowerCase().includes(k)) ? 'password' : 'text'}
                 value={formCreds[field.key] ?? ''}
                 onChange={e => setFormCreds(prev => ({ ...prev, [field.key]: e.target.value }))}
                 placeholder={field.placeholder}
                 autoComplete="off"
-                className="w-full bg-[#0d1117] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500/50 font-mono"
+                className="w-full bg-surface border border-line rounded-2xl px-4 py-3 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/50 font-mono"
               />
               {/* Per-field "where to find this" hint (admin 2026-07-18) — points at the exact spot in the
                   provider's own dashboard where THIS value lives. */}
               {field.where && (
-                <p className="mt-1.5 text-[11px] text-[#6e7681] leading-relaxed flex items-start gap-1.5">
-                  <ExternalLink className="w-3 h-3 shrink-0 mt-0.5 text-[#484f58]" />
-                  <span>Where to find this: <span className="text-[#8b949e]">{field.where}</span></span>
+                <p className="mt-1.5 text-[11px] text-faint leading-relaxed flex items-start gap-1.5">
+                  <ExternalLink className="w-3 h-3 shrink-0 mt-0.5 text-faint" />
+                  <span>Where to find this: <span className="text-muted">{field.where}</span></span>
                 </p>
               )}
             </div>
@@ -215,7 +215,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
             href={currentDef.keyLink}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+            className="inline-flex items-center gap-1.5 text-sm text-accent-text hover:text-accent-text transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
             Get {currentDef.label} API keys
@@ -226,7 +226,7 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-bold rounded-2xl transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent text-sm font-bold rounded-2xl transition-colors"
         >
           {saving ? <TirangaLoader className="w-5 h-5" /> : <Database className="w-5 h-5" />}
           {saving ? 'Saving…' : 'Save & Sync to Secrets'}
@@ -235,41 +235,41 @@ export function DatabaseSettings({ userId, workspaceId }: DatabaseSettingsProps)
         {/* Feedback */}
         {savedMsg && (
           <div className="flex items-start gap-3 p-4 rounded-2xl bg-green-500/10 border border-green-500/20">
-            <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
-            <p className="text-sm text-green-300">{savedMsg}</p>
+            <CheckCircle2 className="w-5 h-5 text-success shrink-0 mt-0.5" />
+            <p className="text-sm text-success">{savedMsg}</p>
           </div>
         )}
 
         {/* Active config indicator */}
         {activeMarker && (
-          <div className="flex items-center gap-3 p-4 rounded-2xl bg-white/3 border border-white/5">
+          <div className="flex items-center gap-3 p-4 rounded-2xl bg-raised border border-line">
             <div className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
-            <p className="text-sm text-[#8b949e]">
-              Active: <span className="text-white font-bold">{DB_PROVIDERS.find(p => p.id === activeMarker.provider)?.label ?? activeMarker.provider}</span>
+            <p className="text-sm text-muted">
+              Active: <span className="text-ink font-bold">{DB_PROVIDERS.find(p => p.id === activeMarker.provider)?.label ?? activeMarker.provider}</span>
             </p>
           </div>
         )}
       </div>
 
       {/* How it works info card */}
-      <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 space-y-3">
-        <h4 className="text-sm font-black text-white uppercase tracking-wider">How it works</h4>
-        <ol className="space-y-2 text-[12px] text-[#8b949e]">
+      <div className="bg-card border border-line rounded-[2.5rem] p-6 space-y-3">
+        <h4 className="text-sm font-black text-ink uppercase tracking-wider">How it works</h4>
+        <ol className="space-y-2 text-[12px] text-muted">
           <li className="flex items-start gap-2">
-            <span className="text-indigo-400 font-bold shrink-0">1.</span>
+            <span className="text-accent-text font-bold shrink-0">1.</span>
             Select your database provider and paste your credentials.
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-indigo-400 font-bold shrink-0">2.</span>
-            Credentials are AES-encrypted and stored under <strong className="text-white">Secrets &amp; Keys</strong>.
+            <span className="text-accent-text font-bold shrink-0">2.</span>
+            Credentials are AES-encrypted and stored under <strong className="text-ink">Secrets &amp; Keys</strong>.
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-indigo-400 font-bold shrink-0">3.</span>
-            When <strong className="text-white">NavBharatAI Pro</strong> builds your app, it detects this connected database, wires that exact provider&apos;s SDK, and injects your keys into <code className="text-indigo-300">.env</code> automatically — it never creates a new or different database.
+            <span className="text-accent-text font-bold shrink-0">3.</span>
+            When <strong className="text-ink">NavBharatAI Pro</strong> builds your app, it detects this connected database, wires that exact provider&apos;s SDK, and injects your keys into <code className="text-accent-text">.env</code> automatically — it never creates a new or different database.
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-indigo-400 font-bold shrink-0">4.</span>
-            NavBharatAI's own database is <strong className="text-white">never</strong> used for your apps — you own 100% of your data.
+            <span className="text-accent-text font-bold shrink-0">4.</span>
+            NavBharatAI's own database is <strong className="text-ink">never</strong> used for your apps — you own 100% of your data.
           </li>
         </ol>
       </div>

@@ -87,14 +87,14 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
     return (
       <button
         onClick={() => setMinimised(false)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-amber-950/50 border border-amber-900 rounded text-left hover:bg-amber-950/70 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-900 rounded text-left hover:bg-amber-950/70 transition-colors cursor-pointer"
       >
-        <Key className="w-4 h-4 text-amber-300 shrink-0" />
-        <span className="text-xs text-amber-200 flex-1">
+        <Key className="w-4 h-4 text-warn shrink-0" />
+        <span className="text-xs text-warn flex-1">
           {secrets.length === 1 ? '1 key needed' : `${secrets.length} keys needed`}
-          {filled > 0 && <span className="text-amber-400/70"> · {filled} filled</span>}
+          {filled > 0 && <span className="text-warn"> · {filled} filled</span>}
         </span>
-        <span className="text-[10px] text-amber-400/80 uppercase tracking-wider">Tap to open</span>
+        <span className="text-[10px] text-warn uppercase tracking-wider">Tap to open</span>
       </button>
     );
   }
@@ -105,22 +105,22 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
       finale
         // The finale card must not look like one more log line. Vivid, but still the product's dark
         // palette — a gradient ring and glow, not a neon block that fights the whole screen.
-        ? 'bg-gradient-to-br from-violet-950/80 via-fuchsia-950/60 to-amber-950/60 border-2 border-fuchsia-500/70 shadow-lg shadow-fuchsia-900/40 rounded-xl'
-        : 'bg-amber-950/50 border border-amber-900',
+        ? 'bg-gradient-to-br from-violet-950/80 via-fuchsia-950/60 to-amber-950/60 border-2 border-fuchsia-500/70 shadow-lg shadow-fuchsia-900/40 rounded-xl text-on-accent'
+        : 'bg-amber-500/10 border border-amber-900',
     )}>
       {finale && (
-        <div className="flex items-center gap-1.5 text-[13px] font-bold text-fuchsia-200">
-          <Sparkles className="w-4 h-4 text-fuchsia-300" /> Your app is ready — one last step
+        <div className="flex items-center gap-1.5 text-[13px] font-bold text-accent-text">
+          <Sparkles className="w-4 h-4 text-accent-text" /> Your app is ready — one last step
         </div>
       )}
       <div className="flex items-start gap-2">
-        <Key className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
-        <p className={cn('text-xs leading-relaxed flex-1', finale ? 'text-fuchsia-100' : 'text-amber-100')}>{prompt}</p>
+        <Key className="w-4 h-4 text-warn shrink-0 mt-0.5" />
+        <p className={cn('text-xs leading-relaxed flex-1', finale ? 'text-accent-text' : 'text-warn')}>{prompt}</p>
         <button
           onClick={() => setMinimised(true)}
           title="Minimise — your typing is kept"
           aria-label="Minimise"
-          className="p-1 rounded hover:bg-amber-900/60 text-amber-300 shrink-0 cursor-pointer"
+          className="p-1 rounded hover:bg-amber-500/10 text-warn shrink-0 cursor-pointer"
         >
           <ChevronDown className="w-3.5 h-3.5" />
         </button>
@@ -135,28 +135,28 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
         const source = findRecipeSource(s.name);
         return (
         <div key={s.name} className="space-y-1">
-          <label htmlFor={`secret-${s.name}`} className="block text-[11px] font-mono text-amber-200">{s.name}</label>
-          <p className="text-[10px] text-zinc-400 leading-snug">{s.why}</p>
+          <label htmlFor={`secret-${s.name}`} className="block text-[11px] font-mono text-warn">{s.name}</label>
+          <p className="text-[10px] text-muted leading-snug">{s.why}</p>
           {source && (
-            <div className="text-[10px] text-zinc-400 leading-snug space-y-0.5 border-l-2 border-amber-900/60 pl-2">
+            <div className="text-[10px] text-muted leading-snug space-y-0.5 border-l-2 border-amber-900/60 pl-2">
               <p>
-                <span className="text-zinc-500">Get it from </span>
+                <span className="text-faint">Get it from </span>
                 <a
                   href={source.option.link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-amber-300 underline underline-offset-2"
+                  className="text-warn underline underline-offset-2"
                 >
                   {source.option.linkLabel}
                 </a>
-                <span className="text-zinc-500"> → {source.option.path}</span>
+                <span className="text-faint"> → {source.option.path}</span>
               </p>
-              <p className="text-zinc-500">{source.variable.where}</p>
-              <p className="text-zinc-500">{source.option.cost}</p>
+              <p className="text-faint">{source.variable.where}</p>
+              <p className="text-faint">{source.option.cost}</p>
               {source.recipe.keyless && (
                 // The most valuable line on the card: it can remove the task entirely. Shown last so it
                 // never looks like a reason to abandon a key the user already has in hand.
-                <p className="text-emerald-400/80">💡 {source.recipe.keyless}</p>
+                <p className="text-success">💡 {source.recipe.keyless}</p>
               )}
             </div>
           )}
@@ -171,13 +171,13 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
               placeholder="Paste the value"
               autoComplete="off"
               spellCheck={false}
-              className="flex-1 px-2 py-1.5 text-xs rounded bg-zinc-900 border border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-amber-600"
+              className="flex-1 px-2 py-1.5 text-xs rounded bg-card border border-line text-body placeholder:text-faint focus:outline-none focus:border-amber-600"
             />
             <button
               onClick={() => setShown((sh) => ({ ...sh, [s.name]: !sh[s.name] }))}
               title={shown[s.name] ? 'Hide' : 'Show'}
               aria-label={shown[s.name] ? `Hide ${s.name}` : `Show ${s.name}`}
-              className="px-2 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer"
+              className="px-2 rounded bg-raised hover:bg-raised text-muted cursor-pointer"
             >
               {shown[s.name] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
@@ -185,7 +185,7 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
               <button
                 onClick={() => onGuide(s.name)}
                 title={`Ask NavBharatAI to walk you to ${s.name}, step by step`}
-                className="flex items-center gap-1 px-2 rounded bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 text-[10px] font-semibold whitespace-nowrap cursor-pointer"
+                className="flex items-center gap-1 px-2 rounded bg-indigo-500/10 hover:bg-indigo-800 text-accent-text text-[10px] font-semibold whitespace-nowrap cursor-pointer"
               >
                 <HelpCircle className="w-3.5 h-3.5" /> Guide me
               </button>
@@ -196,7 +196,7 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
       })}
 
       {error && (
-        <div className="flex items-center gap-1.5 text-[11px] text-red-300">
+        <div className="flex items-center gap-1.5 text-[11px] text-danger">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
         </div>
       )}
@@ -207,7 +207,7 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
           disabled={saving}
           className={cn(
             'px-3 py-1 text-xs rounded font-medium cursor-pointer',
-            saving ? 'bg-emerald-900/40 text-emerald-500/60 cursor-not-allowed' : 'bg-emerald-700 hover:bg-emerald-600 text-white',
+            saving ? 'bg-emerald-500/10 text-success cursor-not-allowed' : 'bg-emerald-700 hover:bg-emerald-600 text-on-accent',
           )}
         >
           {saving ? (<span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Saving…</span>) : (finale ? 'Save keys' : 'Save & continue')}
@@ -215,19 +215,19 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
         <button
           onClick={() => onDone(false)}
           disabled={saving}
-          className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100 cursor-pointer"
+          className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised text-body cursor-pointer"
         >
           {finale ? 'I\u2019ll do this later' : 'Skip for now'}
         </button>
       </div>
-      <p className="text-[10px] text-zinc-500 leading-snug">
+      <p className="text-[10px] text-faint leading-snug">
         Saved to your own encrypted keys (Settings → Secrets &amp; API Keys). Never shown to the AI, never
         written into your code, never committed to git.
       </p>
       {finale && onSwitchProvider && (
         <button
           onClick={onSwitchProvider}
-          className="text-[11px] text-indigo-300 hover:text-indigo-200 underline underline-offset-2 cursor-pointer text-left"
+          className="text-[11px] text-accent-text hover:text-accent-text underline underline-offset-2 cursor-pointer text-left"
         >
           Don’t want to use these services? Ask me to switch your app to a different provider.
         </button>

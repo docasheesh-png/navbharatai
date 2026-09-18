@@ -44,6 +44,9 @@ const PROCESS_ONLY_CODES = new Set([
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
+  // …and its sibling: our own page-render browser produced nothing (autopsy c6e4c6ff). Same rule —
+  // a check that did not run is a fact about OUR instrument, never about the user's pages.
+  'PAGE_RENDER_NOT_RUN',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
   'PROJECT_MODE_FAILED',
   // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).

@@ -718,7 +718,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   };
 
   return (
-    <div className="h-full w-full bg-[#0d1117] flex flex-col">
+    <div className="h-full w-full bg-surface flex flex-col">
       <div className="relative flex-1 min-h-0" onClick={focusBridge}>
         <div ref={hostRef} className="absolute inset-0 p-2" />
         {showCommandBar && (
@@ -748,22 +748,22 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
           // which nobody discovers from an error message.
           <button
             onClick={restart}
-            className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-widest shadow-lg"
+            className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-[11px] font-black uppercase tracking-widest shadow-lg"
           >
             {status.kind === 'exited' ? 'Restart terminal' : 'Try again'}
           </button>
         )}
       </div>
       {showCommandBar && (
-        <div className="shrink-0 border-t border-zinc-800 bg-[#0d1117] px-1.5 py-1.5 flex items-center gap-1.5">
+        <div className="shrink-0 border-t border-line bg-surface px-1.5 py-1.5 flex items-center gap-1.5">
           <button onPointerDown={keepFocus} onClick={() => void sendInput('\x03')} aria-label="Send Ctrl+C (interrupt)"
-            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">^C</button>
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">^C</button>
           <button onPointerDown={keepFocus} onClick={() => void sendInput('\t')} aria-label="Send Tab (completion)"
-            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">Tab</button>
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">Tab</button>
           <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[A')} aria-label="History up"
-            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">↑</button>
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">↑</button>
           <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[B')} aria-label="History down"
-            className="shrink-0 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 text-[11px] font-mono hover:text-white">↓</button>
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">↓</button>
           <input
             ref={barInputRef}
             value={barText}
@@ -782,10 +782,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
             spellCheck={false}
             autoComplete="off"
             enterKeyHint="send"
-            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1.5 text-[13px] text-zinc-100 font-mono outline-none focus:border-indigo-500"
+            className="flex-1 min-w-0 bg-card border border-line rounded px-2.5 py-1.5 text-[13px] text-body font-mono outline-none focus:border-indigo-500"
           />
           <button onPointerDown={keepFocus} onClick={sendBarCommand} aria-label="Run command"
-            className="shrink-0 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[12px] font-bold">Run</button>
+            className="shrink-0 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-on-accent text-[12px] font-bold">Run</button>
         </div>
       )}
     </div>

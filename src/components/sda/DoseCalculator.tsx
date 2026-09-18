@@ -232,7 +232,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                         'px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all',
                         selected?.kind === 'custom' && selected.medicine.id === m.id
                           ? 'bg-emerald-500/10 border-emerald-500/60 text-success'
-                          : 'bg-raised border-line text-body hover:text-ink hover:bg-raised',
+                          : 'bg-raised border-line text-body hover:text-ink hover:bg-raised-hover',
                         manageMode && 'rounded-r-none border-r-0',
                       )}
                     >
@@ -315,7 +315,7 @@ export function DoseCalculator({ onClose }: { onClose: () => void }) {
                       'px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all',
                       selected?.kind === 'chart' && selected.drug.id === d.id
                         ? 'bg-emerald-500/10 border-emerald-500/60 text-success'
-                        : 'bg-raised border-line text-muted hover:text-ink hover:bg-raised',
+                        : 'bg-raised border-line text-muted hover:text-ink hover:bg-raised-hover',
                     )}
                   >
                     {d.label}

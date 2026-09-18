@@ -323,7 +323,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           disabled={loading || files.length >= MAX_FILES}
           badge={files.length}
           title="Attach (photo, gallery, or file)"
-          buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised disabled:opacity-40 border border-line text-body flex items-center justify-center"
+          buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover disabled:opacity-40 border border-line text-body flex items-center justify-center"
         />
         <textarea
           ref={composerRef}

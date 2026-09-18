@@ -235,7 +235,9 @@ describe('migrate — mechanics', () => {
     expect(r.changed).toEqual({ 'text-white → text-ink': 1, 'text-white/40 → text-faint': 1 });
   });
   it('an arbitrary opacity is normalised first, so bg-white/[0.02] cannot become a 2% raised surface', () => {
-    expect(migrate('"bg-white/[0.02] hover:bg-white/[0.05] border-white/[0.08]"').out).toBe('"bg-raised hover:bg-raised border-line"');
+    // Two whites at two alphas both land on `bg-raised`; the hover then moves to `-hover` (see the
+    // dead-hover describe below), so this used to expect `hover:bg-raised` and was asserting a no-op.
+    expect(migrate('"bg-white/[0.02] hover:bg-white/[0.05] border-white/[0.08]"').out).toBe('"bg-raised hover:bg-raised-hover border-line"');
   });
   it('never touches a token that is already semantic', () => {
     const src = '"bg-card text-muted border-line text-on-accent"';
@@ -462,5 +464,25 @@ describe('🔒 embedded source is SOMEBODY ELSE\'S app — never counted, never 
     const starter = "files: { 'src/App.tsx': `import React from \"react\";\nexport default () => <div className=\"bg-white text-gray-900\">hi</div>;` }";
     expect(literalsIn(starter)).toEqual([]);
     expect(migrate(starter).out).toBe(starter);
+  });
+});
+
+describe('🔒 a hover to the surface it already has is not a hover (PR #3095\'s guard, now built into the codemod)', () => {
+  it('bg-white/5 hover:bg-white/10 rests on raised and hovers to raised-hover — never raised twice', () => {
+    expect(migrate('"px-2 bg-white/5 hover:bg-white/10 rounded"').out).toBe('"px-2 bg-raised hover:bg-raised-hover rounded"');
+  });
+  it('the same for a well, and for group-hover', () => {
+    expect(migrate('"bg-black/20 group-hover:bg-black/30"').out).toBe('"bg-well group-hover:bg-well-hover"');
+  });
+  it('a hover to a DIFFERENT surface is left exactly as mapped', () => {
+    expect(migrate('"bg-white/5 hover:bg-[#161b22]"').out).toBe('"bg-raised hover:bg-card"');
+  });
+  it('an already-correct pair is untouched, and a lone hover with no resting surface is untouched', () => {
+    expect(migrate('"bg-raised hover:bg-raised-hover"').out).toBe('"bg-raised hover:bg-raised-hover"');
+    expect(migrate('"px-2 hover:bg-white/5"').out).toBe('"px-2 hover:bg-raised"');
+  });
+  it('is counted as a readability FIX, not an exact swap', () => {
+    const r = migrate('"bg-white/5 hover:bg-white/10"');
+    expect(r.changed['hover to the surface it already has → its -hover token']).toBe(1);
   });
 });

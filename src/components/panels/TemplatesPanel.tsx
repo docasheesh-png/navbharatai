@@ -358,11 +358,11 @@ export function TemplatesPanel({
     : templates.filter((t) => templateMeta(t.id).category === activeCategory);
 
   return (
-    <div className="flex-1 p-8 bg-[#0d1117] overflow-y-auto custom-scrollbar">
+    <div className="flex-1 p-8 bg-surface overflow-y-auto custom-scrollbar">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col mb-6">
-          <h3 className="text-2xl font-bold text-white mb-2">Project Blueprints</h3>
-          <p className="text-sm text-[#8b949e]">Accelerate your development with AI-optimized templates</p>
+          <h3 className="text-2xl font-bold text-ink mb-2">Project Blueprints</h3>
+          <p className="text-sm text-muted">Accelerate your development with AI-optimized templates</p>
         </div>
 
         {/* Category filter — jump straight to the kind of app you want to build */}
@@ -375,8 +375,8 @@ export function TemplatesPanel({
                 onClick={() => setActiveCategory(cat)}
                 className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-widest transition-all ${
                   active
-                    ? 'bg-indigo-600 text-white shadow-lg'
-                    : 'bg-[#161b22] border border-white/5 text-[#8b949e] hover:border-indigo-500/40 hover:text-white'
+                    ? 'bg-indigo-600 text-on-accent shadow-lg'
+                    : 'bg-card border border-line text-muted hover:border-indigo-500/40 hover:text-ink'
                 }`}
               >
                 {cat}
@@ -396,22 +396,22 @@ export function TemplatesPanel({
                   if (isLocked) { onRequireAuth(); return; }
                   onSelectTemplate(t.prompt);
                 }}
-                className={`flex flex-col items-start p-6 bg-[#161b22] border rounded-2xl transition-all text-left group shadow-xl relative overflow-hidden ${
-                  isLocked ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-white/5 hover:border-indigo-500/50 hover:bg-indigo-500/5'
+                className={`flex flex-col items-start p-6 bg-card border rounded-2xl transition-all text-left group shadow-xl relative overflow-hidden ${
+                  isLocked ? 'border-amber-500/20 hover:border-amber-500/40' : 'border-line hover:border-indigo-500/50 hover:bg-indigo-500/5'
                 }`}
               >
                 {t.isPro && (
-                  <span className="absolute top-3 right-3 text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-400 uppercase tracking-widest">
+                  <span className="absolute top-3 right-3 text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-warn uppercase tracking-widest">
                     {isLocked ? '🔒 Pro' : '⭐ Pro'}
                   </span>
                 )}
-                <div className={`w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center mb-6 transition-colors ${isLocked ? 'group-hover:bg-amber-600' : 'group-hover:bg-indigo-600'}`}>
-                  <t.icon className={`w-6 h-6 ${isLocked ? 'text-amber-400 group-hover:text-white' : 'text-indigo-400 group-hover:text-white'}`} />
+                <div className={`w-12 h-12 bg-raised rounded-xl flex items-center justify-center mb-6 transition-colors ${isLocked ? 'group-hover:bg-amber-600' : 'group-hover:bg-indigo-600'}`}>
+                  <t.icon className={`w-6 h-6 ${isLocked ? 'text-warn group-hover:text-ink' : 'text-accent-text group-hover:text-ink'}`} />
                 </div>
-                <h4 className="font-bold text-white mb-2">{t.name}</h4>
-                <p className="text-[11px] text-[#8b949e] leading-relaxed mb-6 opacity-70">{templateMeta(t.id).description}</p>
+                <h4 className="font-bold text-ink mb-2">{t.name}</h4>
+                <p className="text-[11px] text-muted leading-relaxed mb-6 opacity-70">{templateMeta(t.id).description}</p>
                 <div className="mt-auto w-full flex items-center justify-between">
-                  <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-amber-400 bg-amber-500/10' : 'text-indigo-400 bg-indigo-500/10'}`}>
+                  <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${isLocked ? 'text-warn bg-amber-500/10' : 'text-accent-text bg-indigo-500/10'}`}>
                     {isLocked ? 'Sign In to Use' : 'Fast Build'}
                   </span>
                 </div>
@@ -424,13 +424,13 @@ export function TemplatesPanel({
         <div className="mt-12">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-xl font-bold text-white">My Templates</h3>
-              <p className="text-sm text-[#8b949e]">Your saved apps — reuse, remix, and share</p>
+              <h3 className="text-xl font-bold text-ink">My Templates</h3>
+              <p className="text-sm text-muted">Your saved apps — reuse, remix, and share</p>
             </div>
             {hasGeneratedCode && (
               <button
                 onClick={onSaveCurrentTemplate}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
               >
                 <Plus className="w-4 h-4" />
                 Save Current App
@@ -438,33 +438,33 @@ export function TemplatesPanel({
             )}
           </div>
           {savedTemplates.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 border border-dashed border-white/10 rounded-2xl text-center gap-3">
-              <Package className="w-10 h-10 text-white/20" />
-              <p className="text-[#484f58] text-sm font-medium">No saved templates yet</p>
-              <p className="text-[10px] text-[#484f58]">Build an app and click "Save Current App" to save it here</p>
+            <div className="flex flex-col items-center justify-center py-16 border border-dashed border-line rounded-2xl text-center gap-3">
+              <Package className="w-10 h-10 text-faint" />
+              <p className="text-faint text-sm font-medium">No saved templates yet</p>
+              <p className="text-[10px] text-faint">Build an app and click "Save Current App" to save it here</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {savedTemplates.map(t => (
-                <div key={t.id} className="flex flex-col bg-[#161b22] border border-white/5 rounded-2xl p-5 gap-3 hover:border-indigo-500/30 transition-all group">
+                <div key={t.id} className="flex flex-col bg-card border border-line rounded-2xl p-5 gap-3 hover:border-indigo-500/30 transition-all group">
                   <div className="flex items-start justify-between">
                     <div>
-                      <h4 className="text-white font-bold text-sm">{t.name}</h4>
-                      <p className="text-[9px] text-[#484f58] mt-0.5">Saved {t.savedAt}</p>
+                      <h4 className="text-ink font-bold text-sm">{t.name}</h4>
+                      <p className="text-[9px] text-faint mt-0.5">Saved {t.savedAt}</p>
                     </div>
                     <button
                       onClick={() => onDeleteSavedTemplate(t.id)}
-                      className="p-1.5 hover:bg-red-500/10 rounded-lg text-[#484f58] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-1.5 hover:bg-red-500/10 rounded-lg text-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100"
                     >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
-                  <div className="text-[9px] text-[#8b949e] font-mono bg-black/30 rounded-lg p-2 truncate">
+                  <div className="text-[9px] text-muted font-mono bg-well rounded-lg p-2 truncate">
                     {t.html.slice(0, 80)}...
                   </div>
                   <button
                     onClick={() => onLoadSavedTemplate(t.html)}
-                    className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-indigo-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+                    className="w-full py-2 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/20 text-accent-text rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
                   >
                     Load & Preview
                   </button>

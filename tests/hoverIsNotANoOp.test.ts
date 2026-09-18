@@ -29,10 +29,23 @@ function maskEmbedded(src: string): string {
 const ATTR = /(?:className|class)\s*=\s*(?:"([^"]*)"|\{`([^`]*)`\}|\{"([^"]*)"\}|\{\s*`([^`]*)`\s*\})/g;
 const SURFACES = ['surface', 'card', 'raised', 'well'];
 
+/** Every quoted string: a class list chosen by a ternary inside a template, or handed to a
+ *  `buttonClassName` prop, never reaches an attribute this scanner can name — ten dead hovers hid in
+ *  exactly those places while the attribute pass was green (2026-09-18). A string carrying both a
+ *  resting surface and a hover to it is a class list by construction, whatever it is assigned to. */
+const QUOTED = /'([^'\n]*)'|"([^"\n]*)"/g;
+
 function noOpHoversIn(src: string): string[] {
+  const masked = maskEmbedded(src);
+  // Every candidate class list, judged ONCE: whole attributes (including backtick templates) plus every
+  // single- or double-quoted string. A double-quoted attribute appears in both passes with the same
+  // content, so the set collapses it to one offender.
+  const lists = new Set<string>();
+  for (const m of masked.matchAll(ATTR)) lists.add(m[1] ?? m[2] ?? m[3] ?? m[4] ?? '');
+  for (const m of masked.matchAll(QUOTED)) lists.add(m[1] ?? m[2] ?? '');
   const out: string[] = [];
-  for (const m of maskEmbedded(src).matchAll(ATTR)) {
-    const cls = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? '').split(/\s+/);
+  for (const list of lists) {
+    const cls = list.split(/\s+/);
     for (const s of SURFACES) {
       if (cls.includes(`bg-${s}`) && (cls.includes(`hover:bg-${s}`) || cls.includes(`group-hover:bg-${s}`))) {
         out.push(`bg-${s} + hover:bg-${s}`);

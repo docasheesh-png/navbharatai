@@ -59,38 +59,38 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
   const watch = (data?.topReferrers ?? []).filter((r) => r.worthALook);
 
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#161b22] p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-4">
+    <div className="rounded-2xl border border-line bg-card p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
         <div>
-          <h3 className="text-sm font-black uppercase tracking-tight text-white">Referral cost</h3>
-          <p className="mt-1 text-[10px] font-semibold text-[#8b949e]">
+          <h3 className="text-sm font-black uppercase tracking-tight text-ink">Referral cost</h3>
+          <p className="mt-1 text-[10px] font-semibold text-muted">
             What the four-step welcome gift has paid out, and who is worth a look.
           </p>
         </div>
         <button
           onClick={() => void load()}
           disabled={loading}
-          className="rounded-lg bg-white/5 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-[#8b949e] transition-colors hover:text-white disabled:opacity-40"
+          className="rounded-lg bg-raised px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-muted transition-colors hover:text-ink disabled:opacity-40"
         >
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>
 
       {!data ? (
-        <p className="mt-4 text-[11px] font-semibold text-[#8b949e]">Loading…</p>
+        <p className="mt-4 text-[11px] font-semibold text-muted">Loading…</p>
       ) : !data.ok ? (
-        <p className="mt-4 text-[11px] font-semibold text-amber-400">
+        <p className="mt-4 text-[11px] font-semibold text-warn">
           Could not read the referral records{data.reason ? `: ${data.reason}` : ''}.
         </p>
       ) : (
         <>
           {!data.enabled && (
-            <p className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3 text-[11px] font-semibold text-[#8b949e]">
+            <p className="mt-4 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-muted">
               REFERRAL_REWARDS is not set, so nothing is being paid. Any figures below are historic.
             </p>
           )}
           {data.capped && (
-            <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] font-semibold text-amber-400">
+            <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] font-semibold text-warn">
               More referral records exist than this panel reads, so every figure below is a LOWER BOUND.
             </p>
           )}
@@ -102,25 +102,25 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
               ['Total paid out', rupees(data.totalTokens), ''],
               ['Accounts referred', String(data.referred ?? 0), `${data.participants ?? 0} earned something`],
             ].map(([label, value, note]) => (
-              <div key={label} className="rounded-xl border border-white/5 bg-black/20 p-4">
-                <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">{label}</p>
-                <p className="mt-1 text-xl font-black text-white">{value}</p>
-                {note && <p className="mt-0.5 text-[9px] font-semibold text-[#8b949e]">{note}</p>}
+              <div key={label} className="rounded-xl border border-line bg-well p-4">
+                <p className="text-[9px] font-black uppercase tracking-widest text-faint">{label}</p>
+                <p className="mt-1 text-xl font-black text-ink">{value}</p>
+                {note && <p className="mt-0.5 text-[9px] font-semibold text-muted">{note}</p>}
               </div>
             ))}
           </div>
 
           <div className="mt-5">
-            <h4 className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">
-              Busiest referrers {watch.length > 0 && <span className="text-amber-400">— {watch.length} worth a look</span>}
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-muted">
+              Busiest referrers {watch.length > 0 && <span className="text-warn">— {watch.length} worth a look</span>}
             </h4>
             {(data.topReferrers ?? []).length === 0 ? (
-              <p className="mt-2 text-[11px] font-semibold text-[#8b949e]">No referrals yet.</p>
+              <p className="mt-2 text-[11px] font-semibold text-muted">No referrals yet.</p>
             ) : (
               <div className="mt-2 overflow-x-auto">
                 <table className="w-full text-left font-mono text-[11px]">
                   <thead>
-                    <tr className="border-b border-white/5 text-[9px] font-black uppercase tracking-widest text-[#8b949e]">
+                    <tr className="border-b border-line text-[9px] font-black uppercase tracking-widest text-muted">
                       <th className="py-2 pr-4">Referrer</th>
                       <th className="py-2 pr-4">Friends</th>
                       <th className="py-2 pr-4">With mobile</th>
@@ -128,16 +128,16 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
                       <th className="py-2">&nbsp;</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5">
+                  <tbody className="divide-y divide-line">
                     {(data.topReferrers ?? []).map((r) => (
                       <tr key={r.referrerUserId} className={r.worthALook ? 'bg-amber-500/5' : ''}>
-                        <td className="py-2 pr-4 max-w-[14rem] truncate text-white">{r.referrerUserId}</td>
+                        <td className="py-2 pr-4 max-w-[14rem] truncate text-ink">{r.referrerUserId}</td>
                         <td className="py-2 pr-4">{r.friends}</td>
                         <td className="py-2 pr-4">{r.friendsWithMobile}</td>
-                        <td className="py-2 pr-4 text-emerald-400">{rupees(r.earnedTokens)}</td>
+                        <td className="py-2 pr-4 text-success">{rupees(r.earnedTokens)}</td>
                         <td className="py-2">
                           {r.worthALook && (
-                            <span className="rounded border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-400">
+                            <span className="rounded border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-warn">
                               Worth a look
                             </span>
                           )}
@@ -148,7 +148,7 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
                 </table>
               </div>
             )}
-            <p className="mt-3 text-[10px] font-semibold leading-relaxed text-[#8b949e]">
+            <p className="mt-3 text-[10px] font-semibold leading-relaxed text-muted">
               &ldquo;Worth a look&rdquo; means several friends and none of them verified a mobile — the shape a
               factory-reset farm leaves. It is a question, not a verdict: each fact alone is innocent, and
               nothing acts on it. Any one referrer is capped at {rupees(data.capTokens)} for life.

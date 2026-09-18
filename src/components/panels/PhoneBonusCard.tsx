@@ -218,12 +218,12 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
     return (
       <div className="rounded-[1.6rem] border border-emerald-500/25 bg-emerald-500/[0.08] p-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
           <div>
-            <p className="text-sm font-black tracking-tight text-emerald-200">
+            <p className="text-sm font-black tracking-tight text-success">
               ₹{rupees(granted)} added to your wallet
             </p>
-            <p className="mt-1 text-[11px] leading-relaxed text-[#8b949e]">
+            <p className="mt-1 text-[11px] leading-relaxed text-muted">
               Your number is verified. Your account is also easier to recover now.
             </p>
           </div>
@@ -234,10 +234,10 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
 
   if (stage === 'refused') {
     return (
-      <div className="rounded-[1.6rem] border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+      <div className="rounded-[1.6rem] border border-line bg-raised p-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#8b949e]" />
-          <p className="text-[11px] leading-relaxed text-[#8b949e]">{message}</p>
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
+          <p className="text-[11px] leading-relaxed text-muted">{message}</p>
         </div>
       </div>
     );
@@ -246,12 +246,12 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
   return (
     <div className="rounded-[1.6rem] border border-indigo-500/25 bg-indigo-500/[0.07] p-4 sm:p-5">
       <div className="flex items-start gap-3">
-        <Gift className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
+        <Gift className="mt-0.5 h-4 w-4 shrink-0 text-accent-text" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-black tracking-tight text-indigo-200">
+          <p className="text-sm font-black tracking-tight text-accent-text">
             ₹{rupees(claimableTokens)} more — verify your number
           </p>
-          <p className="mt-1 text-[11px] leading-relaxed text-[#8b949e]">
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
             {/* Says what the money BUYS, not just what it is: "₹250" means nothing to someone who has
                 never seen a token bill. And the number earns its keep for the user too, rather than
                 being a tax we collect — it is what makes the account recoverable. */}
@@ -262,7 +262,7 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
           {stage === 'offer' && (
             <button
               onClick={() => setStage('phone')}
-              className="mt-3 rounded-xl bg-indigo-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-colors hover:bg-indigo-500"
+              className="mt-3 rounded-xl bg-indigo-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-on-accent transition-colors hover:bg-indigo-500"
             >
               Claim ₹{rupees(claimableTokens)}
             </button>
@@ -270,9 +270,9 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
 
           {stage === 'phone' && (
             <div className="mt-3 space-y-2">
-              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#0d1117] px-3 py-2.5">
-                <Smartphone className="h-3.5 w-3.5 shrink-0 text-[#484f58]" />
-                <span className="text-[12px] font-mono text-[#8b949e]">+91</span>
+              <div className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5">
+                <Smartphone className="h-3.5 w-3.5 shrink-0 text-faint" />
+                <span className="text-[12px] font-mono text-muted">+91</span>
                 <input
                   value={phone}
                   onChange={(e) => setPhone(sanitisePhoneInput(e.target.value))}
@@ -280,13 +280,13 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
                   autoComplete="tel"
                   placeholder="98765 43210"
                   aria-label="Mobile number"
-                  className="min-w-0 flex-1 bg-transparent text-[13px] font-mono text-white outline-none placeholder:text-[#484f58]"
+                  className="min-w-0 flex-1 bg-transparent text-[13px] font-mono text-ink outline-none placeholder:text-faint"
                 />
               </div>
               <button
                 onClick={sendCode}
                 disabled={busy}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-on-accent transition-colors hover:bg-indigo-500 disabled:opacity-50"
               >
                 {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Send code
@@ -303,12 +303,12 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
                 autoComplete="one-time-code"
                 placeholder="Enter code"
                 aria-label="Verification code"
-                className="w-full rounded-xl border border-white/10 bg-[#0d1117] px-3 py-2.5 text-center text-[15px] font-mono tracking-[0.4em] text-white outline-none placeholder:tracking-normal placeholder:text-[#484f58]"
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-center text-[15px] font-mono tracking-[0.4em] text-ink outline-none placeholder:tracking-normal placeholder:text-faint"
               />
               <button
                 onClick={verifyCode}
                 disabled={busy}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-widest text-on-accent transition-colors hover:bg-indigo-500 disabled:opacity-50"
               >
                 {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Verify &amp; claim
@@ -316,8 +316,8 @@ export const PhoneBonusCard: React.FC<PhoneBonusCardProps> = ({
             </div>
           )}
 
-          {message && <p className="mt-2 text-[10px] text-emerald-300/80">{message}</p>}
-          {error && <p className="mt-2 text-[10px] leading-relaxed text-amber-300">{error}</p>}
+          {message && <p className="mt-2 text-[10px] text-success">{message}</p>}
+          {error && <p className="mt-2 text-[10px] leading-relaxed text-warn">{error}</p>}
 
           {/* Invisible reCAPTCHA host (web only). Must exist in the DOM before the verifier is built. */}
           <div ref={recaptchaRef} />

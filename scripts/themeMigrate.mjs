@@ -433,6 +433,30 @@ export function migrate(src) {
       return `${q[0]}${body} text-on-accent${q[0]}`;
     });
   }
+  // A HOVER TO THE SURFACE IT ALREADY HAS IS NOT A HOVER (PR #3095's guard, tests/hoverIsNotANoOp.test.ts).
+  // `bg-white/5` and `bg-white/10` both map to `bg-raised`, so a chip written as
+  // `bg-white/5 hover:bg-white/10` came out as `bg-raised hover:bg-raised` — pixel-identical on rest and
+  // hover, i.e. a control that no longer answers the pointer. Nine of those were fixed by hand in PR J;
+  // the codemod must not keep producing them. Where a class list rests on a themed surface and hovers to
+  // the SAME one, the hover moves to that surface's `-hover` token, which every theme declares as a real
+  // step away from the resting value.
+  const DEAD_HOVER_LABEL = 'hover to the surface it already has → its -hover token';
+  for (let i = 0; i < out.length; i++) {
+    const m3 = maskEmbeddedSources(out[i]);
+    out[i] = out[i].replace(/'[^'\n]*'|"[^"\n]*"/g, (q, offset) => {
+      if (m3.slice(offset, offset + q.length) !== q) return q;
+      let body = q.slice(1, -1);
+      for (const surface of ['raised', 'well']) {
+        const resting = new RegExp(`(?<![\\w:-])bg-${surface}(?![\\w/-])`);
+        const dead = new RegExp(`(?<![\\w-])((?:group-)?hover:)bg-${surface}(?![\\w/-])`, 'g');
+        if (resting.test(body) && dead.test(body)) {
+          body = body.replace(dead, (_, v) => `${v}bg-${surface}-hover`);
+          changed[DEAD_HOVER_LABEL] = (changed[DEAD_HOVER_LABEL] || 0) + 1; fix++;
+        }
+      }
+      return `${q[0]}${body}${q[0]}`;
+    });
+  }
   return { out: out.join('\n'), changed, left, exact, fix };
 }
 

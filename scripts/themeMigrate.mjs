@@ -27,7 +27,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LITERAL, literalsIn } from './themeColourBaseline.mjs';
+import { LITERAL, literalsIn, maskEmbeddedSources } from './themeColourBaseline.mjs';
 
 /** Semantic token → the palette variable its Tailwind utility resolves to (see `@theme inline` in index.css). */
 export const TOKEN_VAR = {
@@ -98,13 +98,26 @@ export function enclosingSpan(line, idx) {
  *             if only some are, no single class is right for both branches, so it is left for a hand
  *             split rather than guessed.
  */
-export function fillContext(line, idx, prevLine = '') {
+/**
+ * A `bg-[#hex]` that is NOT one of the chrome hexes the table maps to a surface token is a FIXED brand
+ * fill — VS Code's status-bar blue `bg-[#007acc]`, a partner's colour — and the theme will never change
+ * it, so white text on it must stay white. (Chrome hexes become `bg-card` etc. and are NOT fills.)
+ */
+const CHROME_HEX = new Set([...BG_SURFACE, ...BG_CARD, ...BG_RAISED, ...BG_SURFACE_FIX, ...BG_CARD_FIX, ...BG_RAISED_FIX, ...BG_FAINT].filter((v) => v.startsWith('[#')));
+export function hasHexBrandFill(span) {
+  for (const m of span.matchAll(/(?<![\w-])(?:[a-z-]+:)*bg-(\[#[0-9a-fA-F]{6}\])(?![\w/-])/g)) {
+    if (!CHROME_HEX.has(m[1].toLowerCase())) return true;
+  }
+  return false;
+}
+
+export function fillContext(line, idx, insideFill = false) {
   const span = enclosingSpan(line, idx);
-  if (SOLID_FILL.test(span)) return 'yes';
-  // A label directly INSIDE a filled box: `<div className="… bg-indigo-600 …">` on the line above and a
-  // span with no background of its own on this one. The same-element rule cannot see a parent, and
-  // this shape (an avatar badge, a count pill) is where the audit found white labels going dark.
-  if (!/(?<![\w-])(?:[a-z-]+:)*bg-/.test(span) && /className=/.test(prevLine) && SOLID_FILL.test(prevLine)) return 'yes';
+  if (SOLID_FILL.test(span) || hasHexBrandFill(span)) return 'yes';
+  // A label INSIDE a filled box — an element with no background of its own, nested (by indentation)
+  // under an opener whose className carries a solid fill. The same-element rule cannot see a parent,
+  // and this shape (an avatar badge, a status bar's labels) is where the audit found labels going dark.
+  if (insideFill && !/(?<![\w-])(?:[a-z-]+:)*bg-/.test(span)) return 'yes';
   const start = lineStart(line, idx);
   const bounded = line[start - 1] === '`' || line[start + span.length] === '`';
   if (!bounded) return 'no';
@@ -131,6 +144,11 @@ export function mapToken(base, { onSolidFill = false } = {}) {
   const withOpacity = (v) => (opacity === null ? v : `${v}/${opacity}`);
 
   if (prop === 'text' || prop === 'placeholder') {
+    // On a SOLID fill (a brand button, VS Code's status-bar blue) every grey label is white: the fill
+    // is fixed, the theme never changes it, and #8b949e on #007acc is 1.47:1 whichever theme is on.
+    if (onSolidFill && value !== 'white' && [TEXT_BODY, TEXT_MUTED, TEXT_FAINT, TEXT_BODY_FIX, TEXT_MUTED_FIX, TEXT_FAINT_FIX].some((set) => inSet(set, value))) {
+      return { token: `${prop}-on-accent`, kind: 'fix' };
+    }
     if (value === 'white') {
       if (onSolidFill) return { token: `${prop}-on-accent`, kind: opacity === null ? 'exact' : 'fix' };
       // The faded-label idiom. `text-white/40` is 1.9–2.2:1 on every theme; `text-faint` clears 4.5.
@@ -202,6 +220,29 @@ export function mapToken(base, { onSolidFill = false } = {}) {
   return null;
 }
 
+/**
+ * For each line, is it nested under an element whose className carries a SOLID fill? Formatted JSX
+ * nests by indentation, so an opener at indent k that is not closed on its own line owns every deeper
+ * line until the next line at indent ≤ k. Only the opener's OWN className span is judged (a fill in a
+ * ternary branch elsewhere on the line does not count), so this cannot over-reach.
+ */
+export function fillScopes(lines) {
+  const stack = [];
+  return lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed === '') return stack.length > 0;
+    const indent = line.length - line.trimStart().length;
+    while (stack.length && indent <= stack[stack.length - 1]) stack.pop();
+    const inside = stack.length > 0;
+    const at = line.indexOf('className=');
+    if (at >= 0 && !/<\/\w+>\s*$/.test(trimmed) && !/\/>\s*$/.test(trimmed)) {
+      const span = enclosingSpan(line, at + 'className="'.length);
+      if (SOLID_FILL.test(span) || hasHexBrandFill(span)) stack.push(indent);
+    }
+    return inside;
+  });
+}
+
 /** Rewrite one source. Returns the new text plus what changed and what was left, for the report. */
 export function migrate(src) {
   const changed = {}; const left = {}; let exact = 0; let fix = 0;
@@ -210,11 +251,20 @@ export function migrate(src) {
   // nobody can see. Normalise to the percent form the table understands.
   const normalised = src.replace(/(?<![\w-])((?:[a-z-]+:)*(?:bg|text|border|divide)-(?:white|black))\/\[(0?\.\d+)\]/g,
     (_, cls, frac) => `${cls}/${Math.max(1, Math.round(Number(frac) * 100))}`);
+  // Embedded source (a starter project, a copyable snippet) is somebody else's app: masked here so
+  // no literal inside it is ever rewritten, and the real lines are restored below from `lines`.
   const lines = normalised.split('\n');
+  const masked = maskEmbeddedSources(normalised).split('\n');
+  const insideFill = fillScopes(masked);
   const out = lines.map((line, i) => line.replace(LITERAL, (m, v1, v2, offset) => {
+    // Inside an embedded-source span the masked line holds spaces where the match is: leave it alone.
+    if (masked[i].slice(offset, offset + m.length) !== m) return m;
+    return rewrite(line, i, m, v1, v2, offset);
+  }));
+  function rewrite(line, i, m, v1, v2, offset) {
     const variant = v1 ?? v2 ?? '';
     const base = m.slice(variant.length);
-    const ctx = /(?:text|placeholder)-white/.test(base) ? fillContext(line, offset, lines[i - 1] ?? '') : 'no';
+    const ctx = /^(?:text|placeholder)-/.test(base) ? fillContext(line, offset, insideFill[i]) : 'no';
     if (ctx === 'mixed') { left[`${m} (mixed fills in one template — split by hand)`] = (left[`${m} (mixed fills in one template — split by hand)`] || 0) + 1; return m; }
     const r = mapToken(base, { onSolidFill: ctx === 'yes' });
     if (!r) { left[m] = (left[m] || 0) + 1; return m; }
@@ -223,8 +273,8 @@ export function migrate(src) {
     changed[label] = (changed[label] || 0) + 1;
     if (r.kind === 'exact') exact++; else fix++;
     return to;
-  })).join('\n');
-  return { out, changed, left, exact, fix };
+  }
+  return { out: out.join('\n'), changed, left, exact, fix };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

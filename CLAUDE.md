@@ -2733,6 +2733,20 @@ is now enforced at the source, by CI.**
   it also knows a gradient stop into the chrome (`to-[#161b22]` → `to-card`), a hex brand fill
   (`bg-[#24292e]`), and a label directly inside a filled box (the line above opens a solid-fill
   element) — each learned from a real miss in a real file, never from a guess.
+- **🔴 A TEMPLATE LITERAL THAT CONTAINS MARKUP IS SOMEBODY ELSE'S APP — never counted, never
+  rewritten (PR F, 2026-09-18).** `ComponentLibrary.tsx` holds 19 copyable HTML snippets and
+  `SyncedTemplates.ts` whole starter projects as backtick strings; PR D's codemod rewrote the snippets'
+  classes to our tokens (`bg-gray-900` → `bg-card`), which would have handed a user a component with no
+  background in THEIR plain-Tailwind app, and the census counted 219 starter-project literals as our UI.
+  Caught before it reached `main`. `maskEmbeddedSources` (`themeColourBaseline.mjs`) blanks every
+  template literal whose body carries `className=`, `class=` or an HTML tag — NavBharatAI's own UI never
+  puts JSX in a backtick string — and BOTH the census and the codemod read through that one function. A
+  class-list template (`` `px-2 ${x} text-white` ``) has no markup and is still migrated.
+- **A grey label under a solid fill becomes `text-on-accent`, wherever it sits (PR F).** The codemod
+  treats any non-chrome `bg-[#hex]` as a fixed brand fill (`hasHexBrandFill`) and tracks "inside a fill"
+  by indentation across lines (`fillScopes`), so "UTF-8" three lines under Code Studio's `#007acc` status
+  bar no longer lands on `text-muted` (1.47:1). When migrating by hand, the same rule: on `bg-indigo-600`
+  or a hex fill, text is `text-on-accent`, never `text-ink`/`text-muted`.
 - **Two more tokens exist since PR C:** `bg-well` (an inset panel inside a card — the old
   `bg-black/20–40` on dark; a 6% ink wash on light) and `bg-scrim` (the modal backdrop, deliberately
   the same dark on every theme because it dims what is behind it).

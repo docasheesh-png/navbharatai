@@ -418,18 +418,18 @@ Content-Type: application/json
             <div style={{ color: nodeConfig[node.type].color }}>{nodeConfig[node.type].icon}</div>
             <span className="text-sm font-semibold">{nodeConfig[node.type].label}</span>
           </div>
-          <button onClick={() => deleteNode(node.id)} className="text-red-400 hover:text-red-300 transition-colors" aria-label="Delete node">
+          <button onClick={() => deleteNode(node.id)} className="text-danger hover:text-danger transition-colors" aria-label="Delete node">
             <Trash2 size={16} />
           </button>
         </div>
 
-        <div className="text-[10px] text-gray-500 font-mono">ID: {node.id}</div>
+        <div className="text-[10px] text-faint font-mono">ID: {node.id}</div>
 
         {(node.type === 'message' || node.type === 'start' || node.type === 'end') && (
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-gray-400">Message Text</label>
+            <label className="text-xs text-muted">Message Text</label>
             <textarea
-              className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 resize-none focus:outline-none focus:border-white/30"
+              className="w-full rounded-lg p-2 text-sm text-body border border-line resize-none focus:outline-none focus:border-line"
               style={{ background: 'var(--surface-base)', minHeight: 80 }}
               value={node.data.text || ''}
               onChange={e => updateNodeData(node.id, { text: e.target.value })}
@@ -440,27 +440,27 @@ Content-Type: application/json
         {/* Tappable quick-reply buttons ON a message (admin 2026-07-23) — WhatsApp/Telegram style. */}
         {node.type === 'message' && (
           <div className="flex flex-col gap-2">
-            <label className="text-xs text-gray-400">Buttons <span className="text-gray-600">(optional — tappable quick replies)</span></label>
+            <label className="text-xs text-muted">Buttons <span className="text-faint">(optional — tappable quick replies)</span></label>
             {(node.data.options || []).map((opt, i) => (
               <div key={i} className="flex gap-1.5">
                 <input
-                  className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                  className="flex-1 rounded-lg p-2 text-sm text-body border border-line focus:outline-none focus:border-line"
                   style={{ background: 'var(--surface-base)' }}
                   value={opt}
                   placeholder={`Button ${i + 1}`}
                   onChange={e => { const opts = [...(node.data.options || [])]; opts[i] = e.target.value; updateNodeData(node.id, { options: opts }); }}
                 />
-                <button onClick={() => updateNodeData(node.id, { options: (node.data.options || []).filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-300 px-1" aria-label="Remove button"><X size={14} /></button>
+                <button onClick={() => updateNodeData(node.id, { options: (node.data.options || []).filter((_, j) => j !== i) })} className="text-danger hover:text-danger px-1" aria-label="Remove button"><X size={14} /></button>
               </div>
             ))}
             <button
               onClick={() => updateNodeData(node.id, { options: [...(node.data.options || []), 'New button'] })}
-              className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors self-start"
+              className="flex items-center gap-1 text-xs text-success hover:text-success transition-colors self-start"
             >
               <Plus size={12} /> Add button
             </button>
             {(node.data.options || []).length > 0 && (
-              <p className="text-[10px] text-gray-500 leading-snug">Now connect each button to its next node: tap this node → Connect 🔗 → tap the target. The buttons follow the connections in order.</p>
+              <p className="text-[10px] text-faint leading-snug">Now connect each button to its next node: tap this node → Connect 🔗 → tap the target. The buttons follow the connections in order.</p>
             )}
           </div>
         )}
@@ -468,19 +468,19 @@ Content-Type: application/json
         {node.type === 'menu' && (
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-gray-400">Prompt Text</label>
+              <label className="text-xs text-muted">Prompt Text</label>
               <input
-                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                className="w-full rounded-lg p-2 text-sm text-body border border-line focus:outline-none focus:border-line"
                 style={{ background: 'var(--surface-base)' }}
                 value={node.data.text || ''}
                 onChange={e => updateNodeData(node.id, { text: e.target.value })}
               />
             </div>
-            <label className="text-xs text-gray-400">Button Options</label>
+            <label className="text-xs text-muted">Button Options</label>
             {(node.data.options || []).map((opt, i) => (
               <div key={i} className="flex gap-1.5">
                 <input
-                  className="flex-1 rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                  className="flex-1 rounded-lg p-2 text-sm text-body border border-line focus:outline-none focus:border-line"
                   style={{ background: 'var(--surface-base)' }}
                   value={opt}
                   onChange={e => {
@@ -491,7 +491,7 @@ Content-Type: application/json
                 />
                 <button
                   onClick={() => updateNodeData(node.id, { options: (node.data.options || []).filter((_, j) => j !== i) })}
-                  className="text-red-400 hover:text-red-300 px-1"
+                  className="text-danger hover:text-danger px-1"
                   aria-label="Remove option"
                 >
                   <X size={14} />
@@ -500,7 +500,7 @@ Content-Type: application/json
             ))}
             <button
               onClick={() => updateNodeData(node.id, { options: [...(node.data.options || []), 'New Option'] })}
-              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              className="flex items-center gap-1 text-xs text-info hover:text-info transition-colors"
             >
               <Plus size={12} /> Add Option
             </button>
@@ -509,9 +509,9 @@ Content-Type: application/json
 
         {node.type === 'condition' && (
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-gray-400">Condition Expression</label>
+            <label className="text-xs text-muted">Condition Expression</label>
             <input
-              className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
+              className="w-full rounded-lg p-2 text-sm text-body border border-line font-mono focus:outline-none focus:border-line"
               style={{ background: 'var(--surface-base)' }}
               value={node.data.condition || ''}
               onChange={e => updateNodeData(node.id, { condition: e.target.value })}
@@ -523,18 +523,18 @@ Content-Type: application/json
         {node.type === 'api' && (
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-gray-400">API URL</label>
+              <label className="text-xs text-muted">API URL</label>
               <input
-                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
+                className="w-full rounded-lg p-2 text-sm text-body border border-line font-mono focus:outline-none focus:border-line"
                 style={{ background: 'var(--surface-base)' }}
                 value={node.data.apiUrl || ''}
                 onChange={e => updateNodeData(node.id, { apiUrl: e.target.value })}
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-gray-400">Method</label>
+              <label className="text-xs text-muted">Method</label>
               <select
-                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                className="w-full rounded-lg p-2 text-sm text-body border border-line focus:outline-none focus:border-line"
                 style={{ background: 'var(--surface-base)' }}
                 value={node.data.method || 'GET'}
                 onChange={e => updateNodeData(node.id, { method: e.target.value })}
@@ -543,9 +543,9 @@ Content-Type: application/json
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-gray-400">Response Variable</label>
+              <label className="text-xs text-muted">Response Variable</label>
               <input
-                className="w-full rounded-lg p-2 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-white/30"
+                className="w-full rounded-lg p-2 text-sm text-body border border-line font-mono focus:outline-none focus:border-line"
                 style={{ background: 'var(--surface-base)' }}
                 value={node.data.responseVar || ''}
                 onChange={e => updateNodeData(node.id, { responseVar: e.target.value })}
@@ -555,22 +555,22 @@ Content-Type: application/json
           </div>
         )}
 
-        <div className="flex gap-2 pt-2 border-t border-white/10">
+        <div className="flex gap-2 pt-2 border-t border-line">
           <div className="flex flex-col gap-1 flex-1">
-            <label className="text-[10px] text-gray-500">X</label>
+            <label className="text-[10px] text-faint">X</label>
             <input
               type="number"
-              className="w-full rounded p-1.5 text-sm text-gray-300 border border-white/10 focus:outline-none"
+              className="w-full rounded p-1.5 text-sm text-muted border border-line focus:outline-none"
               style={{ background: 'var(--surface-base)' }}
               value={Math.round(node.x)}
               onChange={e => setNodes(prev => prev.map(n => n.id === node.id ? { ...n, x: Number(e.target.value) } : n))}
             />
           </div>
           <div className="flex flex-col gap-1 flex-1">
-            <label className="text-[10px] text-gray-500">Y</label>
+            <label className="text-[10px] text-faint">Y</label>
             <input
               type="number"
-              className="w-full rounded p-1.5 text-sm text-gray-300 border border-white/10 focus:outline-none"
+              className="w-full rounded p-1.5 text-sm text-muted border border-line focus:outline-none"
               style={{ background: 'var(--surface-base)' }}
               value={Math.round(node.y)}
               onChange={e => setNodes(prev => prev.map(n => n.id === node.id ? { ...n, y: Number(e.target.value) } : n))}
@@ -584,33 +584,33 @@ Content-Type: application/json
   return (
     <div className="flex flex-col h-full w-full" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* ——— Toolbar (horizontally scrollable so every action stays reachable on a phone) ——— */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 flex-shrink-0 overflow-x-auto no-scrollbar" style={{ background: 'var(--surface-card)' }}>
-        <div className="flex rounded-lg overflow-hidden border border-white/10 flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line flex-shrink-0 overflow-x-auto no-scrollbar" style={{ background: 'var(--surface-card)' }}>
+        <div className="flex rounded-lg overflow-hidden border border-line flex-shrink-0">
           {(['whatsapp', 'telegram', 'both'] as Platform[]).map(p => (
             <button
               key={p}
               onClick={() => setPlatform(p)}
-              className={`px-3 py-1.5 text-xs capitalize transition-colors whitespace-nowrap ${platform === p ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              className={`px-3 py-1.5 text-xs capitalize transition-colors whitespace-nowrap ${platform === p ? 'bg-green-600 text-on-accent' : 'text-muted hover:text-ink'}`}
             >
               {p === 'both' ? 'Both' : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
         </div>
 
-        <span className="text-xs text-gray-400 border border-white/10 rounded px-2 py-1.5 flex-shrink-0 whitespace-nowrap">{nodes.length} nodes</span>
-        <button onClick={startSim} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors flex-shrink-0 whitespace-nowrap">
+        <span className="text-xs text-muted border border-line rounded px-2 py-1.5 flex-shrink-0 whitespace-nowrap">{nodes.length} nodes</span>
+        <button onClick={startSim} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-on-accent transition-colors flex-shrink-0 whitespace-nowrap">
           <Zap size={13} /> Simulate
         </button>
-        <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex-shrink-0 whitespace-nowrap">
+        <button onClick={() => { setShowConnect(true); setConnResult(null); setConnErr(''); }} disabled={nodes.length === 0} title="Publish this flow as a REAL Telegram / WhatsApp bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent transition-colors flex-shrink-0 whitespace-nowrap">
           <Rocket size={13} /> Go Live
         </button>
-        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-white/10 hover:bg-white/20 text-gray-100 transition-colors flex-shrink-0 whitespace-nowrap">
+        <button onClick={() => setHelpMode('open')} title="Get step-by-step help — NavBharatAI walks you through building & connecting your bot" className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-raised hover:bg-raised text-body transition-colors flex-shrink-0 whitespace-nowrap">
           <HelpCircle size={13} /> Help
         </button>
-        <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors flex-shrink-0 whitespace-nowrap">
+        <button onClick={exportJson} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-green-700 hover:bg-green-600 text-on-accent transition-colors flex-shrink-0 whitespace-nowrap">
           <Download size={13} /> Export JSON
         </button>
-        <button onClick={() => { setNodes([]); setEdges([]); setSelectedId(null); setConnectingFrom(null); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors flex-shrink-0 whitespace-nowrap">
+        <button onClick={() => { setNodes([]); setEdges([]); setSelectedId(null); setConnectingFrom(null); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-danger border border-red-500/30 hover:bg-red-500/10 transition-colors flex-shrink-0 whitespace-nowrap">
           <Trash2 size={13} /> Clear
         </button>
       </div>
@@ -698,7 +698,7 @@ Content-Type: application/json
                       <div className="flex-shrink-0" style={{ color: cfg.color }}>{cfg.icon}</div>
                       <span className="text-[11px] font-semibold truncate" style={{ color: cfg.color }}>{cfg.label}</span>
                     </div>
-                    <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                    <p className="text-[10px] text-muted truncate mt-0.5">
                       {node.data.text || node.data.apiUrl || node.data.condition || ''}
                     </p>
                   </div>
@@ -717,15 +717,15 @@ Content-Type: application/json
               const left = Math.max(4, selectedNode.x + NODE_WIDTH / 2 - TB_W / 2);
               return (
                 <div
-                  className="absolute z-20 flex items-center gap-0.5 p-1 rounded-xl border border-white/15 shadow-2xl"
+                  className="absolute z-20 flex items-center gap-0.5 p-1 rounded-xl border border-line shadow-2xl"
                   style={{ left, top, width: TB_W, background: '#1c2230' }}
                   onClick={e => e.stopPropagation()}
                   onPointerDown={e => e.stopPropagation()}
                 >
                   <button title="Edit" aria-label="Edit node" onClick={e => { e.stopPropagation(); openEditor(selectedNode.id); }}
-                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Pencil size={15} /></button>
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-body hover:bg-raised active:scale-90 transition-all"><Pencil size={15} /></button>
                   <button title="Connect" aria-label="Connect node" onClick={e => { e.stopPropagation(); setConnectingFrom(selectedNode.id); }}
-                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-emerald-400 hover:bg-white/10 active:scale-90 transition-all"><Link2 size={15} /></button>
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-success hover:bg-raised active:scale-90 transition-all"><Link2 size={15} /></button>
                   <button title="Move — drag to reposition" aria-label="Move node"
                     onPointerDown={e => {
                       e.stopPropagation();
@@ -734,11 +734,11 @@ Content-Type: application/json
                       const p = canvasPoint(e.clientX, e.clientY);
                       dragging.current = { id: node.id, ox: p.x - node.x, oy: p.y - node.y, pointerId: e.pointerId };
                     }}
-                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-sky-400 hover:bg-white/10 active:scale-90 transition-all cursor-grab" style={{ touchAction: 'none' }}><Move size={15} /></button>
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-info hover:bg-raised active:scale-90 transition-all cursor-grab" style={{ touchAction: 'none' }}><Move size={15} /></button>
                   <button title="Duplicate" aria-label="Duplicate node" onClick={e => { e.stopPropagation(); duplicateNode(selectedNode.id); }}
-                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-gray-100 hover:bg-white/10 active:scale-90 transition-all"><Copy size={15} /></button>
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-body hover:bg-raised active:scale-90 transition-all"><Copy size={15} /></button>
                   <button title="Delete" aria-label="Delete node" onClick={e => { e.stopPropagation(); deleteNode(selectedNode.id); }}
-                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-500/15 active:scale-90 transition-all"><Trash2 size={15} /></button>
+                    className="flex-1 h-9 rounded-lg flex items-center justify-center text-danger hover:bg-red-500/15 active:scale-90 transition-all"><Trash2 size={15} /></button>
                 </div>
               );
             })()}
@@ -746,7 +746,7 @@ Content-Type: application/json
 
           {/* Connecting banner */}
           {connectingFrom && (
-            <div className="sticky top-2 left-2 z-20 inline-flex items-center gap-2 mx-2 mt-2 px-3 py-1.5 rounded-full bg-emerald-600 text-white text-xs shadow-lg">
+            <div className="sticky top-2 left-2 z-20 inline-flex items-center gap-2 mx-2 mt-2 px-3 py-1.5 rounded-full bg-emerald-600 text-on-accent text-xs shadow-lg">
               <Link2 size={12} /> Tap a target node to connect
               <button onClick={() => setConnectingFrom(null)} className="ml-1 opacity-80 hover:opacity-100" aria-label="Cancel connect"><X size={12} /></button>
             </div>
@@ -754,14 +754,14 @@ Content-Type: application/json
         </div>
 
         {/* Desktop properties (hidden on mobile — the mobile sheet below takes over) */}
-        <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-white/10 flex-col overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
+        <div className="hidden md:flex w-[280px] flex-shrink-0 border-l border-line flex-col overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
           {editorOpen && selectedNode ? renderProperties(selectedNode) : (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
-              <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center">
-                <Bot size={22} className="text-gray-500" />
+              <div className="w-12 h-12 rounded-xl bg-raised flex items-center justify-center">
+                <Bot size={22} className="text-faint" />
               </div>
-              <p className="text-sm text-gray-400">{selectedNode ? 'Tap Edit ✏️ on the node toolbar to edit it here' : 'Select a node to edit its properties'}</p>
-              <p className="text-xs text-gray-600">Tap a node, or double-tap to edit</p>
+              <p className="text-sm text-muted">{selectedNode ? 'Tap Edit ✏️ on the node toolbar to edit it here' : 'Select a node to edit its properties'}</p>
+              <p className="text-xs text-faint">Tap a node, or double-tap to edit</p>
             </div>
           )}
         </div>
@@ -769,22 +769,22 @@ Content-Type: application/json
 
       {/* ——— Mobile properties sheet (opens only via the toolbar's Edit / a double-tap) ——— */}
       {editorOpen && selectedNode && (
-        <div className="md:hidden flex-shrink-0 border-t border-white/10 max-h-[42vh] supports-[height:100dvh]:max-h-[42dvh] overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
+        <div className="md:hidden flex-shrink-0 border-t border-line max-h-[42vh] supports-[height:100dvh]:max-h-[42dvh] overflow-y-auto" style={{ background: 'var(--surface-card)' }}>
           <div className="flex items-center justify-between px-4 pt-3">
-            <span className="text-xs text-gray-500 uppercase tracking-wider">Edit node</span>
-            <button onClick={() => setEditorOpen(false)} className="text-gray-500 hover:text-white" aria-label="Close editor"><X size={16} /></button>
+            <span className="text-xs text-faint uppercase tracking-wider">Edit node</span>
+            <button onClick={() => setEditorOpen(false)} className="text-faint hover:text-ink" aria-label="Close editor"><X size={16} /></button>
           </div>
           {renderProperties(selectedNode)}
         </div>
       )}
 
       {/* ——— Node palette FOOTER (moved from the old left sidebar; horizontal scroll) ——— */}
-      <div className="flex-shrink-0 border-t border-white/10 overflow-x-auto no-scrollbar flex items-stretch gap-2 px-3 py-2.5" style={{ background: 'var(--surface-card)' }}>
+      <div className="flex-shrink-0 border-t border-line overflow-x-auto no-scrollbar flex items-stretch gap-2 px-3 py-2.5" style={{ background: 'var(--surface-card)' }}>
         {(Object.entries(nodeConfig) as [NodeType, typeof nodeConfig[NodeType]][]).map(([type, cfg]) => (
           <button
             key={type}
             onClick={() => addNode(type)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 hover:border-white/25 active:scale-95 text-left transition-all flex-shrink-0"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-line hover:border-line active:scale-95 text-left transition-all flex-shrink-0"
             style={{ background: 'var(--surface-base)' }}
             title={`Add ${cfg.label} — ${cfg.desc}`}
           >
@@ -792,8 +792,8 @@ Content-Type: application/json
               {cfg.icon}
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-200 whitespace-nowrap">{cfg.label}</div>
-              <div className="text-[10px] text-gray-500 whitespace-nowrap">{cfg.desc}</div>
+              <div className="text-xs font-semibold text-body whitespace-nowrap">{cfg.label}</div>
+              <div className="text-[10px] text-faint whitespace-nowrap">{cfg.desc}</div>
             </div>
           </button>
         ))}
@@ -801,84 +801,84 @@ Content-Type: application/json
 
       {/* ——— GO LIVE — real Telegram / WhatsApp connect ——— */}
       {showConnect && (
-        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="nb-sheet rounded-xl border border-white/10 p-6 w-full max-w-[480px] overflow-y-auto flex flex-col gap-4" style={{ background: 'var(--surface-card)' }}>
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm">
+          <div className="nb-sheet rounded-xl border border-line p-6 w-full max-w-[480px] overflow-y-auto flex flex-col gap-4" style={{ background: 'var(--surface-card)' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Rocket size={16} className="text-emerald-400" />
+                <Rocket size={16} className="text-success" />
                 <h2 className="text-sm font-semibold">Go Live — publish your bot</h2>
               </div>
-              <button onClick={() => setShowConnect(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
+              <button onClick={() => setShowConnect(false)} className="text-faint hover:text-ink"><X size={16} /></button>
             </div>
 
             {/* Platform toggle */}
-            <div className="flex rounded-lg overflow-hidden border border-white/10 self-start">
+            <div className="flex rounded-lg overflow-hidden border border-line self-start">
               {(['telegram', 'whatsapp'] as const).map(p => (
                 <button key={p} onClick={() => { setConnPlatform(p); setConnResult(null); setConnErr(''); }}
-                  className={`px-4 py-1.5 text-xs capitalize transition-colors ${connPlatform === p ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>{p}</button>
+                  className={`px-4 py-1.5 text-xs capitalize transition-colors ${connPlatform === p ? 'bg-emerald-600 text-on-accent' : 'text-muted hover:text-ink'}`}>{p}</button>
               ))}
             </div>
 
             {connResult ? (
               connResult.platform === 'telegram' ? (
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Your bot is LIVE on Telegram!</div>
-                  <p className="text-xs text-gray-400">Anyone can now message {connResult.username ? `@${connResult.username}` : 'your bot'} and it will run your exact flow.</p>
+                  <div className="flex items-center gap-2 text-success text-sm font-semibold"><Check size={16} /> Your bot is LIVE on Telegram!</div>
+                  <p className="text-xs text-muted">Anyone can now message {connResult.username ? `@${connResult.username}` : 'your bot'} and it will run your exact flow.</p>
                   {connResult.link && (
-                    <a href={connResult.link} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 text-white transition-colors">
+                    <a href={connResult.link} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 text-on-accent transition-colors">
                       <ExternalLink size={14} /> Open your bot in Telegram
                     </a>
                   )}
-                  <p className="text-[11px] text-gray-500">Edit the flow anytime and hit Go Live again to update the live bot.</p>
+                  <p className="text-[11px] text-faint">Edit the flow anytime and hit Go Live again to update the live bot.</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-semibold"><Check size={16} /> Almost done — finish in Meta</div>
-                  <p className="text-xs text-gray-400">In your Meta app → WhatsApp → Configuration → Edit the webhook, paste these two values, then click Verify and Save:</p>
+                  <div className="flex items-center gap-2 text-success text-sm font-semibold"><Check size={16} /> Almost done — finish in Meta</div>
+                  <p className="text-xs text-muted">In your Meta app → WhatsApp → Configuration → Edit the webhook, paste these two values, then click Verify and Save:</p>
                   {[{ label: 'Callback URL', value: connResult.callbackUrl || '' }, { label: 'Verify token', value: connResult.verifyToken || '' }].map(({ label, value }) => (
                     <div key={label} className="flex flex-col gap-1">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</span>
+                      <span className="text-[10px] text-faint uppercase tracking-wider">{label}</span>
                       <div className="flex gap-1.5">
-                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-gray-200 border border-white/10 font-mono" style={{ background: 'var(--surface-base)' }} />
-                        <button onClick={() => copyField(label, value)} className="px-2 rounded-lg border border-white/10 text-gray-400 hover:text-white">{copiedField === label ? <Check size={12} /> : <Copy size={12} />}</button>
+                        <input readOnly value={value} className="flex-1 rounded-lg p-2 text-xs text-body border border-line font-mono" style={{ background: 'var(--surface-base)' }} />
+                        <button onClick={() => copyField(label, value)} className="px-2 rounded-lg border border-line text-muted hover:text-ink">{copiedField === label ? <Check size={12} /> : <Copy size={12} />}</button>
                       </div>
                     </div>
                   ))}
-                  <p className="text-[11px] text-gray-500">Then subscribe to the <span className="text-gray-300">messages</span> field. After that, message your WhatsApp business number and the bot runs your flow.</p>
+                  <p className="text-[11px] text-faint">Then subscribe to the <span className="text-muted">messages</span> field. After that, message your WhatsApp business number and the bot runs your flow.</p>
                 </div>
               )
             ) : connPlatform === 'telegram' ? (
               <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1.5 text-xs text-gray-400">
+                <div className="flex flex-col gap-1.5 text-xs text-muted">
                   {['Tap "Open @BotFather" below and send /newbot', 'Choose a name + username for your bot', 'Copy the token BotFather gives you (looks like 123456789:ABC-def…)', 'Paste it below and tap Connect'].map((s, i) => (
-                    <div key={i} className="flex items-start gap-2"><span className="text-emerald-400 font-bold">{i + 1}.</span> {s}</div>
+                    <div key={i} className="flex items-start gap-2"><span className="text-success font-bold">{i + 1}.</span> {s}</div>
                   ))}
                 </div>
-                <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-on-accent transition-colors">
                   <ExternalLink size={13} /> Open @BotFather to get your token
                 </a>
-                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
-                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
-                <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                <input value={tgToken} onChange={e => setTgToken(e.target.value)} placeholder="Paste your Telegram bot token here" className="w-full rounded-lg p-2.5 text-sm text-body border border-line font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
+                {connErr && <p className="text-xs text-danger">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !tgToken.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect &amp; Go Live</>}
                 </button>
-                <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1 self-center"><HelpCircle size={11} /> Stuck? Ask NavBharatAI to guide you step-by-step</button>
+                <button onClick={() => setHelpMode('open')} className="text-[11px] text-accent-text hover:text-accent-text flex items-center gap-1 self-center"><HelpCircle size={11} /> Stuck? Ask NavBharatAI to guide you step-by-step</button>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                <p className="text-xs text-gray-400">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-gray-200">permanent access token</span> and <span className="text-gray-200">Phone Number ID</span> from the Meta dashboard, then paste them here:</p>
-                <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-white transition-colors">
+                <p className="text-xs text-muted">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-body">permanent access token</span> and <span className="text-body">Phone Number ID</span> from the Meta dashboard, then paste them here:</p>
+                <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-on-accent transition-colors">
                   <ExternalLink size={13} /> Open Meta App Dashboard (WhatsApp → API Setup)
                 </a>
-                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
-                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-gray-200 border border-white/10 font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
-                {connErr && <p className="text-xs text-red-400">{connErr}</p>}
-                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white transition-colors flex items-center justify-center gap-2">
+                <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-body border border-line font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
+                <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-body border border-line font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
+                {connErr && <p className="text-xs text-danger">{connErr}</p>}
+                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
                 </button>
                 <div className="flex items-center justify-between">
-                  <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">Setup guide <ExternalLink size={10} /></a>
-                  <button onClick={() => setHelpMode('open')} className="text-[11px] text-indigo-300 hover:text-indigo-200 flex items-center gap-1"><HelpCircle size={11} /> Ask NavBharatAI to help</button>
+                  <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noreferrer" className="text-[11px] text-faint hover:text-muted flex items-center gap-1">Setup guide <ExternalLink size={10} /></a>
+                  <button onClick={() => setHelpMode('open')} className="text-[11px] text-accent-text hover:text-accent-text flex items-center gap-1"><HelpCircle size={11} /> Ask NavBharatAI to help</button>
                 </div>
               </div>
             )}
@@ -888,56 +888,56 @@ Content-Type: application/json
 
       {/* ——— Simulator Modal ——— */}
       {showSimulator && (
-        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="nb-sheet rounded-xl border border-white/10 flex flex-col w-full max-w-[380px]" style={{ background: 'var(--surface-card)' }}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+        <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm">
+          <div className="nb-sheet rounded-xl border border-line flex flex-col w-full max-w-[380px]" style={{ background: 'var(--surface-card)' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-line">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                 <span className="text-sm font-semibold">Bot Simulator</span>
-                <span className="text-xs text-gray-500 capitalize">({platform})</span>
+                <span className="text-xs text-faint capitalize">({platform})</span>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={startSim} className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                <button onClick={startSim} className="flex items-center gap-1 text-xs text-info hover:text-info transition-colors">
                   <RotateCcw size={12} /> Restart
                 </button>
-                <button onClick={() => setShowSimulator(false)} className="text-gray-500 hover:text-white"><X size={16} /></button>
+                <button onClick={() => setShowSimulator(false)} className="text-faint hover:text-ink"><X size={16} /></button>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2 min-h-0">
               {simMessages.length === 0 && (
-                <div className="text-center text-xs text-gray-600 py-8">Starting simulation...</div>
+                <div className="text-center text-xs text-faint py-8">Starting simulation...</div>
               )}
               {simMessages.map((msg, i) => (
                 <div key={i} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   {msg.role === 'bot' && (
                     <div className="w-6 h-6 rounded-full bg-green-600/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Bot size={12} className="text-green-400" />
+                      <Bot size={12} className="text-success" />
                     </div>
                   )}
                   <div
-                    className={`max-w-[75%] rounded-xl px-3 py-2 text-xs leading-relaxed ${msg.role === 'user' ? 'text-white rounded-br-sm' : 'text-gray-200 rounded-bl-sm'}`}
+                    className={`max-w-[75%] rounded-xl px-3 py-2 text-xs leading-relaxed ${msg.role === 'user' ? 'text-ink rounded-br-sm' : 'text-body rounded-bl-sm'}`}
                     style={{ background: msg.role === 'user' ? '#1d4ed8' : 'var(--surface-base)' }}
                   >
                     {msg.text}
                   </div>
                   {msg.role === 'user' && (
                     <div className="w-6 h-6 rounded-full bg-blue-600/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <User size={12} className="text-blue-400" />
+                      <User size={12} className="text-info" />
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            <div className="border-t border-white/10 p-3 flex flex-col gap-2">
+            <div className="border-t border-line p-3 flex flex-col gap-2">
               {simOptions.length > 0 ? (
                 <div className="flex flex-col gap-1.5">
                   {simOptions.map((opt, i) => (
                     <button
                       key={i}
                       onClick={() => opt.nextId ? simChoose(opt.nextId, opt.label) : undefined}
-                      className="w-full py-2 px-3 rounded-lg border border-green-500/40 text-xs text-green-300 hover:bg-green-500/10 transition-colors text-left"
+                      className="w-full py-2 px-3 rounded-lg border border-green-500/40 text-xs text-success hover:bg-green-500/10 transition-colors text-left"
                       style={{ background: 'var(--surface-base)' }}
                     >
                       {opt.label}
@@ -945,12 +945,12 @@ Content-Type: application/json
                   ))}
                 </div>
               ) : simCurrentId === null ? (
-                <div className="text-center text-xs text-gray-500 py-1">Conversation ended</div>
+                <div className="text-center text-xs text-faint py-1">Conversation ended</div>
               ) : (
                 <div className="flex gap-2">
                   <input
                     ref={simInputRef}
-                    className="flex-1 rounded-lg px-3 py-2 text-sm text-gray-200 border border-white/10 focus:outline-none focus:border-white/30"
+                    className="flex-1 rounded-lg px-3 py-2 text-sm text-body border border-line focus:outline-none focus:border-line"
                     style={{ background: 'var(--surface-base)' }}
                     placeholder="Type a message..."
                     onKeyDown={e => { if (e.key === 'Enter') sendSimMessage(); }}
@@ -958,7 +958,7 @@ Content-Type: application/json
                   <button
                     onClick={sendSimMessage}
                     aria-label="Send message"
-                    className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white transition-colors"
+                    className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-on-accent transition-colors"
                   >
                     <Send size={12} />
                   </button>

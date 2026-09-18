@@ -29,7 +29,7 @@ import { parseCsv, rowsToObjects } from '../../lib/csv';
 interface DBRow { [key: string]: unknown; }
 
 /** Small local glyph for the import/export notice — avoids widening the icon import for one use. */
-const FileSpreadsheetIcon = () => <Table className="w-4 h-4 text-white/30 shrink-0 mt-0.5" />;
+const FileSpreadsheetIcon = () => <Table className="w-4 h-4 text-faint shrink-0 mt-0.5" />;
 
 /** Shown only when no database is connected — and always labelled as a sample. */
 const SAMPLE_TABLES: Record<string, DBRow[]> = {
@@ -409,14 +409,14 @@ export function DatabaseStudio() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-cyan-600/20 rounded-xl flex items-center justify-center">
-          <Database className="w-5 h-5 text-cyan-400" />
+          <Database className="w-5 h-5 text-info" />
         </div>
         <div className="min-w-0">
-          <h2 className="font-semibold text-white text-base">Database Studio</h2>
+          <h2 className="font-semibold text-ink text-base">Database Studio</h2>
           <Breadcrumb
             className="mt-0.5"
             items={[
@@ -426,13 +426,13 @@ export function DatabaseStudio() {
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <div className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg border ${live ? 'border-cyan-500/40 text-cyan-300 bg-cyan-500/10' : 'border-amber-500/40 text-amber-300 bg-amber-500/10'}`}>
+          <div className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg border ${live ? 'border-cyan-500/40 text-info bg-cyan-500/10' : 'border-amber-500/40 text-warn bg-amber-500/10'}`}>
             <div className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-cyan-400' : 'bg-amber-400'} animate-pulse`} />
             {state.label}
           </div>
           <div className="flex items-center gap-1.5">
             {(['table', 'json', 'schema', 'sql'] as const).map((v) => (
-              <button key={v} onClick={() => setView(v)} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-all capitalize ${view === v ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-white/40'}`}>{v === 'sql' ? 'SQL' : v}</button>
+              <button key={v} onClick={() => setView(v)} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-all capitalize ${view === v ? 'border-cyan-500/40 bg-cyan-500/10 text-info' : 'border-line bg-raised text-faint'}`}>{v === 'sql' ? 'SQL' : v}</button>
             ))}
           </div>
         </div>
@@ -440,46 +440,46 @@ export function DatabaseStudio() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: tables */}
-        <div className="w-48 flex flex-col border-r border-white/5 bg-[#161b22]">
-          <div className="p-3 border-b border-white/5">
-            <p className="text-[10px] text-white/30 uppercase tracking-wider">Tables</p>
+        <div className="w-48 flex flex-col border-r border-line bg-card">
+          <div className="p-3 border-b border-line">
+            <p className="text-[10px] text-faint uppercase tracking-wider">Tables</p>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {booting ? (
-              <div className="flex items-center gap-2 px-2 py-3 text-[10px] text-white/30">
+              <div className="flex items-center gap-2 px-2 py-3 text-[10px] text-faint">
                 <TirangaLoader className="w-3.5 h-3.5" /> Checking your database…
               </div>
             ) : tables.length === 0 ? (
-              <p className="px-2 py-3 text-[10px] text-white/30 leading-relaxed">
+              <p className="px-2 py-3 text-[10px] text-faint leading-relaxed">
                 No tables yet. They appear here as soon as your app creates them.
               </p>
             ) : tables.map((t) => (
               <button
                 key={t.name}
                 onClick={() => setSelected(t.name)}
-                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-left transition-all ${selected === t.name ? 'bg-cyan-500/10 border border-cyan-500/30 text-cyan-300' : 'text-white/50 hover:bg-white/5 border border-transparent'}`}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-left transition-all ${selected === t.name ? 'bg-cyan-500/10 border border-cyan-500/30 text-info' : 'text-muted hover:bg-raised border border-transparent'}`}
               >
                 <Table className="w-3 h-3 shrink-0" />
                 <span className="truncate">{t.name}</span>
                 {/* "~" because this is the planner's estimate, not an exact count — see listTablesSql. */}
-                <span className="ml-auto text-[9px] text-white/20">{t.rowEstimate > 0 ? `~${t.rowEstimate}` : ''}</span>
+                <span className="ml-auto text-[9px] text-faint">{t.rowEstimate > 0 ? `~${t.rowEstimate}` : ''}</span>
               </button>
             ))}
           </div>
-          <div className="p-2 border-t border-white/5 space-y-1.5">
-            <button onClick={() => void loadRows(selected, offset)} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all">
+          <div className="p-2 border-t border-line space-y-1.5">
+            <button onClick={() => void loadRows(selected, offset)} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all">
               <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
             </button>
-            <button onClick={exportJson} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all">
+            <button onClick={exportJson} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all">
               <Download className="w-3 h-3" /> Export page (JSON)
             </button>
             {live && (
               <>
-                <button onClick={() => void exportCsv()} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all">
+                <button onClick={() => void exportCsv()} className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all">
                   <Download className="w-3 h-3" /> Export table (CSV)
                 </button>
                 {editable && (
-                  <label className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-[10px] text-white/40 transition-all cursor-pointer">
+                  <label className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-raised hover:bg-raised rounded-lg text-[10px] text-faint transition-all cursor-pointer">
                     <Upload className="w-3 h-3" /> Import CSV
                     <input
                       type="file"
@@ -496,22 +496,22 @@ export function DatabaseStudio() {
 
         {/* Main */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#161b22]">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-card">
             <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-faint" />
               <input
-                className="w-full bg-[#0d1117] border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-xs text-white placeholder-white/20 focus:outline-none focus:border-cyan-500/50"
+                className="w-full bg-surface border border-line rounded-lg pl-7 pr-3 py-1.5 text-xs text-ink placeholder-faint focus:outline-none focus:border-cyan-500/50"
                 placeholder="Search this page…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <span className="text-xs text-white/30">{pageSummary({ offset, shown: visibleRows.length, rowEstimate })}</span>
+            <span className="text-xs text-faint">{pageSummary({ offset, shown: visibleRows.length, rowEstimate })}</span>
             <div className="ml-auto flex items-center gap-1">
               {editable && (
                 <button
                   onClick={() => { setWriteError(''); setAdding(`{\n  "field": "value"\n}`); }}
-                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 mr-1 bg-cyan-600/20 border border-cyan-500/30 rounded-lg text-cyan-300 hover:bg-cyan-600/30 transition-all"
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 mr-1 bg-cyan-600/20 border border-cyan-500/30 rounded-lg text-info hover:bg-cyan-600/30 transition-all"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add row
                 </button>
@@ -519,18 +519,18 @@ export function DatabaseStudio() {
               <button
                 onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
                 disabled={offset === 0 || loading}
-                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="p-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                 title="Previous page"
               >
-                <ChevronLeft className="w-3.5 h-3.5 text-white/50" />
+                <ChevronLeft className="w-3.5 h-3.5 text-muted" />
               </button>
               <button
                 onClick={() => setOffset((o) => o + PAGE_SIZE)}
                 disabled={!hasMore || loading}
-                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                className="p-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                 title="Next page"
               >
-                <ChevronRight className="w-3.5 h-3.5 text-white/50" />
+                <ChevronRight className="w-3.5 h-3.5 text-muted" />
               </button>
             </div>
           </div>
@@ -538,17 +538,17 @@ export function DatabaseStudio() {
           {/* Honest state — sample rows say outright that they are not the user's data. */}
           {state.hint && (
             <div className="mx-3 mt-2 flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-200/90 leading-relaxed">{state.hint}</p>
+              <AlertCircle className="w-4 h-4 text-warn shrink-0 mt-0.5" />
+              <p className="text-xs text-warn leading-relaxed">{state.hint}</p>
             </div>
           )}
 
           {/* No primary key = no safe way to name one row. Say that, rather than offering a broken Save. */}
           {live && selected && primaryKey.length === 0 && (
-            <div className="mx-3 mt-2 flex items-start gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
-              <Lock className="w-4 h-4 text-white/40 shrink-0 mt-0.5" />
-              <p className="text-xs text-white/50 leading-relaxed">
-                <span className="text-white/70">Read-only.</span> "{selected}" has no primary key, so NavBharatAI
+            <div className="mx-3 mt-2 flex items-start gap-2 bg-raised border border-line rounded-xl px-3 py-2">
+              <Lock className="w-4 h-4 text-faint shrink-0 mt-0.5" />
+              <p className="text-xs text-muted leading-relaxed">
+                <span className="text-body">Read-only.</span> "{selected}" has no primary key, so NavBharatAI
                 cannot tell one row from another and will not risk changing the wrong one. Add a primary key to this
                 table to edit it here.
               </p>
@@ -557,49 +557,49 @@ export function DatabaseStudio() {
 
           {(error || writeError) && (
             <div className="mx-3 mt-2 flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-              <p className="text-xs text-red-300">{error || writeError}</p>
+              <AlertCircle className="w-4 h-4 text-danger shrink-0" />
+              <p className="text-xs text-danger">{error || writeError}</p>
             </div>
           )}
 
           {/* CSV import preview — what was understood, before anything reaches their database. */}
           {importPreview && (
-            <div className="mx-3 mt-2 bg-[#161b22] border border-cyan-500/20 rounded-xl p-3">
-              <p className="text-xs text-white/70 mb-1">
+            <div className="mx-3 mt-2 bg-card border border-cyan-500/20 rounded-xl p-3">
+              <p className="text-xs text-body mb-1">
                 Import {importPreview.rows.length} row{importPreview.rows.length === 1 ? '' : 's'} into "{selected}"
               </p>
-              <p className="text-[10px] text-white/40 mb-2">
+              <p className="text-[10px] text-faint mb-2">
                 Columns in the file: {importPreview.headers.join(', ')}
                 {/* Said up front, because a padded row is a row that will import with fields empty. */}
                 {importPreview.adjusted > 0 && (
-                  <span className="text-amber-300/80"> · {importPreview.adjusted} row{importPreview.adjusted === 1 ? ' has' : 's have'} a different number of columns and will be padded</span>
+                  <span className="text-warn"> · {importPreview.adjusted} row{importPreview.adjusted === 1 ? ' has' : 's have'} a different number of columns and will be padded</span>
                 )}
               </p>
-              <p className="text-[10px] text-white/30 mb-2">
+              <p className="text-[10px] text-faint mb-2">
                 Columns your table does not have are skipped, and NavBharatAI will name them afterwards.
               </p>
               <div className="flex gap-2">
                 <button onClick={() => void runImport()} disabled={importing} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all">
                   {importing ? <TirangaLoader className="w-3 h-3" /> : <Upload className="w-3 h-3" />} Import
                 </button>
-                <button onClick={() => { setImportPreview(null); setImportNote(''); }} className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/40">Cancel</button>
+                <button onClick={() => { setImportPreview(null); setImportNote(''); }} className="px-3 py-1.5 bg-raised rounded-lg text-xs text-faint">Cancel</button>
               </div>
             </div>
           )}
 
           {importNote && (
-            <div className="mx-3 mt-2 flex items-start gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+            <div className="mx-3 mt-2 flex items-start gap-2 bg-raised border border-line rounded-xl px-3 py-2">
               <FileSpreadsheetIcon />
-              <p className="text-xs text-white/60 leading-relaxed">{importNote}</p>
+              <p className="text-xs text-muted leading-relaxed">{importNote}</p>
             </div>
           )}
 
           {/* Add row */}
           {adding !== null && (
-            <div className="mx-3 mt-2 bg-[#161b22] border border-cyan-500/20 rounded-xl p-3">
-              <p className="text-xs text-white/50 mb-2">New row in "{selected}" (JSON)</p>
+            <div className="mx-3 mt-2 bg-card border border-cyan-500/20 rounded-xl p-3">
+              <p className="text-xs text-muted mb-2">New row in "{selected}" (JSON)</p>
               <textarea
-                className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-2 text-xs font-mono text-white/70 resize-none focus:outline-none mb-2"
+                className="w-full bg-surface border border-line rounded-lg p-2 text-xs font-mono text-body resize-none focus:outline-none mb-2"
                 rows={5}
                 value={adding}
                 onChange={(e) => setAdding(e.target.value)}
@@ -609,7 +609,7 @@ export function DatabaseStudio() {
                 <button onClick={() => void addRow()} disabled={saving} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-lg text-xs flex items-center gap-1 transition-all">
                   {saving ? <TirangaLoader className="w-3 h-3" /> : <Check className="w-3 h-3" />} Add
                 </button>
-                <button onClick={() => { setAdding(null); setWriteError(''); }} className="px-3 py-1.5 bg-white/5 rounded-lg text-xs text-white/40">Cancel</button>
+                <button onClick={() => { setAdding(null); setWriteError(''); }} className="px-3 py-1.5 bg-raised rounded-lg text-xs text-faint">Cancel</button>
               </div>
             </div>
           )}
@@ -619,49 +619,49 @@ export function DatabaseStudio() {
               {loading ? (
                 <div className="flex items-center justify-center h-40 gap-2">
                   <TirangaLoader className="w-5 h-5" />
-                  <p className="text-sm text-white/40">Loading…</p>
+                  <p className="text-sm text-faint">Loading…</p>
                 </div>
               ) : visibleRows.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 gap-2">
-                  <Database className="w-10 h-10 text-white/10" />
-                  <p className="text-sm text-white/30">
+                  <Database className="w-10 h-10 text-faint" />
+                  <p className="text-sm text-faint">
                     {searchQuery ? 'Nothing on this page matches your search' : 'This table has no rows yet'}
                   </p>
                 </div>
               ) : (
                 <table className="w-full text-xs border-collapse min-w-max">
-                  <thead className="sticky top-0 bg-[#161b22] z-10">
-                    <tr className="border-b border-white/5">
+                  <thead className="sticky top-0 bg-card z-10">
+                    <tr className="border-b border-line">
                       {headerKeys.map((key) => (
                         <th
                           key={key}
-                          className="text-left px-3 py-2.5 font-normal text-white/40 whitespace-nowrap cursor-pointer hover:text-white/70 select-none"
+                          className="text-left px-3 py-2.5 font-normal text-faint whitespace-nowrap cursor-pointer hover:text-body select-none"
                           onClick={() => live && handleSort(key)}
                         >
                           <div className="flex items-center gap-1">
                             <span>{key}</span>
                             {sortField === key
-                              ? <span className="text-cyan-400">{sortDesc ? '↓' : '↑'}</span>
-                              : <ArrowUpDown className="w-2.5 h-2.5 text-white/20" />}
+                              ? <span className="text-info">{sortDesc ? '↓' : '↑'}</span>
+                              : <ArrowUpDown className="w-2.5 h-2.5 text-faint" />}
                           </div>
                         </th>
                       ))}
-                      {editable && <th className="w-16 px-2 py-2.5 text-white/30 text-right font-normal">Actions</th>}
+                      {editable && <th className="w-16 px-2 py-2.5 text-faint text-right font-normal">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {visibleRows.map((row, ri) => (
-                      <tr key={ri} className="border-b border-white/3 hover:bg-white/2 transition-colors group">
+                      <tr key={ri} className="border-b border-line hover:bg-raised transition-colors group">
                         {headerKeys.map((key) => {
                           const val = renderCell(row[key]);
                           return (
                             <td key={key} className="px-3 py-2 max-w-xs">
                               <div className="flex items-center gap-1 group/cell">
-                                <span className={`truncate ${row[key] === null || row[key] === undefined ? 'text-white/15 italic' : 'text-white/60'}`} title={val}>
+                                <span className={`truncate ${row[key] === null || row[key] === undefined ? 'text-faint italic' : 'text-muted'}`} title={val}>
                                   {val.length > 28 ? `${val.slice(0, 28)}…` : val}
                                 </span>
                                 <button onClick={() => copyCell(val)} className="opacity-0 group-hover/cell:opacity-100 shrink-0 transition-opacity">
-                                  {copied === val ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5 text-white/20 hover:text-white/50" />}
+                                  {copied === val ? <Check className="w-2.5 h-2.5 text-success" /> : <Copy className="w-2.5 h-2.5 text-faint hover:text-muted" />}
                                 </button>
                               </div>
                             </td>
@@ -672,14 +672,14 @@ export function DatabaseStudio() {
                             <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => { setWriteError(''); setEditing({ row, json: JSON.stringify(row, null, 2) }); }}
-                                className="p-1 text-white/30 hover:text-cyan-400 transition-colors"
+                                className="p-1 text-faint hover:text-info transition-colors"
                                 title="Edit this row"
                               >
                                 <Edit2 className="w-3 h-3" />
                               </button>
                               <button
                                 onClick={() => void deleteRow(row)}
-                                className="p-1 text-white/30 hover:text-red-400 transition-colors"
+                                className="p-1 text-faint hover:text-danger transition-colors"
                                 title="Delete this row"
                               >
                                 <Trash2 className="w-3 h-3" />
@@ -697,20 +697,20 @@ export function DatabaseStudio() {
 
           {view === 'json' && (
             <div className="flex-1 overflow-auto p-4">
-              <pre className="text-[10px] font-mono text-emerald-300 whitespace-pre-wrap">{JSON.stringify(visibleRows, null, 2)}</pre>
+              <pre className="text-[10px] font-mono text-success whitespace-pre-wrap">{JSON.stringify(visibleRows, null, 2)}</pre>
             </div>
           )}
 
           {view === 'schema' && (
             <div className="flex-1 overflow-auto p-4">
               {!live ? (
-                <p className="text-xs text-white/30">Connect a database to see its schema.</p>
+                <p className="text-xs text-faint">Connect a database to see its schema.</p>
               ) : !schema ? (
-                <div className="flex items-center gap-2 text-xs text-white/30"><TirangaLoader className="w-4 h-4" /> Reading schema…</div>
+                <div className="flex items-center gap-2 text-xs text-faint"><TirangaLoader className="w-4 h-4" /> Reading schema…</div>
               ) : (
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-white/40 border-b border-white/5">
+                    <tr className="text-faint border-b border-line">
                       <th className="text-left px-3 py-2 font-normal">Column</th>
                       <th className="text-left px-3 py-2 font-normal">Type</th>
                       <th className="text-left px-3 py-2 font-normal">Nullable</th>
@@ -719,14 +719,14 @@ export function DatabaseStudio() {
                   </thead>
                   <tbody>
                     {schema.map((c) => (
-                      <tr key={c.name} className="border-b border-white/3">
-                        <td className="px-3 py-2 text-white/70 flex items-center gap-1.5">
-                          <Columns className="w-3 h-3 text-white/20" />{c.name}
-                          {primaryKey.includes(c.name) && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-cyan-300">PK</span>}
+                      <tr key={c.name} className="border-b border-line">
+                        <td className="px-3 py-2 text-body flex items-center gap-1.5">
+                          <Columns className="w-3 h-3 text-faint" />{c.name}
+                          {primaryKey.includes(c.name) && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-info">PK</span>}
                         </td>
-                        <td className="px-3 py-2 text-cyan-300/70">{c.type}</td>
-                        <td className="px-3 py-2 text-white/40">{c.nullable ? 'yes' : 'no'}</td>
-                        <td className="px-3 py-2 text-white/30">{c.default ?? '—'}</td>
+                        <td className="px-3 py-2 text-info">{c.type}</td>
+                        <td className="px-3 py-2 text-faint">{c.nullable ? 'yes' : 'no'}</td>
+                        <td className="px-3 py-2 text-faint">{c.default ?? '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -737,15 +737,15 @@ export function DatabaseStudio() {
                   person browsing a row is actually asking. */}
               {relations && relations.foreignKeys.length > 0 && (
                 <div className="mt-6">
-                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Relations</p>
+                  <p className="text-[10px] text-faint uppercase tracking-wider mb-2">Relations</p>
                   {relations.foreignKeys.map((fk) => (
-                    <div key={`${fk.name}-${fk.column}`} className="flex items-center gap-2 py-1.5 text-xs border-b border-white/3">
-                      <Link2 className="w-3 h-3 text-white/20 shrink-0" />
-                      <span className="text-white/70">{fk.column}</span>
-                      <span className="text-white/25">→</span>
+                    <div key={`${fk.name}-${fk.column}`} className="flex items-center gap-2 py-1.5 text-xs border-b border-line">
+                      <Link2 className="w-3 h-3 text-faint shrink-0" />
+                      <span className="text-body">{fk.column}</span>
+                      <span className="text-faint">→</span>
                       <button
                         onClick={() => { setSelected(fk.referencesTable); setView('table'); }}
-                        className="text-cyan-300/80 hover:text-cyan-200 hover:underline"
+                        className="text-info hover:text-info hover:underline"
                         title={`Open ${fk.referencesTable}`}
                       >
                         {fk.referencesTable}.{fk.referencesColumn}
@@ -759,16 +759,16 @@ export function DatabaseStudio() {
                   column the app filters by has none. */}
               {relations && relations.indexes.length > 0 && (
                 <div className="mt-6">
-                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Indexes</p>
+                  <p className="text-[10px] text-faint uppercase tracking-wider mb-2">Indexes</p>
                   {relations.indexes.map((ix) => (
-                    <div key={ix.name} className="py-1.5 text-xs border-b border-white/3">
+                    <div key={ix.name} className="py-1.5 text-xs border-b border-line">
                       <div className="flex items-center gap-2">
-                        <Zap className="w-3 h-3 text-white/20 shrink-0" />
-                        <span className="text-white/70">{ix.name}</span>
-                        {ix.primary && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-cyan-300">primary</span>}
-                        {ix.unique && !ix.primary && <span className="text-[9px] px-1 rounded bg-white/10 text-white/50">unique</span>}
+                        <Zap className="w-3 h-3 text-faint shrink-0" />
+                        <span className="text-body">{ix.name}</span>
+                        {ix.primary && <span className="text-[9px] px-1 rounded bg-cyan-500/15 text-info">primary</span>}
+                        {ix.unique && !ix.primary && <span className="text-[9px] px-1 rounded bg-raised text-muted">unique</span>}
                       </div>
-                      <p className="pl-5 text-[10px] text-white/25 font-mono truncate" title={ix.definition}>{ix.definition}</p>
+                      <p className="pl-5 text-[10px] text-faint font-mono truncate" title={ix.definition}>{ix.definition}</p>
                     </div>
                   ))}
                 </div>
@@ -779,11 +779,11 @@ export function DatabaseStudio() {
           {view === 'sql' && (
             <div className="flex-1 overflow-auto p-4">
               {!live ? (
-                <p className="text-xs text-white/30">Connect a database to run queries.</p>
+                <p className="text-xs text-faint">Connect a database to run queries.</p>
               ) : (
                 <>
                   <textarea
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-xl p-3 text-xs font-mono text-white/80 resize-y focus:outline-none focus:border-cyan-500/50"
+                    className="w-full bg-surface border border-line rounded-xl p-3 text-xs font-mono text-body resize-y focus:outline-none focus:border-cyan-500/50"
                     rows={6}
                     value={sqlText}
                     onChange={(e) => setSqlText(e.target.value)}
@@ -803,50 +803,50 @@ export function DatabaseStudio() {
                     <button
                       onClick={() => void runSql(true)}
                       disabled={sqlRunning}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/15 border border-red-500/30 text-red-300 hover:bg-red-600/25 disabled:opacity-40 rounded-lg text-xs transition-all"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/15 border border-red-500/30 text-danger hover:bg-red-600/25 disabled:opacity-40 rounded-lg text-xs transition-all"
                       title="Run a statement that CHANGES your database. You will be asked to confirm."
                     >
                       Run as a change…
                     </button>
-                    <p className="text-[10px] text-white/25 ml-1">
+                    <p className="text-[10px] text-faint ml-1">
                       Run is read-only — your database rejects anything that would change data.
                     </p>
                   </div>
 
                   {sqlError && (
                     <div className="mt-3 flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
-                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                      <p className="text-xs text-red-300 leading-relaxed">{sqlError}</p>
+                      <AlertCircle className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+                      <p className="text-xs text-danger leading-relaxed">{sqlError}</p>
                     </div>
                   )}
 
                   {sqlResult && (
                     <div className="mt-3">
-                      <p className="text-[10px] text-white/30 mb-2">
+                      <p className="text-[10px] text-faint mb-2">
                         {sqlResult.rowCount} row{sqlResult.rowCount === 1 ? '' : 's'} · {sqlResult.elapsedMs} ms
-                        {sqlResult.capped && <span className="text-amber-300/80"> · showing the first {sqlResult.rowCount} — there may be more</span>}
-                        {!sqlResult.readOnly && <span className="text-red-300/80"> · this changed your database</span>}
+                        {sqlResult.capped && <span className="text-warn"> · showing the first {sqlResult.rowCount} — there may be more</span>}
+                        {!sqlResult.readOnly && <span className="text-danger"> · this changed your database</span>}
                       </p>
                       {sqlResult.rows.length === 0 ? (
-                        <p className="text-xs text-white/30">No rows returned.</p>
+                        <p className="text-xs text-faint">No rows returned.</p>
                       ) : (
-                        <div className="overflow-auto border border-white/5 rounded-xl">
+                        <div className="overflow-auto border border-line rounded-xl">
                           <table className="w-full text-xs border-collapse min-w-max">
-                            <thead className="bg-[#161b22]">
-                              <tr className="border-b border-white/5">
+                            <thead className="bg-card">
+                              <tr className="border-b border-line">
                                 {sqlResult.columns.map((c) => (
-                                  <th key={c} className="text-left px-3 py-2 font-normal text-white/40 whitespace-nowrap">{c}</th>
+                                  <th key={c} className="text-left px-3 py-2 font-normal text-faint whitespace-nowrap">{c}</th>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
                               {sqlResult.rows.map((row, ri) => (
-                                <tr key={ri} className="border-b border-white/3">
+                                <tr key={ri} className="border-b border-line">
                                   {sqlResult.columns.map((c) => {
                                     const val = renderCell(row[c]);
                                     return (
                                       <td key={c} className="px-3 py-2 max-w-xs">
-                                        <span className={`truncate block ${row[c] === null || row[c] === undefined ? 'text-white/15 italic' : 'text-white/60'}`} title={val}>{val}</span>
+                                        <span className={`truncate block ${row[c] === null || row[c] === undefined ? 'text-faint italic' : 'text-muted'}`} title={val}>{val}</span>
                                       </td>
                                     );
                                   })}
@@ -867,34 +867,34 @@ export function DatabaseStudio() {
         {/* Edit panel — the key columns are shown but not editable: they identify the row we are
             changing, and letting a typo rewrite them would move the row instead of editing it. */}
         {editing && (
-          <div className="w-80 border-l border-white/5 bg-[#161b22] flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+          <div className="w-80 border-l border-line bg-card flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-line">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">Edit row</p>
-                <p className="text-[10px] text-white/30 truncate">
+                <p className="text-sm font-medium text-ink">Edit row</p>
+                <p className="text-[10px] text-faint truncate">
                   {primaryKey.map((c) => `${c}=${renderCell(editing.row[c])}`).join(', ')}
                 </p>
               </div>
               <button onClick={() => { setEditing(null); setWriteError(''); }} aria-label="Close">
-                <X className="w-4 h-4 text-white/40 hover:text-white/70" />
+                <X className="w-4 h-4 text-faint hover:text-body" />
               </button>
             </div>
             <div className="flex-1 p-3 overflow-auto">
               <textarea
-                className="w-full h-full min-h-[300px] bg-[#0d1117] border border-white/10 rounded-xl p-3 text-xs font-mono text-white/70 resize-none focus:outline-none focus:border-cyan-500/50"
+                className="w-full h-full min-h-[300px] bg-surface border border-line rounded-xl p-3 text-xs font-mono text-body resize-none focus:outline-none focus:border-cyan-500/50"
                 value={editing.json}
                 onChange={(e) => setEditing({ ...editing, json: e.target.value })}
                 spellCheck={false}
               />
-              <p className="mt-2 text-[10px] text-white/30 leading-relaxed">
+              <p className="mt-2 text-[10px] text-faint leading-relaxed">
                 {primaryKey.join(', ')} identif{primaryKey.length === 1 ? 'ies' : 'y'} this row and {primaryKey.length === 1 ? 'is' : 'are'} not changed by saving.
               </p>
             </div>
-            <div className="p-3 border-t border-white/5 flex gap-2">
+            <div className="p-3 border-t border-line flex gap-2">
               <button onClick={() => void saveEdit()} disabled={saving} className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-all">
                 {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />} Save
               </button>
-              <button onClick={() => { setEditing(null); setWriteError(''); }} className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs text-white/40 transition-all">Cancel</button>
+              <button onClick={() => { setEditing(null); setWriteError(''); }} className="px-4 py-2 bg-raised hover:bg-raised rounded-xl text-xs text-faint transition-all">Cancel</button>
             </div>
           </div>
         )}

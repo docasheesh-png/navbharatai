@@ -53,7 +53,7 @@ const PREVIEW_IFRAME_ALLOW = 'camera; microphone; geolocation; clipboard-write; 
 
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="text-zinc-500 text-sm text-center leading-relaxed">{children}</div>;
+  return <div className="text-faint text-sm text-center leading-relaxed">{children}</div>;
 }
 
 // RESPONSIVE VIEWPORTS (admin 2026-07-17): the preview can render at a REAL device width so the built
@@ -114,10 +114,10 @@ function ResponsiveFrame({ viewport, zoom = 'fit', children }: { viewport: Previ
   return (
     <div
       ref={wrapRef}
-      className={`flex-1 min-h-0 flex ${dims ? 'overflow-auto bg-zinc-950/40 items-start justify-center p-3' : ''}`}
+      className={`flex-1 min-h-0 flex ${dims ? 'overflow-auto bg-raised items-start justify-center p-3' : ''}`}
     >
       <div style={footprintStyle}>
-        <div style={deviceBoxStyle} className={dims ? 'overflow-hidden rounded-[14px] ring-1 ring-zinc-700 shadow-2xl bg-white' : ''}>
+        <div style={deviceBoxStyle} className={dims ? 'overflow-hidden rounded-[14px] ring-1 ring-line shadow-2xl bg-white' : ''}>
           {children}
         </div>
       </div>
@@ -166,7 +166,7 @@ export function veRgbToHex(color: string): string {
  * engages — the failure mode that makes this look like it did nothing.
  */
 const TOOLBAR_ROW =
-  'flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400 '
+  'flex items-center gap-2 px-3 py-1.5 border-b border-line text-xs text-muted '
   + 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
 export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string;
@@ -1397,13 +1397,13 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const switcher = (
     <div className="flex items-center gap-1 shrink-0">
       {mode === 'live' ? (
-        <button onClick={() => { userPickedInBrowser.current = true; setChoice('auto'); }} className="px-2 py-0.5 rounded text-[11px] border whitespace-nowrap text-zinc-400 border-zinc-700 hover:text-zinc-200" title="Back to the free preview — the live server is then allowed to go to sleep">← Preview</button>
+        <button onClick={() => { userPickedInBrowser.current = true; setChoice('auto'); }} className="px-2 py-0.5 rounded text-[11px] border whitespace-nowrap text-muted border-line hover:text-body" title="Back to the free preview — the live server is then allowed to go to sleep">← Preview</button>
       ) : (
         /* "Live server" wrapped onto two lines on a phone, which stretched this whole toolbar row
            (admin 2026-08-17). It says "Live" on small screens and the full "Live server" from sm up.
            The Paid tag is NOT shortened away at any width: it is the only always-visible statement
            that this preview spends the user's credits, and the note beside it is dismissible. */
-        <button onClick={() => setChoice('live')} className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border whitespace-nowrap text-zinc-400 border-zinc-700 hover:text-zinc-200" title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The preview you are on is free.">{effectiveUrl ? '● ' : ''}Live<span className="hidden sm:inline">&nbsp;server</span><span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-400 border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
+        <button onClick={() => setChoice('live')} className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border whitespace-nowrap text-muted border-line hover:text-body" title="The running app on a real cloud machine (full fidelity — real npm/runtime). PAID: it uses your credits while it runs. The preview you are on is free.">{effectiveUrl ? '● ' : ''}Live<span className="hidden sm:inline">&nbsp;server</span><span className="ml-0.5 rounded px-1 text-[9px] font-bold uppercase tracking-wide bg-amber-500/15 text-warn border border-amber-500/30">{LIVE_SERVER_PAID_TAG}</span></button>
       )}
     </div>
   );
@@ -1412,12 +1412,12 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // Honest (real cloud compute uses credits; in-browser is free), vendor-free (White-Label), and
   // dismissible so it informs without nagging. Rendered in both Live-server branches below.
   const paidNote = mode === 'live' && !paidNoteDismissed ? (
-    <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-amber-200">
+    <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-warn">
       <span aria-hidden>⚡</span>
       <span className="flex-1">{LIVE_SERVER_PAID_NOTE}</span>
       <button
         onClick={() => { dismissLiveServerNotice(); setPaidNoteDismissed(true); }}
-        className="shrink-0 rounded px-1.5 font-semibold text-amber-300 hover:text-amber-100"
+        className="shrink-0 rounded px-1.5 font-semibold text-warn hover:text-warn"
         title="Got it — don't show this again"
       >
         Got it
@@ -1436,14 +1436,14 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const consoleButton = (
     <button
       onClick={() => setConsoleOpen((v) => !v)}
-      className={`shrink-0 relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+      className={`shrink-0 relative flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${consoleOpen ? 'bg-raised text-ink border-line' : 'text-muted border-line hover:text-body'}`}
       title="Console — everything your app prints, right here (no F12 needed)"
       aria-label="Toggle the app console"
       aria-pressed={consoleOpen}
     >
       <Terminal className="w-3.5 h-3.5" />
       {consoleErrorCount > 0 && (
-        <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-white text-[9px] font-bold flex items-center justify-center">
+        <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-600 text-on-accent text-[9px] font-bold flex items-center justify-center">
           {consoleErrorCount > 99 ? '99+' : consoleErrorCount}
         </span>
       )}
@@ -1451,18 +1451,18 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   );
 
   const consoleDrawer = (
-    <div className="border-b border-zinc-800 bg-black/60 text-[11px] font-mono">
+    <div className="border-b border-line bg-scrim text-[11px] font-mono">
       {/* FILTER + SEARCH. With a hundred rows on screen the drawer was a wall of text, and the one
           line that mattered was somewhere in it. "Problems" spans errors AND warnings on purpose:
           "show me what is wrong" is one question, not two. */}
-      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-zinc-800/60 flex-wrap">
+      <div className="flex items-center gap-1.5 px-3 py-1 border-b border-line flex-wrap">
         {([
           ['all', 'All'], ['problems', 'Problems'], ['error', 'Errors'], ['warn', 'Warnings'], ['log', 'Logs'],
         ] as const).map(([f, label]) => (
           <button
             key={f}
             onClick={() => setConsoleFilter(f)}
-            className={`px-1.5 py-0.5 rounded border text-[10px] ${consoleFilter === f ? 'bg-zinc-700 text-white border-zinc-600' : 'text-zinc-500 border-zinc-800 hover:text-zinc-300'}`}
+            className={`px-1.5 py-0.5 rounded border text-[10px] ${consoleFilter === f ? 'bg-raised text-ink border-line' : 'text-faint border-line hover:text-muted'}`}
             aria-pressed={consoleFilter === f}
           >
             {label}
@@ -1473,7 +1473,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           onChange={(e) => setConsoleQuery(e.target.value)}
           placeholder="Search…"
           aria-label="Search the console"
-          className="flex-1 min-w-[90px] bg-zinc-900/80 border border-zinc-800 rounded px-1.5 py-0.5 text-[10px] text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+          className="flex-1 min-w-[90px] bg-card border border-line rounded px-1.5 py-0.5 text-[10px] text-muted placeholder:text-faint focus:outline-none focus:border-line"
         />
       </div>
       <div className="max-h-40 overflow-y-auto px-3 py-1.5 space-y-0.5">
@@ -1482,26 +1482,26 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             receives the bridge, and saying the app printed nothing there would be a plain untruth —
             so it says what is really the case, and points at the preview whose console always works. */}
         {consoleEntries.length === 0 && mode === 'live' && !liveBridgeReady && (
-          <p className="text-zinc-600">
+          <p className="text-faint">
             The live console is not reporting for this app — server-rendered frameworks have no entry page to attach it to.{' '}
-            <button onClick={() => { userPickedInBrowser.current = true; setChoice('auto'); }} className="underline hover:text-zinc-400">
+            <button onClick={() => { userPickedInBrowser.current = true; setChoice('auto'); }} className="underline hover:text-muted">
               The instant preview
             </button>{' '}
             always shows one.
           </p>
         )}
-        {consoleEntries.length === 0 && !(mode === 'live' && !liveBridgeReady) && <p className="text-zinc-600">Console is empty — your app has not printed anything yet.</p>}
+        {consoleEntries.length === 0 && !(mode === 'live' && !liveBridgeReady) && <p className="text-faint">Console is empty — your app has not printed anything yet.</p>}
         {/* An ACTIVE filter hiding everything is a different state from an empty console, and saying
             "your app has not printed anything" there would simply be untrue. */}
         {consoleEntries.length > 0 && visibleConsoleEntries.length === 0 && (
-          <p className="text-zinc-600">Nothing matches this filter — {consoleEntries.length} {consoleEntries.length === 1 ? 'row' : 'rows'} hidden.</p>
+          <p className="text-faint">Nothing matches this filter — {consoleEntries.length} {consoleEntries.length === 1 ? 'row' : 'rows'} hidden.</p>
         )}
         {visibleConsoleEntries.map((c, i) => (
           <div key={`${c.at}-${i}`} className="flex items-start gap-2">
-            <span className={`flex-1 min-w-0 whitespace-pre-wrap break-words ${c.level === 'error' ? 'text-rose-300' : c.level === 'warn' ? 'text-amber-300' : 'text-zinc-300'}`}>
+            <span className={`flex-1 min-w-0 whitespace-pre-wrap break-words ${c.level === 'error' ? 'text-danger' : c.level === 'warn' ? 'text-warn' : 'text-muted'}`}>
               {c.text}
               {(c.repeats ?? 1) > 1 && (
-                <span className="ml-1.5 px-1 rounded bg-zinc-700/70 text-zinc-300 text-[9px] font-bold tabular-nums" title="How many times in a row your app printed this">×{c.repeats}</span>
+                <span className="ml-1.5 px-1 rounded bg-raised text-muted text-[9px] font-bold tabular-nums" title="How many times in a row your app printed this">×{c.repeats}</span>
               )}
             </span>
             {/* Errors always; a WARNING only when it names a real defect (a missing list key, a
@@ -1509,7 +1509,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             {consoleRowFixable(c.level, c.text) && onFixError && (
               <button
                 onClick={() => onFixError(c.text)}
-                className="shrink-0 px-1.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 text-[10px]"
+                className="shrink-0 px-1.5 rounded border border-indigo-500/40 text-accent-text hover:bg-indigo-500/10 text-[10px]"
                 title="Hand this to the AI to fix"
               >
                 Fix with AI
@@ -1518,8 +1518,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-end px-3 py-1 border-t border-zinc-800/60">
-        <button onClick={() => { setConsoleEntries([]); setConsoleQuery(''); }} className="text-[10px] text-zinc-500 hover:text-zinc-300">Clear</button>
+      <div className="flex items-center justify-end px-3 py-1 border-t border-line">
+        <button onClick={() => { setConsoleEntries([]); setConsoleQuery(''); }} className="text-[10px] text-faint hover:text-muted">Clear</button>
       </div>
     </div>
   );
@@ -1533,10 +1533,10 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    * address bar does. Nothing here is simulated, which is the whole reason it can exist at all.
    */
   const routeBar = routePath ? (
-    <div className="flex items-center gap-1 px-3 py-1 border-b border-zinc-800 bg-zinc-900/60">
+    <div className="flex items-center gap-1 px-3 py-1 border-b border-line bg-raised">
       <button
         onClick={() => postToPreview({ __nbaiHistory: 'back' })}
-        className="shrink-0 w-6 h-6 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 flex items-center justify-center"
+        className="shrink-0 w-6 h-6 rounded hover:bg-raised text-muted hover:text-body flex items-center justify-center"
         title="Back — steps your app's own history"
         aria-label="Back"
       >
@@ -1544,7 +1544,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       </button>
       <button
         onClick={() => postToPreview({ __nbaiHistory: 'forward' })}
-        className="shrink-0 w-6 h-6 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 flex items-center justify-center"
+        className="shrink-0 w-6 h-6 rounded hover:bg-raised text-muted hover:text-body flex items-center justify-center"
         title="Forward"
         aria-label="Forward"
       >
@@ -1562,7 +1562,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           autoComplete="off"
           aria-label="Page address inside your app"
           title="Type a page inside your app (for example /dashboard) and press Enter"
-          className="w-full bg-zinc-950/70 border border-zinc-800 rounded px-2 py-0.5 text-[11px] font-mono text-zinc-300 focus:outline-none focus:border-zinc-600"
+          className="w-full bg-raised border border-line rounded px-2 py-0.5 text-[11px] font-mono text-muted focus:outline-none focus:border-line"
         />
       </form>
     </div>
@@ -1570,7 +1570,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
 
   // Responsive viewport switcher — REAL device-width rendering (not a label), shown on BOTH previews.
   const viewportSwitcher = (
-    <div className="flex items-center gap-0.5 rounded border border-zinc-700 p-0.5 shrink-0">
+    <div className="flex items-center gap-0.5 rounded border border-line p-0.5 shrink-0">
       {([
         ['auto', Maximize2, 'Auto — fills the panel (responsive to the available width)'],
         ['mobile', Smartphone, DEVICE_DIMS.mobile.label],
@@ -1580,7 +1580,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         <button
           key={v}
           onClick={() => setViewport(v)}
-          className={`p-1 rounded transition-colors ${viewport === v ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+          className={`p-1 rounded transition-colors ${viewport === v ? 'bg-raised text-ink' : 'text-muted hover:text-body'}`}
           title={tip}
           aria-label={tip}
           aria-pressed={viewport === v}
@@ -1599,7 +1599,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const zoomButton = viewport === 'auto' ? null : (
     <button
       onClick={() => setZoom((z) => nextZoom(z))}
-      className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] font-semibold text-zinc-400 hover:text-zinc-200 tabular-nums"
+      className="shrink-0 px-1.5 py-0.5 rounded border border-line text-[10px] font-semibold text-muted hover:text-body tabular-nums"
       title="Zoom the device view — Fit shrinks it into the panel; 100% shows the real size and scrolls, which is the only way to judge true text size and spacing"
       aria-label={`Zoom: ${zoomLabel(zoom)}`}
     >
@@ -1615,7 +1615,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const themeButton = themeToggleAvailable ? (
     <button
       onClick={() => { const next = previewIsDark ? 'light' : 'dark'; setPreviewIsDark(!previewIsDark); postToPreview({ __nbaiTheme: next }); }}
-      className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+      className="shrink-0 px-1.5 py-0.5 rounded border border-line text-muted hover:text-body"
       title={previewIsDark ? 'Switch your app to its light theme' : 'Switch your app to its dark theme'}
       aria-label="Toggle your app's dark theme"
       aria-pressed={previewIsDark}
@@ -1632,7 +1632,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   if (versionUrl) {
     return (
       <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-800 bg-amber-950/40 text-[11px] text-amber-100">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-800 bg-amber-950/40 text-[11px] text-warn">
           <span className="shrink-0" aria-hidden="true">🕘</span>
           <span className="flex-1 min-w-0 truncate">
             You are looking at an <strong>older version</strong> of your app{versionSha ? ` (${versionSha.slice(0, 7)})` : ''}. Your current app is untouched.
@@ -1683,7 +1683,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           {onAskAiAboutElement && (
             <button
               onClick={() => { const next = !picking; setPicking(next); postToPreview({ __nbaiPickMode: next }); }}
-              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${picking ? 'bg-indigo-600 text-white border-indigo-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+              className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] ${picking ? 'bg-indigo-600 text-on-accent border-indigo-500' : 'text-muted border-line hover:text-body'}`}
               title={picking ? 'Now click any part of your app' : 'Point at something in your app and tell the AI what to change about it'}
               aria-pressed={picking}
             >
@@ -1692,7 +1692,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             </button>
           )}
           {consoleButton}
-          <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setLiveReloadKey((k) => k + 1)} className="shrink-0 flex items-center gap-1 hover:text-body" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           {/* RESTART THE SERVER — reachable while the preview is SHOWING (ROADMAP §8B B3).
               Diagnose only ever existed in the "No live preview yet" empty state, so a user whose
               preview URL still resolves but whose dev server has died — a blank page, a connection
@@ -1707,7 +1707,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               onClick={() => { setWakeIntent(false); void runDiagnose(true); }}
               disabled={diagnosing}
               aria-label="Restart the server"
-              className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-50"
+              className="shrink-0 flex items-center gap-1 hover:text-body disabled:opacity-50"
               title="Restart the server — reboots the dev server inside your sandbox and checks it really came up. Use this when the preview is blank or stuck."
             >
               {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
@@ -1745,26 +1745,26 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           if (line.kind === 'none') return null;
           if (line.kind === 'progress') {
             return (
-              <div className="flex items-center gap-2 px-3 py-1.5 border-b border-indigo-900/60 bg-indigo-950/30 text-[11px] text-indigo-200">
+              <div className="flex items-center gap-2 px-3 py-1.5 border-b border-indigo-900/60 bg-indigo-950/30 text-[11px] text-accent-text">
                 <TirangaLoader className="w-3 h-3 shrink-0" />
                 <span className="flex-1 truncate">{line.text}</span>
-                <span className="shrink-0 tabular-nums text-indigo-300/70">{line.seconds}s</span>
+                <span className="shrink-0 tabular-nums text-accent-text">{line.seconds}s</span>
               </div>
             );
           }
           return (
             <div className={`flex items-start gap-2 px-3 py-1.5 border-b text-[11px] ${
-              line.kind === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200'
-                : 'border-amber-900/60 bg-amber-950/30 text-amber-200'}`}>
+              line.kind === 'ok' ? 'border-emerald-900/60 bg-emerald-950/30 text-success'
+                : 'border-amber-900/60 bg-amber-950/30 text-warn'}`}>
               <span className="flex-1">{line.text}</span>
               <button onClick={() => setDiagResult(null)} className="shrink-0 opacity-70 hover:opacity-100" title="Dismiss">✕</button>
             </div>
           );
         })()}
         {failoverNote && (
-          <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
+          <div className="flex items-start gap-2 px-3 py-1.5 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-info">
             <span className="flex-1">{failoverNote}</span>
-            <button onClick={() => setFailoverNote('')} className="shrink-0 text-sky-400 hover:text-sky-200" title="Dismiss">✕</button>
+            <button onClick={() => setFailoverNote('')} className="shrink-0 text-info hover:text-info" title="Dismiss">✕</button>
           </div>
         )}
         {/* HONEST STATE, NOT A RENDERED 404 (admin report 2026-08-06). The server answers, so the old
@@ -1772,13 +1772,13 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             page labelled as their live app. A page that does not render is not the app, and saying so is
             the whole point; the iframe still shows below so nothing is hidden from the user. */}
         {notServing && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-amber-200">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/40 text-[11px] text-warn">
             <span className="flex-1">
               <span className="font-semibold">This is not your app yet.</span>{' '}
               The server is answering, but it is not serving your pages
               {notServing.length > 0 ? ` — ${notServing[0]}` : ''}. If the build is still running, give it
               a few more seconds. Meanwhile the{' '}
-              <button onClick={() => setChoice('auto')} className="underline hover:text-amber-100">preview</button>{' '}
+              <button onClick={() => setChoice('auto')} className="underline hover:text-warn">preview</button>{' '}
               renders your files right now.
             </span>
           </div>
@@ -1791,7 +1791,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             running by the time this shows; this line exists so the wait is understood rather than
             guessed at, and the button is here for anyone who does not want to wait for the watchdog. */}
         {(health === 'sleeping' || health === 'crashed') && !diagnosing && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-sky-200">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-sky-900/60 bg-sky-950/40 text-[11px] text-info">
             <span className="flex-1">
               <span className="font-semibold">
                 {health === 'sleeping' ? 'Preview is in sleep mode.' : 'Your preview stopped.'}
@@ -1802,7 +1802,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             </span>
             <button
               onClick={() => { setWakeIntent(true); void runDiagnose(true); }}
-              className="shrink-0 rounded-md bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-500"
+              className="shrink-0 rounded-md bg-sky-600 px-2.5 py-1 font-semibold text-on-accent hover:bg-sky-500"
             >
               Wake up
             </button>
@@ -1817,12 +1817,12 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             wrong, nothing is missing, and the only thing the user could be surprised by — that an edit
             brings the live server back — is what the line says. */}
         {!snapshotNote && idleSnapshotNote && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-zinc-700 bg-zinc-900/60 text-[11px] text-zinc-300">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-line bg-raised text-[11px] text-muted">
             <span className="flex-1">{idleSnapshotNote}</span>
           </div>
         )}
         {snapshotNote && (
-          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/30 text-[11px] text-amber-200">
+          <div className="flex items-start gap-2 px-3 py-2 border-b border-amber-900/60 bg-amber-950/30 text-[11px] text-warn">
             <span className="flex-1">{snapshotNote}</span>
           </div>
         )}
@@ -1835,18 +1835,18 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             reparented, and reparenting an iframe IS a reload — the exact thing this bar exists to
             prevent. */}
         {heldReloads > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-700 bg-zinc-900/80 text-[11px] text-zinc-300">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line bg-card text-[11px] text-muted">
             <span className="flex-1 truncate">{deferredReloadNote(heldReloads)}</span>
             <button
               onClick={applyReload}
-              className="shrink-0 rounded-md bg-zinc-700 px-2.5 py-1 font-semibold text-zinc-100 hover:bg-zinc-600"
+              className="shrink-0 rounded-md bg-raised px-2.5 py-1 font-semibold text-body hover:bg-raised"
             >
               Refresh now
             </button>
           </div>
         )}
         {liveLoading && (
-          <div className="h-0.5 bg-zinc-800 overflow-hidden">
+          <div className="h-0.5 bg-raised overflow-hidden">
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
           </div>
         )}
@@ -1865,18 +1865,18 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
            * there the frame DOES stay, because what it shows is at least the user's own server.
            */
           <div className="flex-1 flex items-center justify-center p-6 text-center">
-            <div className="max-w-md text-sm text-zinc-400 space-y-3">
+            <div className="max-w-md text-sm text-muted space-y-3">
               <div className="w-12 h-12 mx-auto" dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
-              <p className="text-zinc-200 font-medium">Your app hasn’t started serving yet.</p>
+              <p className="text-body font-medium">Your app hasn’t started serving yet.</p>
               <p>
                 NavBharatAI is still bringing it up. If a build is running, this clears on its own the
                 moment your server starts — it usually takes under a minute.
               </p>
               <div className="flex items-center justify-center gap-2 pt-1">
-                <button onClick={() => { setLiveReloadKey((k) => k + 1); void probeAndMaybeHeal(); }} className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold">Check again</button>
-                <button onClick={() => setChoice('auto')} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Back to the preview</button>
+                <button onClick={() => { setLiveReloadKey((k) => k + 1); void probeAndMaybeHeal(); }} className="px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-body text-xs font-semibold">Check again</button>
+                <button onClick={() => setChoice('auto')} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-xs font-semibold">Back to the preview</button>
               </div>
-              <p className="text-zinc-600 text-xs">The preview shows your current files right now, without waiting for the server.</p>
+              <p className="text-faint text-xs">The preview shows your current files right now, without waiting for the server.</p>
             </div>
           </div>
         ) : (
@@ -1899,16 +1899,16 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         <div className={TOOLBAR_ROW}>
           {switcher}
           <span className="flex-1 min-w-0 truncate">Live server</span>
-          <button onClick={() => void refreshSandbox()} className="shrink-0 flex items-center gap-1 hover:text-zinc-200" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
+          <button onClick={() => void refreshSandbox()} className="shrink-0 flex items-center gap-1 hover:text-body" title="Re-check for the live preview (after the sandbox finishes starting)"><RotateCcw className="w-3.5 h-3.5" /></button>
         </div>
         {paidNote}
         <div className="flex-1 flex items-center justify-center p-6 text-center">
-          <div className="max-w-md text-sm text-zinc-400 space-y-2">
+          <div className="max-w-md text-sm text-muted space-y-2">
             {sandboxOff ? (
               <>
-                <p className="text-zinc-200 font-medium">Live server preview isn't available on this deployment.</p>
-                <p>The full-fidelity live preview runs your app on a real cloud machine, which isn't configured here. Your app still builds and runs — use the <button onClick={() => setChoice('auto')} className="underline hover:text-zinc-200">preview</button> to see it.</p>
-                <p className="text-zinc-500 text-xs">Admin: set <code className="text-zinc-400">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
+                <p className="text-body font-medium">Live server preview isn't available on this deployment.</p>
+                <p>The full-fidelity live preview runs your app on a real cloud machine, which isn't configured here. Your app still builds and runs — use the <button onClick={() => setChoice('auto')} className="underline hover:text-body">preview</button> to see it.</p>
+                <p className="text-faint text-xs">Admin: set <code className="text-muted">E2B_API_KEY</code> in the server environment to enable the live cloud preview.</p>
               </>
             ) : knownEmpty ? (
               /* Nothing has been built in this workspace, so there is no dev server to diagnose and
@@ -1917,17 +1917,17 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               <PreviewWelcome />
             ) : (
               <>
-                <p className="text-zinc-200 font-medium">No live preview yet.</p>
-                <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setChoice('auto')} className="underline hover:text-zinc-200">preview</button> shows the current files instantly.</p>
+                <p className="text-body font-medium">No live preview yet.</p>
+                <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setChoice('auto')} className="underline hover:text-body">preview</button> shows the current files instantly.</p>
                 {sandbox?.previewDomainWarning && (
-                  <p className="text-amber-400/80 text-xs">{sandbox.previewDomainWarning}</p>
+                  <p className="text-warn text-xs">{sandbox.previewDomainWarning}</p>
                 )}
                 {workspaceId && (
                   <div className="pt-1">
                     <button
                       onClick={() => void runDiagnose(true)}
                       disabled={diagnosing}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-on-accent text-xs font-semibold"
                       title="Check the real state of the dev server inside your sandbox — installs, starts, and reports the exact cause if it still doesn't come up"
                     >
                       {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
@@ -1939,23 +1939,23 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                   // REAL staged progress from the server stream (stage-based %, never time-faked) +
                   // a live seconds counter proving the long install/boot step is still alive.
                   <div className="mt-3 text-left space-y-1 max-w-sm mx-auto">
-                    <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                    <div className="flex items-center justify-between text-[11px] text-muted">
                       <span className="truncate">{diagStage.label}…</span>
                       <span className="shrink-0 pl-2 font-mono">{diagStage.pct}%{diagStage.seconds > 0 ? ` · ${diagStage.seconds}s` : ''}</span>
                     </div>
-                    <div className="h-1.5 rounded bg-zinc-800 overflow-hidden">
+                    <div className="h-1.5 rounded bg-raised overflow-hidden">
                       <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${diagStage.pct}%` }} />
                     </div>
                     {diagStage.seconds >= 30 && (
-                      <p className="text-[10px] text-zinc-600">A cold sandbox install can take up to ~90s — this is a real install, not a stuck screen.</p>
+                      <p className="text-[10px] text-faint">A cold sandbox install can take up to ~90s — this is a real install, not a stuck screen.</p>
                     )}
                   </div>
                 )}
                 {diagResult && (
-                  <div className={`mt-2 text-left rounded-lg border p-3 text-xs ${diagResult.ok ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200' : 'border-amber-800 bg-amber-950/30 text-amber-200'}`}>
+                  <div className={`mt-2 text-left rounded-lg border p-3 text-xs ${diagResult.ok ? 'border-emerald-800 bg-emerald-950/40 text-success' : 'border-amber-800 bg-amber-950/30 text-warn'}`}>
                     <p className="font-medium">{diagResult.reason}</p>
                     {diagResult.detail && (
-                      <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] text-zinc-400 font-mono">{diagResult.detail}</pre>
+                      <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] text-muted font-mono">{diagResult.detail}</pre>
                     )}
                   </div>
                 )}
@@ -1973,7 +1973,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         {switcher}
         {viewportSwitcher}
         <span className="flex-1 min-w-0 truncate" title={previewSourceTitle(source)}>{previewSourceLabel(source, kind)}</span>
-        {savingEdit && <TirangaLoader className="w-3.5 h-3.5 text-indigo-400" />}
+        {savingEdit && <TirangaLoader className="w-3.5 h-3.5 text-accent-text" />}
         {!!html && !err && (
           <button
             onClick={() => {
@@ -1985,7 +1985,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               if (!next && choice === 'inbrowser') setChoice('auto');
             }}
             disabled={savingEdit}
-            className={`shrink-0 flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+            className={`shrink-0 flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-on-accent border-emerald-500' : 'text-muted border-line hover:text-body'}`}
             title={editMode ? 'Exit visual editing' : source === 'snapshot' ? 'Open the instant preview to edit elements in place' : 'Visual Editor — click any element to select it (toolbar: text size, colour, bold, align); double-click to edit its text'}
           >
             {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
@@ -1993,39 +1993,39 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           </button>
         )}
         {previewToolsFor(source).console && consoleButton}
-        <button onClick={() => { setSnapshotReloadKey((k) => k + 1); void loadInBrowser(); }} disabled={loading || !workspaceId} className="shrink-0 flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Refresh the preview from the current files">
+        <button onClick={() => { setSnapshotReloadKey((k) => k + 1); void loadInBrowser(); }} disabled={loading || !workspaceId} className="shrink-0 flex items-center gap-1 hover:text-body disabled:opacity-40" title="Refresh the preview from the current files">
           {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
       {routeBar}
       {consoleOpen && consoleDrawer}
       {editMode && selection && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/80 text-[11px] text-zinc-300 flex-wrap">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line bg-card text-[11px] text-muted flex-wrap">
           {/* With several elements picked, the COUNT is what matters — the user needs to know a change
               is about to hit more than the one under the cursor. */}
           {selection.targets && selection.targets.length > 1 ? (
-            <span className="font-semibold text-emerald-400">{selection.targets.length} elements</span>
+            <span className="font-semibold text-success">{selection.targets.length} elements</span>
           ) : (
-            <span className="font-mono text-zinc-500">&lt;{selection.tag || 'el'}&gt;</span>
+            <span className="font-mono text-faint">&lt;{selection.tag || 'el'}&gt;</span>
           )}
           <button onClick={() => applyStyle(selection, { fontWeight: veIsBold(selection.styles) ? 'normal' : 'bold' })}
-            className={`w-6 h-6 rounded border font-bold ${veIsBold(selection.styles) ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title="Bold">B</button>
+            className={`w-6 h-6 rounded border font-bold ${veIsBold(selection.styles) ? 'bg-emerald-600 text-on-accent border-emerald-500' : 'border-line hover:text-ink'}`} title="Bold">B</button>
           <div className="flex items-center gap-1">
-            <button onClick={() => applyStyle(selection, { fontSize: `${Math.max(8, Math.round(veFontPx(selection.styles)) - 2)}px` })} className="w-6 h-6 rounded border border-zinc-700 hover:text-white" title="Smaller text">A−</button>
-            <span className="w-9 text-center tabular-nums text-zinc-400">{Math.round(veFontPx(selection.styles))}px</span>
-            <button onClick={() => applyStyle(selection, { fontSize: `${Math.min(200, Math.round(veFontPx(selection.styles)) + 2)}px` })} className="w-6 h-6 rounded border border-zinc-700 hover:text-white" title="Bigger text">A+</button>
+            <button onClick={() => applyStyle(selection, { fontSize: `${Math.max(8, Math.round(veFontPx(selection.styles)) - 2)}px` })} className="w-6 h-6 rounded border border-line hover:text-ink" title="Smaller text">A−</button>
+            <span className="w-9 text-center tabular-nums text-muted">{Math.round(veFontPx(selection.styles))}px</span>
+            <button onClick={() => applyStyle(selection, { fontSize: `${Math.min(200, Math.round(veFontPx(selection.styles)) + 2)}px` })} className="w-6 h-6 rounded border border-line hover:text-ink" title="Bigger text">A+</button>
           </div>
           <label className="flex items-center gap-1 cursor-pointer" title="Text color">
-            <span className="text-zinc-500">Color</span>
-            <input type="color" value={veRgbToHex(selection.styles.color)} onChange={(e) => applyStyle(selection, { color: e.target.value })} className="w-6 h-6 rounded border border-zinc-700 bg-transparent cursor-pointer p-0" />
+            <span className="text-faint">Color</span>
+            <input type="color" value={veRgbToHex(selection.styles.color)} onChange={(e) => applyStyle(selection, { color: e.target.value })} className="w-6 h-6 rounded border border-line bg-transparent cursor-pointer p-0" />
           </label>
           <div className="flex items-center gap-0.5">
             {(['left', 'center', 'right'] as const).map((a) => (
               <button key={a} onClick={() => applyStyle(selection, { textAlign: a })}
-                className={`w-6 h-6 rounded border text-[10px] font-semibold uppercase ${selection.styles.textAlign === a ? 'bg-emerald-600 text-white border-emerald-500' : 'border-zinc-700 hover:text-white'}`} title={`Align ${a}`}>{a[0]}</button>
+                className={`w-6 h-6 rounded border text-[10px] font-semibold uppercase ${selection.styles.textAlign === a ? 'bg-emerald-600 text-on-accent border-emerald-500' : 'border-line hover:text-ink'}`} title={`Align ${a}`}>{a[0]}</button>
             ))}
           </div>
-          <span className="text-zinc-600 hidden sm:inline">drag = move · corner = resize</span>
+          <span className="text-faint hidden sm:inline">drag = move · corner = resize</span>
           <div className="flex-1" />
           {onAskAiAboutElement && (
             // THE Lovable-class move (world-best-preview, 2026-08-06): the selection already knows its
@@ -2033,25 +2033,25 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             // chat so the user just says WHAT to change and the engine edits exactly THAT element.
             <button
               onClick={() => onAskAiAboutElement(`<${selection.tag || 'element'}> in ${selection.file} (line ${selection.line}, column ${selection.column})`)}
-              className="flex items-center gap-1 px-2 h-6 rounded border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10"
+              className="flex items-center gap-1 px-2 h-6 rounded border border-indigo-500/50 text-accent-text hover:bg-indigo-500/10"
               title="Tell the AI what to change about this exact element"
             >
               <Sparkles className="w-3 h-3" /> Ask AI
             </button>
           )}
-          <button onClick={() => postToIframe({ __nbaiEditText: true })} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Edit this element's text (or double-click it)">Edit text</button>
-          <button onClick={() => { setSelection(null); postToIframe({ __nbaiDeselect: true }); }} className="px-2 h-6 rounded border border-zinc-700 hover:text-white" title="Deselect">Done</button>
+          <button onClick={() => postToIframe({ __nbaiEditText: true })} className="px-2 h-6 rounded border border-line hover:text-ink" title="Edit this element's text (or double-click it)">Edit text</button>
+          <button onClick={() => { setSelection(null); postToIframe({ __nbaiDeselect: true }); }} className="px-2 h-6 rounded border border-line hover:text-ink" title="Deselect">Done</button>
         </div>
       )}
       {editError && (
-        <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
+        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-950/40 border-b border-amber-900">{editError}</div>
       )}
       {recovered && (
         // The deep refresh made a previously-broken preview render again — tell the user honestly
         // that no AI fix was needed (and no credit was spent).
-        <div className="px-3 py-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border-b border-emerald-900 flex items-center justify-between gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-success bg-emerald-950/40 border-b border-emerald-900 flex items-center justify-between gap-2">
           <span>✓ Preview recovered after a deep refresh — no AI fix was needed.</span>
-          <button onClick={() => setRecovered(false)} className="shrink-0 text-emerald-500 hover:text-emerald-300">Dismiss</button>
+          <button onClick={() => setRecovered(false)} className="shrink-0 text-success hover:text-success">Dismiss</button>
         </div>
       )}
       {/* PHASE 1 — an honest refusal that names the ACTUAL blocker. `hasBackend` below already covers
@@ -2060,9 +2060,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           rendered as a vaguely wrong app with no explanation, which is the state the second absolute
           rule calls "built but not really working". */}
       {source === 'inbrowser' && !refusal.refuse && browserRunnable === false && !hasBackend && browserBlockedReason && (
-        <div className="px-3 py-1.5 text-[11px] text-amber-200 bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-950/40 border-b border-amber-900 flex items-center justify-between gap-2">
           <span>ℹ️ Heads up — {browserBlockedReason}. What you see here may be incomplete.</span>
-          <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-amber-100 font-semibold">Live server</button>
+          <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-amber-800 hover:bg-amber-700 text-warn font-semibold">Live server</button>
         </div>
       )}
       {/* CONFIG VARIABLES WE DO NOT HOLD (Phase 1b). Live .env files are excluded at the import
@@ -2070,7 +2070,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           exactly as they would under Vite with an empty env. Saying which ones turns "one feature
           behaves oddly and nobody knows why" into a known, named limitation. */}
       {source === 'inbrowser' && envVarsUsed.length > 0 && (
-        <div className="px-3 py-1.5 text-[11px] text-zinc-300 bg-zinc-900/70 border-b border-zinc-800">
+        <div className="px-3 py-1.5 text-[11px] text-muted bg-raised border-b border-line">
           ⚙️ This app reads {envVarsUsed.length === 1 ? 'a setting' : `${envVarsUsed.length} settings`} we
           don't hold ({envVarsUsed.slice(0, 3).join(', ')}{envVarsUsed.length > 3 ? `, +${envVarsUsed.length - 3} more` : ''}) —
           your .env is never uploaded, so anything using them will be blank here.
@@ -2082,24 +2082,24 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           the paid live server for nothing. Deliberately ONE line: a wall of caveats above a working
           app reads as "this is broken", which is the opposite of what is being said. */}
       {source === 'inbrowser' && !!html && !err && !refusal.refuse && !!fidelityNotice && (
-        <div className="px-3 py-1.5 text-[11px] text-amber-200/90 bg-amber-950/30 border-b border-amber-900/60 flex items-start gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-warn bg-amber-950/30 border-b border-amber-900/60 flex items-start gap-2">
           <span className="flex-1">{fidelityNotice}</span>
           {!!effectiveUrl && (
-            <button onClick={() => setChoice('live')} className="shrink-0 underline hover:text-amber-100">See it on the live server</button>
+            <button onClick={() => setChoice('live')} className="shrink-0 underline hover:text-warn">See it on the live server</button>
           )}
-          <button onClick={() => setFidelityNotice('')} className="shrink-0 text-amber-500/70 hover:text-amber-200" title="Dismiss">✕</button>
+          <button onClick={() => setFidelityNotice('')} className="shrink-0 text-warn hover:text-warn" title="Dismiss">✕</button>
         </div>
       )}
       {source === 'inbrowser' && hasBackend && !refusal.refuse && (
         // Task #64 — honest full-stack state. The in-browser preview compiles only the frontend, so an
         // app with a backend renders here with its data/API features non-functional. Say so plainly and
         // point to the Live server (which actually boots the backend) instead of a silently-broken app.
-        <div className="px-3 py-1.5 text-[11px] text-sky-200 bg-sky-950/40 border-b border-sky-900 flex items-center justify-between gap-2">
+        <div className="px-3 py-1.5 text-[11px] text-info bg-sky-950/40 border-b border-sky-900 flex items-center justify-between gap-2">
           <span>
             ℹ️ This app has {backendReason || 'a backend'} — the in-browser preview shows the frontend
             only, so its data/API features won't work here. Switch to the Live server to run it fully.
           </span>
-          <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
+          <button onClick={() => setChoice('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-info font-semibold">Live server</button>
         </div>
       )}
       {source === 'snapshot' ? (
@@ -2135,11 +2135,11 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
          */
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
           <div className="w-12 h-12" dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
-          <p className="text-zinc-200 font-medium">{refusal.title}</p>
-          <p className="text-[12px] text-zinc-500 max-w-sm">
+          <p className="text-body font-medium">{refusal.title}</p>
+          <p className="text-[12px] text-faint max-w-sm">
             {refusal.detail} Your app isn&apos;t broken — switch to the Live server to see it fully.
           </p>
-          <button onClick={() => setChoice('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
+          <button onClick={() => setChoice('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-xs font-semibold">
             {effectiveUrl ? '● ' : ''}Open Live server
           </button>
         </div>
@@ -2170,7 +2170,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
          * the changeover — one loading screen, as asked. The toolbar's refresh button already spins
          * during a reload, so "something is happening" is still visible.
          */
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-faint text-sm">
           {/* Ashok Chakra loader (admin 2026-07-07) — same spinner the in-iframe boot overlay uses. */}
           <div className="w-12 h-12 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
           {/**
@@ -2188,13 +2188,13 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             * the headline. ("Getting your app ready" is deliberately about what WE are doing, not what
             * the user is waiting for.)
             */}
-          <div className="text-zinc-300 text-[15px] font-medium">Getting your app ready…</div>
-          <div className="flex items-center text-[12px] text-zinc-500">
+          <div className="text-muted text-[15px] font-medium">Getting your app ready…</div>
+          <div className="flex items-center text-[12px] text-faint">
             Loading your files and compiling the preview
-            {loadSeconds > 0 ? <span className="ml-1.5 font-mono text-zinc-600">{loadSeconds}s</span> : null}
+            {loadSeconds > 0 ? <span className="ml-1.5 font-mono text-faint">{loadSeconds}s</span> : null}
           </div>
           {loadSeconds >= 8 && (
-            <p className="text-[11px] text-zinc-600 max-w-xs text-center">Still working — the first load after a long gap fetches your saved files from storage, which can take a few extra seconds. Repeat opens are much faster.</p>
+            <p className="text-[11px] text-faint max-w-xs text-center">Still working — the first load after a long gap fetches your saved files from storage, which can take a few extra seconds. Repeat opens are much faster.</p>
           )}
         </div>
       ) : err ? (
@@ -2209,7 +2209,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             <button
               onClick={() => void fixWithAiAfterRefresh(err)}
               disabled={deepRefreshing}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-on-accent text-xs font-semibold"
               title="First deep-refreshes the preview (it may just start working); only if it still fails does it send the error to the AI"
             >
               {deepRefreshing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Wand2 className="w-3.5 h-3.5" />}
@@ -2217,7 +2217,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             </button>
           )}
           {deepRefreshing && (
-            <p className="text-[11px] text-zinc-500 max-w-xs text-center">Trying a clean rebuild first — it may just start working without an AI fix.</p>
+            <p className="text-[11px] text-faint max-w-xs text-center">Trying a clean rebuild first — it may just start working without an AI fix.</p>
           )}
         </div>
       ) : html && previewSandboxUrl ? (
@@ -2267,7 +2267,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             // bounded auto-retry above somehow lost, one tap reloads from the durable files.
             <button
               onClick={() => { emptyRetries.current = 0; void loadInBrowser(); }}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-xs font-semibold"
               title="Compile the saved files into the in-browser preview"
             >
               <RotateCcw className="w-3.5 h-3.5" /> Load preview

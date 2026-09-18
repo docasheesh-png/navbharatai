@@ -129,7 +129,7 @@ describe('App Mart browse is a 2-up TILE grid on a phone, not a list of rows', (
   });
 
   it('the tile is VERTICAL — a horizontal row cannot survive being halved in width', () => {
-    expect(store).toContain('flex flex-col rounded-xl bg-[#161b22]');
+    expect(store).toContain('flex flex-col rounded-xl bg-card'); // the surface token since the theme replacement
     expect(store).toContain('flex flex-col items-start gap-2 p-3 pb-2');
   });
 
@@ -147,7 +147,7 @@ describe('App Mart browse is a 2-up TILE grid on a phone, not a list of rows', (
   it('the sensitive-permission warning keeps its own line in the narrower tile', () => {
     // It is the one thing on an Android card a person must not miss, and the tile is half the width
     // of the row it replaced — so it stops sharing a line with the developer name and size.
-    expect(store).toContain('text-[11px] text-amber-400 leading-tight w-full');
+    expect(store).toContain('text-[11px] text-warn leading-tight w-full'); // token since the theme replacement
   });
 });
 

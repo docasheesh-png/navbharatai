@@ -468,7 +468,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
 
   return (
-    <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-white" style={{ WebkitOverflowScrolling: 'touch' }}>
+    <div className="h-full overflow-y-auto overscroll-contain bg-surface text-ink" style={{ WebkitOverflowScrolling: 'touch' }}>
       <div className="max-w-3xl mx-auto px-4 py-5 sm:px-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
@@ -477,7 +477,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           </div>
           <div className="min-w-0">
             <h1 className="text-lg sm:text-xl font-bold truncate">App Mart</h1>
-            <p className="text-xs text-white/50">Play apps made by other creators — or publish your own</p>
+            <p className="text-xs text-muted">Play apps made by other creators — or publish your own</p>
           </div>
         </div>
 
@@ -490,7 +490,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
               key={id}
               onClick={() => setTab(id)}
               className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
-                tab === id ? 'bg-emerald-600 text-white' : 'bg-white/5 text-white/50 hover:text-white/80'
+                tab === id ? 'bg-emerald-600 text-on-accent' : 'bg-raised text-muted hover:text-body'
               }`}
             >
               {label}
@@ -499,7 +499,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         </div>
 
         {error && (
-          <p className="mb-4 flex gap-2 px-3 py-2.5 rounded-lg text-xs text-amber-300 bg-amber-500/10">
+          <p className="mb-4 flex gap-2 px-3 py-2.5 rounded-lg text-xs text-warn bg-amber-500/10">
             <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />{error}
           </p>
         )}
@@ -514,9 +514,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         */}
         {tab === 'browse' && !loading && webApps.length === 0 && apps.length === 0 && (
           <div className="text-center py-14 px-4">
-            <Store size={40} className="text-white/10 mx-auto mb-3" />
-            <p className="text-sm text-white/60 font-medium">App Mart is just getting started.</p>
-            <p className="text-xs text-white/35 mt-1.5 max-w-xs mx-auto leading-relaxed">
+            <Store size={40} className="text-faint mx-auto mb-3" />
+            <p className="text-sm text-muted font-medium">App Mart is just getting started.</p>
+            <p className="text-xs text-faint mt-1.5 max-w-xs mx-auto leading-relaxed">
               Build something in NavBharatAI Pro and publish it here — it will run in anyone's browser, with nothing to install.
             </p>
           </div>
@@ -526,16 +526,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
           <div className="mb-7">
             {/* 🔴 A FIRST-TIME VISITOR HAS TO BE ABLE TO READ THIS (admin 2026-09-17). It was
-                `text-white/40` uppercase at 12px — the lowest-contrast text on the screen, carrying
+                `text-faint` uppercase at 12px — the lowest-contrast text on the screen, carrying
                 the one sentence that explains what the whole section IS. Uppercase tracking makes a
                 label skimmable when you already know what it says and harder to read when you do
                 not, which is exactly backwards for the person this line exists for. */}
-            <p className="text-sm font-bold text-white/85 mb-0.5 flex items-center gap-1.5">
-              <Play size={13} className="text-emerald-400" /> Play instantly
+            <p className="text-sm font-bold text-body mb-0.5 flex items-center gap-1.5">
+              <Play size={13} className="text-success" /> Play instantly
             </p>
-            <p className="text-xs text-white/45 mb-2.5">Tap any app and it opens right here — nothing to install.</p>
+            <p className="text-xs text-muted mb-2.5">Tap any app and it opens right here — nothing to install.</p>
             {webApps.length === 0 ? (
-              <p className="text-xs text-white/30 py-4 px-3 rounded-xl bg-white/[0.02] border border-white/5">
+              <p className="text-xs text-faint py-4 px-3 rounded-xl bg-raised border border-line">
                 No instant apps yet — the first one can be yours.
               </p>
             ) : (
@@ -555,14 +555,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 halved how many apps a first-time visitor sees before deciding this place is empty. */
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {pagedWebApps.visible.map((a) => (
-                <div key={a.id} className="flex flex-col rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 transition-colors">
+                <div key={a.id} className="flex flex-col rounded-xl bg-card border border-line hover:border-line transition-colors">
                   <button
                     onClick={() => void openWebDetail(a)}
                     className="flex flex-col items-start gap-2 p-3 pb-2 flex-1 min-w-0 text-left"
                     title="See details & screenshots"
                   >
-                    <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={22} className="text-white/30" />}
+                    <div className="w-14 h-14 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
+                      {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={22} className="text-faint" />}
                     </div>
                     {/* TWO lines, not one truncated one. Most names here are a fragment of the
                         creator's prompt, and one line of those is unreadable — see the cap in
@@ -570,25 +570,25 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     <p className="text-sm font-semibold leading-snug line-clamp-2 w-full">{a.name}</p>
                     {(a.requiresPassword || adultBadge(a.contentClass)) && (
                       <span className="flex items-center gap-1.5">
-                        {a.requiresPassword && <Lock size={11} className="text-white/40" />}
+                        {a.requiresPassword && <Lock size={11} className="text-faint" />}
                         {/* The 18+ badge. Only ever seen by a viewer who turned the setting on — the
                             server filters these out of the list for everyone else, so this labels
                             what they chose to see rather than teasing what they cannot. */}
                         {adultBadge(a.contentClass) && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-500/15 text-danger border border-rose-500/30">
                             {adultBadge(a.contentClass)}
                           </span>
                         )}
                       </span>
                     )}
-                    <p className="text-[11px] text-white/35 leading-tight w-full mt-auto">
+                    <p className="text-[11px] text-faint leading-tight w-full mt-auto">
                       {a.runs} run{a.runs === 1 ? '' : 's'}
-                      {(a.priceInr ?? 0) > 0 && <span className="text-emerald-300"> · remix ₹{a.priceInr}</span>}
+                      {(a.priceInr ?? 0) > 0 && <span className="text-success"> · remix ₹{a.priceInr}</span>}
                     </p>
                   </button>
                   <button
                     onClick={() => setPlayingId(a.id)}
-                    className="m-3 mt-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+                    className="m-3 mt-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold transition-colors"
                   >
                     <Play size={12} /> Open
                   </button>
@@ -603,7 +603,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         )}
 
         {tab === 'browse' && loading && (
-          <p className="flex items-center gap-2 text-sm text-white/40 py-10 justify-center">
+          <p className="flex items-center gap-2 text-sm text-faint py-10 justify-center">
             <Loader2 size={15} className="animate-spin" /> Loading apps…
           </p>
         )}
@@ -611,12 +611,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* ── Half 2: INSTALL (Android) — real .apk apps, a different product entirely ── */}
         {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
           <div className="mb-6">
-            <p className="text-sm font-bold text-white/85 mb-0.5 flex items-center gap-1.5">
-              <Package size={13} className="text-sky-400" /> Install on Android
+            <p className="text-sm font-bold text-body mb-0.5 flex items-center gap-1.5">
+              <Package size={13} className="text-info" /> Install on Android
             </p>
-            <p className="text-xs text-white/45 mb-2.5">Real apps you download and install on your phone.</p>
+            <p className="text-xs text-muted mb-2.5">Real apps you download and install on your phone.</p>
             {apps.length === 0 ? (
-              <p className="text-xs text-white/30 py-4 px-3 rounded-xl bg-white/[0.02] border border-white/5">
+              <p className="text-xs text-faint py-4 px-3 rounded-xl bg-raised border border-line">
                 No Android apps yet. Every one is scanned and checked by a person before it appears here.
               </p>
             ) : (
@@ -629,17 +629,17 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 <button
                   key={a.id}
                   onClick={() => setOpenApp(a)}
-                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-[#161b22] border border-white/10 hover:border-white/25 text-left transition-colors"
+                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-card border border-line hover:border-line text-left transition-colors"
                 >
-                  <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                    {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-white/30" />}
+                  <div className="w-14 h-14 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-faint" />}
                   </div>
                   <p className="text-sm font-semibold leading-snug line-clamp-2 w-full">{a.appName}</p>
-                  <p className="text-[11px] text-white/35 leading-tight w-full mt-auto">
+                  <p className="text-[11px] text-faint leading-tight w-full mt-auto">
                     {a.developerName} · {fmtSize(a.sizeBytes)}
                   </p>
                   {a.highRisk.length > 0 && (
-                    <p className="text-[11px] text-amber-400 leading-tight w-full">
+                    <p className="text-[11px] text-warn leading-tight w-full">
                       {a.highRisk.length} sensitive permission{a.highRisk.length === 1 ? '' : 's'}
                     </p>
                   )}
@@ -655,13 +655,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {tab === 'publish' && (
           status && !status.acceptingUploads ? (
             <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
-              <p className="flex items-center gap-2 text-sm font-semibold text-amber-300 mb-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-warn mb-2">
                 <ShieldAlert size={15} /> Not accepting apps yet
               </p>
-              <p className="text-xs text-white/60 leading-relaxed">
+              <p className="text-xs text-muted leading-relaxed">
                 The store cannot take apps until malware scanning and app storage are switched on — no
                 app should ever be handed to someone's phone unscanned. Still to configure:
-                {' '}<span className="text-white/80">{status.missing.join(', ')}</span>.
+                {' '}<span className="text-body">{status.missing.join(', ')}</span>.
               </p>
             </div>
           ) : (
@@ -675,22 +675,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   First on the page on purpose: this is what someone opening "Publish" came to do.
                   The steps below stay, demoted, because a real installable Android app is a
                   different product from an instant app — not a worse way to do the same thing. */}
-              <div className="rounded-xl border border-emerald-500/25 bg-[#0d1117] p-4">
-                <p className="flex items-center gap-1.5 text-sm font-bold text-white mb-1">
-                  <Rocket size={15} className="text-emerald-400" /> Publish an app you built
+              <div className="rounded-xl border border-emerald-500/25 bg-surface p-4">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-ink mb-1">
+                  <Rocket size={15} className="text-success" /> Publish an app you built
                 </p>
-                <p className="text-xs text-white/55 leading-relaxed mb-3">
+                <p className="text-xs text-muted leading-relaxed mb-3">
                   Pick one of your NavBharatAI apps and it goes on App Mart as an instant app — people
                   open it and it runs in their browser. Nothing to build, nothing to upload.
                 </p>
 
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">Your app</label>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-faint mb-1.5">Your app</label>
                 <select
                   value={pickWs}
                   onChange={(e) => choosePublishApp(e.target.value)}
                   disabled={myApps === null || myApps.length === 0}
                   aria-label="Choose which of your apps to publish"
-                  className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500/50 disabled:opacity-60"
+                  className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-emerald-500/50 disabled:opacity-60"
                 >
                   <option value="">
                     {myApps === null ? 'Loading your apps…' : myApps.length === 0 ? 'No apps yet' : 'Choose an app…'}
@@ -701,7 +701,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 </select>
 
                 {myApps !== null && myApps.length === 0 && (
-                  <p className="flex items-start gap-1.5 text-[11px] text-white/45 leading-snug mt-2">
+                  <p className="flex items-start gap-1.5 text-[11px] text-muted leading-snug mt-2">
                     <Info size={12} className="shrink-0 mt-px" />
                     You have not built an app yet. Build one in NavBharatAI Pro, then come back —
                     it will appear in this list by itself.
@@ -711,24 +711,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 {pickWs && (
                   <div className="mt-3 space-y-3">
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">App name</label>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-faint mb-1.5">App name</label>
                       <input
                         value={pickName}
                         onChange={(e) => setPickName(e.target.value.slice(0, 60))}
                         placeholder="What should people see it called?"
-                        className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-emerald-500/50"
+                        className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-faint outline-none focus:border-emerald-500/50"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">
-                        Short description <span className="text-white/25 normal-case font-medium">(optional)</span>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-faint mb-1.5">
+                        Short description <span className="text-faint normal-case font-medium">(optional)</span>
                       </label>
                       <textarea
                         value={pickDesc}
                         onChange={(e) => setPickDesc(e.target.value.slice(0, 600))}
                         rows={2}
                         placeholder="One or two lines about what it does."
-                        className="w-full bg-[#161b22] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-emerald-500/50 resize-none"
+                        className="w-full bg-card border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-faint outline-none focus:border-emerald-500/50 resize-none"
                       />
                     </div>
 
@@ -736,14 +736,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                         where apps showed a name and no logo. Same shared pipeline as the other two
                         icon surfaces, so a 1024px AI-generated PNG is fitted rather than refused. */}
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-white/40 mb-1.5">
-                        App icon <span className="text-white/25 normal-case font-medium">(optional)</span>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-faint mb-1.5">
+                        App icon <span className="text-faint normal-case font-medium">(optional)</span>
                       </label>
                       <div className="flex items-center gap-2.5">
                         {pickIcon
-                          ? <img src={pickIcon} alt="" className="w-11 h-11 rounded-xl object-cover border border-white/10 shrink-0" />
-                          : <div className="w-11 h-11 rounded-xl bg-[#161b22] border border-white/10 flex items-center justify-center shrink-0"><Package size={16} className="text-white/25" /></div>}
-                        <label className="px-3 py-2 rounded-lg border border-white/10 bg-[#161b22] hover:border-white/25 text-white/80 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 transition-colors">
+                          ? <img src={pickIcon} alt="" className="w-11 h-11 rounded-xl object-cover border border-line shrink-0" />
+                          : <div className="w-11 h-11 rounded-xl bg-card border border-line flex items-center justify-center shrink-0"><Package size={16} className="text-faint" /></div>}
+                        <label className="px-3 py-2 rounded-lg border border-line bg-card hover:border-line text-body text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 transition-colors">
                           <ImagePlus size={13} /> Upload
                           <input type="file" accept="image/*" className="hidden"
                             onChange={(e) => { const f = e.target.files?.[0]; if (f) void acceptPickIcon(() => readStoreIcon(f)); }} />
@@ -751,14 +751,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                         <button
                           type="button"
                           onClick={() => void acceptPickIcon(() => readStoreIconFromClipboard())}
-                          className="px-3 py-2 rounded-lg border border-white/10 bg-[#161b22] hover:border-white/25 text-white/80 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                          className="px-3 py-2 rounded-lg border border-line bg-card hover:border-line text-body text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
                         ><Clipboard size={13} /> Paste</button>
                         {pickIcon && (
-                          <button type="button" onClick={() => setPickIcon('')} className="text-[11px] text-white/40 hover:text-white/70 underline underline-offset-2">Remove</button>
+                          <button type="button" onClick={() => setPickIcon('')} className="text-[11px] text-faint hover:text-body underline underline-offset-2">Remove</button>
                         )}
                       </div>
-                      {pickIconBusy && <p className="text-[11px] text-white/40 mt-1.5">Fitting your picture…</p>}
-                      {pickIconErr && <p className="text-[11px] text-amber-300 mt-1.5">{pickIconErr}</p>}
+                      {pickIconBusy && <p className="text-[11px] text-faint mt-1.5">Fitting your picture…</p>}
+                      {pickIconErr && <p className="text-[11px] text-warn mt-1.5">{pickIconErr}</p>}
                     </div>
                   </div>
                 )}
@@ -775,13 +775,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                         type="button"
                         onClick={() => void publishChosenApp()}
                         disabled={blocked !== ''}
-                        className="mt-3 w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors"
+                        className="mt-3 w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 text-on-accent text-sm font-bold inline-flex items-center justify-center gap-2 transition-colors"
                       >
                         {pubBusy ? <Loader2 size={15} className="animate-spin" /> : <Store size={15} />}
                         {pubBusy ? 'Publishing…' : 'Publish to App Mart'}
                       </button>
                       {blocked && !pubBusy && (
-                        <p className="text-[11px] text-white/45 leading-snug mt-1.5 text-center">{blocked}</p>
+                        <p className="text-[11px] text-muted leading-snug mt-1.5 text-center">{blocked}</p>
                       )}
                     </>
                   );
@@ -790,7 +790,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 {/* The gate's refusals name the exact file and line, or the exact cap — shown verbatim,
                     because that one sentence is what tells the user what to fix. */}
                 {pubResult && (
-                  <div className={`mt-3 rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${pubResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-200'}`}>
+                  <div className={`mt-3 rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${pubResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-success' : 'border-amber-500/30 bg-amber-500/10 text-warn'}`}>
                     <p className="flex items-start gap-1.5">
                       {pubResult.ok ? <CheckCircle2 size={13} className="shrink-0 mt-0.5" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
                       <span className="whitespace-pre-wrap break-words">{pubResult.message}</span>
@@ -798,7 +798,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     {pubResult.shareUrl && (
                       <div className="flex items-center gap-2 mt-2">
                         <a href={pubResult.shareUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex-1 min-w-0 truncate underline underline-offset-2 hover:text-white">{pubResult.shareUrl}</a>
+                          className="flex-1 min-w-0 truncate underline underline-offset-2 hover:text-ink">{pubResult.shareUrl}</a>
                         <button type="button" onClick={() => void navigator.clipboard?.writeText(pubResult.shareUrl!)}
                           className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/15 text-[11px] font-semibold"><Copy size={11} /> Copy</button>
                       </div>
@@ -807,52 +807,52 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 )}
               </div>
 
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs leading-relaxed text-white/60">
-                <p className="flex items-center gap-1.5 text-emerald-300 font-semibold mb-1">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs leading-relaxed text-muted">
+                <p className="flex items-center gap-1.5 text-success font-semibold mb-1">
                   <ShieldCheck size={13} /> Publishing is free{status ? ` (₹${status.uploadFeeInr})` : ''}
                 </p>
                 Your app is scanned for malware and then checked by a person before it appears. That
                 usually takes a day. Apps that fail the scan are never stored.
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-[#161b22] p-4">
-                <p className="flex items-center gap-1.5 text-sm font-bold text-white mb-2">
-                  <Store size={15} className="text-emerald-400" /> Only apps you built with NavBharatAI
+              <div className="rounded-xl border border-line bg-card p-4">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-ink mb-2">
+                  <Store size={15} className="text-success" /> Only apps you built with NavBharatAI
                 </p>
-                <p className="text-xs text-white/60 leading-relaxed">
+                <p className="text-xs text-muted leading-relaxed">
                   App Mart carries only apps NavBharatAI made — so there is no app-file upload
-                  here. You cannot upload a <span className="text-white/80">.apk</span>, a
-                  {' '}<span className="text-white/80">.zip</span>, or a file from anywhere else. This is
+                  here. You cannot upload a <span className="text-body">.apk</span>, a
+                  {' '}<span className="text-body">.zip</span>, or a file from anywhere else. This is
                   what keeps the store free of apps NavBharatAI did not build.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-[#0d1117] p-4">
-                <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-1">Want a real Android app (.apk) instead?</p>
-                <p className="text-[11px] text-white/45 leading-relaxed mb-3">
+              <div className="rounded-xl border border-line bg-surface p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-faint mb-1">Want a real Android app (.apk) instead?</p>
+                <p className="text-[11px] text-muted leading-relaxed mb-3">
                   An instant app runs in the browser (the picker above). An Android app installs on a
                   phone — that one is built from your app's build screen:
                 </p>
-                <ol className="space-y-2.5 text-sm text-white/75">
+                <ol className="space-y-2.5 text-sm text-body">
                   <li className="flex gap-2.5">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">1</span>
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-success text-[11px] font-bold flex items-center justify-center">1</span>
                     <span>Open the app you built with NavBharatAI (a new one, or one saved to your GitHub).</span>
                   </li>
                   <li className="flex gap-2.5">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">2</span>
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-success text-[11px] font-bold flex items-center justify-center">2</span>
                     <span>Build its Android app (APK) from the build screen.</span>
                   </li>
                   <li className="flex gap-2.5">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">3</span>
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-600/20 text-success text-[11px] font-bold flex items-center justify-center">3</span>
                     <span>
-                      Next to <span className="inline-flex items-center gap-1 text-white/90"><Download size={12} /> Download</span>,
-                      tap <span className="inline-flex items-center gap-1 font-semibold text-emerald-300"><Store size={12} /> Publish to App Mart</span>.
+                      Next to <span className="inline-flex items-center gap-1 text-body"><Download size={12} /> Download</span>,
+                      tap <span className="inline-flex items-center gap-1 font-semibold text-success"><Store size={12} /> Publish to App Mart</span>.
                       Fill in your name, email and app details there — NavBharatAI sends the build for you,
                       with no file to upload.
                     </span>
                   </li>
                 </ol>
-                <p className="flex items-start gap-1.5 text-[11px] text-white/45 leading-snug mt-3 pt-3 border-t border-white/10">
+                <p className="flex items-start gap-1.5 text-[11px] text-muted leading-snug mt-3 pt-3 border-t border-line">
                   <Info size={12} className="shrink-0 mt-px" />
                   A NavBharatAI app stored in your GitHub still publishes this way — it is a NavBharatAI
                   build, so it comes straight from your build, never a hand-uploaded file.
@@ -867,26 +867,26 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
           <div className="mb-5">
             {owned.length > 0 && (
               <div className="mb-6">
-                <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+                <p className="text-xs font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5">
                   <ShieldCheck size={12} /> Apps you own — take the code any time
                 </p>
-                <p className="text-[11px] text-white/35 mb-2 leading-relaxed">
+                <p className="text-[11px] text-faint mb-2 leading-relaxed">
                   You bought these. Copying is free and unlimited, for these apps only — buy once, take the code whenever you need it.
                 </p>
                 <div className="grid gap-2">
                   {pagedOwned.visible.map((o) => (
-                    <div key={o.appId} className="flex items-center gap-3 p-3 rounded-xl bg-[#161b22] border border-white/10">
+                    <div key={o.appId} className="flex items-center gap-3 p-3 rounded-xl bg-card border border-line">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold truncate">{o.name || 'An app you bought'}</p>
-                        <p className="text-[11px] text-white/35 mt-0.5">
+                        <p className="text-[11px] text-faint mt-0.5">
                           Bought for ₹{o.priceInr}
-                          {!o.available && <span className="text-amber-300"> · the creator has taken this off the store — your copy stays yours</span>}
+                          {!o.available && <span className="text-warn"> · the creator has taken this off the store — your copy stays yours</span>}
                         </p>
                       </div>
                       {o.available && (
                         <button
                           onClick={() => setPlayingId(o.appId)}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex-shrink-0 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold flex-shrink-0 transition-colors"
                         ><Play size={12} /> Open &amp; copy</button>
                       )}
                     </div>
@@ -895,18 +895,18 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                 </div>
               </div>
             )}
-            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+            <p className="text-xs font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5">
               <Globe size={12} /> My instant apps
             </p>
             <div className="space-y-2">
               {pagedWebMine.visible.map((a) => (
-                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+                <div key={a.id} className="p-3 rounded-xl bg-card border border-line">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold">{a.name}</p>
                     <span className={`ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${
-                      a.status === 'listed' ? 'bg-emerald-500/15 text-emerald-300'
-                        : a.status === 'unlisted' ? 'bg-sky-500/15 text-sky-300'
-                        : 'bg-white/10 text-white/50'
+                      a.status === 'listed' ? 'bg-emerald-500/15 text-success'
+                        : a.status === 'unlisted' ? 'bg-sky-500/15 text-info'
+                        : 'bg-raised text-muted'
                     }`}>
                       {a.status === 'listed' ? <CheckCircle2 size={10} /> : a.status === 'unlisted' ? <Link2 size={10} /> : <X size={10} />}
                       {/* 'unlisted' is a REAL state, said honestly: the link works now; the store
@@ -914,22 +914,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       {a.status === 'listed' ? 'On the store' : a.status === 'unlisted' ? 'Live via link · store listing under review' : 'Removed'}
                     </span>
                   </div>
-                  <p className="text-[11px] text-white/40 mt-1">{a.runs} run{a.runs === 1 ? '' : 's'} · {a.requiresPassword ? 'private (password)' : 'public'}</p>
+                  <p className="text-[11px] text-faint mt-1">{a.runs} run{a.runs === 1 ? '' : 's'} · {a.requiresPassword ? 'private (password)' : 'public'}</p>
                   {a.status !== 'removed' && (
                     <div className="flex gap-2 mt-2 flex-wrap">
                       <button
                         onClick={() => { void navigator.clipboard?.writeText(`${window.location.origin}/store/app/${a.id}`); }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
                       ><Link2 size={11} /> Copy link</button>
                       <button
                         onClick={() => setPlayingId(a.id)}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
                       ><Play size={11} /> Open</button>
                       {a.requiresPassword ? (
                         <button
                           onClick={() => void webAppAction(a.id, { visibility: 'public' })}
                           disabled={webBusy === a.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-[11px] text-body transition-colors"
                         >Make public</button>
                       ) : (
                         <button
@@ -938,7 +938,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                             if (pw && pw.length >= 4) void webAppAction(a.id, { visibility: 'private', password: pw });
                           }}
                           disabled={webBusy === a.id}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-[11px] text-white/70 transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised hover:bg-raised disabled:opacity-40 text-[11px] text-body transition-colors"
                         ><Lock size={11} /> Make private</button>
                       )}
                       {/* SELLING IS PARKED (admin 2026-08-15) — every app is free to remix for now.
@@ -947,12 +947,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                           is actually coming rather than pretending something is broken. */}
                       <span
                         title="Every app on the store is free to remix right now. Selling your app — with the money going straight to your own bank — is being built."
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/[0.03] text-[11px] text-white/35"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised text-[11px] text-faint"
                       >Selling — coming soon</span>
                       <button
                         onClick={() => { if (window.confirm('Unpublish this app? Its link stops working and its published files are deleted. Your workspace is untouched.')) void webAppAction(a.id, { action: 'unpublish' }); }}
                         disabled={webBusy === a.id}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/40 disabled:opacity-40 text-[11px] text-rose-300 transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/40 disabled:opacity-40 text-[11px] text-danger transition-colors"
                       ><Trash2 size={11} /> Unpublish</button>
                     </div>
                   )}
@@ -965,25 +965,25 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
         {tab === 'mine' && (
           mine.length === 0 && webMine.length === 0 ? (
-            <p className="text-center text-sm text-white/40 py-12">You have not submitted any apps yet.</p>
+            <p className="text-center text-sm text-faint py-12">You have not submitted any apps yet.</p>
           ) : (
             <div className="space-y-2">
               {pagedMine.visible.map((a) => (
-                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+                <div key={a.id} className="p-3 rounded-xl bg-card border border-line">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold">{a.appName}</p>
-                    <span className="text-xs text-white/40">v{a.versionName}</span>
+                    <span className="text-xs text-faint">v{a.versionName}</span>
                     <span className={`ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${
-                      a.status === 'approved' ? 'bg-emerald-500/15 text-emerald-300'
-                        : a.status === 'pending' ? 'bg-amber-500/15 text-amber-300'
-                        : 'bg-white/10 text-white/50'
+                      a.status === 'approved' ? 'bg-emerald-500/15 text-success'
+                        : a.status === 'pending' ? 'bg-amber-500/15 text-warn'
+                        : 'bg-raised text-muted'
                     }`}>
                       {a.status === 'approved' ? <CheckCircle2 size={10} /> : a.status === 'pending' ? <Clock size={10} /> : <X size={10} />}
                       {a.status === 'approved' ? 'Live' : a.status === 'pending' ? 'Waiting for review' : a.status}
                     </span>
                   </div>
-                  {a.status === 'approved' && <p className="text-[11px] text-white/40 mt-1">{a.downloads} download{a.downloads === 1 ? '' : 's'}</p>}
-                  {a.reviewNote && <p className="text-[11px] text-white/50 mt-1.5 leading-relaxed">Reviewer: {a.reviewNote}</p>}
+                  {a.status === 'approved' && <p className="text-[11px] text-faint mt-1">{a.downloads} download{a.downloads === 1 ? '' : 's'}</p>}
+                  {a.reviewNote && <p className="text-[11px] text-muted mt-1.5 leading-relaxed">Reviewer: {a.reviewNote}</p>}
                 </div>
               ))}
               <LoadMore list={pagedMine} label="apps" />
@@ -997,20 +997,20 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             the person. Newest first, with the app it is about and a way to open or remove it. */}
         {tab === 'review' && status?.isAdmin && reports.length > 0 && (
           <div className="mb-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-rose-400/70 mb-2 flex items-center gap-1.5">
+            <p className="text-xs font-bold uppercase tracking-wider text-danger mb-2 flex items-center gap-1.5">
               <Flag size={12} /> Reported by viewers ({reports.length})
             </p>
             <div className="space-y-2">
               {pagedReports.visible.map((r, i) => (
-                <div key={`${r.appId}-${r.at}-${i}`} className="p-3 rounded-xl bg-[#161b22] border border-rose-500/20">
+                <div key={`${r.appId}-${r.at}-${i}`} className="p-3 rounded-xl bg-card border border-rose-500/20">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-semibold">{r.appName}</p>
-                    <span className="text-[10px] text-white/40 shrink-0">
+                    <span className="text-[10px] text-faint shrink-0">
                       {r.at ? new Date(r.at).toLocaleDateString() : '—'}
                     </span>
                   </div>
-                  <p className="text-xs text-white/70 mt-1 whitespace-pre-wrap break-words">{r.reason}</p>
-                  <p className="text-[10px] text-white/35 mt-1">
+                  <p className="text-xs text-body mt-1 whitespace-pre-wrap break-words">{r.reason}</p>
+                  <p className="text-[10px] text-faint mt-1">
                     {/* Anonymous is recorded honestly rather than dressed up — a reviewer should weigh it. */}
                     {r.reporterUid === 'anon' ? 'from a signed-out viewer' : 'from a signed-in user'}
                     {r.appStatus === 'removed' ? ' · this app is already removed' : ` · status: ${r.appStatus}`}
@@ -1019,12 +1019,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                     <div className="flex gap-2 mt-2.5">
                       <button
                         onClick={() => setPlayingId(r.appId)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
                       ><Play size={11} /> See it</button>
                       <button
                         onClick={() => void decideWeb(r.appId, 'removed')}
                         disabled={webBusy === r.appId}
-                        className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-white font-semibold transition-colors"
+                        className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
                       >Remove this app</button>
                     </div>
                   )}
@@ -1038,28 +1038,28 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* ── Admin review: instant apps waiting for a STORE LISTING (their links already work) ── */}
         {tab === 'review' && status?.isAdmin && webQueue.length > 0 && (
           <div className="mb-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+            <p className="text-xs font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5">
               <Globe size={12} /> Instant apps — listing requests
             </p>
             <div className="space-y-3">
               {[...webQueue]
                 .sort((x, y) => (y.safetyFindings?.length ?? 0) - (x.safetyFindings?.length ?? 0))
                 .map((a) => (
-                <div key={a.id} className={`p-3 rounded-xl bg-[#161b22] border ${(a.safetyFindings?.length ?? 0) > 0 ? 'border-amber-500/40' : 'border-white/10'}`}>
+                <div key={a.id} className={`p-3 rounded-xl bg-card border ${(a.safetyFindings?.length ?? 0) > 0 ? 'border-amber-500/40' : 'border-line'}`}>
                   <p className="text-sm font-semibold">{a.name}</p>
-                  <p className="text-xs text-white/50 mt-0.5">{a.description || '—'}</p>
+                  <p className="text-xs text-muted mt-0.5">{a.description || '—'}</p>
                   {/* WHAT THE SCAN SAW — shown BEFORE the List button, deliberately. A reviewer who
                       has already decided is not going to scroll back for a warning. The matched text
                       is included because "phishing lure" alone is not enough to judge a real app on. */}
                   {(a.safetyFindings?.length ?? 0) > 0 && (
                     <div className="mt-2 px-2.5 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
-                      <p className="text-[11px] font-semibold text-amber-200 flex items-center gap-1.5">
+                      <p className="text-[11px] font-semibold text-warn flex items-center gap-1.5">
                         <ShieldAlert size={11} /> The content scan flagged this app
                       </p>
                       {a.safetyFindings!.map((f, i) => (
-                        <p key={`${f.rule}-${i}`} className="text-[10px] text-amber-100/70 leading-relaxed">
+                        <p key={`${f.rule}-${i}`} className="text-[10px] text-warn leading-relaxed">
                           <b>[{f.severity}]</b> {f.description}
-                          <span className="block text-amber-100/40 font-mono break-all">“{f.matchSnippet}”</span>
+                          <span className="block text-warn font-mono break-all">“{f.matchSnippet}”</span>
                         </p>
                       ))}
                     </div>
@@ -1067,17 +1067,17 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   <div className="flex gap-2 mt-2.5">
                     <button
                       onClick={() => setPlayingId(a.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/70 transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised text-[11px] text-body transition-colors"
                     ><Play size={11} /> Try it</button>
                     <button
                       onClick={() => void decideWeb(a.id, 'listed')}
                       disabled={webBusy === a.id}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-white font-semibold transition-colors"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
                     >List on the store</button>
                     <button
                       onClick={() => void decideWeb(a.id, 'removed')}
                       disabled={webBusy === a.id}
-                      className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-white font-semibold transition-colors"
+                      className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
                     >Remove</button>
                   </div>
                 </div>
@@ -1089,28 +1089,28 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
         {/* ── Admin review ── */}
         {tab === 'review' && status?.isAdmin && (
           queue.length === 0 && webQueue.length === 0 ? (
-            <p className="text-center text-sm text-white/40 py-12">Nothing waiting for review.</p>
+            <p className="text-center text-sm text-faint py-12">Nothing waiting for review.</p>
           ) : (
             <div className="space-y-3">
               {pagedQueue.visible.map((a) => (
-                <div key={a.id} className="p-3 rounded-xl bg-[#161b22] border border-white/10">
+                <div key={a.id} className="p-3 rounded-xl bg-card border border-line">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold">{a.appName} <span className="text-xs font-normal text-white/40">v{a.versionName}</span></p>
+                    <p className="text-sm font-semibold">{a.appName} <span className="text-xs font-normal text-faint">v{a.versionName}</span></p>
                     {/* The app stays on this screen after approval, saying so — it used to vanish. */}
                     <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                      a.status === 'approved' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'
+                      a.status === 'approved' ? 'bg-emerald-500/15 text-success' : 'bg-amber-500/15 text-warn'
                     }`}>
                       {reviewStatusLabel(a.status)}
                     </span>
                   </div>
-                  <p className="text-xs text-white/50 mt-0.5">{a.shortDescription}</p>
-                  <p className="text-[11px] text-white/40 mt-1.5">
+                  <p className="text-xs text-muted mt-0.5">{a.shortDescription}</p>
+                  <p className="text-[11px] text-faint mt-1.5">
                     {a.developer?.name} · {a.developer?.email}{a.developer?.phone ? ` · ${a.developer.phone}` : ''}
                   </p>
-                  <p className="text-[11px] text-white/30 mt-0.5 break-all">{fmtSize(a.sizeBytes)} · sha256 {a.sha256?.slice(0, 16)}…</p>
+                  <p className="text-[11px] text-faint mt-0.5 break-all">{fmtSize(a.sizeBytes)} · sha256 {a.sha256?.slice(0, 16)}…</p>
 
                   <div className={`mt-2 px-2.5 py-1.5 rounded-lg text-[11px] ${
-                    a.scanVerdict === 'clean' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'
+                    a.scanVerdict === 'clean' ? 'bg-emerald-500/10 text-success' : 'bg-amber-500/10 text-warn'
                   }`}>
                     Scan: {a.scanVerdict} — {a.scanMalicious} of {a.scanEnginesTotal} engines flagged it
                     {a.scanFlaggedBy?.length > 0 && ` (${a.scanFlaggedBy.slice(0, 3).join(', ')})`}
@@ -1122,13 +1122,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                   </div>
 
                   {a.highRisk?.length > 0 && (
-                    <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-rose-500/10 text-[11px] text-rose-300 leading-relaxed">
+                    <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-rose-500/10 text-[11px] text-danger leading-relaxed">
                       <p className="font-semibold mb-0.5">Sensitive permissions — look closely:</p>
                       {a.highRisk.map((h) => <p key={h.permission}>• {h.why}</p>)}
                     </div>
                   )}
                   {a.inspectionWarnings?.length > 0 && a.inspectionWarnings.map((w, i) => (
-                    <p key={i} className="mt-1.5 text-[11px] text-white/40 leading-relaxed">• {w}</p>
+                    <p key={i} className="mt-1.5 text-[11px] text-faint leading-relaxed">• {w}</p>
                   ))}
 
                   {/* An APPROVED app is live in the store, so "Publish" and "Reject" would be wrong
@@ -1138,7 +1138,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                       <button
                         onClick={() => void decide(a.id, 'removed')}
                         disabled={reviewing === a.id}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 hover:bg-rose-600/20 text-xs font-semibold text-white/70 hover:text-rose-300 disabled:opacity-40"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-rose-600/20 text-xs font-semibold text-body hover:text-danger disabled:opacity-40"
                       >
                         {reviewing === a.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />} Remove from store
                       </button>
@@ -1154,7 +1154,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
                         <button
                           onClick={() => void decide(a.id, 'rejected')}
                           disabled={reviewing === a.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-white/70 disabled:opacity-40"
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-raised text-xs font-semibold text-body disabled:opacity-40"
                         >
                           <X size={12} /> Reject
                         </button>
@@ -1171,65 +1171,65 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
 
       {/* ── App detail ── */}
       {detailApp && (
-        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailApp(null)}>
-          <div className="nb-sheet w-full sm:max-w-lg bg-[#0d1117] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailApp(null)}>
+          <div className="nb-sheet w-full sm:max-w-lg bg-surface border border-line rounded-t-2xl sm:rounded-2xl p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                {detailApp.iconDataUrl ? <img src={detailApp.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={20} className="text-white/30" />}
+              <div className="w-12 h-12 rounded-xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
+                {detailApp.iconDataUrl ? <img src={detailApp.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={20} className="text-faint" />}
               </div>
               <div className="min-w-0 flex-1">
-                <h2 className="text-lg font-bold truncate flex items-center gap-1.5">{detailApp.name}{detailApp.requiresPassword && <Lock size={12} className="text-white/40" />}</h2>
-                <p className="text-[11px] text-white/40">{detailApp.runs} run{detailApp.runs === 1 ? '' : 's'} · A NavBharatAI-built app</p>
+                <h2 className="text-lg font-bold truncate flex items-center gap-1.5">{detailApp.name}{detailApp.requiresPassword && <Lock size={12} className="text-faint" />}</h2>
+                <p className="text-[11px] text-faint">{detailApp.runs} run{detailApp.runs === 1 ? '' : 's'} · A NavBharatAI-built app</p>
               </div>
             </div>
 
-            <p className="text-sm text-white/70 leading-relaxed whitespace-pre-wrap mb-4">{detailApp.description || 'A NavBharatAI-built app.'}</p>
+            <p className="text-sm text-body leading-relaxed whitespace-pre-wrap mb-4">{detailApp.description || 'A NavBharatAI-built app.'}</p>
 
             {detailLoading ? (
-              <p className="flex items-center gap-2 text-xs text-white/40 py-6 justify-center"><Loader2 size={14} className="animate-spin" /> Loading screenshots…</p>
+              <p className="flex items-center gap-2 text-xs text-faint py-6 justify-center"><Loader2 size={14} className="animate-spin" /> Loading screenshots…</p>
             ) : detailShots.length > 0 ? (
               <div className="flex gap-3 overflow-x-auto pb-2 mb-2 -mx-1 px-1">
                 {detailShots.map((s, i) => (
-                  <img key={i} src={s} alt={`${detailApp.name} screenshot ${i + 1}`} className="h-64 rounded-xl border border-white/10 object-cover flex-shrink-0" />
+                  <img key={i} src={s} alt={`${detailApp.name} screenshot ${i + 1}`} className="h-64 rounded-xl border border-line object-cover flex-shrink-0" />
                 ))}
               </div>
             ) : (detailApp.screenshotCount ?? 0) === 0 ? (
-              <p className="text-[11px] text-white/30 mb-2">No screenshots yet.</p>
+              <p className="text-[11px] text-faint mb-2">No screenshots yet.</p>
             ) : null}
 
             <button
               onClick={() => { const id = detailApp.id; setDetailApp(null); setPlayingId(id); }}
-              className="w-full mt-2 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold flex items-center justify-center gap-2"
+              className="w-full mt-2 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-sm font-bold flex items-center justify-center gap-2"
             >
               <Play size={14} /> Open the app
             </button>
-            <button onClick={() => setDetailApp(null)} className="w-full mt-2 py-2 rounded-lg text-xs text-white/50 hover:text-white/80">Close</button>
+            <button onClick={() => setDetailApp(null)} className="w-full mt-2 py-2 rounded-lg text-xs text-muted hover:text-body">Close</button>
           </div>
         </div>
       )}
 
       {openApp && (
-        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpenApp(null)}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpenApp(null)}>
           <div
-            className="nb-sheet w-full sm:max-w-lg overflow-y-auto bg-[#161b22] border border-white/10 rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
+            className="nb-sheet w-full sm:max-w-lg overflow-y-auto bg-card border border-line rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex gap-3 mb-3">
-              <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
-                {openApp.iconDataUrl ? <img src={openApp.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-white/30" />}
+              <div className="w-16 h-16 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
+                {openApp.iconDataUrl ? <img src={openApp.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-faint" />}
               </div>
               <div className="min-w-0">
                 <h2 className="text-lg font-bold truncate">{openApp.appName}</h2>
-                <p className="text-xs text-white/50">{openApp.developerName} · v{openApp.versionName}</p>
-                <p className="text-[11px] text-white/30">{openApp.category} · {fmtSize(openApp.sizeBytes)} · {openApp.downloads} downloads</p>
+                <p className="text-xs text-muted">{openApp.developerName} · v{openApp.versionName}</p>
+                <p className="text-[11px] text-faint">{openApp.category} · {fmtSize(openApp.sizeBytes)} · {openApp.downloads} downloads</p>
               </div>
             </div>
 
-            <p className="text-sm text-white/70 leading-relaxed whitespace-pre-wrap mb-4">{openApp.description}</p>
+            <p className="text-sm text-body leading-relaxed whitespace-pre-wrap mb-4">{openApp.description}</p>
 
             {/* What it can do on your phone. Shown BEFORE the download button, on purpose. */}
             {openApp.highRisk.length > 0 && (
-              <div className="mb-4 px-3 py-2.5 rounded-xl bg-amber-500/10 text-xs text-amber-200 leading-relaxed">
+              <div className="mb-4 px-3 py-2.5 rounded-xl bg-amber-500/10 text-xs text-warn leading-relaxed">
                 <p className="font-semibold mb-1 flex items-center gap-1.5"><ShieldAlert size={13} /> This app asks to:</p>
                 {openApp.highRisk.map((h) => <p key={h.permission}>• {h.why}</p>)}
               </div>
@@ -1255,17 +1255,17 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId }) => 
             {/* 🔒 A REFUSED DOWNLOAD MUST SAY SO. The old `<a>` could only ever navigate; a signed-out
                 user would have met the server's page instead of a sentence here. */}
             {dlError && (
-              <p className="mt-2 text-[11px] text-amber-300 leading-relaxed">{dlError}</p>
+              <p className="mt-2 text-[11px] text-warn leading-relaxed">{dlError}</p>
             )}
 
-            <p className="mt-3 flex gap-2 text-[11px] text-white/40 leading-relaxed">
+            <p className="mt-3 flex gap-2 text-[11px] text-faint leading-relaxed">
               <Info size={12} className="mt-0.5 flex-shrink-0" />
               To install an app from outside the Play Store, Android will ask you to allow installs
               from this browser. This app was scanned for malware and checked by a person, but always
               install only what you actually trust.
             </p>
 
-            <button onClick={() => setOpenApp(null)} className="w-full mt-3 py-2 rounded-lg text-xs text-white/50 hover:text-white/80">
+            <button onClick={() => setOpenApp(null)} className="w-full mt-3 py-2 rounded-lg text-xs text-muted hover:text-body">
               Close
             </button>
           </div>

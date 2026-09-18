@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR } from '../scripts/themeMigrate.mjs';
+import { literalsIn, maskEmbeddedSources } from '../scripts/themeColourBaseline.mjs';
 
 const compat = readFileSync(resolve(__dirname, '../src/styles/theme-compat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
 
@@ -170,6 +171,21 @@ describe('white text on a SOLID brand fill stays white — the compat exception,
     expect(SOLID_FILL.test('bg-rose-600/80 text-white')).toBe(true);
     expect(SOLID_FILL.test('bg-rose-600/10 text-white')).toBe(false);
   });
+  it('every grey label nested under a fixed fill goes white, however deep — the Studio status bar', () => {
+    const src = [
+      '<div className="h-5 bg-[#007acc] flex items-center px-3">',
+      '  <span className="text-[10px] text-white font-mono">Ln 1</span>',
+      '  <span className="text-[10px] text-[#c9d1d9] font-mono">TXT</span>',
+      '  <span className="text-[10px] text-[#8b949e] font-mono ml-auto">UTF-8</span>',
+      '</div>',
+      '<span className="text-[#8b949e]">outside</span>',
+    ].join('\n');
+    const out = migrate(src).out.split('\n');
+    expect(out[1]).toContain('text-on-accent');
+    expect(out[2]).toContain('text-on-accent');
+    expect(out[3]).toContain('text-on-accent');
+    expect(out[5]).toBe('<span className="text-muted">outside</span>');
+  });
   it('a label directly inside a filled box (the line above opens a solid-fill element) stays white', () => {
     const src = [
       '<div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">',
@@ -181,6 +197,13 @@ describe('white text on a SOLID brand fill stays white — the compat exception,
     const { out } = migrate(src);
     expect(out).toContain('<span className="text-on-accent font-black text-xs">NB</span>');
     expect(out).toContain('<span className="text-ink font-black">plain</span>');
+  });
+  it('a FIXED hex fill the theme will never change (VS Code blue) keeps its white label; a chrome hex does not count', () => {
+    // Studio\'s status bar: `bg-[#007acc] text-white/60` became text-muted on the first run — #8b949e on
+    // that blue is 1.47:1, an "invisible" the crawl caught on Dark. A hex that the table maps to a
+    // surface token (bg-[#161b22] → bg-card) is chrome, not a fill, so white on IT is still text-ink.
+    expect(migrate('"bg-[#007acc] text-white/60 px-2"').out).toBe('"bg-[#007acc] text-on-accent px-2"');
+    expect(migrate('"bg-[#161b22] text-white px-2"').out).toBe('"bg-card text-ink px-2"');
   });
   it('mapToken itself takes the flag', () => {
     expect(mapToken('text-white', { onSolidFill: true })?.token).toBe('text-on-accent');
@@ -211,5 +234,32 @@ describe('migrate — mechanics', () => {
   it('never touches a token that is already semantic', () => {
     const src = '"bg-card text-muted border-line text-on-accent"';
     expect(migrate(src).out).toBe(src);
+  });
+});
+
+describe('🔒 embedded source is SOMEBODY ELSE\'S app — never counted, never rewritten', () => {
+  // ComponentLibrary\'s copyable snippets and SyncedTemplates\' starter projects are markup inside
+  // template literals. Those apps run on plain Tailwind, where `bg-card` means nothing — the first
+  // run of PR D rewrote 19 snippets to our tokens and would have handed users broken components.
+  const snippet = "const c = { html: `<nav class=\"bg-[#161b22] text-white px-4\"><a class=\"text-gray-400\">Home</a></nav>` };";
+  it('the census does not count a literal inside embedded markup', () => {
+    expect(literalsIn(snippet)).toEqual([]);
+    expect(maskEmbeddedSources(snippet)).toMatch(/const c = \{ html: +\};/); // the whole literal, backticks included, becomes spaces
+  });
+  it('the codemod leaves embedded markup byte-identical while migrating the UI around it', () => {
+    const src = snippet + "\nconst ui = <div className=\"bg-[#161b22] text-white\">{c.html}</div>;";
+    const { out } = migrate(src);
+    expect(out.split('\n')[0]).toBe(snippet);
+    expect(out.split('\n')[1]).toBe("const ui = <div className=\"bg-card text-ink\">{c.html}</div>;");
+  });
+  it('a class-list template (`px-2 ${x} text-white`) is NOT embedded source — it has no markup', () => {
+    const src = "className={`px-2 ${on ? 'a' : 'b'} text-white`}";
+    expect(maskEmbeddedSources(src)).toBe(src);
+    expect(migrate(src).out).toBe("className={`px-2 ${on ? 'a' : 'b'} text-ink`}");
+  });
+  it('a starter project file (a whole App.tsx in a backtick) counts for nothing', () => {
+    const starter = "files: { 'src/App.tsx': `import React from \"react\";\nexport default () => <div className=\"bg-white text-gray-900\">hi</div>;` }";
+    expect(literalsIn(starter)).toEqual([]);
+    expect(migrate(starter).out).toBe(starter);
   });
 });

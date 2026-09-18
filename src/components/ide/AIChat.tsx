@@ -1204,9 +1204,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                   msg.sender === 'user'
                     ? "bg-indigo-600 text-on-accent rounded-tr-none"
                     : isNetworkError
-                      ? "bg-[#1a0e0e] text-body border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                      ? "bg-red-500/10 text-body border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                       : isAIError
-                        ? "bg-[#1a1600] text-body border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                        ? "bg-amber-500/10 text-body border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                         : "bg-card text-body border border-line rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                 )}>
                   {/* Attachment image previews — compact grid */}

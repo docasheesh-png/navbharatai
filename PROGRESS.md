@@ -66159,3 +66159,62 @@ re-anchored: `appMart.test.ts` asserted the description's `hidden sm:block` rule
 class riding along in the same string; it now names the token, and the claim it makes is unchanged.
 **After the palette fix, re-crawled:** Home, Settings, Billing and Admin are at **zero misses on all
 three themes** — the first time any crawled page has been clean on Light.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR F of N: nine more files — and the finding that embedded source is SOMEBODY ELSE'S app
+
+**🔴 The finding first, because PR D shipped it wrong and this PR corrects it.** `ComponentLibrary.tsx`
+holds 19 copyable HTML snippets (the Component Library's own catalogue — a navbar, a login card, a
+footer) as template literals, and `SyncedTemplates.ts` holds whole starter projects the same way. The
+codemod in PR D rewrote the snippets' classes to our tokens (`bg-gray-900` → `bg-card`,
+`text-white` → `text-ink`), and the census counted SyncedTemplates' 219 literals as NavBharatAI UI. Both
+are wrong for the same reason: **that markup runs in the USER'S app, on plain Tailwind, where `bg-card`
+means nothing** — a user copying "Navbar Dark" would have received a component with no background.
+The preview iframe's `<body class>` was rewritten too, so the library's own previews would have lost
+their surface. Found by scanning the migrated files for template literals containing markup, before
+the D commit reached `main`; nothing was ever served.
+- **Fixed at the class, not the instance:** `maskEmbeddedSources` in `themeColourBaseline.mjs` blanks
+  every template literal whose body is markup (`className=`, `class=`, an HTML tag) — NavBharatAI's own
+  UI never puts JSX inside a backtick string; what does is source that belongs to somebody else's app.
+  The census skips it and the codemod never rewrites inside it, from ONE function, so the two cannot
+  disagree. A class-list template (`` `px-2 ${x} text-white` ``) has no markup and is still migrated.
+- **ComponentLibrary restored from before PR D and re-migrated under the rule**: snippets and the
+  preview wrapper byte-identical to the original plain-Tailwind markup; the panel's own UI on tokens;
+  the inline-style hand edits re-applied. 1 literal left (the light preview canvas, deliberate).
+- **The census got more honest everywhere:** SyncedTemplates 219 → 0 (all starter source),
+  AICodeReview 91 → 43, AITestingSuite 57 → 17, PluginSystem 69 → 32, MultiPageBuilder 46 → 35,
+  previewUtils 46 → 32, SDAChat 145 → 129, App.tsx 29 → 26, paymentSetup 8 → 0 — every drop is a
+  template literal of generated or sample source that was never NavBharatAI's UI. Test-locked in
+  `themeMigrate.test.ts` (four cases: not counted, not rewritten, the class-list template still
+  migrates, a whole starter file counts for nothing).
+
+**Nine files, one run each:** HostingChooser 218 → 3 · NavAppStore 207 → 0 · ProfilePage 191 → 2 ·
+PreviewSurface 186 → 6 · ProjectInsightsPanel 167 → 2 · BotBuilder 166 → 8 · DatabaseStudio 159 → 0 ·
+AppModals 154 → 2 · CodeStudio 150 → 4. Baseline **7,714 → 5,738** (165 files).
+
+**🔴 The crawl caught a regression the codemod's own rule created, and the fix is a rule, not a line.**
+The first run of F put Code Studio's status bar (`bg-[#007acc]`, a fixed VS-Code blue) on `text-muted`:
+"UTF-8" measured **1.47:1** on Dark. Two gaps, both in `scripts/themeMigrate.mjs`: a hex fill that is
+not in the chrome tables (`#007acc`, `#161b22`-style rows are chrome; `#007acc` is a brand fill) was not
+recognised as a fill at all, and a grey label on a line BELOW the fill's opening line was judged as if
+it stood on the page surface. Now: `hasHexBrandFill` treats every non-chrome `bg-[#hex]` as a fixed
+fill; `fillScopes` walks the file with an indentation stack so a label nested anywhere under a solid
+fill knows it; and a grey text literal in that position becomes `text-on-accent`. The nine files were
+restored from HEAD and re-run under the fixed codemod, so every one of them carries the fix, not a
+hand patch. **The sibling hunt across A–E found two more of the same class** in `SettingsPanel.tsx`
+(the avatar initial and the hover "+" on the `bg-indigo-600` bot tile, both `text-ink` on indigo since
+PR D) — fixed to `text-on-accent`. Test-locked (45 cases in `themeMigrate.test.ts`, including the
+status-bar shape and a label two lines under its box).
+
+**Crawled nine views × three themes, before vs after F** (App Store, Profile, Preview, BotBuilder,
+Database, Studio, Deploy, Files, Components): **no view worse on any theme.** Dark severe 2 → 0, fail
+17 → 15; Contrast severe 3 → 0, fail 13 → 12; Light severe 6 → 3, fail 25 → 21. Profile, Preview,
+Database, Deploy, Files and Components are at zero on all three themes. What remains is NOT in F's
+files, named so the next PR does not re-find it: (1) Studio's editor tabs are `Editor.tsx`
+(`bg-[#2d2d2d] text-[#969696]` — compat re-maps the text to Light's muted grey and leaves the fixed
+dark tab behind it: 1.82:1) and the "Explorer" label is `FileExplorer.tsx`'s `text-white/50`; both
+are later-PR files. (2) Monaco's own `mtk10` tokens on Light (the editor keeps `vs-dark`) — the
+editor's theme, not ours; a Light editor theme is a separate decision. (3) 🟡 **A systemic one for a
+later PR: white on `bg-emerald-600` / `bg-green-600` is 3.65:1 / 3.22:1 on EVERY theme** (App Store's
+"Browse", BotBuilder's "Go Live" and "Whatsapp"). That is the brand fill, not the theme system — a
+`bg-success` fill token at emerald-700 (≥ 4.5 with white) would fix the class in one place; recorded
+here rather than hand-patched three buttons.

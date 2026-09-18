@@ -496,7 +496,7 @@ export function SettingsPanel({
                       {user.photoURL ? (
                         <img src={user.photoURL} alt={user.displayName || 'User'} className="w-full h-full object-cover" referrerPolicy="no-referrer" loading="lazy" />
                       ) : (
-                        <span className="text-ink font-black text-sm">{(user.displayName || user.email || 'U').charAt(0).toUpperCase()}</span>
+                        <span className="text-on-accent font-black text-sm">{(user.displayName || user.email || 'U').charAt(0).toUpperCase()}</span>
                       )}
                     </div>
                     <div className="min-w-0">
@@ -749,7 +749,7 @@ export function SettingsPanel({
                      <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl relative group cursor-pointer overflow-hidden">
                         <Bot className="w-10 h-10 text-on-accent group-hover:scale-110 transition-transform" />
                         <div className="absolute inset-0 bg-well opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                           <Plus className="w-6 h-6 text-ink" />
+                           <Plus className="w-6 h-6 text-on-accent" />
                         </div>
                      </div>
                      <div>

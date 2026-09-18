@@ -932,34 +932,34 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           onFilesChange(next);
         };
         return (
-           <div className="flex flex-col h-full bg-[#161b22]">
-              <div className="p-4 space-y-2 border-b border-white/5 shrink-0">
-                 <h3 className="text-white font-black uppercase tracking-widest text-[10px] mb-1 flex items-center gap-2"><Search className="w-3 h-3" /> Search</h3>
+           <div className="flex flex-col h-full bg-card">
+              <div className="p-4 space-y-2 border-b border-line shrink-0">
+                 <h3 className="text-ink font-black uppercase tracking-widest text-[10px] mb-1 flex items-center gap-2"><Search className="w-3 h-3" /> Search</h3>
                  <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     autoFocus
-                    className="w-full bg-black/20 border border-white/5 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
+                    className="w-full bg-well border border-line rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
                     placeholder="Search all files…"
                  />
                  <div className="flex gap-2">
                     <input
                        value={replaceQuery}
                        onChange={(e) => setReplaceQuery(e.target.value)}
-                       className="flex-1 bg-black/20 border border-white/5 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
+                       className="flex-1 bg-well border border-line rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
                        placeholder="Replace with…"
                     />
                     <button
                        onClick={doReplaceAll}
                        disabled={!q}
                        title="Replace all occurrences in every file"
-                       className="px-3 rounded-lg bg-indigo-600 disabled:opacity-40 text-white text-[10px] font-bold flex items-center gap-1 whitespace-nowrap"
+                       className="px-3 rounded-lg bg-indigo-600 disabled:opacity-40 text-on-accent text-[10px] font-bold flex items-center gap-1 whitespace-nowrap"
                     >
                        Replace All
                     </button>
                  </div>
                  {q && (
-                    <p className="text-[10px] text-[#8b949e] font-medium">
+                    <p className="text-[10px] text-muted font-medium">
                        {results.length}{results.length > 500 ? '+' : ''} match{results.length === 1 ? '' : 'es'} in {fileCount} file{fileCount === 1 ? '' : 's'}
                     </p>
                  )}
@@ -971,17 +971,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                     <button
                        key={`${r.path}:${r.line}:${i}`}
                        onClick={() => { setActiveFile(r.path); if (isMobile) setIsSidebarOpen(false); }}
-                       className="w-full text-left px-4 py-2 hover:bg-white/5 border-b border-white/[0.03]"
+                       className="w-full text-left px-4 py-2 hover:bg-raised border-b border-line"
                     >
-                       <div className="text-[10px] text-indigo-300 font-mono truncate">{r.path}:{r.line}</div>
-                       <div className="text-[11px] text-[#c9d1d9] font-mono truncate">{r.text || '(empty line)'}</div>
+                       <div className="text-[10px] text-accent-text font-mono truncate">{r.path}:{r.line}</div>
+                       <div className="text-[11px] text-body font-mono truncate">{r.text || '(empty line)'}</div>
                     </button>
                  ))}
                  {q && results.length === 0 && (
-                    <p className="p-4 text-[11px] text-[#8b949e]">No matches for “{q}”.</p>
+                    <p className="p-4 text-[11px] text-muted">No matches for “{q}”.</p>
                  )}
                  {!q && (
-                    <p className="p-4 text-[11px] text-[#8b949e]">Type above to search across all project files. Click a result to open it.</p>
+                    <p className="p-4 text-[11px] text-muted">Type above to search across all project files. Click a result to open it.</p>
                  )}
               </div>
            </div>
@@ -1027,22 +1027,22 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         return <AgentV3MiniChat userId={v3UserId} email={v3Email} prefill={aiPrefill} />;
       case 'settings':
         return (
-          <div className="p-6 h-full bg-[#161b22] space-y-6">
-             <h3 className="text-white font-black uppercase tracking-widest text-[10px]">User Preferences</h3>
+          <div className="p-6 h-full bg-card space-y-6">
+             <h3 className="text-ink font-black uppercase tracking-widest text-[10px]">User Preferences</h3>
              <div className="space-y-4">
                  {/* REMOVED (2026-08-04): four rows — General / Editor / Terminal / Extensions —
                      styled `cursor-pointer` with a chevron, and no onClick at all. They looked like
                      navigation into sub-screens that were never built, so every tap did nothing. The
                      real, working settings are directly below. */}
                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-[#8b949e] uppercase">Interface Theme</label>
+                    <label className="text-[9px] font-black text-muted uppercase">Interface Theme</label>
                     <select 
                        value={theme}
                        onChange={(e) => {
                          const newTheme = e.target.value as ThemeMode;
                          if (onThemeChange) onThemeChange(newTheme);
                        }}
-                       className="w-full bg-black/20 border border-white/5 rounded-lg px-4 py-3 text-xs outline-none focus:border-indigo-500/50 appearance-none text-[#c9d1d9]"
+                       className="w-full bg-well border border-line rounded-lg px-4 py-3 text-xs outline-none focus:border-indigo-500/50 appearance-none text-body"
                     >
                        {THEME_MODES.map(mode => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
                     </select>
@@ -1052,10 +1052,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         );
       case 'security':
         return (
-          <div className="p-6 h-full bg-[#161b22] space-y-4">
-             <h3 className="text-white font-black uppercase tracking-widest text-[10px]">Security Center</h3>
-             <p className="text-[10px] text-[#8b949e] font-medium leading-relaxed">Launch a deep security audit of your codebase to identify vulnerabilities, secrets, and misconfigurations.</p>
-             <button onClick={() => setActiveScreen('security')} className="w-full py-3 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-indigo-600/20">Enter Security Hub</button>
+          <div className="p-6 h-full bg-card space-y-4">
+             <h3 className="text-ink font-black uppercase tracking-widest text-[10px]">Security Center</h3>
+             <p className="text-[10px] text-muted font-medium leading-relaxed">Launch a deep security audit of your codebase to identify vulnerabilities, secrets, and misconfigurations.</p>
+             <button onClick={() => setActiveScreen('security')} className="w-full py-3 bg-indigo-600 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-indigo-600/20">Enter Security Hub</button>
           </div>
         );
       default: return null;
@@ -1077,25 +1077,25 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         {zipConfirmOpen && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            className="absolute inset-0 z-[600] flex items-center justify-center p-4 bg-scrim backdrop-blur-sm"
             onClick={() => { if (!zipBusy) setZipConfirmOpen(false); }}
           >
             <motion.div
               initial={{ scale: 0.95, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 8 }}
               onClick={(e) => e.stopPropagation()}
               role="alertdialog" aria-modal="true" aria-labelledby="zip-warn-title"
-              className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#161b22] p-6 shadow-2xl"
+              className="w-full max-w-sm rounded-3xl border border-line bg-card p-6 shadow-2xl"
             >
               <div className="flex items-center gap-2.5 mb-3">
                 <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-4.5 h-4.5 text-amber-400" />
+                  <AlertCircle className="w-4.5 h-4.5 text-warn" />
                 </div>
-                <h3 id="zip-warn-title" className="text-white font-bold text-[15px] leading-snug">{zipText.title}</h3>
+                <h3 id="zip-warn-title" className="text-ink font-bold text-[15px] leading-snug">{zipText.title}</h3>
               </div>
-              <p className="text-[13px] leading-relaxed text-[#c9d1d9] mb-5">{zipText.body}</p>
+              <p className="text-[13px] leading-relaxed text-body mb-5">{zipText.body}</p>
 
               {zipBusy ? (
-                <div className="flex items-center gap-2 text-[12px] text-indigo-300 font-medium py-2">
+                <div className="flex items-center gap-2 text-[12px] text-accent-text font-medium py-2">
                   <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                   {zipProgress || zipText.working}
                 </div>
@@ -1103,14 +1103,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setZipConfirmOpen(false)}
-                    className="flex-1 py-2.5 rounded-xl border border-white/10 text-[#c9d1d9] text-[12px] font-bold hover:bg-white/5 transition-colors"
+                    className="flex-1 py-2.5 rounded-xl border border-line text-body text-[12px] font-bold hover:bg-raised transition-colors"
                   >
                     {zipText.cancel}
                   </button>
                   {/* Only THIS opens the picker. The destructive step is never one tap away. */}
                   <button
                     onClick={() => zipInputRef.current?.click()}
-                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-[12px] font-bold transition-colors"
+                    className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-on-accent text-[12px] font-bold transition-colors"
                   >
                     {zipText.confirm}
                   </button>
@@ -1118,7 +1118,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               )}
 
               {zipError && (
-                <p className="mt-3 text-[11px] leading-relaxed text-rose-400 break-words">{zipError}</p>
+                <p className="mt-3 text-[11px] leading-relaxed text-danger break-words">{zipError}</p>
               )}
             </motion.div>
           </motion.div>
@@ -1150,11 +1150,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             {/* IDE menu (☰ NavBharat IDE): opens the IDE's FILE EXPLORER sidebar — NOT the AI chat (admin
                 2026-07-31). It used to only toggle isSidebarOpen, so if activeScreen was left on 'ai' the
                 menu showed the AI panel. Force the 'files' screen; a second tap while already on files closes it. */}
-            <div className="flex items-center gap-1.5 cursor-pointer hover:bg-white/5 px-2 py-1 rounded transition-colors" onClick={() => { if (isSidebarOpen && activeScreen === 'files') { setIsSidebarOpen(false); } else { setActiveScreen('files'); setIsSidebarOpen(true); } }}>
-               <MenuIcon className="w-4 h-4 text-white/70" />
-               <span className="text-[11px] text-white/80 font-medium">NavBharat IDE</span>
+            <div className="flex items-center gap-1.5 cursor-pointer hover:bg-raised px-2 py-1 rounded transition-colors" onClick={() => { if (isSidebarOpen && activeScreen === 'files') { setIsSidebarOpen(false); } else { setActiveScreen('files'); setIsSidebarOpen(true); } }}>
+               <MenuIcon className="w-4 h-4 text-body" />
+               <span className="text-[11px] text-body font-medium">NavBharat IDE</span>
             </div>
-            <div ref={menuBarRef} data-ide-menu className="hidden md:flex items-center gap-0.5 text-[11px] text-white/60 font-medium relative">
+            <div ref={menuBarRef} data-ide-menu className="hidden md:flex items-center gap-0.5 text-[11px] text-muted font-medium relative">
                {([
                  { name: 'File', items: [
                    { label: 'New File…', shortcut: 'Ctrl+N', run: () => handleShortcut([], 'explorer.newFile') },
@@ -1235,7 +1235,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                ] as Array<{ name: string; items: Array<{ label?: string; shortcut?: string; run?: () => void; divider?: boolean }> }>).map((menu) => (
                  <div key={menu.name} className="relative">
                    <button
-                     className={`px-2 py-1 rounded transition-colors ${openMenu?.name === menu.name ? 'bg-white/10 text-white' : 'hover:text-white hover:bg-white/5'}`}
+                     className={`px-2 py-1 rounded transition-colors ${openMenu?.name === menu.name ? 'bg-raised text-ink' : 'hover:text-ink hover:bg-raised'}`}
                      onClick={(e) => {
                        if (openMenu?.name === menu.name) { setOpenMenu(null); return; }
                        const r = e.currentTarget.getBoundingClientRect();
@@ -1251,13 +1251,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      <div
                        data-ide-menu
                        style={{ position: 'fixed', left: openMenu.x, top: openMenu.y }}
-                       className="min-w-[230px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
+                       className="min-w-[230px] bg-raised border border-line rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
                        {menu.items.map((item, i) => item.divider ? (
-                         <div key={i} className="h-px bg-white/10 my-1 mx-2" />
+                         <div key={i} className="h-px bg-raised my-1 mx-2" />
                        ) : (
                          <button
                            key={i}
-                           className="w-full flex items-center justify-between gap-6 px-3 py-1.5 text-left text-[11px] text-white/80 hover:bg-indigo-600 hover:text-white transition-colors"
+                           className="w-full flex items-center justify-between gap-6 px-3 py-1.5 text-left text-[11px] text-on-accent hover:bg-indigo-600 hover:text-on-accent transition-colors"
                            onClick={() => { setOpenMenu(null); item.run?.(); }}
                          >
                            <span>{item.label}</span>
@@ -1277,40 +1277,40 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => { const v = !editorWordWrap; setEditorWordWrap(v); localStorage.setItem('ide_wordWrap', v ? 'on' : 'off'); }}
              title={`Word wrap: ${editorWordWrap ? 'on' : 'off'}`}
-             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorWordWrap ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorWordWrap ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
            >
              <AlignJustify className="w-3 h-3" />
            </button>
            <button
              onClick={() => { const v = !editorMinimap; setEditorMinimap(v); localStorage.setItem('ide_minimap', v ? 'on' : 'off'); }}
              title={`Minimap: ${editorMinimap ? 'on' : 'off'}`}
-             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorMinimap ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorMinimap ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
            >
              <Map className="w-3 h-3" />
            </button>
            <button
              onClick={() => { const v = Math.max(10, editorFontSize - 1); setEditorFontSize(v); localStorage.setItem('ide_fontSize', String(v)); }}
              title="Decrease font size"
-             className="p-0.5 text-[#484f58] hover:text-white rounded transition-colors"
+             className="p-0.5 text-faint hover:text-ink rounded transition-colors"
            >
              <ChevronDown className="w-3 h-3" />
            </button>
-           <span className="text-[9px] font-mono text-[#484f58] select-none w-5 text-center">{editorFontSize}</span>
+           <span className="text-[9px] font-mono text-faint select-none w-5 text-center">{editorFontSize}</span>
            <button
              onClick={() => { const v = Math.min(30, editorFontSize + 1); setEditorFontSize(v); localStorage.setItem('ide_fontSize', String(v)); }}
              title="Increase font size"
-             className="p-0.5 text-[#484f58] hover:text-white rounded transition-colors"
+             className="p-0.5 text-faint hover:text-ink rounded transition-colors"
            >
              <ChevronUp className="w-3 h-3" />
            </button>
            {/* A5: Tab size selector */}
-           <div className="flex items-center gap-0.5 bg-white/5 rounded px-1">
+           <div className="flex items-center gap-0.5 bg-raised rounded px-1">
              {[2, 4].map(size => (
                <button
                  key={size}
                  onClick={() => { setEditorTabSize(size); localStorage.setItem('ide_tabSize', String(size)); }}
                  title={`Tab size: ${size}`}
-                 className={`px-1 py-0.5 rounded text-[9px] font-mono transition-all ${editorTabSize === size ? 'text-indigo-400 font-black' : 'text-[#484f58] hover:text-white'}`}
+                 className={`px-1 py-0.5 rounded text-[9px] font-mono transition-all ${editorTabSize === size ? 'text-accent-text font-black' : 'text-faint hover:text-ink'}`}
                >
                  {size}
                </button>
@@ -1320,7 +1320,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => editorInstance?.getAction('editor.action.formatDocument')?.run()}
              title="Format document (Shift+Alt+F)"
-             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              <Code2 className="w-3 h-3" />
            </button>
@@ -1328,38 +1328,38 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => { const v = editorTheme === 'vs-dark' ? 'vs' : 'vs-dark'; setEditorTheme(v); localStorage.setItem('ide_theme', v); }}
              title={`Editor theme: ${editorTheme === 'vs-dark' ? 'Dark' : 'Light'} (click to toggle)`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTheme === 'vs' ? 'text-amber-400 bg-amber-900/20' : 'text-[#484f58] hover:text-white'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTheme === 'vs' ? 'text-warn bg-amber-900/20' : 'text-faint hover:text-ink'}`}
            >{editorTheme === 'vs-dark' ? '🌙' : '☀️'}</button>
            {/* A12: Format on Save toggle */}
            <button
              onClick={() => { const v = !editorFormatOnSave; setEditorFormatOnSave(v); localStorage.setItem('ide_formatOnSave', v ? 'on' : 'off'); }}
              title={`Format on Save: ${editorFormatOnSave ? 'on' : 'off'} (Ctrl+S)`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFormatOnSave ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFormatOnSave ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
            >Fmt</button>
            {/* A13: Trim whitespace toggle */}
            <button
              onClick={() => { const v = !editorTrimWhitespace; setEditorTrimWhitespace(v); localStorage.setItem('ide_trimWhitespace', v ? 'on' : 'off'); }}
              title={`Trim trailing whitespace on Save: ${editorTrimWhitespace ? 'on' : 'off'}`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTrimWhitespace ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorTrimWhitespace ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
            >Trim</button>
            {/* A14: Final newline toggle */}
            <button
              onClick={() => { const v = !editorFinalNewline; setEditorFinalNewline(v); localStorage.setItem('ide_finalNewline', v ? 'on' : 'off'); }}
              title={`Insert final newline on Save: ${editorFinalNewline ? 'on' : 'off'}`}
-             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFinalNewline ? 'text-indigo-400 bg-indigo-900/30' : 'text-[#484f58] hover:text-white'}`}
+             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest transition-all ${editorFinalNewline ? 'text-accent-text bg-indigo-900/30' : 'text-faint hover:text-ink'}`}
            >↵</button>
            {/* A9: Code folding */}
            <button
              onClick={() => editorInstance?.getAction('editor.foldAll')?.run()}
              title="Fold All (Ctrl+K Ctrl+0)"
-             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              <Minimize2 className="w-3 h-3" />
            </button>
            <button
              onClick={() => editorInstance?.getAction('editor.unfoldAll')?.run()}
              title="Unfold All (Ctrl+K Ctrl+J)"
-             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              <Maximize2 className="w-3 h-3" />
            </button>
@@ -1367,21 +1367,21 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => editorInstance?.getAction('actions.find')?.run()}
              title="Find (Ctrl+F)"
-             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              <Search className="w-3 h-3" />
            </button>
            <button
              onClick={() => editorInstance?.getAction('editor.action.gotoLine')?.run()}
              title="Go to Line (Ctrl+G)"
-             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-[#484f58] hover:text-white transition-all"
+             className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              G
            </button>
          </div>
 
          {/* N10-N12: Project-level AI actions */}
-         <div className="hidden lg:flex items-center gap-0.5 border-l border-white/10 pl-2 ml-1">
+         <div className="hidden lg:flex items-center gap-0.5 border-l border-line pl-2 ml-1">
            {([
              { label: 'README', icon: BookOpen, prompt: 'Generate a comprehensive README.md for this project based on the code. Include: project description, features, installation steps, usage examples, and tech stack.' },
              { label: '.env', icon: Key, prompt: 'Generate a .env.example file listing all environment variables needed by this project with placeholder values and brief comments.' },
@@ -1391,7 +1391,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                key={label}
                onClick={() => sendProjectAction(prompt)}
                title={`AI: Generate ${label}`}
-               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black text-[#484f58] hover:text-emerald-400 hover:bg-emerald-900/20 transition-all uppercase tracking-widest"
+               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black text-faint hover:text-success hover:bg-emerald-900/20 transition-all uppercase tracking-widest"
              >
                <Icon className="w-3 h-3" />
                {label}
@@ -1406,7 +1406,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => { setZipError(''); setZipConfirmOpen(true); }}
              title={zipText.menuLabel}
-             className="flex items-center gap-1.5 px-2 h-6 rounded-md border border-white/5 bg-black/20 hover:bg-black/30 hover:border-white/10 text-[10px] font-medium text-white/60 hover:text-white transition-all shrink-0"
+             className="flex items-center gap-1.5 px-2 h-6 rounded-md border border-line bg-well hover:bg-well hover:border-line text-[10px] font-medium text-muted hover:text-ink transition-all shrink-0"
            >
              <UploadCloud className="w-3 h-3" />
              {zipText.menuLabel}
@@ -1416,7 +1416,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          <div className="flex-1 flex justify-center mx-4">
             <button
                onClick={() => setIsCommandPaletteOpen(true)}
-               className="w-full max-w-sm h-6 bg-black/20 rounded-md border border-white/5 flex items-center justify-center gap-2 text-[10px] text-white/40 hover:bg-black/30 hover:border-white/10 transition-all font-medium"
+               className="w-full max-w-sm h-6 bg-well rounded-md border border-line flex items-center justify-center gap-2 text-[10px] text-faint hover:bg-well hover:border-line transition-all font-medium"
             >
                <Search className="w-3 h-3" />
                Search Files & Commands (Ctrl+Shift+P)
@@ -1430,7 +1430,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               // surface — same workspace + memory, 100% synced), not the in-IDE mini panel. Wired via
               // onSocialChatTrigger; the internal mini stays only as a fallback if the parent doesn't wire it.
               onClick={() => { if (onSocialChatTrigger) onSocialChatTrigger(); else { handleScreenChange('ai'); setIsSidebarOpen(true); } }}
-              className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
+              className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-on-accent shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
               title="Open NavBharatAI Pro (full)"
             >
               <Bot className="w-4 h-4 mr-1" />
@@ -1443,7 +1443,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               // parent that does not wire this (and for the command palette's markdown.showPreview).
               onClick={() => { if (onPreviewClick) onPreviewClick(); else handleScreenChange('preview'); }}
               className={cn(
-                "w-20 h-7 rounded-r-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-r border-l border-indigo-400/20",
+                "w-20 h-7 rounded-r-lg flex items-center justify-center text-ink shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-r border-l border-indigo-400/20",
                 activeScreen === 'preview' ? "bg-indigo-700" : "bg-indigo-600 hover:bg-indigo-700"
               )}
               title="Open Preview"
@@ -1490,14 +1490,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  derives the height from the layout instead of from a hardcoded header offset, so the
                  two can never drift apart again. */
               className={cn(
-                "z-40 bg-[#161b22] border-r border-[#2b2b2b] shrink-0 overflow-hidden flex flex-col select-none",
+                "z-40 bg-card border-r border-line shrink-0 overflow-hidden flex flex-col select-none",
                 isMobile ? "absolute inset-0" : "h-full"
               )}
             >
                {isMobile && (
-                  <div className="h-12 border-b border-white/5 flex items-center justify-between px-4 shrink-0 bg-[#0d1117]">
-                     <span className="text-xs font-black uppercase tracking-widest text-white">{activeScreen}</span>
-                     <button onClick={() => setIsSidebarOpen(false)} aria-label="Close sidebar" className="p-2 bg-white/5 rounded-xl"><X className="w-4 h-4" /></button>
+                  <div className="h-12 border-b border-line flex items-center justify-between px-4 shrink-0 bg-surface">
+                     <span className="text-xs font-black uppercase tracking-widest text-ink">{activeScreen}</span>
+                     <button onClick={() => setIsSidebarOpen(false)} aria-label="Close sidebar" className="p-2 bg-raised rounded-xl"><X className="w-4 h-4" /></button>
                   </div>
                )}
                {/* Every sidebar screen gets the SAME bounded, shrinkable slot. `min-h-0` is what lets a
@@ -1512,7 +1512,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         </AnimatePresence>
 
         {/* Dynamic Main Workspace */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
+        <div className="flex-1 flex flex-col min-w-0 bg-card relative">
           {activeScreen === 'preview' ? (
              /* ONE PREVIEW EVERYWHERE (admin 2026-09-14: "jo navbharatai pro me preview open hota hai,
                 wahi preview open hona chahiye — kuch aur nahi"). This mirrors ViewPanels.tsx's global
@@ -1545,10 +1545,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           ) : Object.keys(files).length === 0 ? (
              <div className="flex-1 flex flex-col items-center justify-center text-center px-6 select-none">
                 <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center mb-4">
-                   <FileCode className="w-7 h-7 text-indigo-400" />
+                   <FileCode className="w-7 h-7 text-accent-text" />
                 </div>
-                <h3 className="text-white font-bold text-sm mb-1">Empty workspace</h3>
-                <p className="text-[#8b949e] text-xs mb-5 max-w-xs leading-relaxed">No files yet. Create one to start coding, or ask the AI to build your app.</p>
+                <h3 className="text-ink font-bold text-sm mb-1">Empty workspace</h3>
+                <p className="text-muted text-xs mb-5 max-w-xs leading-relaxed">No files yet. Create one to start coding, or ask the AI to build your app.</p>
                 {/* REMOVED 2026-09-15 (admin): the "Ask AI" button that stood beside New File. It ran
                     handleScreenChange('ai') — the in-IDE mini chat that opens in the SIDE panel, not
                     NavBharatAI Pro — which is exactly the "wahi side me open ho jata hai" the admin
@@ -1558,7 +1558,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 <div className="flex items-center gap-2">
                    <button
                       onClick={() => { const name = (window.prompt('New file name (e.g. index.html)') || '').trim(); if (name) handleCreateFile(name); }}
-                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5"
+                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-on-accent text-xs font-bold flex items-center gap-1.5"
                    >
                       <Plus className="w-3.5 h-3.5" /> New File
                    </button>
@@ -1568,7 +1568,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              /* One group, or two side by side. With `splitOpen` false this renders exactly the single
                 Editor it always did — the wrapper is a plain flex row with one child. */
              <div className="flex-1 flex min-w-0 min-h-0">
-             <div className={`flex-1 min-w-0 min-h-0 flex flex-col ${splitOpen && !isMobile ? 'border-r border-white/10' : ''}`}>
+             <div className={`flex-1 min-w-0 min-h-0 flex flex-col ${splitOpen && !isMobile ? 'border-r border-line' : ''}`}>
              <Editor
                 content={files[activeFile] || ''}
                 fileName={activeFile}
@@ -1703,9 +1703,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.12 }}
-                className="absolute top-10 right-2 z-[52] flex items-center gap-0.5 bg-[#0d1117] border border-white/15 rounded-xl shadow-2xl px-1.5 py-1 shadow-black/40"
+                className="absolute top-10 right-2 z-[52] flex items-center gap-0.5 bg-surface border border-line rounded-xl shadow-2xl px-1.5 py-1 shadow-black/40"
               >
-                <span className="text-[8px] font-black text-[#484f58] uppercase tracking-widest px-1 border-r border-white/10 mr-0.5">AI Actions</span>
+                <span className="text-[8px] font-black text-faint uppercase tracking-widest px-1 border-r border-line mr-0.5">AI Actions</span>
                 {([
                   { label: 'Explain', icon: MessageSquare, instruction: 'Explain this code' },
                   { label: 'Improve', icon: Sparkles, instruction: 'Improve and optimize this code' },
@@ -1735,7 +1735,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                     key={label}
                     onClick={() => sendCodeAction(label, instruction)}
                     title={instruction}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[8px] font-black text-[#8b949e] hover:text-white hover:bg-indigo-600/80 transition-all"
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[8px] font-black text-on-accent hover:text-on-accent hover:bg-indigo-600/80 transition-all"
                   >
                     <Icon className="w-2.5 h-2.5 shrink-0" />
                     {label}
@@ -1744,7 +1744,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 <button
                   onClick={() => setSelectedCode('')}
                   title="Dismiss"
-                  className="ml-0.5 p-0.5 rounded text-[#484f58] hover:text-white transition-colors"
+                  className="ml-0.5 p-0.5 rounded text-faint hover:text-ink transition-colors"
                 >
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -1755,9 +1755,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           {/* A24: Status bar — cursor position, language, file info */}
           {activeScreen !== 'preview' && activeScreen !== 'security' && Object.keys(files).length > 0 && (
             <div className="h-5 shrink-0 bg-[#007acc] flex items-center px-3 gap-4 select-none overflow-hidden">
-              <span className="text-[10px] text-white/90 font-mono">Ln {cursorPos.line}, Col {cursorPos.col}</span>
-              <span className="text-[10px] text-white/70 font-mono">{activeFile?.split('.').pop()?.toUpperCase() || 'TXT'}</span>
-              <span className="text-[10px] text-white/60 font-mono ml-auto">UTF-8</span>
+              <span className="text-[10px] text-on-accent font-mono">Ln {cursorPos.line}, Col {cursorPos.col}</span>
+              <span className="text-[10px] text-on-accent font-mono">{activeFile?.split('.').pop()?.toUpperCase() || 'TXT'}</span>
+              <span className="text-[10px] text-on-accent font-mono ml-auto">UTF-8</span>
             </div>
           )}
 
@@ -1768,7 +1768,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      initial={{ height: 0 }}
                      animate={{ height: isPanelMaximized ? '100%' : '35%' }}
                      exit={{ height: 0 }}
-                     className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+                     className="absolute left-0 right-0 bottom-0 z-50 bg-surface border-t border-line shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
                       {/* MULTI-TERMINAL (admin 2026-08-04): one panel, many independent sessions, with
                           the "+ New" dropdown inside the terminal itself. */}
@@ -1794,7 +1794,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      initial={{ height: 0 }}
                      animate={{ height: '35%' }}
                      exit={{ height: 0 }}
-                     className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+                     className="absolute left-0 right-0 bottom-0 z-50 bg-surface border-t border-line shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
                       <DebugPanel
                         onClose={() => setIsDebugPanelOpen(false)}
@@ -1814,7 +1814,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      initial={{ height: 0 }}
                      animate={{ height: '35%' }}
                      exit={{ height: 0 }}
-                     className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+                     className="absolute left-0 right-0 bottom-0 z-50 bg-surface border-t border-line shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
                       <ProblemsPanel
                         problems={problems}
@@ -1837,7 +1837,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    onClick={() => setIsProblemsPanelOpen(true)}
                    aria-label="Open Problems panel"
                    title={`${problems.length} problem${problems.length === 1 ? '' : 's'}`}
-                   className="h-10 px-3 bg-amber-600/20 hover:bg-amber-600/30 rounded-lg border border-amber-500/30 flex items-center gap-1.5 text-amber-300 hover:text-amber-200 transition-all shadow-2xl text-xs font-bold"
+                   className="h-10 px-3 bg-amber-600/20 hover:bg-amber-600/30 rounded-lg border border-amber-500/30 flex items-center gap-1.5 text-warn hover:text-warn transition-all shadow-2xl text-xs font-bold"
                  >
                     <AlertCircle className="w-4 h-4" />
                     {problems.length}
@@ -1847,7 +1847,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  <button
                    onClick={() => setIsPanelOpen(true)}
                    aria-label="Open terminal panel"
-                   className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
+                   className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-line flex items-center justify-center text-muted hover:text-ink transition-all shadow-2xl"
                  >
                     <ChevronUp className="w-5 h-5" />
                  </button>
@@ -1877,7 +1877,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            {mobileMoreOpen && (
              <>
                <div className="fixed inset-0 z-[55]" onClick={() => setMobileMoreOpen(false)} aria-hidden="true" />
-               <div className="absolute right-2 bottom-[68px] z-[56] w-56 rounded-2xl border border-white/10 bg-[#161b22] shadow-2xl py-1.5">
+               <div className="absolute right-2 bottom-[68px] z-[56] w-56 rounded-2xl border border-line bg-card shadow-2xl py-1.5">
                  {([
                    { label: 'Search', Icon: Search, onTap: () => handleScreenChange('search') },
                    { label: 'Source Control', Icon: GitBranch, onTap: () => handleScreenChange('git') },
@@ -1890,9 +1890,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    <button
                      key={label}
                      onClick={() => { setMobileMoreOpen(false); onTap(); }}
-                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[#c9d1d9] hover:bg-white/5 active:bg-white/10"
+                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-body hover:bg-raised active:bg-raised"
                    >
-                     <Icon className="w-4 h-4 text-[#8b949e]" />
+                     <Icon className="w-4 h-4 text-muted" />
                      <span className="font-medium">{label}</span>
                    </button>
                  ))}
@@ -1920,7 +1920,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  aria-label={label}
                  className={cn(
                    'flex-1 flex flex-col items-center justify-center gap-1 transition-all relative min-h-[44px]',
-                   active ? 'text-indigo-400' : 'text-[#484f58] active:text-[#8b949e]'
+                   active ? 'text-accent-text' : 'text-faint active:text-muted'
                  )}
                >
                  <Icon className="w-5 h-5" />

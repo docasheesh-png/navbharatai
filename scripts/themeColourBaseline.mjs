@@ -52,6 +52,20 @@ export function codeOnly(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, ' ').split('\n').map((l) => l.replace(/(^|[^:'"`\\])\/\/.*$/, '$1')).join('\n');
 }
 
+/**
+ * Blank out EMBEDDED SOURCE — a template literal whose body is markup (`className=`, `class=`, an
+ * HTML tag). NavBharatAI's own UI never puts JSX inside a backtick string; what does is source that
+ * belongs to SOMEBODY ELSE'S app: the starter projects in SyncedTemplates.ts, the copyable snippets in
+ * ComponentLibrary, a scaffold a builder writes into the user's workspace. Those apps do not have our
+ * tokens, so a `text-white` there is not a theme bug and rewriting it to `text-ink` would break the
+ * component the user copies. The body is replaced with spaces (newlines kept) so line numbers and
+ * offsets still line up for the census and the codemod alike.
+ */
+export function maskEmbeddedSources(src) {
+  return src.replace(/`(?:[^`\\]|\\.)*`/g, (lit) =>
+    (/className=|\bclass=|<[a-z][\w-]*[\s>]/.test(lit) ? lit.replace(/[^\n]/g, ' ') : lit));
+}
+
 /** Every client source file — the surfaces a user reads. Server code renders no UI. */
 export function clientFiles(root = ROOT) {
   const out = [];
@@ -71,7 +85,7 @@ export function clientFiles(root = ROOT) {
 /** The literal colours in one file, with line numbers — what the failure message prints. */
 export function literalsIn(src) {
   const hits = [];
-  codeOnly(src).split('\n').forEach((line, i) => {
+  maskEmbeddedSources(codeOnly(src)).split('\n').forEach((line, i) => {
     for (const m of line.matchAll(LITERAL)) hits.push({ line: i + 1, token: m[0] });
     for (const m of line.matchAll(INLINE)) hits.push({ line: i + 1, token: m[0] });
   });

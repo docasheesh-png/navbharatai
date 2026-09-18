@@ -67224,6 +67224,52 @@ than quietly corrected.
 **Tests:** `tests/aSuggestionCostsASuggestionsPrice.test.ts` — 16 cases + source-anchored wiring
 guard. **Proven by reversion four ways:** the plan not asked · the budget not told · the green cap
 removed · the plan ignoring the write rule (bites two cases).
+## 2026-09-18 — Option A: a working app is never lost to later edits in the SAME build (`AGENTV3_IN_BUILD_GREEN`)
+
+Admin, verbatim: *"navbharatai dwara app banne ke baad tutni nahi chahiye!!!!!"* — the same sentence
+they wrote on 2026-08-09, which GreenGuard answered for TURNS. Read from the route's end-of-build
+call: `before: { green: hasSnapshot }` where `hasSnapshot` is a **previous** build's green snapshot.
+So on a first build — app rendering at minute 2, broken by a later step at minute 6 — there was
+nothing to restore from. Verified in the Gita build (b6f88a72): `GREEN_GUARD_SAVE` fired at t+365 s,
+after everything; no snapshot existed at t+128 s when the app first rendered.
+
+**The principle, extended one level down: a build's OWN first proven render is a last known good too.**
+
+- `inBuildGreen.ts` (pure): the evidence bar is the late check's own three refusals — never curl,
+  never inconclusive, never server-down (`isProvenGreenRender`); `shouldAttemptInBuildProof` bounds
+  attempts (one in flight, 15 s gap, stop once proven, never after abort); `attemptOutcome` names the
+  write race apart from "not yet" and "could not tell".
+- The route runs the proof BESIDE the loop (fire-and-forget on `preview` / successful `tool_result`),
+  collects the tree, and saves it to **`greenWorkspaceKey(workspaceId)` — the same key the
+  end-of-build GreenGuard reads.** No second store, no second decision. One browser open per attempt,
+  zero model calls.
+- 🔒 The snapshot must be of the tree that RENDERED: `inBuildWriteTick` is bumped on every captured
+  write and compared before the browser opens and after the files are collected. A change discards
+  the attempt (`IN_BUILD_GREEN_RACED`). A snapshot that was never proven would be restored as "the
+  working version" — worse than none.
+- Honesty: `decideGreenGuard` takes `turnStartedAt`; with `before.at` from this build the restore
+  reason says *"rendered earlier in this build"*. `greenGuardSummaryCorrection` gains `fromThisBuild`
+  — *"your change was not kept"* is FALSE for a first build whose own earlier version came back; the
+  user is told a later step broke it and the rendering version is what they see, later work saved
+  separately. Both markers are idempotent on the settle/watchdog double path.
+
+**What it does NOT do, stated plainly (and why):** it does not freeze writes and does not stop the
+build — a rendering app is not a finished app (a manifest may plan 20 files with 8 written). Only
+the worst case changes. It does not save the 10–20 minutes; that is Option E's measurement and then
+B/C on evidence. ⚠️ Semantics: the last known good is now the LATEST PROVEN RENDER, which on an edit
+turn may be a mid-edit state that renders — GreenGuard's own rule applied inside the turn.
+
+**Tests:** `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts` — 25 cases, including a source-anchored
+wiring guard (the proof is armed BEFORE `await runner.run(buildPrompt)`, saves to GreenGuard's key,
+checks the write race, tells the guard when the build began). **Proven by reversion, four ways**, each
+restored and re-verified: the save key · the write-tick bump · `turnStartedAt` · the curl refusal.
+⚠️ One reversion's restore silently failed on the first pass (a probe string collided with existing
+text); caught by grepping the file, redone with hard-stop restores. Recorded because "the tests pass"
+after a botched restore is exactly the false green this repo warns about.
+`tests/greenGuardHonesty.test.ts` re-anchored on the multi-line facts (reason recorded in place).
+
+**Next in this series (admin: "ek ek kar ke sabhi build karo"):** F (reviewer cheap on green), then
+E (time-to-first-render + who wrote after green), then B/C on E's numbers. D never.
 ---
 
 ## 2026-09-18 — 🔴 FOUR VARIABLES HELD ONE FACT, AND THE TWO PRODUCERS DID NOT AGREE (evidence ledger, 7th appearance)

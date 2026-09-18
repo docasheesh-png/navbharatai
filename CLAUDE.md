@@ -2256,6 +2256,29 @@ the flag entries above promise.
   page's self-retry is CAPPED (~2 min) because a door hit RESUMES a paused sandbox — uncapped, an
   abandoned open tab would fight the idle reaper forever at real E2B cost; (2) `off` stops both minting
   and answering, and the client falls back to the old stored-URL behaviour byte-identically.
+- **`AGENTV3_IN_BUILD_GREEN`** (default ON, set `off` to disable — added 2026-09-18, admin: *"navbharatai
+  dwara app banne ke baad tutni nahi chahiye!!!!!"*) — **a working app is never lost to later edits in the
+  SAME build.** GreenGuard (2026-08-09, the admin's identical sentence then) restores a PREVIOUS build's
+  green snapshot when a turn ends proven-broken — so on a first build, where the app rendered at minute 2
+  and a later step broke it, there was nothing to restore from. Now the build's OWN first proven render
+  (real browser, same judge and same three refusals as the late check: never curl, never inconclusive,
+  never server-down) is saved as the last known good **to the same key GreenGuard reads**, so the
+  end-of-build restore path covers the case the admin described with no second store and no second rule.
+  Logic in `inBuildGreen.ts` (pure); the I/O half runs BESIDE the loop in `routes/agentv3.ts`
+  (`attemptInBuildGreen`), fire-and-forget on a `preview`/`tool_result` event, one browser open per
+  attempt bounded by `MIN_ATTEMPT_GAP_MS` (15 s), zero model calls, every failure swallowed.
+  ⚠️ **It does NOT freeze writes and does NOT stop the build** — a rendering app is not a finished app;
+  only the worst case changes (the version that rendered comes back, with an honest note). 🔒 **The
+  snapshot must be of the tree that RENDERED:** a write counter is compared before the browser opens and
+  after the files are collected; a change discards the attempt (`IN_BUILD_GREEN_RACED`) and a later
+  trigger retries. ⚠️ **Semantics, stated plainly:** the last known good is now the LATEST PROVEN
+  RENDER, which on an edit turn may be a mid-edit state that renders — GreenGuard's own rule ("green now
+  → save it"), applied inside the turn. Report codes `IN_BUILD_GREEN` / `_RACED` / `_NOT_YET` /
+  `_UNCHECKED`; the restore's reason and the user's summary correction say "earlier in this build"
+  instead of "your change was not kept" when the snapshot is this build's own (`turnStartedAt`,
+  `fromThisBuild`). Test-locked and reversion-proven four ways in
+  `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts`. **What to watch:** `IN_BUILD_GREEN` appearing
+  a minute or two into builds, and `GREEN_GUARD_RESTORED` on FIRST builds — which was impossible before.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the

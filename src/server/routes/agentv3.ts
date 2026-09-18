@@ -157,6 +157,7 @@ import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../Agent
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver } from '../AgentV3/greenFreeze';
+import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild } from '../AgentV3/inBuildGreen';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
@@ -13491,7 +13492,14 @@ async function noteBuildOutcome(
           });
         } catch { /* best-effort */ }
       });
+      /**
+       * IN-BUILD GREEN (inBuildGreen.ts): counts every captured write so a proof attempt can tell
+       * whether the tree it collected is the tree the browser rendered. Compared before the browser
+       * opens and after the files are collected; a change between them discards the attempt.
+       */
+      let inBuildWriteTick = 0;
       const onFileWrite = (path: string, content: string) => {
+        inBuildWriteTick++;
         // Security gate: scan AI-generated JS/TS files for malicious patterns before
         // they are persisted. Critical findings emit a security warning event so the
         // user sees it in the build log; the write itself is still recorded (the agent
@@ -13548,6 +13556,72 @@ async function noteBuildOutcome(
       // Arm the sub-agent spawn factory's forward-referenced holder now that the real callback
       // exists — see its declaration, above `spawnSubAgent`, for why this indirection is needed.
       onFileWriteForSubAgents = onFileWrite;
+
+      // ── IN-BUILD GREEN — a working app is never lost to later edits in the SAME build ─────────────
+      //
+      // ADMIN 2026-09-18: "navbharatai dwara app banne ke baad tutni nahi chahiye!!!!!" GreenGuard (the
+      // block at the end of this build) restores a PREVIOUS build's green snapshot when this build ends
+      // proven-broken — so on a first build, where the app rendered at minute 2 and a later step broke
+      // it, there was nothing to restore from. This records the build's OWN first proven render as the
+      // last known good, to the same key GreenGuard reads, so that end-of-build path now covers the
+      // case the admin actually described. See inBuildGreen.ts for the rules; this is the I/O half.
+      //
+      // 🔒 Runs BESIDE the loop, never in it: fire-and-forget on a preview/tool event, one browser open
+      // per attempt, zero model calls, every failure swallowed. It does not freeze writes and does not
+      // stop the build — the model keeps finishing the app; only the worst case changes.
+      let inBuildGreenAt = 0;
+      let inBuildGreenInFlight = false;
+      let inBuildGreenLastAttempt = 0;
+      const attemptInBuildGreen = async (): Promise<void> => {
+        if (!shouldAttemptInBuildProof({
+          enabled: inBuildGreenEnabled() && greenGuardEnabled(),
+          previewUrl: lastPreviewUrl,
+          hasBrowser: typeof actuator.browseUrl === 'function',
+          proven: inBuildGreenAt > 0,
+          inFlight: inBuildGreenInFlight,
+          aborted: abort.signal.aborted,
+          lastAttemptAt: inBuildGreenLastAttempt,
+        }, Date.now())) return;
+        inBuildGreenInFlight = true;
+        inBuildGreenLastAttempt = Date.now();
+        try {
+          const writesBefore = inBuildWriteTick;
+          const shot = await withTimeout(actuator.browseUrl!(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'in-build-green');
+          const verdict = analyzePreviewHtml(shot.html, {
+            painted: shot.painted,
+            source: shot.source,
+            hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
+          });
+          // Collect BEFORE judging the race, so a write during the collection is caught too.
+          let files: Record<string, string> = {};
+          if (isProvenGreenRender(shot, verdict)) {
+            try { files = { ...(await collectWorkspaceFiles(actuator, workspaceId)).files }; } catch { /* captured writes below are the reliable source */ }
+            for (const [pth, c] of writtenFiles) files[pth] = c;
+          }
+          const outcome = attemptOutcome({ shot, verdict, writesBefore, writesAfter: inBuildWriteTick });
+          const elapsedMs = Date.now() - buildStartedAt;
+          if (outcome.kind === 'proven' && Object.keys(files).length > 0) {
+            // The same key the end-of-build GreenGuard reads — no second store, no second rule.
+            await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
+            inBuildGreenAt = Date.now();
+            try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
+            events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+          } else if (outcome.kind !== 'proven') {
+            try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs }) }); } catch { /* best-effort */ }
+          }
+        } catch { /* a proof that could not run leaves the build exactly as unprotected as before — never worse */ }
+        finally { inBuildGreenInFlight = false; }
+      };
+      // The trigger: a published preview, and every successful tool result after it while unproven —
+      // `shouldAttemptInBuildProof` bounds the browser opens (MIN_ATTEMPT_GAP_MS) and stops them once
+      // one snapshot exists. Unsubscribed the moment the app is proven.
+      const stopInBuildGreen = events.subscribe((e) => {
+        const t = (e as { type?: string }).type;
+        if (t === 'preview' || (t === 'tool_result' && (e as { ok?: boolean }).ok === true)) {
+          void attemptInBuildGreen().then(() => { if (inBuildGreenAt > 0) stopInBuildGreen(); });
+        }
+      }, false);
+
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
@@ -19725,7 +19799,11 @@ async function noteBuildOutcome(
               const snapshot = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
               const hasSnapshot = Object.keys(snapshot).length > 0;
               const decision = decideGreenGuard({
-                before: { green: hasSnapshot },
+                // `at` is set only when THIS build recorded the snapshot (inBuildGreen.ts); with
+                // `turnStartedAt` the guard can then say "earlier in this build" instead of "before this
+                // turn" — the sentence a first build's user actually needs.
+                before: { green: hasSnapshot, at: inBuildGreenAt > 0 ? inBuildGreenAt : undefined },
+                turnStartedAt: buildStartedAt,
                 after: { green: previewGreen },
                 hasSnapshot,
                 // ONLY AN OBSERVED BREAKAGE MAY UNDO THE USER'S WORK (admin report 2026-08-25).
@@ -19772,7 +19850,11 @@ async function noteBuildOutcome(
                 // into an admin-only report, while the build's own summary still said the change was
                 // delivered. See greenGuardHonesty.ts: from their chair, they asked for more speed,
                 // were told it was done, and nothing changed — twice.
-                greenGuardRestoreFacts = { restored: Object.keys(plan.write).length, removed: plan.remove.length };
+                greenGuardRestoreFacts = {
+                  restored: Object.keys(plan.write).length,
+                  removed: plan.remove.length,
+                  fromThisBuild: snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt),
+                };
               } else if (hasSnapshot && !previewGreen) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a

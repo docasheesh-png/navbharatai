@@ -102,6 +102,13 @@ export function decideGreenGuard(input: {
    * nothing. It exists so the recorded reason cannot over-claim; see below.
    */
   ready?: boolean;
+  /**
+   * When THIS build began (epoch ms). With it, a `before.at` at or after it means the last known good
+   * was recorded by this very build (see inBuildGreen.ts), and the restore's reason says so — "your
+   * change was not kept" is the wrong sentence for a first build whose own earlier state came back.
+   * Optional and additive: without it every wording is exactly as before.
+   */
+  turnStartedAt?: number;
 }): GreenDecision {
   const afterGreen = input.after?.green === true;
   const beforeGreen = input.before?.green === true;
@@ -131,7 +138,10 @@ export function decideGreenGuard(input: {
         reason: 'This turn\u2019s changes were kept: the app could not be opened to check them, and an unverified turn is never undone. The last known good version is still saved and untouched.',
       };
     }
-    return { action: 'restore', reason: 'The app was verified working before this turn and is not working after it — the last known good state was restored.' };
+    const fromThisBuild = typeof input.turnStartedAt === 'number' && typeof input.before?.at === 'number' && input.before.at >= input.turnStartedAt;
+    return fromThisBuild
+      ? { action: 'restore', reason: 'The app rendered earlier in this build and is not working now — the version that rendered was restored.' }
+      : { action: 'restore', reason: 'The app was verified working before this turn and is not working after it — the last known good state was restored.' };
   }
   if (beforeGreen && !input.hasSnapshot) {
     // Honest gap: we believe it was working but never captured the files, so we cannot put them back.

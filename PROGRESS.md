@@ -66977,3 +66977,92 @@ dukaan prompt, and the genuine translation requests that must not regress.
 
 **Proven by reversion** — each turns its suite red, and each was restored: `in hindi` back in the
 translate signal · the inline-artifact line removed · the excludes dropped from the grep command.
+## 2026-09-18 — Autopsy c6e4c6ff ("E commerce website", free Weak): a rendering app failed and made FREE over a file it had already deleted
+
+**The build.** Prompt `"E commerce website"`, Weak tier, delivered by KIMI `kimi-k2.7-code`, 26.7 minutes,
+real cost **$0.93**, billed **₹0**. Verdict NOT ok. The app — ShopWave — was genuinely built and genuinely
+rendering when it was failed.
+
+**The five-minute version.** From the build's own command log:
+
+```
+t+1250s  $ rm src/routes/orders.ts            → exit 0
+t+1256s  $ ./node_modules/.bin/tsc --noEmit   → exit 0     ← clean, the file is gone
+t+1283s  $ npm run build                      → exit 0     ← PROD_BUILD_OK
+t+1430s  preview published, opened in a real browser, RENDERED
+t+1474s  READINESS_BLOCKER — 2 unresolved import(s) — the build will fail:
+         src/routes/orders.ts -> ../db, src/routes/orders.ts -> ../middleware/authenticate
+```
+
+Both imports belong to the file deleted 224 seconds earlier. Release gate RED →
+`OUTCOME_RELEASE_GATE_RED` flipped a rendering app's verdict to NOT ok → the user was told
+"2 things are still broken" → "working app or free" made it ₹0.
+
+**Root cause, verified in code (not inferred).** `analyzeArchitecture(mem.graph())` judges the project
+GRAPH, never the sandbox. `seedGraphFromWorkspace` — which runs immediately before the gate and holds
+BOTH the real tree and the graph — was **add-only**: it filtered the listing to `!known.has(p)` and
+never asked the opposite question. The set difference `known \ tree` is exactly the zombie set and was
+computed nowhere.
+
+**🔴 The honest half: this instance was ALREADY fixed, twelve hours after this build ran.** PR #3014
+(autopsy 8b3dca5c) landed 2026-09-17 16:09 UTC; this build ran at 03:58 UTC. Measured against the real
+parser, `singleSourceDeleteTargets('rm src/routes/orders.ts')` → `['src/routes/orders.ts']`, so #3014
+would have caught it. **The instance was fixed and the CLASS was not** — the exact shape the fifth
+rule's bar forbids. Measured, every other road into the graph still left a zombie:
+
+| command | `singleSourceDeleteTargets` |
+|---|---|
+| `rm src/routes/orders.ts` | `['src/routes/orders.ts']` ✅ #3014 |
+| `rm -rf src/routes` | `[]` — a directory delete |
+| `mv src/a.ts src/b.ts` | `[]` — a RENAME, and routine |
+| `npm run clean` | `[]` |
+| `git clean -fd` / `git checkout .` | `[]` |
+| `cd src && rm routes/orders.ts` | `['routes/orders.ts']` — relative to the `cd`, matches no graph key |
+
+**The fix (this change).** `src/server/AgentV3/graphReconcile.ts` computes the graph-vs-disk difference
+where it is answerable for every road at once, and `seedGraphFromWorkspace` hands the candidates to
+**`reconcileDeletions` — #3014's own already-shipped disposer**, so there is no second implementation to
+drift. It PROPOSES only; the direct sandbox read still disposes. Three guards, all in the safe direction
+(`fileDeletion.ts`'s: an unknown answer means KEEP):
+
+1. **A listing that THREW is not an empty workspace.** The seeder's `.catch(() => [])` made those
+   indistinguishable — harmless while it only added, a whole-graph wipe the moment it also removes. Now
+   `.catch(() => null)`, refused by the reconciler; the add path is byte-identical.
+2. **Only what this seeder would have indexed.** A `README.md` or a `dist/` path is absent from the
+   listing because the filter excludes it, not because it was deleted.
+3. **A disagreement larger than `MAX_PRUNE_PROBES` (25) refuses the WHOLE batch**, never a truncated
+   prefix — at that size a partial `find` is far likelier than a deleted app. The refusal is reported.
+
+⚠️ **A defect in my own first draft, caught by my own test and recorded rather than quietly swapped:**
+a whitespace-only listing entry is truthy, so it entered the on-disk set and normalized to `''`, leaving
+the set non-empty — which would have proposed the ENTIRE graph. Normalization now happens before the
+emptiness test.
+
+**Not touched, deliberately: the billing rule.** The ₹0 was the *symptom*. The gate was RED only because
+of the phantom file; with the graph correct the gate and the bill follow. Changing the billing rule
+instead would have been the surface patch the fourth rule forbids.
+
+**Tests.** `tests/theGraphMustMatchTheDisk.test.ts` (22) — this build's exact file set, every uncovered
+road above, all three guards, path-shape normalization, plus a reversion guard that reads the call site
+(the behavioural tests all pass against a seeder that never calls the module — the defect *was* a
+question nobody asked). **Proven by reversion:** restoring `.catch(() => [])`, removing the prune call,
+and deleting the cap each turn the suite red.
+
+### 🔴 OPEN ROOT CAUSE (rule 6) — `AGENTV3_COMPLEX_TO_KIMI` cannot fire for an e-commerce build
+
+Measured against `analyzeRequest` on today's `main`:
+
+```
+'E commerce website'                                                    → complexityScore 5, taskType 'chat', ambiguous false
+'build an ecommerce website with cart, checkout, payments, orders, admin' → complexityScore 5, taskType 'chat', ambiguous false
+```
+
+`complexityRouting` reads that score against a threshold of **40**, and asks a model only within **±3**
+of the line. At 5 with `ambiguous: false`, neither path can open — so the feature shipped ON by default
+on 2026-09-17 to start big apps on KIMI is, for this whole class of prompt, dead. This build opened on
+the cheap flash rung, which was then **benched for answering 3.4× slower than budgeted**, and took 26.7
+minutes.
+
+**Not fixed here on purpose:** `analyzeRequest`'s score also drives `startTier` and `escalationPath` for
+every build, so changing it trades one problem for a possible other (the 2026-09-13 rule) and needs its
+own change with its own evidence. Recorded, not guessed at.

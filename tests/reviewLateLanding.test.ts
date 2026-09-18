@@ -72,7 +72,12 @@ describe('WIRING — the timeout stops us waiting, not looking', () => {
   it('the review promise is held in its own binding, so it survives the timeout', () => {
     // The whole defect: the promise used to be an inline expression argument, so when raceTimeout
     // rejected there was nothing left to collect from.
-    expect(route).toContain('const reviewPromise = reviewBuild({');
+    // NOTE 2026-09-18: the call gained a wrapper — the reviewer now runs inside its BILLING PHASE
+    // (billingPhase.ts), so a pass that delivers nothing is our cost and not the user's. What this
+    // case guards is untouched and still asserted: the promise is held in its OWN BINDING, so when
+    // raceTimeout rejects there is still something to collect from.
+    expect(route).toContain('const reviewPromise = runInBillingPhase(');
+    expect(route).toContain('reviewBuild({');
     expect(route).toContain("review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review')");
   });
 

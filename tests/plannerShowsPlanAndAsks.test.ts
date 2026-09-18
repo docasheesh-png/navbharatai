@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { plannerDomainBrief, PLANNER_MAX_QUESTIONS } from '../src/server/AgentV3/RoleChats';
+import { knowledgeFromList } from '../src/server/lib/domainKnowledge';
 
 /**
  * PLAN MODE SHOWS THE PLAN AND ASKS THE FEW QUESTIONS THAT MATTER (admin, 2026-09-17).
@@ -10,7 +11,11 @@ import { plannerDomainBrief, PLANNER_MAX_QUESTIONS } from '../src/server/AgentV3
  * puchna chahiye"* and *"Lovable/Bolt user ko plan dikhate hain … 'plan' wale option me yeh sikha
  * sakte hai?"* The domain knowledge existed since 2026-07-19 and had never reached the planner.
  */
-const brief = (p: string, empty = true) => plannerDomainBrief('planner', p, { projectIsEmpty: empty });
+// The brief now takes the RESOLVED knowledge (list first, model only where the list is silent —
+// `domainKnowledge.ts`, 2026-09-18). These helpers hand it the LISTED answer, which is exactly what
+// the route resolves for these prompts, so every assertion below means what it meant before.
+const brief = (p: string, empty = true) =>
+  plannerDomainBrief('planner', p, { projectIsEmpty: empty, knowledge: knowledgeFromList(p) });
 
 describe('the planner finally gets the domain knowledge', () => {
   it('a hospital app is told what a hospital app needs', () => {
@@ -64,7 +69,7 @@ describe('where it must stay silent — a plan that nags is worse than one that 
   });
 
   it('the ADVISOR is untouched — it reviews code, it does not scope new apps', () => {
-    expect(plannerDomainBrief('advisor', 'hospital app banao', { projectIsEmpty: true })).toBe('');
+    expect(plannerDomainBrief('advisor', 'hospital app banao', { projectIsEmpty: true, knowledge: knowledgeFromList('hospital app banao') })).toBe('');
   });
 
   it('costs no model call — the analyser is deterministic, so the same prompt gives the same brief', () => {
@@ -81,7 +86,7 @@ describe('the wiring, and the decision it must not quietly reverse', () => {
   });
 
   it('it is gated on the project being EMPTY, read from the real files', () => {
-    expect(route).toContain('projectIsEmpty: Object.keys(roleFiles).length === 0');
+    expect(route).toContain('const projectIsEmpty = Object.keys(roleFiles).length === 0;');
   });
 
   // 🔒 THE BUILD LANE STILL NEVER ASKS. The 2026-07-20 decision (requirement awareness is

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { classifyFailureReason, categorizeBuildFailures } from '../src/server/lib/buildFailureCategory';
+import { OUTCOME_REASONS } from '../src/lib/failureReason';
 import { OUTCOME_TO_CATEGORY } from '../src/server/lib/BuildRetrospectiveEngine';
 import { severityOfOutcome, outcomeCodeOf } from '../src/server/AgentV3/BuildDiagnostics';
 
@@ -30,12 +31,15 @@ const ADVISORY = 'Build outcome: STOPPED — the app was built; the post-build a
 
 describe('the code is read before the prose', () => {
   it('THE BUG: messages that ALL returned "other" are now named', () => {
-    // Proven before the fix: every one of these classified as `other` by text alone.
+    // Proven before the fix: every one of these classified as `other` by text alone. (Since the two
+    // classifiers were merged on 2026-09-17 the shared text patterns also know "wall-clock", so the
+    // STOPPED message is named by text too — the point stands: the CODE is what names it, exactly.)
     for (const [code, message] of Object.entries(REAL_MESSAGES)) {
       const byTextOnly = classifyFailureReason(message);
       const byCode = classifyFailureReason(message, code, 'error');
-      expect(byTextOnly.key, `${code} should have been unnamed by text alone`).toBe('other');
+      if (code !== 'OUTCOME_STOPPED') expect(byTextOnly.key, `${code} should have been unnamed by text alone`).toBe('other');
       expect(byCode.key, `${code} must be named once the code is read`).not.toBe('other');
+      expect(byCode, `${code} must be named by its OWN code, not by a text guess`).toEqual(OUTCOME_REASONS[code]);
       expect(byCode.label.length).toBeGreaterThan(0);
     }
   });
@@ -103,11 +107,18 @@ describe('🔒 the drift guard — two maps that must not disagree', () => {
   it('every OUTCOME code the retrospective knows also has a panel label', () => {
     // Without this, a code added to one map and not the other silently reappears as "Other" — the exact
     // failure this phase exists to remove.
-    const src = readFileSync(join(process.cwd(), 'src/server/lib/buildFailureCategory.ts'), 'utf8');
+    // The classifier moved to `src/lib/failureReason.ts` on 2026-09-17 (shared with the client-side
+    // "Top failure patterns" card); the guard reads the map itself now, not a file's text.
+    const src = readFileSync(join(process.cwd(), 'src/lib/failureReason.ts'), 'utf8');
     for (const code of Object.keys(OUTCOME_TO_CATEGORY)) {
       // The advisory cap is deliberately NOT a failure reason; it has its own row.
       if (code === 'OUTCOME_ADVISORY_CAPPED') continue;
       expect(src, `${code} has no label on the admin panel`).toContain(`${code}:`);
+      expect(OUTCOME_REASONS[code], `${code} has no label on the admin panel`).toBeTruthy();
+    }
+    // …and the other way: a code the panel labels must be one the retrospective can categorise.
+    for (const code of Object.keys(OUTCOME_REASONS)) {
+      expect(OUTCOME_TO_CATEGORY[code], `${code} is labelled on the panel but unknown to the retrospective`).toBeTruthy();
     }
   });
 });

@@ -3,10 +3,19 @@
 // guesswork. Pure + isomorphic (no server deps) so the admin dashboard computes it client-side from the
 // already-fetched report list, and it is unit-testable without any network.
 
+import { classifyFailureReason } from './failureReason';
+
 /** The minimal report shape this analysis needs (a structural subset of the admin report row). */
 export interface FailureAnalyticsInput {
   ok: boolean | null;
   rootCause: string | null;
+  /**
+   * The build's own `OUTCOME_*` code and its severity — a machine fact, read BEFORE the prose by the
+   * shared classifier. Absent on a report filed before the code was projected into its meta; the text
+   * is then the honest fallback, exactly as for a legacy record on the server's Failure Category panel.
+   */
+  outcomeCode?: string | null;
+  outcomeSeverity?: string | null;
   appLabel?: string | null;
   /** Build duration in ms (for the speed signal); optional so failure analysis ignores it. */
   buildMs?: number | null;
@@ -44,6 +53,8 @@ export function summarizeBuildTimes(reports: FailureAnalyticsInput[], topN = 5):
 }
 
 export interface FailurePattern {
+  /** Stable machine key from the shared classifier (`empty-build`, `other`, …). Never derived from text. */
+  key: string;
   /** A short, human category label (e.g. "React Rules-of-Hooks violation"). */
   label: string;
   /** How many failed builds fall into this pattern. */
@@ -61,39 +72,28 @@ export interface FailureSummary {
 }
 
 /**
- * Known failure categories, matched against a failed build's rootCause. Ordered most-specific first so
- * a rootCause that could match two rules lands in the more precise bucket. A rootCause matching none
- * falls back to a normalised signature (below), so nothing is silently dropped.
+ * 🔴 THE CARD READS THE ONE CLASSIFIER NOW (admin, 2026-09-17 — the "Top failure patterns" card).
+ *
+ * This file used to carry its own nine-rule regex list and, for anything it did not match, used the
+ * first line of `rootCause` — numbers and file names stripped — AS THE BUCKET LABEL. The admin's card
+ * then read, at 25% each:
+ *
+ *     🔍 I analyzed your project — no files were changed. Overview:
+ *     The GLM rung answered inside its clock and produced nothing, because our own output ceilin…
+ *     Tool call failed: edit_file: old_string not found in <file>. The string you supplied does…
+ *
+ * A "pattern" that is one build's own sentence is not a pattern: every novel sentence becomes its own
+ * row, and the card can never say "this class recurs". Its fourth row, `Sandbox / preview did not
+ * come up`, came from a rule that matched the bare word `port` — which is also inside "report",
+ * "import" and "support".
+ *
+ * `src/lib/failureReason.ts` is the classifier the server's Failure Category panel already used; it
+ * reads the build's own `OUTCOME_*` code before its prose, its patterns are grounded in real engine
+ * strings, and an unmatched reason is a stable "Other" whose raw sentence rides in `sample` for the
+ * admin to read. Both panels now answer the same question the same way.
  */
-const CATEGORY_RULES: ReadonlyArray<{ label: string; re: RegExp }> = [
-  { label: 'React Rules-of-Hooks violation', re: /rules[- ]of[- ]hooks|hook.*(conditional|after an early return|in a loop)/i },
-  { label: 'Reviewer critical not resolved', re: /reviewer \[critical\]|\[critical\] finding|reviewer .*not verifiably/i },
-  { label: 'Build hit the wall-clock time cap', re: /wall-clock|exceeded the \d+s|time (cap|limit)|build timeout/i },
-  { label: 'Unresolved / missing imports', re: /unresolved import|cannot find module|missing (local )?module|undefined (jsx )?component/i },
-  { label: 'Syntax / compile error', re: /syntax error|does not parse|already been declared|typecheck failed|tsc/i },
-  { label: 'Missing dependency in package.json', re: /missing dependenc|not in package\.json|undeclared package/i },
-  { label: 'Sandbox / preview did not come up', re: /sandbox|dev server did not|preview.*(blank|not render|failed)|port/i },
-  { label: 'Empty build (no files produced)', re: /empty build|produced zero|no files were written/i },
-  { label: 'All AI providers failed', re: /all .*providers failed|provider.*unavailable/i },
-];
-
-/** Collapse a rootCause into a stable signature (strip numbers, file paths, quotes) for the fallback bucket. */
-function normalizeSignature(rootCause: string): string {
-  return rootCause
-    .split('\n')[0] // first line only — the headline cause
-    .replace(/[a-zA-Z0-9_./-]+@[a-zA-Z0-9_./-]+:\d+/g, '<loc>') // file@path:line
-    .replace(/[a-zA-Z0-9_./-]+\.(tsx?|jsx?|css|json|vue|svelte)\b/gi, '<file>') // file names
-    .replace(/["'`][^"'`]*["'`]/g, '<x>') // quoted specifics
-    .replace(/\d+/g, '#') // any number
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 90);
-}
-
-function categoryFor(rootCause: string): string {
-  for (const rule of CATEGORY_RULES) if (rule.re.test(rootCause)) return rule.label;
-  const sig = normalizeSignature(rootCause);
-  return sig || 'Other failure';
+function categoryFor(r: FailureAnalyticsInput): { key: string; label: string } {
+  return classifyFailureReason(r.rootCause, r.outcomeCode ?? null, r.outcomeSeverity ?? null);
 }
 
 /**
@@ -104,17 +104,17 @@ function categoryFor(rootCause: string): string {
 export function summarizeFailurePatterns(reports: FailureAnalyticsInput[], topN = 8): FailureSummary {
   const list = Array.isArray(reports) ? reports : [];
   const failed = list.filter((r) => r && r.ok === false && typeof r.rootCause === 'string' && r.rootCause.trim());
-  const buckets = new Map<string, { count: number; sample: string; apps: Set<string> }>();
+  const buckets = new Map<string, { label: string; count: number; sample: string; apps: Set<string> }>();
   for (const r of failed) {
     const cause = (r.rootCause as string).trim();
-    const label = categoryFor(cause);
-    const b = buckets.get(label) ?? { count: 0, sample: cause.split('\n')[0].slice(0, 160), apps: new Set<string>() };
+    const { key, label } = categoryFor(r);
+    const b = buckets.get(key) ?? { label, count: 0, sample: cause.split('\n')[0].slice(0, 160), apps: new Set<string>() };
     b.count += 1;
     if (r.appLabel && b.apps.size < 3) b.apps.add(r.appLabel);
-    buckets.set(label, b);
+    buckets.set(key, b);
   }
   const patterns: FailurePattern[] = [...buckets.entries()]
-    .map(([label, b]) => ({ label, count: b.count, sample: b.sample, apps: [...b.apps] }))
+    .map(([key, b]) => ({ key, label: b.label, count: b.count, sample: b.sample, apps: [...b.apps] }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, Math.max(1, topN));
   return { totalReports: list.length, totalFailed: failed.length, patterns };

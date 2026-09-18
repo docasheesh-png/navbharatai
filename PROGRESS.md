@@ -65136,6 +65136,78 @@ invocation that lacks the path or carries `2>/dev/null`, and on a browse block t
 defeated by the fix's own comment, which names the lossy spelling it replaced. Proven by reversion
 both ways.
 
+## 2026-09-17 — "Top failure patterns": three of four "patterns" were one build's own sentence
+
+**The card the admin pasted** (`4 failed of 51 report(s)`, four rows at 25% each):
+
+```
+🔍 I analyzed your project — no files were changed. Overview:                          1 · 25%
+Sandbox / preview did not come up                                                      1 · 25%
+The GLM rung answered inside its clock and produced nothing, because our own output …  1 · 25%
+Tool call failed: edit_file: old_string not found in <file>. The string you supplied … 1 · 25%
+```
+
+Rows 1, 3 and 4 are not patterns — they are the model's own recap, a provider diagnostic and a tool
+error, each printed verbatim as a category. A panel whose rows are one-off sentences can never say
+"this class recurs": every novel sentence is its own 25%.
+
+### Three root causes, all read out of the code rather than guessed
+
+**1. 🔴 The card had its OWN classifier, and its fallback used the sentence AS THE LABEL.**
+`src/lib/buildReportAnalytics.ts` carried a nine-rule regex list (`CATEGORY_RULES`) and, for anything
+unmatched, `normalizeSignature()` — the first line of `rootCause` with numbers and file names stripped —
+became the bucket. It was the SECOND classifier of the same `rootCause` vocabulary:
+`buildFailureCategory.ts` had root-caused the "Other" flood that morning by reading the build's own
+`OUTCOME_*` code before its prose, and its header recorded, in writing, that the two lists were
+deliberately left apart *"as an open item"*. Row 2 is the same list's bare-word rule `/port/i` — which
+also matches "re**port**", "im**port**", "sup**port**" and "ex**port**" — so an unresolved-import failure could be
+filed as a sandbox one.
+
+**2. 🔴 The empty-build verdict flip recorded NO outcome — the only flip in the route that did not.**
+`OUTCOME_PREVIEW_COMPILE`, `OUTCOME_SYNTAX_ERROR` and `OUTCOME_REVIEW_CRITICAL` are each recorded beside
+their `ok:false`; `emptyBuildFailureSummary`'s flip (`routes/agentv3.ts`) recorded nothing. So
+`deriveRootCause` — which reads the last `OUTCOME_*` first — had no fact and fell to the loudest recorded
+warning. All three raw-sentence rows are empty builds: a recap note, an `OUTPUT_BUDGET_STARVED`
+diagnostic, a `TOOL_ERROR`. None of the three sentences was the reason the build failed.
+
+**3. 🔴 The platform's OWN recap sentence was keyword-matched into a "problem".** `BuildDiagnostics`
+flags a short narration as a WARNING when it contains a problem word; `no files` is on that list (it
+catches "no files were produced"). `ProjectSummary`'s analysis-only headline BEGINS with "no files were
+changed", so on a small project (recap ≤ 300 chars) the platform's own honest deliverable was recorded
+as a struggle — and, per (2), became the root cause.
+
+### The fix, at the class
+
+- **ONE classifier**, `src/lib/failureReason.ts` (isomorphic, so the client-side card can import it):
+  code-first with severity, grounded text patterns, and an unmatched reason is a STABLE `other` whose
+  raw sentence rides in the row's `sample`, never its label. `buildFailureCategory.ts` re-exports it
+  (every import path and `tests/failureNaming.test.ts` unchanged); `buildReportAnalytics.ts` reads it and
+  its regex list + signature fallback are DELETED. The advisory-cap predicates moved to
+  `src/lib/advisoryCapOutcome.ts` with a re-export shim at the old server path.
+- **New codes `OUTCOME_EMPTY_BUILD` / `OUTCOME_SANDBOX_UNAVAILABLE`**, recorded by
+  `emptyBuildOutcomeIssue()` at the flip. Two codes because the two causes are different work (infra vs
+  the engine — the same line `isInfra` already draws). Mapped in `failureReason.ts` and
+  `BuildRetrospectiveEngine.ts`; the drift guard now checks BOTH directions (which surfaced the legacy
+  `OUTCOME_BUILD_FAILED`, now in the retrospective map too).
+- **The filed report's meta carries `outcomeCode` / `outcomeSeverity`** (`AdminBuildReportStore`),
+  projected from the same issue list exactly as `listAllDiagnostics` does — so the card names a failure by
+  the build's own fact. Records written before this field classify by text, honestly, as before.
+- **`isProjectSummaryNarration`** (`ProjectSummary.ts`, matched on the exact headlines that module
+  emits, so a model's prose cannot claim the exemption) — the recap is an `AGENT_STEP`, never a note.
+
+**Tests:** `tests/emptyBuildRecordsItsOutcome.test.ts` (11 — the bug reproduced on `deriveRootCause`
+with the three real sentences, then named once the outcome is recorded; the route wiring; the recap
+predicate against the recap the engine really emits; the meta projection), `src/lib/buildReportAnalytics.test.ts`
+(the card's four rows → stable keys, code beats text, the `/port/` reversion guard), `tests/failureNaming.test.ts`
+(two-way drift guard). Proven by reversion: dropping the narration exemption fails 1, dropping the
+code-first read in the card fails 1.
+
+**Still open, said plainly (rule 6):** a `TOOL_ERROR` for an `edit_file` miss that the model then
+recovered from (a later successful write to the same path) stays `autoResolved: false` on a FAILED build,
+because nothing back-fills tool errors by path the way `recoveredCommands` does for commands. It can no
+longer become a root cause on an empty build (the outcome code wins), but it still inflates the
+unresolved count. Not coded here: it needs the tool-call path carried on the pending map, a separate
+change.
 ### The same day, correcting the entry above: the "real tokenizer" was one import
 
 The entry immediately above recorded an OPEN root cause — the apostrophe flaw in the code trees —
@@ -65316,6 +65388,93 @@ servers would have passed the new tests and broken every preview in the product.
   install away and nothing in the engine knew that `Property 'props' does not exist on a React class`
   means missing React types. That mapping is the missing subsystem this report names.
 
+## 2026-09-17 — THE MISSING SUBSYSTEM FROM AUTOPSY `baa0b3c7`: what a compiler error actually MEANS
+
+The `baa0b3c7` entry above closed with three open root causes. This is the first of them, and the one that
+report itself named as the missing subsystem: *"nothing in the engine knew that `Property 'props' does not
+exist on a React class` means missing React types. That mapping is the missing subsystem this report
+names."* It exists now — `src/server/AgentV3/tscErrorCause.ts`.
+
+**🔴 THE CORRECTION FIRST, because the entry above states it wrongly.** That entry recorded, as an open
+root cause, *"There is no guard against a destructive 'fix'"* for `rm src/components/Dashboard/Dashboard.tsx`.
+**That is false and was false on the day of the build.** `destructiveSourceDeletionTarget` has blocked the
+whole class — directory teardown, bulk deletion, blanking, moving source out, git wipes — since before
+that build, and a SECOND guard (2026-08-02) refuses to delete a file other modules still import. Neither
+fired because **neither was wrong to allow it**: the first deliberately permits *"deleting ONE stale source
+file by name"*, and the second asked the import graph, which had no importer of `Dashboard.tsx` to protect.
+A third guard shipped the same day this was written (`fileDeletion.ts`, autopsy 8b3dca5c) for the graph
+half. The real gap is narrower than "no guard" and is stated properly below.
+
+**WHAT ACTUALLY WENT WRONG, and it is one cause with two faces.** The build read
+
+    src/ErrorBoundary.tsx(29,39): error TS2339: Property 'setState' does not exist on type 'ErrorBoundary'.
+
+six times. The file was CORRECT. React's type declarations were absent, so `React.Component` had no members
+and a good class lost `this.props`. **A missing-declaration error is reported where the symbol is USED, so
+its remedy appears nowhere in the message and the code under the cursor looks broken.** The model therefore
+did the only thing the message suggests — it rewrote the file, four times — and then deleted a *different*
+component to make that one's errors go away. Both are rational responses to an error nobody translated.
+Four "repeated step is not making progress" nudges fired and changed nothing, because the loop detector can
+see a repeat without being able to say WHAT to do differently. **So the destructive delete is downstream of
+this, not a guard gap: the answer was one install away and the engine could not say so.**
+
+**THE MAPPING, and its boundary — this is not a hint bag.** Five signatures, every one a case where *the
+compiler is missing a DECLARATION and the code is fine*: React class members, untyped JSX, `import.meta.env`
+(Vite's client types), TS7016 "no declaration file for module", and TS2307 for a BARE package. A genuine
+code error needs no translation — the model reads `TS2345` and fixes it, and that ordinary path is
+deliberately untouched (test-locked on four such errors). **Do not add a signature whose remedy is "change
+the code".**
+
+**🔒 PRECISION, because advice is a steer and a wrong steer costs a round.** `Property 'props' does not
+exist on type 'X'` is genuinely AMBIGUOUS, and this repo holds both causes: the types are missing
+(`baa0b3c7`), or the class never extended `React.Component` (the dukaan stock app, 2026-08-12, which
+`looksLikeBrokenErrorBoundary` was written for). When the source is in hand the two are told apart and the
+advice is exact and opposite; when it is not, it names both, cheapest check first, rather than guessing.
+`extendsReactComponent` returns **null** for a class the file does not declare — "did not look" must not
+read as "does not extend".
+
+**FIVE SITES, because annotating only the tidy one would have missed this very report.** The build's own
+`rootCause` line is `$ ./node_modules/.bin/tsc --noEmit 2>&1 → exit 2` — a BASH command, not the
+`typecheck` tool. So: the write-time typecheck note (earliest possible moment, and the only site holding
+the file content, so the only one that gets the exact answer); the `typecheck` tool; a bare `tsc` through
+bash, keyed on output that really parses as compiler errors so an ordinary command is never annotated; and
+the endgame batch repair. That one rides the **error text** rather than a new parameter deliberately:
+every implementor of `llmRepair` passes that string to the model, and an optional argument an implementor
+forgot to read would be decoration.
+
+**AND A FIFTH, FOUND BY RULE 3 AFTER THE OTHER FOUR WERE WIRED — the one that REPEATS.** The fast lane's
+repair loop (`SimpleBuilder`) runs up to `maxRepairs` times climbing a strategy ladder, so a
+missing-declaration error aims EVERY rung of that ladder at a file that was never wrong — the
+four-rewrites-of-one-file shape itself. It reads `parseTscErrors` through a different import than the
+dispatcher, which is why a grep for the dispatcher's spelling alone did not find it. It holds `byPath`, so
+it gets the exact answer rather than the hedged one. The sweep that found it is kept as a test, so a sixth
+site cannot appear unnoticed: the only other consumer of parsed compiler errors, `AgentRunner`, parses to
+COUNT for the trend checkpoint and shows a model nothing.
+
+**Costs nothing.** Pure string analysis — no model call, no file read, no clock. `tscCauseNote` returns ''
+for every error outside the five, so a clean build and an ordinary type error are byte-identical to before.
+
+**Tests:** `tests/tscErrorCause.test.ts` (42 cases), **proven by reversion five ways** — removing the
+write-time note, the endgame block, the bash annotation, the typecheck-tool annotation or the fast-lane
+block each fails a named case. `tests/writeTimeTypecheck.test.ts` gained a guard that the call sites pass the CONTENT, not
+only the path, so a future edit that drops back to paths fails there instead of silently downgrading every
+piece of advice to the hedged form.
+
+⚠️ **Not added to `AppKnowledgeBase.ts`, deliberately:** this changes what the build engine tells itself. It
+adds no screen, route, button or capability a user can navigate to, and inventing an entry would make the
+knowledge base describe the engine's internals to people who cannot see them.
+
+**STILL OPEN from `baa0b3c7` (rule 6), and now stated correctly:**
+- **A single-file delete by name is allowed by design, and the ONLY thing that can refuse it is whether
+  another file imports it.** Nothing asks whether the file was a FEATURE the user asked for — a component
+  with no importer yet is indistinguishable from dead code, and `RequirementCoverage` / the feature heal
+  are downstream nets that report it rather than prevent it. Narrowing that allowance is a real design
+  decision (which deletions are legitimate?), not a patch, and it is now much less pressing: this change
+  removes the commonest REASON to reach for a delete.
+- **The batch repair that took 4 errors to 41** is bounded by the convergence guard (CrewHub autopsy
+  2026-07-20) — it reverted itself honestly and that worked. Why the pass made it eight times worse is
+  still unexplained on this evidence. Starting that pass with the real cause is the most that could be
+  done from this report.
 ---
 
 ## 2026-09-17 (later) — three PUBLISHED promises the registries did not keep, one root cause

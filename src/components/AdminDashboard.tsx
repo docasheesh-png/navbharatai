@@ -94,6 +94,9 @@ interface AdminBuildReportRow extends ReportTriage {
   buildMs: number | null;
   rootCause: string | null;
   summary: string | null;
+  /** The build's own OUTCOME_* code + severity (AdminBuildReportStore) — read by the failure-pattern card. */
+  outcomeCode?: string | null;
+  outcomeSeverity?: string | null;
   /** How many defects the engine repaired in its OWN output, and how many it left unresolved.
    *  Absent on reports written before this measurement existed — those rows are EXCLUDED from the
    *  first-pass rate rather than counted as clean (see firstPassStatsFromMeta). */

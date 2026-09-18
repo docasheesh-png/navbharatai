@@ -29,24 +29,76 @@ describe('summarizeFailurePatterns — data-driven failure signal', () => {
       r(false, 'Syntax error: handleExportCSV has already been declared'),
     ];
     const s = summarizeFailurePatterns(reports);
-    expect(s.patterns[0].label).toBe('Unresolved / missing imports');
+    expect(s.patterns[0].key).toBe('dependency-error');
     expect(s.patterns[0].count).toBe(3);
   });
 
-  it('falls back to a normalised signature for an unknown cause (nothing dropped)', () => {
+  it('an unknown cause is a STABLE "Other" whose raw sentence rides in the sample (nothing dropped)', () => {
     const s = summarizeFailurePatterns([
       r(false, 'Weird novel failure #42 in "SomeModule.tsx" at 03:00'),
       r(false, 'Weird novel failure #99 in "OtherModule.tsx" at 04:00'),
     ]);
-    // Both normalise to the same signature → grouped into one bucket of 2.
     expect(s.totalFailed).toBe(2);
     expect(s.patterns[0].count).toBe(2);
+    expect(s.patterns[0].key).toBe('other');
+    expect(s.patterns[0].label).not.toContain('Weird novel failure');
+    expect(s.patterns[0].sample).toContain('Weird novel failure #42');
   });
 
   it('is robust to junk input', () => {
     expect(summarizeFailurePatterns(undefined as never).totalFailed).toBe(0);
     expect(summarizeFailurePatterns([]).patterns).toEqual([]);
     expect(summarizeFailurePatterns([r(false, '   ')]).totalFailed).toBe(0);
+  });
+});
+
+/**
+ * 🔴 THE ADMIN'S CARD, 2026-09-17 — "4 failed of 51 report(s)", four rows at 25% each, three of them
+ * one build's own sentence. A pattern panel whose rows are raw sentences cannot say "this recurs".
+ */
+describe('the "Top failure patterns" card never shows a raw sentence as a pattern', () => {
+  const CARD = [
+    r(false, '🔍 I analyzed your project — no files were changed. Overview:\nStack: React + Vite\n3 files', 'Analysis turn'),
+    r(false, 'Error: nothing is listening on that port — the dev server did not come up', 'Sandbox app'),
+    r(false, 'The GLM rung answered inside its clock and produced nothing, because our own output ceiling was spent before the answer began — "starved".', 'Starved app'),
+    r(false, "Tool call failed: edit_file: old_string not found in src/App.tsx. The string you supplied does not appear in the file.", 'Edit-miss app'),
+  ];
+
+  it('the four rows classify to STABLE labels, and the sentence survives only as the sample', () => {
+    const s = summarizeFailurePatterns(CARD);
+    expect(s.totalFailed).toBe(4);
+    const keys = s.patterns.map((p) => p.key).sort();
+    expect(keys).toEqual(['empty-build', 'preview-failed', 'provider-starved', 'tool-call-failed']);
+    for (const p of s.patterns) {
+      expect(p.label).not.toMatch(/^🔍|^The GLM rung|^Tool call failed/);
+      expect(p.label.length).toBeLessThan(90);
+    }
+    expect(s.patterns.find((p) => p.key === 'empty-build')?.sample).toContain('no files were changed');
+  });
+
+  it('🔴 the build\'s own OUTCOME code beats the sentence — a filed report that carries it is named by it', () => {
+    // The report meta now projects the code (AdminBuildReportStore). Text alone would say "tool call
+    // failed"; the build itself recorded that it produced nothing, and that is the failure.
+    const s = summarizeFailurePatterns([{
+      ...CARD[3], outcomeCode: 'OUTCOME_EMPTY_BUILD', outcomeSeverity: 'error',
+    }]);
+    expect(s.patterns[0].key).toBe('empty-build');
+    expect(s.patterns[0].label).toBe('No files were produced');
+  });
+
+  it('a successful advisory-capped build is never a failure row, whatever its rootCause says', () => {
+    const s = summarizeFailurePatterns([{
+      ok: true, rootCause: 'Build outcome: STOPPED — the app was built; the post-build advisory pass was cut short by its 2-minute cap.',
+      outcomeCode: 'OUTCOME_STOPPED', outcomeSeverity: 'warning',
+    }]);
+    expect(s.totalFailed).toBe(0);
+  });
+
+  it('🔒 REVERSION GUARD: the retired classifier and its bare-word "port" rule are gone', () => {
+    // `/port/` matched "report", "import", "support" and "export" — an unresolved-import failure was a
+    // "sandbox" one. A bare common word is not a pattern.
+    const s = summarizeFailurePatterns([r(false, 'unresolved import: ./support/report')]);
+    expect(s.patterns[0].key).toBe('dependency-error');
   });
 });
 

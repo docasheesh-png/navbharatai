@@ -22,25 +22,25 @@
 //
 // PURE — no Firestore, no clock, no env. The caller supplies the rows it already read.
 //
-// ⚠️ A SIBLING WAS FOUND WHILE BUILDING THIS (redundant-work check, 2026-09-16) AND DELIBERATELY NOT
-// MERGED INTO IT — recorded rather than silently duplicated (CLAUDE.md rule 3/6). `src/lib/buildReportAnalytics.ts`
-// already classifies failure REASONS with its own regex list (`CATEGORY_RULES`), on the SAME underlying
-// rootCause vocabulary (`buildAdminReportRecord` is built from the identical `BuildDiagnosticsReport`
-// this module's caller reads). It answers a narrower question from a narrower, self-selected sample: only
-// the reports a user chose to file via the "Report" button — see `AdminDashboard.tsx`'s own 2026-08-12
-// correction, which moved the "first-pass quality" headline OFF that same biased sample for exactly this
-// reason, but never touched this reason-pattern panel. This module intentionally does NOT reuse
-// `CATEGORY_RULES`, to avoid changing a live, already-shipped admin panel's classification inside an
-// unrelated feature PR. A future pass should decide whether to (a) centralise the two reason-classifiers
-// into one shared list, and (b) point `buildReportAnalytics.ts`'s failure-pattern panel at the same
-// comprehensive `listAllDiagnostics` source this module uses, retiring the biased-sample version. Left as
-// an open item rather than guessed at.
+// ✅ THE SIBLING IS MERGED (2026-09-17, the "Top failure patterns" autopsy). This module's first version
+// recorded (2026-09-16) that `src/lib/buildReportAnalytics.ts` classified the SAME rootCause vocabulary
+// with its own regex list (`CATEGORY_RULES`) and left the two apart as an open item. The next day the
+// admin's "Top failure patterns" card showed three RAW SENTENCES as "patterns" — the model's summary
+// narration, a provider diagnostic and a tool error — because that list's fallback used the first line
+// of `rootCause` as the bucket label. The reason classifier now lives ONCE, in `src/lib/failureReason.ts`
+// (isomorphic, so the client-side card can import it), and both panels read it. The DOMAIN half and the
+// verdict split stay here; they are server-only and need nothing the card needs.
 
 import { analyzeRequirementGaps } from './RequirementGapAnalyzer';
-import { textIsAdvisoryCap, isAdvisoryCapOutcome } from '../AgentV3/advisoryCapOutcome';
+import { classifyFailureReason, type FailureReason } from '../../lib/failureReason';
 
-/** One definition, so the code path and the text path can never describe it differently. */
-const ADVISORY_CAP_REASON = { key: 'advisory-cap', label: 'Not a failure — the app was built; only the post-build checks ran out of time' } as const;
+/**
+ * Re-exported so every existing caller (and `tests/failureNaming.test.ts`) keeps its import path. The
+ * classifier itself — `OUTCOME_REASONS`, the grounded text patterns, the advisory-cap rule — is defined
+ * ONCE in `src/lib/failureReason.ts`; do not add a pattern here.
+ */
+export { classifyFailureReason };
+export type { FailureReason };
 
 /** The subset of a stored build's data this module needs. Matches AllDiagnosticsEntry by shape. */
 export interface CategorizableBuild {
@@ -54,163 +54,6 @@ export interface CategorizableBuild {
   outcomeSeverity?: string | null;
   /** Was the app SEEN running (real browser render / published preview)? See `appWasSeenRunning`. */
   appSeenRunning?: boolean | null;
-}
-
-/**
- * 🔴 WHAT THE BUILD'S OWN OUTCOME CODE MEANS, in the admin's words — the fix for the "Other" flood.
- *
- * THE DEFECT (admin 2026-09-17): on a panel covering 385 projects and 151 failures, the top reason for
- * THIRTEEN OF FIFTEEN app types was "Other (not yet in the known pattern list)" — 92 of the 107 failures
- * in its largest row. So ~85% of failures had no named cause, and every plan built on that panel would
- * have been a guess.
- *
- * WHY: `REASON_PATTERNS` below reads the PROSE of `rootCause` looking for words like `compilation` or
- * `cannot find module`. A v5 build does not fail with compiler words — it fails with sentences we wrote
- * ourselves. Six real outcome messages were run through it and ALL SIX returned `other`, including this
- * one, verbatim from a real report: *"Build outcome: STOPPED — the app was built; the post-build
- * advisory pass was cut short by its 2-minute cap."*
- *
- * `BuildRetrospectiveEngine.ts` had already root-caused exactly this on 2026-09-12 and written the
- * remedy down: *"The diagnostic CODE is a machine fact recorded by the build itself. Reading it is not
- * pattern matching, it is just looking."* That module read the code; this one did not, and its own
- * header records the decision not to merge the two. This is that merge.
- *
- * ⚠️ NOT A SECOND SOURCE OF TRUTH. `tests/failureNaming.test.ts` asserts every code in
- * `OUTCOME_TO_CATEGORY` also has a label here, so a code added to one and not the other fails CI
- * rather than quietly reappearing as "Other".
- */
-const OUTCOME_REASONS: Readonly<Record<string, { key: string; label: string }>> = {
-  OUTCOME_BUILD_TIMEOUT: { key: 'timeout', label: 'Ran out of time before the app was finished' },
-  OUTCOME_STOPPED: { key: 'stopped', label: 'The run ended before it finished' },
-  OUTCOME_SYNTAX_ERROR: { key: 'syntax-error', label: 'The generated code did not parse' },
-  OUTCOME_TYPECHECK_FAILED: { key: 'typecheck-failed', label: 'TypeScript / compile check failed' },
-  OUTCOME_MISSING_FILES: { key: 'missing-files', label: 'Files were imported but never created' },
-  OUTCOME_MISSING_EXPORT: { key: 'missing-export', label: 'A file was imported for something it does not export' },
-  OUTCOME_BUILD_PARTIAL: { key: 'partial', label: 'The build shipped less than it planned' },
-  OUTCOME_PREVIEW_FAILED: { key: 'preview-failed', label: 'The app was produced but never rendered' },
-  OUTCOME_PREVIEW_COMPILE: { key: 'preview-compile', label: 'The preview does not compile — the app would not load' },
-  OUTCOME_REVIEW_CRITICAL: { key: 'review-critical', label: 'The reviewer found something critical that was not repaired' },
-  OUTCOME_RELEASE_GATE_RED: { key: 'release-gate-red', label: 'The release gate found evidence the app does not work' },
-  OUTCOME_BUILD_FAILED: { key: 'build-failed', label: 'The build itself failed' },
-};
-
-/**
- * The engine's own real failure vocabulary, matched by substring/pattern against `rootCause`.
- *
- * ⚠️ EVERY PATTERN HERE IS GROUNDED IN A REAL STRING READ OUT OF THE SOURCE, not guessed — see the
- * module header. Order matters: the FIRST pattern that matches wins, so a more specific bucket
- * (e.g. `db-unreachable`) is listed ahead of a more general one that could also fire on its wording.
- */
-const REASON_PATTERNS: ReadonlyArray<{ key: string; label: string; test: RegExp }> = [
-  {
-    key: 'db-unreachable',
-    label: 'Database was not actually reachable',
-    // BuildDiagnostics.ts: "reported exit 0 but the database was NOT reachable — the migration/query
-    // did not actually run."
-    test: /database was not reachable|db unreachable|database is unreachable|could not (connect|reach) (the )?database/i,
-  },
-  {
-    key: 'sandbox-unavailable',
-    label: 'Build sandbox unavailable (infra, not the app)',
-    // BuildDiagnostics.ts: "could not run — the build sandbox was unavailable (reaped/expired/unreachable)."
-    test: /sandbox was unavailable|sandbox (is )?unavailable|could not run.{0,40}sandbox/i,
-  },
-  {
-    key: 'provider-budget',
-    label: 'AI provider timed out / ran out of budget',
-    // turnDeadline.ts: BUDGET_EXHAUSTED_MESSAGE / BUDGET_REACHED_MESSAGE; plus the platform's own
-    // "no provider answered" wording (autopsy 4efab9d7) and a plain provider timeout.
-    test: /build budget (exhausted|reached)|no provider answered|timed out|time budget ended/i,
-  },
-  {
-    key: 'cost-ceiling',
-    label: 'Hit the build cost ceiling',
-    test: /cost ceiling|spending (limit|cap) reached/i,
-  },
-  {
-    key: 'stuck-tool',
-    label: 'A tool call got stuck and never returned',
-    // BuildDiagnostics.ts STUCK_TOOL: "Stuck on '<tool>' — in-flight …s, never completed."
-    test: /stuck on ['"]|never completed/i,
-  },
-  {
-    key: 'tool-call-failed',
-    label: 'A tool call failed',
-    test: /tool call failed/i,
-  },
-  {
-    key: 'typecheck-failed',
-    label: 'TypeScript / compile check failed',
-    test: /\btsc\b|typecheck|type error|compil(e|ation) (fail|error)/i,
-  },
-  {
-    key: 'dependency-error',
-    label: 'A dependency / package could not be installed',
-    test: /npm (err|install)|module not found|cannot find package|dependency (error|failed)/i,
-  },
-  {
-    key: 'preview-failed',
-    label: 'The preview did not render',
-    test: /preview (failed|error|unverified)|did not render|blank (page|screen)/i,
-  },
-  {
-    key: 'runtime-error',
-    label: 'A runtime / console error in the built app',
-    test: /runtime error|console error|uncaught|unhandled (rejection|exception)/i,
-  },
-  {
-    key: 'review-critical',
-    label: 'A reviewer found a critical issue',
-    // BuildDiagnostics.ts deriveRootCause: "Critical issue found by review: <finding>"
-    test: /critical issue found by review/i,
-  },
-  {
-    key: 'no-files',
-    label: 'No files were produced',
-    test: /no files (were )?(changed|written|produced)|empty build|nothing was written/i,
-  },
-];
-
-/** One build's failure reason, from its stored rootCause text. Pure, exported for direct testing. */
-export function classifyFailureReason(
-  rootCause: string | null | undefined,
-  outcomeCode?: string | null,
-  outcomeSeverity?: string | null,
-): { key: string; label: string } {
-  const text = String(rootCause ?? '').trim();
-  /**
-   * THE CODE IS READ FIRST, because it is a fact the build recorded rather than a guess about what its
-   * prose means. The text stays as the fallback for a build that has no code — an imported project, a
-   * crash before any outcome, or a legacy record.
-   *
-   * ⚠️ SEVERITY RIDES WITH IT, and leaving it out would have traded one wrong answer for another:
-   * `OUTCOME_STOPPED` at `warning` is the 2-minute advisory cap on an app that WAS built. Classifying
-   * on the code alone would file every one of those as "the run ended before it finished".
-   */
-  const code = String(outcomeCode ?? '').trim();
-  if (code) {
-    if (isAdvisoryCapOutcome({ code, message: text })
-      || (code === 'OUTCOME_STOPPED' && String(outcomeSeverity ?? '') === 'warning' && textIsAdvisoryCap(text))) {
-      return ADVISORY_CAP_REASON;
-    }
-    const mapped = OUTCOME_REASONS[code];
-    // An UNRECOGNISED code falls through to the text exactly as it would have before this existed, so
-    // a code added later is never silently mis-filed — it simply classifies as it used to.
-    if (mapped) return mapped;
-  }
-  if (!text) return { key: 'no-root-cause', label: 'No root cause was recorded' };
-  /**
-   * 🔴 NOT A FAILURE, AND IT LOOKED LIKE THE BIGGEST ONE (report af3a3f7f, 2026-09-17). The advisory
-   * cap used to share the code `OUTCOME_STOPPED` with the real wall-clock stop, and its sentence
-   * contains no keyword in the list below — so a fully built, browser-verified app landed in the
-   * honest-but-useless `other` bucket. Named here because this module only ever sees the PROSE:
-   * `listAllDiagnostics` projects `rootCause` and drops the issue codes.
-   */
-  if (textIsAdvisoryCap(text)) return ADVISORY_CAP_REASON;
-  for (const p of REASON_PATTERNS) if (p.test.test(text)) return { key: p.key, label: p.label };
-  // Honest, not a guess forced into a bucket it may not belong to — the raw text still rides in the
-  // example list, so the admin can read it and decide whether a new pattern is worth adding.
-  return { key: 'other', label: 'Other (not yet in the known pattern list)' };
 }
 
 /** The domain a build's prompt most likely belongs to, reusing the platform's OWN classifier. Pure. */

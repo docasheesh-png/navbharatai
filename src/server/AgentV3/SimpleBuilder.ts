@@ -23,6 +23,7 @@ import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled } from './EndgameRepair';
+import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
@@ -1334,6 +1335,20 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         const drift = contractDriftReport(Object.fromEntries([...byPath].map(([p, f]) => [p, f.content])));
         if (drift) repairErrors = `${drift}\n\n${verdict.errors}`;
       } catch { /* drift report is best-effort — never blocks repair */ }
+      // WHAT THE ERRORS MEAN (autopsy baa0b3c7) — the fifth and last place the compiler speaks to a model
+      // in this engine, and the one that speaks to it REPEATEDLY: this loop runs up to `maxRepairs` times,
+      // climbing a strategy ladder, which is precisely the four-rewrites-of-one-file shape that report
+      // recorded. A missing-declaration error names the file where the symbol is USED, so every rung of
+      // that ladder is aimed at a file that was never wrong. The project's own text is passed, so the
+      // React ambiguity is resolved to the exact answer here rather than hedged — `byPath` already holds
+      // it. Advisory and additive: '' for every other kind of error, so a normal repair is unchanged.
+      try {
+        const causes = tscCauseNote(tscErrorCauses(
+          parseTscErrors(verdict.errors),
+          Object.fromEntries([...byPath].map(([p, f]) => [p, f.content])),
+        ));
+        if (causes) repairErrors = `${repairErrors}${causes}`;
+      } catch { /* the analysis is advisory — the repair still gets the compiler's own words */ }
       let fixed: OneShotFile[] = [];
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
       fixed = fixed.filter((f) => f && f.path && f.content);

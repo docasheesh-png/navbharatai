@@ -67651,3 +67651,58 @@ counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail;
 3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
    system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
    ASKED what it needs is a product question, not a threshold one.
+
+---
+
+## 2026-09-18 — The Pro image tier moves to Z-Image, and the price falls to ₹1
+
+**Admin, after comparing Z-Image Turbo against GPT Image 1 Mini:** *"Z-Image Turbo + Z-Image-Edit … price bhi 1 inr / image karo"*.
+
+### Why this is a cut in price AND a rise in quality, not a trade
+
+| | cost/image | ₹ at 95.76/$ | margin at the price |
+|---|---|---|---|
+| **Z-Image Turbo** (new) | $0.005 | ₹0.48 | **₹1 → +₹0.52 (2.1×)** |
+| FLUX.2 Klein 4B (replaced) | $0.014 | ₹1.34 | ₹2 → +₹0.66 (1.5×) |
+| GPT Image 1 Mini — low | $0.005 | ₹0.48 | affordable, but not a premium tier |
+| GPT Image 1 Mini — high | $0.036 | ₹3.45 | 🔴 a LOSS at either price |
+
+Three reasons Z-Image won, and none of them is only price: it is **~a third of FLUX.2 Klein's cost**;
+it is **#1 open-source on the Artificial Analysis Image Arena**, above FLUX.2 [dev], HunyuanImage 3.0
+and Qwen-Image; and it is **open weights, so many vendors serve it** ($0.0047–$0.01 at WaveSpeed,
+Atlas, Replicate, SiliconFlow, getimg, …) — the GLM/Kimi key-pool situation, with competition and no
+lock-in. GPT Image 1 Mini is single-vendor and is only cheap at a quality tier that cannot deliver the
+thing the Pro tier exists for (*"paid walo ko inhance karna hai"*).
+
+**The break-even rupee went UP, not down: ₹1 ÷ $0.005 = ₹200/$**, against ₹2 ÷ $0.014 = ₹142.9/$. The
+rupee would have to halve again before a Pro image stopped covering its own cost.
+
+### 🔑 Z-Image is a FAMILY, so the mode picks the model
+
+`Z-Image-Turbo` generates from words; **`Z-Image-Edit`** is the variant fine-tuned to follow an editing
+instruction against a supplied picture. `imageProModel(env, mode)` is therefore mode-aware, with
+`IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` pinnable separately and `IMAGE_PRO_MODEL` kept as the
+one-endpoint escape hatch. Sending the generation model a picture and an instruction would return a
+fresh image and quietly ignore one of them — a request that succeeds and answers the wrong question,
+which is precisely the half-working state the second absolute rule forbids. Test-locked.
+
+### 🔴 THE PRICE WAS IN THREE PLACES, AND THAT IS THE REAL DEFECT THIS FIXED
+
+`IMAGE_PRO_PRICE_INR` on the server, `PRICE_INR` in the Pro studio, and the bare string `'Pro ₹2'` on
+the free/pro toggle. Moving ₹2 → ₹1 meant three edits, and the third is exactly the one a later
+change forgets — the price a user is SHOWN and the price they are CHARGED are the same promise.
+The client cannot import the server module (it would pull server code into the browser bundle), so
+`tests/theProPriceIsOneNumber.test.ts` fails CI when they drift — the idiom
+`privacyPolicyTruth.test.ts` already uses. The toggle's literal is gone; it renders the constant.
+
+⚠️ **UNPROVEN, AND DELIBERATELY NOT ASSUMED: Devanagari.** Z-Image's bilingual text rendering is
+**Chinese and English**. No reliable claim was found for Hindi text inside an image, for Z-Image or
+for GPT Image 1 Mini. For an India-first app that is the differentiator, and it is the FIRST thing to
+test once `IMAGE_PRO_ENDPOINT` + `IMAGE_PRO_KEY` are set. Recorded as an open question rather than
+answered with a plausible guess.
+
+⚠️ **Still not live.** Both env keys remain unset, so the Pro tier still reports an honest "not
+available" and charges nothing; this change moves which engine it will call and what it will cost
+when the admin picks a host. Five of my own earlier cases in `imageProTier.test.ts` pinned ₹2/$0.014
+and were updated with the reason recorded in place — intent unchanged (the quote is price × count;
+the margin cannot invert silently; a malformed cost never falls back to zero).

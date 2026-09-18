@@ -583,13 +583,34 @@ export async function warmIndexFiles(
 ): Promise<string[]> {
   const maxFiles = opts.maxFiles ?? 80;
   const maxBytes = opts.maxBytes ?? 200_000;
-  const known = new Set(mem.graph().files);
-  // 🔴 THIS SKIPS EVERY FILE A COLD RESUME STUBBED, AND `restoreWorkspaceMemory` USED TO CLAIM THE
-  // OPPOSITE ("warmIndexFiles will fill them later") ONE LINE ABOVE WHERE IT ALSO SAID THE TRUTH
-  // ("so warmIndexFiles skips already-known files"). Both sentences cannot hold; the code does the
-  // second. A stubbed file is IN `graph.files`, so it is `known`, so it is filtered out here and
-  // keeps its empty facts for the whole build. Behaviour is UNCHANGED by this change — see
-  // `restoredStubPaths`: the hollow graph is measured first, not quietly filled.
+  // 🔴 A STUBBED FILE IS NOT A KNOWN FILE — FIXED 2026-09-18 from report 2ec15a71, and this line was
+  // the whole defect. `restoreWorkspaceMemory` indexes every previously-known path with
+  // `RESTORED_STUB`, which puts it in `graph.files`; building `known` from `graph.files` therefore
+  // filtered those files OUT here and they kept EMPTY facts (no imports, exports, components or
+  // routes) for the entire build. `restoreWorkspaceMemory` once claimed the opposite one line above
+  // where it also stated the truth — both sentences could not hold, and the code did the second.
+  //
+  // WHAT THAT COST, measured on a real user's build rather than argued: `GRAPH_RESTORED_STUBS` read
+  // **30 of 31 files**, and the three mechanisms that read this graph to PREVENT a bad edit all
+  // degraded together, each provably —
+  //   · the project contract card reads `graph().symbols` → no symbol→module map, so the model
+  //     rewrote `App.tsx` with its OWN `Item` interface while `types.ts` already exported
+  //     `PriceItem`, orphaning `data.ts` and creating a `data.ts → types.ts → data.ts` cycle;
+  //   · the architecture invariants read `g.imports` → the report says "1 observed rule";
+  //   · grounding centrality reads `graph().imports` → "3 files, ~211 tokens (budget 4000)".
+  // The build reported ok:true and told the user "137 items added, console clean". Nothing failed;
+  // the engine was simply blind to the project it was editing.
+  //
+  // 🔒 WHY FILLING IS SAFE IN BOTH DIRECTIONS, which is what the earlier measurement-first refusal
+  // was waiting on. The worry recorded at the call site was that real imports could fire
+  // `unresolvedImport` (a 20-point blocker) on a working app. They cannot fire falsely here: every
+  // path in `fileTree` is indexed, and a file not reached under `maxFiles` is STILL in `graph.files`
+  // as a stub, so an import pointing at it resolves. The hollow graph was in fact causing the
+  // OPPOSITE false penalty — a stub imports nothing, so every component looked un-imported
+  // (`orphanComponent`) on every resumed build. Filling removes false penalties and makes the real
+  // ones real; it never invents one.
+  const stubs = new Set(mem.restoredStubPaths());
+  const known = new Set(mem.graph().files.filter((f) => !stubs.has(f)));
   const targets = fileTree.filter((f) => isCode(f) && !known.has(f)).slice(0, maxFiles);
   const indexed: string[] = [];
   for (const file of targets) {

@@ -48,6 +48,19 @@ export interface UserScopedCollection { collection: string; key: KeyStrategy; }
  * Every collection here was verified against its read/write path:
  *  - users / user_profiles / user_sessions / user_token_wallets → doc id IS the uid
  *  - user_costs / user_build_history / chat_sessions            → a `userId` field equals the uid
+ *  - user_vault_pin       → `doc(db, VAULT_PIN_COLLECTION, userId)`  (appLockStore.ts:29,45)
+ *  - agentv3_mcp_library  → `.doc(userId)` on read and both writes (McpLibraryStore.ts:95,132,148)
+ *
+ * 🔴 THE LAST TWO WERE MISSING, AND THE POLICY ALREADY PROMISED THEM. Section 9 says personal data is
+ * "deleted or irreversibly anonymised within 30 days" of account deletion, with four exceptions
+ * (payment/tax records, the 180-day safety and removal records, a live legal matter) — and neither an
+ * App Lock PIN record nor a user's saved MCP library is any of them. Both are keyed by the uid, both
+ * appeared in NO erase path anywhere in the repo, so both survived account deletion for ever.
+ *
+ * ⚠️ SAME ROOT CAUSE AS THE `site_analytics` RETENTION GAP FIXED IN THE SAME CHANGE: this is a
+ * hand-maintained registry, a new per-user store has to be added to it by a human, and nothing
+ * detected the omission. `tests/everyCollectionIsClassified.test.ts` is that detector now — a new
+ * `*_COLLECTION` constant fails CI until somebody classifies it.
  */
 export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'users', key: 'docId' },
@@ -57,6 +70,8 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_costs', key: { field: 'userId' } },
   { collection: 'user_build_history', key: { field: 'userId' } },
   { collection: 'chat_sessions', key: { field: 'userId' } },
+  { collection: 'user_vault_pin', key: 'docId' },
+  { collection: 'agentv3_mcp_library', key: 'docId' },
   /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
@@ -170,6 +185,28 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   // generous; the per-visitor collection is the one that actually grows with an app's audience.
   { collection: 'app_ai_usage', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
   { collection: 'app_ai_visitors', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+
+  /**
+   * Visitor counts for published apps — the ONE window this registry promised in PUBLIC and did not keep.
+   *
+   * 🔴 The Privacy Policy says, in those words: *"These counts … are kept for 30 days."* Nothing deleted
+   * them. `site_analytics` was in neither this list nor `RETAINED_INDEFINITELY`, and no purge, TTL or
+   * sweep anywhere in the repo touched it — so the counts accumulated for ever while the published
+   * policy stated a 30-day limit as fact. That is the 2026-09-02 shape (the policy said we never share
+   * data with advertisers while the pixel was being built), and it produced no failure of any kind.
+   *
+   * ⚠️ WHY IT WAS MISSED rather than decided: `GROWING_COLLECTIONS` in `routes/admin.ts` — the inventory
+   * the Load board's storage warning is computed from — carries the comment "verified by reading each
+   * store on 2026-09-07", and the beacon shipped on 2026-09-10. A hand-maintained inventory cannot warn
+   * about the collection nobody added to it, so the omission was invisible from both directions.
+   *
+   * 🔒 SAFE BY CONSTRUCTION, checked rather than assumed: every document here is one app-day-shard
+   * (`hitDocId`) carrying `updatedAt: Date.now()`, the owner's dashboard reads a DAY WINDOW by id and
+   * the widest window any caller asks for is exactly `days = 30`, and the all-time total is a SEPARATE
+   * running counter (`ownAudience.lifetimeViews`, its own collection) — so deleting a day-document past
+   * 30 days cannot change a number anybody is shown.
+   */
+  { collection: 'site_analytics', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'epochMs' },
 ];
 
 /**

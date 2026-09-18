@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { PRIVACY_POLICY } from '../src/content/legal/privacyPolicy';
 import { pixelEventFor, pixelBootSequence } from '../src/lib/metaPixel';
 import { spaFallbackShouldDefer } from '../src/server/lib/spaFallback';
@@ -162,6 +164,34 @@ describe('Privacy Policy — it discloses the visitor analytics on published app
     expect(PRIVACY_POLICY).toMatch(/sets no cookie and stores nothing on the visitor's device/);
     expect(PRIVACY_POLICY).toMatch(/shown only to you, the app's builder/);
     expect(PRIVACY_POLICY).toMatch(/kept for 30 days/);
+  });
+
+  it('🔒 the 30-day promise is KEPT, not just printed — something actually deletes the counts', async () => {
+    // 🔴 THIS FILE ASSERTED THE SENTENCE AND NOT THE MECHANISM, and for `kept for 30 days` there WAS no
+    // mechanism: `site_analytics` sat in neither `RETENTION_POLICIES` nor `RETAINED_INDEFINITELY`, and no
+    // purge, TTL or sweep in the repo touched it — so the counts grew for ever while the published policy
+    // stated a 30-day limit as fact. A guard that checks a promise is PRESENT cannot fail when the promise
+    // stops being true; that is the whole reason this case exists beside the prose one above.
+    const { RETENTION_POLICIES } = await import('../src/server/lib/DataRetentionManager');
+    const { SITE_ANALYTICS_COLLECTION } = await import('../src/server/lib/siteAnalyticsStore');
+    const policy = RETENTION_POLICIES.find((p) => p.collection === SITE_ANALYTICS_COLLECTION);
+    expect(policy, `no retention policy deletes ${SITE_ANALYTICS_COLLECTION}`).toBeDefined();
+    // The NUMBER is tied to the sentence, so changing either alone fails here.
+    expect(policy?.ttlDays).toBe(30);
+    expect(PRIVACY_POLICY).toMatch(/kept for 30 days/);
+    // The field it deletes by must be one the writer actually sets.
+    expect(policy?.timestampField).toBe('updatedAt');
+    expect(policy?.timestampKind).toBe('epochMs');
+  });
+
+  it('🔒 and the Load board can SEE the collection — a hand-kept inventory is how this was missed', async () => {
+    // `GROWING_COLLECTIONS` says "verified by reading each store on 2026-09-07"; the beacon shipped on
+    // 2026-09-10. The storage warning cannot warn about a collection nobody added to its list, so the
+    // omission was invisible from both directions at once.
+    const admin = readFileSync(resolve(__dirname, '../src/server/routes/admin.ts'), 'utf8');
+    const { SITE_ANALYTICS_COLLECTION } = await import('../src/server/lib/siteAnalyticsStore');
+    const inventory = admin.slice(admin.indexOf('const GROWING_COLLECTIONS'));
+    expect(inventory.slice(0, inventory.indexOf('];'))).toContain(`'${SITE_ANALYTICS_COLLECTION}'`);
   });
 
   it('🔒 the beacon keeps those promises in code, not only in prose', async () => {

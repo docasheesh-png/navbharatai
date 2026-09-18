@@ -110,10 +110,10 @@ interface ChatMsg {
 }
 
 const V3_EXT_COLOR: Record<string, string> = {
-  html: 'text-orange-400', css: 'text-blue-400', js: 'text-yellow-400',
-  ts: 'text-cyan-400', tsx: 'text-cyan-400', jsx: 'text-yellow-400',
-  json: 'text-green-400', md: 'text-purple-400', py: 'text-emerald-400',
-  svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
+  html: 'text-warn', css: 'text-info', js: 'text-warn',
+  ts: 'text-info', tsx: 'text-info', jsx: 'text-warn',
+  json: 'text-success', md: 'text-accent-text', py: 'text-success',
+  svg: 'text-accent-text', png: 'text-accent-text', jpg: 'text-accent-text',
 };
 
 // Last `resume` nonce actually applied — at MODULE scope on purpose, so it SURVIVES the panel
@@ -2823,15 +2823,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         key={b.id}
         onClick={() => onPick(b)}
         disabled={reportSending}
-        className={`w-full text-left hover:bg-zinc-800 disabled:opacity-40 border-b border-zinc-800/60 last:border-b-0 ${mobile ? 'px-4 py-3 touch-manipulation' : 'px-3 py-2'}`}
+        className={`w-full text-left hover:bg-raised disabled:opacity-40 border-b border-line last:border-b-0 ${mobile ? 'px-4 py-3 touch-manipulation' : 'px-3 py-2'}`}
       >
         <div className="flex items-center gap-2">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${b.ok === false ? 'bg-rose-400' : 'bg-emerald-400'}`} />
-          <span className={`text-zinc-200 truncate ${mobile ? 'text-sm' : 'text-xs'}`}>{b.label}</span>
+          <span className={`text-body truncate ${mobile ? 'text-sm' : 'text-xs'}`}>{b.label}</span>
         </div>
-        <div className="mt-0.5 pl-3.5 text-[10px] text-zinc-500">
+        <div className="mt-0.5 pl-3.5 text-[10px] text-faint">
           {i === 0 ? 'Latest · ' : ''}{new Date(b.startedAt).toLocaleString()}
-          {sent > 0 && <span className="text-emerald-400/80"> · already sent{sent > 1 ? ` (${sent})` : ''}</span>}
+          {sent > 0 && <span className="text-success"> · already sent{sent > 1 ? ` (${sent})` : ''}</span>}
         </div>
       </button>
     );
@@ -3649,26 +3649,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           onClick={() => { if (!isDeleting) openConversation(c.id); }}
           disabled={isDeleting}
           title={c.deadTranscript ? 'Transcript lost to an old bug — files/memory intact' : (c.title || 'Untitled build')}
-          className={`w-full flex items-center gap-2 pl-3 pr-16 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
+          className={`w-full flex items-center gap-2 pl-3 pr-16 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-ink' : c.deadTranscript ? 'text-faint hover:bg-raised active:bg-raised' : 'text-muted hover:bg-raised active:bg-raised'}`}
         >
           <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
             {/* Live = the app has an ACTIVE published deployment (server-verified) — soft glow halo,
                 like a broadcast "on air" light. Static (running's pulse stays the only animation). */}
             <span
-              className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
+              className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-raised' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
               title={meta.live ? 'Live — this app is published' : meta.label}
             />
           </span>
           <span className="flex-1 min-w-0">
             <span className="flex items-center gap-1 min-w-0">
-              {c.pinned && <Star className="w-3 h-3 shrink-0 text-indigo-400 fill-indigo-400" />}
+              {c.pinned && <Star className="w-3 h-3 shrink-0 text-accent-text fill-indigo-400" />}
               <span className="block truncate">{c.title || 'Untitled build'}</span>
             </span>
-            <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
-              {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
+            <span className="flex items-center gap-1.5 text-[10px] text-faint">
+              {isActive && <span className="text-accent-text font-semibold">Current session ·</span>}
               {c.deadTranscript
                 ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
-                : meta.label && <span className={meta.live ? 'text-green-400 font-semibold' : ''}>{meta.label}</span>}
+                : meta.label && <span className={meta.live ? 'text-success font-semibold' : ''}>{meta.label}</span>}
               {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
             </span>
           </span>
@@ -3680,7 +3680,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             disabled={isPinning || isDeleting}
             title={c.pinned ? 'Unpin this session' : 'Pin this session to the top'}
             aria-label={c.pinned ? 'Unpin this session' : 'Pin this session'}
-            className={`p-1 rounded touch-manipulation disabled:opacity-40 focus:opacity-100 ${c.pinned ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 opacity-100' : 'text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 opacity-60 sm:opacity-0 sm:group-hover:opacity-100'}`}
+            className={`p-1 rounded touch-manipulation disabled:opacity-40 focus:opacity-100 ${c.pinned ? 'text-accent-text hover:text-accent-text hover:bg-indigo-500/10 opacity-100' : 'text-faint hover:text-accent-text hover:bg-indigo-500/10 opacity-60 sm:opacity-0 sm:group-hover:opacity-100'}`}
           >
             {isPinning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
           </button>
@@ -3690,7 +3690,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             disabled={running || isDeleting || duplicatingId === c.id}
             title="Make a copy of this app"
             aria-label="Make a copy of this app"
-            className="p-1 rounded touch-manipulation text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+            className="p-1 rounded touch-manipulation text-faint hover:text-accent-text hover:bg-indigo-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
           >
             {duplicatingId === c.id ? <TirangaLoader className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
           </button>
@@ -3700,7 +3700,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             disabled={running || isDeleting}
             title="Delete this session"
             aria-label="Delete this session"
-            className="p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+            className="p-1 rounded touch-manipulation text-faint hover:text-danger hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
           >
             {isDeleting ? <TirangaLoader className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
           </button>
@@ -3711,35 +3711,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const historyListBody = (
     <>
       {tapDebug && (
-        <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-amber-300 break-all select-text">
+        <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-warn break-all select-text">
           {lastTap || 'tap tracer ON — now tap any chat'}
         </div>
       )}
       <button
         onClick={newChatFromHistory}
-        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-ink hover:bg-raised disabled:opacity-40"
       >
-        <Plus className="w-4 h-4 text-indigo-400" /> New chat
+        <Plus className="w-4 h-4 text-accent-text" /> New chat
       </button>
-      <div className="my-1 border-t border-zinc-800" />
+      <div className="my-1 border-t border-line" />
       {!historyLoading && !historyError && historyItems.length > 0 && (
         <div className="px-2 pb-1.5">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint pointer-events-none" />
             <input
               type="text"
               value={historyQuery}
               onChange={(e) => setHistoryQuery(e.target.value)}
               placeholder="Search sessions…"
               aria-label="Search sessions"
-              className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+              className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-raised border border-line text-sm text-body placeholder-faint focus:outline-none focus:border-indigo-500"
             />
             {historyQuery && (
               <button
                 type="button"
                 onClick={() => setHistoryQuery('')}
                 aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-zinc-500 hover:text-zinc-200"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-faint hover:text-body"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -3748,36 +3748,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         </div>
       )}
       {historyLoading ? (
-        <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading sessions…</div>
+        <div className="px-3 py-3 text-xs text-faint flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading sessions…</div>
       ) : historyError ? (
         <div className="px-3 py-4 text-xs text-center">
-          <div className="flex items-center justify-center gap-1.5 text-amber-400">
+          <div className="flex items-center justify-center gap-1.5 text-warn">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             <span>Couldn't load your history</span>
           </div>
-          <div className="mt-1 text-zinc-500">{historyError}</div>
+          <div className="mt-1 text-faint">{historyError}</div>
           <button
             onClick={loadHistory}
-            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-zinc-800 font-medium"
+            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-accent-text hover:text-accent-text hover:bg-raised font-medium"
           >
             <RotateCcw className="w-3 h-3" /> Try again
           </button>
         </div>
       ) : historyItems.length === 0 ? (
-        <div className="px-3 py-4 text-xs text-zinc-500 text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
+        <div className="px-3 py-4 text-xs text-faint text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
       ) : (() => {
         // Instant client-side search, then pinned-first: the Pinned section sits above the normal
         // date buckets so a user's important builds are always one glance away regardless of age.
         const filtered = filterSessionsByQuery(historyItems, historyQuery);
         if (filtered.length === 0) {
-          return <div className="px-3 py-4 text-xs text-zinc-500 text-center">No sessions match “{historyQuery.trim()}”.</div>;
+          return <div className="px-3 py-4 text-xs text-faint text-center">No sessions match “{historyQuery.trim()}”.</div>;
         }
         const { pinned, rest } = partitionPinnedSessions(filtered);
         return (
           <>
             {pinned.length > 0 && (
               <div>
-                <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-indigo-400/80 flex items-center gap-1">
+                <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-accent-text flex items-center gap-1">
                   <Star className="w-3 h-3 fill-current" /> Pinned
                 </div>
                 {pinned.map(renderSessionRow)}
@@ -3785,7 +3785,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             )}
             {groupSessionsByDate(rest, Date.now()).map((group) => (
               <div key={group.label}>
-                <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
+                <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-faint">{group.label}</div>
                 {group.items.map(renderSessionRow)}
               </div>
             ))}
@@ -3813,7 +3813,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   });
 
   return (
-    <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
+    <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-surface text-body">
       {showHostingChooser && (
         <HostingChooser
           providers={configuredProviders}
@@ -3892,7 +3892,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       )}
 
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
-      <div className="shrink-0 border-b border-zinc-800">
+      <div className="shrink-0 border-b border-line">
         {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve
             room on the right so the header's own trailing controls (Stop/Resume) don't sit under it. */}
         {/* HEIGHT (admin 2026-08-17: "upar ke 25% bina baat ke header me chala jata hai"). On a phone
@@ -3909,7 +3909,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               onClick={toggleHistory}
               title="Chat history"
               aria-label="Chat history"
-              className="flex items-center justify-center w-7 h-7 -ml-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800"
+              className="flex items-center justify-center w-7 h-7 -ml-1 rounded-md text-muted hover:text-ink hover:bg-raised"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -3919,14 +3919,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     to the root) Safari only synthesizes click on "clickable" elements, so a bare div
                     never closed the menu on tap-outside on iPhone. */}
                 <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryOpen(false)} aria-hidden="true" />
-                <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
-                  <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
+                <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-xl border border-line bg-card shadow-2xl py-1.5">
+                  <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Session history</div>
                   {historyListBody}
                 </div>
               </>
             )}
           </div>
-          <Bot className="w-5 h-5 text-indigo-400" />
+          <Bot className="w-5 h-5 text-accent-text" />
           {/* The full name wrapped to TWO lines on a phone, which cost more height than every padding
               value in this header put together. "NavBharatAI" is already on the bar directly above, so
               the short form loses nothing a user can actually see — the full name returns at lg. */}
@@ -3934,7 +3934,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <span className="lg:hidden">Pro</span>
             <span className="hidden lg:inline">NavBharatAI Pro</span>
           </span>
-          <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
+          <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-accent-text px-1.5 py-0.5 rounded">beta</span>
           {/* Paid-public (billing PR 5): a live wallet-balance chip — shown ONLY when this user is
               actually on paid billing (server `billed:true`), so admin/free-list users and the
               flag-off state never see it. Tapping it opens Wallet & Billing to top up. */}
@@ -3944,7 +3944,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
               title={`Your NavBharatAI Pro token balance${walletBalanceInr !== null ? ` (≈ ₹${walletBalanceInr.toFixed(2)})` : ''} — tap to add more`}
-              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border transition-all ${(walletTokens ?? walletBalanceInr ?? 0) <= 0 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20'}`}
+              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border transition-all ${(walletTokens ?? walletBalanceInr ?? 0) <= 0 ? 'bg-amber-500/15 border-amber-500/30 text-warn hover:bg-amber-500/25' : 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20'}`}
             >
               <Wallet className="w-3 h-3" />
               {walletTokens !== null
@@ -3954,7 +3954,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           )}
           <button
             onClick={() => setShowFrameworkPicker(true)}
-            className="flex items-center gap-1 text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-400 hover:text-white px-2 py-0.5 rounded-full transition-all"
+            className="flex items-center gap-1 text-[10px] bg-raised hover:bg-raised border border-line text-muted hover:text-ink px-2 py-0.5 rounded-full transition-all"
             title="Change framework"
           >
             <span>{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
@@ -3962,13 +3962,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 name + picker entry lives in the footer's More sheet. */}
             <span className={mobileFooter ? 'hidden lg:inline' : ''}>{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
           </button>
-          <span className="text-[9px] text-zinc-600 font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
+          <span className="text-[9px] text-faint font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
           {running ? (
             // Attached + streaming here → Stop.
             <button
               onClick={stop}
               title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)"
-              className="ml-auto flex items-center gap-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded px-2 py-1"
+              className="ml-auto flex items-center gap-1 text-xs text-on-accent bg-red-600 hover:bg-red-500 rounded px-2 py-1"
             >
               <Square className="w-3.5 h-3.5" /> Stop
             </button>
@@ -3978,14 +3978,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <button
                 onClick={() => { void attachToBuild(); }}
                 title="Open the running build — resume where it left off"
-                className="flex items-center gap-1 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2 py-1"
+                className="flex items-center gap-1 text-xs text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2 py-1"
               >
                 <Play className="w-3.5 h-3.5" /> Resume
               </button>
               <button
                 onClick={stop}
                 title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)"
-                className="flex items-center gap-1 text-xs text-red-200 border border-red-700 hover:bg-red-950 rounded px-2 py-1"
+                className="flex items-center gap-1 text-xs text-danger border border-red-700 hover:bg-red-950 rounded px-2 py-1"
               >
                 <Square className="w-3.5 h-3.5" /> Stop
               </button>
@@ -4011,7 +4011,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               onClick={() => void openReportPicker()}
               disabled={reportSending || reportPickerLoading || !state.workspaceId}
               title={`Send a build's report to the NavBharatAI team so we can improve the build engine. (The report is reviewed by our team.)${reportCount > 0 ? ` ${reportAlreadySentHint(reportCount)}` : ''}`}
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent || reportCount > 0 ? 'border-emerald-600 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${reportSent || reportCount > 0 ? 'border-emerald-600 text-success' : 'border-line text-muted hover:text-ink hover:border-line'}`}
             >
               {reportSending || reportPickerLoading ? <TirangaLoader className="w-3.5 h-3.5" /> : reportSent || reportCount > 0 ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
               {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
@@ -4030,8 +4030,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <>
                 {/* Click-away layer, so the list closes the way every other popover here does. */}
                 <div className="fixed inset-0 z-40" onClick={() => setReportPickerOpen(false)} />
-                <div className="absolute right-0 z-50 mt-1 w-80 max-h-80 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl">
-                  <div className="px-3 py-2 text-[11px] text-zinc-400 border-b border-zinc-800">
+                <div className="absolute right-0 z-50 mt-1 w-80 max-h-80 overflow-y-auto rounded-lg border border-line bg-card shadow-xl">
+                  <div className="px-3 py-2 text-[11px] text-muted border-b border-line">
                     Which build had the problem?
                   </div>
                   {reportPickerRows((b) => askForReportNote(b), false)}
@@ -4045,7 +4045,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               target="_blank"
               rel="noreferrer"
               title={`Open this project's GitHub repo${state.repoFullName ? ` (${state.repoFullName})` : ''} — your code, branches, pull requests, CI and merges`}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-line text-muted hover:text-ink hover:border-line transition-colors"
             >
               <Github className="w-3.5 h-3.5" />
               GitHub
@@ -4059,7 +4059,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             data-tour="deploy"
             disabled={running || !state.workspaceId}
             title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-success hover:text-ink hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Rocket className="w-3.5 h-3.5" />
             Publish
@@ -4071,7 +4071,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               target="_blank"
               rel="noreferrer"
               title={`Your live site: ${liveUrl}`}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 bg-emerald-950/40 text-emerald-300 hover:text-white hover:border-emerald-500 transition-colors"
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 bg-emerald-950/40 text-success hover:text-ink hover:border-emerald-500 transition-colors"
             >
               <Globe className="w-3.5 h-3.5" />
               Live site
@@ -4106,12 +4106,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               return lastUser ? <AppUpdateChatNotice /> : null;
             })()}
             {coldStartVisible && (
-              <div className="text-sm text-zinc-500 mt-6 text-center">
-                <Bot className="w-8 h-8 mx-auto mb-2 text-indigo-400/60" />
+              <div className="text-sm text-faint mt-6 text-center">
+                <Bot className="w-8 h-8 mx-auto mb-2 text-accent-text" />
                 {chatMode === 'planner'
-                  ? <>🧠 <b className="text-zinc-300">Plan</b> — read-only. Describe a goal and I’ll plan it with you (aware of your build); approve the steps into the build queue.</>
+                  ? <>🧠 <b className="text-muted">Plan</b> — read-only. Describe a goal and I’ll plan it with you (aware of your build); approve the steps into the build queue.</>
                   : chatMode === 'advisor'
-                  ? <>🔍 <b className="text-zinc-300">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
+                  ? <>🔍 <b className="text-muted">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
                 {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
                     composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
@@ -4119,10 +4119,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     prompt with a remove (×). Saved via the 🔖 action on any message you sent. */}
                 {chatMode === 'build' && savedTpls.length > 0 && (
                   <div className="mt-5">
-                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Your templates</div>
+                    <div className="text-[11px] uppercase tracking-wide text-faint mb-2">Your templates</div>
                     <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
                       {pagedSavedTpls.visible.map((t) => (
-                        <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-amber-200 overflow-hidden">
+                        <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-warn overflow-hidden">
                           <button
                             type="button"
                             title={t.prompt}
@@ -4136,7 +4136,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                             title="Remove this template"
                             aria-label="Remove template"
                             onClick={() => handleRemoveTemplate(t.id)}
-                            className="px-1.5 py-1 text-amber-400/70 hover:text-red-400 hover:bg-white/5 transition-colors"
+                            className="px-1.5 py-1 text-warn hover:text-danger hover:bg-raised transition-colors"
                           >
                             <X className="w-3 h-3" />
                           </button>
@@ -4160,7 +4160,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   const starterShown = startersExpanded ? starterInitial.concat(starterMore) : starterInitial;
                   return (
                   <div className="mt-5">
-                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
+                    <div className="text-[11px] uppercase tracking-wide text-faint mb-2">Or start from a template</div>
                     {/* 🔴 BUTTONS, NOT TILES (admin 2026-09-12: *"in tiles se user confused hota hai, ki
                         sayad kuch load ho raha hai … bas simple text button rahne do, koi discription nahi,
                         koi preview image/background nahi"*).
@@ -4189,7 +4189,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           type="button"
                           title={t.prompt}
                           onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300 hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-indigo-200 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-line bg-raised text-xs text-muted hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-accent-text transition-colors"
                         >
                           <span aria-hidden>{t.icon}</span>{t.label}
                         </button>
@@ -4205,7 +4205,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           type="button"
                           aria-expanded={startersExpanded}
                           onClick={() => setStartersExpanded((v) => !v)}
-                          className="px-3 py-1 rounded-full text-[11px] text-zinc-500 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors"
+                          className="px-3 py-1 rounded-full text-[11px] text-faint hover:text-accent-text hover:bg-indigo-500/10 transition-colors"
                         >
                           {startersExpanded ? 'Show fewer templates' : 'More templates (' + starterMore.length + ')'}
                         </button>
@@ -4215,7 +4215,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         recharge surface) instead of dropping a prompt the weak tier would flail on. */}
                     {starterLocked.length > 0 && (
                       <div className="mt-4">
-                        <div className="text-[11px] uppercase tracking-wide text-indigo-400/70 mb-2 flex items-center justify-center gap-1">
+                        <div className="text-[11px] uppercase tracking-wide text-accent-text mb-2 flex items-center justify-center gap-1">
                           <span aria-hidden>⚡</span> Unlock with Pro
                         </div>
                         <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
@@ -4225,7 +4225,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               type="button"
                               title={`${t.label} needs a Pro tier — the free tier is tuned for simple apps. Tap to unlock.`}
                               onClick={() => setSettingsOpen(true)}
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-indigo-300/80 hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-indigo-200 transition-colors"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-accent-text hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-accent-text transition-colors"
                             >
                               <span aria-hidden>{t.icon}</span>{t.label}<span aria-hidden className="ml-0.5 opacity-70">🔒</span>
                             </button>
@@ -4242,7 +4242,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         onClick={openScreenshotGallery}
                         disabled={screenshotBusy || running}
                         title="Pick a website/app screenshot from your gallery — NavBharatAI Pro builds it"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
                         {screenshotBusy ? 'Reading screenshot…' : 'Screenshot → App'}
@@ -4263,23 +4263,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {appName && (
               <div className="mx-auto my-3 w-full max-w-[92%] rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-3 py-2.5">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 shrink-0 text-indigo-400" aria-hidden />
+                  <Sparkles className="w-4 h-4 shrink-0 text-accent-text" aria-hidden />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[10px] font-black uppercase tracking-widest text-indigo-300/70">App name</div>
-                    <div className="truncate text-sm font-semibold text-zinc-100" title={appName}>{appName}</div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-accent-text">App name</div>
+                    <div className="truncate text-sm font-semibold text-body" title={appName}>{appName}</div>
                   </div>
                   <button
                     type="button"
                     onClick={() => { setNameDraft(appName); setNameError(null); setNameModalOpen(true); }}
                     title="Change your app's name"
                     aria-label="Change your app's name"
-                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white hover:bg-white/10 transition-colors touch-manipulation"
+                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[11px] font-semibold text-muted hover:text-ink hover:bg-raised transition-colors touch-manipulation"
                   >
                     <Pencil className="w-3 h-3" /> Edit
                   </button>
                 </div>
                 {nameNote && (
-                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-emerald-300">
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-success">
                     <span aria-hidden>✓</span>{nameNote}
                   </div>
                 )}
@@ -4298,37 +4298,37 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 no live build anywhere (serverBuildRunning false) and nothing is streaming here. Files, plan
                 and memory were all saved durably, so Continue picks up from where it stopped. */}
             {remixArrived && (
-              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-100">
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm text-success">
                 <div className="flex items-start gap-2">
-                  <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-emerald-400" />
+                  <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-success" />
                   <div className="flex-1">
                     <div className="font-medium">
                       {remixArrived.owned ? `${remixArrived.appName} is yours — copied again` : `${remixArrived.appName} is yours now`}
                     </div>
-                    <div className="text-emerald-200/80 text-xs mt-0.5">
+                    <div className="text-success text-xs mt-0.5">
                       Every file is here and ready to edit — see it running, or just tell me what to change.
                     </div>
                     <button
                       type="button"
                       onClick={() => openSurfaceFromFooter('preview')}
-                      className="mt-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors"
+                      className="mt-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-semibold transition-colors"
                     >▶ Open preview</button>
                   </div>
                   <button
                     type="button"
                     onClick={() => setRemixArrived(null)}
-                    className="shrink-0 text-emerald-200/70 text-xs hover:text-emerald-100"
+                    className="shrink-0 text-success text-xs hover:text-success"
                   >Dismiss</button>
                 </div>
               </div>
             )}
             {interruptedResume && !serverBuildRunning && !running && (
-              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-warn">
                 <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-warn" />
                   <div className="flex-1">
                     <div className="font-medium">This build didn’t finish</div>
-                    <div className="text-amber-200/80 text-xs mt-0.5">
+                    <div className="text-warn text-xs mt-0.5">
                       It was interrupted before it could complete (usually a server restart). Your files, plan and progress are all saved — continue to finish the remaining steps.
                     </div>
                     <div className="mt-2 flex items-center gap-2">
@@ -4342,7 +4342,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       <button
                         type="button"
                         onClick={() => setInterruptedResume(false)}
-                        className="px-2.5 py-1 rounded-md text-amber-200/80 text-xs hover:text-amber-100 hover:bg-white/5 transition-colors"
+                        className="px-2.5 py-1 rounded-md text-warn text-xs hover:text-warn hover:bg-raised transition-colors"
                       >
                         Dismiss
                       </button>
@@ -4371,8 +4371,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {state.verification && state.verification.steps.length > 0 && (
               <div className={`mx-auto my-3 max-w-[92%] rounded-xl border px-3 py-2.5 text-sm ${
                 state.verification.ok
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
-                  : 'border-amber-500/40 bg-amber-500/10 text-amber-100'}`}>
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-success'
+                  : 'border-amber-500/40 bg-amber-500/10 text-warn'}`}>
                 <div className="flex items-start gap-2">
                   <span className="mt-0.5 shrink-0" aria-hidden="true">{state.verification.ok ? '✅' : '⚠️'}</span>
                   <div className="flex-1 min-w-0">
@@ -4391,24 +4391,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
                 dismiss. It never pauses the build (honours "text reply > build app"). */}
             {state.pendingClarify && !clarifyDismissed && state.pendingClarify.questions.length > 0 && (
-              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-sm text-indigo-100">
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-sm text-accent-text">
                 <div className="flex items-start gap-2">
-                  <Bot className="w-4 h-4 mt-0.5 shrink-0 text-indigo-400" />
+                  <Bot className="w-4 h-4 mt-0.5 shrink-0 text-accent-text" />
                   <div className="flex-1">
                     <div className="font-medium">Building your {state.pendingClarify.domain} app — a few things I assumed</div>
-                    <div className="text-indigo-200/80 text-xs mt-0.5">
+                    <div className="text-accent-text text-xs mt-0.5">
                       I’m already building with sensible defaults. Want to adjust any of these? Just reply below — no need to wait.
                     </div>
                     <ul className="mt-1.5 space-y-1">
                       {state.pendingClarify.questions.map((q, i) => (
-                        <li key={i} className="text-xs text-indigo-100/90 flex gap-1.5"><span className="text-indigo-400">•</span><span>{q}</span></li>
+                        <li key={i} className="text-xs text-accent-text flex gap-1.5"><span className="text-accent-text">•</span><span>{q}</span></li>
                       ))}
                     </ul>
                     <div className="mt-2">
                       <button
                         type="button"
                         onClick={() => setClarifyDismissed(true)}
-                        className="px-2.5 py-1 rounded-md text-indigo-200/80 text-xs hover:text-indigo-100 hover:bg-white/5 transition-colors"
+                        className="px-2.5 py-1 rounded-md text-accent-text text-xs hover:text-accent-text hover:bg-raised transition-colors"
                       >
                         Looks good — dismiss
                       </button>
@@ -4425,22 +4425,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               // Paid-public (billing PR 5): credits ran out → the build was refused BEFORE it started, so
               // "Fix with AI" (the code-error treatment) would be wrong. This is its own actionable card:
               // add credits, or dismiss. Any build already running is unaffected (nothing was started).
-              <div className="px-3 py-2.5 bg-amber-950/50 text-amber-100 text-xs rounded border border-amber-500/30">
+              <div className="px-3 py-2.5 bg-amber-950/50 text-warn text-xs rounded border border-amber-500/30">
                 <div className="flex items-start gap-2">
                   <Wallet className="w-4 h-4 shrink-0 mt-0.5" />
                   <div className="min-w-0">
-                    <div className="font-semibold text-amber-200">Add credits to build</div>
+                    <div className="font-semibold text-warn">Add credits to build</div>
                     <div className="mt-0.5 whitespace-pre-wrap break-words">{billingBlock.notice}</div>
                     {/* Billing Phase 2 — token-first: balance and estimate in the wallet's primary unit
                         (server-converted tokens); older servers without token fields fall back to ₹. */}
                     {(typeof billingBlock.balanceTokens === 'number' || typeof billingBlock.estimateTokens === 'number') ? (
-                      <div className="mt-1 text-[11px] text-amber-300/80">
+                      <div className="mt-1 text-[11px] text-warn">
                         {typeof billingBlock.balanceTokens === 'number' && <span>Balance: {billingBlock.balanceTokens.toLocaleString()} tokens</span>}
                         {typeof billingBlock.balanceTokens === 'number' && typeof billingBlock.estimateTokens === 'number' && <span> · </span>}
                         {typeof billingBlock.estimateTokens === 'number' && <span>This build ≈ {billingBlock.estimateTokens.toLocaleString()} tokens</span>}
                       </div>
                     ) : (typeof billingBlock.balanceInr === 'number' || typeof billingBlock.estimateInr === 'number') && (
-                      <div className="mt-1 text-[11px] text-amber-300/80">
+                      <div className="mt-1 text-[11px] text-warn">
                         {typeof billingBlock.balanceInr === 'number' && <span>Balance: ₹{billingBlock.balanceInr.toFixed(2)}</span>}
                         {typeof billingBlock.balanceInr === 'number' && typeof billingBlock.estimateInr === 'number' && <span> · </span>}
                         {typeof billingBlock.estimateInr === 'number' && <span>This build ≈ ₹{billingBlock.estimateInr.toFixed(2)}</span>}
@@ -4452,13 +4452,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <button
                     onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
                     title="Open Wallet & Billing to add credits"
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-amber-600 hover:bg-amber-500 rounded px-2.5 py-1"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-amber-600 hover:bg-amber-500 rounded px-2.5 py-1"
                   >
                     <Wallet className="w-3.5 h-3.5" /> Add credits
                   </button>
                   <button
                     onClick={clearBillingBlock}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-200 bg-white/5 hover:bg-white/10 rounded px-2.5 py-1"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-warn bg-raised hover:bg-raised rounded px-2.5 py-1"
                   >
                     Dismiss
                   </button>
@@ -4466,7 +4466,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {(error || state.error) && (
-              <div className="px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
+              <div className="px-3 py-2 bg-red-950/60 text-danger text-xs rounded">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
                 </div>
@@ -4477,7 +4477,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <div className="mt-2">
                     <button
                       onClick={() => setVerifyPhoneOpen(true)}
-                      className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded px-2.5 py-1"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-emerald-600 hover:bg-emerald-500 rounded px-2.5 py-1"
                     >
                       <Rocket className="w-3.5 h-3.5" /> Verify my number
                     </button>
@@ -4491,14 +4491,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       <button
                         onClick={stop}
                         title="Stop the build that's holding your account, so you can send again"
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-red-600 hover:bg-red-500 rounded px-2.5 py-1"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-red-600 hover:bg-red-500 rounded px-2.5 py-1"
                       >
                         <Square className="w-3.5 h-3.5" /> Stop
                       </button>
                       <button
                         onClick={() => { void attachToBuild(); }}
                         title="Connect to the build that's already running — attach and watch it live"
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
                       >
                         <Play className="w-3.5 h-3.5" /> Connect
                       </button>
@@ -4516,7 +4516,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     errorCanBeFixedByEditingTheApp({ beforeBuildStarted: errorBeforeBuildStarted, message: error || state.error }) ? (
                       <button
                         onClick={() => fixWithAI(fixErrorAndContinuePrompt(error || state.error || ''))}
-                        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                        className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
                       >
                         <Sparkles className="w-3.5 h-3.5" /> Fix with AI
                       </button>
@@ -4528,7 +4528,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {/* T1-budget-ux: a budget-cap stop is an honest PAUSE, not a failure — calm state + a Continue that
                 the user chooses (never a silent auto-continue that would keep spending). Work is already saved. */}
             {state.done && state.budgetReached && (
-              <div className="px-3 py-2 bg-sky-950/50 text-sky-100 text-xs rounded border border-sky-900/60">
+              <div className="px-3 py-2 bg-sky-950/50 text-info text-xs rounded border border-sky-900/60">
                 <div className="flex items-start gap-2">
                   <Wallet className="w-4 h-4 shrink-0" />
                   <span className="whitespace-pre-wrap break-words">This build reached its budget for now — your files are saved. Continue to keep building (uses more of your balance), or stop here.</span>
@@ -4536,7 +4536,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 {!running && (
                   <button
                     onClick={() => fixWithAI('Continue building from where you left off and finish the app — I understand this uses more of my budget.')}
-                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-sky-600 hover:bg-sky-500 rounded px-2.5 py-1"
+                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-sky-600 hover:bg-sky-500 rounded px-2.5 py-1"
                   >
                     <Sparkles className="w-3.5 h-3.5" /> Continue building
                   </button>
@@ -4556,31 +4556,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 ok: state.ok, appRendered: state.appRendered, running,
                 hasError: !!state.error, budgetReached: state.budgetReached, summary: state.summary,
               }) ? (
-                <div className="px-3 py-2 bg-emerald-950/40 text-emerald-100 text-xs rounded border border-emerald-900/60">
+                <div className="px-3 py-2 bg-emerald-950/40 text-success text-xs rounded border border-emerald-900/60">
                   <div className="flex items-start gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
                     <span className="whitespace-pre-wrap break-words">{appRunningNoticeText()}</span>
                   </div>
-                  <div className="mt-1.5 pl-6 text-emerald-200/80 whitespace-pre-wrap break-words">{state.summary}</div>
+                  <div className="mt-1.5 pl-6 text-success whitespace-pre-wrap break-words">{state.summary}</div>
                   {!running && (
                     <button
                       onClick={() => fixWithAI(fixRemainingIssuePrompt(state.summary || ''))}
                       title="Look at the one remaining check — without rebuilding the app that already works"
-                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-emerald-700 hover:bg-emerald-600 rounded px-2.5 py-1"
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-emerald-700 hover:bg-emerald-600 rounded px-2.5 py-1"
                     >
                       <Sparkles className="w-3.5 h-3.5" /> Look at the remaining check
                     </button>
                   )}
                 </div>
               ) : (
-                <div className="px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
+                <div className="px-3 py-2 bg-amber-950/50 text-warn text-xs rounded">
                   <div className="flex items-start gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
                   </div>
                   {!running && (
                     <button
                       onClick={() => fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')}
-                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
                     >
                       <Sparkles className="w-3.5 h-3.5" /> Fix with AI
                     </button>
@@ -4625,44 +4625,44 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             )}
             {state.pendingPermission && (
               <div className="px-3 py-2.5 bg-amber-950/50 border border-amber-900 rounded">
-                <div className="flex items-center gap-2 text-xs text-amber-200 mb-2">
+                <div className="flex items-center gap-2 text-xs text-warn mb-2">
                   <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
                 </div>
                 {state.todos.length > 0 && (
                   <div className="mb-2"><TodoList todos={state.todos} /></div>
                 )}
                 <div className="flex gap-2">
-                  <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white">Approve &amp; build</button>
-                  <button onClick={() => respond(state.pendingPermission!.callId, false)} className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100">Reject</button>
+                  <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-on-accent">Approve &amp; build</button>
+                  <button onClick={() => respond(state.pendingPermission!.callId, false)} className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised text-body">Reject</button>
                 </div>
               </div>
             )}
             {fwConflict && (
               <div className="px-3 py-2.5 bg-indigo-950/50 border border-indigo-800 rounded">
-                <div className="flex items-center gap-2 text-xs text-indigo-200 mb-1">
+                <div className="flex items-center gap-2 text-xs text-accent-text mb-1">
                   <AlertCircle className="w-4 h-4" /> Which framework should I use?
                 </div>
-                <div className="text-[11px] text-zinc-400 mb-2">
-                  You selected <b className="text-zinc-200">{fwName(fwConflict.picked)}</b>, but your message mentions <b className="text-zinc-200">{fwName(fwConflict.detected)}</b>. Pick one — I&apos;ll build with it.
+                <div className="text-[11px] text-muted mb-2">
+                  You selected <b className="text-body">{fwName(fwConflict.picked)}</b>, but your message mentions <b className="text-body">{fwName(fwConflict.detected)}</b>. Pick one — I&apos;ll build with it.
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => { setFramework(fwConflict.detected); setFrameworkExplicit(true); fwConflict.launch(fwConflict.detected); setFwConflict(null); }}
-                    className="px-3 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white"
+                    className="px-3 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-on-accent"
                   >Use {fwName(fwConflict.detected)} (from your message)</button>
                   <button
                     onClick={() => { setFramework(fwConflict.picked); setFrameworkExplicit(true); fwConflict.launch(fwConflict.picked); setFwConflict(null); }}
-                    className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+                    className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised text-body"
                   >Keep {fwName(fwConflict.picked)} (your selection)</button>
                   <button
                     onClick={() => setFwConflict(null)}
-                    className="px-3 py-1 text-xs rounded bg-transparent hover:bg-white/5 text-zinc-500"
+                    className="px-3 py-1 text-xs rounded bg-transparent hover:bg-raised text-faint"
                   >Cancel</button>
                 </div>
               </div>
             )}
             {state.done && (typeof state.billedInr === 'number' || typeof state.billedUsd === 'number') && (
-              <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Customer bill (INR)">
+              <div className="flex items-center gap-1 text-[11px] text-faint" title="Customer bill (INR)">
                 <Rocket className="w-3 h-3" />{' '}
                 {typeof state.billedInr === 'number'
                   ? `₹${state.billedInr.toFixed(2)}`
@@ -4671,11 +4671,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             )}
             {/* T1-cost-transparency — expandable "why this build cost ₹X" breakdown. */}
             {state.done && state.costBreakdown && (
-              <details className="text-[11px] text-zinc-500">
-                <summary className="cursor-pointer select-none hover:text-zinc-300" title="See how this build's charge was calculated">
+              <details className="text-[11px] text-faint">
+                <summary className="cursor-pointer select-none hover:text-muted" title="See how this build's charge was calculated">
                   Why this cost?
                 </summary>
-                <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-700 pl-2">
+                <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-line pl-2">
                   <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
                   <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
                   {/* LIVE PREVIEW (admin 2026-08-22) — shown only when it was actually charged, and named
@@ -4686,7 +4686,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       Live preview: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
                         ? `${Math.round((state.costBreakdown.livePreviewSeconds ?? 0) / 60)} min`
                         : `${state.costBreakdown.livePreviewSeconds ?? 0} sec`} · ₹{state.costBreakdown.livePreviewInr.toFixed(2)}
-                      <span className="text-zinc-600"> · in-browser preview is free</span>
+                      <span className="text-faint"> · in-browser preview is free</span>
                     </span>
                   )}
                   <span>Total: ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
@@ -4695,14 +4695,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             )}
             {/* P-UX.7 — token usage for this build (input + output), shown alongside the ₹ cost. */}
             {state.done && typeof state.tokens === 'number' && state.tokens > 0 && (
-              <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Tokens used by this build (input + output)">
+              <div className="flex items-center gap-1 text-[11px] text-faint" title="Tokens used by this build (input + output)">
                 <FileCode className="w-3 h-3" />
                 {state.tokens >= 1000 ? `${(state.tokens / 1000).toFixed(1)}k` : state.tokens} tokens
               </div>
             )}
             {/* Billing Phase 1 — the REAL wallet deduction for this build (tokens out + balance left). */}
             {state.done && typeof state.walletTokensDebited === 'number' && state.walletTokensDebited > 0 && (
-              <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Tokens deducted from your wallet for this build">
+              <div className="flex items-center gap-1 text-[11px] text-faint" title="Tokens deducted from your wallet for this build">
                 <Wallet className="w-3 h-3" />
                 −{state.walletTokensDebited.toLocaleString()} wallet tokens
                 {typeof state.walletTokenBalance === 'number' ? ` · ${state.walletTokenBalance.toLocaleString()} left` : ''}
@@ -4714,7 +4714,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           </div>
 
           {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom).
-              In focus mode (header hidden) the composer's outer frame — the solid bg-zinc-950
+              In focus mode (header hidden) the composer's outer frame — the solid bg-surface
               block + the top border line — is dropped so the input/attach/filter read as a clean
               floating popup touching the lower edge. The inner elements keep their own borders,
               and the device inset always stays so the composer never hides behind the phone browser's
@@ -4729,7 +4729,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               disagree about who owns the inset; the literal stays as the fallback, which is exactly
               today's behaviour for SSR, tests and the first paint. */}
           <div
-            className={`shrink-0 sticky bottom-0 ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}
+            className={`shrink-0 sticky bottom-0 ${focusMode ? '' : 'bg-surface border-t border-line'}`}
             style={{ paddingBottom: 'var(--nb-safe-below, env(safe-area-inset-bottom, 0px))' }}
           >
             {/* FIX #6 — the 3-role model (Build = builder; Plan/Advise = read-only lanes) now lives in a
@@ -4752,7 +4752,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       type="button"
                       onClick={() => setRoadmapOpen((v) => !v)}
                       title={`${roadmap.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} — tap to review & queue`}
-                      className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold border ${roadmapOpen ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-950/60 border-indigo-800 text-indigo-300 hover:text-white'}`}
+                      className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold border ${roadmapOpen ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-indigo-950/60 border-indigo-800 text-accent-text hover:text-ink'}`}
                     >
                       🗺 {roadmap.role === 'planner' ? 'Plan' : 'Fixes'} · {roadmap.steps.length}
                     </button>
@@ -4762,7 +4762,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       type="button"
                       onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
                       title="This app's command queue — steps run one at a time"
-                      className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white"
+                      className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-card border border-line text-muted hover:text-ink"
                     >
                       <Clock className="w-3 h-3" />
                       Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
@@ -4777,7 +4777,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               && roadmapDismissedKey !== activeProposedSteps.steps.join('\n') && (
               <div className="mx-3 mt-1.5 p-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5 max-h-44 overflow-y-auto">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-text">
                     {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
                   </span>
                   <div className="flex items-center gap-1.5">
@@ -4785,7 +4785,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       type="button"
                       onClick={() => addStepsToQueue(activeProposedSteps.steps.filter((s) => !addedSteps.has(s)), activeProposedSteps.role)}
                       disabled={activeProposedSteps.steps.every((s) => addedSteps.has(s))}
-                      className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
+                      className="text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
                     >
                       {activeProposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
                     </button>
@@ -4793,46 +4793,46 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       type="button"
                       onClick={() => { setRoadmapDismissedKey(activeProposedSteps.steps.join('\n')); setRoadmapOpen(false); setRoleProposedSteps(null); }}
                       title="Dismiss this roadmap"
-                      className="text-zinc-500 hover:text-white"
+                      className="text-faint hover:text-ink"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
                 {activeProposedSteps.steps.map((s, i) => (
-                  <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
+                  <div key={i} className="flex items-start gap-2 text-xs text-muted">
                     <button
                       type="button"
                       onClick={() => addStepsToQueue([s], activeProposedSteps.role)}
                       disabled={addedSteps.has(s)}
                       title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
-                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
+                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-accent-text hover:text-on-accent hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
                     >
                       {addedSteps.has(s) ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
                     </button>
                     <span className="whitespace-pre-wrap break-words">{i + 1}. {s}</span>
                   </div>
                 ))}
-                <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
+                <div className="text-[10px] text-faint">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
               </div>
             )}
             {queueOpen && queueItems.length > 0 && (
-              <div className="mx-3 mt-1.5 p-2 bg-zinc-900/80 border border-zinc-800 rounded space-y-1 max-h-40 overflow-y-auto">
+              <div className="mx-3 mt-1.5 p-2 bg-card border border-line rounded space-y-1 max-h-40 overflow-y-auto">
                 {queueItems.map((item) => (
                   <div key={item.id} className="flex items-start gap-2 text-[11px]">
-                    <span className={`shrink-0 mt-0.5 ${item.status === 'running' ? 'text-indigo-400' : item.status === 'done' ? 'text-green-500' : item.status === 'failed' ? 'text-red-400' : item.status === 'cancelled' ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                    <span className={`shrink-0 mt-0.5 ${item.status === 'running' ? 'text-accent-text' : item.status === 'done' ? 'text-success' : item.status === 'failed' ? 'text-danger' : item.status === 'cancelled' ? 'text-faint' : 'text-muted'}`}>
                       {item.status === 'running' ? <TirangaLoader className="w-3 h-3" /> : item.status === 'done' ? <Check className="w-3 h-3" /> : item.status === 'failed' ? <X className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
                     </span>
-                    <span className={`flex-1 break-words ${item.status === 'cancelled' ? 'text-zinc-600 line-through' : item.status === 'done' ? 'text-zinc-500' : 'text-zinc-300'}`}>
+                    <span className={`flex-1 break-words ${item.status === 'cancelled' ? 'text-faint line-through' : item.status === 'done' ? 'text-faint' : 'text-muted'}`}>
                       {item.prompt}
-                      {item.note ? <span className="text-zinc-500"> — {item.note}</span> : null}
+                      {item.note ? <span className="text-faint"> — {item.note}</span> : null}
                     </span>
                     {item.status === 'pending' && (
                       <button
                         type="button"
                         onClick={() => { void queueCancel(expectedWorkspaceId(), item.id).then(setQueueItems); }}
                         title="Cancel this queued step"
-                        className="shrink-0 text-zinc-500 hover:text-red-400"
+                        className="shrink-0 text-faint hover:text-danger"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -4851,7 +4851,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   onClick={doShipToMain}
                   disabled={shipping || reverting}
                   title={`Merge ‘${state.ownRepo.workBranch}’ into ‘${state.ownRepo.baseBranch}’ (only if CI is green)`}
-                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-on-accent transition-colors"
                 >
                   <Rocket className="w-3.5 h-3.5" />
                   {shipping ? 'Shipping…' : `Ship to ${state.ownRepo.baseBranch}`}
@@ -4861,7 +4861,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   onClick={doRevertLastMerge}
                   disabled={shipping || reverting}
                   title={`Undo the last change on ‘${state.ownRepo.baseBranch}’ (restores the previous state as a new commit)`}
-                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-line text-muted hover:text-ink hover:border-line disabled:opacity-50 transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   {reverting ? 'Reverting…' : 'Revert last'}
@@ -4876,7 +4876,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     onClick={doReadReview}
                     disabled={shipping || reverting || reviewBusy}
                     title={`Read the review comments on pull request #${openPr.number} and turn them into your next instruction`}
-                    className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-indigo-500/50 text-indigo-200 hover:bg-indigo-500/10 disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-indigo-500/50 text-accent-text hover:bg-indigo-500/10 disabled:opacity-50 transition-colors"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                     {reviewBusy ? 'Reading…' : `Read review #${openPr.number}`}
@@ -4893,13 +4893,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     title={reviewOutcome.ok
                       ? `Reply on pull request #${openPr.number}: addressed in the latest commit`
                       : `Reply on pull request #${openPr.number}: this change could not be completed`}
-                    className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-line text-muted hover:text-ink hover:border-line disabled:opacity-50 transition-colors"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                     {replyBusy ? 'Replying…' : reviewOutcome.ok ? 'Tell the reviewer it is done' : 'Tell the reviewer it failed'}
                   </button>
                 )}
-                <span className="text-[10px] text-zinc-500 truncate">
+                <span className="text-[10px] text-faint truncate">
                   {shipNote ?? `Edits saved on ‘${state.ownRepo.workBranch}’ in ${state.ownRepo.owner}/${state.ownRepo.repo} — your ‘${state.ownRepo.baseBranch}’ is untouched until you ship.`}
                 </span>
               </div>
@@ -4911,18 +4911,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <button
                   type="button"
                   onClick={() => setPlanCollapsed((v) => !v)}
-                  className="w-full flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-200"
+                  className="w-full flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted hover:text-body"
                   title={planCollapsed ? 'Expand plan' : 'Minimize plan'}
                 >
                   {planCollapsed ? <ChevronRight className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
                   {planComplete ? (
-                    <span className="text-emerald-500 font-semibold flex items-center gap-1">✓ Done</span>
+                    <span className="text-success font-semibold flex items-center gap-1">✓ Done</span>
                   ) : (
                     <>
                       <span>Plan</span>
-                      <span className="text-zinc-500">{planDone}/{state.todos.length}</span>
+                      <span className="text-faint">{planDone}/{state.todos.length}</span>
                       {planCollapsed && currentTodo && (
-                        <span className="text-zinc-600 truncate normal-case font-normal">· {currentTodo.title}</span>
+                        <span className="text-faint truncate normal-case font-normal">· {currentTodo.title}</span>
                       )}
                     </>
                   )}
@@ -4952,10 +4952,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {files.length > 0 && (
               <div className="px-3 pt-2 flex flex-wrap gap-1.5">
                 {pagedFiles.visible.map((f, i) => (
-                  <span key={i} className="flex items-center gap-1 max-w-[200px] text-[11px] bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-zinc-300">
-                    <FileText className="w-3 h-3 shrink-0 text-indigo-400" />
+                  <span key={i} className="flex items-center gap-1 max-w-[200px] text-[11px] bg-card border border-line rounded px-2 py-1 text-muted">
+                    <FileText className="w-3 h-3 shrink-0 text-accent-text" />
                     <span className="truncate">{f.name}</span>
-                    <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="shrink-0 text-zinc-500 hover:text-white" title="Remove">
+                    <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="shrink-0 text-faint hover:text-ink" title="Remove">
                       <X className="w-3 h-3" />
                     </button>
                   </span>
@@ -4977,14 +4977,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
                       {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠'], ['advisor', 'Advise', '🔍']] as const).map(([m, label, icon]) => (
                         <button
                           key={m}
                           type="button"
                           onClick={() => { setChatMode(m); setModeMenuOpen(false); }}
                           title={m === 'build' ? 'Build — code, build & chat' : m === 'planner' ? 'Plan — read-only planning; approve steps into the build queue' : 'Advise — read-only analysis (audit / scan / compare)'}
-                          className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${chatMode === m ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                          className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${chatMode === m ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}
                         >
                           <span>{icon}</span>{label}
                           {m === 'build' && running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="A build is running" />}
@@ -4997,7 +4997,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               Shows the real count, or ✓ when every step is done. */}
                           {m === 'planner' && state.todos.length > 0 && (
                             <span
-                              className={`ml-auto text-[9px] font-mono px-1 rounded ${planComplete ? 'text-emerald-400' : 'text-indigo-300'}`}
+                              className={`ml-auto text-[9px] font-mono px-1 rounded ${planComplete ? 'text-success' : 'text-accent-text'}`}
                               title={planComplete ? 'This build\u2019s plan is complete' : `This build\u2019s plan: ${planDone} of ${state.todos.length} steps done`}
                             >
                               {planComplete ? '\u2713' : `${planDone}/${state.todos.length}`}
@@ -5011,16 +5011,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           surface to dismiss is the opposite of that. Bounded height with its own
                           scroll so a 20-step plan cannot grow the menu off the screen. */}
                       {state.todos.length > 0 && (
-                        <div className="mt-1 border-t border-zinc-800 pt-1">
+                        <div className="mt-1 border-t border-line pt-1">
                           <button
                             type="button"
                             onClick={() => setMenuPlanOpen((v) => !v)}
-                            className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                            className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wider text-muted hover:text-body hover:bg-raised"
                             title={menuPlanOpen ? 'Hide the plan' : 'Show this build\u2019s plan'}
                           >
                             {menuPlanOpen ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
                             <span>Plan</span>
-                            <span className="text-zinc-500 normal-case font-normal">{planDone}/{state.todos.length}</span>
+                            <span className="text-faint normal-case font-normal">{planDone}/{state.todos.length}</span>
                           </button>
                           {menuPlanOpen && (
                             <div className="mt-1 max-h-40 overflow-y-auto overscroll-contain px-1">
@@ -5036,7 +5036,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   type="button"
                   onClick={() => setModeMenuOpen((v) => !v)}
                   title="Chat mode — Build / Plan / Advise"
-                  className={`h-7 min-w-[80px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white'}`}
+                  className={`h-7 min-w-[80px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
                 >
                   <span className="flex items-center gap-1">
                     <span>{chatMode === 'build' ? '🔨' : chatMode === 'planner' ? '🧠' : '🔍'}</span>
@@ -5053,7 +5053,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   <>
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-card border border-line rounded-lg shadow-xl p-1.5 space-y-0.5">
                       {/* Planning + Thinking toggles removed (admin 2026-08-14: "no need now"). Plan is
                           still available as its own chat mode; thinking is automatic for complex builds. */}
                       {/* KEEP SCREEN ON (admin 2026-08-14): stop the phone auto-locking mid-build and cutting
@@ -5066,7 +5066,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           not selectable) until they recharge — and the server clamps free→weak regardless,
                           so a UI/API bypass can never reach a paid engine. Paid default = Normal. */}
                       <div className="px-3 py-2">
-                        <div className="text-sm text-zinc-200 mb-1.5">Power</div>
+                        <div className="text-sm text-body mb-1.5">Power</div>
                         <div className="flex flex-col gap-1">
                           {([
                             { key: 'weak', label: 'Weak' },
@@ -5083,10 +5083,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                                 onClick={() => { if (!locked) setPowerLevel(opt.key); }}
                                 className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
                                   powerLevel === opt.key
-                                    ? 'bg-indigo-600 text-white'
+                                    ? 'bg-indigo-600 text-on-accent'
                                     : locked
-                                    ? 'bg-zinc-800/50 text-zinc-500 cursor-not-allowed'
-                                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                                    ? 'bg-raised text-faint cursor-not-allowed'
+                                    : 'bg-raised text-muted hover:bg-raised'
                                 }`}
                               >
                                 <span className="flex items-center justify-between">
@@ -5104,25 +5104,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                             exactly what one ternary per developer produces and what a choke point
                             prevents. `publicTierLabel` keeps every fact a user needs (relative
                             strength, pinned or adaptive, how much effort) and names no vendor. */}
-                        <div className="text-[11px] text-zinc-500 mt-1">
+                        <div className="text-[11px] text-faint mt-1">
                           {publicTierLabel(powerLevel)}
                           {!powerUnlocked && ' · 🔒 recharge (any amount) to unlock all tiers'}
                         </div>
                       </div>
-                      <div className="border-t border-zinc-800 my-1" />
+                      <div className="border-t border-line my-1" />
                       <button
-                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
+                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-raised text-left"
                         onClick={() => { setShowFrameworkPicker(true); setSettingsOpen(false); }}
                       >
-                        <span className="text-xs text-zinc-300">Framework</span>
-                        <span className="text-[11px] text-indigo-400 font-medium">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+                        <span className="text-xs text-muted">Framework</span>
+                        <span className="text-[11px] text-accent-text font-medium">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
                       </button>
                       <button
-                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-zinc-800 text-left"
+                        className="w-full flex items-center justify-between px-3 py-2 rounded hover:bg-raised text-left"
                         onClick={() => { setShowImportModal(true); setSettingsOpen(false); }}
                       >
-                        <span className="text-xs text-zinc-300">Import Repo</span>
-                        {importUrl ? <span className="text-[10px] text-green-400 truncate max-w-[100px]">✓ set</span> : <span className="text-[10px] text-zinc-500">GitHub / URL</span>}
+                        <span className="text-xs text-muted">Import Repo</span>
+                        {importUrl ? <span className="text-[10px] text-success truncate max-w-[100px]">✓ set</span> : <span className="text-[10px] text-faint">GitHub / URL</span>}
                       </button>
                     </div>
                   </>
@@ -5131,7 +5131,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   type="button"
                   onClick={() => setSettingsOpen((v) => !v)}
                   title="Build options"
-                  className={`relative h-7 w-9 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+                  className={`relative h-7 w-9 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-accent-text' : 'border-line text-muted hover:text-ink'}`}
                 >
                   <Settings className="w-4 h-4" />
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
@@ -5146,7 +5146,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 disabled={running}
                 badge={files.length}
                 title="Attach (photo, gallery, file, or a website screenshot → app)"
-                buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+                buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-line text-muted hover:text-ink disabled:opacity-40"
                 onZipProject={(f) => void handleZipProject(f)}
                 onOpenFolder={() => void handleOpenFolder()}
               />
@@ -5158,7 +5158,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 disabled={running}
                 title={listening ? 'Listening… tap to stop' : 'Voice to App — speak to type'}
                 aria-pressed={listening}
-                className={`h-7 w-9 flex items-center justify-center rounded border disabled:opacity-40 ${listening ? 'border-red-500 text-red-400 bg-red-500/10 animate-pulse' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+                className={`h-7 w-9 flex items-center justify-center rounded border disabled:opacity-40 ${listening ? 'border-red-500 text-danger bg-red-500/10 animate-pulse' : 'border-line text-muted hover:text-ink'}`}
               >
                 <Mic className="w-4 h-4" />
               </button>
@@ -5169,7 +5169,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   and the user is signed in. */}
               <ProfessionalVoiceButton
                 title="Talk to NavBharatAI by voice"
-                className="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-emerald-300"
+                className="h-7 w-9 flex items-center justify-center rounded border border-line text-muted hover:text-success"
                 icon={<Volume2 className="w-4 h-4" />}
                 getHistory={() => convo
                   .filter((m) => (m.text || '').trim())
@@ -5202,10 +5202,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   screen showed one static "Importing…" line for minutes, which is indistinguishable from
                   a crash ("sab ruk gaya"). A real percentage is the difference between working and frozen. */}
               {zipImporting && (
-                <div className="order-1 w-full mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-800/60 bg-indigo-950/40 text-[11px] text-indigo-200">
+                <div className="order-1 w-full mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-800/60 bg-indigo-950/40 text-[11px] text-accent-text">
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                   <span className="flex-1 truncate">{zipProgress || 'Preparing your project…'}</span>
-                  <span className="shrink-0 text-indigo-400">Large projects take a few minutes</span>
+                  <span className="shrink-0 text-accent-text">Large projects take a few minutes</span>
                 </div>
               )}
               {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). order-0 so
@@ -5246,11 +5246,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div
                   className={`order-0 w-full mb-1 flex items-center gap-2 rounded px-2 py-1 text-[11px] border ${
                     state.contextUsage.level === 'critical'
-                      ? 'border-amber-600/50 bg-amber-950/30 text-amber-200'
-                      : 'border-white/5 bg-zinc-800/60 text-zinc-400'
+                      ? 'border-amber-600/50 bg-amber-950/30 text-warn'
+                      : 'border-line bg-raised text-muted'
                   }`}
                 >
-                  <div className="h-1 w-12 shrink-0 rounded bg-zinc-700 overflow-hidden" aria-hidden="true">
+                  <div className="h-1 w-12 shrink-0 rounded bg-raised overflow-hidden" aria-hidden="true">
                     <div
                       className={`h-full ${state.contextUsage.level === 'critical' ? 'bg-amber-400' : 'bg-zinc-400'}`}
                       style={{ width: `${state.contextUsage.pct}%` }}
@@ -5258,7 +5258,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   </div>
                   <span className="flex-1">{state.contextUsage.note}</span>
                   {state.contextUsage.level === 'critical' && !running && (
-                    <button onClick={newChatFromHistory} className="shrink-0 px-1.5 py-0.5 rounded bg-amber-700/40 hover:bg-amber-600/50 text-amber-100">
+                    <button onClick={newChatFromHistory} className="shrink-0 px-1.5 py-0.5 rounded bg-amber-700/40 hover:bg-amber-600/50 text-warn">
                       New chat
                     </button>
                   )}
@@ -5268,24 +5268,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 {/* C3 — the @ file picker. Naming the file removes the SEARCH that otherwise starts
                     every edit request (billed tokens) and the wrong-file guess that follows it. */}
                 {mentionOpen && (
-                  <div className="absolute bottom-full mb-1 left-0 right-0 z-20 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg">
+                  <div className="absolute bottom-full mb-1 left-0 right-0 z-20 max-h-56 overflow-y-auto rounded-lg border border-line bg-card shadow-lg">
                     {mentionSuggestions.map((path, i) => (
                       <button
                         key={path}
                         type="button"
                         onMouseDown={(e) => { e.preventDefault(); acceptMention(path); }}
                         onMouseEnter={() => setMentionIndex(i)}
-                        className={`w-full text-left px-2 py-1 text-xs truncate ${i === mentionIndex ? 'bg-indigo-600/30 text-white' : 'text-zinc-300 hover:bg-zinc-800'}`}
+                        className={`w-full text-left px-2 py-1 text-xs truncate ${i === mentionIndex ? 'bg-indigo-600/30 text-ink' : 'text-muted hover:bg-raised'}`}
                       >
                         {path}
                       </button>
                     ))}
-                    <div className="px-2 py-1 text-[10px] text-zinc-500 border-t border-zinc-800">Tab to insert · Esc to close</div>
+                    <div className="px-2 py-1 text-[10px] text-faint border-t border-line">Tab to insert · Esc to close</div>
                   </div>
                 )}
                 <textarea
                   ref={composerRef}
-                  className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-16 py-1 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
+                  className={`w-full bg-card border border-line rounded-xl pl-3 pr-16 py-1 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
                   rows={1}
                   placeholder={
                     chatMode === 'planner'
@@ -5360,7 +5360,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800`}
+                    className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-muted hover:text-ink hover:bg-raised`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -5369,7 +5369,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white`}>
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-on-accent`}>
                     {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
@@ -5382,19 +5382,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // revert, never silent — which is the trade this switch is for. Do not delete the
                   // branch to tidy up; it is what the gate returns to.
                   <>
-                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80`}>
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-danger hover:text-on-accent hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
                       <Send className="w-4 h-4" />
                     </button>
                   </>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white`}>
+                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-on-accent`}>
                     <Square className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white`}>
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-on-accent`}>
                     <Send className="w-4 h-4" />
                   </button>
                 )}
@@ -5427,13 +5427,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               the one-tap device widths. They sit HERE, next to the app itself, because that is where
               the user is already looking when the question "does this work on a phone?" occurs to
               them (admin 2026-08-17). */}
-          <div className="hidden sm:flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
-            <span className="font-medium text-zinc-300 capitalize shrink-0">{tab}</span>
+          <div className="hidden sm:flex shrink-0 items-center justify-between gap-2 px-3 py-1.5 border-b border-line text-xs">
+            <span className="font-medium text-muted capitalize shrink-0">{tab}</span>
             {/* The header Phone/Tablet/Full width chips were REMOVED (admin 2026-08-19): they duplicated
                 the device-width switcher already in PreviewSurface's own toolbar (Auto/Mobile/Tablet/
                 Desktop), so the same control appeared twice in one preview. The single remaining control
                 lives with the app in PreviewSurface; the draggable divider still resizes the pane. */}
-            <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
+            <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-muted hover:text-ink">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -5446,14 +5446,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               This row renders UNCONDITIONALLY. The strip it absorbed was gated on there being activity;
               the close button is not optional, and hiding the only way back to chat whenever a build
               happened to be idle would strand the user in the workspace. */}
-          <div className="sm:hidden shrink-0 flex items-center gap-2 px-3 py-1 border-b border-zinc-800 bg-zinc-950 text-xs">
-            <span className="font-medium text-zinc-300 capitalize shrink-0">{tab}</span>
+          <div className="sm:hidden shrink-0 flex items-center gap-2 px-3 py-1 border-b border-line bg-surface text-xs">
+            <span className="font-medium text-muted capitalize shrink-0">{tab}</span>
             {(running || state.activity.length > 0) && (
               <div className="flex-1 min-w-0 flex justify-end">
                 <WorkingIndicator activity={state.activity} running={running} />
               </div>
             )}
-            <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" aria-label="Close workspace" className="ml-auto shrink-0 flex items-center text-zinc-400 hover:text-white">
+            <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" aria-label="Close workspace" className="ml-auto shrink-0 flex items-center text-muted hover:text-ink">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -5564,13 +5564,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       <button
                         onClick={handleRestoreAll}
                         disabled={restoring}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-accent-text hover:text-ink hover:border-indigo-500 disabled:opacity-40"
                       >
                         {restoring ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
                     )}
-                    {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                    {restoreMsg && <span className="text-[11px] text-muted">{restoreMsg}</span>}
                   </div>
                 </div>
               );
@@ -5579,7 +5579,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <div className="flex-1 overflow-auto p-3 font-mono text-xs">
               {tab === 'diff' && (diffPaths.length === 0 ? <Empty>No diffs yet.</Empty> : (
                 <div className="space-y-3">
-                  {diffPaths.map((p) => <div key={p}><div className="text-zinc-400 mb-1">{p}</div><pre className="whitespace-pre-wrap">{colorizeDiff(state.diffs[p])}</pre></div>)}
+                  {diffPaths.map((p) => <div key={p}><div className="text-muted mb-1">{p}</div><pre className="whitespace-pre-wrap">{colorizeDiff(state.diffs[p])}</pre></div>)}
                 </div>
               ))}
               {/* A2 — the Terminal tab is SPLIT: what NavBharatAI ran while building on top, and a REAL
@@ -5592,7 +5592,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   `+` here: one implementation cannot drift from itself. No shell is opened until the
                   user asks for one, so simply reading the log spends none of the daily allowance. */}
               {tab === 'terminal' && (
-                <Suspense fallback={<div className="text-xs text-zinc-500">Loading terminal…</div>}>
+                <Suspense fallback={<div className="text-xs text-faint">Loading terminal…</div>}>
                   <TerminalPanel
                     workspaceId={state.workspaceId || undefined}
                     userId={userId ?? undefined}
@@ -5601,7 +5601,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       label: 'NavBharatAI · build log',
                       content: state.terminal.length === 0
                         ? <Empty>No build output yet.</Empty>
-                        : <pre className="whitespace-pre-wrap text-zinc-300 text-xs p-2">{state.terminal.join('\n')}</pre>,
+                        : <pre className="whitespace-pre-wrap text-muted text-xs p-2">{state.terminal.join('\n')}</pre>,
                     }}
                   />
                 </Suspense>
@@ -5615,23 +5615,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       poll; a service the project expects is shown as expected-and-not-running, never as
                       green because a config file said so. */}
                   {appServices.available && (appServices.services.length > 0 || appServices.extras.length > 0) && (
-                    <div className="rounded border border-white/5 bg-zinc-900/60 px-2 py-1.5 space-y-1">
-                      {appServices.summary && <div className="text-[11px] text-zinc-300">{appServices.summary}</div>}
+                    <div className="rounded border border-line bg-raised px-2 py-1.5 space-y-1">
+                      {appServices.summary && <div className="text-[11px] text-muted">{appServices.summary}</div>}
                       {appServices.services.map((svc) => (
                         <div key={svc.id} className="flex items-center gap-2 text-[11px]" title={svc.note}>
                           <span
                             className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                               svc.status === 'listening' ? 'bg-emerald-400'
-                                : svc.status === 'not_listening' ? 'bg-red-400' : 'bg-zinc-500'
+                                : svc.status === 'not_listening' ? 'bg-red-400' : 'bg-faint'
                             }`}
                           />
-                          <span className="text-zinc-200 truncate">{svc.name}</span>
-                          <span className="text-zinc-500 shrink-0">{svc.port != null ? `:${svc.port}` : svc.kind}</span>
-                          <span className="text-zinc-500 truncate hidden sm:inline">{svc.note}</span>
+                          <span className="text-body truncate">{svc.name}</span>
+                          <span className="text-faint shrink-0">{svc.port != null ? `:${svc.port}` : svc.kind}</span>
+                          <span className="text-faint truncate hidden sm:inline">{svc.note}</span>
                         </div>
                       ))}
                       {appServices.extras.map((e) => (
-                        <div key={`extra-${e.port}`} className="flex items-center gap-2 text-[11px] text-zinc-400">
+                        <div key={`extra-${e.port}`} className="flex items-center gap-2 text-[11px] text-muted">
                           <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-sky-400/70" />
                           <span className="shrink-0">:{e.port}</span>
                           <span className="truncate">{e.label}</span>
@@ -5640,12 +5640,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     </div>
                   )}
                   {runtimeLogs.notice && (
-                    <div className="text-[11px] text-amber-300/90 border border-amber-700/40 bg-amber-950/30 rounded px-2 py-1">
+                    <div className="text-[11px] text-warn border border-amber-700/40 bg-amber-950/30 rounded px-2 py-1">
                       {runtimeLogs.notice}
                     </div>
                   )}
                   {runtimeLogs.text
-                    ? <pre ref={logPaneRef} className="whitespace-pre-wrap text-zinc-300 max-h-[60vh] supports-[height:100dvh]:max-h-[60dvh] overflow-y-auto">{runtimeLogs.text}</pre>
+                    ? <pre ref={logPaneRef} className="whitespace-pre-wrap text-muted max-h-[60vh] supports-[height:100dvh]:max-h-[60dvh] overflow-y-auto">{runtimeLogs.text}</pre>
                     : <Empty>{runtimeLogEmptyMessage(runtimeLogs.status, runtimeLogs.hasLog)}</Empty>}
                 </div>
               )}
@@ -5659,35 +5659,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         onClick={handleRestoreAll}
                         disabled={restoring}
                         title="Bring your whole project back into the workspace"
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-accent-text hover:text-ink hover:border-indigo-500 disabled:opacity-40"
                       >
                         {restoring ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
-                      {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                      {restoreMsg && <span className="text-[11px] text-muted">{restoreMsg}</span>}
                     </div>
                   )}
                   {gitStatus && (
-                    <div className="mb-2 flex items-center gap-2 text-[11px] px-2 py-1 rounded bg-zinc-800/60 border border-white/5">
-                      <GitBranch className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    <div className="mb-2 flex items-center gap-2 text-[11px] px-2 py-1 rounded bg-raised border border-line">
+                      <GitBranch className="w-3.5 h-3.5 text-faint shrink-0" />
                       {!gitStatus.available ? (
-                        <span className="text-zinc-500">Workspace is dormant — send a message to bring it back online.</span>
+                        <span className="text-faint">Workspace is dormant — send a message to bring it back online.</span>
                       ) : gitStatus.live === false ? (
-                        <span className="text-zinc-400">Last saved: working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}{gitStatus.lastCommit ? ` · ${gitStatus.lastCommit.slice(0, 48)}` : ''}</span>
+                        <span className="text-muted">Last saved: working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}{gitStatus.lastCommit ? ` · ${gitStatus.lastCommit.slice(0, 48)}` : ''}</span>
                       ) : gitStatus.clean ? (
-                        <span className="text-emerald-400">Working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
+                        <span className="text-success">Working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
                       ) : (
-                        <span className="text-amber-400">{gitStatus.changed} uncommitted change{gitStatus.changed === 1 ? '' : 's'}{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
+                        <span className="text-warn">{gitStatus.changed} uncommitted change{gitStatus.changed === 1 ? '' : 's'}{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
                       )}
                     </div>
                   )}
                   {restoreNote && (
-                    <div className="mb-2 text-[11px] text-zinc-400 bg-zinc-800/60 border border-white/5 rounded px-2 py-1">{restoreNote}</div>
+                    <div className="mb-2 text-[11px] text-muted bg-raised border border-line rounded px-2 py-1">{restoreNote}</div>
                   )}
                   {/* B5 — a name that did NOT persist must say so. Silently reverting the row would look
                       like the app ate the user's input. */}
                   {labelError && (
-                    <div className="mb-2 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1">{labelError}</div>
+                    <div className="mb-2 text-[11px] text-warn bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1">{labelError}</div>
                   )}
                   {/* B6 — compare two versions. The toggle is offered only when there is anything
                       to compare; results render above the list so picking stays one screen. */}
@@ -5695,27 +5695,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <div className="mb-2">
                       <button
                         onClick={() => { setCompareMode((v) => !v); setCompareSel([]); setCompareResult(null); }}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${compareMode ? 'bg-indigo-600/30 text-indigo-300' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}`}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${compareMode ? 'bg-indigo-600/30 text-accent-text' : 'bg-raised hover:bg-raised text-muted'}`}
                         title="Pick two versions to see what changed between them — nothing is modified"
                       >
                         <FileDiff className="w-3 h-3" /> {compareMode ? 'Comparing — pick two versions' : 'Compare two versions'}
                       </button>
                       {compareMode && compareBusy && (
-                        <div className="mt-2 text-[11px] text-zinc-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Comparing…</div>
+                        <div className="mt-2 text-[11px] text-muted flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Comparing…</div>
                       )}
                       {compareMode && compareResult && (
-                        <div className="mt-2 text-[11px] bg-zinc-800/60 border border-white/5 rounded px-2 py-1.5">
-                          <div className={compareResult.ok ? 'text-zinc-200' : 'text-amber-300'}>{compareResult.message}</div>
+                        <div className="mt-2 text-[11px] bg-raised border border-line rounded px-2 py-1.5">
+                          <div className={compareResult.ok ? 'text-body' : 'text-warn'}>{compareResult.message}</div>
                           {compareResult.ok && compareResult.files.length > 0 && (
                             <ul className="mt-1.5 max-h-40 overflow-y-auto space-y-0.5">
                               {compareResult.files.map((f) => (
                                 <li key={f.path} className="flex items-center gap-2 font-mono text-[10px]">
-                                  <span className="truncate text-zinc-300" title={f.renamedFrom ? `renamed from ${f.renamedFrom}` : f.path}>
+                                  <span className="truncate text-muted" title={f.renamedFrom ? `renamed from ${f.renamedFrom}` : f.path}>
                                     {f.renamedFrom ? `${f.renamedFrom} → ` : ''}{f.path}
                                   </span>
                                   {f.added === null
-                                    ? <span className="text-zinc-500 shrink-0">binary</span>
-                                    : <span className="shrink-0"><span className="text-emerald-400">+{f.added}</span> <span className="text-red-400">−{f.removed}</span></span>}
+                                    ? <span className="text-faint shrink-0">binary</span>
+                                    : <span className="shrink-0"><span className="text-success">+{f.added}</span> <span className="text-danger">−{f.removed}</span></span>}
                                 </li>
                               ))}
                             </ul>
@@ -5728,8 +5728,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <ul className="space-y-1">
                       {allCheckpoints.map((c) => (
                         <li key={c.id} className="flex items-center gap-2">
-                          <History className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                          <span className="text-zinc-500 shrink-0">{c.sha.slice(0, 7) || '—'}</span>
+                          <History className="w-3.5 h-3.5 text-faint shrink-0" />
+                          <span className="text-faint shrink-0">{c.sha.slice(0, 7) || '—'}</span>
                           {/* B5 — a NAMED checkpoint shows the user's own words; the auto commit message
                               moves to the tooltip rather than being thrown away. Editing swaps in an
                               input in place, so naming never costs a dialog or a page change. */}
@@ -5745,11 +5745,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               }}
                               onBlur={() => void saveCheckpointLabel(c.sha)}
                               placeholder="Name this version…"
-                              className="flex-1 min-w-0 bg-zinc-900 border border-indigo-600 rounded px-1.5 py-0.5 text-zinc-100 focus:outline-none"
+                              className="flex-1 min-w-0 bg-card border border-indigo-600 rounded px-1.5 py-0.5 text-body focus:outline-none"
                             />
                           ) : (
                             <span
-                              className={`flex-1 truncate ${c.label ? 'text-zinc-100' : ''}`}
+                              className={`flex-1 truncate ${c.label ? 'text-body' : ''}`}
                               title={c.label ? `${c.label} — ${c.message}` : c.message}
                             >
                               {checkpointDisplayName(c)}
@@ -5758,7 +5758,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           {c.sha && labelEditSha !== c.sha && (
                             <button
                               onClick={() => beginLabelEdit(c.sha, c.label ?? '')}
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised text-muted shrink-0"
                               title={c.label ? 'Rename this version' : 'Give this version a name you will recognise'}
                             >
                               <Pencil className="w-3 h-3" />
@@ -5772,7 +5772,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                                 setCompareResult(null);
                                 if (next.length === 2) void runCompare(next, allCheckpoints.map((x) => x.sha).filter(Boolean));
                               }}
-                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0 ${compareSel.includes(c.sha) ? 'bg-indigo-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'}`}
+                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0 ${compareSel.includes(c.sha) ? 'bg-indigo-600 text-on-accent' : 'bg-raised hover:bg-raised text-muted'}`}
                               title="Pick this version for the comparison"
                             >
                               {compareSel.includes(c.sha) ? <Check className="w-3 h-3" /> : <FileDiff className="w-3 h-3" />} Pick
@@ -5785,12 +5785,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               <button
                                 onClick={() => handlePreviewCheckpoint(c.sha)}
                                 disabled={previewingSha === c.sha}
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0 disabled:opacity-50"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised text-muted shrink-0 disabled:opacity-50"
                                 title="Open this version in a new tab — your current files are not changed"
                               >
                                 <Eye className="w-3 h-3" /> {previewingSha === c.sha ? 'Opening…' : 'Preview'}
                               </button>
-                              <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 shrink-0" title="Restore to this checkpoint">
+                              <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised text-muted shrink-0" title="Restore to this checkpoint">
                                 <RotateCcw className="w-3 h-3" /> Restore
                               </button>
                             </>
@@ -5811,13 +5811,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           lg:hidden — on desktop these controls live in the header exactly as before. */}
       {mobileFooter && mobileSheet && (
         <>
-          <div className="fixed inset-0 z-[140] bg-black/50 cursor-pointer touch-manipulation lg:hidden" onClick={() => setMobileSheet(null)} aria-hidden="true" />
+          <div className="fixed inset-0 z-[140] bg-well cursor-pointer touch-manipulation lg:hidden" onClick={() => setMobileSheet(null)} aria-hidden="true" />
           <div
             /* 70vh is 70% of the mobile LARGE viewport, i.e. taller than what is on screen while the
                browser toolbar is showing — the sheet's own bottom then sat under it. `dvh` is the unit
                that tracks the visible height; the `vh` value stays as the fallback for engines without
                it, exactly as App.tsx does for the shell. */
-            className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-zinc-700 bg-zinc-900 shadow-2xl pb-2"
+            className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t border-line bg-card shadow-2xl pb-2"
             /* Clears the app's tab bar by reading the SHARED height, never a hand-typed copy of it —
                this line used to spell out `calc(3.5rem + env(safe-area-inset-bottom, 0px))`, which is
                the fourth place that number had been written out and the reason lib/mobileNav.ts
@@ -5825,11 +5825,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                collapses to 0 on any screen where the bar is not rendered. */
             style={{ bottom: 'var(--nb-bottom-nav, 0px)' }}
           >
-            <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <div className="sticky top-0 z-10 bg-card flex items-center justify-between px-4 pt-3 pb-2 border-b border-line">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-faint">
                 {mobileSheet === 'history' ? 'Session history' : mobileSheet === 'report' ? 'Which build had the problem?' : mobileSheet === 'secrets' ? 'Keys & Secrets' : mobileSheet === 'services' ? 'Connected services (MCP)' : 'More'}
               </span>
-              <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
+              <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-muted hover:text-ink touch-manipulation">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -5841,15 +5841,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               // Opens IN PLACE, like Keys & Secrets — sending someone away mid-build loses the build,
               // the preview and the chat. Lazy, so a user who never connects anything never downloads it.
               state.workspaceId
-                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading…</div>}>
+                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-faint">Loading…</div>}>
                     <ConnectedServices workspaceId={state.workspaceId} authedFetch={authedFetch} />
                   </Suspense>
-                : <div className="px-4 py-6 text-xs text-zinc-500">Start or open an app first, then connect your tools to it.</div>
+                : <div className="px-4 py-6 text-xs text-faint">Start or open an app first, then connect your tools to it.</div>
             ) : mobileSheet === 'secrets' ? (
               // The SAME vault component the Settings screen renders — not a copy of it. Lazy, so a
               // user who never opens this door never downloads it.
               userId
-                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-zinc-500">Loading your keys…</div>}>
+                ? <Suspense fallback={<div className="px-4 py-6 text-xs text-faint">Loading your keys…</div>}>
                     <VaultManager
                       userId={userId}
                       embedded
@@ -5859,30 +5859,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       defaultAppName={appName}
                     />
                   </Suspense>
-                : <div className="px-4 py-6 text-xs text-zinc-500">Sign in to manage your keys.</div>
+                : <div className="px-4 py-6 text-xs text-faint">Sign in to manage your keys.</div>
             ) : (
               <div className="py-1.5">
                 {/* Framework — moved here from the header (admin: "React + Vite ko More me bhej do") */}
                 <button
                   onClick={() => { setMobileSheet(null); setShowFrameworkPicker(true); }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation"
                 >
                   <span className="w-4 text-center shrink-0">{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
                   <span className="flex-1 text-left">Framework</span>
-                  <span className="text-xs text-zinc-500">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+                  <span className="text-xs text-faint">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
                 </button>
-                <button onClick={() => openSurfaceFromFooter('diff')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
-                  <FileDiff className="w-4 h-4 shrink-0 text-zinc-400" />
+                <button onClick={() => openSurfaceFromFooter('diff')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation">
+                  <FileDiff className="w-4 h-4 shrink-0 text-muted" />
                   <span className="flex-1 text-left">Diff</span>
-                  <span className="text-xs text-zinc-500">{diffPaths.length}</span>
+                  <span className="text-xs text-faint">{diffPaths.length}</span>
                 </button>
-                <button onClick={() => openSurfaceFromFooter('terminal')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
-                  <Terminal className="w-4 h-4 shrink-0 text-zinc-400" />
+                <button onClick={() => openSurfaceFromFooter('terminal')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation">
+                  <Terminal className="w-4 h-4 shrink-0 text-muted" />
                   <span className="flex-1 text-left">Terminal</span>
                 </button>
                 {/* B1 — App Logs on mobile too: a phone user hits a broken backend exactly as often. */}
-                <button onClick={() => openSurfaceFromFooter('logs')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
-                  <ScrollText className="w-4 h-4 shrink-0 text-zinc-400" />
+                <button onClick={() => openSurfaceFromFooter('logs')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation">
+                  <ScrollText className="w-4 h-4 shrink-0 text-muted" />
                   <span className="flex-1 text-left">App Logs</span>
                 </button>
                 {/* ANOTHER DOOR TO THE SAME ROOM (admin 2026-08-17: "ek room ke kayi gate").
@@ -5895,12 +5895,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     their way back. Same component, same API, no second implementation to drift. */}
                 <button
                   onClick={() => setMobileSheet('secrets')}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation"
                 >
-                  <Key className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <Key className="w-4 h-4 shrink-0 text-muted" />
                   <span className="flex-1 text-left">Keys &amp; Secrets</span>
                   {savedKeyCount !== null && savedKeyCount > 0 && (
-                    <span className="text-xs text-zinc-500">{savedKeyCount} saved</span>
+                    <span className="text-xs text-faint">{savedKeyCount} saved</span>
                   )}
                 </button>
                 {/* CONNECTED SERVICES — the user's own tools (MCP). Same in-place pattern as the vault
@@ -5908,32 +5908,32 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     be the wrong shape. */}
                 <button
                   onClick={() => setMobileSheet('services')}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation"
                 >
-                  <Puzzle className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <Puzzle className="w-4 h-4 shrink-0 text-muted" />
                   <span className="flex-1 text-left">Connected services (MCP)</span>
                 </button>
-                <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
-                  <History className="w-4 h-4 shrink-0 text-zinc-400" />
+                <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation">
+                  <History className="w-4 h-4 shrink-0 text-muted" />
                   <span className="flex-1 text-left">Checkpoints</span>
-                  <span className="text-xs text-zinc-500">{allCheckpoints.length}</span>
+                  <span className="text-xs text-faint">{allCheckpoints.length}</span>
                 </button>
                 {/* Report to admin (admin 2026-07-29): one action, admin-only report — no download,
                     no copy, no history browser. Submits this build's report to NavBharatAI. */}
                 <button
                   onClick={() => { setMobileSheet(null); void openReportPicker('sheet'); }}
                   disabled={reportSending || !state.workspaceId}
-                  className="w-full flex items-start gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                  className="w-full flex items-start gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised disabled:opacity-40 touch-manipulation"
                 >
                   {reportSent || reportCount > 0
-                    ? <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
-                    : <FileText className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />}
+                    ? <Check className="w-4 h-4 shrink-0 mt-0.5 text-success" />
+                    : <FileText className="w-4 h-4 shrink-0 mt-0.5 text-muted" />}
                   <span className="flex-1 text-left">
                     {reportButtonLabel({ sending: reportSending, justSent: reportSent, count: reportCount })}
                     {/* The count alone answers "did mine go through?"; this line says outright that a
                         second send adds nothing — the actual ask behind "duplicate report na ho". */}
                     {reportCount > 0 && !reportSending && (
-                      <span className="block text-[11px] text-zinc-500 leading-snug">{reportAlreadySentHint(reportCount)}</span>
+                      <span className="block text-[11px] text-faint leading-snug">{reportAlreadySentHint(reportCount)}</span>
                     )}
                   </span>
                 </button>
@@ -5942,9 +5942,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     href={state.repoUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation"
                   >
-                    <Github className="w-4 h-4 shrink-0 text-zinc-400" />
+                    <Github className="w-4 h-4 shrink-0 text-muted" />
                     <span className="flex-1 text-left">GitHub{state.repoFullName ? ` — ${state.repoFullName}` : ''}</span>
                     <ExternalLink className="w-3 h-3 opacity-60" />
                   </a>
@@ -5952,7 +5952,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <button
                   onClick={() => { setMobileSheet(null); setShowHostingChooser(true); }}
                   disabled={running || !state.workspaceId}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-success hover:bg-raised disabled:opacity-40 touch-manipulation"
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
@@ -5963,19 +5963,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     href={liveUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 touch-manipulation"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-success hover:bg-raised touch-manipulation"
                   >
                     <Globe className="w-4 h-4 shrink-0" />
                     <span className="flex-1 text-left truncate">Live site — {liveUrl.replace(/^https?:\/\//, '')}</span>
                     <ExternalLink className="w-3 h-3 opacity-60" />
                   </a>
                 )}
-                <div className="my-1 border-t border-zinc-800" />
+                <div className="my-1 border-t border-line" />
                 <button
                   onClick={newChatFromHistory}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-body hover:bg-raised touch-manipulation"
                 >
-                  <Plus className="w-4 h-4 shrink-0 text-indigo-400" />
+                  <Plus className="w-4 h-4 shrink-0 text-accent-text" />
                   <span className="flex-1 text-left">New chat</span>
                 </button>
               </div>
@@ -5986,13 +5986,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
 
       {/* LOUD open-failure toast — a history chat that fails to open must say WHY, never no-op. */}
       {openChatError && (
-        <div className="fixed inset-x-3 bottom-20 z-[70] sm:left-auto sm:right-4 sm:max-w-md rounded-xl border border-red-500/40 bg-red-950/95 text-red-100 text-xs leading-relaxed shadow-2xl p-3 pr-8">
+        <div className="fixed inset-x-3 bottom-20 z-[70] sm:left-auto sm:right-4 sm:max-w-md rounded-xl border border-red-500/40 bg-red-950/95 text-danger text-xs leading-relaxed shadow-2xl p-3 pr-8">
           {openChatError}
           <button
             type="button"
             onClick={() => setOpenChatError(null)}
             aria-label="Dismiss"
-            className="absolute top-2 right-2 p-1 rounded text-red-300 hover:text-white touch-manipulation"
+            className="absolute top-2 right-2 p-1 rounded text-danger hover:text-ink touch-manipulation"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -6005,14 +6005,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           name; it never interrupts, pauses or restarts anything the engine is doing. */}
       {nameModalOpen && (
         <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60" onClick={() => { if (!nameSaving) setNameModalOpen(false); }} />
-          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          <div className="absolute inset-0 bg-scrim" onClick={() => { if (!nameSaving) setNameModalOpen(false); }} />
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-surface border border-line rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-widest">App name</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">This name is used everywhere, including where your code is saved.</p>
+                <h3 className="text-sm font-black text-ink uppercase tracking-widest">App name</h3>
+                <p className="text-[10px] text-muted mt-0.5">This name is used everywhere, including where your code is saved.</p>
               </div>
-              <button onClick={() => { if (!nameSaving) setNameModalOpen(false); }} className="text-zinc-500 hover:text-white" aria-label="Close">
+              <button onClick={() => { if (!nameSaving) setNameModalOpen(false); }} className="text-faint hover:text-ink" aria-label="Close">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -6027,28 +6027,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               maxLength={60}
               placeholder="My Shop"
               aria-label="Your app's name"
-              className="w-full bg-white/5 border border-indigo-500/30 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] outline-none focus:border-indigo-500"
+              className="w-full bg-raised border border-indigo-500/30 rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint outline-none focus:border-indigo-500"
             />
             {nameError && (
-              <p className="text-[11px] text-red-300 bg-red-900/20 border border-red-500/20 rounded-lg px-2.5 py-2">{nameError}</p>
+              <p className="text-[11px] text-danger bg-red-900/20 border border-red-500/20 rounded-lg px-2.5 py-2">{nameError}</p>
             )}
             {running && (
               // Said out loud because the opposite is what users expect from a builder, and a person
               // who assumes renaming might break their build simply will not use this.
-              <p className="text-[11px] text-[#8b949e]">Your build keeps running — renaming does not interrupt it.</p>
+              <p className="text-[11px] text-muted">Your build keeps running — renaming does not interrupt it.</p>
             )}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => { void saveAppName(); }}
                 disabled={nameSaving || !nameDraft.trim()}
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all"
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-on-accent text-sm font-bold rounded-xl transition-all"
               >
                 {nameSaving ? 'Saving…' : 'Save'}
               </button>
               <button
                 onClick={() => { if (!nameSaving) setNameModalOpen(false); }}
                 disabled={nameSaving}
-                className="px-4 py-2.5 border border-white/10 text-sm font-semibold text-zinc-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors disabled:opacity-50"
+                className="px-4 py-2.5 border border-line text-sm font-semibold text-muted hover:text-ink hover:bg-raised rounded-xl transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -6060,23 +6060,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       {/* Framework Picker Modal */}
       {showFrameworkPicker && (
         <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShowFrameworkPicker(false)} />
+          <div className="absolute inset-0 bg-scrim" onClick={() => setShowFrameworkPicker(false)} />
           {/* Capped + scrollable — an uncapped modal grows past a phone screen and everything below the
               fold becomes unreachable (see the Import/Push modal below for the reported instance). */}
-          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-surface border border-line rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-widest">Choose Framework</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">Pick the technology stack for your new project</p>
+                <h3 className="text-sm font-black text-ink uppercase tracking-widest">Choose Framework</h3>
+                <p className="text-[10px] text-muted mt-0.5">Pick the technology stack for your new project</p>
               </div>
-              <button onClick={() => setShowFrameworkPicker(false)} className="text-zinc-500 hover:text-white">
+              <button onClick={() => setShowFrameworkPicker(false)} className="text-faint hover:text-ink">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <FrameworkPicker value={framework} onChange={pickFramework} />
             <button
               onClick={() => setShowFrameworkPicker(false)}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-on-accent text-sm font-bold rounded-xl transition-all"
             >
               Confirm
             </button>
@@ -6087,31 +6087,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       {/* Import Repo Modal */}
       {showImportModal && (
         <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShowImportModal(false)} />
+          <div className="absolute inset-0 bg-scrim" onClick={() => setShowImportModal(false)} />
           {/* ROOT CAUSE of "PUSH button kaam ka nahi hai" (admin 2026-08-03): this card had NO height cap
               and NO scroll, so on a phone it grew past the screen. In PUSH mode the commit-message field
               and — critically — the push RESULT banner render near the BOTTOM, i.e. below the fold with
               no way to reach them. The push itself ran fine (real blobs → tree → commit → ref); its only
               feedback was simply off-screen, so the button felt dead. Same class as the Publish sheet
               (#2037) — this was its surviving sibling. Cap at the viewport and scroll. */}
-          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
+          <div className="nb-sheet relative z-10 w-full max-w-sm overflow-y-auto overscroll-contain bg-surface border border-line rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">{modalMode === 'push' ? 'Publish your current app to one of your GitHub repos' : 'Clone a GitHub repo into your NavBharatAI Pro workspace'}</p>
+                <h3 className="text-sm font-black text-ink uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
+                <p className="text-[10px] text-muted mt-0.5">{modalMode === 'push' ? 'Publish your current app to one of your GitHub repos' : 'Clone a GitHub repo into your NavBharatAI Pro workspace'}</p>
               </div>
-              <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
+              <button onClick={() => setShowImportModal(false)} className="text-faint hover:text-ink">
                 <X className="w-4 h-4" />
               </button>
             </div>
             {/* Import / Push toggle — one connection, both directions. */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-black/40 rounded-xl border border-white/10">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-well rounded-xl border border-line">
               {(['import', 'push'] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => { setModalMode(m); setPushResult(null); }}
-                  className={`py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all ${modalMode === m ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}
+                  className={`py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all ${modalMode === m ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:text-ink'}`}
                 >
                   {m === 'import' ? 'Import' : 'Push'}
                 </button>
@@ -6120,33 +6120,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {/* PRIMARY: the 1-click repo picker (states: connect → loading → list/empty → error) */}
             {ghReposError === 'auth' ? (
               <div className="space-y-2 text-center py-2">
-                <p className="text-[11px] text-[#8b949e]">Connect your GitHub once — then every import is a single click on a repo.</p>
+                <p className="text-[11px] text-muted">Connect your GitHub once — then every import is a single click on a repo.</p>
                 <button
                   type="button"
                   onClick={() => void connectGitHub()}
                   disabled={ghConnecting}
                   aria-busy={ghConnecting}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait text-white text-sm font-bold rounded-xl transition-all touch-manipulation"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait text-on-accent text-sm font-bold rounded-xl transition-all touch-manipulation"
                 >
                   {ghConnecting
                     ? <><TirangaLoader className="w-4 h-4" /> Connecting…</>
                     : <><Github className="w-4 h-4" /> Connect GitHub</>}
                 </button>
-                <p className="text-[10px] text-[#484f58]">You'll be taken to GitHub to sign in and approve access (private repos included), then brought right back here.</p>
+                <p className="text-[10px] text-faint">You'll be taken to GitHub to sign in and approve access (private repos included), then brought right back here.</p>
                 {/* Reliable fallback (works even inside the app, where the OAuth redirect can't return): */}
                 <button
                   type="button"
                   onClick={() => setShowTokenPaste((v) => !v)}
-                  className="text-[10px] text-indigo-400 hover:text-indigo-300 underline touch-manipulation"
+                  className="text-[10px] text-accent-text hover:text-accent-text underline touch-manipulation"
                 >
                   {showTokenPaste ? 'Hide token option' : 'Not working? Paste a GitHub token instead'}
                 </button>
                 {showTokenPaste && (
-                  <div className="space-y-2 text-left bg-white/5 border border-white/10 rounded-xl p-3">
-                    <p className="text-[10px] text-[#8b949e] leading-relaxed">
+                  <div className="space-y-2 text-left bg-raised border border-line rounded-xl p-3">
+                    <p className="text-[10px] text-muted leading-relaxed">
                       Create a token at{' '}
-                      <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=NavBharatAI" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">github.com/settings/tokens</a>{' '}
-                      with the <span className="font-mono text-indigo-300">repo</span> scope, then paste it here — this works for your private repos on any device.
+                      <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=NavBharatAI" target="_blank" rel="noopener noreferrer" className="text-accent-text underline">github.com/settings/tokens</a>{' '}
+                      with the <span className="font-mono text-accent-text">repo</span> scope, then paste it here — this works for your private repos on any device.
                     </p>
                     <input
                       type="password"
@@ -6154,31 +6154,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       onChange={(e) => setPastedToken(e.target.value)}
                       placeholder="ghp_… or github_pat_…"
                       autoComplete="off"
-                      className="w-full bg-[#0d1117] border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#484f58] font-mono focus:outline-none focus:border-indigo-500/50"
+                      className="w-full bg-surface border border-line rounded-lg px-3 py-2 text-xs text-ink placeholder:text-faint font-mono focus:outline-none focus:border-indigo-500/50"
                     />
                     <button
                       type="button"
                       onClick={() => void submitPastedToken()}
                       disabled={!pastedToken.trim() || tokenBusy}
-                      className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait text-white text-xs font-bold rounded-lg transition-all touch-manipulation"
+                      className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait text-on-accent text-xs font-bold rounded-lg transition-all touch-manipulation"
                     >
                       {tokenBusy ? <><TirangaLoader className="w-3.5 h-3.5" /> Verifying…</> : 'Use this token'}
                     </button>
-                    {tokenError && <p className="text-[10px] text-amber-300">{tokenError}</p>}
+                    {tokenError && <p className="text-[10px] text-warn">{tokenError}</p>}
                   </div>
                 )}
               </div>
             ) : ghReposLoading ? (
-              <div className="flex items-center justify-center gap-2 py-6 text-[#8b949e] text-xs">
+              <div className="flex items-center justify-center gap-2 py-6 text-muted text-xs">
                 <TirangaLoader className="w-4 h-4" /> Loading your repositories…
               </div>
             ) : ghReposError ? (
               <div className="space-y-2 text-center py-2">
-                <p className="text-[11px] text-amber-300">{ghReposError}</p>
-                <button type="button" onClick={() => void loadGhRepos()} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-200 text-xs font-semibold rounded-xl touch-manipulation">Retry</button>
+                <p className="text-[11px] text-warn">{ghReposError}</p>
+                <button type="button" onClick={() => void loadGhRepos()} className="px-4 py-2 bg-raised hover:bg-raised text-body text-xs font-semibold rounded-xl touch-manipulation">Retry</button>
               </div>
             ) : ghRepos && ghRepos.length === 0 ? (
-              <p className="text-[11px] text-[#8b949e] text-center py-3">No repositories found on your GitHub account — paste a URL below instead.</p>
+              <p className="text-[11px] text-muted text-center py-3">No repositories found on your GitHub account — paste a URL below instead.</p>
             ) : ghRepos ? (
               <div className="space-y-2">
                 <input
@@ -6186,9 +6186,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   value={repoSearch}
                   onChange={(e) => setRepoSearch(e.target.value)}
                   placeholder={`Search ${ghRepos.length} repositories…`}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  className="w-full bg-well border border-line rounded-xl px-3 py-2 text-xs text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
                 />
-                <div className="max-h-56 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
+                <div className="max-h-56 overflow-y-auto rounded-xl border border-line divide-y divide-line">
                   {ghRepos
                     .filter((r) => !repoSearch.trim() || r.fullName.toLowerCase().includes(repoSearch.trim().toLowerCase()))
                     .slice(0, 60)
@@ -6199,57 +6199,57 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         onClick={() => (modalMode === 'push' ? void pushToRepo(r.fullName) : importRepo(r.url))}
                         disabled={running || importSending || pushBusy}
                         title={running ? 'A build is running — wait for it to finish' : modalMode === 'push' ? `Push your current app to ${r.fullName}` : `Import ${r.fullName} into this workspace`}
-                        className="w-full text-left px-3 py-2.5 hover:bg-white/5 active:bg-white/10 disabled:opacity-40 touch-manipulation"
+                        className="w-full text-left px-3 py-2.5 hover:bg-raised active:bg-raised disabled:opacity-40 touch-manipulation"
                       >
                         <span className="flex items-center gap-2">
-                          <Github className="w-3.5 h-3.5 text-[#8b949e] shrink-0" />
-                          <span className="text-xs text-white truncate font-medium">{r.fullName}</span>
-                          {r.isPrivate && <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/20">private</span>}
-                          {r.updatedAt > 0 && <span className="shrink-0 ml-auto text-[10px] text-[#484f58]">{relTime(r.updatedAt)}</span>}
+                          <Github className="w-3.5 h-3.5 text-muted shrink-0" />
+                          <span className="text-xs text-ink truncate font-medium">{r.fullName}</span>
+                          {r.isPrivate && <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-warn border border-amber-500/20">private</span>}
+                          {r.updatedAt > 0 && <span className="shrink-0 ml-auto text-[10px] text-faint">{relTime(r.updatedAt)}</span>}
                         </span>
-                        {r.description && <span className="block mt-0.5 pl-5 text-[10px] text-[#8b949e] truncate">{r.description}</span>}
+                        {r.description && <span className="block mt-0.5 pl-5 text-[10px] text-muted truncate">{r.description}</span>}
                       </button>
                     ))}
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] text-[#484f58]">{modalMode === 'push' ? 'Click a repo to push your current app to it. New repos are created automatically.' : 'Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.'}</p>
-                  <button type="button" onClick={disconnectGh} className="shrink-0 text-[10px] text-[#8b949e] hover:text-white underline underline-offset-2 touch-manipulation">Wrong account?</button>
+                  <p className="text-[10px] text-faint">{modalMode === 'push' ? 'Click a repo to push your current app to it. New repos are created automatically.' : 'Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.'}</p>
+                  <button type="button" onClick={disconnectGh} className="shrink-0 text-[10px] text-muted hover:text-ink underline underline-offset-2 touch-manipulation">Wrong account?</button>
                 </div>
               </div>
             ) : null}
 
             {/* PUSH mode: an optional commit message; the click on a repo above does the real push. */}
             {modalMode === 'push' && ghReposError !== 'auth' && (
-              <div className="pt-1 border-t border-white/10 space-y-2">
-                <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Commit message (optional)</label>
+              <div className="pt-1 border-t border-line space-y-2">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-widest">Commit message (optional)</label>
                 <input
                   type="text"
                   value={pushCommitMsg}
                   onChange={e => setPushCommitMsg(e.target.value)}
                   placeholder="Update from NavBharatAI Pro"
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  className="w-full bg-well border border-line rounded-xl px-3 py-2 text-xs text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
                 />
-                <p className="text-[10px] text-[#484f58]">Secrets (.env, keys, service-account files) are never pushed. If a repo already has newer commits, we ask you to import first instead of overwriting.</p>
+                <p className="text-[10px] text-faint">Secrets (.env, keys, service-account files) are never pushed. If a repo already has newer commits, we ask you to import first instead of overwriting.</p>
               </div>
             )}
 
             {/* SECONDARY (import only): paste any repo URL (e.g. someone else's public repo) */}
             {modalMode === 'import' && (
-              <div className="pt-1 border-t border-white/10 space-y-2">
-                <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Or paste a repository URL</label>
+              <div className="pt-1 border-t border-line space-y-2">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-widest">Or paste a repository URL</label>
                 <div className="flex gap-2">
                   <input
                     type="url"
                     value={importUrl}
                     onChange={e => setImportUrl(e.target.value)}
                     placeholder="https://github.com/owner/repo"
-                    className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                    className="flex-1 min-w-0 bg-well border border-line rounded-xl px-3 py-2 text-xs text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
                   />
                   <button
                     type="button"
                     onClick={() => { const u = importUrl.trim(); if (u) { setImportUrl(''); importRepo(u); } }}
                     disabled={running || importSending || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/.test(importUrl.trim())}
-                    className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl touch-manipulation"
+                    className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-on-accent text-xs font-bold rounded-xl touch-manipulation"
                   >
                     Import
                   </button>
@@ -6262,12 +6262,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 phone that put it off-screen, which is exactly why the button felt dead. Pinned to the
                 bottom of the scroll area so the answer is visible the moment a repo is tapped. */}
             {(pushBusy || pushResult) && (
-              <div className={`sticky bottom-0 z-10 flex items-start gap-2 p-3 rounded-xl border text-[11px] backdrop-blur-sm ${pushResult && !pushResult.ok ? 'bg-amber-950/80 border-amber-500/30 text-amber-200' : 'bg-indigo-950/80 border-indigo-500/30 text-indigo-100'}`}>
+              <div className={`sticky bottom-0 z-10 flex items-start gap-2 p-3 rounded-xl border text-[11px] backdrop-blur-sm ${pushResult && !pushResult.ok ? 'bg-amber-950/80 border-amber-500/30 text-warn' : 'bg-indigo-950/80 border-indigo-500/30 text-accent-text'}`}>
                 {pushBusy ? <TirangaLoader className="w-4 h-4 shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
                 <div className="min-w-0">
                   <p>{pushResult?.text || 'Pushing…'}</p>
                   {pushResult?.ok && pushResult.url && (
-                    <a href={pushResult.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 break-all hover:text-white">{pushResult.url}</a>
+                    <a href={pushResult.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 break-all hover:text-ink">{pushResult.url}</a>
                   )}
                 </div>
               </div>
@@ -6383,12 +6383,12 @@ function WorkingIndicator({ activity, running }: { activity: ActivityEntry[]; ru
   // every file already streams live. The indicator is now a single honest line — the live current
   // action + clock while running, just "Done · <time>" once finished.
   return (
-    <div className="text-xs text-zinc-500 w-full max-w-[90%]">
+    <div className="text-xs text-faint w-full max-w-[90%]">
       <div className="flex items-center gap-2 w-full text-left">
-        {running ? <WavingTiranga size={16} /> : <span className="text-emerald-400">✓</span>}
+        {running ? <WavingTiranga size={16} /> : <span className="text-success">✓</span>}
         <span className="truncate flex-1">{running ? `${current ? `${activityIcon(current)} ${current.text}` : 'working…'}` : 'Done'}</span>
         {running && current?.active && <span className="inline-block w-1 h-3 bg-current animate-pulse shrink-0" />}
-        <span className="shrink-0 tabular-nums text-zinc-600">{elapsed}</span>
+        <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
     </div>
   );
@@ -6423,7 +6423,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
-        <div className="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
+        <div className="max-w-[85%] bg-indigo-600 text-on-accent rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
@@ -6439,13 +6439,13 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
     <div className="group flex flex-col items-start">
       <div className="max-w-[90%]">
         {msg.agent && msg.agent !== 'architect' && (
-          <div className="text-[10px] uppercase tracking-wide text-indigo-400 mb-0.5">{msg.agent}</div>
+          <div className="text-[10px] uppercase tracking-wide text-accent-text mb-0.5">{msg.agent}</div>
         )}
         <div
           className={
             isThinking
-              ? 'text-zinc-500 italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
-              : 'bg-zinc-900 text-zinc-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words'
+              ? 'text-faint italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
+              : 'bg-card text-body rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words'
           }
         >
           {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}
@@ -6466,10 +6466,10 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
 /** Status icon for a single todo — lets the user watch the agent work through its plan live. */
 function todoStatusIcon(status: TodoStatus) {
   switch (status) {
-    case 'done': return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
-    case 'in_progress': return <TirangaLoader className="w-3.5 h-3.5 text-indigo-400 shrink-0" />;
-    case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
-    default: return <Circle className="w-3.5 h-3.5 text-zinc-600 shrink-0" />; // pending
+    case 'done': return <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />;
+    case 'in_progress': return <TirangaLoader className="w-3.5 h-3.5 text-accent-text shrink-0" />;
+    case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-danger shrink-0" />;
+    default: return <Circle className="w-3.5 h-3.5 text-faint shrink-0" />; // pending
   }
 }
 
@@ -6494,15 +6494,15 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
     try { trackEvent('feedback', { score: score === 'up' ? 1 : -1, surface: 'agentv3_build', workspaceId }); } catch { /* best-effort */ }
   };
   if (rated) {
-    return <div className="mt-1 text-[11px] text-zinc-500">Thanks for the feedback{rated === 'down' ? ' — we’ll keep improving.' : '!'}</div>;
+    return <div className="mt-1 text-[11px] text-faint">Thanks for the feedback{rated === 'down' ? ' — we’ll keep improving.' : '!'}</div>;
   }
   return (
-    <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500">
+    <div className="mt-1 flex items-center gap-2 text-[11px] text-faint">
       <span>Was this build helpful?</span>
-      <button onClick={() => rate('up')} aria-label="Helpful" className="p-1 rounded hover:bg-white/5 hover:text-emerald-400 transition-colors">
+      <button onClick={() => rate('up')} aria-label="Helpful" className="p-1 rounded hover:bg-raised hover:text-success transition-colors">
         <ThumbsUp className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => rate('down')} aria-label="Not helpful" className="p-1 rounded hover:bg-white/5 hover:text-rose-400 transition-colors">
+      <button onClick={() => rate('down')} aria-label="Not helpful" className="p-1 rounded hover:bg-raised hover:text-danger transition-colors">
         <ThumbsDown className="w-3.5 h-3.5" />
       </button>
     </div>
@@ -6525,33 +6525,33 @@ function BuildHealthCard({ health }: { health: BuildHealth }) {
     <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] ${ready ? 'border-emerald-800/60 bg-emerald-950/30' : 'border-amber-800/60 bg-amber-950/30'}`}>
       <div className="flex items-center gap-1.5 font-semibold">
         {ready
-          ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          : <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+          ? <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+          : <AlertCircle className="w-3.5 h-3.5 text-warn shrink-0" />}
         {/* "READY" alone overstated an app nobody had seen run (admin screenshot 2026-08-22: the card
             said READY · 100/100 directly above the build's own "critical build-breaking issues"). The
             server now reports whether the app was actually seen running; when it was not, the label
             says so rather than implying proof. `undefined` (older payload) keeps today's wording. */}
-        <span className={ready ? 'text-emerald-300' : 'text-amber-300'}>
+        <span className={ready ? 'text-success' : 'text-warn'}>
           Build health: {ready ? (health.provenRunning === false ? 'READY (not verified)' : 'READY') : 'NOT READY'}
         </span>
-        <span className="text-zinc-500">· {health.score}/100</span>
+        <span className="text-faint">· {health.score}/100</span>
       </div>
       {blockers.lines.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-amber-200/90">
+        <ul className="mt-1 space-y-0.5 text-warn">
           {blockers.lines.map((b, i) => (
-            <li key={`b${i}`} className="flex gap-1"><span className="text-amber-500">✗</span><span>{b}</span></li>
+            <li key={`b${i}`} className="flex gap-1"><span className="text-warn">✗</span><span>{b}</span></li>
           ))}
         </ul>
       )}
       {warnings.lines.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-zinc-400">
+        <ul className="mt-1 space-y-0.5 text-muted">
           {warnings.lines.map((w, i) => (
-            <li key={`w${i}`} className="flex gap-1"><span className="text-zinc-500">•</span><span>{w}</span></li>
+            <li key={`w${i}`} className="flex gap-1"><span className="text-faint">•</span><span>{w}</span></li>
           ))}
         </ul>
       )}
       {more > 0 && (
-        <div className="mt-1 text-[10px] text-zinc-500">+{more} more · see Report for details</div>
+        <div className="mt-1 text-[10px] text-faint">+{more} more · see Report for details</div>
       )}
     </div>
   );
@@ -6568,16 +6568,16 @@ function TodoList({ todos, hideHeader }: { todos: TodoItem[]; hideHeader?: boole
   return (
     <div className="text-left">
       {!hideHeader && (
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">
           <span>Plan</span>
-          <span className="text-zinc-500">{done}/{todos.length}</span>
+          <span className="text-faint">{done}/{todos.length}</span>
         </div>
       )}
       <ul className="space-y-1">
         {todos.map((t) => (
           <li key={t.id} className="flex items-center gap-1.5 text-xs">
             {todoStatusIcon(t.status)}
-            <span className={t.status === 'done' ? 'line-through text-zinc-500' : 'text-zinc-200'}>{t.title}</span>
+            <span className={t.status === 'done' ? 'line-through text-faint' : 'text-body'}>{t.title}</span>
           </li>
         ))}
       </ul>
@@ -6600,16 +6600,16 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
   const squares = m.progress.total > 0 ? todos.slice(0, 24) : [];
   return (
     <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)]">
-      <div className="rounded-[11px] bg-zinc-950/95 px-3 py-2">
+      <div className="rounded-[11px] bg-surface px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
             <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">⚡ FULL TEAM</span>
-            <span className="text-zinc-500 font-normal">
+            <span className="text-faint font-normal">
               {m.roster.length > 0 ? `${m.roster.length} agent${m.roster.length > 1 ? 's' : ''}` : 'assembling…'}
               {m.activeCount > 0 && ` · ${m.activeCount} working`}
             </span>
           </span>
-          <span className="text-[11px] font-mono text-zinc-400 tabular-nums">{formatElapsed(elapsedMs)}</span>
+          <span className="text-[11px] font-mono text-muted tabular-nums">{formatElapsed(elapsedMs)}</span>
         </div>
         {squares.length > 0 && (
           <div className="mt-1.5 flex items-center gap-[3px]" title={`Plan: ${m.progress.done}/${m.progress.total} steps done`}>
@@ -6619,20 +6619,20 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
                 className={`h-2 w-2 rounded-[2px] ${
                   t.status === 'done' ? 'bg-emerald-500'
                   : t.status === 'in_progress' ? 'bg-indigo-400 animate-pulse'
-                  : 'bg-zinc-700'
+                  : 'bg-raised'
                 }`}
               />
             ))}
-            <span className="ml-1.5 text-[10px] text-zinc-500 tabular-nums">{m.progress.done}/{m.progress.total}</span>
+            <span className="ml-1.5 text-[10px] text-faint tabular-nums">{m.progress.done}/{m.progress.total}</span>
           </div>
         )}
         {m.roster.length > 0 && (
           <div className="mt-1.5 flex gap-1.5 overflow-x-auto no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
             {m.roster.map((a) => (
-              <span key={a.agent} title={a.lastAction} className={`flex items-center gap-1 shrink-0 text-[10px] rounded-full px-2 py-0.5 border ${a.active ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-200' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>
+              <span key={a.agent} title={a.lastAction} className={`flex items-center gap-1 shrink-0 text-[10px] rounded-full px-2 py-0.5 border ${a.active ? 'border-indigo-500/60 bg-indigo-500/10 text-accent-text' : 'border-line bg-card text-muted'}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${a.active ? 'bg-indigo-400 animate-pulse' : 'bg-emerald-500'}`} />
                 <span className="capitalize font-medium">{a.agent}</span>
-                <span className="max-w-[120px] truncate text-zinc-500">{a.lastAction}</span>
+                <span className="max-w-[120px] truncate text-faint">{a.lastAction}</span>
               </span>
             ))}
           </div>
@@ -6647,11 +6647,11 @@ function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
   // progress). Once the build finishes, it turns into a green check. (Per-tool-call
   // active flags flicker between tools, so the chip tracks the whole-build state.)
   return (
-    <div className="flex items-center gap-1 text-[11px] bg-zinc-900 rounded-full px-2 py-1" title={card.lastAction}>
+    <div className="flex items-center gap-1 text-[11px] bg-card rounded-full px-2 py-1" title={card.lastAction}>
       {running
         ? <WavingTiranga size={14} />
-        : <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
-      <span className="font-medium capitalize text-zinc-200">{card.agent}</span>
+        : <CheckCircle2 className="w-3 h-3 text-success" />}
+      <span className="font-medium capitalize text-body">{card.agent}</span>
     </div>
   );
 }
@@ -6663,8 +6663,8 @@ function TabPill({ active, onClick, icon, children, dataTour }: { active: boolea
       data-tour={dataTour}
       className={`flex items-center gap-1 shrink-0 px-3 py-1 rounded-full text-xs border whitespace-nowrap ${
         active
-          ? 'bg-indigo-600 border-indigo-500 text-white'
-          : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:border-zinc-600'
+          ? 'bg-indigo-600 border-indigo-500 text-on-accent'
+          : 'bg-card border-line text-muted hover:text-body hover:border-line'
       }`}
     >
       {icon} {children}
@@ -6683,10 +6683,10 @@ function ToggleRow({ label, checked, disabled, onClick }: { label: string; check
       onClick={onClick}
       disabled={disabled}
       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left disabled:opacity-40 ${
-        checked ? 'text-indigo-200 bg-indigo-500/10' : 'text-zinc-300 hover:bg-zinc-800'
+        checked ? 'text-accent-text bg-indigo-500/10' : 'text-muted hover:bg-raised'
       }`}
     >
-      <span className={`w-4 h-4 shrink-0 flex items-center justify-center rounded border ${checked ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-zinc-600'}`}>
+      <span className={`w-4 h-4 shrink-0 flex items-center justify-center rounded border ${checked ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'border-line'}`}>
         {checked && <Check className="w-3 h-3" />}
       </span>
       <span className="flex-1">{label}</span>
@@ -6695,7 +6695,7 @@ function ToggleRow({ label, checked, disabled, onClick }: { label: string; check
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs text-zinc-600 italic">{children}</div>;
+  return <div className="text-xs text-faint italic">{children}</div>;
 }
 
 function fileDot(kind: string): string {
@@ -6707,7 +6707,7 @@ function fileDot(kind: string): string {
 
 function colorizeDiff(patch: string): React.ReactNode {
   return patch.split('\n').map((line, i) => {
-    const cls = line.startsWith('+') ? 'text-emerald-400' : line.startsWith('-') ? 'text-red-400' : 'text-zinc-400';
+    const cls = line.startsWith('+') ? 'text-success' : line.startsWith('-') ? 'text-danger' : 'text-muted';
     return <div key={i} className={cls}>{line}</div>;
   });
 }

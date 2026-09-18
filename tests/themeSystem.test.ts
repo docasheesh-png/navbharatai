@@ -122,10 +122,14 @@ describe('theme-compat.css — the darkest chrome family follows the theme (Pro 
     expect(compat).toMatch(/\.hover\\:bg-zinc-900:hover[\s\S]{0,200}var\(--surface-card\)/);
   });
 
-  it('the v5 panel root literal is genuinely covered (the reported symptom cannot return)', () => {
+  it('the v5 panel root follows the theme by TOKEN now (the reported symptom cannot return)', () => {
+    // Until the theme replacement (2026-09-18) this asserted the literal `bg-zinc-950` plus its compat
+    // remap. The panel is migrated: the root names the surface token, which resolves to the same
+    // variable the remap did, and the literal is gone from the file — a strictly stronger guarantee.
     const panel = read('src/components/agentv3/AgentV3Panel.tsx');
-    expect(panel).toMatch(/bg-zinc-950/); // the root still uses the literal…
-    expect(compat).toMatch(/html\[data-theme\]\s*\.bg-zinc-950\b/); // …and the compat layer remaps it.
+    expect(panel).toMatch(/\bbg-surface\b/);
+    expect(panel).not.toMatch(/bg-zinc-950/);
+    expect(compat).toMatch(/html\[data-theme\]\s*\.bg-zinc-950\b/); // the remap stays for files not yet migrated
   });
 
   it('the fixed-dark escape hatch exists but no surface currently claims it (the comment tells the truth)', () => {

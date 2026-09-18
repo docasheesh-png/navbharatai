@@ -2729,7 +2729,10 @@ is now enforced at the source, by CI.**
   fill chosen by a ternary inside a template literal is handled only when every branch is a fill,
   otherwise it is left for a hand split. Verified on AdminDashboard: 1,073 → 1 literals, and the
   audit crawler's numbers and screenshots on the admin view are IDENTICAL before and after on all
-  three themes. ⚠️ Do not extend the table with a row you cannot classify as EXACT or FIX.
+  three themes. ⚠️ Do not extend the table with a row you cannot classify as EXACT or FIX. Since PR D
+  it also knows a gradient stop into the chrome (`to-[#161b22]` → `to-card`), a hex brand fill
+  (`bg-[#24292e]`), and a label directly inside a filled box (the line above opens a solid-fill
+  element) — each learned from a real miss in a real file, never from a guess.
 - **Two more tokens exist since PR C:** `bg-well` (an inset panel inside a card — the old
   `bg-black/20–40` on dark; a 6% ink wash on light) and `bg-scrim` (the modal backdrop, deliberately
   the same dark on every theme because it dims what is behind it).

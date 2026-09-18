@@ -51,22 +51,22 @@ interface PlatformOption {
 }
 
 const DEPLOY_PLATFORMS: PlatformOption[] = [
-  { id: 'github', name: 'GitHub Sync & Pages', icon: Github, color: 'text-white', bgHover: 'hover:bg-white/5', desc: 'Push commits directly to public/private remote repos.', defaultBuildDir: 'dist' },
-  { id: 'firebase', name: 'Firebase Hosting', icon: Cloud, color: 'text-amber-500', bgHover: 'hover:bg-amber-500/10', desc: 'Deploy high-performance static sites & Cloud Functions.', defaultBuildDir: 'public' },
-  { id: 'vercel', name: 'Vercel App', icon: Layers, color: 'text-stone-300', bgHover: 'hover:bg-stone-500/15', desc: 'Zero-config global edge deployments with serverless routes.', defaultBuildDir: 'dist' },
-  { id: 'netlify', name: 'Netlify Cloud', icon: Globe, color: 'text-teal-400', bgHover: 'hover:bg-teal-400/10', desc: 'Production site hosting with instant cache invalidation.', defaultBuildDir: 'dist' },
-  { id: 'cloudflare', name: 'Cloudflare Pages', icon: Server, color: 'text-orange-400', bgHover: 'hover:bg-orange-500/10', desc: 'Build jamstack applications distributed on global CDN.', defaultBuildDir: 'dist' },
-  { id: 'gcloud', name: 'Google Cloud Run', icon: Cpu, color: 'text-blue-400', bgHover: 'hover:bg-blue-500/10', desc: 'Run server-side compiled containers on auto-scaling clusters.', defaultBuildDir: 'dist' },
-  { id: 'docker', name: 'Docker Hub Registry', icon: Play, color: 'text-[#2496ed]', bgHover: 'hover:bg-blue-600/10', desc: 'Build & package standard OCI images for portable runtimes.', defaultBuildDir: 'dist' },
-  { id: 'render', name: 'Render Web Services', icon: RefreshCcw, color: 'text-fuchsia-400', bgHover: 'hover:bg-fuchsia-500/10', desc: 'Continuous hosting for Node full-stack applications.', defaultBuildDir: 'dist' },
-  { id: 'railway', name: 'Railway App', icon: Terminal, color: 'text-pink-400', bgHover: 'hover:bg-pink-500/10', desc: 'Instant database and multi-service cloud container host.', defaultBuildDir: 'dist' },
-  { id: 'aws', name: 'AWS Amplify', icon: Cloud, color: 'text-yellow-500', bgHover: 'hover:bg-yellow-500/10', desc: 'Secure AWS backend and web app deployment console.', defaultBuildDir: 'dist' },
-  { id: 'supabase', name: 'Supabase Edge', icon: Layout, color: 'text-emerald-400', bgHover: 'hover:bg-emerald-500/10', desc: 'PostgreSQL integrated static and edge function pipeline.', defaultBuildDir: 'dist' },
-  { id: 'digitalocean', name: 'DigitalOcean App Platform', icon: Server, color: 'text-indigo-400', bgHover: 'hover:bg-indigo-500/10', desc: 'High availability scalable cloud deployments.', defaultBuildDir: 'dist' },
-  { id: 'heroku', name: 'Heroku Dynos', icon: Layers, color: 'text-purple-400', bgHover: 'hover:bg-purple-500/10', desc: 'Classic managed cloud Platform as a Service (PaaS).', defaultBuildDir: 'dist' },
-  { id: 'surge', name: 'Surge.sh CLI', icon: Globe, color: 'text-cyan-400', bgHover: 'hover:bg-cyan-500/10', badge: 'Fastest', desc: 'Deploy single-command static paths directly onto the web.', defaultBuildDir: 'dist' },
-  { id: 'static', name: 'Static Export Store', icon: Download, color: 'text-stone-400', bgHover: 'hover:bg-stone-400/10', desc: 'Bundle static client bundle into a portable zip file.', defaultBuildDir: 'dist' },
-  { id: 'remote', name: 'Custom Remote Git', icon: GitBranch, color: 'text-red-400', bgHover: 'hover:bg-red-500/10', desc: 'Push commits to custom git endpoints over Secure Shell (SSH).', defaultBuildDir: 'dist' }
+  { id: 'github', name: 'GitHub Sync & Pages', icon: Github, color: 'text-ink', bgHover: 'hover:bg-raised', desc: 'Push commits directly to public/private remote repos.', defaultBuildDir: 'dist' },
+  { id: 'firebase', name: 'Firebase Hosting', icon: Cloud, color: 'text-warn', bgHover: 'hover:bg-amber-500/10', desc: 'Deploy high-performance static sites & Cloud Functions.', defaultBuildDir: 'public' },
+  { id: 'vercel', name: 'Vercel App', icon: Layers, color: 'text-body', bgHover: 'hover:bg-raised', desc: 'Zero-config global edge deployments with serverless routes.', defaultBuildDir: 'dist' },
+  { id: 'netlify', name: 'Netlify Cloud', icon: Globe, color: 'text-success', bgHover: 'hover:bg-teal-400/10', desc: 'Production site hosting with instant cache invalidation.', defaultBuildDir: 'dist' },
+  { id: 'cloudflare', name: 'Cloudflare Pages', icon: Server, color: 'text-warn', bgHover: 'hover:bg-orange-500/10', desc: 'Build jamstack applications distributed on global CDN.', defaultBuildDir: 'dist' },
+  { id: 'gcloud', name: 'Google Cloud Run', icon: Cpu, color: 'text-info', bgHover: 'hover:bg-blue-500/10', desc: 'Run server-side compiled containers on auto-scaling clusters.', defaultBuildDir: 'dist' },
+  { id: 'docker', name: 'Docker Hub Registry', icon: Play, color: 'text-info', bgHover: 'hover:bg-blue-600/10', desc: 'Build & package standard OCI images for portable runtimes.', defaultBuildDir: 'dist' },
+  { id: 'render', name: 'Render Web Services', icon: RefreshCcw, color: 'text-accent-text', bgHover: 'hover:bg-fuchsia-500/10', desc: 'Continuous hosting for Node full-stack applications.', defaultBuildDir: 'dist' },
+  { id: 'railway', name: 'Railway App', icon: Terminal, color: 'text-accent-text', bgHover: 'hover:bg-pink-500/10', desc: 'Instant database and multi-service cloud container host.', defaultBuildDir: 'dist' },
+  { id: 'aws', name: 'AWS Amplify', icon: Cloud, color: 'text-warn', bgHover: 'hover:bg-yellow-500/10', desc: 'Secure AWS backend and web app deployment console.', defaultBuildDir: 'dist' },
+  { id: 'supabase', name: 'Supabase Edge', icon: Layout, color: 'text-success', bgHover: 'hover:bg-emerald-500/10', desc: 'PostgreSQL integrated static and edge function pipeline.', defaultBuildDir: 'dist' },
+  { id: 'digitalocean', name: 'DigitalOcean App Platform', icon: Server, color: 'text-accent-text', bgHover: 'hover:bg-indigo-500/10', desc: 'High availability scalable cloud deployments.', defaultBuildDir: 'dist' },
+  { id: 'heroku', name: 'Heroku Dynos', icon: Layers, color: 'text-accent-text', bgHover: 'hover:bg-purple-500/10', desc: 'Classic managed cloud Platform as a Service (PaaS).', defaultBuildDir: 'dist' },
+  { id: 'surge', name: 'Surge.sh CLI', icon: Globe, color: 'text-info', bgHover: 'hover:bg-cyan-500/10', badge: 'Fastest', desc: 'Deploy single-command static paths directly onto the web.', defaultBuildDir: 'dist' },
+  { id: 'static', name: 'Static Export Store', icon: Download, color: 'text-muted', bgHover: 'hover:bg-raised', desc: 'Bundle static client bundle into a portable zip file.', defaultBuildDir: 'dist' },
+  { id: 'remote', name: 'Custom Remote Git', icon: GitBranch, color: 'text-danger', bgHover: 'hover:bg-red-500/10', desc: 'Push commits to custom git endpoints over Secure Shell (SSH).', defaultBuildDir: 'dist' }
 ];
 
 export const GitPanel: React.FC<GitPanelProps> = ({
@@ -813,7 +813,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   const changes = Object.keys(files).map(f => ({
     file: f,
     status: 'M',
-    color: 'text-amber-500'
+    color: 'text-warn'
   }));
 
   const filteredPlatforms = DEPLOY_PLATFORMS.filter(p => 
@@ -828,16 +828,16 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   const SyncPltIcon = syncPlatformObj.icon;
 
   return (
-    <div className="flex flex-col h-full bg-[#161b22] text-white">
+    <div className="flex flex-col h-full bg-card text-ink">
       {/* Upper Navigation Tabs */}
-      <div className="flex bg-[#0d1117] border-b border-white/5 select-none shrink-0 p-1 gap-1">
+      <div className="flex bg-surface border-b border-line select-none shrink-0 p-1 gap-1">
         <button 
           onClick={() => setActiveTab2('deploy')}
           className={cn(
             "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer",
             activeTab === 'deploy' 
-              ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/25" 
-              : "text-[#8b949e] hover:text-white hover:bg-white/5 border border-transparent"
+              ? "bg-indigo-600/10 text-accent-text border border-indigo-500/25" 
+              : "text-muted hover:text-ink hover:bg-raised border border-transparent"
           )}
         >
           <Rocket className="w-3.5 h-3.5" />
@@ -848,8 +848,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
           className={cn(
             "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer",
             activeTab === 'sync' 
-              ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/25" 
-              : "text-[#8b949e] hover:text-white hover:bg-white/5 border border-transparent"
+              ? "bg-indigo-600/10 text-accent-text border border-indigo-500/25" 
+              : "text-muted hover:text-ink hover:bg-raised border border-transparent"
           )}
         >
           <Cloud className="w-3.5 h-3.5" />
@@ -867,34 +867,34 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             {/* Header / Intro */}
             <div className="relative p-4 rounded-2xl bg-gradient-to-br from-indigo-950/40 to-black/30 border border-indigo-500/10 space-y-2 overflow-hidden shadow-xl shrink-0">
               <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl"></div>
-              <div className="flex items-center gap-2 text-[9px] font-black uppercase text-indigo-400 tracking-wider">
+              <div className="flex items-center gap-2 text-[9px] font-black uppercase text-accent-text tracking-wider">
                 <Sparkles className="w-3.5 h-3.5 animate-pulse" />
                 Cloud Deployment Hub
               </div>
-              <h4 className="text-sm font-black uppercase tracking-tight text-white leading-none">Push to GitHub &amp; Export</h4>
-              <p className="text-[10px] text-[#8b949e] font-medium leading-relaxed">
+              <h4 className="text-sm font-black uppercase tracking-tight text-ink leading-none">Push to GitHub &amp; Export</h4>
+              <p className="text-[10px] text-muted font-medium leading-relaxed">
                 Live now: real commits/pushes to GitHub and a real ZIP export of your files. Other platforms connect to your GitHub repo for auto-deploy — we never fake a deployment.
               </p>
             </div>
 
             {/* Target Select Area */}
             <div className="space-y-1.5 relative select-none z-[80] shrink-0">
-              <label className="text-[9px] font-black text-[#8b949e] uppercase tracking-wide">Select Deployment Target Platform</label>
+              <label className="text-[9px] font-black text-muted uppercase tracking-wide">Select Deployment Target Platform</label>
               
               {/* Trigger drop-down */}
               <button 
                 onClick={() => setShowPlatformDropdown(prev => !prev)}
-                className="w-full bg-[#0d1117] hover:bg-[#12161f] border border-white/10 hover:border-indigo-500/40 rounded-xl p-3 flex items-center justify-between text-xs font-bold transition-all text-[#c9d1d9] shadow-inner select-none cursor-pointer group"
+                className="w-full bg-surface hover:bg-raised border border-line hover:border-indigo-500/40 rounded-xl p-3 flex items-center justify-between text-xs font-bold transition-all text-body shadow-inner select-none cursor-pointer group"
               >
                 <div className="flex items-center gap-2.5">
-                  <span className={cn("p-1.5 rounded-lg bg-white/5 border border-white/5", selectedPlatformObj.color)}>
+                  <span className={cn("p-1.5 rounded-lg bg-raised border border-line", selectedPlatformObj.color)}>
                     <CurrentPltIcon className="w-4 h-4" />
                   </span>
-                  <span className="text-white font-extrabold text-[11px] uppercase tracking-wide group-hover:text-indigo-400 transition-colors">
+                  <span className="text-ink font-extrabold text-[11px] uppercase tracking-wide group-hover:text-accent-text transition-colors">
                     {selectedPlatformObj.name}
                   </span>
                 </div>
-                <ChevronDown className={cn("w-4 h-4 text-[#8b949e] transition-transform duration-200", showPlatformDropdown && "rotate-180")} />
+                <ChevronDown className={cn("w-4 h-4 text-muted transition-transform duration-200", showPlatformDropdown && "rotate-180")} />
               </button>
 
               {/* Custom rich Dropdown selector */}
@@ -904,17 +904,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
-                    className="absolute left-0 right-0 mt-1 bg-[#1c2128] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100] max-h-60 flex flex-col backdrop-blur-lg"
+                    className="absolute left-0 right-0 mt-1 bg-raised border border-line rounded-xl shadow-2xl overflow-hidden z-[100] max-h-60 flex flex-col backdrop-blur-lg"
                   >
-                    <div className="p-2 border-b border-white/5 bg-[#0d1117]/80 flex items-center justify-between">
+                    <div className="p-2 border-b border-line bg-surface flex items-center justify-between">
                       <div className="relative w-full">
-                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8b949e]" />
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
                         <input 
                           type="text"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           placeholder="Filter 15+ deployment endpoints..."
-                          className="w-full bg-[#161b22] text-[10px] pl-8 pr-3 py-1.5 rounded-lg border border-white/5 outline-none font-bold text-white placeholder-[#484f58] focus:border-indigo-500/40"
+                          className="w-full bg-card text-[10px] pl-8 pr-3 py-1.5 rounded-lg border border-line outline-none font-bold text-ink placeholder-faint focus:border-indigo-500/40"
                           onClick={(e) => e.stopPropagation()}
                         />
                       </div>
@@ -932,32 +932,32 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                               setShowPlatformDropdown(false);
                             }}
                             className={cn(
-                              "w-full text-left p-2.5 rounded-lg flex items-center gap-3 transition-colors text-white cursor-pointer",
+                              "w-full text-left p-2.5 rounded-lg flex items-center gap-3 transition-colors text-ink cursor-pointer",
                               plt.bgHover,
                               isCurrent ? "bg-indigo-600/10 border border-indigo-500/20" : "border border-transparent"
                             )}
                           >
-                            <span className={cn("p-1.5 rounded-lg bg-white/5 shrink-0", plt.color)}>
+                            <span className={cn("p-1.5 rounded-lg bg-raised shrink-0", plt.color)}>
                               <IconComponent className="w-3.5 h-3.5" />
                             </span>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between">
-                                <span className={cn("text-[11px] font-black uppercase tracking-wide leading-none", isCurrent ? "text-indigo-400" : "text-white")}>
+                                <span className={cn("text-[11px] font-black uppercase tracking-wide leading-none", isCurrent ? "text-accent-text" : "text-ink")}>
                                   {plt.name}
                                 </span>
                                 {plt.badge && (
-                                  <span className="text-[7.5px] font-black uppercase tracking-widest px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 leading-none">
+                                  <span className="text-[7.5px] font-black uppercase tracking-widest px-1 py-0.5 rounded bg-cyan-500/10 text-info border border-cyan-500/20 leading-none">
                                     {plt.badge}
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[9px] text-[#8b949e] truncate mt-0.5 font-medium leading-none">{plt.desc}</p>
+                              <p className="text-[9px] text-muted truncate mt-0.5 font-medium leading-none">{plt.desc}</p>
                             </div>
                           </button>
                         );
                       })}
                       {filteredPlatforms.length === 0 && (
-                        <div className="text-center p-4 text-[10px] text-[#8b949e] italic font-medium">No deployment target matches filter...</div>
+                        <div className="text-center p-4 text-[10px] text-muted italic font-medium">No deployment target matches filter...</div>
                       )}
                     </div>
                   </motion.div>
@@ -966,13 +966,13 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             </div>
 
             {/* Config & Parameters View Area */}
-            <div className="flex-1 bg-[#0d1117] border border-white/10 rounded-2xl p-4 space-y-3 shadow-inner flex flex-col shrink-0 min-h-[220px]">
-              <div className="flex items-center justify-between border-b border-white/5 pb-2 shrink-0">
-                <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider flex items-center gap-1.5">
+            <div className="flex-1 bg-surface border border-line rounded-2xl p-4 space-y-3 shadow-inner flex flex-col shrink-0 min-h-[220px]">
+              <div className="flex items-center justify-between border-b border-line pb-2 shrink-0">
+                <span className="text-[10px] font-black uppercase text-accent-text tracking-wider flex items-center gap-1.5">
                   <Settings className="w-3.5 h-3.5" />
                   Target Variables & Env Setup
                 </span>
-                <span className="text-[9px] font-black text-white/50 bg-[#161b22] px-2 py-0.5 rounded border border-white/5">
+                <span className="text-[9px] font-black text-muted bg-card px-2 py-0.5 rounded border border-line">
                   {selectedPlatform.toUpperCase()} Mode
                 </span>
               </div>
@@ -982,24 +982,24 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 {selectedPlatform === 'github' && (
                   <div className="space-y-4">
                     {/* AUTHENTICATION FEEDBACK STATUS CARD */}
-                    <div className="p-3 bg-[#161b22] border border-white/10 rounded-2xl flex items-center justify-between gap-3 shrink-0">
+                    <div className="p-3 bg-card border border-line rounded-2xl flex items-center justify-between gap-3 shrink-0">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-8 h-8 rounded-xl bg-indigo-600/10 flex items-center justify-center border border-white/5 overflow-hidden shrink-0">
+                        <div className="w-8 h-8 rounded-xl bg-indigo-600/10 flex items-center justify-center border border-line overflow-hidden shrink-0">
                           {user?.avatar_url ? (
                             <img src={user.avatar_url} referrerPolicy="no-referrer" alt="Avatar" className="w-full h-full object-cover" loading="lazy" />
                           ) : (
-                            <Github className="w-4 h-4 text-white" />
+                            <Github className="w-4 h-4 text-ink" />
                           )}
                         </div>
                         <div className="leading-tight text-left min-w-0">
-                          <p className="text-[8.5px] text-[#8b949e] font-sans uppercase tracking-widest font-black">GitHub pipeline link</p>
+                          <p className="text-[8.5px] text-muted font-sans uppercase tracking-widest font-black">GitHub pipeline link</p>
                           {token ? (
-                            <span className="text-emerald-400 font-extrabold text-[10px] flex items-center gap-1 mt-0.5 truncate">
+                            <span className="text-success font-extrabold text-[10px] flex items-center gap-1 mt-0.5 truncate">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                               @{user?.login || 'Authorized'}
                             </span>
                           ) : (
-                            <span className="text-yellow-400 font-extrabold text-[10px] flex items-center gap-1 mt-0.5 uppercase tracking-wide">
+                            <span className="text-warn font-extrabold text-[10px] flex items-center gap-1 mt-0.5 uppercase tracking-wide">
                               ⚠️ Disconnected
                             </span>
                           )}
@@ -1008,7 +1008,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       {token && (
                         <button
                           onClick={onDisconnect}
-                          className="px-2.5 py-1 bg-red-950/20 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-[#ff8080] hover:text-white transition-all cursor-pointer hover:bg-red-950/40"
+                          className="px-2.5 py-1 bg-red-950/20 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-danger hover:text-ink transition-all cursor-pointer hover:bg-red-950/40"
                         >
                           Sign Out
                         </button>
@@ -1017,14 +1017,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
                     {!token ? (
                       <div className="space-y-3 pt-1">
-                        <p className="text-[10px] text-[#8b949e] leading-relaxed italic text-center font-medium">
+                        <p className="text-[10px] text-muted leading-relaxed italic text-center font-medium">
                           Authorize your GitHub account to instantiate repositories, push real commits, and manage staging targets dynamically.
                         </p>
                         <button 
                           onClick={onConnect} 
-                          className="w-full h-10 bg-[#24292e] hover:bg-[#2f363d] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-white/10 hover:border-indigo-500/40 transition-all shadow-lg cursor-pointer select-none"
+                          className="w-full h-10 bg-[#24292e] hover:bg-raised text-on-accent rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-line hover:border-indigo-500/40 transition-all shadow-lg cursor-pointer select-none"
                         >
-                          <Github className="w-3.5 h-3.5 text-white" />
+                          <Github className="w-3.5 h-3.5 text-ink" />
                           Connect GitHub Pipeline
                         </button>
                       </div>
@@ -1032,8 +1032,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       <div className="space-y-3.5">
                         {/* Repository Input Field */}
                         <div className="space-y-1 text-left">
-                          <label className="text-[9.5px] font-black text-[#8b949e] uppercase tracking-wide flex items-center gap-1">
-                            <Layers className="w-3.5 h-3.5 text-stone-400" />
+                          <label className="text-[9.5px] font-black text-muted uppercase tracking-wide flex items-center gap-1">
+                            <Layers className="w-3.5 h-3.5 text-muted" />
                             Repository (username/repo)
                           </label>
                           <input 
@@ -1041,27 +1041,27 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                             placeholder="username/repository-name"
                             value={configs.github.repoName}
                             onChange={(e) => updateConfig('github', { repoName: e.target.value })}
-                            className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40"
+                            className="w-full bg-card border border-line rounded-xl p-2.5 text-xs font-bold text-ink outline-none focus:border-indigo-500/40"
                           />
-                          <p className="text-[8px] text-[#8b949e] font-serif leading-tight">
-                            Will create repo automatically under owner: <span className="text-white/60 font-semibold">{configs.github.repoName?.split('/')[0] || user?.login || 'profile'}</span> if it does not exist.
+                          <p className="text-[8px] text-muted font-serif leading-tight">
+                            Will create repo automatically under owner: <span className="text-muted font-semibold">{configs.github.repoName?.split('/')[0] || user?.login || 'profile'}</span> if it does not exist.
                           </p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 text-left">
                           <div className="space-y-1">
-                            <label className="text-[9.5px] font-bold text-[#8b949e]">Visibility</label>
+                            <label className="text-[9.5px] font-bold text-muted">Visibility</label>
                             <select 
                               value={configs.github.visibility}
                               onChange={(e) => updateConfig('github', { visibility: e.target.value })}
-                              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none appearance-none cursor-pointer"
+                              className="w-full bg-card border border-line rounded-xl p-2.5 text-xs font-bold text-ink outline-none appearance-none cursor-pointer"
                             >
                               <option value="private">🔒 Private Repo</option>
                               <option value="public">🌐 Public Repo</option>
                             </select>
                           </div>
                           <div className="space-y-1 text-left">
-                            <label className="text-[9.5px] font-bold text-[#8b949e]">Target Branch</label>
+                            <label className="text-[9.5px] font-bold text-muted">Target Branch</label>
                             {/* J4: Create / select branch */}
                             <input
                               type="text"
@@ -1069,7 +1069,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                               onChange={(e) => updateConfig('github', { branch: e.target.value })}
                               placeholder="e.g. main, feature/xyz"
                               list="git-branch-suggestions"
-                              className="w-full bg-[#161b22] border border-white/10 rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40 appearance-none cursor-text"
+                              className="w-full bg-card border border-line rounded-xl p-2.5 text-xs font-bold text-ink outline-none focus:border-indigo-500/40 appearance-none cursor-text"
                             />
                             <datalist id="git-branch-suggestions">
                               <option value="main" />
@@ -1083,20 +1083,20 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
                         <div className="space-y-1 text-left">
                           <div className="flex items-center justify-between">
-                            <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
+                            <label className="text-[9.5px] font-bold text-muted">Commit Message</label>
                             <div className="flex items-center gap-2">
                               {/* J1: suggest a commit message from the changed files (local heuristic, not AI) */}
                               <button
                                 onClick={generateCommitMessage}
                                 title="Suggest a commit message from your changed files"
                                 aria-label="Suggest a commit message from your changed files"
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-indigo-400 hover:text-indigo-300 hover:bg-indigo-900/20 transition-all uppercase tracking-widest"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-accent-text hover:text-accent-text hover:bg-indigo-900/20 transition-all uppercase tracking-widest"
                               >
                                 <Sparkles className="w-2.5 h-2.5" />
                                 Suggest
                               </button>
                               {/* J15: Character count warning */}
-                              <span className={`text-[8px] font-mono ${(configs.github.commitMsg || '').length > 72 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                              <span className={`text-[8px] font-mono ${(configs.github.commitMsg || '').length > 72 ? 'text-warn' : 'text-faint'}`}>
                                 {(configs.github.commitMsg || '').length}/72
                               </span>
                             </div>
@@ -1106,10 +1106,10 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                             value={configs.github.commitMsg}
                             onChange={(e) => updateConfig('github', { commitMsg: e.target.value })}
                             maxLength={150}
-                            className={`w-full bg-[#161b22] border rounded-xl p-2.5 text-xs font-bold text-white outline-none focus:border-indigo-500/40 ${(configs.github.commitMsg || '').length > 72 ? 'border-amber-500/40' : 'border-white/10'}`}
+                            className={`w-full bg-card border rounded-xl p-2.5 text-xs font-bold text-ink outline-none focus:border-indigo-500/40 ${(configs.github.commitMsg || '').length > 72 ? 'border-amber-500/40' : 'border-line'}`}
                           />
                           {(configs.github.commitMsg || '').length > 72 && (
-                            <p className="text-[8px] text-amber-400 font-bold">Commit messages over 72 characters may be truncated in Git logs.</p>
+                            <p className="text-[8px] text-warn font-bold">Commit messages over 72 characters may be truncated in Git logs.</p>
                           )}
                         </div>
                       </div>
@@ -1121,20 +1121,20 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                  {selectedPlatform === 'firebase' && (
                   <div className="space-y-4 text-left">
                     {/* FIREBASE AUTHENTICATION FEEDBACK STATUS CARD */}
-                    <div className="p-3 bg-[#161b22] border border-white/10 rounded-2xl flex items-center justify-between gap-3 shrink-0">
+                    <div className="p-3 bg-card border border-line rounded-2xl flex items-center justify-between gap-3 shrink-0">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center border border-white/5 overflow-hidden shrink-0">
-                          <Cloud className="w-4 h-4 text-amber-500 animate-pulse" />
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center border border-line overflow-hidden shrink-0">
+                          <Cloud className="w-4 h-4 text-warn animate-pulse" />
                         </div>
                         <div className="leading-tight text-left min-w-0">
-                          <p className="text-[8.5px] text-[#8b949e] font-sans uppercase tracking-widest font-black">Firebase DevOps link</p>
+                          <p className="text-[8.5px] text-muted font-sans uppercase tracking-widest font-black">Firebase DevOps link</p>
                           {firebaseToken ? (
-                            <span className="text-amber-400 font-extrabold text-[10px] flex items-center gap-1 mt-0.5 truncate">
+                            <span className="text-warn font-extrabold text-[10px] flex items-center gap-1 mt-0.5 truncate">
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
                               {firebaseUser?.projectId || configs.firebase.projectId || 'Connected'}
                             </span>
                           ) : (
-                            <span className="text-yellow-400/80 font-extrabold text-[10px] flex items-center gap-1 mt-0.5 uppercase tracking-wide">
+                            <span className="text-warn font-extrabold text-[10px] flex items-center gap-1 mt-0.5 uppercase tracking-wide">
                               ⚠️ Disconnected
                             </span>
                           )}
@@ -1143,7 +1143,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       {firebaseToken && (
                         <button
                           onClick={onFirebaseDisconnect}
-                          className="px-2.5 py-1 bg-red-950/20 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-[#ff8080] hover:text-white transition-all cursor-pointer hover:bg-red-950/40"
+                          className="px-2.5 py-1 bg-red-950/20 border border-red-500/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-danger hover:text-ink transition-all cursor-pointer hover:bg-red-950/40"
                         >
                           Sign Out
                         </button>
@@ -1152,7 +1152,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
                     {!firebaseToken ? (
                       <div className="space-y-3 pt-1">
-                        <p className="text-[10px] text-[#8b949e] leading-relaxed italic text-center font-medium">
+                        <p className="text-[10px] text-muted leading-relaxed italic text-center font-medium">
                           Authorize and bind your Google/Firebase Console account to populate secure deploy tokens and project rules in one-click.
                         </p>
                         <button 
@@ -1166,41 +1166,41 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     ) : (
                       <div className="space-y-3">
                         <div className="space-y-1">
-                          <label className="text-[9.5px] font-bold text-[#8b949e]">Target Firebase Project ID</label>
+                          <label className="text-[9.5px] font-bold text-muted">Target Firebase Project ID</label>
                           <input 
                             type="text"
                             placeholder="e.g. sample-project-99d"
                             value={configs.firebase.projectId}
                             onChange={(e) => updateConfig('firebase', { projectId: e.target.value })}
-                            className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none focus:border-indigo-500/40"
+                            className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none focus:border-indigo-500/40"
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-[#161b22] border border-white/5 cursor-pointer hover:bg-white/5">
+                          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-card border border-line cursor-pointer hover:bg-raised">
                             <input 
                               type="checkbox" 
                               checked={configs.firebase.hosting}
                               onChange={(e) => updateConfig('firebase', { hosting: e.target.checked })}
                               className="accent-amber-500"
                             />
-                            <span className="text-[10px] font-bold text-[#c9d1d9]">Hosting Deployment</span>
+                            <span className="text-[10px] font-bold text-body">Hosting Deployment</span>
                           </label>
-                          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-[#161b22] border border-white/5 cursor-pointer hover:bg-white/5">
+                          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-card border border-line cursor-pointer hover:bg-raised">
                             <input 
                               type="checkbox" 
                               checked={configs.firebase.functions}
                               onChange={(e) => updateConfig('firebase', { functions: e.target.checked })}
                               className="accent-amber-500"
                             />
-                            <span className="text-[10px] font-bold text-[#c9d1d9]">Cloud Functions</span>
+                            <span className="text-[10px] font-bold text-body">Cloud Functions</span>
                           </label>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[9.5px] font-bold text-[#8b949e]">Serverless Region Target</label>
+                          <label className="text-[9.5px] font-bold text-muted">Serverless Region Target</label>
                           <select 
                             value={configs.firebase.region}
                             onChange={(e) => updateConfig('firebase', { region: e.target.value })}
-                            className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none cursor-pointer"
+                            className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none cursor-pointer"
                           >
                             <option value="us-central1">us-central-1 (Iowa)</option>
                             <option value="asia-southeast1">asia-southeast-1 (Singapore)</option>
@@ -1208,26 +1208,26 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                           </select>
                         </div>
                         {/* CREDENTIALS BOX */}
-                        <div className="p-3 bg-[#161b22] border border-white/10 rounded-xl space-y-2 mt-2">
-                          <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-amber-500 block">Firebase Authorization Setup</span>
+                        <div className="p-3 bg-card border border-line rounded-xl space-y-2 mt-2">
+                          <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-warn block">Firebase Authorization Setup</span>
                           <div className="space-y-1">
-                            <label className="text-[9px] font-mono font-bold text-white/70">Firebase CLI CI Token</label>
+                            <label className="text-[9px] font-mono font-bold text-body">Firebase CLI CI Token</label>
                             <input 
                               type="password"
                               placeholder="1//0xxxxxxx-xxxxxxxxxxxxxxxxxxxx"
                               value={configs.firebase.firebaseToken || ''}
                               onChange={(e) => updateConfig('firebase', { firebaseToken: e.target.value })}
-                              className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-2 text-[10.5px] font-mono text-amber-300 outline-none focus:border-amber-500/50"
+                              className="w-full bg-surface border border-line rounded-lg p-2 text-[10.5px] font-mono text-warn outline-none focus:border-amber-500/50"
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[9px] font-mono font-bold text-white/70">Service Account Key (JSON Option)</label>
+                            <label className="text-[9px] font-mono font-bold text-body">Service Account Key (JSON Option)</label>
                             <textarea 
                               rows={2}
                               placeholder='{ "type": "service_account", ... }'
                               value={configs.firebase.serviceAccountKeyJson || ''}
                               onChange={(e) => updateConfig('firebase', { serviceAccountKeyJson: e.target.value })}
-                              className="w-full bg-[#0d1117] text-amber-200/80 hover:text-white border border-white/10 rounded-lg p-2 font-mono text-[9px] outline-none h-14 resize-none focus:border-amber-500/50"
+                              className="w-full bg-surface text-warn hover:text-ink border border-line rounded-lg p-2 font-mono text-[9px] outline-none h-14 resize-none focus:border-amber-500/50"
                             />
                           </div>
                         </div>
@@ -1241,55 +1241,55 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <label className="text-[9.5px] font-bold text-[#8b949e]">Deployment Target</label>
+                        <label className="text-[9.5px] font-bold text-muted">Deployment Target</label>
                         <select 
                           value={configs.vercel.env}
                           onChange={(e) => updateConfig('vercel', { env: e.target.value })}
-                          className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2 text-[11px] font-bold text-white outline-none cursor-pointer"
+                          className="w-full bg-card border border-line rounded-lg p-2 text-[11px] font-bold text-ink outline-none cursor-pointer"
                         >
                           <option value="production">Production</option>
                           <option value="preview">Staging Preview</option>
                         </select>
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9.5px] font-bold text-[#8b949e]">Org Team Namespace</label>
+                        <label className="text-[9.5px] font-bold text-muted">Org Team Namespace</label>
                         <input 
                           type="text" 
                           value={configs.vercel.teamContext}
                           onChange={(e) => updateConfig('vercel', { teamContext: e.target.value })}
-                          className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2 text-[11px] font-bold text-white outline-none"
+                          className="w-full bg-card border border-line rounded-lg p-2 text-[11px] font-bold text-ink outline-none"
                         />
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">Deploy Output Directory Override</label>
+                      <label className="text-[9.5px] font-bold text-muted">Deploy Output Directory Override</label>
                       <input 
                         type="text" 
                         value={configs.vercel.outputDir}
                         onChange={(e) => updateConfig('vercel', { outputDir: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none"
                       />
                     </div>
-                    <label className="flex items-center gap-2 p-2 rounded-lg bg-[#161b22] border border-white/5 cursor-pointer">
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-card border border-line cursor-pointer">
                       <input 
                         type="checkbox" 
                         checked={configs.vercel.configAutoInstall}
                         onChange={(e) => updateConfig('vercel', { configAutoInstall: e.target.checked })}
                         className="accent-indigo-500"
                       />
-                      <span className="text-[10px] font-bold text-[#c9d1d9]">Auto-install modules via Yarn cache</span>
+                      <span className="text-[10px] font-bold text-body">Auto-install modules via Yarn cache</span>
                     </label>
                     {/* CREDENTIALS BOX */}
-                    <div className="p-3 bg-stone-900 border border-stone-700/55 rounded-xl space-y-2 mt-2">
-                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-[#d6d3d1] block">Vercel Authorization Setup</span>
+                    <div className="p-3 bg-card border border-line rounded-xl space-y-2 mt-2">
+                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-body block">Vercel Authorization Setup</span>
                       <div className="space-y-1">
-                        <label className="text-[9px] font-mono font-bold text-white/70">Vercel Web Token</label>
+                        <label className="text-[9px] font-mono font-bold text-body">Vercel Web Token</label>
                         <input 
                           type="password"
                           placeholder="erc_xxxxxxxxxxxxxxxxxxxxxxxx"
                           value={configs.vercel.vercelApiToken || ''}
                           onChange={(e) => updateConfig('vercel', { vercelApiToken: e.target.value })}
-                          className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-2 text-[10.5px] font-mono text-stone-300 outline-none focus:border-stone-500"
+                          className="w-full bg-surface border border-line rounded-lg p-2 text-[10.5px] font-mono text-body outline-none focus:border-stone-500"
                         />
                       </div>
                     </div>
@@ -1300,43 +1300,43 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 {selectedPlatform === 'netlify' && (
                   <div className="space-y-3">
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">Netlify Custom Site Title</label>
+                      <label className="text-[9.5px] font-bold text-muted">Netlify Custom Site Title</label>
                       <input 
                         type="text" 
                         value={configs.netlify.siteId}
                         onChange={(e) => updateConfig('netlify', { siteId: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">Framework Build Command Trigger</label>
+                      <label className="text-[9.5px] font-bold text-muted">Framework Build Command Trigger</label>
                       <input 
                         type="text" 
                         value={configs.netlify.customBuildCommand}
                         onChange={(e) => updateConfig('netlify', { customBuildCommand: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none focus:border-indigo-500/40"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none focus:border-indigo-500/40"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">Publish build path</label>
+                      <label className="text-[9.5px] font-bold text-muted">Publish build path</label>
                       <input 
                         type="text" 
                         value={configs.netlify.outputDir}
                         onChange={(e) => updateConfig('netlify', { outputDir: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none focus:border-indigo-500/40"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none focus:border-indigo-500/40"
                       />
                     </div>
                     {/* CREDENTIALS BOX */}
                     <div className="p-3 bg-teal-950/10 border border-teal-500/15 rounded-xl space-y-2 mt-2">
-                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-teal-400 block">Netlify Authorization Setup</span>
+                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-success block">Netlify Authorization Setup</span>
                       <div className="space-y-1">
-                        <label className="text-[9px] font-mono font-bold text-white/70">Netlify Personal Access Token</label>
+                        <label className="text-[9px] font-mono font-bold text-body">Netlify Personal Access Token</label>
                         <input 
                           type="password"
                           placeholder="nlp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                           value={configs.netlify.netlifyAccessToken || ''}
                           onChange={(e) => updateConfig('netlify', { netlifyAccessToken: e.target.value })}
-                          className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-2 text-[10.5px] font-mono text-teal-300 outline-none focus:border-teal-500/50"
+                          className="w-full bg-surface border border-line rounded-lg p-2 text-[10.5px] font-mono text-success outline-none focus:border-teal-500/50"
                         />
                       </div>
                     </div>
@@ -1347,30 +1347,30 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 {selectedPlatform === 'gcloud' && (
                   <div className="space-y-3">
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">GCP Project ID Identity</label>
+                      <label className="text-[9.5px] font-bold text-muted">GCP Project ID Identity</label>
                       <input 
                         type="text" 
                         value={configs.gcloud.projectId}
                         onChange={(e) => updateConfig('gcloud', { projectId: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <label className="text-[9.5px] font-bold text-[#8b949e]">Service Name</label>
+                        <label className="text-[9.5px] font-bold text-muted">Service Name</label>
                         <input 
                           type="text" 
                           value={configs.gcloud.serviceName}
                           onChange={(e) => updateConfig('gcloud', { serviceName: e.target.value })}
-                          className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2 text-[11px] font-bold text-white outline-none"
+                          className="w-full bg-card border border-line rounded-lg p-2 text-[11px] font-bold text-ink outline-none"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9.5px] font-bold text-[#8b949e]">Console Location</label>
+                        <label className="text-[9.5px] font-bold text-muted">Console Location</label>
                         <select 
                           value={configs.gcloud.region}
                           onChange={(e) => updateConfig('gcloud', { region: e.target.value })}
-                          className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2 text-[11px] font-bold text-white outline-none cursor-pointer"
+                          className="w-full bg-card border border-line rounded-lg p-2 text-[11px] font-bold text-ink outline-none cursor-pointer"
                         >
                           <option value="us-central1">us-central1</option>
                           <option value="asia-southeast1">asia-southeast1</option>
@@ -1380,35 +1380,35 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <label className="text-[9.5px] font-bold text-[#8b949e]">Run Port Mapping</label>
+                        <label className="text-[9.5px] font-bold text-muted">Run Port Mapping</label>
                         <input 
                           type="text" 
                           value={configs.gcloud.port}
                           onChange={(e) => updateConfig('gcloud', { port: e.target.value })}
-                          className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2 text-[11px] font-bold text-white outline-none text-center"
+                          className="w-full bg-card border border-line rounded-lg p-2 text-[11px] font-bold text-ink outline-none text-center"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9.5px] font-bold text-[#8b949e]">Minimum Scale</label>
+                        <label className="text-[9.5px] font-bold text-muted">Minimum Scale</label>
                         <input 
                           type="number" 
                           value={configs.gcloud.minScale}
                           onChange={(e) => updateConfig('gcloud', { minScale: e.target.value })}
-                          className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2 text-[11px] font-bold text-white outline-none text-center"
+                          className="w-full bg-card border border-line rounded-lg p-2 text-[11px] font-bold text-ink outline-none text-center"
                         />
                       </div>
                     </div>
                     {/* CREDENTIALS BOX */}
                     <div className="p-3 bg-blue-950/15 border border-blue-500/15 rounded-xl space-y-2 mt-2">
-                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-[#60a5fa] block">Google Cloud Platform Auth</span>
+                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-info block">Google Cloud Platform Auth</span>
                       <div className="space-y-1">
-                        <label className="text-[9px] font-mono font-bold text-white/70">Service Account Credential JSON Key</label>
+                        <label className="text-[9px] font-mono font-bold text-body">Service Account Credential JSON Key</label>
                         <textarea 
                           rows={2}
                           placeholder='{ "type": "service_account", "private_key": "...", ... }'
                           value={configs.gcloud.gcpServiceAccountJson || ''}
                           onChange={(e) => updateConfig('gcloud', { gcpServiceAccountJson: e.target.value })}
-                          className="w-full bg-[#0d1117] text-blue-200/80 hover:text-white border border-white/10 rounded-lg p-2 font-mono text-[9px] outline-none h-14 resize-none focus:border-blue-500/50"
+                          className="w-full bg-surface text-info hover:text-ink border border-line rounded-lg p-2 font-mono text-[9px] outline-none h-14 resize-none focus:border-blue-500/50"
                         />
                       </div>
                     </div>
@@ -1419,54 +1419,54 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 {selectedPlatform === 'docker' && (
                   <div className="space-y-3">
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">Docker Hub Namespace Repository</label>
+                      <label className="text-[9.5px] font-bold text-muted">Docker Hub Namespace Repository</label>
                       <input 
                         type="text" 
                         value={configs.docker.imageRegistry}
                         onChange={(e) => updateConfig('docker', { imageRegistry: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none focus:border-indigo-500/40"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none focus:border-indigo-500/40"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[9.5px] font-bold text-[#8b949e]">Image Tag Version</label>
+                      <label className="text-[9.5px] font-bold text-muted">Image Tag Version</label>
                       <input 
                         type="text" 
                         value={configs.docker.tag}
                         onChange={(e) => updateConfig('docker', { tag: e.target.value })}
-                        className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none focus:border-indigo-500/40"
+                        className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none focus:border-indigo-500/40"
                       />
                     </div>
-                    <label className="flex items-center gap-2 p-2 rounded-lg bg-[#161b22] border border-white/5 cursor-pointer">
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-card border border-line cursor-pointer">
                       <input 
                         type="checkbox" 
                         checked={configs.docker.autoDockerfile}
                         onChange={(e) => updateConfig('docker', { autoDockerfile: e.target.checked })}
                         className="accent-indigo-500"
                       />
-                      <span className="text-[10px] font-bold text-[#c9d1d9]">Auto-generate secure multi-stage Dockerfile</span>
+                      <span className="text-[10px] font-bold text-body">Auto-generate secure multi-stage Dockerfile</span>
                     </label>
                     {/* CREDENTIALS BOX */}
                     <div className="p-3 bg-blue-950/15 border border-[#2496ed]/20 rounded-xl space-y-2 mt-2">
-                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-[#2496ed] block">Docker Hub Account handshakes</span>
+                      <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-info block">Docker Hub Account handshakes</span>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-1">
-                          <label className="text-[8.5px] font-mono text-white/70">Hub Username</label>
+                          <label className="text-[8.5px] font-mono text-body">Hub Username</label>
                           <input 
                             type="text"
                             placeholder="username"
                             value={configs.docker.dockerUsername || ''}
                             onChange={(e) => updateConfig('docker', { dockerUsername: e.target.value })}
-                            className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-1.5 text-[10px] text-white outline-none focus:border-indigo-500/30"
+                            className="w-full bg-surface border border-line rounded-lg p-1.5 text-[10px] text-ink outline-none focus:border-indigo-500/30"
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[8.5px] font-mono text-white/70">Access Token/Pass</label>
+                          <label className="text-[8.5px] font-mono text-body">Access Token/Pass</label>
                           <input 
                             type="password"
                             placeholder="dckr_pat_..."
                             value={configs.docker.dockerPasswordToken || ''}
                             onChange={(e) => updateConfig('docker', { dockerPasswordToken: e.target.value })}
-                            className="w-full bg-[#0d1117] border border-white/10 rounded-lg p-1.5 text-[10px] text-white outline-none focus:border-indigo-500/30"
+                            className="w-full bg-surface border border-line rounded-lg p-1.5 text-[10px] text-ink outline-none focus:border-indigo-500/30"
                           />
                         </div>
                       </div>
@@ -1477,14 +1477,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 {/* 7. OTHER GENERIC PLATFORMS (Surge, Custom and Fallbacks) */}
                 {!['github', 'firebase', 'vercel', 'netlify', 'gcloud', 'docker'].includes(selectedPlatform) && (
                   <div className="space-y-3">
-                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 text-[10px] text-[#8b949e] font-serif leading-relaxed">
+                    <div className="p-3 bg-raised rounded-xl border border-line text-[10px] text-muted font-serif leading-relaxed">
                       Sovereign Multi-service target detected. Configure standard custom integration credentials and path setups safely.
                     </div>
                     {configs[selectedPlatform] && Object.keys(configs[selectedPlatform]).map((key) => {
                       const value = configs[selectedPlatform][key];
                       if (typeof value === 'boolean') {
                         return (
-                          <label key={key} className="flex items-center gap-2 p-2.5 rounded-lg bg-[#161b22] border border-white/5 cursor-pointer">
+                          <label key={key} className="flex items-center gap-2 p-2.5 rounded-lg bg-card border border-line cursor-pointer">
                             <input 
                               type="checkbox" 
                               checked={value}
@@ -1494,7 +1494,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                               }}
                               className="accent-indigo-500"
                             />
-                            <span className="text-[10px] font-extrabold uppercase text-[#c9d1d9] tracking-wider leading-none">
+                            <span className="text-[10px] font-extrabold uppercase text-body tracking-wider leading-none">
                               {key.replace(/([A-Z])/g, ' $1')}
                             </span>
                           </label>
@@ -1502,7 +1502,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       }
                       return (
                         <div key={key} className="space-y-1">
-                          <label className="text-[9.5px] font-extrabold text-[#8b949e] uppercase tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
+                          <label className="text-[9.5px] font-extrabold text-muted uppercase tracking-wider">{key.replace(/([A-Z])/g, ' $1')}</label>
                           <input 
                             type="text" 
                             value={value}
@@ -1510,7 +1510,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                               const payload = { [key]: e.target.value };
                               updateConfig(selectedPlatform, payload);
                             }}
-                            className="w-full bg-[#161b22] border border-white/10 rounded-lg p-2.5 text-[11px] font-bold text-white outline-none focus:border-indigo-500/40"
+                            className="w-full bg-card border border-line rounded-lg p-2.5 text-[11px] font-bold text-ink outline-none focus:border-indigo-500/40"
                           />
                         </div>
                       );
@@ -1523,14 +1523,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
             {/* Validation warning block if any */}
             {validationErrors.length > 0 && (
-              <div className="p-3 rounded-2xl bg-red-950/25 border border-red-500/20 text-[9.5px] text-[#ff8080] font-medium leading-relaxed space-y-1 animate-in shake duration-200 shrink-0">
+              <div className="p-3 rounded-2xl bg-red-950/25 border border-red-500/20 text-[9.5px] text-danger font-medium leading-relaxed space-y-1 animate-in shake duration-200 shrink-0">
                 <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider mb-1">
                   <AlertTriangle className="w-3.5 h-3.5" />
                   Pre-deployment validation halt
                 </div>
                 {validationErrors.map((err, idx) => (
                   <div key={idx} className="flex items-start gap-1">
-                    <span className="select-none text-red-500">•</span>
+                    <span className="select-none text-danger">•</span>
                     <span>{err}</span>
                   </div>
                 ))}
@@ -1550,7 +1550,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setShowConfirmModal(true);
                   }}
                   disabled={deployStatus === 'validating' || deployStatus === 'building'}
-                  className="w-full h-8 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40 text-[#8b949e] hover:text-white rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
+                  className="w-full h-8 bg-raised hover:bg-raised border border-line disabled:opacity-40 text-muted hover:text-ink rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
                   title="Push your local commits to the remote (a remote→local pull is not performed)"
                 >
                   <RefreshCcw className="w-3 h-3" />
@@ -1585,16 +1585,16 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   }
                 }}
                 disabled={deployStatus === 'validating' || deployStatus === 'building'}
-                className="w-full h-11 bg-gradient-to-r from-indigo-600 via-orange-600 to-[#10b981] disabled:opacity-40 text-white rounded-xl text-[10.5px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-2xl hover:scale-[1.01] active:scale-[0.98] transition-all cursor-pointer shadow-indigo-500/15"
+                className="w-full h-11 bg-gradient-to-r from-indigo-600 via-orange-600 to-[#10b981] disabled:opacity-40 text-on-accent rounded-xl text-[10.5px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-2xl hover:scale-[1.01] active:scale-[0.98] transition-all cursor-pointer shadow-indigo-500/15"
               >
                 {deployStatus === 'validating' || deployStatus === 'building' ? (
                   <>
-                    <TirangaLoader className="w-4 h-4 text-white" />
+                    <TirangaLoader className="w-4 h-4 text-ink" />
                     Executing Push Pipeline...
                   </>
                 ) : (
                   <>
-                    {selectedPlatform === 'github' ? <Github className="w-4 h-4 text-white" /> : <Rocket className="w-4 h-4 text-white" />}
+                    {selectedPlatform === 'github' ? <Github className="w-4 h-4 text-ink" /> : <Rocket className="w-4 h-4 text-ink" />}
                     {selectedPlatform === 'github' ? '🚀 Push to GitHub' : '🚀 Push / Deploy'}
                   </>
                 )}
@@ -1603,19 +1603,19 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
             {/* Live Interactive Deploy Console Logs */}
             {(deployStatus !== 'idle' || deployLogs.length > 0) && (
-              <div className="bg-[#0b0e14] border border-white/10 rounded-2xl p-4 space-y-2 max-h-[190px] shrink-0 flex flex-col overflow-hidden shadow-2xl relative">
+              <div className="bg-surface border border-line rounded-2xl p-4 space-y-2 max-h-[190px] shrink-0 flex flex-col overflow-hidden shadow-2xl relative">
                 {/* Upper Status indicators */}
-                <div className="flex items-center justify-between border-b border-white/5 pb-1.5 shrink-0 text-[9px] font-medium text-[#c9d1d9]">
-                  <span className="text-[#8b949e] flex items-center gap-1 font-mono uppercase tracking-widest text-[8px]">
-                    <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                <div className="flex items-center justify-between border-b border-line pb-1.5 shrink-0 text-[9px] font-medium text-body">
+                  <span className="text-muted flex items-center gap-1 font-mono uppercase tracking-widest text-[8px]">
+                    <Terminal className="w-3.5 h-3.5 text-accent-text" />
                     DevOps Console Terminal Logs
                   </span>
                   <div className="flex items-center gap-2">
-                    {deployStatus === 'validating' && <span className="text-yellow-400 animate-pulse font-bold">Validating...</span>}
-                    {deployStatus === 'building' && <span className="text-amber-500 animate-pulse font-bold">Building...</span>}
-                    {deployStatus === 'deployed' && <span className="text-emerald-400 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Ready</span>}
-                    {deployStatus === 'error' && <span className="text-red-400 font-bold">Error</span>}
-                    {deployStatus === 'unavailable' && <span className="text-amber-400 font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Not available yet</span>}
+                    {deployStatus === 'validating' && <span className="text-warn animate-pulse font-bold">Validating...</span>}
+                    {deployStatus === 'building' && <span className="text-warn animate-pulse font-bold">Building...</span>}
+                    {deployStatus === 'deployed' && <span className="text-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Ready</span>}
+                    {deployStatus === 'error' && <span className="text-danger font-bold">Error</span>}
+                    {deployStatus === 'unavailable' && <span className="text-warn font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Not available yet</span>}
                   </div>
                 </div>
 
@@ -1629,7 +1629,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         key={index} 
                         className={cn(
                           "leading-relaxed font-mono leading-none py-0.5",
-                          isErr ? "text-red-400 font-bold" : isSuccess ? "text-emerald-400 font-black" : "text-[#4af626]/90"
+                          isErr ? "text-danger font-bold" : isSuccess ? "text-success font-black" : "text-[#4af626]/90"
                         )}
                       >
                         {log}
@@ -1637,7 +1637,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     );
                   })}
                   {deployStatus === 'building' && (
-                    <div className="flex items-center gap-1.5 text-amber-500 animate-pulse font-bold text-[8.5px] pt-1">
+                    <div className="flex items-center gap-1.5 text-warn animate-pulse font-bold text-[8.5px] pt-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
                       PIPELINE ACTIVE... EXECUTING DOCKER BUILD ENGINE
                     </div>
@@ -1652,13 +1652,13 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 generators and no engine, so a button there could not be honoured. */}
             {canManagedDeploy && deployStatus === 'unavailable' && (
               <div className="bg-indigo-950/20 border border-indigo-500/25 rounded-2xl p-4 space-y-2 shrink-0">
-                <div className="flex items-center gap-2 text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                <div className="flex items-center gap-2 text-accent-text text-[10px] font-black uppercase tracking-wider">
                   <Rocket className="w-4 h-4" />
                   NavBharatAI can deploy this for you
                 </div>
-                <p className="text-[10px] text-[#8b949e] leading-relaxed">
-                  It deploys to <span className="text-zinc-300 font-semibold">your own Render account</span> using the
-                  <code className="text-zinc-300"> RENDER_API_KEY</code> you saved in Settings → Secrets &amp; Keys —
+                <p className="text-[10px] text-muted leading-relaxed">
+                  It deploys to <span className="text-muted font-semibold">your own Render account</span> using the
+                  <code className="text-muted"> RENDER_API_KEY</code> you saved in Settings → Secrets &amp; Keys —
                   your account, your billing. Push to GitHub first, and connect the repo once in Render.
                 </p>
                 <button
@@ -1667,8 +1667,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   className={cn(
                     'w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all cursor-pointer',
                     managedDeploying
-                      ? 'bg-indigo-600/10 text-indigo-400/50 cursor-not-allowed'
-                      : 'bg-indigo-600 text-white hover:bg-indigo-500',
+                      ? 'bg-indigo-600/10 text-accent-text cursor-not-allowed'
+                      : 'bg-indigo-600 text-on-accent hover:bg-indigo-500',
                   )}
                 >
                   {managedDeploying
@@ -1685,29 +1685,29 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 animate={{ opacity: 1, scale: 1 }}
                 className="bg-emerald-950/20 border border-emerald-500/25 rounded-2xl p-4 space-y-3 shrink-0 shadow-lg"
               >
-                <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-black uppercase tracking-wider">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <div className="flex items-center gap-2 text-success text-[10px] font-black uppercase tracking-wider">
+                  <CheckCircle2 className="w-4 h-4 text-success" />
                   Pushed to GitHub
                 </div>
 
-                <div className="space-y-1 bg-black/40 border border-[#2b2b2b] rounded-xl p-3">
-                  <span className="text-[8.5px] font-extrabold text-[#8b949e] uppercase tracking-wider">Repository URL</span>
+                <div className="space-y-1 bg-well border border-line rounded-xl p-3">
+                  <span className="text-[8.5px] font-extrabold text-muted uppercase tracking-wider">Repository URL</span>
                   <div className="flex items-center justify-between text-xs font-bold gap-3">
                     <a 
                       href={deployedUrl} 
                       target="_blank" 
                       rel="noopener noreferrer" 
-                      className="text-white hover:text-emerald-300 underline truncate select-all flex items-center gap-1 text-[11px]"
+                      className="text-ink hover:text-success underline truncate select-all flex items-center gap-1 text-[11px]"
                     >
                       {deployedUrl}
-                      <Globe className="w-3 h-3 text-emerald-400 inline" />
+                      <Globe className="w-3 h-3 text-success inline" />
                     </a>
                     <button 
                       onClick={() => {
                         navigator.clipboard.writeText(deployedUrl);
                         alert('Copied repository URL to clipboard!');
                       }}
-                      className="p-1 text-[#8b949e] hover:text-white hover:bg-white/5 rounded transition-all cursor-pointer"
+                      className="p-1 text-muted hover:text-ink hover:bg-raised rounded transition-all cursor-pointer"
                       title="Copy URL"
                     >
                       <Copy className="w-3.5 h-3.5" />
@@ -1716,13 +1716,13 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-[9px]">
-                  <div className="p-2.5 rounded-xl bg-black/20 border border-white/5 flex flex-col">
-                    <span className="text-[#8b949e] font-bold">Branch</span>
-                    <span className="text-white font-black uppercase mt-0.5 truncate">{configs.github.branch || 'main'}</span>
+                  <div className="p-2.5 rounded-xl bg-well border border-line flex flex-col">
+                    <span className="text-muted font-bold">Branch</span>
+                    <span className="text-ink font-black uppercase mt-0.5 truncate">{configs.github.branch || 'main'}</span>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-black/20 border border-white/5 flex flex-col">
-                    <span className="text-[#8b949e] font-bold">Files pushed</span>
-                    <span className="text-white font-black uppercase mt-0.5">{Object.keys(files || {}).length}</span>
+                  <div className="p-2.5 rounded-xl bg-well border border-line flex flex-col">
+                    <span className="text-muted font-bold">Files pushed</span>
+                    <span className="text-ink font-black uppercase mt-0.5">{Object.keys(files || {}).length}</span>
                   </div>
                 </div>
 
@@ -1732,7 +1732,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     href={`${deployedUrl}/compare/main...${encodeURIComponent(configs.github.branch)}?expand=1`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-indigo-900/30 border border-indigo-500/30 text-indigo-300 text-[9px] font-black uppercase tracking-widest hover:bg-indigo-900/50 transition-all"
+                    className="flex items-center justify-center gap-2 w-full py-2 rounded-xl bg-indigo-900/30 border border-indigo-500/30 text-accent-text text-[9px] font-black uppercase tracking-widest hover:bg-indigo-900/50 transition-all"
                   >
                     <Github className="w-3 h-3" />
                     Create Pull Request on GitHub
@@ -1744,7 +1744,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     onClick={() => {
                       window.open(deployedUrl, '_blank');
                     }}
-                    className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer"
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer"
                   >
                     Open on GitHub
                   </button>
@@ -1755,8 +1755,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             {/* Deployment history list */}
             {gitHistory.length > 0 && (
               <div className="space-y-2 shrink-0">
-                <h5 className="text-[9.5px] font-black text-[#8b949e] uppercase tracking-wider flex items-center gap-1.5 px-0.5">
-                  <History className="w-3.5 h-3.5 text-indigo-400" />
+                <h5 className="text-[9.5px] font-black text-muted uppercase tracking-wider flex items-center gap-1.5 px-0.5">
+                  <History className="w-3.5 h-3.5 text-accent-text" />
                   DevOps Pipeline Deployment History
                 </h5>
                 <div className="space-y-1.5 max-h-[140px] overflow-y-auto no-scrollbar">
@@ -1765,19 +1765,19 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     return (
                       <div 
                         key={item.id} 
-                        className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 flex items-center justify-between gap-3 text-xs font-bold shrink-0 transition-all cursor-pointer group"
+                        className="p-2.5 rounded-xl bg-raised hover:bg-raised border border-line flex items-center justify-between gap-3 text-xs font-bold shrink-0 transition-all cursor-pointer group"
                         onClick={() => window.open(item.url, '_blank')}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-1.5 rounded-lg bg-black/40 text-indigo-400 shrink-0 border border-white/5 group-hover:text-amber-400 transition-colors">
+                          <span className="p-1.5 rounded-lg bg-well text-accent-text shrink-0 border border-line group-hover:text-warn transition-colors">
                             <PltIcon className="w-3.5 h-3.5" />
                           </span>
                           <div className="min-w-0 leading-tight">
-                            <p className="text-white text-[11px] font-bold truncate pr-2">{item.commit}</p>
-                            <p className="text-[8.5px] text-[#8b949e] font-serif uppercase tracking-wider mt-0.5 truncate">{item.platform.toUpperCase()} • {item.date}</p>
+                            <p className="text-ink text-[11px] font-bold truncate pr-2">{item.commit}</p>
+                            <p className="text-[8.5px] text-muted font-serif uppercase tracking-wider mt-0.5 truncate">{item.platform.toUpperCase()} • {item.date}</p>
                           </div>
                         </div>
-                        <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded shrink-0">
+                        <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 bg-emerald-500/10 text-success border border-emerald-500/20 rounded shrink-0">
                           Live
                         </span>
                       </div>
@@ -1791,31 +1791,31 @@ export const GitPanel: React.FC<GitPanelProps> = ({
           /* Premium Cloud Sync Panel */
           <div className="p-3 space-y-3 flex flex-col flex-1 min-h-0 select-none">
             {/* Header Description */}
-            <div className="relative p-2.5 px-3 rounded-xl bg-gradient-to-br from-[#1f2937]/35 to-black/40 border border-white/5 overflow-hidden shadow-xl shrink-0">
+            <div className="relative p-2.5 px-3 rounded-xl bg-gradient-to-br from-raised to-black/40 border border-line overflow-hidden shadow-xl shrink-0">
               <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl"></div>
-              <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-indigo-400 tracking-wider">
+              <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-accent-text tracking-wider">
                 <Cloud className="w-3.5 h-3.5 animate-pulse" />
                 🔥 Cloud Sync Network
               </div>
-              <p className="text-[10px] text-[#8b949e] leading-snug font-medium mt-1">
+              <p className="text-[10px] text-muted leading-snug font-medium mt-1">
                 Link repository structures and sync active files into Code Studio.
               </p>
             </div>
 
             {/* Platform Selector Dropdown */}
             <div className="relative space-y-1 shrink-0">
-              <label className="text-[8px] font-black uppercase text-[#8b949e] tracking-wider px-1">Select Sync Platform</label>
+              <label className="text-[8px] font-black uppercase text-muted tracking-wider px-1">Select Sync Platform</label>
               <button
                 onClick={() => setSyncDropdownOpen(!syncDropdownOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 bg-[#0d1117] border border-white/5 hover:border-white/10 rounded-xl text-xs font-bold transition-all"
+                className="w-full flex items-center justify-between px-3 py-2 bg-surface border border-line hover:border-line rounded-xl text-xs font-bold transition-all"
               >
                 <div className="flex items-center gap-2">
-                  <span className={cn("p-0.5 rounded bg-white/5", syncPlatformObj.color)}>
+                  <span className={cn("p-0.5 rounded bg-raised", syncPlatformObj.color)}>
                     <SyncPltIcon className="w-3.5 h-3.5" />
                   </span>
-                  <span className="text-white font-black text-[11px]">{syncPlatformObj.name}</span>
+                  <span className="text-ink font-black text-[11px]">{syncPlatformObj.name}</span>
                 </div>
-                <ChevronDown className={cn("w-3.5 h-3.5 text-neutral-400 transition-transform", syncDropdownOpen ? "rotate-180" : "rotate-0")} />
+                <ChevronDown className={cn("w-3.5 h-3.5 text-muted transition-transform", syncDropdownOpen ? "rotate-180" : "rotate-0")} />
               </button>
 
               <AnimatePresence>
@@ -1824,7 +1824,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
-                    className="absolute z-[100] top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto no-scrollbar bg-[#0d1117] border border-white/10 rounded-xl shadow-2xl p-1 space-y-0.5"
+                    className="absolute z-[100] top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto no-scrollbar bg-surface border border-line rounded-xl shadow-2xl p-1 space-y-0.5"
                   >
                     {DEPLOY_PLATFORMS.map((platform) => {
                       const IconComponent = platform.icon;
@@ -1837,8 +1837,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                             setSuccessfullySyncedProject(null);
                           }}
                           className={cn(
-                            "w-full flex items-center gap-2.5 p-2 rounded-lg text-left text-xs font-semibold hover:bg-white/5 transition-all",
-                            selectedSyncPlatform === platform.id ? "bg-white/5 border border-white/5 text-white" : "text-[#8b949e] border border-transparent"
+                            "w-full flex items-center gap-2.5 p-2 rounded-lg text-left text-xs font-semibold hover:bg-raised transition-all",
+                            selectedSyncPlatform === platform.id ? "bg-raised border border-line text-ink" : "text-muted border border-transparent"
                           )}
                         >
                           <span className={platform.color}>
@@ -1846,7 +1846,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                           </span>
                           <span className="flex-1 font-bold">{platform.name}</span>
                           {platform.badge && (
-                            <span className="text-[7.5px] font-black uppercase tracking-widest px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            <span className="text-[7.5px] font-black uppercase tracking-widest px-1 py-0.5 rounded bg-amber-500/10 text-warn border border-amber-500/20">
                               {platform.badge}
                             </span>
                           )}
@@ -1869,12 +1869,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         {user?.avatar_url ? (
                           <img src={user.avatar_url} alt="GitHub avatar" className="w-full h-full object-cover" loading="lazy" />
                         ) : (
-                          <div className="w-full h-full bg-neutral-900 border border-white/10 flex items-center justify-center text-white"><Github className="w-3.5 h-3.5" /></div>
+                          <div className="w-full h-full bg-card border border-line flex items-center justify-center text-ink"><Github className="w-3.5 h-3.5" /></div>
                         )}
                       </div>
                       <div className="leading-none">
-                        <p className="text-[10px] font-black text-white">@{user?.login || 'Authorized Account'}</p>
-                        <span className="text-[8px] font-sans text-emerald-400 uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
+                        <p className="text-[10px] font-black text-ink">@{user?.login || 'Authorized Account'}</p>
+                        <span className="text-[8px] font-sans text-success uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
                           <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse" />
                           ACTIVE HOST ACCESS
                         </span>
@@ -1882,7 +1882,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     </div>
                     <button 
                       onClick={onDisconnect}
-                      className="px-2 py-1 bg-neutral-950 hover:bg-red-500/10 text-[8px] font-black uppercase tracking-widest text-[#8b949e] hover:text-red-400 border border-white/5 hover:border-red-500/25 rounded-lg transition-all"
+                      className="px-2 py-1 bg-surface hover:bg-red-500/10 text-[8px] font-black uppercase tracking-widest text-muted hover:text-danger border border-line hover:border-red-500/25 rounded-lg transition-all"
                     >
                       Disconnect
                     </button>
@@ -1890,10 +1890,10 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 ) : (
                   <div className="p-3 bg-amber-500/5 border border-amber-500/15 rounded-xl space-y-2">
                     <div className="flex items-start gap-2">
-                      <Lock className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                      <Lock className="w-3.5 h-3.5 text-warn mt-0.5 shrink-0" />
                       <div className="leading-tight">
-                        <p className="text-white text-[10px] font-black uppercase tracking-wide">Platform Access Locked</p>
-                        <p className="text-[#8b949e] text-[8.5px] leading-snug mt-0.5">
+                        <p className="text-ink text-[10px] font-black uppercase tracking-wide">Platform Access Locked</p>
+                        <p className="text-muted text-[8.5px] leading-snug mt-0.5">
                           Connect gateway credentials to browser templates.
                         </p>
                       </div>
@@ -1911,12 +1911,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 firebaseToken ? (
                   <div className="flex items-center justify-between p-2 px-3 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-orange-600/10 flex items-center justify-center border border-emerald-500/20 text-orange-400 shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-orange-600/10 flex items-center justify-center border border-emerald-500/20 text-warn shrink-0">
                         <Cloud className="w-3.5 h-3.5" />
                       </div>
                       <div className="leading-none">
-                        <p className="text-[10px] font-black text-white truncate max-w-[120px]">{firebaseUser?.projectId || 'Connected Project'}</p>
-                        <span className="text-[8px] font-sans text-emerald-400 uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
+                        <p className="text-[10px] font-black text-ink truncate max-w-[120px]">{firebaseUser?.projectId || 'Connected Project'}</p>
+                        <span className="text-[8px] font-sans text-success uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
                           <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse" />
                           DATABASE LINKED
                         </span>
@@ -1924,7 +1924,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     </div>
                     <button 
                       onClick={onFirebaseDisconnect}
-                      className="px-2 py-1 bg-neutral-950 hover:bg-red-500/10 text-[8px] font-black uppercase tracking-widest text-[#8b949e] hover:text-red-400 border border-white/5 hover:border-red-500/25 rounded-lg transition-all"
+                      className="px-2 py-1 bg-surface hover:bg-red-500/10 text-[8px] font-black uppercase tracking-widest text-muted hover:text-danger border border-line hover:border-red-500/25 rounded-lg transition-all"
                     >
                       Unlink
                     </button>
@@ -1932,10 +1932,10 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 ) : (
                   <div className="p-3 bg-amber-500/5 border border-amber-500/15 rounded-xl space-y-2">
                     <div className="flex items-start gap-2">
-                      <Lock className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                      <Lock className="w-3.5 h-3.5 text-warn mt-0.5 shrink-0" />
                       <div className="leading-tight">
-                        <p className="text-white text-[10px] font-black uppercase tracking-wide">Firebase Sandbox Locked</p>
-                        <p className="text-[#8b949e] text-[8.5px] leading-snug mt-0.5">
+                        <p className="text-ink text-[10px] font-black uppercase tracking-wide">Firebase Sandbox Locked</p>
+                        <p className="text-muted text-[8.5px] leading-snug mt-0.5">
                           Configure Firebase credentials, databases and clusters.
                         </p>
                       </div>
@@ -1952,12 +1952,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               ) : (
                 /* Non-GitHub/Firebase cloud sync is NOT available yet — shown HONESTLY. We never fake a
                    "connected" state here: there is no real OAuth/backend for these platforms. Use GitHub. */
-                <div className="p-3 bg-[#1f2937]/15 border border-white/5 rounded-xl space-y-2">
+                <div className="p-3 bg-raised border border-line rounded-xl space-y-2">
                   <div className="flex items-start gap-2">
-                    <Lock className="w-3.5 h-3.5 text-[#8b949e] mt-0.5 shrink-0" />
+                    <Lock className="w-3.5 h-3.5 text-muted mt-0.5 shrink-0" />
                     <div className="leading-tight">
-                      <p className="text-white text-[10px] font-black uppercase tracking-wide">{selectedSyncPlatform.toUpperCase()} sync — coming soon</p>
-                      <p className="text-[#8b949e] text-[8.5px] leading-snug mt-0.5">
+                      <p className="text-ink text-[10px] font-black uppercase tracking-wide">{selectedSyncPlatform.toUpperCase()} sync — coming soon</p>
+                      <p className="text-muted text-[8.5px] leading-snug mt-0.5">
                         Direct {selectedSyncPlatform} cloud sync isn't available yet — we won't fake a connection that doesn't work. Use GitHub (fully supported) to push your project, or export a ZIP.
                       </p>
                     </div>
@@ -1967,21 +1967,21 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             </div>
 
             {/* Searchable Projects List Container */}
-            <div className="flex flex-col border border-white/5 rounded-xl p-2.5 space-y-2 bg-black/10 select-none">
+            <div className="flex flex-col border border-line rounded-xl p-2.5 space-y-2 bg-well select-none">
               <div className="flex items-center justify-between shrink-0">
-                <span className="text-[8.5px] font-black text-[#8b949e] uppercase tracking-wider px-1">Available Apps / Projects</span>
-                {isFetchingProjects && <TirangaLoader className="w-3 h-3 text-indigo-400" />}
+                <span className="text-[8.5px] font-black text-muted uppercase tracking-wider px-1">Available Apps / Projects</span>
+                {isFetchingProjects && <TirangaLoader className="w-3 h-3 text-accent-text" />}
               </div>
 
               {/* Project Search Bar */}
               <div className="relative shrink-0">
-                <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-2" />
+                <Search className="w-3.5 h-3.5 text-faint absolute left-3 top-2" />
                 <input
                   type="text"
                   value={syncQuery}
                   onChange={(e) => setSyncQuery(e.target.value)}
                   placeholder="Search project repositories..."
-                  className="w-full bg-[#0d1117] border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500/50 transition-all text-white font-medium"
+                  className="w-full bg-surface border border-line rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500/50 transition-all text-ink font-medium"
                 />
               </div>
 
@@ -1998,17 +1998,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         }
                       }}
                       disabled={isSyncRunning}
-                      className="w-full p-2 rounded-lg bg-[#0d1117]/60 hover:bg-[#12161f] border border-white/5 hover:border-indigo-600/40 transition-all text-left flex justify-between items-center focus:ring-1 focus:ring-indigo-600/30"
+                      className="w-full p-2 rounded-lg bg-raised hover:bg-raised border border-line hover:border-indigo-600/40 transition-all text-left flex justify-between items-center focus:ring-1 focus:ring-indigo-600/30"
                     >
                       <div className="min-w-0 pr-2 leading-none">
-                        <h4 className="text-[11px] font-extrabold text-[#f0f6fc] truncate">{project.displayName}</h4>
-                        <p className="text-[9px] text-[#8b949e] truncate mt-1 leading-normal font-medium max-w-[220px]">{project.description}</p>
+                        <h4 className="text-[11px] font-extrabold text-body truncate">{project.displayName}</h4>
+                        <p className="text-[9px] text-muted truncate mt-1 leading-normal font-medium max-w-[220px]">{project.description}</p>
                       </div>
                       <span className={cn(
                         "text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border leading-none font-sans shrink-0",
                         project.isTemplate 
-                          ? "bg-amber-600/10 text-amber-400 border-amber-500/25" 
-                          : "bg-indigo-600/10 text-indigo-400 border-indigo-500/25"
+                          ? "bg-amber-600/10 text-warn border-amber-500/25" 
+                          : "bg-indigo-600/10 text-accent-text border-indigo-500/25"
                       )}>
                         {project.isTemplate ? "Template" : "Repo"}
                       </span>
@@ -2019,7 +2019,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
                 {fetchedProjects.length === 0 && (
                   <div className="text-center py-6">
-                    <p className="text-[10px] font-bold text-[#8b949e]">No repositories or packages matching query.</p>
+                    <p className="text-[10px] font-bold text-muted">No repositories or packages matching query.</p>
                   </div>
                 )}
               </div>
@@ -2027,17 +2027,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
             {/* Live Progress Sync Console */}
             {isSyncRunning && (
-              <div className="bg-black/95 border border-white/5 p-2 px-3 rounded-xl font-mono text-[9px] text-zinc-400 space-y-1.5 shrink-0 relative overflow-hidden">
-                <div className="flex justify-between items-center border-b border-white/5 pb-1">
-                  <span className="text-[8px] font-sans font-black text-indigo-400 uppercase tracking-widest">Sync Console</span>
+              <div className="bg-scrim border border-line p-2 px-3 rounded-xl font-mono text-[9px] text-muted space-y-1.5 shrink-0 relative overflow-hidden">
+                <div className="flex justify-between items-center border-b border-line pb-1">
+                  <span className="text-[8px] font-sans font-black text-accent-text uppercase tracking-widest">Sync Console</span>
                   <div className="flex items-center gap-1">
                     <span className="w-1 h-1 bg-yellow-500 rounded-full animate-ping" />
-                    <span className="text-[7.5px] font-sans text-neutral-500 uppercase tracking-widest">{syncProgressStage}</span>
+                    <span className="text-[7.5px] font-sans text-faint uppercase tracking-widest">{syncProgressStage}</span>
                   </div>
                 </div>
                 <div className="space-y-0.5 max-h-[60px] overflow-y-auto no-scrollbar">
                   {syncLogs.slice(-3).map((log, i) => (
-                    <div key={i} className="line-clamp-2 leading-tight text-neutral-400">{log}</div>
+                    <div key={i} className="line-clamp-2 leading-tight text-muted">{log}</div>
                   ))}
                 </div>
               </div>
@@ -2047,12 +2047,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             {successfullySyncedProject && (
               <div className="bg-indigo-600/10 border border-indigo-500/35 p-2.5 px-3 rounded-xl space-y-2 shrink-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                  <div className="w-6 h-6 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-accent-text shrink-0">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                   </div>
                   <div className="leading-none">
-                    <h4 className="text-[10px] font-black text-white uppercase tracking-wide">Sync Successful!</h4>
-                    <p className="text-[8.5px] text-[#8b949e] font-semibold mt-0.5">
+                    <h4 className="text-[10px] font-black text-ink uppercase tracking-wide">Sync Successful!</h4>
+                    <p className="text-[8.5px] text-muted font-semibold mt-0.5">
                       Synchronized <b>{successfullySyncedProject.displayName}</b>.
                     </p>
                   </div>
@@ -2061,7 +2061,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                   <button
                     onClick={() => setShowModeModal(true)}
-                    className="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase text-[9px] tracking-wider py-1.5 rounded-lg shadow-lg transition-all active:scale-95 cursor-pointer border border-indigo-500"
+                    className="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-on-accent font-black uppercase text-[9px] tracking-wider py-1.5 rounded-lg shadow-lg transition-all active:scale-95 cursor-pointer border border-indigo-500"
                   >
                     <Sparkles className="w-3 h-3" />
                     🔥 AI Workspace
@@ -2072,9 +2072,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         onActivatePreview();
                       }
                     }}
-                    className="flex items-center justify-center gap-1  bg-neutral-900 hover:bg-neutral-800 text-white font-black uppercase text-[9px] tracking-wider py-1.5 rounded-lg border border-white/5 hover:border-white/10 transition-all active:scale-95 cursor-pointer"
+                    className="flex items-center justify-center gap-1  bg-card hover:bg-raised text-ink font-black uppercase text-[9px] tracking-wider py-1.5 rounded-lg border border-line hover:border-line transition-all active:scale-95 cursor-pointer"
                   >
-                    <Globe className="w-3 h-3 text-indigo-400" />
+                    <Globe className="w-3 h-3 text-accent-text" />
                     👁️ Preview
                   </button>
                 </div>
@@ -2085,24 +2085,24 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
         <AnimatePresence>
           {showModeModal && (
-            <div className="fixed inset-0 bg-[#0d1117]/85 backdrop-blur-md z-[2000] flex flex-col justify-center p-6 select-none animate-in fade-in duration-200">
+            <div className="fixed inset-0 bg-surface backdrop-blur-md z-[2000] flex flex-col justify-center p-6 select-none animate-in fade-in duration-200">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 15 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                className="bg-[#161b22] border border-white/10 rounded-3xl p-6 shadow-2xl relative space-y-5 max-w-sm ml-auto mr-auto text-left"
+                className="bg-card border border-line rounded-3xl p-6 shadow-2xl relative space-y-5 max-w-sm ml-auto mr-auto text-left"
               >
-                <div className="flex justify-between items-start border-b border-white/5 pb-3">
+                <div className="flex justify-between items-start border-b border-line pb-3">
                   <div>
-                    <h4 className="text-sm font-black uppercase tracking-tight text-white leading-tight">DevOps Orchestrator Tiers</h4>
-                    <span className="text-[9.5px] text-indigo-400 tracking-wider font-black uppercase mt-1 inline-block">navBharatAI Core Engine</span>
+                    <h4 className="text-sm font-black uppercase tracking-tight text-ink leading-tight">DevOps Orchestrator Tiers</h4>
+                    <span className="text-[9.5px] text-accent-text tracking-wider font-black uppercase mt-1 inline-block">navBharatAI Core Engine</span>
                   </div>
-                  <span className="p-1 px-2.5 rounded-full bg-indigo-500/15 border border-indigo-500/25 text-[8px] font-black uppercase tracking-widest text-indigo-400 font-sans">
+                  <span className="p-1 px-2.5 rounded-full bg-indigo-500/15 border border-indigo-500/25 text-[8px] font-black uppercase tracking-widest text-accent-text font-sans">
                     Premium Active
                   </span>
                 </div>
 
-                <p className="text-[10px] text-[#8b949e] leading-snug font-medium">
+                <p className="text-[10px] text-muted leading-snug font-medium">
                   Select the underlying cognitive orchestration tier to initiate live code edits, refactor, and build pipelines over files in real-time.
                 </p>
 
@@ -2112,13 +2112,13 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                         if (onAgentChange) onAgentChange('navbharatai');
                         setShowModeModal(false);
                     }}
-                    className="w-full p-3.5 rounded-2xl bg-neutral-900 border border-white/5 hover:border-indigo-500/30 text-left space-y-1 group transition-all"
+                    className="w-full p-3.5 rounded-2xl bg-card border border-line hover:border-indigo-500/30 text-left space-y-1 group transition-all"
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-black text-white uppercase tracking-wide group-hover:text-indigo-400">NavBharatAi FREE</span>
-                      <span className="text-[8px] font-black bg-neutral-950 px-1.5 py-0.5 rounded text-neutral-400 text-right">Standard Speed</span>
+                      <span className="text-xs font-black text-ink uppercase tracking-wide group-hover:text-accent-text">NavBharatAi FREE</span>
+                      <span className="text-[8px] font-black bg-surface px-1.5 py-0.5 rounded text-muted text-right">Standard Speed</span>
                     </div>
-                    <p className="text-[#8b949e] text-[9.5px] font-semibold">
+                    <p className="text-muted text-[9.5px] font-semibold">
                       Your reliable and free AI companion for all your tasks, building and analysis.
                     </p>
                   </button>
@@ -2127,7 +2127,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 <div className="flex justify-end pt-1">
                   <button 
                     onClick={() => setShowModeModal(false)}
-                    className="px-4 py-2 bg-[#0d1117] hover:bg-white/5 border border-white/5 text-[9px] font-black uppercase text-[#8b949e] hover:text-white rounded-xl transition-all cursor-pointer"
+                    className="px-4 py-2 bg-surface hover:bg-raised border border-line text-[9px] font-black uppercase text-muted hover:text-ink rounded-xl transition-all cursor-pointer"
                   >
                     Cancel Action
                   </button>
@@ -2141,50 +2141,50 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       {/* SAFE DEPLOYMENT CONFIRMATION DIALOG */}
       <AnimatePresence>
         {showConfirmModal && (
-          <div key="confirm-modal" className="absolute inset-0 bg-[#0d1117]/85 backdrop-blur-sm z-[999] flex flex-col justify-center p-6 select-none animate-in fade-in duration-200">
+          <div key="confirm-modal" className="absolute inset-0 bg-surface backdrop-blur-sm z-[999] flex flex-col justify-center p-6 select-none animate-in fade-in duration-200">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-[#1c2128] border border-white/10 rounded-3xl p-6 shadow-2xl relative space-y-4 max-w-sm mx-auto text-left"
+              className="bg-raised border border-line rounded-3xl p-6 shadow-2xl relative space-y-4 max-w-sm mx-auto text-left"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-500 shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-warn shrink-0">
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-black uppercase tracking-tight text-white leading-tight">Sovereign Safe Push</h4>
-                  <p className="text-[9.5px] text-[#8b949e] font-sans uppercase tracking-widest font-black">navBharat Security Shield</p>
+                  <h4 className="text-sm font-black uppercase tracking-tight text-ink leading-tight">Sovereign Safe Push</h4>
+                  <p className="text-[9.5px] text-muted font-sans uppercase tracking-widest font-black">navBharat Security Shield</p>
                 </div>
               </div>
 
               <div className="space-y-3 pt-2">
-                <div className="space-y-0.5 bg-black/40 border border-white/5 rounded-xl p-3">
-                  <span className="text-[8.5px] font-extrabold text-[#8b949e] uppercase tracking-wider block">Currently Open Project</span>
-                  <span className="text-xs font-bold text-white block truncate">{projectName}</span>
+                <div className="space-y-0.5 bg-well border border-line rounded-xl p-3">
+                  <span className="text-[8.5px] font-extrabold text-muted uppercase tracking-wider block">Currently Open Project</span>
+                  <span className="text-xs font-bold text-ink block truncate">{projectName}</span>
                 </div>
 
-                <div className="space-y-0.5 bg-black/40 border border-white/5 rounded-xl p-3">
-                  <span className="text-[8.5px] font-extrabold text-[#8b949e] uppercase tracking-wider block">Target Repository Link</span>
-                  <span className="text-xs font-mono font-bold text-indigo-400 block truncate">
+                <div className="space-y-0.5 bg-well border border-line rounded-xl p-3">
+                  <span className="text-[8.5px] font-extrabold text-muted uppercase tracking-wider block">Target Repository Link</span>
+                  <span className="text-xs font-mono font-bold text-accent-text block truncate">
                     https://github.com/{configs.github.repoName || 'untitled'}.git
                   </span>
                 </div>
 
-                <div className="space-y-0.5 bg-black/40 border border-[#1e293b] rounded-xl p-3">
-                  <span className="text-[8.5px] font-extrabold text-[#a1a1aa] uppercase tracking-wider block">Files Ready to Transmit</span>
-                  <span className="text-xs font-bold text-emerald-400 block">{Object.keys(files || {}).length} Workspace Files</span>
+                <div className="space-y-0.5 bg-well border border-line rounded-xl p-3">
+                  <span className="text-[8.5px] font-extrabold text-muted uppercase tracking-wider block">Files Ready to Transmit</span>
+                  <span className="text-xs font-bold text-success block">{Object.keys(files || {}).length} Workspace Files</span>
                 </div>
               </div>
 
-              <p className="text-[10px] text-[#8b949e] leading-relaxed pt-1 font-medium">
+              <p className="text-[10px] text-muted leading-relaxed pt-1 font-medium">
                 Verify that this is your desired destination repository. Accidental overlap pushes are fully prevented.
               </p>
 
               <div className="flex items-center gap-2.5 pt-2">
                 <button
                   onClick={() => setShowConfirmModal(false)}
-                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
+                  className="flex-1 py-3 bg-raised hover:bg-raised active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                 >
                   Cancel
                 </button>
@@ -2193,7 +2193,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setShowConfirmModal(false);
                     triggerPushAndDeploy();
                   }}
-                  className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:scale-[1.02] active:scale-95 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
+                  className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:scale-[1.02] active:scale-95 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                 >
                   Confirm & Push 🚀
                 </button>
@@ -2206,23 +2206,23 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       {/* ENTERPRISE DEPLOYMENT FAILURE POPUP MODAL (Glassmorphism & Red/Orange Glow) */}
       <AnimatePresence>
         {showErrorModal && errorDetails && (
-          <div key="error-popup" className="absolute inset-0 bg-black/90 backdrop-blur-md z-[1000] flex flex-col justify-center p-5 select-none animate-in fade-in duration-300">
+          <div key="error-popup" className="absolute inset-0 bg-scrim backdrop-blur-md z-[1000] flex flex-col justify-center p-5 select-none animate-in fade-in duration-300">
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 30 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 30 }}
-              className="bg-black/95 border border-red-500/30 rounded-3xl p-5 shadow-[0_0_50px_rgba(239,68,68,0.25)] relative max-w-sm mx-auto text-left flex flex-col max-h-[92%] overflow-y-auto scrollbar-none space-y-3.5"
+              className="bg-scrim border border-red-500/30 rounded-3xl p-5 shadow-[0_0_50px_rgba(239,68,68,0.25)] relative max-w-sm mx-auto text-left flex flex-col max-h-[92%] overflow-y-auto scrollbar-none space-y-3.5"
             >
               {/* Pulse Error Header */}
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 shrink-0">
+                <div className="w-11 h-11 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-danger shrink-0">
                   <AlertCircle className="w-6 h-6 animate-pulse" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-[#ff8080] block">
+                  <span className="text-[8.5px] font-extrabold uppercase tracking-widest text-danger block">
                     {errorDetails.provider} Deployment Halt
                   </span>
-                  <h4 className="text-xs font-black uppercase tracking-tight text-white leading-tight truncate">
+                  <h4 className="text-xs font-black uppercase tracking-tight text-ink leading-tight truncate">
                     {errorDetails.errorType}
                   </h4>
                 </div>
@@ -2230,39 +2230,39 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
               {/* Error Reason Banner */}
               <div className="p-3 bg-red-950/20 border border-red-500/15 rounded-xl space-y-1">
-                <span className="text-[8px] font-extrabold text-[#fda4af] uppercase tracking-wider block">Raw Return Manifest Message:</span>
-                <p className="text-[10px] text-red-200/90 font-mono leading-relaxed break-words font-medium">
+                <span className="text-[8px] font-extrabold text-danger uppercase tracking-wider block">Raw Return Manifest Message:</span>
+                <p className="text-[10px] text-danger font-mono leading-relaxed break-words font-medium">
                   {errorDetails.rawDetails}
                 </p>
               </div>
 
               {/* Suggestions Panel */}
-              <div className="p-3 bg-zinc-950/40 border border-white/5 rounded-xl space-y-1">
-                <span className="text-[8px] font-extrabold text-[#a1a1aa] uppercase tracking-wider block flex items-center gap-1">
-                  <Settings className="w-2.5 h-2.5 text-indigo-400" />
+              <div className="p-3 bg-raised border border-line rounded-xl space-y-1">
+                <span className="text-[8px] font-extrabold text-muted uppercase tracking-wider block flex items-center gap-1">
+                  <Settings className="w-2.5 h-2.5 text-accent-text" />
                   Recommended DevOps Correction:
                 </span>
-                <p className="text-[10.5px] text-zinc-300 leading-normal font-medium">
+                <p className="text-[10.5px] text-muted leading-normal font-medium">
                   {errorDetails.fixSuggestions}
                 </p>
               </div>
 
               {/* Real-time Logs Console Accordion */}
-              <div className="border border-white/5 bg-black/40 rounded-xl overflow-hidden">
+              <div className="border border-line bg-well rounded-xl overflow-hidden">
                 <button 
                   onClick={() => setIsLogsExpanded(!isLogsExpanded)}
-                  className="w-full flex items-center justify-between p-2.5 bg-white/5 hover:bg-white/10 transition-all font-mono text-[9px] font-bold text-white/80"
+                  className="w-full flex items-center justify-between p-2.5 bg-raised hover:bg-raised transition-all font-mono text-[9px] font-bold text-body"
                 >
-                  <span className="flex items-center gap-1.5 uppercase text-[8.5px] tracking-wider text-indigo-300">
-                    <Terminal className="w-3 h-3 text-indigo-400" />
+                  <span className="flex items-center gap-1.5 uppercase text-[8.5px] tracking-wider text-accent-text">
+                    <Terminal className="w-3 h-3 text-accent-text" />
                     Inspect Build Pipeline Logs ({deployLogs.length})
                   </span>
-                  <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isLogsExpanded ? "rotate-180 text-white" : "rotate-0")} />
+                  <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isLogsExpanded ? "rotate-180 text-ink" : "rotate-0")} />
                 </button>
                 {isLogsExpanded && (
-                  <div className="p-2.5 bg-[#07090e] border-t border-white/5 max-h-[110px] overflow-y-auto font-mono text-[9px] text-red-300/80 space-y-1.5 scrollbar-thin">
+                  <div className="p-2.5 bg-surface border-t border-line max-h-[110px] overflow-y-auto font-mono text-[9px] text-danger space-y-1.5 scrollbar-thin">
                     {deployLogs.length === 0 ? (
-                      <span className="text-zinc-500 italic">No console logs outputted.</span>
+                      <span className="text-faint italic">No console logs outputted.</span>
                     ) : (
                       deployLogs.map((log, idx) => (
                         <div key={idx} className="leading-tight break-all font-medium">
@@ -2277,13 +2277,13 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               {/* Auto Retry countdown widget */}
               {isAutoRetryActive && retryCountdown !== null && (
                 <div className="flex items-center justify-between p-2.5 bg-amber-500/5 border border-amber-500/10 rounded-xl">
-                  <span className="text-[9.5px] font-bold text-amber-300 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                    Auto-retry in <span className="font-mono text-[11px] font-black text-amber-400">{retryCountdown}s</span>
+                  <span className="text-[9.5px] font-bold text-warn flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-warn animate-spin" />
+                    Auto-retry in <span className="font-mono text-[11px] font-black text-warn">{retryCountdown}s</span>
                   </span>
                   <button
                     onClick={handleCancelAutoRetry}
-                    className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/40 text-red-400 hover:text-white rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-red-500/20 transition-all cursor-pointer shadow-none"
+                    className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/40 text-danger hover:text-ink rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-red-500/20 transition-all cursor-pointer shadow-none"
                   >
                     Pause
                   </button>
@@ -2294,23 +2294,23 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               <div className="grid grid-cols-2 gap-2 pt-1 font-bold">
                 <button
                   onClick={handleRetryDeployment}
-                  className="py-2.5 bg-gradient-to-r from-red-600 to-orange-600 hover:scale-[1.02] text-white rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+                  className="py-2.5 bg-gradient-to-r from-red-600 to-orange-600 hover:scale-[1.02] text-on-accent rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
-                  <RefreshCcw className="w-3 h-3 text-white" />
+                  <RefreshCcw className="w-3 h-3 text-ink" />
                   Retry Sync
                 </button>
                 <button
                   onClick={handleReconnectAccount}
-                  className="py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-white rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+                  className="py-2.5 bg-card hover:bg-raised border border-line text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
-                  <Key className="w-3 h-3 text-indigo-400" />
+                  <Key className="w-3 h-3 text-accent-text" />
                   Reconnect
                 </button>
                 <button
                   onClick={handleCopyLogs}
-                  className="py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+                  className="py-2 bg-raised hover:bg-raised text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
-                  <Copy className="w-3 h-3 text-zinc-400" />
+                  <Copy className="w-3 h-3 text-muted" />
                   Copy Logs
                 </button>
                 <button
@@ -2320,7 +2320,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setIsAutoRetryActive(false);
                     setRetryCountdown(null);
                   }}
-                  className="py-2 bg-white/5 hover:bg-white/10 text-[#a1a1aa] hover:text-white rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
+                  className="py-2 bg-raised hover:bg-raised text-muted hover:text-ink rounded-xl text-[9px] font-extrabold uppercase tracking-widest transition-all cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
                   Dismiss
                 </button>
@@ -2331,7 +2331,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       </AnimatePresence>
 
       {/* Footer copyright */}
-      <div className="p-3 bg-black/35 border-t border-white/5 text-center text-[8px] font-bold text-[#8b949e] uppercase tracking-wider shrink-0 select-none">
+      <div className="p-3 bg-well border-t border-line text-center text-[8px] font-bold text-muted uppercase tracking-wider shrink-0 select-none">
         navBharatAI Cloud IDE Deployment &copy; 2026 Bharat Dev Team
       </div>
     </div>

@@ -65996,3 +65996,49 @@ file absent from the baseline is at zero, exactly as designed. The merge commit 
 63 → 6**, the remainder being `text-black` on a light control, a near-black stage `bg-[#08090c]` and a
 white gradient over an image — hand decisions, listed by the tool. The image-studio render test and
 the Pro-tier tests pass on the migrated files.
+
+## 2026-09-18 — THE THEME SYSTEM IS REPLACED, PR D of N: the next six files, and the codemod's table grown by what they exposed
+
+**Six files, one run each:** AgentV3Panel 598 → 5 · GitPanel 485 → 12 · ComponentLibrary 444 → 27
+(then 20 by hand) · SettingsPanel 304 → 5 · AIChat 275 → 8 · BillingPanel 265 → 1. Baseline
+**10,385 → 8,052** (173 files). Every remaining literal is listed by the tool and is one of: a
+light-styled preview canvas (`bg-white text-gray-900` — the component preview frames the USER'S
+component on white, deliberately), `text-black` on a light control, the tricolour flag's own three
+hexes in AgentV3Panel, and a terminal green.
+
+**What these six files taught the table, each row test-locked in `themeMigrate.test.ts`:**
+- **The grey families compat never covered** (`text-zinc-600`, `text-stone-400`, `text-neutral-400`,
+  `border-stone-800`, `bg-stone-900`, `bg-zinc-900/60`, `hover:border-zinc-500`, …) — these did not
+  follow the theme AT ALL today (a zinc-600 label stays #52525b on Light). FIX rows, by role.
+- **Hex brand text** the hue table cannot see (`#ff8080`/`#fda4af`/`#f85149` → danger, `#58a6ff`/
+  `#60a5fa`/`#2496ed` → info, `#a259ff` → accent) and hex chrome (`#0b0e14`, `#1f2937`, `#1c2430`,
+  `#1e293b` …) by role.
+- **A gradient stop INTO the chrome follows the theme** (`to-[#161b22]` → `to-card`). This is the
+  Billing page's four plan cards: on Light they ended in a GitHub-dark corner with unreadable labels
+  on it — visible in the before/after screenshots. A brand or white stop is left: a design choice.
+- **A hex BRAND fill is a solid fill** (`bg-[#24292e]`, GitHub black): its white label stays white.
+- **A label directly inside a filled box** — `<div className="… bg-indigo-600 …">` on the line above,
+  a `<span className="text-white">` with no background of its own — stays white. The same-element
+  rule cannot see a parent; the Settings footer's "NB" badge went dark-on-indigo on Light on the first
+  run, and the compat layer had the identical blind spot.
+- **A faint grey wash** (`hover:bg-stone-500/15`) is the same lift as `bg-white/5` → `bg-raised`.
+- **ComponentLibrary's inline `style={{ background: '#1f2937', color: '#9ca3af' }}`** chips and
+  modal chrome — unreachable by any class rule — moved to `var(--surface-raised)` /
+  `var(--text-muted)` / `var(--scrim)` by hand; the "copied" toast to `bg-emerald-600 text-on-accent`
+  (a success-TEXT token as a fill would be light green under white text on Dark).
+
+**The proof in the browser** (audit crawler, six views × three themes, pre-PR-D build vs migrated):
+**dark and contrast: zero misses before, zero after, all six views** — after one catch the crawl
+itself made: the first hand edit put the "Add to my app" button on `var(--accent)`, which is a
+per-theme TEXT accent (light indigo on Dark, yellow on High contrast) and so white-on-it failed
+on both dark themes; a solid button is `bg-indigo-600 text-on-accent`, the tolerated brand fill.
+Light, summed: invisible
+**6 → 1**, severe **5 → 0**, AA-fail **15 → 13**. The one "invisible" left is the crawler misreading
+a gradient button's background as the page's white (the label is white on the gradient); the
+thirteen fails are the sidebar's grey header block (`SidebarNav`, 2 per view — next PR) and one
+near-miss badge at 4.37. Billing on Light went from two dark plan cards with invisible labels to
+white cards with readable ones.
+
+**One guard re-anchored:** `themeSystem.test.ts` asserted AgentV3Panel's root LITERAL `bg-zinc-950`
+plus its compat remap; it now asserts the token `bg-surface` and the literal's ABSENCE — strictly
+stronger. Stacked on C; pushed after #3070 merges.

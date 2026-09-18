@@ -82,6 +82,41 @@ describe('the readability FIX rows — pixels change on purpose, toward AA', () 
     expect(mapToken('decoration-white/20')?.token).toBe('decoration-line');
     expect(mapToken('decoration-white')?.token).toBe('decoration-ink');
   });
+  it('the grey families and hexes compat never covered — today they do not follow the theme at all', () => {
+    expect(mapToken('text-zinc-600')).toEqual({ token: 'text-faint', kind: 'fix' });
+    expect(mapToken('text-stone-400')?.token).toBe('text-muted');
+    expect(mapToken('text-[#a1a1aa]')?.token).toBe('text-muted');
+    expect(mapToken('text-[#efeff1]')?.token).toBe('text-body');
+    expect(mapToken('hover:border-zinc-500')).toBeNull(); // the variant is stripped by migrate, not mapToken
+    expect(mapToken('border-zinc-500')?.token).toBe('border-line');
+    expect(mapToken('border-stone-800')?.token).toBe('border-line');
+    expect(mapToken('border-zinc-800/60')?.token).toBe('border-line');
+    expect(mapToken('bg-stone-900')?.token).toBe('bg-card');
+    expect(mapToken('bg-zinc-900/60')?.token).toBe('bg-raised');
+    expect(mapToken('bg-zinc-900/80')?.token).toBe('bg-card');
+    expect(mapToken('bg-[#0d1117]/85')?.token).toBe('bg-surface');
+    expect(mapToken('bg-[#1a212b]')?.token).toBe('bg-raised');
+    expect(mapToken('text-[#ff8080]')?.token).toBe('text-danger');
+    expect(mapToken('text-[#58a6ff]')?.token).toBe('text-info');
+    expect(mapToken('text-[#a259ff]')?.token).toBe('text-accent-text');
+  });
+  it('a gradient stop INTO the chrome follows the theme; a brand or white stop is left', () => {
+    expect(mapToken('to-[#161b22]')).toEqual({ token: 'to-card', kind: 'fix' });
+    expect(mapToken('from-gray-950')?.token).toBe('from-surface');
+    expect(mapToken('via-gray-900')?.token).toBe('via-card');
+    expect(mapToken('via-gray-950/70')?.token).toBe('via-surface');
+    expect(mapToken('from-white')).toBeNull();
+    expect(mapToken('to-indigo-600')).toBeNull();
+  });
+  it('a hex BRAND fill (GitHub black) is a solid fill, so its white label stays white', () => {
+    expect(SOLID_FILL.test('bg-[#24292e] text-white')).toBe(true);
+    expect(migrate('"px-3 bg-[#24292e] hover:bg-[#1a1e22] text-white"').out).toContain('text-on-accent');
+  });
+  it('a LIGHT-authored surface is not guessed — bg-gray-50 / text-gray-900 / border-gray-200 stay for a hand read', () => {
+    for (const lit of ['bg-gray-50', 'bg-stone-100', 'text-gray-900', 'text-stone-900', 'border-gray-200', 'text-zinc-950']) {
+      expect(mapToken(lit), lit).toBeNull();
+    }
+  });
   it('a translucent black is a well inside a card up to /50 and a scrim from /60', () => {
     expect(mapToken('bg-black/20')?.token).toBe('bg-well');
     expect(mapToken('bg-black/50')?.token).toBe('bg-well');
@@ -98,7 +133,7 @@ describe('the readability FIX rows — pixels change on purpose, toward AA', () 
 
 describe('what is deliberately LEFT for a human', () => {
   it('bg-white, bg-black, text-black and non-colour props are not guessed', () => {
-    for (const lit of ['bg-white', 'bg-black', 'text-black', 'from-white/10', 'fill-white']) {
+    for (const lit of ['bg-white', 'bg-black', 'text-black', 'from-white/10', 'fill-white', 'to-black/30']) {
       expect(mapToken(lit), lit).toBeNull();
     }
   });
@@ -134,6 +169,18 @@ describe('white text on a SOLID brand fill stays white — the compat exception,
   it('an 80%+ fill is still a fill (bg-rose-600/80); a 10% tint is not', () => {
     expect(SOLID_FILL.test('bg-rose-600/80 text-white')).toBe(true);
     expect(SOLID_FILL.test('bg-rose-600/10 text-white')).toBe(false);
+  });
+  it('a label directly inside a filled box (the line above opens a solid-fill element) stays white', () => {
+    const src = [
+      '<div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">',
+      '  <span className="text-white font-black text-xs">NB</span>',
+      '</div>',
+      '<div className="p-4 bg-card">',
+      '  <span className="text-white font-black">plain</span>',
+    ].join('\n');
+    const { out } = migrate(src);
+    expect(out).toContain('<span className="text-on-accent font-black text-xs">NB</span>');
+    expect(out).toContain('<span className="text-ink font-black">plain</span>');
   });
   it('mapToken itself takes the flag', () => {
     expect(mapToken('text-white', { onSolidFill: true })?.token).toBe('text-on-accent');

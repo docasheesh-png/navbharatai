@@ -243,7 +243,7 @@ export function BillingPanel(props: BillingPanelProps) {
                 <div className="flex gap-4 pt-2">
                   <button
                     onClick={() => onSetDismissedReminderWarning(true)}
-                    className="flex-1 py-4 bg-raised border border-line hover:bg-raised text-muted hover:text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
+                    className="flex-1 py-4 bg-raised border border-line hover:bg-raised-hover text-muted hover:text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
                   >
                     Dismiss Warning
                   </button>
@@ -750,7 +750,7 @@ export function BillingPanel(props: BillingPanelProps) {
                                 key={pack.productId}
                                 onClick={() => onBuyStorePack?.(pack.productId)}
                                 disabled={!!buyingProductId}
-                                className="w-full text-left bg-well hover:bg-well disabled:opacity-40 border border-line hover:border-emerald-500/40 p-4 rounded-2xl transition-all active:scale-[0.99]"
+                                className="w-full text-left bg-well hover:bg-well-hover disabled:opacity-40 border border-line hover:border-emerald-500/40 p-4 rounded-2xl transition-all active:scale-[0.99]"
                               >
                                 <div className="flex items-center justify-between gap-4">
                                   <div>

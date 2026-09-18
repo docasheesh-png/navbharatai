@@ -106,7 +106,7 @@ export function DonationPanel({
               <div className="flex items-center justify-center gap-4 mb-4">
                 <h2 className="text-3xl sm:text-4xl font-black text-ink tracking-tighter leading-tight">{donationData.headline}</h2>
                 {isAdmin && (
-                  <button onClick={onStartEditing} className="p-2 opacity-0 group-hover/edit:opacity-100 bg-raised hover:bg-raised rounded-lg text-accent-text transition-all border border-line shadow-lg">
+                  <button onClick={onStartEditing} className="p-2 opacity-0 group-hover/edit:opacity-100 bg-raised hover:bg-raised-hover rounded-lg text-accent-text transition-all border border-line shadow-lg">
                     <Edit2 className="w-4 h-4" />
                   </button>
                 )}
@@ -125,7 +125,7 @@ export function DonationPanel({
               <div className="flex items-center justify-center gap-4 mb-8">
                 <p className="text-lg font-bold text-accent-text uppercase tracking-[0.2em]">{donationData.subHeadline}</p>
                 {isAdmin && (
-                  <button onClick={onStartEditing} className="p-1 px-2 opacity-0 group-hover/edit:opacity-100 bg-raised hover:bg-raised rounded-lg text-accent-text transition-all border border-line shadow-lg flex items-center gap-1">
+                  <button onClick={onStartEditing} className="p-1 px-2 opacity-0 group-hover/edit:opacity-100 bg-raised hover:bg-raised-hover rounded-lg text-accent-text transition-all border border-line shadow-lg flex items-center gap-1">
                     <Edit2 className="w-3 h-3" />
                     <span className="text-[8px] font-black uppercase">Edit</span>
                   </button>
@@ -151,7 +151,7 @@ export function DonationPanel({
                   <div className="flex items-start gap-4">
                     <span>I am <span className="text-ink font-bold underline decoration-indigo-500 decoration-2 underline-offset-4">{donationData.name}</span>. {donationData.missionStatement}</span>
                     {isAdmin && (
-                      <button onClick={onStartEditing} className="p-1 px-2 mt-1 bg-raised hover:bg-raised rounded-lg text-accent-text opacity-0 group-hover/edit:opacity-100 transition-all border border-line shadow-lg flex items-center gap-1 shrink-0">
+                      <button onClick={onStartEditing} className="p-1 px-2 mt-1 bg-raised hover:bg-raised-hover rounded-lg text-accent-text opacity-0 group-hover/edit:opacity-100 transition-all border border-line shadow-lg flex items-center gap-1 shrink-0">
                         <Edit2 className="w-3 h-3" />
                       </button>
                     )}
@@ -167,7 +167,7 @@ export function DonationPanel({
                 <div className="flex flex-col items-center">
                   <p className="text-sm text-muted leading-relaxed italic text-center">{donationData.dreamStatement}</p>
                   {isAdmin && (
-                    <button onClick={onStartEditing} className="mt-4 p-1 px-2 bg-raised hover:bg-raised rounded-lg text-accent-text opacity-0 group-hover/edit:opacity-100 transition-all border border-line shadow-lg flex items-center gap-1">
+                    <button onClick={onStartEditing} className="mt-4 p-1 px-2 bg-raised hover:bg-raised-hover rounded-lg text-accent-text opacity-0 group-hover/edit:opacity-100 transition-all border border-line shadow-lg flex items-center gap-1">
                       <Edit2 className="w-3 h-3" />
                       <span className="text-[8px] font-black uppercase">Edit Dream</span>
                     </button>
@@ -252,7 +252,7 @@ export function DonationPanel({
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-[10px] font-black text-accent-text uppercase tracking-[0.2em]">UPI IDENTITY</h4>
                 {isAdmin && !isDonationEditing && (
-                  <button onClick={onStartEditing} className="p-1 px-2 bg-raised hover:bg-raised rounded-lg text-accent-text opacity-0 group-hover/edit:opacity-100 transition-all border border-line shadow-lg flex items-center gap-1">
+                  <button onClick={onStartEditing} className="p-1 px-2 bg-raised hover:bg-raised-hover rounded-lg text-accent-text opacity-0 group-hover/edit:opacity-100 transition-all border border-line shadow-lg flex items-center gap-1">
                     <Edit2 className="w-3 h-3" />
                     <span className="text-[8px] font-black uppercase">Edit</span>
                   </button>

@@ -3954,7 +3954,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           )}
           <button
             onClick={() => setShowFrameworkPicker(true)}
-            className="flex items-center gap-1 text-[10px] bg-raised hover:bg-raised border border-line text-muted hover:text-ink px-2 py-0.5 rounded-full transition-all"
+            className="flex items-center gap-1 text-[10px] bg-raised hover:bg-raised-hover border border-line text-muted hover:text-ink px-2 py-0.5 rounded-full transition-all"
             title="Change framework"
           >
             <span>{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
@@ -4273,7 +4273,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     onClick={() => { setNameDraft(appName); setNameError(null); setNameModalOpen(true); }}
                     title="Change your app's name"
                     aria-label="Change your app's name"
-                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[11px] font-semibold text-muted hover:text-ink hover:bg-raised transition-colors touch-manipulation"
+                    className="shrink-0 flex items-center gap-1.5 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[11px] font-semibold text-muted hover:text-ink hover:bg-raised-hover transition-colors touch-manipulation"
                   >
                     <Pencil className="w-3 h-3" /> Edit
                   </button>
@@ -4458,7 +4458,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   </button>
                   <button
                     onClick={clearBillingBlock}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-warn bg-raised hover:bg-raised rounded px-2.5 py-1"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-warn bg-raised hover:bg-raised-hover rounded px-2.5 py-1"
                   >
                     Dismiss
                   </button>
@@ -4633,7 +4633,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 )}
                 <div className="flex gap-2">
                   <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-on-accent">Approve &amp; build</button>
-                  <button onClick={() => respond(state.pendingPermission!.callId, false)} className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised text-body">Reject</button>
+                  <button onClick={() => respond(state.pendingPermission!.callId, false)} className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised-hover text-body">Reject</button>
                 </div>
               </div>
             )}
@@ -4652,7 +4652,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   >Use {fwName(fwConflict.detected)} (from your message)</button>
                   <button
                     onClick={() => { setFramework(fwConflict.picked); setFrameworkExplicit(true); fwConflict.launch(fwConflict.picked); setFwConflict(null); }}
-                    className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised text-body"
+                    className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised-hover text-body"
                   >Keep {fwName(fwConflict.picked)} (your selection)</button>
                   <button
                     onClick={() => setFwConflict(null)}
@@ -5758,7 +5758,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                           {c.sha && labelEditSha !== c.sha && (
                             <button
                               onClick={() => beginLabelEdit(c.sha, c.label ?? '')}
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised text-muted shrink-0"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised-hover text-muted shrink-0"
                               title={c.label ? 'Rename this version' : 'Give this version a name you will recognise'}
                             >
                               <Pencil className="w-3 h-3" />
@@ -5785,12 +5785,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               <button
                                 onClick={() => handlePreviewCheckpoint(c.sha)}
                                 disabled={previewingSha === c.sha}
-                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised text-muted shrink-0 disabled:opacity-50"
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised-hover text-muted shrink-0 disabled:opacity-50"
                                 title="Open this version in a new tab — your current files are not changed"
                               >
                                 <Eye className="w-3 h-3" /> {previewingSha === c.sha ? 'Opening…' : 'Preview'}
                               </button>
-                              <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised text-muted shrink-0" title="Restore to this checkpoint">
+                              <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised-hover text-muted shrink-0" title="Restore to this checkpoint">
                                 <RotateCcw className="w-3 h-3" /> Restore
                               </button>
                             </>
@@ -6175,7 +6175,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             ) : ghReposError ? (
               <div className="space-y-2 text-center py-2">
                 <p className="text-[11px] text-warn">{ghReposError}</p>
-                <button type="button" onClick={() => void loadGhRepos()} className="px-4 py-2 bg-raised hover:bg-raised text-body text-xs font-semibold rounded-xl touch-manipulation">Retry</button>
+                <button type="button" onClick={() => void loadGhRepos()} className="px-4 py-2 bg-raised hover:bg-raised-hover text-body text-xs font-semibold rounded-xl touch-manipulation">Retry</button>
               </div>
             ) : ghRepos && ghRepos.length === 0 ? (
               <p className="text-[11px] text-muted text-center py-3">No repositories found on your GitHub account — paste a URL below instead.</p>

@@ -67185,6 +67185,45 @@ The module's existing 20 cases pass unchanged.
 - **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+## 2026-09-18 — Option F: a suggestion costs a suggestion's price (`AGENTV3_GREEN_REVIEW_LEAN`)
+
+Second of the series (admin: *"ek ek kar ke sabhi build karo"*). Measured on b6f88a72 from the raw
+token counts, not report fields: the reviewer made **40 calls**, read `src/App.tsx` **six times** and
+`src/index.css` five (each time told by the tool "you already have it"), spent **523,374 input tokens
+= 34.4% of the build's LLM spend ≈ ₹12.6**, and returned **`responseChars: 0` on every call**. And on
+that green app Green Stop had already made it suggest-only — no repair could run, nothing it said
+could fail the build.
+
+**The rule, reused — never a second "is the app green?" question.** `greenReviewPlan` is
+`!reviewerShouldWrite(...)`: exactly when the review can only suggest, it is also lean.
+- **Hard step cap** `GREEN_REVIEW_MAX_STEPS = 12` — a second `makeSubAgentSpawn({ ...subAgentDeps,
+  maxSteps })`. The deps object was hoisted so one wiring serves both spawns (the arity test
+  `subAgentGetsTheWholeWiring` re-anchored on the object, reason recorded in place).
+- **Budget** `reviewerBudgetMs(…, { previewGreen })` capped at `GREEN_REVIEW_BUDGET_MS = 45_000` — the
+  floor the function already refuses to go under, so a green review is never given LESS than a
+  not-green one at the wall-clock margin, only never more.
+- **The reviewer is TOLD** (`reviewBuild({ mode: 'suggest' })`): proven to render, suggest-only, read
+  each file once, do not survey, do not call `second_opinion`. The instruction became the pure,
+  exported `reviewerInstruction` so this can be asserted rather than trusted; full mode is
+  byte-identical to a review with no mode at all (test-locked).
+- Report code `REVIEW_LEAN`. Kill switch `AGENTV3_GREEN_REVIEW_LEAN=off`.
+
+**Untouched, on purpose:** where the reviewer can WRITE — not green AND (build failed OR proven
+broken) — full budget, full steps, full powers. The cut is in tokens, never strictness.
+
+⚠️ **A wrong expectation in my own first test, caught by the derived case.** I wrote that "not green,
+not proven broken, build ok" keeps the full review. `reviewerShouldWrite` says otherwise — that is the
+*could not look* state, and since 2026-08-23 ignorance is not a licence to edit, so it was already
+suggest-only. The plan correctly makes it lean; the hand-written table was wrong and the derived
+test (plan.mode === 'suggest' ⇔ !canWrite, all eight states) is what caught it. Recorded rather
+than quietly corrected.
+
+`second_opinion` needed no change: the child dispatcher is built with it withheld (SubAgent.ts,
+"positions 7-10"), which is why the Gita reviewer's call to it took 0 s.
+
+**Tests:** `tests/aSuggestionCostsASuggestionsPrice.test.ts` — 16 cases + source-anchored wiring
+guard. **Proven by reversion four ways:** the plan not asked · the budget not told · the green cap
+removed · the plan ignoring the write rule (bites two cases).
 ## 2026-09-18 — Option A: a working app is never lost to later edits in the SAME build (`AGENTV3_IN_BUILD_GREEN`)
 
 Admin, verbatim: *"navbharatai dwara app banne ke baad tutni nahi chahiye!!!!!"* — the same sentence
@@ -67309,6 +67348,48 @@ curl count as proof, and making the gate fill unconditional — each turns the s
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+## 2026-09-18 — A hover that repeats the resting background is not a hover (follow-up to #3070)
+
+**Found while auditing #3070 for the admin's standing instruction that no PR may compromise another
+feature.** The theme migration was clean on every axis it measured — literals down 11,487 → 2,825, AA
+green on all three themes, embedded snippets untouched — and it still shipped a real interaction
+regression that none of its gates could see.
+
+**The defect, in one line: the app's old idiom was `bg-white/10 hover:bg-white/15`, and BOTH alphas map
+to the single `bg-raised` token.** So the codemod emitted `bg-raised hover:bg-raised` **105 times**, and
+on **76 of those controls there was no other hover feedback of any kind** — a button simply stopped
+answering the pointer. Nothing failed anywhere: the classes are valid, `tsc` and the suite are silent on
+behaviour, the ratchet counts *literals* rather than *outcomes*, and every contrast check passed because
+the hover colour was, by construction, the colour that had already passed.
+
+🔒 **Fixed as one collapsed mapping, not as 105 sites.** Two real surfaces per theme — `--surface-raised-hover`
+and `--surface-well-hover` — exposed through `@theme inline` as `bg-raised-hover` / `bg-well-hover`, and
+the 107 class attributes rewritten to use them (29 files). A site whose hover was already a *different*
+surface was left alone, and a template literal carrying markup was skipped, because that is somebody
+else's app — the same exclusion `maskEmbeddedSources` makes.
+
+**The rule the values follow, so a fourth theme does not have to re-derive it: a hover moves the surface
+toward the theme's INSET end (the `well` direction), never toward its text.** On dark that is darker, on
+light darker, and on High contrast the only direction black can move. Contrast therefore *improves* on
+hover on every theme, which is what let this ship without re-tuning the palette.
+
+⚠️ **One palette value did have to move, and it is worth recording why.** Light's `--text-faint` was set
+to `#5b6b82` by the 2026-09-18 audit precisely because `#64748b` measured 4.23 on `--surface-raised` — and
+`#5b6b82` measures **4.40 on the new hover surface**, i.e. the hover state would have re-created the exact
+defect that audit removed, one step later. It is now `#57677e` (4.73), still lighter than `--text-muted`,
+so the body > muted > faint hierarchy is unchanged. `surface-raised-hover` was added to the AA lock's
+`SURFACES` list, so all ten text tokens are checked against it for every theme from now on.
+
+**Tests:** `tests/hoverIsNotANoOp.test.ts` (7 cases). It asserts no client file pairs a resting surface
+with the same surface on hover, that each theme declares both hover surfaces, and that the lift is large
+enough to SEE (> 7%) — a token differing in its last hex digit would otherwise pass and be invisible,
+which is the same "nothing failed" outcome in a new costume. **Reversion-proven in both halves:**
+restoring one `hover:bg-raised` fails the scanner by name, and setting `--surface-raised-hover` back to
+`--surface-raised` fails both the repeat check and the lift check.
+
+**Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
+in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
+appears it fails rather than shipping silently.
 ---
 
 ## 2026-09-18 — Autopsy `1a7f4a58` (Qiikr): the platform killed the app's own frontend and previewed its API

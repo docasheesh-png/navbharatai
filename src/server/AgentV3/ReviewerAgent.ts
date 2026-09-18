@@ -194,7 +194,7 @@ export function reviewScope(changedFiles: readonly string[] | undefined, treeSiz
   return { focused: true, files: changed };
 }
 
-export async function reviewBuild(opts: {
+export interface ReviewBuildOpts {
   userRequest: string;
   fileTree: string[];
   fileSample: { path: string; content: string }[];
@@ -204,21 +204,20 @@ export async function reviewBuild(opts: {
    * whole app is both expensive and wrong — see reviewScope.
    */
   changedFiles?: string[];
-}): Promise<ReviewResult> {
+  /**
+   * `suggest` when the app is PROVEN green and this review can only ever produce a suggestion
+   * (greenReviewPolicy.ts). The instruction then says so and sets a reading budget; the caller pairs
+   * it with a hard step cap and a small time budget. `full` (the default) is today's review, unchanged.
+   */
+  mode?: 'full' | 'suggest';
+}
+
+/**
+ * The reviewer's instruction, as a pure function of its inputs — exported so the suggest-mode block
+ * can be asserted rather than trusted. PURE.
+ */
+export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): string {
   const { userRequest, fileTree, fileSample } = opts;
-
-  // Defensive: never review an unreadable/empty workspace — an empty listing means we could not
-  // read the files, NOT that the app has no code. Return a neutral, honest skipped result so the
-  // user never sees a false "missing all source code, 0/100" after a successful build.
-  if (!hasReviewableSource(fileTree)) {
-    return {
-      passed: true,
-      score: 0,
-      issues: [],
-      summary: 'Review skipped — the workspace file listing could not be read (the build still completed).',
-    };
-  }
-
   const scope = reviewScope(opts.changedFiles, fileTree.length);
   const fileContext = fileSample
     .slice(0, 5)
@@ -228,7 +227,7 @@ export async function reviewBuild(opts: {
     )
     .join('\n');
 
-  const instruction = [
+  return [
     'You are a code reviewer. Evaluate whether the app fully meets the user\'s request.',
     '',
     `USER REQUEST: "${userRequest}"`,
@@ -271,7 +270,34 @@ export async function reviewBuild(opts: {
     '',
     'End with: "Score: N/100" (where N = your quality assessment).',
     'If everything looks good, just write: [PASS] App looks complete. Score: 90',
+    ...(opts.mode === 'suggest' ? [
+      '',
+      'THIS APP IS PROVEN TO RENDER IN A REAL BROWSER, AND THIS REVIEW IS SUGGEST-ONLY: nothing you',
+      'report can fail the build, and no repair will run from it — your findings are shown to the user as',
+      'an offer. So spend accordingly. Read each file you need ONCE (you were already handed samples above',
+      'and a file you have read does not change while you review it — re-reading it buys nothing and costs',
+      'the user money). Do not survey the project; look at what changed and answer. Do not call',
+      'second_opinion. If nothing is genuinely wrong, say [PASS] immediately.',
+    ] : []),
   ].join('\n');
+}
+
+export async function reviewBuild(opts: ReviewBuildOpts): Promise<ReviewResult> {
+  const { fileTree } = opts;
+
+  // Defensive: never review an unreadable/empty workspace — an empty listing means we could not
+  // read the files, NOT that the app has no code. Return a neutral, honest skipped result so the
+  // user never sees a false "missing all source code, 0/100" after a successful build.
+  if (!hasReviewableSource(fileTree)) {
+    return {
+      passed: true,
+      score: 0,
+      issues: [],
+      summary: 'Review skipped — the workspace file listing could not be read (the build still completed).',
+    };
+  }
+
+  const instruction = reviewerInstruction(opts);
 
   try {
     const { ok, summary } = await opts.spawn('reviewer', instruction);

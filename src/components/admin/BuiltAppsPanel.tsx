@@ -361,7 +361,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                   </button>
                 </div>
               </div>
-              <div className="flex-1 min-h-0 bg-white">
+              <div className="flex-1 min-h-0">
                 {plan.source === 'copy' && (
                   <iframe title={`Saved copy of ${preview.row.workspaceId}`} src={plan.url} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={IFRAME_SANDBOX} />
                 )}

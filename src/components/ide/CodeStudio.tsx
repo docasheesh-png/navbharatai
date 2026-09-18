@@ -1406,7 +1406,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <button
              onClick={() => { setZipError(''); setZipConfirmOpen(true); }}
              title={zipText.menuLabel}
-             className="flex items-center gap-1.5 px-2 h-6 rounded-md border border-line bg-well hover:bg-well hover:border-line text-[10px] font-medium text-muted hover:text-ink transition-all shrink-0"
+             className="flex items-center gap-1.5 px-2 h-6 rounded-md border border-line bg-well hover:bg-well-hover hover:border-line text-[10px] font-medium text-muted hover:text-ink transition-all shrink-0"
            >
              <UploadCloud className="w-3 h-3" />
              {zipText.menuLabel}
@@ -1416,7 +1416,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          <div className="flex-1 flex justify-center mx-4">
             <button
                onClick={() => setIsCommandPaletteOpen(true)}
-               className="w-full max-w-sm h-6 bg-well rounded-md border border-line flex items-center justify-center gap-2 text-[10px] text-faint hover:bg-well hover:border-line transition-all font-medium"
+               className="w-full max-w-sm h-6 bg-well rounded-md border border-line flex items-center justify-center gap-2 text-[10px] text-faint hover:bg-well-hover hover:border-line transition-all font-medium"
             >
                <Search className="w-3 h-3" />
                Search Files & Commands (Ctrl+Shift+P)

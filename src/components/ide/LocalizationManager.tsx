@@ -246,7 +246,7 @@ export function LocalizationManager() {
             />
             <div className="flex flex-col gap-1.5">
               <button onClick={importJson} disabled={!importText.trim()} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 rounded-lg text-xs transition-all text-on-accent">Import</button>
-              <button onClick={() => setShowImport(false)} className="px-3 py-1.5 bg-raised hover:bg-raised rounded-lg text-xs text-faint">Cancel</button>
+              <button onClick={() => setShowImport(false)} className="px-3 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-xs text-faint">Cancel</button>
             </div>
           </div>
         </div>

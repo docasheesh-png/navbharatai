@@ -719,7 +719,7 @@ ${generatedCode}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1.5 text-xs text-muted hover:text-body bg-raised hover:bg-raised px-3 py-1.5 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-muted hover:text-body bg-raised hover:bg-raised-hover px-3 py-1.5 rounded-lg transition-colors"
                   >
                     {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
                     {copied ? 'Copied!' : 'Copy'}
@@ -743,7 +743,7 @@ ${generatedCode}
                       w.document.body.appendChild(frame);
                       w.document.close();
                     }}
-                    className="flex items-center gap-1.5 text-xs text-muted hover:text-body bg-raised hover:bg-raised px-3 py-1.5 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 text-xs text-muted hover:text-body bg-raised hover:bg-raised-hover px-3 py-1.5 rounded-lg transition-colors"
                   >
                     <ExternalLink size={13} />
                     Open in Preview

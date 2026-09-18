@@ -343,7 +343,7 @@ export const MonetizationWizard: React.FC<MonetizationWizardProps> = ({
           {onConnectGitHub && (
             <button
               onClick={onConnectGitHub}
-              className="flex items-center gap-2 rounded-xl bg-raised px-4 py-2.5 text-xs font-semibold text-ink hover:bg-raised"
+              className="flex items-center gap-2 rounded-xl bg-raised px-4 py-2.5 text-xs font-semibold text-ink hover:bg-raised-hover"
             >
               <Github size={14} /> Connect GitHub
             </button>

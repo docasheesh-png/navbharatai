@@ -67674,6 +67674,99 @@ live AND offline, and source-anchored guards: the three store methods `update` a
   decision, not code.
 - A never-published app cannot be BANNED (nothing in the registry for the deploy gate to re-check). If
   the admin wants "this workspace may never publish", that is a new pre-publish block, not this panel.
+## 2026-09-18 — AUTOPSY `e9b25b08`: a build ORDER was built as an EDIT of our own scaffold, and it blocked the admin's first Project-Mode test
+
+**The build:** free/Weak, `"Build a search engines like google"`, 90 seconds, **stopped by the user**,
+₹0 (correctly). Delivered by `kimi-k2.7-code` after the planned `glm-4.7-flashx` lead rung was benched.
+
+### The five buckets (honest counts)
+
+- ✅ **Self-healed: 0.**
+- 🔀 **Worked around: 1** — GLM FlashX *"answering far below a usable rate after 31s — abandoned"*,
+  benched; KIMI made the build's only model call.
+- ⏭️ **Skipped: 2** — Software Project Mode created no plan (*"this turn is not a fresh build"*);
+  typecheck / page-render / journey all skipped with no preview.
+- ❌ **Still broken: 4** — design consistency 62/100 (grade C, 16 colours); accessibility 84/100 (two
+  buttons with no accessible name); release gate RED; **the ₹0 reason was false** (below).
+- 🥵 **Struggle: 5** — 6 s setup · **31 s inside a dead GLM call (34% of the build)** · 47 s first
+  model call · **four `read_file` calls on one scaffold file at 9–15 s each** · and the user pressing
+  Stop at 69 seconds having been shown nothing built. Sandbox: 3.0 min up, **2.7 min (89%) idle**.
+
+### 🔴 The chain, every link measured on `main` rather than assumed
+
+| | |
+|---|---|
+| 1 | `classifyIntentWithConfidence("Build a search engines like google")` → **`new_build`, HIGH** |
+| 2 | HIGH confidence ⇒ the intention reader is **deliberately never consulted** |
+| 3 | `isExplicitCompleteBuild(...)` → **false** (only a prompt carrying the literal word "complete"/"full" passes) |
+| 4 | so the route's deterministic net forced `new_build` → `edit_existing` |
+| 5 | the workspace held **the platform's own golden scaffold**, and `projectExists = fileCount > 0` cannot tell that from the user's app |
+| 6 | user told *"✏️ Editing your existing app (4 source files)"* about an app they never wrote |
+| 7 | `PROJECT_MODE: "this turn is not a fresh build, so no plan was created"` — **the admin's own first test of the flag they had switched on that morning** |
+
+Measured, same run:
+
+```
+   edit      | Build a search engine like google
+   edit      | build a todo website
+   edit      | ek dukaan ka billing app banao
+   edit      | make a game like ludo
+FRESH-BUILD  | Create a complete Hospital OPD Management System
+```
+
+🔴 **THE 2026-07-07 REPORT NAMED THIS CAUSE AND IT WAS TREATED IN VOCABULARY.** Its own words, still
+in `IntentClassifier.ts`: *"a handful of scaffold/test files had been restored from history
+(projectExists=true)"*. The remedy chosen then was `isExplicitCompleteBuild`, a PROMPT guard — so the
+cause survived, and two months later a prompt one word outside that guard hit it again.
+
+### The fixes (all five reversion-proven)
+
+**1 · The net asks about the USER's app, not about files on disk.** `userProjectFiles.ts` —
+`SCAFFOLD_PATHS` is **derived** from `goldenBaseFiles`, never re-listed, so adding a scaffold file
+updates it automatically. A workspace holding only our starter files holds no app of the user's.
+🔒 It cannot endanger a real app: any app a user has built carries files the scaffold does not, so the
+net still fires. 🔒 **UNKNOWN MEANS YES** — an unreadable listing answers `true`, today's behaviour
+exactly, and the only direction in which this could reach a real app.
+⚠️ Stated plainly: `src/App.tsx` IS a scaffold path, so a one-file app reads as "no app of your own
+yet" and an explicit build order there starts a fresh build. That is what the order asked for.
+
+**2 · A safety net must not overrule the signal it stands in for.** `SmartIntent.readerAnswered` is
+true only when the LLM reader itself answered; the net skips a `new_build` it decided. The net's own
+comment names its population — *"even if the LLM is down/slow"* — and every one of those paths
+(high-confidence keyword, timeout, failure, "unclear") still returns `false` and is byte-identical.
+⚠️ **This alone does NOT fix the reported build, and that was measured rather than assumed** — a plain
+build order is HIGH confidence, so the reader never sees one. My first version was exactly that guard;
+my own test caught it. The two guards answer different halves and only together close the class.
+
+**3 · The downgrade is no longer silent.** `BUILD_ORDER_READ_AS_EDIT` (info) names the file count, how
+many are the user's own, and whether the reader ran. Registered in `PROCESS_ONLY_CODES` and
+`NEVER_SUGGEST` — how a turn was ROUTED is a fact about our engine, never a finding about their app.
+That silence is why this class survived from July to today: the report said only *"not a fresh build"*,
+with nothing anywhere saying why it was not one.
+
+**4 · A build the user stopped is not an empty build.** `zeroBillReasonFor` — three states where the
+route had a two-branch ternary, so a stop was recorded as *"empty build (0 files produced)"* under a
+comment reading *"the build failed"*. Both false. Third instance of the `JOURNEY_PASSED` /
+`PAGE_RENDER_FAILED` class. **The bill is unchanged (₹0 in every branch); only the sentence stops lying.**
+
+**Test:** `tests/aBuildOrderIsNotAnEdit.test.ts` — 25 cases, **proven by reversion five ways**
+(scaffold not excluded → 3 fail · unknown-means-empty → 1 · `readerAnswered` always false → 1 · the
+code dropped from `PROCESS_ONLY` → 1 · the stopped branch removed → 1).
+
+### Still open, recorded rather than guessed (rule 6)
+
+1. **`glm-4.7-flashx` has now failed to lead TWO consecutive reports** — `2ec15a71` (abandoned at 18 s)
+   and this one (31 s). `CLAUDE.md`'s own 2026-09-17 entry calls its coding quality unmeasured and says
+   to watch it. The ladder is admin-mandated, so this is a decision, not a fix: on a third report the
+   recommendation is to drop FlashX and let KIMI lead Weak/Normal.
+2. **`read_file` took 9–15 seconds per call**, four times on one file — roughly half of a 90-second
+   build. Cause not established from this report.
+3. **`framework: python-fastapi`** was recorded for an app whose only service is *"frontend on port
+   5173"* and whose file is `index.html`. A misdetection with real consequences (scaffold, run command);
+   not investigated here.
+4. **"A search engine like Google" is something this platform cannot build** — it needs a crawler and an
+   index, not a web app — and the engine said nothing. Second report supporting an honest
+   capability gate (the VPN-app build spent 18 minutes on the same class).
 ---
 
 ## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)
@@ -67790,6 +67883,93 @@ restoring one `hover:bg-raised` fails the scanner by name, and setting `--surfac
 **Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
 in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
 appears it fails rather than shipping silently.
+## 2026-09-18 — A HOSPITAL SYSTEM ASKED FOR IN TAMIL SCORED 5 — THE SCORE OF "hi"
+
+Follow-on to the same day's domain-sizing work, on the admin's word ("han, wahi bhasha wala kaam
+uthao"). That entry closed the gap for English and Hindi and recorded this half as **open**, because
+this repo held no vocabulary at all for the other languages of the market and inventing one would be
+a guess. This is that vocabulary, measured rather than guessed.
+
+**THE DEFECT, root-caused.** `RequirementGapAnalyzer`'s thirteen domain regexes were English, with
+romanised Hindi and then Devanagari appended by hand, twice. A prompt in **Bengali, Tamil, Telugu,
+Urdu, Marathi, Gujarati, Kannada, Malayalam, Punjabi or Odia** therefore named NO domain:
+`analyzeRequirementGaps` returned `general`, `namesBusinessDomain` returned false, and
+`RequestAnalyser`'s last resort — which asks exactly that question — fell to `chat` at `BASE_SCORE`
+**5**. Everything downstream followed the score down: **80 steps instead of 150, no blueprint, a
+small-app ETA, and the cheap flash rung instead of Kimi.** The user typed their own language and got
+a toy.
+
+**THE SECOND DEFECT, same file, same cause.** `INDIA_CONTEXT_RE` names the languages in ENGLISH
+("hindi", "tamil"), so a prompt typed entirely IN one of those scripts was never recognised as an
+Indian-market prompt at all — `indiaFirstGuidance` (₹, UPI, DD/MM/YYYY) never reached the builder, and
+a user writing in Tamil got `$` / Stripe / MM-DD-YYYY defaults.
+
+**THE 50/50 HALF — why it could arise.** There was no PLACE for a language. The vocabulary lived
+inside one-line regex literals, so adding one meant editing thirteen lines and every editor had to
+re-derive the boundary rules below. `src/server/lib/indicDomainTerms.ts` is that place: one table, one
+boundary builder, one compiled cache, consulted at the **single** point where a domain is chosen —
+`selectDomain`, extracted because BOTH readers (the analyzer and the suggestion bulb) carried the same
+filter+reduce inline. So `analyzeRequirementGaps`, `missingDomainFeatures`, the admin's Failure
+Category panel, `namesBusinessDomain`, `BuildTimeEstimator`, `RoleChats` and `domainKnowledge` all
+gained every language at once, with no second copy to keep in sync.
+
+**🔒 THE BOUNDARY IS THE WHOLE DIFFICULTY, and it is why the terms are NOT pasted into the regexes.**
+JavaScript's `\b` is ASCII-only, so an unanchored Indic term matches inside longer, unrelated words —
+the way `माल` (goods) matches inside `मालिक` (owner). Two assertions, both needed:
+* LEFT `(?<![\p{L}\p{N}\p{M}])` — a term can never be found mid-word or at a word's end.
+* RIGHT `(?!\p{M}*[\p{L}\p{N}])` — trailing COMBINING MARKS may follow (so an inflected `दुकानों`
+  still matches `दुकान`), but not a mark-then-letter. **That second half is what a naive "marks are
+  allowed" rule gets wrong**: in Indic scripts a virama IS a mark, so `ಯೋಗ` (yoga) would otherwise
+  match inside `ಯೋಗ್ಯ` (suitable).
+A term marked `+` is a STEM (left assertion only), for the case suffixes Tamil/Telugu/Kannada/
+Malayalam/Bengali attach directly to a noun — `மருத்துவமனை` inside `மருத்துவமனையில்`. A term earns
+`+` only when every longer word starting with it is the same domain; otherwise it stays a whole word
+and an inflected form is simply missed. **A miss costs today's behaviour; a false positive costs a
+wrongly-sized, dearer build** — that asymmetry decided every borderline word.
+
+**Words dropped for precision, not forgotten:** `तेर्वु`/`தேர்வு` (exam, but also "selection"),
+`সংরক্ষণ` (means data storage as often as a reservation), `आरक्षण` (in India, quota far more often
+than a booking), `भूमि`/generic "home" words (`घर`, `ঘর`, `ಮನೆ`, `വീട്`), and every "hotel" word (in
+India it means both an eatery and lodging, and English `hotel` is in no domain regex either). `अप्पु`
+(Telugu loan) was demoted from stem to whole word because it is a prefix of `అప్పుడు` ("then").
+
+**Evidence.** `tests/theLanguagesOfTheMarketNameTheirDomain.test.ts` — 17 cases: **71 INFLECTED
+prompts** across ten languages each resolving to its own domain end-to-end and sizing as
+`complex_app`/58/`sonnet`; a **16-line collision corpus** of ordinary sentences that CONTAIN a domain
+term (`கடைசி`, `ಯೋಗ್ಯ`, `সুদানের`, `জিম্বাবুয়ের`, `अप्पुडु`, `कडलास`, `मालिक`, `उपयोग`) naming no
+domain; eleven ordinary app requests in eleven scripts staying `general` and ≤20; the English/Hindi
+corpus asserted unchanged. **Proven by reversion**: removing the matcher from `selectDomain` and the
+script test from `detectIndiaContext` turns 6 of the 17 red; narrowing the script range by one script
+turns 2 red.
+
+**A tie was INHERITED rather than re-decided.** `ഭക്ഷണത്തിന്റെ ഓർഡർ ആപ്പ്` ("a food order app")
+resolves to `ecommerce`, not `restaurant` — because `a food order app` does too in English, and has
+since the 2026-07-21 feature-score fix (with no English feature word in an Indic prompt, nothing
+breaks the tie and array order keeps the earlier domain). Giving the Indic path its own tie-break
+would make one sentence mean two things in two languages. Pinned as a test so it is a decision.
+
+**Drift policed, not merely noted.** `AgentV3/LanguageDetect.ts` already enumerates these nine script
+ranges for a DIFFERENT question (which language to write an app's labels in, gated on 15% dominance).
+Rather than refactor a module with its own tests, or leave two copies of one fact, a test DERIVES the
+invariant from that table and asserts the two agree — the `ladderClaimsMatchTheTable` pattern.
+
+### 🔴 STILL OPEN (rule 6) — four honest gaps, none of them guessed at
+
+1. **`namesBusinessDomain`'s guards are English-only.** `PAGE_DELIVERABLE_SIGNAL` and
+   `SIMPLE_APP_SIGNAL` (`appComplexitySignals.ts`) stop "a coming-soon **page** for my restaurant"
+   being sized as a whole app. An Indic-language page request passes both guards, so it sizes as
+   `complex_app`. **Not fixed here because that file is mid-flight in PR #3079** — CLAUDE.md's
+   concurrency rule 4 (do not edit another session's file while it is in flight).
+2. **Feature detection is still English-only.** For an Indic prompt every domain feature reads as
+   `likelyMissing`, so the requirement guidance tells the builder to INCLUDE things the user already
+   asked for (harmless — it would build them anyway) and, more importantly, the feature score cannot
+   break a tie between two domains (see the food-order case above). Closing it means Indic terms per
+   FEATURE, not per domain — a much larger table, and a separate change with its own evidence.
+3. **A SIMPLE app prompt in an Indic script still scores 5, not 15.** No consequence today (both are
+   ≤20, so the same tier and the same step cap), which is why it was not chased.
+4. **Assamese, Sindhi, Kashmiri, Konkani, Manipuri and Bodo are not covered.** Assamese is partly
+   carried by the Bengali terms (shared script); the rest would need vocabulary nobody here has
+   measured. Recorded rather than filled with guesses.
 ## 2026-09-18 — `AGENTV3_PROJECT_MODE=on`, and the door it opens was bolted (the gate read bullets; users write commas)
 
 The admin set `AGENTV3_PROJECT_MODE=on` in Cloud Run — the two-month-old pending decision recorded in
@@ -68048,3 +68228,70 @@ and a local install that is never a symlink to itself.
 **For every other live session:** after merging a `main` that carries `caa7e47e` and not this fix,
 `rm node_modules && npm ci` restores the install. Do not "fix" it by committing anything under
 `node_modules`.
+---
+
+## 2026-09-18 — Admin order: "ab yeh nahi ana chahiye" — ONE answer about which port is the app
+
+Admin, on autopsy `1a7f4a58`, pointing at the two lines that contradicted each other in one report:
+
+```
+SERVICE_GRAPH_SINGLE  "Single service: qiikr (frontend on port 5173)."
+(supersede)           "superseded now that the current app is verified on port 3001"
+```
+
+**Two subsystems, one report, opposite conclusions — and the wrong one held the kill switch.**
+
+### The graph was not merely ignored; it was also guessing
+
+Worth recording because it changes what "listen to the graph" means: the graph's `5173` came from
+`DEFAULT_PORTS.frontend`, **not from the app**. It was right by coincidence (Vite's default equals this
+app's pin) and wrong about everything else — it called a two-process project "Single service", because
+`buildServiceGraph` read only the text of `dev` and `"dev": "concurrently \"npm run dev:server\"
+\"npm run dev:client\""` contains no port and no clue.
+
+### What shipped
+
+- **`npmScripts.ts` — the ONE script parser.** Four modules kept private copies of "find a port in a
+  command" and all four stopped at the `npm run` boundary (`declaredPort`, `serviceGraph`,
+  `DevServerRecovery`, `E2BActuator`). `portsInCommand`, `delegatesTo` and a cycle-safe, depth-bounded
+  `walkScript` now live in one file that the readers import — the drifted-copy class this repo has
+  already paid for with four `safeRelPath`s and two complex-app detectors.
+- **The graph READS the fan-out.** `expandDelegated` turns a delegating entry script into the services
+  the author actually wrote. Qiikr now reports `2 services: qiikr (dev:client) — frontend :5173;
+  qiikr (dev:server) — backend :3001`, start order backend-first, with **5173 read from `--port 5173`**
+  — proven by moving the app's pin and watching the answer follow.
+  🔒 Conservative, per that file's own warning that inventing a service is worse than the gap: it needs
+  ≥2 delegated scripts that exist, classify, and yield ≥2 DISTINCT kinds. Two frontends behind one
+  script stay one service.
+  ⚠️ `classifyScript` gained `assumeRunnable`: its name gate (`dev|start|serve|preview`) exists to FIND
+  the entry script among all scripts, and inside a known fan-out it rejected every real name (`api`,
+  `web`, `client`). My own test caught that — `run-p api web` classified as nothing. Worker/cron
+  detection still runs ahead of it.
+- **`appPorts.ts` — the single derivation.** `appPortsFrom(files)` → `{ preview, frontend, backends,
+  all, multiService }`, built on the graph and unioned with `declaredPortsFrom` (the graph reads
+  scripts; an app also states ports in `.env.example`, `listen()` and `vite.config.ts`, and the veto
+  must not answer "not yours" because of which file it was written in). `previewPortFor` answers the
+  question nobody was asking: **a frontend always wins** — the API is the web app's dependency, and a
+  person opening a "preview" means the thing with a user interface.
+- **Every actor reads it.** `update_preview` feeds the supersede veto from `appPortMap.all`, and when
+  the port it just published is the app's API while the app also has a web page, it says so to the
+  agent instead of letting it believe the app moved. The port sweep's summary stops asserting a move:
+  *"Port 3001 is this project's API/secondary service … Nothing has moved. Point the preview at 5173."*
+- **`tests/oneAnswerAboutWhichPortIsTheApp.test.ts` (15 cases)** includes the contradiction guard
+  itself: the graph's preview port must be a port the supersede refuses to free, asserted through the
+  same function. Proven by reversion twice — un-expanding the fan-out turns 4 red, taking the port map
+  away from the sweep turns 1 red.
+
+### 🔴 Still open (rule 6)
+
+- **The health check's own line is not yet port-map-aware.** `devServerHealthLine` still says
+  *"dev server is UP on port N. Call update_preview with port=N"*, and on a backend-only restart that N
+  is the API. The sweep line beside it now contradicts it honestly, and `update_preview` corrects it
+  after the fact — but the cleanest fix is one more reader of `appPortsFrom`, in `DevServerRecovery`.
+  Deliberately not done in the same change: that file was PR #3086's subject hours earlier, and the
+  right moment to touch it is after this lands.
+- **Nothing STARTS the second service yet.** The graph now describes both processes and their order;
+  the runner still launches one. That was always the graph's stated purpose — *"Before building a
+  multi-process runner we need to know how often a real project even has a second service"* — and this
+  change is what finally makes that measurement real. A full-stack app whose API is not running still
+  renders a web page with failing fetches.

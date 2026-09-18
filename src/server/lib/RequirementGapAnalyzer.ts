@@ -11,6 +11,8 @@
 // It changes NO build flow — it is a tool the planner can call (or a future clarification pass can consume).
 // Real, complete, unit-tested. (The interactive "pause and ask the user" loop is a deliberate follow-up.)
 
+import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
+
 export interface RequirementGaps {
   domain: string;
   mentioned: string[];
@@ -390,7 +392,14 @@ const INDIA_CONTEXT_RE =
 
 /** True when the prompt is clearly for the Indian market. Pure. */
 export function detectIndiaContext(prompt: string): boolean {
-  return INDIA_CONTEXT_RE.test(String(prompt || ''));
+  const text = String(prompt || '');
+  // 🔴 A PROMPT WRITTEN IN AN INDIAN SCRIPT IS AN INDIAN-MARKET PROMPT (2026-09-18). The regex above
+  // names the languages in ENGLISH ("hindi", "tamil"), so a prompt typed entirely IN Tamil — or in
+  // Devanagari — was not recognised as Indian at all, and `indiaFirstGuidance` never reached the
+  // builder: a user who literally typed their own language got $ / Stripe / MM-DD-YYYY defaults. The
+  // script test is the most direct evidence there is. See `INDIC_SCRIPT_RE` for the one honest gap
+  // (Urdu shares its script with Arabic and Persian, so script alone cannot claim it for India).
+  return INDIA_CONTEXT_RE.test(text) || usesIndicScript(text);
 }
 
 /**
@@ -411,6 +420,25 @@ export function indiaFirstGuidance(domain: string): string {
     lines.push('For identity, use Aadhaar / PAN-based KYC (Indian norms) — never SSN.');
   }
   return ['[INDIA-FIRST — build this for the Indian market by default]', ...lines.map((l) => `- ${l}`)].join('\n');
+}
+
+/**
+ * 🔑 THE ONE PLACE A DOMAIN IS CHOSEN. Both readers (the analyzer and the suggestion bulb) called this
+ * same filter+reduce inline, so any change to HOW a domain is recognised had to be made twice — the
+ * duplication this file already warns about for `stripNonDomainUses`. Centralised when the languages of
+ * India were added (2026-09-18), so a script added to `indicDomainTerms` reaches every reader at once.
+ *
+ * A domain fires when its ENGLISH/Hindi regex matches, OR when the prompt names it in one of the nine
+ * Indic scripts. Ties are broken by feature score, and `>=` keeps the EARLIER domain — so every existing
+ * classification is byte-identical unless a later domain is strictly more specific. Pure.
+ */
+function selectDomain(text: string): DomainDef | undefined {
+  return DOMAINS
+    .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text))
+    .reduce<DomainDef | undefined>(
+      (best, d) => (best && domainFeatureScore(best, text) >= domainFeatureScore(d, text) ? best : d),
+      undefined,
+    );
 }
 
 /** How specifically a domain fits the prompt: the count of its FEATURE signals present in the text. Used to
@@ -435,12 +463,7 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
   // real misclassification (deep-test 2026-07-21): a restaurant POS ("menu / KOT / table / GST billing")
   // resolved to 'ecommerce' because ecommerce's `\border\b` matched "orders" first, so the build was handed
   // ecommerce implicit features (cart/checkout/refunds) instead of restaurant ones. Pure + deterministic.
-  const domain = DOMAINS
-    .filter((d) => d.re.test(text))
-    .reduce<DomainDef | undefined>(
-      (best, d) => (best && domainFeatureScore(best, text) >= domainFeatureScore(d, text) ? best : d),
-      undefined,
-    );
+  const domain = selectDomain(text);
   const feats = domain ? domain.features : GENERIC_FEATURES;
 
   const mentioned: string[] = [];
@@ -492,12 +515,7 @@ export function shouldSurfaceRequirementGaps(g: RequirementGaps): boolean {
 export function missingDomainFeatures(appText: string, source: string): { domain: string; labels: string[] } {
   const text = stripNonDomainUses(String(appText || ''));
   const src = String(source || '');
-  const domain = DOMAINS
-    .filter((d) => d.re.test(text))
-    .reduce<DomainDef | undefined>(
-      (best, d) => (best && domainFeatureScore(best, text) >= domainFeatureScore(d, text) ? best : d),
-      undefined,
-    );
+  const domain = selectDomain(text);
   const feats = domain ? domain.features : GENERIC_FEATURES;
   const labels = feats.filter((f) => !f.re.test(src) && !f.re.test(text)).map((f) => f.label);
   return { domain: domain ? domain.key : 'general', labels };

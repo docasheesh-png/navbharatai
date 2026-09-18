@@ -66,11 +66,11 @@ interface ServicesResponse {
 
 /** Tone per level. `unknown` is grey on purpose — see the header; it must never read as healthy. */
 const TONE: Record<LoadLevel, { dot: string; ring: string; text: string; chip: string }> = {
-  ok: { dot: 'bg-emerald-500', ring: 'border-white/10', text: 'text-emerald-400', chip: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' },
-  warn: { dot: 'bg-amber-500', ring: 'border-amber-500/30', text: 'text-amber-400', chip: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
-  critical: { dot: 'bg-red-500', ring: 'border-red-500/30', text: 'text-red-400', chip: 'bg-red-500/10 border-red-500/30 text-red-400' },
-  full: { dot: 'bg-red-600', ring: 'border-red-500/50', text: 'text-red-400', chip: 'bg-red-500/15 border-red-500/50 text-red-300' },
-  unknown: { dot: 'bg-white/25', ring: 'border-white/10', text: 'text-[#8b949e]', chip: 'bg-white/5 border-white/10 text-[#8b949e]' },
+  ok: { dot: 'bg-emerald-500 text-on-accent', ring: 'border-line', text: 'text-success', chip: 'bg-emerald-500/10 border-emerald-500/30 text-success' },
+  warn: { dot: 'bg-amber-500 text-on-accent', ring: 'border-amber-500/30', text: 'text-warn', chip: 'bg-amber-500/10 border-amber-500/30 text-warn' },
+  critical: { dot: 'bg-red-500 text-on-accent', ring: 'border-red-500/30', text: 'text-danger', chip: 'bg-red-500/10 border-red-500/30 text-danger' },
+  full: { dot: 'bg-red-600 text-on-accent', ring: 'border-red-500/50', text: 'text-danger', chip: 'bg-red-500/15 border-red-500/50 text-danger' },
+  unknown: { dot: 'bg-raised', ring: 'border-line', text: 'text-muted', chip: 'bg-raised border-line text-muted' },
 };
 
 const LEVEL_WORD: Record<LoadLevel, string> = {
@@ -173,11 +173,11 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
   const unreadable = tiles.filter((t) => t.level === 'unknown');
 
   return (
-    <div className={`rounded-[1.5rem] p-6 border bg-[#161b22] ${tone.ring}`}>
+    <div className={`rounded-[1.5rem] p-6 border bg-card ${tone.ring}`}>
       <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <Gauge className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-sm font-black text-white uppercase tracking-tight">Platform Load</h3>
+          <Gauge className="w-4 h-4 text-accent-text" />
+          <h3 className="text-sm font-black text-ink uppercase tracking-tight">Platform Load</h3>
           <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${tone.chip}`}>
             {chipWord(worst, unreadable.length, tiles.length)}
           </span>
@@ -186,19 +186,19 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
           type="button"
           onClick={() => void fetchLoad()}
           disabled={loading}
-          className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white disabled:opacity-50 transition-colors"
+          className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink disabled:opacity-50 transition-colors"
         >
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
       </div>
 
-      <p className="text-[11px] text-[#8b949e] font-semibold mb-4">{loadHeadline(data, error)}</p>
+      <p className="text-[11px] text-muted font-semibold mb-4">{loadHeadline(data, error)}</p>
 
       {error && (
-        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 p-3 mb-4">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <p className="text-[10px] text-[#8b949e] font-semibold">{error}</p>
+        <div className="flex items-start gap-2 rounded-xl border border-line bg-raised p-3 mb-4">
+          <AlertTriangle className="w-3.5 h-3.5 text-warn shrink-0 mt-0.5" />
+          <p className="text-[10px] text-muted font-semibold">{error}</p>
         </div>
       )}
 
@@ -207,17 +207,17 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
           {tiles.map((t) => {
             const tt = TONE[t.level] ?? TONE.unknown;
             return (
-              <div key={t.id} className={`rounded-xl border bg-[#0d1117] p-4 ${tt.ring}`}>
+              <div key={t.id} className={`rounded-xl border bg-surface p-4 ${tt.ring}`}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className={`w-1.5 h-1.5 rounded-full ${tt.dot}`} />
-                  <span className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">{t.label}</span>
+                  <span className="text-[9px] font-black text-muted uppercase tracking-widest">{t.label}</span>
                 </div>
                 <div className={`text-lg font-black ${tt.text}`}>
                   {/* The route's own display string, so the screen can never disagree with the API
                       about what was measured — an unread ceiling reads "unknown", never "0". */}
                   {t.display}
                 </div>
-                <p className="text-[10px] text-[#8b949e] font-semibold mt-1.5 leading-snug">{t.note}</p>
+                <p className="text-[10px] text-muted font-semibold mt-1.5 leading-snug">{t.note}</p>
               </div>
             );
           })}
@@ -227,10 +227,10 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
       {unreadable.length > 0 && (
         // Named a SECOND time, deliberately. A grey tile in a grid of green ones is easy to read past,
         // and "we could not see this ceiling" is the one thing on this screen that must not be missed.
-        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 p-3 mt-4">
-          <HelpCircle className="w-3.5 h-3.5 text-[#8b949e] shrink-0 mt-0.5" />
-          <p className="text-[10px] text-[#8b949e] font-semibold">
-            <span className="text-white">Not measured:</span> {unreadable.map((t) => t.label).join(', ')}.
+        <div className="flex items-start gap-2 rounded-xl border border-line bg-raised p-3 mt-4">
+          <HelpCircle className="w-3.5 h-3.5 text-muted shrink-0 mt-0.5" />
+          <p className="text-[10px] text-muted font-semibold">
+            <span className="text-ink">Not measured:</span> {unreadable.map((t) => t.label).join(', ')}.
             These are unknown, not clear — a ceiling that could not be read may already be full.
           </p>
         </div>
@@ -239,11 +239,11 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
       {/* ── HOSTING, on demand ─────────────────────────────────────────────────────────────────
           Real Google API calls against the apps project, and only meaningful while hosting is being
           switched on — so they run when asked, never on every home-page visit. */}
-      <div className="mt-5 pt-4 border-t border-white/5">
+      <div className="mt-5 pt-4 border-t border-line">
         <button
           type="button"
           onClick={openHosting}
-          className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors"
+          className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-muted hover:text-ink transition-colors"
         >
           <Server className="w-3 h-3" />
           {hostingOpen ? 'Hide app-hosting checks' : 'Check app hosting setup'}
@@ -252,30 +252,30 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
         {hostingOpen && (
           <div className="mt-3 space-y-3">
             {hostingLoading && (
-              <p className="text-[10px] text-[#8b949e] font-semibold">Running the same calls a real publish makes…</p>
+              <p className="text-[10px] text-muted font-semibold">Running the same calls a real publish makes…</p>
             )}
             {hostingError && (
-              <p className="text-[10px] text-amber-400 font-semibold">{hostingError}</p>
+              <p className="text-[10px] text-warn font-semibold">{hostingError}</p>
             )}
 
             {services && (
-              <div className="rounded-xl border border-white/10 bg-[#0d1117] p-4">
-                <div className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest mb-1.5">Hosted services</div>
+              <div className="rounded-xl border border-line bg-surface p-4">
+                <div className="text-[9px] font-black text-muted uppercase tracking-widest mb-1.5">Hosted services</div>
                 {!services.available ? (
                   // Not an error and not "zero used" — hosting simply is not switched on.
-                  <p className="text-[10px] text-[#8b949e] font-semibold">
+                  <p className="text-[10px] text-muted font-semibold">
                     {services.message || 'App hosting is not switched on, so there is nothing to count.'}
                   </p>
                 ) : (
                   <>
-                    <div className="text-lg font-black text-white">
+                    <div className="text-lg font-black text-ink">
                       {services.capacity ? `${services.capacity.used} / ${services.capacity.cap}` : '—'}
                     </div>
-                    <p className="text-[10px] text-[#8b949e] font-semibold mt-1">
+                    <p className="text-[10px] text-muted font-semibold mt-1">
                       {services.capacity?.message || 'Capacity could not be summarised.'}
                     </p>
                     {services.warning && (
-                      <p className="text-[10px] text-amber-400 font-semibold mt-1.5">{services.warning}</p>
+                      <p className="text-[10px] text-warn font-semibold mt-1.5">{services.warning}</p>
                     )}
                   </>
                 )}
@@ -283,10 +283,10 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
             )}
 
             {preflight && (
-              <div className="rounded-xl border border-white/10 bg-[#0d1117] p-4">
+              <div className="rounded-xl border border-line bg-surface p-4">
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-[9px] font-black text-[#8b949e] uppercase tracking-widest">Setup check</span>
-                  <span className="text-[9px] font-black uppercase text-[#8b949e]">
+                  <span className="text-[9px] font-black text-muted uppercase tracking-widest">Setup check</span>
+                  <span className="text-[9px] font-black uppercase text-muted">
                     {preflight.projectId || 'no project configured'}
                   </span>
                 </div>
@@ -294,20 +294,20 @@ export function LoadBoard({ adminToken }: { adminToken: string }): React.ReactEl
                   {preflight.checks.map((c) => (
                     <li key={c.id} className="flex items-start gap-2">
                       {c.state === 'ok'
-                        ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                        : <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />}
+                        ? <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
+                        : <AlertTriangle className="w-3.5 h-3.5 text-warn shrink-0 mt-0.5" />}
                       <div>
-                        <p className="text-[10px] font-bold text-white">{c.label}</p>
-                        {c.detail && <p className="text-[10px] text-[#8b949e] font-semibold">{c.detail}</p>}
+                        <p className="text-[10px] font-bold text-ink">{c.label}</p>
+                        {c.detail && <p className="text-[10px] text-muted font-semibold">{c.detail}</p>}
                         {c.state !== 'ok' && c.remedy && (
-                          <p className="text-[10px] text-indigo-300 font-semibold">{c.remedy}</p>
+                          <p className="text-[10px] text-accent-text font-semibold">{c.remedy}</p>
                         )}
                       </div>
                     </li>
                   ))}
                 </ul>
                 {preflight.nextAction && (
-                  <p className="text-[10px] text-white font-bold mt-2.5">Next: {preflight.nextAction}</p>
+                  <p className="text-[10px] text-ink font-bold mt-2.5">Next: {preflight.nextAction}</p>
                 )}
               </div>
             )}

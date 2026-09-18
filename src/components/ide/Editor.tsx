@@ -271,9 +271,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e] overflow-hidden">
+    <div className="flex flex-col h-full bg-card overflow-hidden">
       {/* Tab bar */}
-      <div className="h-9 bg-[#252526] flex items-center overflow-x-auto no-scrollbar shrink-0 select-none">
+      <div className="h-9 bg-card flex items-center overflow-x-auto no-scrollbar shrink-0 select-none">
         {openTabs.map((tab) => {
           const isActive = tab.path === activeTab;
           const TabIcon = iconForFile(tab.path);
@@ -283,10 +283,10 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               onClick={() => onTabChange(tab.path)}
               className={cn(
                 "h-full flex items-center px-3 gap-2 border-r border-[#1e1e1e] cursor-pointer min-w-[120px] max-w-[200px] transition-all group",
-                isActive ? "bg-[#1e1e1e] text-white" : "bg-[#2d2d2d] text-[#969696] hover:bg-[#2a2d2e]"
+                isActive ? "bg-card text-ink" : "bg-[#2d2d2d] text-on-accent hover:bg-[#2a2d2e]"
               )}
             >
-              <TabIcon className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-indigo-400" : "text-[#858585]")} />
+              <TabIcon className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-accent-text" : "text-muted")} />
               <span className={cn("text-[11px] truncate flex-1", isActive ? "font-medium" : "")}>
                 {tab.path}
               </span>
@@ -303,7 +303,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                   // Same touch trap as the file rows: hover-only meant a phone could not close a
                   // BACKGROUND tab at all without first switching to it. Pointer devices keep the
                   // reveal-on-hover; touch shows every ✕.
-                  "p-0.5 rounded hover:bg-white/10 transition-opacity",
+                  "p-0.5 rounded hover:bg-raised transition-opacity",
                   "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100",
                   isActive && "[@media(hover:hover)]:opacity-100"
                 )}
@@ -316,17 +316,17 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       </div>
 
       {/* Editor Header / Breadcrumbs */}
-      <div className="h-6 bg-[#1e1e1e] border-b border-white/5 flex items-center justify-between px-4 shrink-0 text-[#858585] select-none">
+      <div className="h-6 bg-card border-b border-line flex items-center justify-between px-4 shrink-0 text-muted select-none">
         <div className="flex items-center gap-1 text-[10px] font-medium tracking-tight">
            <span>Project Root</span>
            <ChevronRight className="w-3 h-3" />
-           <span className="text-white">{fileName}</span>
+           <span className="text-ink">{fileName}</span>
            {/* C23: reveal active file in explorer */}
            {onRevealInExplorer && (
              <button
                onClick={() => onRevealInExplorer(activeTab)}
                title="Reveal in file explorer"
-               className="ml-1 p-0.5 hover:text-white transition-colors"
+               className="ml-1 p-0.5 hover:text-ink transition-colors"
              >
                <FolderOpen className="w-3 h-3" />
              </button>
@@ -340,7 +340,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                 onChange={(e) => changeTheme(e.target.value as EditorThemeId)}
                 title="Editor theme"
                 aria-label="Editor theme"
-                className="bg-[#1e1e1e] border border-white/10 rounded text-[10px] text-[#858585] hover:text-white outline-none focus:border-indigo-500 px-1 py-0.5 cursor-pointer"
+                className="bg-card border border-line rounded text-[10px] text-muted hover:text-ink outline-none focus:border-indigo-500 px-1 py-0.5 cursor-pointer"
               >
                 {EDITOR_THEMES.map((t) => (
                   <option key={t.id} value={t.id}>{t.label}</option>
@@ -353,7 +353,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                <button
                  onClick={onDebug}
                  aria-label="Preview debug"
-                 className="hover:text-amber-500 transition-all"
+                 className="hover:text-warn transition-all"
                  title="Preview Debug"
                >
                  <Bug className="w-3.5 h-3.5" />
@@ -369,7 +369,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                  title="Save (Ctrl+S)"
                  className={cn(
                    'transition-all flex items-center gap-1 text-[10px] font-bold',
-                   justSaved ? 'text-emerald-400' : 'hover:text-white',
+                   justSaved ? 'text-success' : 'hover:text-ink',
                  )}
                >
                  {justSaved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
@@ -385,9 +385,9 @@ export const Editor: React.FC<EditorProps> = React.memo(({
 
       {/* C11: Binary file warning */}
       {isBinaryFile && (
-        <div className="flex-1 flex flex-col items-center justify-center bg-[#1e1e1e] text-[#8b949e] gap-3 p-8">
-          <Image className="w-10 h-10 text-[#484f58]" />
-          <p className="text-sm font-medium text-[#c9d1d9]">Binary file</p>
+        <div className="flex-1 flex flex-col items-center justify-center bg-card text-muted gap-3 p-8">
+          <Image className="w-10 h-10 text-faint" />
+          <p className="text-sm font-medium text-body">Binary file</p>
           <p className="text-[11px] text-center max-w-[280px] leading-relaxed">
             This file type cannot be edited as text. Download the project ZIP to access it directly.
           </p>
@@ -429,7 +429,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           language={getLanguage(fileName)}
           value={content}
           theme={theme}
-          loading={<div className="w-full h-full flex items-center justify-center bg-[#1e1e1e] text-[#8b949e] text-xs font-mono">Loading editor…</div>}
+          loading={<div className="w-full h-full flex items-center justify-center bg-card text-muted text-xs font-mono">Loading editor…</div>}
           beforeMount={handleEditorWillMount}
           onMount={handleEditorDidMount}
           onChange={(val) => onChange(val || '')}
@@ -463,7 +463,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       {/* Mobile ACTION toolbar (admin 2026-07-31): a phone has no Ctrl key, so the key editor actions
           (Undo / Redo / Find / Run) become ≥40px tap buttons here. Hidden on desktop, where the real
           keyboard shortcuts do the job. */}
-      <div className="md:hidden h-11 bg-[#1f1f1f] border-t border-white/5 flex items-center px-2 gap-1.5 shrink-0">
+      <div className="md:hidden h-11 bg-[#1f1f1f] border-t border-line flex items-center px-2 gap-1.5 shrink-0 text-on-accent">
           {([
             { label: 'Undo', Icon: RotateCcw, mirror: false, run: () => editorRef.current?.trigger('mobile-toolbar', 'undo', {}) },
             { label: 'Redo', Icon: RotateCcw, mirror: true, run: () => editorRef.current?.trigger('mobile-toolbar', 'redo', {}) },
@@ -473,7 +473,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               key={label}
               onClick={() => { editorRef.current?.focus(); run(); }}
               aria-label={label}
-              className="min-w-[40px] h-9 px-2 bg-white/5 active:bg-white/10 rounded-lg text-white flex items-center justify-center border border-white/5"
+              className="min-w-[40px] h-9 px-2 bg-raised active:bg-raised rounded-lg text-on-accent flex items-center justify-center border border-line"
             >
               <Icon className={cn('w-4 h-4', mirror && 'scale-x-[-1]')} />
             </button>
@@ -486,8 +486,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               onClick={handleSave}
               aria-label="Save file"
               className={cn(
-                'min-w-[40px] h-9 px-3 rounded-lg text-white flex items-center gap-1.5 font-bold text-xs ml-auto transition-colors',
-                justSaved ? 'bg-emerald-600' : 'bg-white/10 active:bg-white/20',
+                'min-w-[40px] h-9 px-3 rounded-lg text-on-accent flex items-center gap-1.5 font-bold text-xs ml-auto transition-colors',
+                justSaved ? 'bg-emerald-600 text-on-accent' : 'bg-raised active:bg-raised',
               )}
             >
               {justSaved ? <><Check className="w-4 h-4" /> Saved</> : <><Save className="w-4 h-4" /> Save</>}
@@ -496,7 +496,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       </div>
 
       {/* Mobile Input Helper Toolbar - Hidden on desktop */}
-      <div className="md:hidden h-10 bg-[#252526] border-t border-white/5 flex items-center px-1 overflow-x-auto no-scrollbar gap-1 shrink-0">
+      <div className="md:hidden h-10 bg-card border-t border-line flex items-center px-1 overflow-x-auto no-scrollbar gap-1 shrink-0">
           {['{', '}', '(', ')', '[', ']', ';', ':', '"', "'", '<', '>', '/', '=', '+', '-', '*', '_'].map((char, i) => (
             <button
               key={i}
@@ -512,7 +512,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
                   editorRef.current.executeEdits('helper', [{ range, text: char, forceMoveMarkers: true }]);
                 }
               }}
-              className="min-w-[32px] h-8 bg-white/5 rounded-lg text-white font-mono text-xs flex items-center justify-center border border-white/5"
+              className="min-w-[32px] h-8 bg-raised rounded-lg text-ink font-mono text-xs flex items-center justify-center border border-line"
             >
               {char}
             </button>

@@ -2835,6 +2835,8 @@ is now enforced at the source, by CI.**
   **brand-coloured label keeps its literal** — `text-amber-400` stays, because `text-warn` is dark
   amber on Light and the panel under it is near-black on every theme (2.59:1); same for a hex brand
   ink such as Figma's `#a259ff` on its own dark chip.
+  A **translucent tint** (`bg-amber-500/10`) is not a surface either — the fixed box shows through it,
+  so "does this element have its own background?" means a resting, OPAQUE one (`hasOwnOpaqueBackground`).
   ⚠️ **While `theme-compat.css` still exists, a GitHub-dark literal is NOT self-coherent** — compat
   repaints `bg-[#0d1117]` per theme, so a fixed ink left on it goes invisible on Light. A code block
   whose background compat owns must have its ink themed too (`bg-surface text-info`), not frozen.
@@ -3082,6 +3084,38 @@ the plan rather than by the window. It answers the five ceilings by name: contex
 saves the plan and projects the todos, ~18571 marks each module done/failed after its turn, ~19591
 auto-continues to the next buildable module). This is a live path behind a flag, not dead code —
 unlike `EmbeddingSearch`, whose only reader is called from nowhere.
+
+✅ **SET `on` IN CLOUD RUN BY THE ADMIN 2026-09-18** — the two-month-old pending decision above is
+taken, and Software Project Mode is live for every user. ⚠️ **It had never run for a single real
+build before that moment**, so the first real mega-prompts are its first evidence; treat it as new.
+
+🔴 **AND THE SWITCH WAS MEASURED THE SAME HOUR: THE DOOR IT OPENS WAS BOLTED.** `megaProjectSignals`
+counted `^- ` / `^1. ` LINES, so **not one of fourteen realistic prompts fired** — "school ERP with
+students, teachers, attendance, fees, exams, timetable, library, transport" scored **zero**, while
+`ProjectPlan.test.ts`'s own passing case is the same system written as a bulleted spec. **The gate was
+built to read a DEVELOPER's spec; real users write one line with commas.** Identical class to the
+scoring fix shipped hours earlier that day (`COMPLEX_APP_SIGNAL` listed the words a developer writes
+and scored "hospital management system" 5 — the score of "hi"): the instance was fixed in the SIZER,
+the two GATES were never hunted.
+- Both now ask one shared counter, `src/server/AgentV3/enumeratedFeatures.ts`
+  (`countEnumeratedFeatures`), which reads bullet lines AND inline `a, b, c` / `a aur b` runs.
+- ⚠️ **`MEGA_BULLETS_WITH_NOUN` moved 8 → 6**, and 6 is not invented: `complexityFromPrompt` already
+  floors a named complex app's `featureCount` at six. It is the weaker half of an AND (a big-software
+  noun must be present too). Measured margin: every ordinary app prompt counts **0–2**, every real
+  project prompt **5–8** — six sits in the gap, not on an edge.
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE (rule 3): `featureCount` in `lib/appScopeAnalyzer.ts`**, the
+  gate behind `AGENTV3_MEGA_ROADMAP` (on by default), was blind the same way — it saw only bullet
+  lines plus loose verbs, so eight comma-listed modules read as the single word "with", halved away.
+  It takes the **MAX** of its old count and the shared one, never the sum: that gate spends a real
+  planner call on every user's build, so it may only become more right, never more eager. Measured:
+  **zero** ordinary prompts flipped to `analyze`.
+- Test-locked and reversion-proven in all three halves in
+  `tests/theGateReadsBulletsUsersWriteCommas.test.ts` (17 cases), whose ORDINARY corpus is the
+  precision lock — a later widening that drags a todo app in fails CI.
+
+⚠️ **What to watch on the first real builds:** the `PROJECT_MODE` report line, and whether a big
+request's module plan appears and advances. A build that takes an extra planner call and then
+decomposes is the feature working; a *small* app doing that is the precision lock having been broken.
 
 ⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
 `off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built

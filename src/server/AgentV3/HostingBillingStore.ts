@@ -87,8 +87,11 @@ class HostingBillingStore {
     const db = this.getDb();
     if (!db) return;
     try {
-      await db.collection(COLLECTION).doc(hostingBillKey(subject, day)).set(
-        { debited: true, tokensDebited, debitedAt: Date.now() }, { merge: true },
+      // An UPDATE, never a merge-set: the claim above CREATED this doc, and a stamp must never be the
+      // first thing written under a bill key — a minted `{ debited: true }` would make the next claim's
+      // `create` fail and silently absorb a day (the DeploymentStore.setStatus class, 2026-09-18).
+      await db.collection(COLLECTION).doc(hostingBillKey(subject, day)).update(
+        { debited: true, tokensDebited, debitedAt: Date.now() },
       );
     } catch { /* the money moved; a telemetry write failing must not undo that fact */ }
   }

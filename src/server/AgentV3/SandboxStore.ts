@@ -333,11 +333,14 @@ class SandboxStore {
     const db = this.getDb();
     if (!db || !workspaceId) return;
     try {
-      await db.collection('agentv3_sandboxes').doc(workspaceId).set(
-        { pausedAt: Date.now(), ...(by ? { pausedBy: by } : {}) },
-        { merge: true },
-      );
-    } catch { /* best-effort */ }
+      // 🔴 AN UPDATE, NOT A MERGE-SET (the DeploymentStore.setStatus class, hunted 2026-09-18). This is
+      // the one writer here whose payload carries NO identity — no workspaceId, no sandboxId — so a
+      // merge-set on a record that `clear()` deleted between the sweep's read and this stamp minted a
+      // doc holding only `{ pausedAt }`: a sandbox record for no sandbox. `update()` refuses a missing
+      // doc, and a missing record has nothing to mark.
+      await db.collection('agentv3_sandboxes').doc(workspaceId)
+        .update({ pausedAt: Date.now(), ...(by ? { pausedBy: by } : {}) });
+    } catch { /* best-effort — a missing record has nothing to mark */ }
   }
 
   /**

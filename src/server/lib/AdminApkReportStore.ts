@@ -146,9 +146,12 @@ export async function markApkReportFixed(
   const db = getDb();
   if (!db || !id) return false;
   try {
-    await db.collection(COLLECTION).doc(id).set({
+    // An UPDATE, never a merge-set: this patches a report that must already exist, and `set(…, { merge: true })`
+    // would MINT a report holding only `fixed` when it does not — a blank row in the admin's APK list
+    // (the DeploymentStore.setStatus class, 2026-09-18). A missing report is reported as not marked.
+    await db.collection(COLLECTION).doc(id).update({
       fixed, fixedAt: fixed ? Date.now() : null, fixedNote: note ?? null,
-    }, { merge: true });
+    });
     return true;
   } catch {
     return false;

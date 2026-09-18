@@ -335,7 +335,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
           <div className="space-y-2.5">
             <button
               onClick={() => setMode('new')}
-              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-line bg-raised hover:bg-raised text-left transition-colors"
+              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-line bg-raised hover:bg-raised-hover text-left transition-colors"
             >
               <span className="shrink-0 w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-400/25 flex items-center justify-center">
                 <AlertCircle className="w-4 h-4 text-accent-text" />
@@ -348,7 +348,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
 
             <button
               onClick={() => setMode('list')}
-              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-line bg-raised hover:bg-raised text-left transition-colors"
+              className="w-full flex items-center gap-3 p-4 rounded-2xl border border-line bg-raised hover:bg-raised-hover text-left transition-colors"
             >
               <span className="shrink-0 w-9 h-9 rounded-xl bg-raised border border-line flex items-center justify-center relative">
                 <MessageSquare className="w-4 h-4 text-muted" />
@@ -496,7 +496,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                               <button
                                 onClick={() => replyFileRef.current?.click()}
                                 disabled={replying}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-raised text-[10px] font-semibold text-muted hover:bg-raised disabled:opacity-40"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-raised text-[10px] font-semibold text-muted hover:bg-raised-hover disabled:opacity-40"
                               >
                                 <ImageIcon className="w-3 h-3" /> {replyShot ? 'Change screenshot' : 'Add screenshot'}
                               </button>
@@ -563,7 +563,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-raised text-[11px] font-semibold text-body hover:bg-raised disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-line bg-raised text-[11px] font-semibold text-body hover:bg-raised-hover disabled:opacity-40"
               >
                 <ImageIcon className="w-3.5 h-3.5" /> {shot ? 'Change screenshot' : 'Add screenshot'}
               </button>

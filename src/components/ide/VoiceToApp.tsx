@@ -131,7 +131,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                 <span className="text-sm font-medium text-muted">Voice Recorder</span>
                 <button
                   onClick={() => setLang((l) => (l === 'hi-IN' ? 'en-US' : 'hi-IN'))}
-                  className="flex items-center gap-1.5 rounded-md border border-line bg-raised px-3 py-1.5 text-xs text-muted hover:bg-raised transition-colors"
+                  className="flex items-center gap-1.5 rounded-md border border-line bg-raised px-3 py-1.5 text-xs text-muted hover:bg-raised-hover transition-colors"
                 >
                   <Languages className="w-3.5 h-3.5" />
                   {lang === 'hi-IN' ? 'Hindi' : 'English'}
@@ -217,7 +217,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
               <div className="mt-4 rounded-lg border border-line overflow-hidden">
                 <button
                   onClick={() => setEnhancersOpen((o) => !o)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-raised text-sm text-muted hover:bg-raised transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-raised text-sm text-muted hover:bg-raised-hover transition-colors"
                 >
                   <span>Prompt Enhancers</span>
                   {enhancersOpen ? (

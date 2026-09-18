@@ -177,7 +177,7 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
               onClick={() => setShown((sh) => ({ ...sh, [s.name]: !sh[s.name] }))}
               title={shown[s.name] ? 'Hide' : 'Show'}
               aria-label={shown[s.name] ? `Hide ${s.name}` : `Show ${s.name}`}
-              className="px-2 rounded bg-raised hover:bg-raised text-muted cursor-pointer"
+              className="px-2 rounded bg-raised hover:bg-raised-hover text-muted cursor-pointer"
             >
               {shown[s.name] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
@@ -215,7 +215,7 @@ export function SecretRequestCard({ prompt, secrets, onSave, onDone, finale, onG
         <button
           onClick={() => onDone(false)}
           disabled={saving}
-          className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised text-body cursor-pointer"
+          className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised-hover text-body cursor-pointer"
         >
           {finale ? 'I\u2019ll do this later' : 'Skip for now'}
         </button>

@@ -274,7 +274,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         {showQuick && (
           <div className="flex flex-wrap gap-2 pt-2">
             {config.quickPrompts!.map((q, i) => (
-              <button key={i} onClick={() => send(q)} className="text-[12px] px-3 py-1.5 rounded-full bg-raised hover:bg-raised border border-line text-body">{q}</button>
+              <button key={i} onClick={() => send(q)} className="text-[12px] px-3 py-1.5 rounded-full bg-raised hover:bg-raised-hover border border-line text-body">{q}</button>
             ))}
           </div>
         )}

@@ -65678,6 +65678,51 @@ SPECIFIC word (`dhaba`) over a GENERIC one (`order`), but that changes the tie-b
 pair and therefore what real builds produce. It needs its own change and its own corpus sweep — not a
 rider on this one.
 
+### 2026-09-18 — user report (build 117, Android WebView): "Aapki home screen bahut leg maarta hai"
+
+One report, three findings: a real cause of the lag, a real unhandled rejection, and a false alarm.
+
+**1. 🥵 THE LAG — two `blur-[100px]` blobs animated FOR EVER.** `HomeView.tsx` carried two
+`motion.div`s, each `w-3/4 h-3/4` with a 100px Gaussian, animating `scale` + `rotate` + `opacity` on
+`repeat: Infinity` (22 s and 28 s). **A blurred layer that never moves is rasterised once and then
+composited for free; one that scales or rotates must be re-rasterised through the filter on
+essentially every frame**, and a 100px radius needs a buffer far larger than the element. Two of
+them, for ever, on the app's most-visited screen, on a 360×524 mid-range phone in a WebView — plus
+two perpetual rAF loops. They were the ONLY two `repeat: Infinity` in the file.
+**Fixed by keeping the blobs and dropping the motion**: same colours, sizes, positions and blur, so
+at rest the screen is pixel-identical. If the ambient movement is ever wanted back it must be an
+OPACITY-only CSS keyframe — opacity composites without re-running the filter; scale and rotate cannot.
+⚠️ **Honest limit: this cannot be profiled on the reporter's phone from here.** It is the strongest
+candidate by a wide margin and the report's own off-screen finding points at exactly that element,
+but it is a diagnosis from the code, not a measurement of their device.
+
+**2. 🔴 `"PlayBilling.then()" is not implemented on android @ unhandled promise` — and `.then()` is
+the whole diagnosis, because no line in that file ever calls it.** `registerPlugin` returns a PROXY
+that turns any property access into a native call. `plugin()` was `async` and did `return cached`, so
+the async machinery — which probes a returned value for `.then` to see whether it is a thenable —
+read `.then` OFF THE PROXY. Capacitor dispatched a native call to a method named `then`, Android has
+none, and the promise it made for that call is held by nobody.
+⚠️ **`try/catch` could not save it**: the probe happens during the RESOLUTION of the helper's own
+promise, so a file whose header fairly claims *"every call try/caught into a NAMED outcome"* still
+shipped a guaranteed unhandled rejection on every Android launch — whether or not the installed shell
+carries the plugin at all. The guard was real; the leak was upstream of it.
+🔎 **The sibling was hunted (rule 3): `deviceIntegrityNative.ts` had the identical defect** and would
+have said `DeviceIntegrity.then()`. Both fixed. `metaNativeConsent.ts` — which `playBillingNative`'s
+header claims to "mirror exactly" — is safe, and the ONE difference is precisely this: it uses the
+proxy locally and never returns it. **The fix is the wrapper (`{ api }`), and it must stay one.**
+
+**3. ⚠️ THE 147px "off-screen" FINDING WAS A GHOST.** `div.absolute.-bottom-1/3 — 147px past the
+edge` was true of the element's geometry and false of anything a user can see: its parent is
+`absolute inset-0 pointer-events-none overflow-hidden`, so the browser clips it and the page gains no
+scroll. A deliberately-oversized blurred background is the commonest shape on any modern landing
+screen, so the scanner was set to report a ghost on nearly every report — **and a finding that is
+always there is a finding nobody reads.** `scanOverflow` now skips an element that any ancestor clips
+or scrolls horizontally (exact, not heuristic: such an ancestor BOUNDS it, and if the ancestor is
+itself too wide it is reported in its own right). Knowing this needs computed style, which the pure
+scan deliberately lacks, so it arrives as an OPTIONAL hook — **no hook supplied ⇒ byte-identical to
+before**, and a style read that throws never hides a real finding.
+
+**Tests:** `tests/homeLagAndPluginRejection.test.ts` (16), reversion-proven on both code fixes.
 ---
 
 ## 2026-09-18 — The admin build-report ⓘ popover was CLIPPED BY ITS OWN ROW, not mis-sized (PR #3069)

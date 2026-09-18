@@ -47,6 +47,26 @@ export interface OverflowScan {
 /** Sub-pixel layout rounding routinely puts an element a fraction over the edge. That is not a bug. */
 const EDGE_TOLERANCE_PX = 1;
 
+/**
+ * 🔴 AN ELEMENT AN ANCESTOR CLIPS IS NOT OFF-SCREEN — IT IS DECORATION (user report 2026-09-15).
+ *
+ * That report said `div.absolute.-bottom-1/3 — 147px past the edge`. It was true of the element's
+ * geometry and FALSE of anything a user could see: the blob sits inside
+ * `absolute inset-0 pointer-events-none overflow-hidden`, so the browser clips it and the page
+ * gains no scroll at all. A deliberately-oversized blurred background is the single most common
+ * shape on any modern landing screen, so without this the scanner reports a ghost on nearly every
+ * report — and a finding that is always there is a finding nobody reads.
+ *
+ * The rule is exact rather than heuristic: if ANY ancestor clips or scrolls horizontally, that
+ * ancestor bounds the element, so the element cannot be what widens the page. If the ancestor is
+ * itself too wide, it is measured on its own and reported in its own right — nothing is lost.
+ *
+ * ⚠️ Knowing this needs computed style, which the pure scan deliberately does not have. So it
+ * arrives as an OPTIONAL hook: a caller that does not supply it gets exactly today's behaviour,
+ * and the DOM collector supplies one backed by `getComputedStyle`.
+ */
+const CLIPPING_OVERFLOW = /^(hidden|clip|auto|scroll)$/;
+
 /** A phone page has a few hundred elements; the cap only exists so a pathological page cannot hang. */
 const DEFAULT_ELEMENT_BUDGET = 4000;
 
@@ -90,10 +110,26 @@ interface Measured {
  * kept only when no descendant of it overflows by as much: that is the point where the width is
  * actually introduced, and it is the element a fix would touch.
  */
+/** Walk up: does any ancestor clip or scroll horizontally, and therefore contain this element? PURE. */
+export function isClippedByAncestor(el: ScanElement, clips: (e: ScanElement) => boolean): boolean {
+  let parent = el.parentElement ?? null;
+  let hops = 0;
+  while (parent && hops < 200) {
+    try {
+      if (clips(parent)) return true;
+    } catch {
+      /* a style read that throws tells us nothing — keep walking rather than guess */
+    }
+    parent = parent.parentElement ?? null;
+    hops += 1;
+  }
+  return false;
+}
+
 export function scanOverflow(
   root: ScanRoot | null | undefined,
   viewportWidth: number,
-  opts: { maxFindings?: number; elementBudget?: number } = {},
+  opts: { maxFindings?: number; elementBudget?: number; clipsHorizontally?: (el: ScanElement) => boolean } = {},
 ): OverflowScan {
   const empty: OverflowScan = { scanned: false, truncated: false, findings: [] };
   if (!root || typeof root.querySelectorAll !== 'function') return empty;
@@ -125,6 +161,9 @@ export function scanOverflow(
     if (!Number.isFinite(rect.right)) continue;
     const over = rect.right - viewportWidth;
     if (over <= EDGE_TOLERANCE_PX) continue;
+    // Clipped by an ancestor ⇒ it cannot widen the page. See CLIPPING_OVERFLOW above (the 147px
+    // decorative blob a real report chased). No hook supplied ⇒ nothing is skipped, as before.
+    if (opts.clipsHorizontally && isClippedByAncestor(el, opts.clipsHorizontally)) continue;
     measured.push({ el, overflowPx: over });
   }
 
@@ -240,7 +279,19 @@ export function collectDiagnostics(win: DiagnosticsWindow | null | undefined): C
   try {
     const contentWidth = Number(win.document?.documentElement?.clientWidth);
     const width = Number.isFinite(contentWidth) && contentWidth > 0 ? contentWidth : Number(win.innerWidth);
-    const scan = scanOverflow(win.document?.body ?? null, width);
+    // The clipping hook (see CLIPPING_OVERFLOW). Best-effort by construction: any browser without
+    // getComputedStyle, or any style read that throws, simply yields `false` and the scan behaves
+    // exactly as it did before this existed — a ghost finding is better than a lost one.
+    const getStyle = (win as { getComputedStyle?: (e: unknown) => { overflowX?: string } | null }).getComputedStyle;
+    const clipsHorizontally = typeof getStyle === 'function'
+      ? (el: ScanElement) => {
+          try {
+            const ox = getStyle.call(win, el)?.overflowX;
+            return typeof ox === 'string' && CLIPPING_OVERFLOW.test(ox.trim().toLowerCase());
+          } catch { return false; }
+        }
+      : undefined;
+    const scan = scanOverflow(win.document?.body ?? null, width, { clipsHorizontally });
     out.overflowScanned = scan.scanned;
     if (scan.truncated) out.overflowTruncated = true;
     if (scan.findings.length > 0) out.overflow = scan.findings;

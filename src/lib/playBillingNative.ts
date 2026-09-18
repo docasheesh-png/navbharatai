@@ -45,15 +45,41 @@ export function isPlayBillingPlatform(platform: string | null | undefined): bool
   return String(platform ?? '').trim().toLowerCase() === 'android';
 }
 
+/**
+ * 🔴 A CAPACITOR PLUGIN PROXY MUST NEVER BE THE RESOLUTION VALUE OF A PROMISE.
+ *
+ * THE REPORT (user report, 2026-09-15, app build 117, Android 16 WebView):
+ *     `"PlayBilling.then()" is not implemented on android @ unhandled promise`
+ *
+ * **The `.then()` in that message is the whole diagnosis, and no line in this file ever calls it.**
+ * `registerPlugin` returns a PROXY that turns any property access into a native method call. This
+ * helper was `async` and did `return cached`, so the async machinery — which resolves a returned
+ * value by probing it for `.then` to see whether it is a thenable — read `.then` OFF THE PROXY.
+ * The proxy dispatched a native call to a method named `then`, Android has no such method, and the
+ * promise Capacitor made for it is held by nobody. Hence: unhandled, on every Android launch,
+ * whether or not the installed shell carries the plugin at all.
+ *
+ * ⚠️ `try/catch` could not save it: the probe happens during the RESOLUTION of this function's own
+ * promise, and the rejected promise it produces is never awaited. So a file whose header fairly
+ * claims "every call try/caught into a NAMED outcome" still shipped a guaranteed unhandled
+ * rejection — the guard was real and the leak was upstream of it.
+ *
+ * 🔎 The header also says this file "mirrors metaNativeConsent.ts exactly". It does not, and the
+ * ONE difference is exactly this: that file uses the proxy locally and never returns it.
+ * `deviceIntegrityNative.ts` had the identical defect and is fixed in the same change (rule 3).
+ *
+ * 🔒 THE FIX IS THE WRAPPER, AND IT MUST STAY ONE: the proxy is handed back INSIDE an object, so no
+ * promise ever resolves to the proxy and nothing probes it for `.then`.
+ */
 /** The plugin handle, or null anywhere Play Billing does not exist (web, iOS, an older shell). Never throws. */
-async function plugin(): Promise<PlayBillingPlugin | null> {
-  if (cached) return cached;
+async function plugin(): Promise<{ api: PlayBillingPlugin } | null> {
+  if (cached) return { api: cached };
   try {
     const { Capacitor, registerPlugin } = await import('@capacitor/core');
     // Android, not "native": Play Billing is a Google Play service, and iOS has no such plugin.
     if (!isPlayBillingPlatform(Capacitor.getPlatform())) return null;
     cached = registerPlugin<PlayBillingPlugin>('PlayBilling');
-    return cached;
+    return { api: cached };
   } catch {
     return null;
   }
@@ -66,9 +92,9 @@ async function plugin(): Promise<PlayBillingPlugin | null> {
  */
 export async function playBillingAvailable(): Promise<boolean> {
   try {
-    const p = await plugin();
-    if (!p) return false;
-    const res = await p.isAvailable();
+    const held = await plugin();
+    if (!held) return false;
+    const res = await held.api.isAvailable();
     return res?.available === true;
   } catch {
     return false;
@@ -78,9 +104,9 @@ export async function playBillingAvailable(): Promise<boolean> {
 /** Launch Google's purchase sheet for one product. Resolves with a NAMED status, never a throw. */
 export async function launchPlayPurchase(productId: string): Promise<NativePurchase> {
   try {
-    const p = await plugin();
-    if (!p) return { status: 'unavailable' };
-    return await p.purchase({ productId });
+    const held = await plugin();
+    if (!held) return { status: 'unavailable' };
+    return await held.api.purchase({ productId });
   } catch (e) {
     return { status: 'failed', message: e instanceof Error ? e.message : String(e) };
   }
@@ -98,9 +124,9 @@ export async function launchPlayPurchase(productId: string): Promise<NativePurch
  */
 export async function pendingPlayPurchases(): Promise<Array<{ purchaseToken: string; productId: string; orderId?: string }>> {
   try {
-    const p = await plugin();
-    if (!p) return [];
-    const res = await p.queryPurchases();
+    const held = await plugin();
+    if (!held) return [];
+    const res = await held.api.queryPurchases();
     return Array.isArray(res?.purchases) ? res.purchases : [];
   } catch {
     return [];
@@ -117,9 +143,9 @@ export async function pendingPlayPurchases(): Promise<Array<{ purchaseToken: str
  */
 export async function consumePlayPurchase(purchaseToken: string): Promise<boolean> {
   try {
-    const p = await plugin();
-    if (!p) return false;
-    const res = await p.consume({ purchaseToken });
+    const held = await plugin();
+    if (!held) return false;
+    const res = await held.api.consume({ purchaseToken });
     return res?.consumed === true;
   } catch {
     return false;

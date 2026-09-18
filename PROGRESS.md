@@ -67184,3 +67184,85 @@ The module's existing 20 cases pass unchanged.
   real subsystem; today there are two readers sharing no vocabulary.
 - **The `useState of null` from this same autopsy is still unexplained.** It needs the failing file
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
+
+## 2026-09-18 — `AGENTV3_PROJECT_MODE=on`, and the door it opens was bolted (the gate read bullets; users write commas)
+
+The admin set `AGENTV3_PROJECT_MODE=on` in Cloud Run — the two-month-old pending decision recorded in
+`CLAUDE.md`, taken on this session's recommendation. **The first thing done after the switch was to
+measure what it had actually switched on, and the answer was: almost nothing.**
+
+**Measured on `main`, before touching a line** (`megaProjectSignals`, 14 realistic prompts):
+
+| prompt | fires? | why |
+|---|---|---|
+| `school ERP with students, teachers, attendance, fees, exams, timetable, library, transport` | **no** | bullets = **0** |
+| `ek hospital management system banao jisme OPD, IPD, pharmacy, billing, lab reports, doctor schedule, patient history sab ho` | **no** | bullets = **0** |
+| `banao ek full fledged ERP for my factory with production, inventory, purchase, sales, accounts, payroll, quality, dispatch` | **no** | bullets = **0** |
+| `Build a hospital management system:\n- patients\n- doctors\n- …` | yes | 8 bullet LINES |
+
+**Zero of fourteen.** `bullets` was `split('\n').filter(/^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/)` — a count of
+markdown list LINES. `ProjectPlan.test.ts`'s own passing case is a hospital system written as a
+bulleted spec. **The gate was built to read a DEVELOPER's spec; a real user writes one line with
+commas.**
+
+🔑 **THIS IS THE SAME CLASS AS THE FIX SHIPPED HOURS EARLIER THE SAME DAY.** `COMPLEX_APP_SIGNAL`
+listed the words a developer writes (saas, crm, checkout) and scored `hospital management system` **5**
+— the score of the word "hi". That was fixed in the SIZER (`namesBusinessDomain`). The two GATES that
+decide "is this a project?" were never hunted, and both were blind the same way:
+
+| gate | feeds | what it could see |
+|---|---|---|
+| `megaProjectSignals` (`AgentV3/ProjectPlan.ts`) | Software Project Mode (`AGENTV3_PROJECT_MODE`) | bullet lines only |
+| `featureCount` (`lib/appScopeAnalyzer.ts`) | the mega-app roadmap (`AGENTV3_MEGA_ROADMAP`, **on by default**) | bullet lines + loose verbs |
+
+On the school-ERP prompt the second one scored **0**: eight named modules, and the only thing it could
+match was the single word "with", halved to nothing.
+
+### The fix — one counter, centralized (rule 4 step 2: fix the class)
+
+`src/server/AgentV3/enumeratedFeatures.ts` — `countEnumeratedFeatures`, PURE. It reads a bulleted spec
+**and** the way a person actually types a list: inline `a, b, c`, `a and b`, Hinglish `a aur b`, and
+the list-opening connectives that separate the REQUEST from the LIST (`with`, `jisme`, `including`,
+`:` …), so *"ek hospital management system banao jisme OPD, IPD, …"* counts the modules and not the ask.
+
+🔒 **STRICT BY CONSTRUCTION, because both consumers are GATES and over-counting costs real money:**
+a run needs `MIN_RUN_ITEMS = 3` pieces before any of it counts (one comma in a sentence enumerates
+nothing); an item is at most `MAX_ITEM_WORDS = 5` words (a comma-joined SENTENCE inflates nothing);
+items are de-duplicated; the count is bounded at `MAX_COUNTED = 40`.
+
+**⚠️ `MEGA_BULLETS_WITH_NOUN` moved 8 → 6, and 6 is borrowed, not invented:** `complexityFromPrompt`
+already floors a named complex app's `featureCount` at six — this repo's own standing answer to "how
+many parts before this is a complex app". Here it is the weaker half of an AND, since a big-software
+noun must be present too.
+
+**Measured margin (the whole justification):** every ordinary app prompt counts **0–2**; every real
+project prompt counts **5–8**. Six sits in the gap, not on an edge.
+
+### 🔎 Sibling fixed in the same change (rule 3)
+
+`featureCount` in `appScopeAnalyzer.ts` now takes `Math.max(legacy, countEnumeratedFeatures(text))` —
+**a MAX, never a sum**: a bulleted PRD already counts once through `numbered`, and adding the shared
+count on top would double it and push ordinary prompts over `FEATURE_COUNT_MEGA`. That gate spends a
+real planner call (up to a minute) on every user's build, so it may only ever become more right, never
+more eager. **Measured blast radius: three project prompts flipped to `analyze`, ZERO ordinary prompts
+flipped.** No spend increase on ordinary builds.
+
+### Test
+
+`tests/theGateReadsBulletsUsersWriteCommas.test.ts` — 17 cases. It pins the bug as measured (both real
+corpora, not synthetic strings), and its ORDINARY corpus is the precision lock: a later widening that
+drags a todo app into either gate fails CI. **Reversion-proven in all three halves:** bullet-only
+counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail; restored → 17 pass.
+
+### Still open, not guessed at (rule 6)
+
+1. **Whether Software Project Mode actually builds these apps better is unmeasured** — it has still
+   never completed a real build. This change only means the door now opens for the requests it was
+   written for. The honest thing to watch is the `PROJECT_MODE` report line and whether module plans
+   appear and advance.
+2. **The three gaps recorded on 2026-07-04 are unchanged:** an IMPORTED repo never creates a plan; a
+   reopened incomplete plan needs a typed "continue"; contract DRIFT is caught only by the whole-
+   workspace `tsc`, not by a dedicated contract check.
+3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
+   system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
+   ASKED what it needs is a product question, not a threshold one.

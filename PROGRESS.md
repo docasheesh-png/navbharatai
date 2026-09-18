@@ -68024,3 +68024,27 @@ was designed to answer a different question.
 - **Billing:** ₹613.08 charged on a free wallet for a build whose `RELEASE_GATE` is `UNKNOWN` and
   whose preview never rendered. `ok: true`, so "working app or free" never fired. Whether an UNKNOWN
   gate should bill in full is an admin decision, not a code one — raised, not changed.
+
+## 2026-09-18 — 🔴 HOTFIX: `main` carried a tracked `node_modules` symlink pointing at itself (branch `claude/node-modules-is-not-a-file`)
+
+**What happened.** Commit `8210e4be` ("Merge origin/main into claude/vigilant-feynman-9aobjz — main is
+green again"), from a session working in a git worktree, committed `node_modules` as a SYMLINK to
+`/home/user/navbharatai/node_modules` — a worktree convenience that `git add -A` swept up. It reached
+`main` through #3079 (`caa7e47e`). In the main clone that symlink points at ITSELF: the moment a session
+merged `main`, git replaced its real install with the loop — `ls node_modules` → "Too many levels of
+symbolic links", `npx vitest` → "package not found, will be installed", `npm run typecheck` printing
+nothing. This session's re-gate on the stacked ghost-write branch came back with three EMPTY sections
+before the cause was found. CI never noticed because `npm ci` deletes `node_modules` first.
+
+**Root cause is the ignore PATTERN, not the commit.** `.gitignore` said `node_modules/`; the trailing
+slash matches a directory only, so a symlink of that name is not ignored (proven in a scratch repo:
+`node_modules/` → the symlink is tracked; `node_modules` → it is not). The commit was the first time
+anyone made a symlink there; the pattern had been one keystroke from this since day one.
+
+**Fix:** `git rm --cached node_modules`; `.gitignore` line is `node_modules` (no slash);
+`tests/nodeModulesIsNotAFile.test.ts` locks both — the ignore line, an empty `git ls-files node_modules`,
+and a local install that is never a symlink to itself.
+
+**For every other live session:** after merging a `main` that carries `caa7e47e` and not this fix,
+`rm node_modules && npm ci` restores the install. Do not "fix" it by committing anything under
+`node_modules`.

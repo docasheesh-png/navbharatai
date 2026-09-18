@@ -67348,6 +67348,80 @@ curl count as proof, and making the gate fill unconditional — each turns the s
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+---
+
+## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)
+
+**Admin:** *"woh crash report wala kaam bhi kar do"* — make a runtime crash bring its own file, so no
+autopsy is blocked on missing evidence again.
+
+### The gap, stated as the autopsy that hit it
+
+Build `95598899` left the app throwing `Cannot read properties of null (reading 'useState')`. The
+report recorded the SENTENCE and nothing else, so that autopsy could not name the file, could not read
+it, and closed the cause **unexplained** — honest, and a wasted report.
+
+The information existed at capture time and was dropped one property short:
+
+```js
+page.on('pageerror', e => rec('pageerror', e && e.message || e));   //  e.stack, never read
+```
+
+…in **three** independently-written capture sites (the console bridge, the page-route check, the
+journey runner), plus two more that scaffold the user's own test files.
+
+🔑 **AND A MESSAGE CAN NEVER CARRY IT.** `locationTag` / `parseLocation` already pull a `file:line:col`
+out of error TEXT, which is why a Vite compile error reads well in the report. A React runtime crash's
+message is one sentence with no path in it, so that parser correctly returned nothing — **the
+information was never in the string it was given.** That is why this reads as "the parser is fine" on
+inspection and still leaves every crash unattributed.
+
+### The fix
+
+- **`runtimeErrorSite.ts`** (new, pure) answers the question nobody had asked: *which frame is the
+  app's OWN code?* It REUSES `parseLocation` per frame and adds only the decision — skip
+  `node_modules` / `.vite` / `@vite` / `@react-refresh` / `@fs` / `@id` / extensions, strip the origin
+  and Vite's HMR query, return repo-relative. `null` when the stack names none, never a guess.
+- **The bridge stops discarding it**: `rec` takes a bounded stack, `pageerror` passes `e.stack`, the
+  NDJSON reader carries it back out as OPTIONAL (an older daemon still running emits none, and a
+  `console.error` never had one).
+- **`RuntimeError.stack`** survives `filterActionableErrors` — which builds a NEW object, and is
+  exactly how the field would have been lost after the capture started keeping it.
+- **The report line now names the first error and where it is.** `RUNTIME_ERRORS_REMAIN` was a COUNT
+  and nothing else.
+
+🔒 **The stack fills a GAP, never overrides.** `locationTag(text) || siteTag(stack)` — every error that
+already read well is byte-identical, and a reversion proof pins the order.
+
+### Scope, and why it stops where it does (rule 3, and the concurrency rule)
+
+`PageRouteCheck.ts` and `journeyDerivation.ts` have the identical defect and are **deliberately not
+touched**: **PR #3088 is editing `PageRouteCheck.ts` right now** (it changes `summarizePageCheck`'s
+return shape), and the journey runner is written as its deliberate mirror — fixing one alone would
+leave the pair inconsistent for whoever lands the other. Both also need a parallel `stacks` array
+rather than a one-line change, because their errors are plain strings embedded in report sentences.
+**Recorded as the named sibling, to do together once #3088 lands.**
+
+`e2eScaffold.ts` and `authFlowSpec.ts` are NOT in this class: their error strings are written into the
+USER's own generated test files, a different contract.
+
+### Tests
+
+`tests/theStackNamedTheFile.test.ts` — **25 cases** built on that crash's real React+Vite stack: the
+extraction, every not-our-code frame it must refuse, the conservative keep, the bounded deep stack, the
+filter, the repair prompt, the report line, white-label, and four **source-level reversion guards**
+(the capture is a sandbox script string no unit test can execute). **Proven by five reversions** —
+the daemon dropping the stack, the filter dropping it, the stack overriding the text, no origin strip,
+no vendor skip — each turns the suite red.
+
+⚠️ **A defect in my own module, found by my own test and recorded rather than quietly swapped:**
+`FILE_LOC`'s character class contains digits, so `http://localhost:5173/src/App.tsx` matched from the
+PORT and produced `5173/src/App.tsx` — a path that exists nowhere. The origin is stripped before the
+shared parser is asked; `FILE_LOC` itself is untouched, so no existing caller changed.
+
+**What to watch on the first real builds:** `RUNTIME_ERRORS_REMAIN` lines carrying `[at src/…]`. A
+crash with no tag is a stack that genuinely named no app frame — which the report now says rather than
+implies.
 ## 2026-09-18 — A hover that repeats the resting background is not a hover (follow-up to #3070)
 
 **Found while auditing #3070 for the admin's standing instruction that no PR may compromise another

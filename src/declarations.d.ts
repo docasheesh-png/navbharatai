@@ -237,6 +237,7 @@ declare module 'lucide-react' {
   export const Mic: Icon;
   export const MicOff: Icon;
   export const Minimize2: Icon;
+  export const Minus: Icon;
   export const Monitor: Icon;
   export const MoreVertical: Icon;
   export const MousePointer2: Icon;

@@ -41,8 +41,8 @@ import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { listAdminBuildReports, getAdminBuildReport, markAdminBuildReport, deleteAdminBuildReport, deleteAllAdminBuildReports } from '../AgentV3/AdminBuildReportStore';
 import { getBuildTriage, markBuildTriage } from '../AgentV3/AdminBuildTriageStore';
 import { listApkReports, getApkReport, markApkReportFixed, deleteApkReport, deleteAllApkReports } from '../lib/AdminApkReportStore';
-import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentFullReports } from '../AgentV3/DiagnosticsStore';
-import { buildCostRow, summarizeCosts, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../lib/buildCostLedger';
+import { listAllDiagnostics, listBuildFacts, listDiagnosticsHistory, getDiagnosticsHistoryItem, loadDiagnostics, listRecentBuildReports } from '../AgentV3/DiagnosticsStore';
+import { buildCostRow, summarizeCosts, costTrend, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../lib/buildCostLedger';
 import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/adminUserLookup';
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
@@ -1032,19 +1032,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '30'), 10) || 30, 1), 60);
       const usdInr = usdInrRate();
-      const stored = await listRecentFullReports(limit);
-      const rows = stored
+      // ADMIN 2026-09-18 — was `listRecentFullReports`, which returns one report per WORKSPACE, so
+      // repeated builds in the same workspace overwrote each other and the window never moved. This
+      // reads the per-BUILD history, which is what "last N builds" has always claimed to be.
+      const recent = await listRecentBuildReports(limit);
+      const rows = recent.builds
         .map((entry) => buildCostRow(entry, usdInr))
         .filter((row): row is NonNullable<typeof row> => row !== null);
       const summary = summarizeCosts(rows);
       res.json({
         rows,
         summary,
+        trend: costTrend(rows),
         usdInr,
         window: limit,
-        reportsRead: stored.length,
+        reportsRead: recent.builds.length,
+        source: recent.source,
+        workspacesScanned: recent.workspacesScanned,
+        readAt: Date.now(),
         sizeRule: `Frontend-only apps: ≤ ${SIMPLE_MAX_FILES} files = simple, ≤ ${MID_MAX_FILES} = mid, more = full-stack; any server/API/database file = full-stack.`,
-        note: 'Real cost = provider tokens at the real rate card, as priced at settle. Sandbox VM cost is shown separately. Reports older than 2026-09-14 are re-priced from their stored call log; a log at the storage cap is a lower bound and is excluded from averages.',
+        note: 'One row per BUILD, newest first, read from each workspace\'s own build history — so repeated builds in one workspace all appear. Real cost = provider tokens at the real rate card, as priced at settle. Sandbox VM cost is shown separately. Reports older than 2026-09-14 are re-priced from their stored call log; a log at the storage cap is a lower bound and is excluded from averages.',
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read build costs.' });

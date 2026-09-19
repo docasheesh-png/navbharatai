@@ -82,19 +82,46 @@ const lum = ([r, g, b]: number[]) => { const f = (c: number) => { c /= 255; retu
 export const contrast = (a: string, b: string) => { const [x, y] = [lum(hex(a)), lum(hex(b))]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
 /** Read one theme's block out of index.css — the palette as shipped, not a copy of it. */
+/**
+ * A translucent surface flattened onto what it sits on, as a browser would paint it.
+ *
+ * 🔎 WHY IT EXISTS (2026-09-19): this parser read `#rrggbb` only, and Light and Dark declare
+ * `--surface-well` / `--surface-well-hover` as `rgba(…)` washes. So the WELL — an inset panel used
+ * across the app, and since today the editor's inactive TABS — was the one surface in the whole token
+ * set that **nothing had ever measured**: adding it to SURFACES reported "missing", not a ratio.
+ * `index.css` documents a well as "an inset well inside a card", so the card is its base.
+ */
+function composite(value: string, baseHex: string): string {
+  const m = value.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/);
+  if (!m) return value;
+  const a = m[4] === undefined ? 1 : Number(m[4]);
+  const base = [1, 3, 5].map((i) => parseInt(baseHex.slice(i, i + 2), 16));
+  const mix = [1, 2, 3].map((i) => Math.round(a * Number(m[i]) + (1 - a) * base[i - 1]));
+  return `#${mix.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
 function palette(theme: string): Record<string, string> {
   const css = read('src/index.css');
   const m = css.match(new RegExp(`html\\[data-theme="${theme}"\\]\\s*\\{([^}]*)\\}`));
   expect(m, `no palette block for ${theme}`).toBeTruthy();
   const out: Record<string, string> = {};
-  for (const v of m![1].matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})/g)) out[v[1]] = v[2].toLowerCase();
+  for (const v of m![1].matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6}|rgba?\([^)]*\))/g)) out[v[1]] = v[2].toLowerCase();
+  // Flatten the translucent surfaces LAST, so the card they sit on is already resolved.
+  for (const k of Object.keys(out)) {
+    if (k.startsWith('surface-') && out[k].startsWith('rgb')) out[k] = composite(out[k], out['surface-card']);
+  }
   return out;
 }
 const THEMES = ['light', 'dark', 'contrast'];
 /* `surface-raised-hover` is in this list on purpose: a hovered row carries the same faint labels a
    resting one does, so a hover surface the palette does not clear is the audit's own defect with an
    extra step. It is what forced Light's --text-faint from #5b6b82 to #57677e (4.40 → 4.73). */
-const SURFACES = ['surface-base', 'surface-card', 'surface-raised', 'surface-raised-hover'];
+/* `surface-well` and its hover joined on 2026-09-19, when the Code Studio readability fix put a
+   muted label on a WELL for the first time (the editor's inactive tabs). A surface the palette does
+   not clear is the audit's own defect wherever it is used, and until the parser above learned to
+   composite an rgba wash, this was the one surface nothing could even measure. All 10 inks clear AA
+   on both, in all three themes — measured, not assumed. */
+const SURFACES = ['surface-base', 'surface-card', 'surface-raised', 'surface-raised-hover', 'surface-well', 'surface-well-hover'];
 const TEXTS = ['text-primary', 'text-body', 'text-muted', 'text-faint', 'accent', 'brand-accent-text', 'brand-success-text', 'brand-warn-text', 'brand-danger-text', 'brand-info-text'];
 
 describe('🔒 every theme palette clears WCAG AA (4.5:1) for normal text — Comfort failed 11 of 30 pairs before', () => {

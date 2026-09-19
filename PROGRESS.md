@@ -68688,3 +68688,35 @@ So, in this order, and `REFERRAL_REWARDS` LAST:
 create an account and verify email. **₹100 arriving means the whole chain is live.** Nothing arriving
 means one link is broken, and it is one of the seven above. ⚠️ The website will never pay ₹1 — that is
 the design (*"websites par kuch bhi nahi dena"*), not a fault.
+## 2026-09-18 — Theme PR K: thirty heaviest files, and the codemod stops manufacturing dead hovers (branch `claude/theme-pr-k`)
+
+**Baseline 1,668 → 1,019 literals, 132 → 112 files.** The thirty heaviest files by the ratchet's own
+census ran through `scripts/themeMigrate.mjs`; twenty-five went to zero or near it. Five were untouched
+by design (0 exact, 0 fixes) and stay counted: `MultiPageBuilder.tsx`, `previewUtils.ts`,
+`SEOOptimizer.tsx`, `frameworkOptions.ts`, `AppScanPanel.tsx` — data tables of colour names, a
+third-party mockup (a Google/Twitter card, LIGHT fixed fill), and generated preview markup. Hand work,
+not codemod work, and not this PR.
+
+### 🔴 The codemod was still MAKING the defect #3095 guards against
+
+`bg-white/5` and `bg-white/10` both map to `bg-raised`, so a chip written `bg-white/5 hover:bg-white/10`
+came out `bg-raised hover:bg-raised` — pixel-identical at rest and on hover. PR J fixed nine of those
+by hand; this run produced five more, and the full suite caught them. Fix at the class, in the codemod:
+a post-pass moves a hover that lands on the surface the element already rests on to that surface's
+`-hover` token (`raised-hover` / `well-hover`, both real per-theme values), for `hover:` and
+`group-hover:`. `tests/themeMigrate.test.ts` line 238 had been ASSERTING the dead pair as correct
+output; corrected, reason recorded, plus five cases for the post-pass.
+
+### 🔴 …and the guard itself could not see inside a template
+
+`tests/hoverIsNotANoOp.test.ts` judged only whole `className=` attributes. A class list chosen by a
+ternary inside a template literal, or handed to a `buttonClassName` prop, never reached it — and ten
+dead hovers were sitting in exactly those places on `main` while it was green (AdminDashboard,
+ReportSheet, AgentV3Panel ×?, FrameworkPicker ×3, APKBuilder, VoiceToApp, DoseCalculator ×2). The guard
+now judges every quoted string as well (a string carrying both a resting surface and a hover to it is a
+class list by construction), each candidate once. All ten fixed by running the codemod on those files.
+
+### Gate
+
+Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
+`themeSystem`, `theme` all green.

@@ -535,7 +535,7 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
                   className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-colors ${
                     kind === k.id
                       ? 'bg-indigo-600 border-indigo-500 text-on-accent'
-                      : 'bg-raised border-line text-muted hover:bg-raised'
+                      : 'bg-raised border-line text-muted hover:bg-raised-hover'
                   }`}
                 >
                   {k.label}

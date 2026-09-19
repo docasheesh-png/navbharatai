@@ -433,7 +433,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
                   key={p}
                   onClick={() => setGuidePlatform(p)}
                   className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                    guidePlatform === p ? 'bg-indigo-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised'
+                    guidePlatform === p ? 'bg-indigo-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised-hover'
                   }`}
                 >
                   {p === 'android' ? 'Play Store' : 'App Store'}

@@ -448,7 +448,7 @@ export const HistoryView = ({
                             "p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-center",
                             openDropdownId === session.id
                               ? "bg-indigo-600 border-indigo-500 text-on-accent"
-                              : "bg-raised hover:bg-raised border-line text-muted hover:text-ink"
+                              : "bg-raised hover:bg-raised-hover border-line text-muted hover:text-ink"
                           )}
                           title="Options"
                         >

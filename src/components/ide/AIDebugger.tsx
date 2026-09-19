@@ -420,7 +420,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
 
           {/* Honest failure banner — the real reason, never a canned fake analysis */}
           {!isLoading && analyzeError && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 flex items-start gap-2">
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-danger flex items-start gap-2">
               <X className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{analyzeError}</span>
             </div>
@@ -617,7 +617,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
               <button
                 key={entry.id}
                 onClick={() => handleHistoryRestore(entry)}
-                className="group flex flex-col gap-1 w-full text-left rounded p-2 transition-colors hover:bg-white/5 relative"
+                className="group flex flex-col gap-1 w-full text-left rounded p-2 transition-colors hover:bg-raised relative"
               >
                 <div className="flex items-center justify-between gap-1">
                   <span

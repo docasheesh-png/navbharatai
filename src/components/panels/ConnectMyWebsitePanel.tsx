@@ -140,7 +140,7 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
   };
 
   return (
-    <div className="h-full overflow-y-auto custom-scrollbar bg-[#0d1117] text-white">
+    <div className="h-full overflow-y-auto custom-scrollbar bg-surface text-ink">
       <div className="max-w-2xl mx-auto px-3 sm:px-5 py-5 sm:py-6">
         {selected ? (
           <div className="flex flex-col gap-2">
@@ -160,60 +160,60 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <button onClick={onBack} className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-colors" title="Back">
+              <button onClick={onBack} className="w-7 h-7 rounded-lg bg-raised hover:bg-raised-hover flex items-center justify-center text-muted hover:text-ink transition-colors" title="Back">
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <div>
-                <h3 className="text-sm font-bold text-white">Connect my website</h3>
-                <p className="text-[11px] text-zinc-400">Point your own domain at an app you built on NavBharatAI.</p>
+                <h3 className="text-sm font-bold text-ink">Connect my website</h3>
+                <p className="text-[11px] text-muted">Point your own domain at an app you built on NavBharatAI.</p>
               </div>
             </div>
 
             {loading && (
-              <div className="flex items-center gap-2 px-3 py-4 justify-center text-zinc-400 text-sm">
+              <div className="flex items-center gap-2 px-3 py-4 justify-center text-muted text-sm">
                 <TirangaLoader className="w-4 h-4" /> Loading your apps…
               </div>
             )}
 
             {!loading && error && (
-              <div className="px-3 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-[12px] text-red-200/90">
+              <div className="px-3 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-[12px] text-danger">
                 {error}
               </div>
             )}
 
             {!loading && !error && apps && apps.length === 0 && (
-              <div className="px-3 py-4 rounded-lg bg-zinc-900 border border-zinc-800 text-center flex flex-col items-center gap-2">
-                <Globe className="w-6 h-6 text-zinc-500" />
-                <p className="text-[12px] text-zinc-300">You don't have a built app yet.</p>
-                <p className="text-[11px] text-zinc-500">Build something with NavBharatAI Pro first, then come back here to connect your own domain to it.</p>
+              <div className="px-3 py-4 rounded-lg bg-card border border-line text-center flex flex-col items-center gap-2">
+                <Globe className="w-6 h-6 text-faint" />
+                <p className="text-[12px] text-muted">You don't have a built app yet.</p>
+                <p className="text-[11px] text-faint">Build something with NavBharatAI Pro first, then come back here to connect your own domain to it.</p>
               </div>
             )}
 
             {!loading && !error && apps && apps.length > 1 && (
               <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Which app should this domain point to?</span>
+                <span className="text-[10px] font-black text-faint uppercase tracking-widest">Which app should this domain point to?</span>
                 {apps.map((a) => (
                   <button
                     key={a.workspaceId}
                     onClick={() => pickApp(a.workspaceId)}
-                    className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 hover:bg-zinc-800/80 text-left transition-colors"
+                    className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-card border border-line hover:border-emerald-500/50 hover:bg-raised text-left transition-colors"
                   >
-                    <FileCode2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <FileCode2 className="w-4 h-4 text-success shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12px] font-medium text-white truncate">{a.label}</div>
+                      <div className="text-[12px] font-medium text-ink truncate">{a.label}</div>
                       {connected[a.workspaceId]?.length ? (
-                        <div className="text-[10px] text-green-400 flex items-center gap-1 truncate">
+                        <div className="text-[10px] text-success flex items-center gap-1 truncate">
                           <Globe className="w-3 h-3 shrink-0" />
                           <span className="truncate">Connected: {connected[a.workspaceId].join(', ')}</span>
                         </div>
                       ) : a.workspaceId === currentWorkspaceId ? (
-                        <div className="text-[10px] text-emerald-400">Currently open</div>
+                        <div className="text-[10px] text-success">Currently open</div>
                       ) : null}
                     </div>
                     {connected[a.workspaceId]?.length ? (
-                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-green-300 shrink-0">Connected</span>
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-green-500/15 text-success shrink-0">Connected</span>
                     ) : null}
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    <ChevronRight className="w-3.5 h-3.5 text-faint shrink-0" />
                   </button>
                 ))}
               </div>

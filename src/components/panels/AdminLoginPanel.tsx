@@ -42,45 +42,45 @@ export function AdminLoginPanel({
   mfaRequired,
 }: AdminLoginPanelProps) {
   return (
-    <div className="flex-1 bg-[#0d1117] flex flex-col items-center justify-center p-6">
+    <div className="flex-1 bg-surface flex flex-col items-center justify-center p-6">
       {!isAdmin ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-[#161b22] border border-white/10 p-8 rounded-[2.5rem] shadow-3xl space-y-8"
+          className="w-full max-w-md bg-card border border-line p-8 rounded-[2.5rem] shadow-3xl space-y-8"
         >
           <div className="text-center space-y-2">
-            <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl mb-4">
-              <Lock className="w-10 h-10 text-white" />
+            <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl mb-4 text-on-accent">
+              <Lock className="w-10 h-10 text-on-accent" />
             </div>
-            <h2 className="text-2xl font-black text-white tracking-tight uppercase">Admin Access</h2>
-            <p className="text-[10px] text-[#8b949e] font-black uppercase tracking-widest">Navbharat Enterprise Cloud Console</p>
+            <h2 className="text-2xl font-black text-ink tracking-tight uppercase">Admin Access</h2>
+            <p className="text-[10px] text-muted font-black uppercase tracking-widest">Navbharat Enterprise Cloud Console</p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Username</label>
+              <label className="text-[10px] font-black text-accent-text uppercase tracking-widest ml-1">Username</label>
               <input
                 type="text"
                 value={adminEmail}
                 onChange={e => onEmailChange(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
+                className="w-full bg-well border border-line rounded-2xl px-6 py-4 text-ink font-bold outline-none focus:border-indigo-500"
                 placeholder="aashishcpmt09"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Password</label>
+              <label className="text-[10px] font-black text-accent-text uppercase tracking-widest ml-1">Password</label>
               <input
                 type="password"
                 value={adminPassword}
                 onChange={e => onPasswordChange(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-indigo-500"
+                className="w-full bg-well border border-line rounded-2xl px-6 py-4 text-ink font-bold outline-none focus:border-indigo-500"
                 placeholder="••••••••••••"
               />
             </div>
             {mfaRequired && (
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest ml-1">Authenticator Code</label>
+                <label className="text-[10px] font-black text-accent-text uppercase tracking-widest ml-1">Authenticator Code</label>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -88,16 +88,16 @@ export function AdminLoginPanel({
                   maxLength={6}
                   value={adminTotp}
                   onChange={e => onTotpChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-bold tracking-[0.4em] text-center outline-none focus:border-indigo-500"
+                  className="w-full bg-well border border-line rounded-2xl px-6 py-4 text-ink font-bold tracking-[0.4em] text-center outline-none focus:border-indigo-500"
                   placeholder="000000"
                 />
-                <p className="text-[9px] text-[#8b949e] font-bold uppercase tracking-widest ml-1">6-digit code from your authenticator app</p>
+                <p className="text-[9px] text-muted font-bold uppercase tracking-widest ml-1">6-digit code from your authenticator app</p>
               </div>
             )}
             {adminError && (
-              <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest text-center">{adminError}</p>
+              <p className="text-[10px] text-danger font-bold uppercase tracking-widest text-center">{adminError}</p>
             )}
-            <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/30 transition-all active:scale-95">
+            <button className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/30 transition-all active:scale-95">
               Authenticate
             </button>
           </form>

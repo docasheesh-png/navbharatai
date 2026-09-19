@@ -70,19 +70,19 @@ export const ExtensionMarket: React.FC = () => {
   );
 
   return (
-    <div className="flex flex-col h-full bg-[#161b22]">
-      <div className="p-4 border-b border-white/5 space-y-4">
-        <h3 className="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
-          <Puzzle className="w-4 h-4 text-indigo-400" />
+    <div className="flex flex-col h-full bg-card">
+      <div className="p-4 border-b border-line space-y-4">
+        <h3 className="text-xs font-black uppercase tracking-widest text-ink flex items-center gap-2">
+          <Puzzle className="w-4 h-4 text-accent-text" />
           Marketplace
         </h3>
         <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#484f58]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
           <input 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search extensions..."
-            className="w-full bg-black/20 border border-white/5 rounded-xl py-2 pl-9 pr-4 text-[11px] font-bold outline-none focus:border-indigo-500/50 transition-all"
+            className="w-full bg-well border border-line rounded-xl py-2 pl-9 pr-4 text-[11px] font-bold outline-none focus:border-indigo-500/50 transition-all"
           />
         </div>
       </div>
@@ -93,14 +93,14 @@ export const ExtensionMarket: React.FC = () => {
           return (
             <div 
               key={ext.id}
-              className="p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/5 transition-all group flex items-start gap-3"
+              className="p-3 rounded-xl hover:bg-raised border border-transparent hover:border-line transition-all group flex items-start gap-3"
             >
               <div className="relative">
-                <div className="w-10 h-10 bg-[#0d1117] rounded-xl flex items-center justify-center border border-white/5 group-hover:border-indigo-500/30 transition-colors">
-                  <ext.icon className="w-5 h-5 text-indigo-400" />
+                <div className="w-10 h-10 bg-surface rounded-xl flex items-center justify-center border border-line group-hover:border-indigo-500/30 transition-colors">
+                  <ext.icon className="w-5 h-5 text-accent-text" />
                 </div>
                 {isInstalled && (
-                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 text-white rounded-full flex items-center justify-center border-2 border-[#161b22]">
+                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 text-on-accent rounded-full flex items-center justify-center border-2 border-line">
                     <CheckCircle2 className="w-2.5 h-2.5" />
                   </div>
                 )}
@@ -108,16 +108,16 @@ export const ExtensionMarket: React.FC = () => {
               
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
-                   <h4 className="text-[11px] font-bold text-white truncate">{ext.name}</h4>
-                   <span className="text-[8px] font-black text-[#484f58] uppercase px-1.5 py-0.5 bg-black/20 rounded border border-white/5">{ext.category}</span>
+                   <h4 className="text-[11px] font-bold text-ink truncate">{ext.name}</h4>
+                   <span className="text-[8px] font-black text-faint uppercase px-1.5 py-0.5 bg-well rounded border border-line">{ext.category}</span>
                 </div>
-                <p className="text-[10px] text-[#8b949e] line-clamp-1 mb-2">{ext.description}</p>
+                <p className="text-[10px] text-muted line-clamp-1 mb-2">{ext.description}</p>
                 <div className="flex items-center gap-3">
-                   <div className="flex items-center gap-1 text-[9px] font-bold text-[#484f58]">
+                   <div className="flex items-center gap-1 text-[9px] font-bold text-faint">
                      <Download className="w-2.5 h-2.5" />
                      {ext.installs}
                    </div>
-                   <div className="flex items-center gap-1 text-[9px] font-bold text-amber-500/60">
+                   <div className="flex items-center gap-1 text-[9px] font-bold text-warn">
                      <Star className="w-2.5 h-2.5 fill-current" />
                      {ext.rating}
                    </div>
@@ -134,7 +134,7 @@ export const ExtensionMarket: React.FC = () => {
                 }}
                 className={cn(
                   "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
-                  isInstalled ? "bg-white/5 text-[#8b949e] hover:bg-red-500/10 hover:text-red-500" : "bg-indigo-600 text-white hover:bg-indigo-700"
+                  isInstalled ? "bg-raised text-muted hover:bg-red-500/10 hover:text-danger" : "bg-indigo-600 text-on-accent hover:bg-indigo-700"
                 )}
               >
                 {isInstalled ? 'Uninstall' : 'Install'}

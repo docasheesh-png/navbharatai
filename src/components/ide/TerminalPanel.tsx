@@ -107,17 +107,17 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
   const headerLabel = pinnedActive ? pinnedTab!.label : (active?.label ?? 'Terminal');
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-white">
+    <div className="flex flex-col h-full bg-surface text-ink">
       {/* One shared header for every session */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-line shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-1.5 shrink-0">
-            <TerminalIcon className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted flex items-center gap-1.5 shrink-0">
+            <TerminalIcon className="w-3.5 h-3.5 text-accent-text" />
             {headerLabel}
           </span>
           {/* The REAL allowance left today — never the old hardcoded "30 free minutes a day", which
               was true only for someone who had not opened a terminal yet. */}
-          <span className="text-[10px] text-[#6e7681] truncate hidden sm:inline">
+          <span className="text-[10px] text-faint truncate hidden sm:inline">
             {terminalRemainingLabel(remaining)}
           </span>
 
@@ -128,37 +128,37 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
               aria-label="Terminals"
               aria-expanded={listOpen}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest transition-colors ${
-                listOpen ? 'bg-white/10 text-white' : 'text-indigo-400 hover:text-white hover:bg-white/5'
+                listOpen ? 'bg-raised text-ink' : 'text-accent-text hover:text-ink hover:bg-raised'
               }`}
             >
               <Plus className="w-3 h-3" />
               New
               <ChevronDown className="w-3 h-3 opacity-60" />
               {sessions.length > 1 && (
-                <span className="ml-0.5 px-1 rounded bg-indigo-500/20 text-indigo-300 text-[9px]">{sessions.length}</span>
+                <span className="ml-0.5 px-1 rounded bg-indigo-500/20 text-accent-text text-[9px]">{sessions.length}</span>
               )}
             </button>
 
             {listOpen && (
-              <div className="absolute left-0 top-full mt-1 min-w-[220px] bg-[#1c2128] border border-white/10 rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
+              <div className="absolute left-0 top-full mt-1 min-w-[220px] bg-raised border border-line rounded-lg shadow-2xl shadow-black/50 py-1 z-[9998]">
                 {pinnedTab && (
                   <div
                     className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] cursor-pointer transition-colors ${
-                      pinnedActive ? 'text-white bg-white/5' : 'text-white/75 hover:bg-indigo-600 hover:text-white'
+                      pinnedActive ? 'text-ink bg-raised' : 'text-on-accent hover:bg-indigo-600 hover:text-on-accent'
                     }`}
                     onClick={() => { setActiveId(PINNED_ID); setListOpen(false); }}
                   >
                     <TerminalIcon className="w-3 h-3 shrink-0 opacity-70" />
                     <span className="truncate">{pinnedTab.label}</span>
                     {/* No ✕: this tab is NavBharatAI's own record, not a shell the user opened. */}
-                    <span className="ml-auto text-[9px] uppercase tracking-widest text-[#6e7681]">read-only</span>
+                    <span className="ml-auto text-[9px] uppercase tracking-widest text-faint">read-only</span>
                   </div>
                 )}
                 {sessions.map((s) => (
                   <div
                     key={s.id}
                     className={`group flex items-center justify-between gap-2 px-3 py-1.5 text-[11px] cursor-pointer transition-colors ${
-                      s.id === activeId ? 'text-white bg-white/5' : 'text-white/75 hover:bg-indigo-600 hover:text-white'
+                      s.id === activeId ? 'text-ink bg-raised' : 'text-on-accent hover:bg-indigo-600 hover:text-on-accent'
                     }`}
                     onClick={() => { setActiveId(s.id); setListOpen(false); }}
                   >
@@ -170,16 +170,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
                       onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}
                       title={`Close ${s.label}`}
                       aria-label={`Close ${s.label}`}
-                      className="p-0.5 rounded text-white/40 hover:text-white hover:bg-white/15 shrink-0"
+                      className="p-0.5 rounded text-faint hover:text-ink hover:bg-raised shrink-0"
                     >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                 ))}
-                <div className="h-px bg-white/10 my-1 mx-2" />
+                <div className="h-px bg-raised my-1 mx-2" />
                 <button
                   onClick={addSession}
-                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors"
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-indigo-300 hover:bg-indigo-600 hover:text-on-accent transition-colors"
                 >
                   <Plus className="w-3 h-3" />
                   New Terminal
@@ -191,11 +191,11 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
 
         <div className="flex items-center gap-1 shrink-0">
           {onToggleMaximize && (
-            <button onClick={onToggleMaximize} className="p-1 text-[#8b949e] hover:text-white hover:bg-white/5 rounded" aria-label="Toggle maximize">
+            <button onClick={onToggleMaximize} className="p-1 text-muted hover:text-ink hover:bg-raised rounded" aria-label="Toggle maximize">
               {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
           )}
-          <button onClick={onClose} className="p-1 text-[#8b949e] hover:text-white hover:bg-white/5 rounded" aria-label="Close terminal panel">
+          <button onClick={onClose} className="p-1 text-muted hover:text-ink hover:bg-raised rounded" aria-label="Close terminal panel">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>

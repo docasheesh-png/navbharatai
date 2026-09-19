@@ -1647,7 +1647,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   disabled={moderateBusy || reasonMissing}
                   title={reasonMissing ? 'A ban needs a reason' : undefined}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-ink text-sm font-bold disabled:opacity-40 ${
-                    isBan ? 'bg-red-600 hover:bg-red-500 text-on-accent' : 'bg-raised hover:bg-raised'}`}
+                    isBan ? 'bg-red-600 hover:bg-red-500 text-on-accent' : 'bg-raised hover:bg-raised-hover'}`}
                 >
                   {moderateBusy ? 'Working…' : copy.cta}
                 </button>
@@ -3229,7 +3229,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <button
                       key={f}
                       onClick={() => setReportFilter(f)}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised'}`}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${reportFilter === f ? 'bg-rose-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised-hover'}`}
                     >{f === 'open' ? 'Needs a person' : 'All'}</button>
                   ))}
                   <button onClick={() => void fetchUserReports()} className="p-2 rounded-lg bg-raised hover:bg-raised-hover text-muted" aria-label="Refresh">

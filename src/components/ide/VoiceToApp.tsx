@@ -146,7 +146,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                     'relative w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 focus:outline-none',
                     isRecording
                       ? 'bg-red-600 shadow-lg shadow-red-600/40 text-on-accent'
-                      : 'bg-raised hover:bg-raised',
+                      : 'bg-raised hover:bg-raised-hover',
                     !speechSupported ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
                   ].join(' ')}
                 >

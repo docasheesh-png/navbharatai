@@ -68856,3 +68856,83 @@ accounts?" from it; the old entry would have given directions to a menu that no 
 
 Test-locked in `tests/oneAccountAtATime.test.ts` — 11 cases, proven by two reversions (restoring a
 `switchTo` turns it red; removing the storage cleanup turns two more red).
+## 2026-09-19 — CODE STUDIO ON A LIGHT THEME: HALF THE PANE WAS REPAINTED AND HALF WAS FROZEN
+
+The admin sent a phone screenshot of Code Studio with two problems: *"1- light theme me visiblity kam.
+2- upfooter me jo button hai {}()[] etc etc woh kaam nahi kar rahe hai. actualy unki need hi nahi hai.
+hata do!!"*
+
+**PROBLEM 1 — ROOT CAUSE, MEASURED RATHER THAN JUDGED BY EYE.** `Editor.tsx` — the whole editor pane:
+tab strip, breadcrumb, mobile toolbars — was written in VS-Code-dark literals, and
+`theme-compat.css` remaps only **some** of them. `#1e1e1e` and `#252526` are in its allowlist;
+`#2d2d2d`, `#2a2d2e` and `#1f1f1f` are **not** (verified by grepping the compat file, not assumed).
+So on Light the same pane came out half repainted and half frozen: the active tab turned light while
+the inactive tabs stayed near-black, and the action bar under the editor stayed a black strip. That is
+the exact failure CLAUDE.md predicts of an allowlist against an open-ended set of class names.
+
+🔴 **AND PR #3111 (PR K, merged two hours earlier) HAD ALREADY MIGRATED THIS FILE — LEAVING EXACTLY
+THOSE FIVE LITERALS.** The codemod maps what the table knows and lists the rest; the rest were the
+only ones that produce the symptom, because they are the ones compat never covered. So the
+instance-vs-class pattern this repo keeps paying for appeared inside the theme migration itself: 39
+literals of 44 moved, and the 5 that mattered stayed. An earlier session had also fixed **one
+element** of this same file for this same complaint on 2026-07-22 (the mobile textarea) and left the
+pane around it on literals.
+
+**What the pane looks like now, by token:** strip `bg-surface`, active tab `bg-card text-ink` (so the
+selected tab reads continuous with the code), inactive `bg-well text-muted hover:bg-well-hover`,
+divider `border-line`, action bar `bg-card border-t border-line`. The three surfaces are
+**deliberately different** — compat had mapped the strip and the active tab to the same colour, so on
+Light the one thing that disappeared was the selection marker.
+
+**PROBLEM 2 — the symbol row is deleted, not repaired.** Two real defects in it, and one reason not to
+keep it: it reached for the **monaco global** to build a Range (the only place in the repo that did,
+while every working button on that bar uses `editorRef.current` alone), and it never called `focus()`
+first, unlike every neighbour. ⚠️ **I could not reproduce a phone tap from here, so I am not claiming
+which of the two bit the admin.** The reason it is gone rather than fixed: a phone keyboard already
+carries all eighteen characters and Monaco runs with `autoClosingBrackets: 'always'`, so the row
+duplicated the keyboard while taking screen height from the code.
+
+**A third defect in the same screenshot, unreported:** the command-palette label had no `truncate` in a
+fixed `h-6` box, so on a phone it wrapped to three lines inside a 24px button and spilled over the
+title beside it. One line now, and the `Ctrl+Shift+P` hint is desktop-only — a phone has no Ctrl key.
+
+**📱 THE SIBLING THAT MATTERS MOST ON A PHONE: `active:` was invisible to the dead-state guard.**
+`tests/hoverIsNotANoOp.test.ts` (#3095) catches `bg-X hover:bg-X`; the codemod had emitted
+`bg-raised active:bg-raised` into this very toolbar and nothing looked. **A finger never hovers, so on
+touch `active:` is the only feedback there is** — the press repainted the resting colour and the
+button did not answer at all. Fixed in three places, in the order that keeps it fixed: PR K's own lift
+in `themeMigrate.mjs` now covers `active:` (one token added to its regex, not a parallel pass), the
+guard reads `active:` too, and the one offender the widened guard found repo-wide
+(`SettingsPanel.tsx`, a resting `bg-raised`) is corrected. The resting-surface rule is unchanged:
+`hover:bg-raised active:bg-raised` with no resting fill paints a real change and is not a finding —
+measured, so the sweep touched one line rather than six.
+
+**🔎 THE WELL WAS THE ONE SURFACE NOTHING HAD EVER MEASURED.** Putting the inactive tabs on `bg-well`
+raised the question, and adding `surface-well` to the AA lock answered *"missing"* rather than a
+ratio: `palette()` read `#rrggbb` only, and Light and Dark declare the wells as `rgba()` washes. The
+parser now composites a wash over the card it sits inside, and **all 10 inks clear AA on `well` and
+`well-hover` in all three themes** — 60 pairs per theme now guarded instead of 40. (My own throwaway
+script had reported 4.49 for one pair; an independent calculation and then the repo's own instrument
+both give ≈4.7. The scratch parser was wrong, and the wrong number is not recorded as a finding.)
+
+**Evidence.** `tests/theIdeIsReadableOnEveryTheme.test.ts` (9 cases) pins both reported problems by
+name, plus the three-surface tab rule, the action bar, the floating terminal disc, the shortcut
+panel's `#21262d` labels (≈1.3:1 — invisible on **every** theme, not only Light) and a reversion
+guard on the note explaining the deletion. **Proven by reversion:** putting the strip back to
+`bg-card` fails the three-surface case; re-adding an `executeEdits('helper'` line fails the symbol-row
+case; restoring one `active:bg-raised` fails the widened guard; reverting the composite makes the AA
+lock report the wells missing again. Editor.tsx and VirtualKeyboard.tsx are both at **zero** literals,
+so the ratchet holds them there.
+
+⚠️ **VERIFIED THE WAY A TAILWIND CHANGE HAS TO BE:** a class that does not exist emits no CSS and
+fails nothing, so `bg-well-hover`, `placeholder-faint`, `bg-accent`, `bg-surface`, `bg-raised-hover`
+and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All present.
+
+### 🔴 STILL OPEN (rule 6)
+1. **Nobody has seen this on a phone.** Every claim above is source-level, contrast arithmetic, or the
+   built CSS. `scripts/verifyTouchVisibility.mjs` is the precedent for answering that properly (real
+   Chromium, real built CSS, computed values) and it is **not** wired into CI because the runner has no
+   browser. The honest confirmation is the admin opening Code Studio on Light.
+2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
+   already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
+3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.

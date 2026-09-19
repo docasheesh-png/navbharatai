@@ -70721,3 +70721,71 @@ which is what the "working app or free" billing rules gate on.
 The class only exists for an app whose UI is written in an Indic script — the case NavBharatAI is built
 for and the one Lovable / Bolt / v0 / Cursor have no reason to check. A user who asked for a Bengali app
 and got a word that reads as nonsense does not file a bug; they leave.
+
+---
+
+## 2026-09-19 — Nemotron is LIVE on Weak, and the fail-open judge is now an open root cause
+
+The admin set **`NEMOTRON_API_KEY`** and **`AGENTV3_NEMOTRON=weak`** in Cloud Run the same day PR #3141
+merged. Recorded here hand-to-hand per the env registry's own rule. So the Weak tier's judge and plan
+are the first Nemotron calls this platform has ever made; Normal and Strong are untouched until that
+flag names them, and Strong's PLAN can never be taken at all (`PLAN_FORBIDDEN_TIERS`).
+
+### ✅ CORRECTED THE SAME DAY: the host WAS NVIDIA's own, and it is now set
+
+The admin sent a screenshot of **`build.nvidia.com`** — so the key is NVIDIA's own endpoint, and the
+OpenRouter default this code ships with was wrong for it. They then set
+**`NEMOTRON_BASE_URL = https://integrate.api.nvidia.com/v1`**, recorded here hand-to-hand.
+
+**So the judge was silently off for about an hour** — between the key landing and the host being
+corrected — and that hour is exactly the failure mode described below. Nothing reported it; the only
+reason it was caught is that the host was asked about rather than assumed. The model ids needed no
+override: NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b`, the same as the code default.
+
+⚠️ **AND THE ADMIN'S WORRY IS WORTH RECORDING, because it came from my own unclear writing.** They
+read the trial-credits caveat as *"the key is useless, where should I buy a real one?"* It was neither:
+the key was fine and NVIDIA genuinely is the cheap option they had seen advertised — the only caveat
+was that a trial pool is finite. A caveat stated without its scope reads as a rejection.
+
+### The failure mode that hour demonstrated
+
+`NEMOTRON_BASE_URL` was left unset, so the OpenRouter default is in force. That is right for an
+OpenRouter key and WRONG for one bought at `build.nvidia.com` (which needs
+`https://integrate.api.nvidia.com/v1`) or Together AI (`https://api.together.xyz/v1`).
+
+**Why that is worth a PROGRESS entry rather than a shrug:** with the wrong host the judge call throws,
+and `judgeBuild` catches it and returns `{ pass: true, findings: [], score: 100 }`. So a mis-set host
+does not produce an error anywhere — it **switches the quality gate off and passes every build.**
+Verification therefore has to be positive: find `NEMOTRON` in a Weak build's per-call log. The absence
+of an error proves nothing.
+
+### 🔴 OPEN ROOT CAUSE (rule 6) — a judge that could not RUN is reported as a PASS
+
+Found while answering *"cloud run me kya dalu?"*, by reading the judge's failure path rather than
+assuming it. `BuildJudge.ts` has two of these:
+
+```
+line  60:  } catch { /* fall through to the safe default */ }
+line  62:  return { pass: true, findings: [], score: 100 };
+line 101:  } catch {   // "A judge that could not RUN has not approved anything either"
+```
+
+The comment at 101 states the correct principle and the code does the opposite of it: an unreachable
+judge, a revoked key, a 404 on a mis-typed model id and a genuinely clean app all produce the identical
+`pass: true, score: 100`.
+
+**This is NOT introduced by Nemotron — `glm-5.3` has had it all along**, and it is the exact shape the
+fifth absolute rule names: *"if the bug produced a wrong verdict (fake success …), fixing the code is
+not enough — fix the reporting so the system tells the truth about that state forever after."* A build
+whose judge never ran is not a judged build.
+
+⚠️ **Deliberately NOT fixed in the same change as the key being recorded.** The honest fix is a third
+outcome — "the judge could not run" as distinct from pass and fail — and every reader of that verdict
+(the escalation loop, the release gate, the build report, the user's summary) has to be taught what to
+do with it. Changing `pass: true` to `pass: false` on its own would make an outage escalate every build
+to Claude, which is a fix trading one problem for a dearer one. It needs its own change and its own
+gate run.
+
+**What makes it urgent now rather than theoretical:** until today the judge was one vendor whose key
+has been set for months. From today it is a vendor whose key was set an hour ago, whose host may be
+wrong, and against which not one call had ever been made.

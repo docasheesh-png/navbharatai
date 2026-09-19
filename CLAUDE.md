@@ -1013,8 +1013,21 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
-- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19; ⚠️ NOT live — no key
-  yet).** `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
+- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19).** ✅ **LIVE: the admin
+  SET `NEMOTRON_API_KEY` and `AGENTV3_NEMOTRON=weak` in Cloud Run on 2026-09-19**, the same day it
+  merged — so the WEAK tier's judge and plan are the first Nemotron calls this platform has ever made,
+  and Normal/Strong are untouched until that flag names them.
+  ⚠️ **THE HOST WAS NOT STATED, AND THAT MATTERS BECAUSE THE FAILURE IS SILENT.** `NEMOTRON_BASE_URL`
+  was left unset, so the code default (OpenRouter, `https://openrouter.ai/api/v1`) is in force. A key
+  bought from NVIDIA directly needs `NEMOTRON_BASE_URL=https://integrate.api.nvidia.com/v1`; Together
+  AI needs `https://api.together.xyz/v1`. With the wrong host the judge call simply throws, and
+  `judgeBuild` treats a judge that could not RUN as `{ pass: true, score: 100 }` — **so a mis-set host
+  turns the gate off and every build passes its judge with nothing failing anywhere.** Verify by
+  finding `NEMOTRON` in a Weak build's per-call log, never by the absence of an error.
+  🔴 **AND THAT FAIL-OPEN IS AN OPEN ROOT CAUSE, not a Nemotron problem** — `glm-5.3` has always had
+  it too. A judge that cannot run has approved nothing, and reporting it as a pass is the
+  honesty defect rule 5 forbids. Recorded in `PROGRESS.md`; it needs its own change.
+  `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
   role/tier gate — ⚠️ **unset means the judge and plan are OFF even with a key**; takes `off` as a HARD
   kill that removes the ladder rung too, `on` for every tier, or a comma list of tiers: `weak` / `free`,
   `normal` / `economy`, `strong` / `premium`), `NEMOTRON_BASE_URL` (default OpenRouter),

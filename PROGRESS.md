@@ -69507,6 +69507,77 @@ screen-to-screen transitions. None of them is started; each needs the admin's wo
 
 ---
 
+## 2026-09-19 — 🧭 THE MODE LIST SHOWS WHERE YOU ARE (admin's spec, free mode's expert list)
+
+Admin, with a screenshot of the picker: the list opened with two hardcoded rows — **"NavBharatAI FREE"**
+(which RESUMED whatever was open) and **"NavBharatAI FREE +"** (a new chat) — and every expert row
+resumed its existing conversation.
+
+> *"1st jahan navbharatai likha hai, waha hardcod navbharatai nahi hoga, waha woh AI ayega jo chatbox
+> me active hai … agar teacher ai open hai, to 1st number par teacher ai ayega!"*
+> *"agar kisi bhi professional ya free par tap kiya jayega hamesa new chat hi open hoga
+> (exept : 1st option, jo ki open kon sa yeh batata hai)"*
+> *"1. recent chat, 2. navbharatai free, 3. images generator ai, 4. doctor ai,........ and so on!"*
+
+### The list now
+
+| # | row | tap |
+|---|---|---|
+| 1 | **the AI open right now, by its own name** | goes back to THAT conversation — the one row that starts nothing |
+| 2 | **NavBharatAI FREE** | always a brand-new free chat |
+| 3 | **Image Generator AI** | Other Tools' own `imagegen` view — free AND paid together |
+| 4 | Doctor AI, then every professional | a new chat |
+
+**The open AI appears twice on purpose** (admin, asked directly): Teacher AI open ⇒ row 1 "Teacher AI"
+*and* Teacher AI in the list. So the two rows carry different **ids** (`recent:teacher_ai` vs
+`teacher_ai`) and different **tags** (`Recent` vs `New chat`). One id would have collapsed two opposite
+actions into one, silently; one tag would have made it a coin flip for the person looking at it.
+
+**No recent row when no AI is open** (the Professionals hub) — a row offering to resume nothing is the
+fake-button class. And `imagegen` joins `isModeSurface`, or the image studio would be a room with no
+door back.
+
+### Nothing is lost, and that took the most care
+
+- **Free** — `startNewChat` mints a new session id; the previous record keeps its own, so the old chat
+  stays in History.
+- **A professional** — `endProfessionalChat` ARCHIVES the transcript into Professional History and then
+  clears the live slot, so the next mount is genuinely fresh. Not `removeItem`.
+- 🔴 **Doctor AI RESUMES, and that is a decision rather than an omission.** Its transcript is
+  `sda_messages` plus ONE fixed Firestore document per user (`sda_<uid>`), and
+  `ProfessionalHistoryView` iterates `PROFESSIONAL_CHATS`, which does not contain it. "Always a new
+  chat" would delete the previous case locally at once and overwrite it in Firestore as soon as the new
+  one had two messages — **medical case notes, gone, with nothing to reopen.** Told to the admin before
+  any code was written.
+  ⚠️ **And it is NOT a one-line flip**, which is the part worth recording: adding Doctor AI to
+  `startsFreshOnPick` would call `endProfessionalChat('sda_chat')`, which writes an archive under a key
+  **nothing reads** and never touches `sda_messages` — a "new chat" that silently is not one. Making it
+  real needs a per-conversation archive for Doctor AI plus its own clearing path. **OPEN root cause.**
+
+### 🔴 The reversion proof caught a lever of mine that did nothing
+
+The first draft shipped `RESUMES_INSTEAD_OF_STARTING_FRESH = new Set(['sda_chat'])` read as
+`id in PROFESSIONAL_CHATS && !set.has(id)`. Doctor AI is **not** in `PROFESSIONAL_CHATS`, so the set
+decided nothing: emptying it changed no behaviour and broke no test. **A switch that looks like the
+control and is not is worse than no switch** — the next person flips it, sees nothing happen, and goes
+looking in the wrong file. Deleted, with the reason written where it stood; the guard is now plainly
+`id in PROFESSIONAL_CHATS`, and a test pins that it never reaches Doctor AI, the image row or the free row.
+
+### Two existing tests changed, both recorded rather than deleted
+
+- `modePicker.test.ts` pinned the OLD rules ("FREE resumes", "FREE + starts new", the ✓ on the list
+  row). Those assertions were right about the rule that was withdrawn, so each is rewritten in place
+  with the reason — a test removed silently is a rule nobody can see was changed.
+- `polishBuilderTools.test.ts` asserted the KB path with **exact equality**, which is stricter than the
+  rule in its own name ("the doorway is Other AI, not Settings"). It broke the moment AI Image Gen
+  legitimately gained a second door. Now `startsWith`; the Settings guard — the half that actually
+  protects — is untouched.
+
+`AppKnowledgeBase.ts` records the new door, so every AI in the app can tell a user about it.
+
+Test-locked in `src/components/chat/modePicker.test.ts` (27 cases) and **reversion-proven four ways**:
+a bare recent id turns 1 red; widening the archive guard turns 2 red; dropping the archive call turns
+1 red; rendering a recent row with nothing open turns 1 red.
 ## 2026-09-19 — One door per thing in the sidebar (admin: "list wala hata do")
 
 Admin, verbatim: *"sidebar menu me 'setting' ke 2 option dikh rahe hai. ek list me hai, ek system

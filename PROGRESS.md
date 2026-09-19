@@ -68720,3 +68720,57 @@ class list by construction), each candidate once. All ten fixed by running the c
 
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
+
+---
+
+## 2026-09-19 — ⏱️ MEASURE THE COLD START BEFORE OPTIMISING IT (admin item E of five)
+
+The audit that produced items A–E found `dist/assets` at **5.9 MB** and the splash released at **1 s**,
+and could say **nothing** about what that costs a real user at launch — because nobody had ever measured
+it. This repo already knows the price of skipping that step: the `E2B_USD_PER_HOUR` correction in
+`CLAUDE.md` records a derivation that "could not fail" and put a number **half the real one** on the
+admin's own cost panel for a month. So E is an instrument, not an optimisation.
+
+### 🔴 What it cannot see, said in the payload and not only in a comment
+
+JavaScript begins existing when the WebView starts loading our document. The Android process starting,
+the Activity, the WebView's own creation and the splash appearing are **invisible from here**. So
+`toAppReady` is the **web half** of a cold start and the true figure is larger by an amount only a
+native trace can give. The row carries `excludesNativeLaunch: true` so a dashboard built from these
+rows cannot quietly present the half as the whole — reporting it as "the cold start" would be exactly
+the confident, unfalsifiable number this project has been bitten by before.
+
+### A load no human experienced is rejected BY NAME, never averaged away
+
+- **`reload` / `back_forward`** reuse a warm process and a warm cache. Not a cold start.
+- **Backgrounded** — an OS pre-warm, or the user switching away mid-launch. Nobody watched it, and a
+  hidden document has throttled timers, so the numbers would be long *and* meaningless.
+- **Incomplete or implausible** (> 120 s) — a stalled tab or a clock that moved, not a slow launch.
+
+Each is a distinct reason rather than a silent drop, because "we got no samples" and "we got samples
+and discarded them" lead to different next steps.
+
+### Reuses the existing pipeline rather than adding one
+
+Same sink (`/api/analytics/event`), same **consent gate** (`hasAnalyticsConsent`), same `PROD` guard as
+the web-vitals block it sits beside — this is non-essential telemetry of exactly that kind, and a second
+pipeline would be a second thing to keep in sync with the user's choice. It is stamped in the
+`requestAnimationFrame` that **already** proves the shell painted (the one that clears the stale-chunk
+flag), rather than inventing a second "ready" signal that could drift from it. Phases reported:
+`toFirstByte`, `toDomReady`, `toFirstPaint`, **`toAppReady`**, and `scriptBoot` — the last being the
+half that is ours to fix.
+
+Test-locked in `tests/measureTheColdStartBeforeOptimising.test.ts` (15 cases) and **reversion-proven
+twice**: averaging in a backgrounded launch turns **1** red; dropping the `excludesNativeLaunch`
+admission turns **2** red.
+
+⚠️ **The same brittleness I had fixed two hours earlier, reproduced in my own new test:** the wiring
+assertions sliced `main.tsx` by a fixed `at + 2200` characters and fell off the end of the function.
+Now anchor-based, like `githubNativeReturnWiring.test.ts`. A second slip is recorded in place too — the
+test asserted the event's VALUE where the source correctly uses the shared CONSTANT, which is the
+stronger thing to require.
+
+### Next step, deliberately NOT taken here
+
+No speed change ships in this PR. The point is to have the number first; `dist/assets` at 5.9 MB is a
+hypothesis about the cause, not a measurement of it.

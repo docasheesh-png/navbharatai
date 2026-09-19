@@ -68720,3 +68720,48 @@ class list by construction), each candidate once. All ten fixed by running the c
 
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
+
+---
+
+## 2026-09-19 — ↻ PULL TO REFRESH: REAL, OR ABSENT (admin item D of five)
+
+The gesture every native list has and this app had nowhere — the only way to see new data was to leave
+the screen and come back.
+
+### 🔴 The hard part was not the gesture. It was deciding where the gesture is HONEST
+
+A spinner over data that is already current is precisely the "built but not really working" state the
+second absolute rule bans, and the obvious target turned out to be the worst one:
+
+| screen | how it loads | verdict |
+|---|---|---|
+| **App Mart** | plain HTTP (`/api/nav-store/apps`, `/api/nav-store/web/apps`) — apps published by other creators appear **only** on a re-fetch | ✅ **wrapped** |
+| **History** | a Firestore **`onSnapshot` live listener** — already current on every device the moment anything changes | ❌ **not wrapped**, deliberately |
+
+Pulling on History would spin and fetch what is already on screen. That is theatre, so it is not there —
+and `tests/pullToRefreshIsRealOrAbsent.test.ts` asserts the absence, so nobody "finishes the job" later.
+
+### The gesture, and the conflicts it has to avoid
+
+`src/lib/pullToRefresh.ts` holds every decision, pure and unit-tested; the component is the DOM half.
+
+- **Each start condition is a real conflict**, not defensive noise: mid-list would steal the first
+  pixels of every upward flick; two fingers is a pinch; a refresh already in flight must not start
+  another.
+- **The axis lock keeps the app's other gestures.** This app has horizontally scrollable tab rows and a
+  swipe-to-open menu. A tie goes to **not** pulling — the safe side is leaving the other gesture alone.
+- **Resistance 0.5, threshold 64px, travel clamped at 96px.** Content moving less than the finger is
+  what makes a pull feel attached to a surface rather than to a scrollbar. A test asserts the clamp sits
+  **above** the threshold: the other way round would make the gesture impossible to complete with
+  nothing failing anywhere.
+- **One haptic, latched at the arming point** — the moment a native list confirms the gesture. Without
+  the latch a finger resting on the threshold rattles.
+- **The refresh is awaited**, so the indicator lasts as long as the work, and a failed fetch still ends
+  the gesture (the list reports its own error).
+
+`hapticNow()` was added to `nativeShell.ts` rather than writing a fourth copy of the
+load-the-shell-context dance at a call site; on the web it is a no-op by construction.
+
+Test-locked in `tests/pullToRefreshIsRealOrAbsent.test.ts` (19 cases) and **reversion-proven twice**:
+making a diagonal tie count as a pull turns **1** red; replacing the refresh with a no-op — the banned
+spinner — turns **1** red.

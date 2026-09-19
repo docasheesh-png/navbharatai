@@ -68765,3 +68765,335 @@ load-the-shell-context dance at a call site; on the web it is a no-op by constru
 Test-locked in `tests/pullToRefreshIsRealOrAbsent.test.ts` (19 cases) and **reversion-proven twice**:
 making a diagonal tie count as a pull turns **1** red; replacing the refresh with a no-op — the banned
 spinner — turns **1** red.
+## 2026-09-19 — The Android app blurred, every frame, something nobody could see
+
+**The admin corrected the target:** *"website par problem nahi hai. bas mobile app ko fast karo, bina
+tode!!"* — the Capacitor Android app, not the site.
+
+🔴 **THAT CORRECTION ALSO RETIRES MOST OF THE PREVIOUS ENTRY'S RELEVANCE, and it should be said plainly
+rather than left for someone to notice.** The app is **bundled mode** (`webDir: 'dist'`, no
+`server.url`, locked by `tests/nativeShellInvariants.test.ts`), so its JavaScript and CSS are already
+on the device. **The 3,600 ms first paint measured hours earlier was a DOWNLOAD cost and does not
+exist in the app at all.** The boot frame shipped in #3114 is a website fix; in the app it is worth
+very little. Everything below is about the app.
+
+### What was found, and why this one and not the other forty-two
+
+The global mobile bottom nav (`App.tsx`, `showsGlobalMobileNav`) was:
+
+```
+fixed bottom-0 left-0 right-0 … bg-[var(--surface-base)]/95 backdrop-blur-xl
+```
+
+Three facts, and the third is what makes it indefensible:
+
+1. `fixed`, full width, and `showsGlobalMobileNav` is true for **essentially the whole mobile app**
+   (mobile device mode, not focus mode, not Code Studio, not the bot builder) — so it sits over the
+   scrolling content at all times.
+2. `backdrop-blur-xl` is a **24px** blur, and what is behind it **moves while the user scrolls**, so
+   the compositor must re-blur that full-width strip **on every frame**.
+3. The surface over that blur was **95% opaque**. At most **5%** of the result could ever reach anyone's
+   eye.
+
+**A per-frame, full-width GPU blur, to produce an effect nobody can see.** On a desktop GPU it is
+invisible in both senses, which is exactly why it survived; in an Android WebView on a mid-range Mali
+or Adreno it is the classic reason a 60fps scroll becomes a stuttering one — and the report came from
+an Android phone.
+
+🔎 **THE CONTRAST IS THE EVIDENCE.** All 43 `backdrop-blur` sites were read, not sampled. Almost every
+other one is a **modal backdrop** (`fixed inset-0 bg-scrim`): it exists only while a dialog is open, it
+blurs a background that is not moving, and the blur is the whole point of it. Two more are transient —
+the focus-mode exit button and the GitHub-push status strip. **This was the only blur living
+permanently over the app's own scrolling content.** A finding that explains why one case differs from
+forty-two is worth more than one that merely names a cost.
+
+### The fix, and its deliberate narrowness
+
+`bg-surface` — the same `--surface-base` colour, opaque, no blur. That is also what a native Android
+tab bar looks like.
+
+⚠️ **Opaque, not merely un-blurred.** Dropping the blur and keeping `/95` would have been the worse of
+both worlds: still a per-frame blend, and now *unblurred* moving content ghosting through. The 5% that
+is lost was never visible through a 24px blur anyway.
+
+⚠️ **Nothing else was touched, on purpose** (*"bina tode"*). The focus-mode button keeps its blur and
+now says why in place: it renders only in focus mode, it is 36×36px rather than full width, and at 60%
+opacity its blur is genuinely visible — the opposite trade to the one removed.
+
+### ⚠️ THE HONEST LIMIT, stated before anyone quotes this as a measurement
+
+**No session here can drive a real Android device, so this is a mechanism-level finding from the code
+plus how WebView compositing works — NOT a frame-rate measurement on a phone.** What is certain is the
+cost side (a per-frame blur is real work) and the visual side (removing it cannot change more than that
+5%). Whether the admin's scroll feels different is a fact only the next `.aab` on a real phone can
+settle, and this entry claims nothing beyond that.
+
+### Locked
+
+`tests/theAppDoesNotBlurWhatNobodyCanSee.test.ts`, 3 cases, proven by four reversions: the blur
+returning to the nav (2 fail), the bar going translucent again (1), a new unjustified fixed blurred bar
+anywhere in `src/**` (1), and the justification marker being deleted (1).
+
+🔒 **The third case is the one that outlives this bug.** It sweeps every `.tsx` outside `src/server` for
+a `fixed` blur that is not a full-bleed overlay, and an exception must carry a `BLUR-OVER-SCROLL-OK`
+marker **in the twelve lines above it** — justified in place, never on a list inside the test. A list in
+a test file drifts away from the code it excuses, and the next reader cannot tell a considered
+exception from a forgotten one.
+
+### 🔴 STILL OPEN for the app (rule 6) — neither is a code fix
+
+1. **Cloud Run cold start, measured at 4,815 ms**, with `--min-instances 0`. In bundled mode the
+   frontend is already local, so *"kuch der baad response aata hai"* in the APP can only be the server.
+   This is the most likely remaining cause of that half of the report, and settling it means checking
+   whether the Cloud Scheduler ping on `/api/warm` actually exists, or paying for `--min-instances 1`.
+2. **A frontend change reaches installed users ONLY through a fresh `.aab`**, which is admin-triggered
+   only. Until one is built and live on Play, nothing here changes anything for a single real user.
+---
+
+## 2026-09-19 — THE ACCOUNT SWITCHER IS REMOVED (admin-mandated)
+
+**Admin, looking at the sign-in screen a "switch" had just dropped them on:** *"1 tab swich kam nahi
+kar raha hai. isko hata do! pura multiple account login wala system hata do … jab account switch ke
+samay login hi karna padega har baar to fayda hi kya hua, switching ka! ek account login hi rahne
+do."*
+
+**They were reading the feature correctly, and `accountRoster.ts` said so in its own header from the
+day it shipped:** *"the Firebase SDK holds ONE live session per app instance. So switching
+re-authenticates with the provider rather than keeping five sessions live in parallel."* The menu
+nevertheless said **"Switch account"** — Google's and Instagram's words for a mechanism that really
+does hold several sessions at once.
+
+🔴 **THE SHAPE WORTH RECOGNISING AGAIN: four separate repairs went into the WORDING of a promise the
+code could not keep, and none into the mechanism.** A banner on the sign-in screen explaining that
+you were switching (2026-09-02); a `login_hint` so the chooser landed on the right row (2026-08-22);
+a per-row `title` admitting *"this signs you in again"*; and a 2026-09-12 edit moving that admission
+off the screen because it *"bina bat ke jagah kha raha hai"*. Each was a reasonable local fix. Their
+sum is a feature whose every visible part exists to explain why it does not do what it is called.
+
+**Honest about what was possible, since the admin's own words were "apse nahi hoga":** real parallel
+sessions ARE buildable — several named Firebase app instances, each with its own persistence. It was
+never attempted; what shipped was the metadata half. On its own that half saves typing an email
+address and costs a screen that looks like the switch failed, so removing it is right whether or not
+the full thing is ever built.
+
+**Removed:** `src/lib/accountRoster.ts` (+ its test), `tests/accountSwitchHonesty.test.ts`, the
+dropdown's whole switch block in `TopNav.tsx`, the sign-in-screen switch banner, and the stored-hint
+plumbing (`SIGN_IN_HINT_KEY` / `SIGN_IN_PROVIDER_KEY` / `googleNativeCustomParameters`).
+
+🔒 **THE PART A CODE-ONLY DELETION WOULD HAVE MISSED: the roster is DELETED from devices that have
+one.** `nbai:accounts` is a list of everyone who ever signed in on that phone — the roster's own
+header warned about exactly that on a shared machine — and with the switcher gone there would be no
+screen left that could clear it. `App.tsx` now removes all three keys where it used to write them.
+
+⚠️ **Two `login_hint` uses REMAIN and are correct — they were checked, not swept up.** GitHub's native
+`allow_signup` parameter, and the account-LINKING flow, which hints the email out of the pending
+credential in hand so a user proving they own that address is not made to pick it from a list.
+Neither reads stored accounts. `tests/oneAccountAtATime.test.ts` therefore forbids
+`login_hint: signInHint` and any read of the `nbai:sign-in*` keys, NOT the string `login_hint`.
+
+Google sign-in keeps `prompt: 'select_account'`, which is now the whole policy: with no hint, that is
+what stops Google silently reusing its single live session and signing someone back into the account
+they opened the screen to leave.
+
+`AppKnowledgeBase.ts` updated in the same change (every AI in the app answers "where do I switch
+accounts?" from it; the old entry would have given directions to a menu that no longer exists).
+
+Test-locked in `tests/oneAccountAtATime.test.ts` — 11 cases, proven by two reversions (restoring a
+`switchTo` turns it red; removing the storage cleanup turns two more red).
+## 2026-09-19 — CODE STUDIO ON A LIGHT THEME: HALF THE PANE WAS REPAINTED AND HALF WAS FROZEN
+
+The admin sent a phone screenshot of Code Studio with two problems: *"1- light theme me visiblity kam.
+2- upfooter me jo button hai {}()[] etc etc woh kaam nahi kar rahe hai. actualy unki need hi nahi hai.
+hata do!!"*
+
+**PROBLEM 1 — ROOT CAUSE, MEASURED RATHER THAN JUDGED BY EYE.** `Editor.tsx` — the whole editor pane:
+tab strip, breadcrumb, mobile toolbars — was written in VS-Code-dark literals, and
+`theme-compat.css` remaps only **some** of them. `#1e1e1e` and `#252526` are in its allowlist;
+`#2d2d2d`, `#2a2d2e` and `#1f1f1f` are **not** (verified by grepping the compat file, not assumed).
+So on Light the same pane came out half repainted and half frozen: the active tab turned light while
+the inactive tabs stayed near-black, and the action bar under the editor stayed a black strip. That is
+the exact failure CLAUDE.md predicts of an allowlist against an open-ended set of class names.
+
+🔴 **AND PR #3111 (PR K, merged two hours earlier) HAD ALREADY MIGRATED THIS FILE — LEAVING EXACTLY
+THOSE FIVE LITERALS.** The codemod maps what the table knows and lists the rest; the rest were the
+only ones that produce the symptom, because they are the ones compat never covered. So the
+instance-vs-class pattern this repo keeps paying for appeared inside the theme migration itself: 39
+literals of 44 moved, and the 5 that mattered stayed. An earlier session had also fixed **one
+element** of this same file for this same complaint on 2026-07-22 (the mobile textarea) and left the
+pane around it on literals.
+
+**What the pane looks like now, by token:** strip `bg-surface`, active tab `bg-card text-ink` (so the
+selected tab reads continuous with the code), inactive `bg-well text-muted hover:bg-well-hover`,
+divider `border-line`, action bar `bg-card border-t border-line`. The three surfaces are
+**deliberately different** — compat had mapped the strip and the active tab to the same colour, so on
+Light the one thing that disappeared was the selection marker.
+
+**PROBLEM 2 — the symbol row is deleted, not repaired.** Two real defects in it, and one reason not to
+keep it: it reached for the **monaco global** to build a Range (the only place in the repo that did,
+while every working button on that bar uses `editorRef.current` alone), and it never called `focus()`
+first, unlike every neighbour. ⚠️ **I could not reproduce a phone tap from here, so I am not claiming
+which of the two bit the admin.** The reason it is gone rather than fixed: a phone keyboard already
+carries all eighteen characters and Monaco runs with `autoClosingBrackets: 'always'`, so the row
+duplicated the keyboard while taking screen height from the code.
+
+**A third defect in the same screenshot, unreported:** the command-palette label had no `truncate` in a
+fixed `h-6` box, so on a phone it wrapped to three lines inside a 24px button and spilled over the
+title beside it. One line now, and the `Ctrl+Shift+P` hint is desktop-only — a phone has no Ctrl key.
+
+**📱 THE SIBLING THAT MATTERS MOST ON A PHONE: `active:` was invisible to the dead-state guard.**
+`tests/hoverIsNotANoOp.test.ts` (#3095) catches `bg-X hover:bg-X`; the codemod had emitted
+`bg-raised active:bg-raised` into this very toolbar and nothing looked. **A finger never hovers, so on
+touch `active:` is the only feedback there is** — the press repainted the resting colour and the
+button did not answer at all. Fixed in three places, in the order that keeps it fixed: PR K's own lift
+in `themeMigrate.mjs` now covers `active:` (one token added to its regex, not a parallel pass), the
+guard reads `active:` too, and the one offender the widened guard found repo-wide
+(`SettingsPanel.tsx`, a resting `bg-raised`) is corrected. The resting-surface rule is unchanged:
+`hover:bg-raised active:bg-raised` with no resting fill paints a real change and is not a finding —
+measured, so the sweep touched one line rather than six.
+
+**🔎 THE WELL WAS THE ONE SURFACE NOTHING HAD EVER MEASURED.** Putting the inactive tabs on `bg-well`
+raised the question, and adding `surface-well` to the AA lock answered *"missing"* rather than a
+ratio: `palette()` read `#rrggbb` only, and Light and Dark declare the wells as `rgba()` washes. The
+parser now composites a wash over the card it sits inside, and **all 10 inks clear AA on `well` and
+`well-hover` in all three themes** — 60 pairs per theme now guarded instead of 40. (My own throwaway
+script had reported 4.49 for one pair; an independent calculation and then the repo's own instrument
+both give ≈4.7. The scratch parser was wrong, and the wrong number is not recorded as a finding.)
+
+**Evidence.** `tests/theIdeIsReadableOnEveryTheme.test.ts` (9 cases) pins both reported problems by
+name, plus the three-surface tab rule, the action bar, the floating terminal disc, the shortcut
+panel's `#21262d` labels (≈1.3:1 — invisible on **every** theme, not only Light) and a reversion
+guard on the note explaining the deletion. **Proven by reversion:** putting the strip back to
+`bg-card` fails the three-surface case; re-adding an `executeEdits('helper'` line fails the symbol-row
+case; restoring one `active:bg-raised` fails the widened guard; reverting the composite makes the AA
+lock report the wells missing again. Editor.tsx and VirtualKeyboard.tsx are both at **zero** literals,
+so the ratchet holds them there.
+
+⚠️ **VERIFIED THE WAY A TAILWIND CHANGE HAS TO BE:** a class that does not exist emits no CSS and
+fails nothing, so `bg-well-hover`, `placeholder-faint`, `bg-accent`, `bg-surface`, `bg-raised-hover`
+and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All present.
+
+### 🔴 STILL OPEN (rule 6)
+1. **Nobody has seen this on a phone.** Every claim above is source-level, contrast arithmetic, or the
+   built CSS. `scripts/verifyTouchVisibility.mjs` is the precedent for answering that properly (real
+   Chromium, real built CSS, computed values) and it is **not** wired into CI because the runner has no
+   browser. The honest confirmation is the admin opening Code Studio on Light.
+2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
+   already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
+3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.
+## 2026-09-19 — 🔗 A navbharatai.com LINK OPENS THE APP (admin: "mujhe sabse acchi native app banani hai")
+
+First of five items the admin approved after the scrollbar fix (A–E). Tapping a navbharatai.com link
+in WhatsApp opened a **browser**. Every app we are compared to opens its own links, and this is both a
+native-feel defect and a growth leak — share links, referral codes, published apps, all of it leaked to
+a browser tab.
+
+### The shape of the problem, because both halves fail in OPPOSITE directions
+
+- **Claim a URL we cannot serve** ⇒ the app opens, dumps the user on Home, and has EATEN the page they
+  asked for. Strictly worse than never claiming it — the browser would at least have shown it.
+- **Serve a URL we do not claim** ⇒ code nobody reaches.
+
+So the claim and the destination had to become ONE fact. `src/lib/deepLinkRoute.ts` is that fact:
+`routeForPath` says where a URL goes, `APP_LINK_CLAIMS` says what to write in the manifest, and
+`tests/aLinkOpensTheApp.test.ts` asserts the manifest against it **in both directions**. A path added
+to one and not the other fails CI. Same shape as autopsy 1a7f4a58's fix, deliberately — that autopsy
+was two subsystems answering one question differently, and App.tsx already had **two** private copies
+of the path test (`readAdminRoute`, `readStoreRoute`); a deep link would have made three. Both now ask
+the shared rule, and its ORDER preserves today's behaviour exactly (admin before store;
+`?view=appstore` honoured on any path).
+
+### What ships
+
+- **`src/lib/deepLinkRoute.ts`** — pure. `deepLinkTarget` additionally checks the ORIGIN, which is the
+  security half: a deep link names its own origin, and honouring a path from `https://evil.example/admin`
+  because the PATH matched would let any website open any screen of the app.
+- **`AndroidManifest.xml`** — an `autoVerify` intent filter over `navbharatai.com` and
+  `www.navbharatai.com`, claiming `/`, `/admin`, `/store`, `/store/app/*` and nothing else.
+  ⚠️ **`/privacy` and `/terms` are deliberately NOT claimed**: Play and Meta fetch them with tools that
+  may not run JavaScript, and a person who taps a privacy link asked for that page.
+- **`src/server/lib/assetLinks.ts` + a route in `server.ts`** — serves
+  `/.well-known/assetlinks.json` from `ANDROID_CERT_SHA256`. Mounted beside the Apple domain-association
+  route and for the same reason: `express.static`'s `dotfiles` default is `ignore`, so a `.well-known`
+  path never reaches it. **Env-only, no file** — because that same Apple module records that `public/`
+  is not copied into the runtime image, so a committed `.well-known` file is absent exactly where
+  Android fetches from.
+- **`App.tsx`** — `handleAppLinkOpen` writes the path onto the local origin **before** switching view.
+  That order IS the feature: `/store/app/<id>` is read out of `window.location` by NavAppStore, so a
+  view switch without the path lands on Browse and the shared app is lost.
+
+### Not live until the admin sets one value
+
+`ANDROID_CERT_SHA256` is **unset**, so the route 404s, verification fails and every link keeps going to
+the browser — today's behaviour exactly. It is the SHA-256 of the app's signing certificate, read from
+Play Console → Setup → App signing. **It is not a secret** (it is published at that public URL by every
+App-Links app on earth); the keystore is, and no session can reach it. **Both** certificates should be
+set, comma-separated — under Play App Signing the upload key and Google's app-signing key are different,
+and which one reaches a phone depends on how the app was installed. A malformed entry is DROPPED rather
+than passed through, because Android rejects the whole file on one bad entry and would silently disable
+link handling for the good fingerprint beside it — the shape that already bit `BRAVE_API_KEY` (trailing
+space) and `ALERT_EMAIL_FROM` (an `=` for a `<`). Registered in `CLAUDE.md`.
+
+### Two existing tests broke, and both were right to
+
+- `githubNativeReturnWiring.test.ts` sliced the deep-link listener as `at + 1600` **characters**. One
+  added line at the top of the callback pushed `setGithubToken(token)` out of the window and produced a
+  failure about GitHub sign-in, which was untouched. The slice now ends at an **anchor**
+  (`removeGithubUrlOpen`), so it no longer depends on how much unrelated code sits above it.
+- `webAppPlayerSandbox.test.ts` asserted the literal `startsWith('/store/app/')` **inside App.tsx**. The
+  rule moved; the behaviour did not. It now asserts the rule in its new home AND that App.tsx really
+  asks it — strictly stronger than the old single grep.
+
+Test-locked in `tests/aLinkOpensTheApp.test.ts` (22 cases) and **reversion-proven twice**: making the
+manifest claim `/privacy` turns **2** red; setting the view before writing the path turns **1** red.
+## 2026-09-19 — 🚫 THE APP DOES NOT PAINT A SCROLL TRACK (admin screenshot: "yeh website ka feel deti hai")
+
+Admin, with a phone screenshot of the home screen: *"app ke andar bhi right side me blue vertical light
+show ho rahi hai, jo page ke scroll ke time up/down hoti hai. yeh website ka feel deti hai. isko mobile
+app me se hata do! jisse app ka feel aye."*
+
+A native Android or iOS app never paints a PERSISTENT scroll track — both platforms draw a transient
+indicator that fades when the finger lifts. A bar that sits there while you read belongs to a browser,
+and it was the loudest web tell left in the shell.
+
+### 🔎 Why it was BLUE — and the dead duplicate that made it hard to see
+
+`.custom-scrollbar` was declared **twice**: in `src/index.css` inside `@layer base` (indigo, via the
+STANDARD `scrollbar-color` property) and again in an unlayered `<style>` inside `App.tsx` (white, via
+`::-webkit-scrollbar-thumb`). Unlayered beats layered, so the white copy read like the winner.
+
+It was not. **Since Chromium 121 a non-`auto` `scrollbar-color`/`scrollbar-width` makes the engine
+ignore every `::-webkit-scrollbar` pseudo-element on that box**, and every Android WebView in the field
+is past 121. The screenshot is indigo, not grey — the mechanism and the observation agree, and the
+App.tsx copy had been painting nothing for an unknown length of time while still reading like the
+authority. It is deleted; one scrollbar now has one home.
+
+### The fix — `html.nb-native-shell`, unlayered, both mechanisms
+
+- `scrollbar-width: none` + `scrollbar-color: transparent transparent` (what Chromium 121+ reads) AND
+  `::-webkit-scrollbar { display: none }` (what older engines read). A box must lose its bar under
+  either engine, so both are set rather than one being "the" answer.
+- **Unlayered on purpose.** `@layer base` loses to any unlayered rule, and `.custom-scrollbar` lives in
+  that layer — a layered hide would have lost to the very rule it replaces.
+- **Carries `html` on purpose.** `.nb-native-shell *` and `.custom-scrollbar` are both (0,1,0), so the
+  winner would be decided by source order against a `<style>` rendered into the body — i.e. by luck,
+  re-rolled by whoever adds the next inline block. `html.nb-native-shell` is (0,1,1) and wins by
+  construction.
+- **Gated, so the WEBSITE keeps its scrollbar.** The class is added to `<html>` by index.html's
+  pre-paint script only when `window.Capacitor` exists. A desktop visitor has a pointer and genuinely
+  needs a bar to drag; taking it away would be an accessibility regression, not a polish.
+- Hiding is not disabling — `display: none` on the pseudo-element leaves the box fully scrollable, the
+  same technique `.no-scrollbar` has used here for months.
+
+Test-locked and reversion-proven in both halves in `tests/theAppHasNoScrollbarsInTheApp.test.ts`
+(7 cases): removing the CSS block turns **3** red, restoring the App.tsx duplicate turns **2** red. The
+suite also asserts the two cascade facts above, because neither is visible from the rule itself.
+
+Side effect, stated: the app reclaims the ~8px gutter the non-overlay scrollbar was holding, and the
+theme-colour ratchet recorded `src/App.tsx` 20 → 18 literals (two colours left with the dead block).
+
+### Still open (rule 6) — the rest of the "native, not Capacitor" list
+
+Answered in the same message as a ranked audit rather than built: Android App Links (`autoVerify`) so
+`navbharatai.com` links open the app, predictive-back on targetSdk 36, a native share sheet beyond the
+two existing `navigator.share` call sites, `@capacitor/network` for an honest offline state, and
+screen-to-screen transitions. None of them is started; each needs the admin's word on scope.

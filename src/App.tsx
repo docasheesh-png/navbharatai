@@ -5,6 +5,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
 // Native Supabase-connect return — the SAME deep-link shape, its own path (2026-09-14 fix).
 import { nonceFromSupabaseDeepLink, errorFromSupabaseDeepLink, SUPABASE_NATIVE_RETURN_EVENT } from './lib/supabaseOauthReturn';
+import { routeForPath, deepLinkTarget, type DeepLinkView } from './lib/deepLinkRoute';
 import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
@@ -63,7 +64,6 @@ import { Capacitor } from '@capacitor/core';
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
-import { readRoster, writeRoster, rememberAccount } from './lib/accountRoster';
 import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
 import { LS_EVICTABLE, safeLS } from './lib/localStorageSafe';
@@ -367,23 +367,25 @@ export default function App() {
   // into the existing admin view (login → MFA → dashboard). Keeping it a URL (not a visible menu item)
   // means the admin entry isn't advertised in the UI, and it reuses ALL the existing, tested admin
   // wiring rather than duplicating it. A trailing slash is tolerated.
-  const readAdminRoute = (): boolean => {
-    try { return typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/admin'; } catch { return false; }
+  // Both readers below ask ONE rule (src/lib/deepLinkRoute.ts), which is also what the native shell
+  // uses for an incoming App Link and what the Android manifest's claimed paths are asserted against.
+  // Before this they were two private path tests, and a deep link would have needed a third — which is
+  // precisely how autopsy 1a7f4a58's two subsystems came to answer the same question differently.
+  const readUrlRoute = (): DeepLinkView | null => {
+    try {
+      if (typeof window === 'undefined') return null;
+      return routeForPath(window.location.pathname, window.location.search)?.view ?? null;
+    } catch { return null; }
   };
+  const readAdminRoute = (): boolean => readUrlRoute() === 'admin';
   // Nav App Store deep-link (admin 2026-08-01): navbharatai.com/?view=appstore (or /store) opens the
   // Nav App Store panel straight away, so a shareable link can drop someone directly on the store's
   // Browse tab (public, no login needed) instead of them hunting through Other AI → Publish & Deploy.
   // It reuses the existing 'appstore' view — no duplicate wiring. A trailing slash on /store is tolerated.
-  const readStoreRoute = (): boolean => {
-    try {
-      if (typeof window === 'undefined') return false;
-      // `/store` opens the store; `/store/app/<id>` is a SHARE LINK to one web app — it must land in
-      // the store too (NavAppStore reads the id itself and opens the player directly).
-      const path = window.location.pathname.replace(/\/+$/, '');
-      if (path === '/store' || path.startsWith('/store/app/')) return true;
-      return new URLSearchParams(window.location.search).get('view') === 'appstore';
-    } catch { return false; }
-  };
+  // `/store` opens the store; `/store/app/<id>` is a SHARE LINK to one web app — it must land in the
+  // store too (NavAppStore reads the id itself and opens the player directly). `?view=appstore` is the
+  // older share link, still in circulation. All three live in routeForPath now.
+  const readStoreRoute = (): boolean => readUrlRoute() === 'appstore';
   /**
    * "wahi se start ho" (admin 2026-09-17) — the places the app may land somebody in on launch.
    *
@@ -1219,23 +1221,22 @@ export default function App() {
         // in-memory, which is what made every app relaunch come back logged out). Fire-and-forget: it is
         // best-effort, never throws, and must never delay the UI reacting to a successful sign-in.
         void ensureNativeSessionPersisted();
-        // REMEMBER THIS ACCOUNT ON THIS DEVICE (admin 2026-08-22 — profile switching). Recorded HERE,
-        // at the one place every successful sign-in passes through, so every provider and every path
-        // (popup, redirect, native, email) populates the switcher without its own wiring.
+        // FORGET THE OLD ACCOUNT ROSTER (admin 2026-09-19 — the switcher was removed).
         //
-        // 🔒 METADATA ONLY — no token ever reaches this list; see accountRoster.ts for why. Wrapped
-        // because a device with storage disabled must still sign in normally, just without a roster.
+        // Until today this same spot RECORDED every account that signed in on this device, to feed a
+        // "Switch account" list. That list is gone, so the stored copy must go too rather than sit in
+        // localStorage for ever with no screen that can clear it: on a shared or family phone it is a
+        // list of everyone who ever signed in here, and its own module warned about exactly that. The
+        // two sign-in hint keys it wrote go with it — nothing reads them any more, and a key nobody
+        // reads is precisely what this repo has already had to delete once before.
+        //
+        // Runs on every signed-in load and costs three `removeItem` calls on an empty store, which is
+        // cheaper than a flag recording that the cleanup has happened.
         try {
-          const rStore = typeof localStorage !== 'undefined' ? localStorage : null;
-          writeRoster(rStore, rememberAccount(readRoster(rStore), {
-            uid: currentUser.uid,
-            email: currentUser.email || '',
-            name: currentUser.displayName || '',
-            photo: currentUser.photoURL || '',
-            provider: currentUser.providerData?.[0]?.providerId || '',
-            lastUsed: Date.now(),
-          }));
-        } catch { /* the roster is a convenience — it must never affect signing in */ }
+          if (typeof localStorage !== 'undefined') {
+            for (const k of ['nbai:accounts', 'nbai:sign-in-hint', 'nbai:sign-in-provider']) localStorage.removeItem(k);
+          }
+        } catch { /* blocked storage — there is nothing stored to clean up either */ }
         // REGISTRATION CONVERSION — reported HERE for the same reason the roster above is: this is
         // the ONE place every successful sign-in passes through, so all eight paths (email, phone
         // web/native, Google popup/redirect/native, GitHub) are covered without each growing its own
@@ -2612,6 +2613,33 @@ export default function App() {
     // SupabaseConnectCard listens for — it stays mounted the whole time on native (no page navigation),
     // so it cannot pick this up on its own. Kept as its own function (not inlined into the appUrlOpen
     // callback below) so the GitHub listener's own shape and tested content stay unchanged.
+    /**
+     * AN APP LINK ARRIVED — take the user where the link said, not to Home (admin 2026-09-19).
+     *
+     * This is the half that makes the manifest's `autoVerify` worth having. Android hands us the FULL
+     * https URL; the native shell's own document lives at localhost, so `window.location` knows nothing
+     * about it. Two things therefore have to happen, in this order:
+     *
+     *   1. WRITE THE PATH ONTO THE LOCAL ORIGIN FIRST. `/store/app/<id>` is a share link to ONE app, and
+     *      NavAppStore reads that id from `window.location.pathname` itself. Setting the view without
+     *      writing the path would open the store's Browse tab — the app opens, and the link the person
+     *      actually tapped is gone. That is the failure this whole feature exists to avoid.
+     *   2. Then switch the view.
+     *
+     * `deepLinkTarget` rejects anything that is not https on one of OUR hosts, so the custom-scheme
+     * returns handled below (com.navbharat.ai://…) can never reach this — the two are disjoint by
+     * protocol, not by ordering.
+     */
+    const handleAppLinkOpen = (url: string | undefined): boolean => {
+      const target = deepLinkTarget(url);
+      if (!target) return false;
+      try {
+        window.history.replaceState(null, '', `${target.path || '/'}${target.search}`);
+      } catch { /* history unavailable — the view switch below is still worth doing */ }
+      setActiveView(target.view);
+      return true;
+    };
+
     const handleSupabaseUrlOpen = (url: string | undefined): boolean => {
       const sbNonce = nonceFromSupabaseDeepLink(url);
       const sbErr = errorFromSupabaseDeepLink(url);
@@ -2639,6 +2667,7 @@ export default function App() {
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
           if (handleSupabaseUrlOpen(data?.url)) return; // see handleSupabaseUrlOpen above
+          if (handleAppLinkOpen(data?.url)) return; // an https navbharatai.com link — see above
           // A TICKET, when the server had a verified identity to bind one to; the raw token otherwise.
           // Both are handled because the server chooses, not the client — see githubOauthReturn.ts.
           // The ticket path exists because a custom URI scheme is claimable by any installed app, and
@@ -4176,8 +4205,36 @@ export default function App() {
           and the two rows disagree about where you are (the IDE says CODE, the global bar says STUDIO).
           Inside the IDE, the IDE's own bar is the correct and only one. `botbuilder` is excluded here for
           the same reason and has been for a while. */}
+      {/* 🔴 NO backdrop-blur HERE, AND THAT IS A PERFORMANCE DECISION (admin 2026-09-19: the Android
+          app scrolled badly — "page scroll karne me lag hota hai").
+
+          This bar used to be `bg-[var(--surface-base)]/95 backdrop-blur-xl`. Three facts together made
+          that the most expensive pixel in the app, and the third is what made it pointless:
+
+            • It is `fixed` and `showsGlobalMobileNav` is true for essentially the whole mobile app, so
+              it sits over the scrolling content at all times.
+            • `backdrop-blur-xl` is a 24px blur, and the content behind it MOVES while the user scrolls,
+              so the compositor had to re-blur that full-width strip on EVERY frame.
+            • The surface over it was 95% opaque, so at most 5% of that blur ever reached anyone's eye.
+
+          We were paying a per-frame, full-width GPU blur to produce an effect nobody could see. On a
+          desktop GPU that is invisible in both senses; in an Android WebView on a mid-range phone it is
+          exactly the kind of work that turns a 60fps scroll into a stuttering one.
+
+          🔎 WHY THIS ONE AND NOT THE OTHER 42 `backdrop-blur` SITES, because the contrast is the
+          evidence: almost every other one is a MODAL overlay (`fixed inset-0 bg-scrim`), which appears
+          only while a dialog is open and blurs a background that is not moving — there the blur is both
+          cheap and visible. This was the only blur living permanently over scrolling content.
+
+          ⚠️ HONEST LIMIT: no session here can drive a real Android device, so this is a mechanism-level
+          finding from the code plus how WebView compositing works, NOT a measurement on a phone. It is
+          recorded that way in PROGRESS.md. What IS certain is the cost side — a per-frame blur is real
+          work — and that removing it cannot change what the user sees beyond that 5%.
+
+          `bg-surface` is the same `--surface-base` colour the bar already used, just opaque — which is
+          also what a native Android tab bar looks like. */}
       {showsGlobalMobileNav && (
-        <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
+        <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-surface border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.
             // Adding the safe-area to the height (instead of the old fixed h-14 with padding eating INTO it
@@ -4322,6 +4379,13 @@ export default function App() {
           both mouse and touch, unlike a hover-reveal) on the top-most layer so it's discoverable and
           never lost behind other UI; safe-area-aware for the notch / browser chrome up top. Esc does
           the same thing (see the keydown effect above). */}
+      {/* BLUR-OVER-SCROLL-OK: this one keeps its backdrop-blur, deliberately, and the reason is the
+          mirror image of the bottom nav's (see the note on that <nav> above). It renders ONLY in focus
+          mode, it is 36x36px rather than the full width of the screen, and at 60% opacity the blur is
+          genuinely visible instead of being hidden under a 95%-opaque surface. Cost small, effect real
+          — the opposite trade to the one that was removed.
+          ⚠️ The marker above is what `tests/theAppDoesNotBlurWhatNobodyCanSee.test.ts` looks for: a
+          blur placed over the app's own scrolling content has to justify itself in place, or CI fails. */}
       {focusMode && (
         <button
           onClick={() => setFocusMode(false)}
@@ -4334,13 +4398,13 @@ export default function App() {
         </button>
       )}
 
+      {/* SCROLLBAR RULES DELIBERATELY ABSENT (2026-09-19). They used to sit at the top of this block —
+          a second copy of .custom-scrollbar / .no-scrollbar, already declared in src/index.css. The copy
+          here read like the winner (unlayered beats @layer base) and was DEAD: since Chromium 121 a
+          non-auto scrollbar-color, which index.css sets, makes the engine ignore every
+          ::-webkit-scrollbar pseudo-element on that box. One rule, one home — index.css. The native
+          shell hides scrollbars outright there, under html.nb-native-shell. */}
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes bounce-slow {
           0%, 100% { transform: translateY(-5%); animation-timing-function: cubic-bezier(0.8, 0, 1, 1); }
           50% { transform: translateY(0); animation-timing-function: cubic-bezier(0, 0, 0.2, 1); }

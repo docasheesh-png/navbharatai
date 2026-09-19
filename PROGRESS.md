@@ -68720,3 +68720,87 @@ class list by construction), each candidate once. All ten fixed by running the c
 
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
+
+## 2026-09-19 — The Android app blurred, every frame, something nobody could see
+
+**The admin corrected the target:** *"website par problem nahi hai. bas mobile app ko fast karo, bina
+tode!!"* — the Capacitor Android app, not the site.
+
+🔴 **THAT CORRECTION ALSO RETIRES MOST OF THE PREVIOUS ENTRY'S RELEVANCE, and it should be said plainly
+rather than left for someone to notice.** The app is **bundled mode** (`webDir: 'dist'`, no
+`server.url`, locked by `tests/nativeShellInvariants.test.ts`), so its JavaScript and CSS are already
+on the device. **The 3,600 ms first paint measured hours earlier was a DOWNLOAD cost and does not
+exist in the app at all.** The boot frame shipped in #3114 is a website fix; in the app it is worth
+very little. Everything below is about the app.
+
+### What was found, and why this one and not the other forty-two
+
+The global mobile bottom nav (`App.tsx`, `showsGlobalMobileNav`) was:
+
+```
+fixed bottom-0 left-0 right-0 … bg-[var(--surface-base)]/95 backdrop-blur-xl
+```
+
+Three facts, and the third is what makes it indefensible:
+
+1. `fixed`, full width, and `showsGlobalMobileNav` is true for **essentially the whole mobile app**
+   (mobile device mode, not focus mode, not Code Studio, not the bot builder) — so it sits over the
+   scrolling content at all times.
+2. `backdrop-blur-xl` is a **24px** blur, and what is behind it **moves while the user scrolls**, so
+   the compositor must re-blur that full-width strip **on every frame**.
+3. The surface over that blur was **95% opaque**. At most **5%** of the result could ever reach anyone's
+   eye.
+
+**A per-frame, full-width GPU blur, to produce an effect nobody can see.** On a desktop GPU it is
+invisible in both senses, which is exactly why it survived; in an Android WebView on a mid-range Mali
+or Adreno it is the classic reason a 60fps scroll becomes a stuttering one — and the report came from
+an Android phone.
+
+🔎 **THE CONTRAST IS THE EVIDENCE.** All 43 `backdrop-blur` sites were read, not sampled. Almost every
+other one is a **modal backdrop** (`fixed inset-0 bg-scrim`): it exists only while a dialog is open, it
+blurs a background that is not moving, and the blur is the whole point of it. Two more are transient —
+the focus-mode exit button and the GitHub-push status strip. **This was the only blur living
+permanently over the app's own scrolling content.** A finding that explains why one case differs from
+forty-two is worth more than one that merely names a cost.
+
+### The fix, and its deliberate narrowness
+
+`bg-surface` — the same `--surface-base` colour, opaque, no blur. That is also what a native Android
+tab bar looks like.
+
+⚠️ **Opaque, not merely un-blurred.** Dropping the blur and keeping `/95` would have been the worse of
+both worlds: still a per-frame blend, and now *unblurred* moving content ghosting through. The 5% that
+is lost was never visible through a 24px blur anyway.
+
+⚠️ **Nothing else was touched, on purpose** (*"bina tode"*). The focus-mode button keeps its blur and
+now says why in place: it renders only in focus mode, it is 36×36px rather than full width, and at 60%
+opacity its blur is genuinely visible — the opposite trade to the one removed.
+
+### ⚠️ THE HONEST LIMIT, stated before anyone quotes this as a measurement
+
+**No session here can drive a real Android device, so this is a mechanism-level finding from the code
+plus how WebView compositing works — NOT a frame-rate measurement on a phone.** What is certain is the
+cost side (a per-frame blur is real work) and the visual side (removing it cannot change more than that
+5%). Whether the admin's scroll feels different is a fact only the next `.aab` on a real phone can
+settle, and this entry claims nothing beyond that.
+
+### Locked
+
+`tests/theAppDoesNotBlurWhatNobodyCanSee.test.ts`, 3 cases, proven by four reversions: the blur
+returning to the nav (2 fail), the bar going translucent again (1), a new unjustified fixed blurred bar
+anywhere in `src/**` (1), and the justification marker being deleted (1).
+
+🔒 **The third case is the one that outlives this bug.** It sweeps every `.tsx` outside `src/server` for
+a `fixed` blur that is not a full-bleed overlay, and an exception must carry a `BLUR-OVER-SCROLL-OK`
+marker **in the twelve lines above it** — justified in place, never on a list inside the test. A list in
+a test file drifts away from the code it excuses, and the next reader cannot tell a considered
+exception from a forgotten one.
+
+### 🔴 STILL OPEN for the app (rule 6) — neither is a code fix
+
+1. **Cloud Run cold start, measured at 4,815 ms**, with `--min-instances 0`. In bundled mode the
+   frontend is already local, so *"kuch der baad response aata hai"* in the APP can only be the server.
+   This is the most likely remaining cause of that half of the report, and settling it means checking
+   whether the Cloud Scheduler ping on `/api/warm` actually exists, or paying for `--min-instances 1`.
+2. **A frontend change reaches installed users ONLY through a fresh `.aab`**, which is admin-triggered
+   only. Until one is built and live on Play, nothing here changes anything for a single real user.

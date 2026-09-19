@@ -4176,8 +4176,36 @@ export default function App() {
           and the two rows disagree about where you are (the IDE says CODE, the global bar says STUDIO).
           Inside the IDE, the IDE's own bar is the correct and only one. `botbuilder` is excluded here for
           the same reason and has been for a while. */}
+      {/* 🔴 NO backdrop-blur HERE, AND THAT IS A PERFORMANCE DECISION (admin 2026-09-19: the Android
+          app scrolled badly — "page scroll karne me lag hota hai").
+
+          This bar used to be `bg-[var(--surface-base)]/95 backdrop-blur-xl`. Three facts together made
+          that the most expensive pixel in the app, and the third is what made it pointless:
+
+            • It is `fixed` and `showsGlobalMobileNav` is true for essentially the whole mobile app, so
+              it sits over the scrolling content at all times.
+            • `backdrop-blur-xl` is a 24px blur, and the content behind it MOVES while the user scrolls,
+              so the compositor had to re-blur that full-width strip on EVERY frame.
+            • The surface over it was 95% opaque, so at most 5% of that blur ever reached anyone's eye.
+
+          We were paying a per-frame, full-width GPU blur to produce an effect nobody could see. On a
+          desktop GPU that is invisible in both senses; in an Android WebView on a mid-range phone it is
+          exactly the kind of work that turns a 60fps scroll into a stuttering one.
+
+          🔎 WHY THIS ONE AND NOT THE OTHER 42 `backdrop-blur` SITES, because the contrast is the
+          evidence: almost every other one is a MODAL overlay (`fixed inset-0 bg-scrim`), which appears
+          only while a dialog is open and blurs a background that is not moving — there the blur is both
+          cheap and visible. This was the only blur living permanently over scrolling content.
+
+          ⚠️ HONEST LIMIT: no session here can drive a real Android device, so this is a mechanism-level
+          finding from the code plus how WebView compositing works, NOT a measurement on a phone. It is
+          recorded that way in PROGRESS.md. What IS certain is the cost side — a per-frame blur is real
+          work — and that removing it cannot change what the user sees beyond that 5%.
+
+          `bg-surface` is the same `--surface-base` colour the bar already used, just opaque — which is
+          also what a native Android tab bar looks like. */}
       {showsGlobalMobileNav && (
-        <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
+        <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-surface border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.
             // Adding the safe-area to the height (instead of the old fixed h-14 with padding eating INTO it
@@ -4322,6 +4350,13 @@ export default function App() {
           both mouse and touch, unlike a hover-reveal) on the top-most layer so it's discoverable and
           never lost behind other UI; safe-area-aware for the notch / browser chrome up top. Esc does
           the same thing (see the keydown effect above). */}
+      {/* BLUR-OVER-SCROLL-OK: this one keeps its backdrop-blur, deliberately, and the reason is the
+          mirror image of the bottom nav's (see the note on that <nav> above). It renders ONLY in focus
+          mode, it is 36x36px rather than the full width of the screen, and at 60% opacity the blur is
+          genuinely visible instead of being hidden under a 95%-opaque surface. Cost small, effect real
+          — the opposite trade to the one that was removed.
+          ⚠️ The marker above is what `tests/theAppDoesNotBlurWhatNobodyCanSee.test.ts` looks for: a
+          blur placed over the app's own scrolling content has to justify itself in place, or CI fails. */}
       {focusMode && (
         <button
           onClick={() => setFocusMode(false)}

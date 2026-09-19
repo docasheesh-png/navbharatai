@@ -242,6 +242,25 @@ describe('the wiring — asserted from source, comments stripped', () => {
     expect(app).toContain('startFreshCase(');
   });
 
+  it('✅ picking Doctor AI in the Mode list now starts a fresh case — the spec completed', () => {
+    // The last row still resuming, and only because starting fresh would have destroyed the previous
+    // patient. It goes through startFreshCase — the SAME call the ✕ makes — never endProfessionalChat,
+    // which would archive under a key nothing reads and leave the real transcript untouched.
+    const pick = app.slice(app.indexOf('onPick={(id) =>'), app.indexOf('startsFreshOnPick(id)'));
+    expect(pick).toContain("id === 'sda_chat'");
+    expect(pick).toContain('startFreshCase(');
+    expect(pick).not.toContain('endProfessionalChat');
+  });
+
+  it('startsFreshOnPick still means the PROFESSIONAL archive, and still excludes Doctor AI', () => {
+    // Widening it to cover Doctor AI is the tempting one-liner and is wrong: endProfessionalChat is
+    // written for the professional store, which Doctor AI does not use.
+    const modePicker = stripComments(read('src/components/chat/modePicker.ts'));
+    const fn = modePicker.slice(modePicker.indexOf('export function startsFreshOnPick'));
+    expect(fn.slice(0, 160)).toContain('return id in PROFESSIONAL_CHATS;');
+    expect(fn.slice(0, 160)).not.toContain('sda_chat');
+  });
+
   it('History opens the case that was tapped, and SDAChat accepts it', () => {
     expect(sessions).toContain('setSdaOpenCaseId(caseIdFromDocId(');
     expect(app).toContain('openCaseId={sdaOpenCaseId}');

@@ -4066,10 +4066,22 @@ export default function App() {
                 // The image studio is Other Tools' own view — free and paid together, nothing forked.
                 if (id === IMAGE_MODE_ID) { toggleTab(IMAGE_MODE_ID as ViewType); return; }
                 if (medicalViewBlocked(id, isNativeApp())) return; // defense in depth behind the filter
+                // ✅ DOCTOR AI NOW STARTS FRESH TOO (2026-09-19). It was the one row still resuming,
+                // because every case shared one Firestore document and one transcript key — so "new
+                // chat" would have destroyed the previous patient's workup. Each case now owns its
+                // address (sdaCaseStore.ts), so starting one deletes nothing: the case before it keeps
+                // its own row in History → SDA. Same call the ✕ makes, so there is one way to begin a
+                // case rather than a second copy of the rule.
+                if (id === 'sda_chat') {
+                  setSdaOpenCaseId(undefined);
+                  startFreshCase(typeof window !== 'undefined' ? window.localStorage : null, newSdaCaseId(), user?.uid);
+                  setSdaResetKey(k => k + 1);
+                  toggleTab(id as ViewType);
+                  return;
+                }
                 // A professional restores itself from localStorage on mount, so a fresh chat means
                 // ENDING the live one first — which ARCHIVES it into Professional History rather than
-                // dropping it. `startsFreshOnPick` is what holds Doctor AI back: it has no archive, so
-                // a new chat there would destroy the previous case. See modePicker.ts.
+                // dropping it. See modePicker.ts.
                 if (startsFreshOnPick(id)) {
                   const store = professionalStore();
                   if (store) endProfessionalChat(store, id);

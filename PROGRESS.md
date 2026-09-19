@@ -69810,9 +69810,13 @@ History no longer naming the case → 1 red.
 
 ### Still open, stated plainly
 
-- **Doctor AI "always a new chat" in the Mode list is still NOT enabled.** It is now *safe* to enable —
-  that is what this change unblocks — but it belongs to PR #3128's branch, which another session is also
-  touching; doing it here would be a cross-PR conflict. It is a one-line follow-up once #3128 lands.
+- ~~Doctor AI "always a new chat" in the Mode list is still NOT enabled.~~ **DONE in this same change**:
+  #3128 merged while this was being built, so the Mode list arrived on `main` and the last piece of the
+  admin's spec — *"agar kisi bhi professional ya free par tap kiya jayega hamesa new chat hi open hoga"* —
+  could finally be kept. It routes through `startFreshCase`, the SAME call the ✕ makes, and deliberately
+  NOT through `endProfessionalChat`: that would archive under a key nothing reads and leave the real
+  transcript untouched. `startsFreshOnPick` still means "needs the PROFESSIONAL archive" and still
+  excludes Doctor AI, which is correct — a test pins both halves.
 - Doctor AI remains hidden in the Play native shell (`playCompliance`), so this is a web surface today.
 - Retention is unaffected: `DataRetentionManager` clears `chat_sessions` by the `userId` FIELD, which
   every per-case row carries — verified, not assumed.

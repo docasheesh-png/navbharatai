@@ -78,10 +78,16 @@ describe('🔒 the snapshot must be of the tree that RENDERED', () => {
   it('no write during the proof, a real render: proven', () => {
     expect(attemptOutcome({ shot: { source: 'browser' }, verdict: ok, writesBefore: 7, writesAfter: 7 }).kind).toBe('proven');
   });
+  // ⚠️ REWRITTEN 2026-09-19, NOT DELETED. This case used to assert that a curl capture and an
+  // unpainted browser snapshot BOTH return the single kind `'inconclusive'`. That collapsing is the
+  // defect `theProofThatCouldNotSayWhatHappened.test.ts` withdraws: the two have different causes and
+  // different fixes, and the one line they shared could only hedge between them. What the case was
+  // really guarding — that "not rendered yet" is never confused with "could not tell" — still holds
+  // and is kept; the three blind causes are now each named.
   it('not rendered yet, and could-not-tell, are named apart', () => {
     expect(attemptOutcome({ shot: { source: 'browser' }, verdict: { ...ok, rendered: false }, writesBefore: 1, writesAfter: 1 }).kind).toBe('not-rendered');
-    expect(attemptOutcome({ shot: { source: 'curl' }, verdict: ok, writesBefore: 1, writesAfter: 1 }).kind).toBe('inconclusive');
-    expect(attemptOutcome({ shot: { source: 'browser' }, verdict: { ...ok, inconclusive: true }, writesBefore: 1, writesAfter: 1 }).kind).toBe('inconclusive');
+    expect(attemptOutcome({ shot: { source: 'curl' }, verdict: ok, writesBefore: 1, writesAfter: 1 }).kind).toBe('no-browser');
+    expect(attemptOutcome({ shot: { source: 'browser' }, verdict: { ...ok, inconclusive: true }, writesBefore: 1, writesAfter: 1 }).kind).toBe('not-painted');
   });
   it('every outcome has an honest admin line; only proven has a user line', () => {
     const proven = inBuildGreenNote({ kind: 'proven' }, { elapsedMs: 128_000, fileCount: 14 });
@@ -90,7 +96,11 @@ describe('🔒 the snapshot must be of the tree that RENDERED', () => {
     expect(proven.message).toContain('14 file(s)');
     expect(inBuildGreenNote({ kind: 'raced' }, { elapsedMs: 1000 }).code).toBe('IN_BUILD_GREEN_RACED');
     expect(inBuildGreenNote({ kind: 'not-rendered' }, { elapsedMs: 1000 }).code).toBe('IN_BUILD_GREEN_NOT_YET');
-    expect(inBuildGreenNote({ kind: 'inconclusive' }, { elapsedMs: 1000 }).code).toBe('IN_BUILD_GREEN_UNCHECKED');
+    // The UNCHECKED code is unchanged — what changed is that three different facts no longer share
+    // one hedged sentence under it (see the rewritten case above).
+    expect(inBuildGreenNote({ kind: 'not-painted' }, { elapsedMs: 1000 }).code).toBe('IN_BUILD_GREEN_UNCHECKED');
+    expect(inBuildGreenNote({ kind: 'no-browser' }, { elapsedMs: 1000 }).code).toBe('IN_BUILD_GREEN_UNCHECKED');
+    expect(inBuildGreenNote({ kind: 'server-down' }, { elapsedMs: 1000 }).code).toBe('IN_BUILD_GREEN_UNCHECKED');
     expect(inBuildGreenNarration()).toMatch(/protected/);
   });
 });

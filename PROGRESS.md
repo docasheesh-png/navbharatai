@@ -69078,6 +69078,56 @@ and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All
 2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
    already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
 3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.
+## 2026-09-19 — 🎬 THE APP MOVES BETWEEN SCREENS (admin item B of five)
+
+Switching tabs replaced the content **instantly**. That is what a web page does when you click a link,
+and it was the second-loudest "this is a website" signal after the scrollbar the same admin
+photographed — every native app acknowledges a screen change with motion, so the eye knows something
+moved rather than being swapped.
+
+### What it is, and the two things it deliberately is NOT
+
+It is Material's **fade-through**: the incoming screen rises from 97% and fades in over **210 ms**. That
+is the specified transition between screens with no parent/child relationship — exactly a tab bar — and
+iOS's tab bar cross-dissolves for the same reason. **A slide would be wrong**: a slide says "forward" or
+"back", and Home → Studio is neither.
+
+**Not `document.startViewTransition`.** That API morphs old into new and is the better tool for a
+push/pop, but under React it needs `flushSync` inside the transition callback to capture the new DOM —
+a forced synchronous render of this entire tree on every tab tap. The cost is real and the gain here is
+nil, because a fade-through never needs the outgoing frame. A CSS animation costs one class toggle and
+works on every engine, including a WebView too old for the API.
+
+**Not `key={activeView}`.** That is the obvious way to restart a CSS animation and it would REMOUNT the
+whole subtree on every tab tap — discarding scroll positions, half-typed messages and open panels. A
+regression wearing a polish's clothes. The animation is restarted by hand on the same DOM node.
+
+### Two details that are load-bearing rather than decorative
+
+- **The reflow read.** Remove-then-add of a class inside one frame is coalesced by the browser into no
+  change at all, so the animation silently never restarts and the second tab tap does nothing. Reading
+  a layout property between the two commits the change. Test-locked as an ORDER assertion.
+- **`useLayoutEffect`, not `useEffect`.** The class must be on the node in the same frame React commits
+  the new screen. One frame later and the first frame has already painted at full opacity, so the
+  animation starts from a flash — visibly worse than no animation at all.
+
+### Gated in CSS, so there is nothing to keep in sync
+
+`html.nb-native-shell` keeps it off the website, and `prefers-reduced-motion: reduce` switches it off
+for anyone who asked their device for less motion — motion sickness is a real condition and a
+decorative animation is precisely what that setting exists to disable. In both cases the class is inert
+and the screen simply appears, as it does today.
+
+Test-locked in `tests/theAppMovesBetweenScreens.test.ts` (11 cases) and **reversion-proven twice**:
+removing the reflow read turns **1** red; adding `key={activeView}` and downgrading to `useEffect`
+turns **2** red.
+
+⚠️ Two of my own test bugs, recorded because one is a trap this file already names: the remount guard
+first matched the JSDoc that EXPLAINS why there is no such key — a test that fails on its own prose and
+can never fail for the reason it was written — so the source is comment-stripped before that assertion;
+and the "is it gated?" check used a negative regex that matched the GOOD rule, because
+`html.nb-native-shell .nb-screen-enter` contains a space before the class. It now reads every selector
+that mentions the class and requires each to be gated.
 ## 2026-09-19 — "Open karte hi scroll lag hota hai": the first frame was blank for 3.6 seconds
 
 **The report (admin).** *"navbharatai jab user isko open karta hai, to page scroll karne me lag hota

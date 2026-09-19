@@ -1,10 +1,11 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
-import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
 // Native Supabase-connect return — the SAME deep-link shape, its own path (2026-09-14 fix).
 import { nonceFromSupabaseDeepLink, errorFromSupabaseDeepLink, SUPABASE_NATIVE_RETURN_EVENT } from './lib/supabaseOauthReturn';
+import { restartScreenEnter, shouldAnimateViewChange } from './lib/screenTransition';
 import { routeForPath, deepLinkTarget, type DeepLinkView } from './lib/deepLinkRoute';
 import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
@@ -435,6 +436,26 @@ export default function App() {
   // leave the list hanging over whatever came next, so changing view always dismisses it. Opening the
   // popup does NOT change activeView, so this can never close it the moment it opens.
   useEffect(() => { setHistoryPopupOpen(false); }, [activeView]);
+  /**
+   * THE SCREEN ANNOUNCES ITSELF (admin 2026-09-19) — a fade-through on the incoming view.
+   *
+   * `useLayoutEffect`, not `useEffect`: the class must be on the node in the SAME frame React commits
+   * the new screen. One frame later and the first frame of the new screen has already been painted at
+   * full opacity, so the animation starts from a flash — visibly worse than no animation at all.
+   *
+   * 🔒 NO `key={activeView}` ON THE CONTAINER. That is the obvious way to restart a CSS animation and
+   * it would REMOUNT the whole subtree on every tab tap, discarding scroll positions, half-typed
+   * messages and open panels. The animation is restarted by hand on the same DOM node instead.
+   *
+   * The gate is in CSS (native shell, and off under prefers-reduced-motion), so this runs on the
+   * website too and does nothing there.
+   */
+  const screenRef = useRef<HTMLDivElement | null>(null);
+  const previousViewRef = useRef<ViewType | null>(null);
+  useLayoutEffect(() => {
+    if (shouldAnimateViewChange(previousViewRef.current, activeView)) restartScreenEnter(screenRef.current);
+    previousViewRef.current = activeView;
+  }, [activeView]);
   // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
   // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
   useEffect(() => {
@@ -3134,7 +3155,7 @@ export default function App() {
             </div>
           </div>
         }>
-        <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
+        <div ref={screenRef} className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
           ['chat', 'nbi_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:h-[calc(100dvh-3.5rem-var(--nb-safe-top))] max-h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem-var(--nb-safe-top))]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile

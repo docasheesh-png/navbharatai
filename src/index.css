@@ -118,6 +118,41 @@ html, body {
   touch-action: pan-x pan-y;
 }
 
+/* THE APP MOVES BETWEEN SCREENS — NATIVE SHELL ONLY (admin 2026-09-19, item B of five).
+   "mujhe sabse acchi native app banani hai." Switching tabs replaced the content instantly, which is
+   what a web page does when you click a link. Every native app acknowledges the change with motion.
+
+   This is Material's **fade-through**: the incoming screen rises from 97% and fades in. That is the
+   specified transition between screens with NO parent/child relationship — which is exactly a tab bar —
+   and iOS's tab bar cross-dissolves for the same reason. A slide would be wrong here: a slide says
+   "forward" or "back", and Home → Studio is neither.
+
+   210ms because a screen change should be FELT, not waited for. Material's own guidance for this
+   pattern is ~200ms on a phone; past ~250ms an app starts to feel slow rather than smooth, and the
+   admin's standing bar is that the app should feel effortless.
+
+   🔒 GATED IN CSS, NOT IN JAVASCRIPT, so there is nothing to keep in sync: `html.nb-native-shell` keeps
+   it out of the website (the class is added by index.html's pre-paint script only when Capacitor is
+   present), and `prefers-reduced-motion` is honoured because motion sickness is a real condition and a
+   decorative animation is exactly what that setting exists to switch off. In both cases the class is
+   inert — the screen simply appears, as it does today.
+
+   It animates the INCOMING screen only. The outgoing one is already gone by the time React commits, and
+   holding it would need a second element and a remount — see src/lib/screenTransition.ts for why
+   remounting (the obvious `key={activeView}`) would throw away scroll positions and half-typed input. */
+@keyframes nb-screen-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+html.nb-native-shell .nb-screen-enter {
+  animation: nb-screen-in 210ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.nb-native-shell .nb-screen-enter {
+    animation: none;
+  }
+}
+
 /* NO SCROLLBAR INSIDE THE APP — NATIVE SHELL ONLY (admin 2026-09-19, phone screenshot: "right side me
    blue vertical light … yeh website ka feel deti hai. isko mobile app me se hata do").
 

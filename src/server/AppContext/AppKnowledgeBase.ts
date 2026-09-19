@@ -2789,11 +2789,11 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
 • Revenue counts only successful payments with money received — coupons, welcome gifts and referral steps are shown but never counted
 • Search by user, email or transaction id; filter by status and date range; sort by date, amount or tokens; paginated
 • Clicking a user opens the account sheet, which shows purchased → used → remaining credits and the user's own purchase list
-• The Users tab shows each user's purchased tokens, tokens used and rupees paid
+• The Users tab shows each user's purchased tokens, tokens used and rupees paid, and (2026-09-19) can be FILTERED to Paid or Free users \u2014 "Paid" means this person has recharged their wallet with real money at least once in their life, so a gifted welcome balance never counts \u2014 with an Asc / Desc button that reverses whichever sort is selected (A-Z, Tokens, AI Use, Recent). Each row also carries a small Paid / Free badge beside the rupee figure, which is the same verdict the filter uses
 • Refunds are not recorded by the payment webhook; the panel says so`,
     howToUse: 'Admin login required. Open the admin panel → Revenue tab. The purchases table sits under the revenue tiles; use the search box, status and date filters, and the sort selector. Click a user name to open their account sheet.',
     relatedFeatures: ['admin-metrics', 'admin-monitor'],
-    keywords: ['revenue', 'purchases', 'who paid', 'kisne kharida', 'kisne payment ki', 'transactions', 'transaction id', 'refund', 'tokens purchased', 'user wise purchase', 'admin revenue', 'payments list'],
+    keywords: ['revenue', 'purchases', 'who paid', 'kisne kharida', 'kisne payment ki', 'transactions', 'transaction id', 'refund', 'tokens purchased', 'user wise purchase', 'admin revenue', 'payments list', 'paid users', 'free users', 'paid free filter', 'kaun paid user hai', 'paid user list', 'ascending', 'descending', 'asc desc', 'sort order', 'reverse sort'],
   },
   {
     id: 'admin-monitor',

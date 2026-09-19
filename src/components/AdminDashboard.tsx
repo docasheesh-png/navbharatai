@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
 import { LoadMore } from './common/LoadMore';
@@ -183,6 +184,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState('');
   const [userSort, setUserSort] = useState('tokens');
+  // PAID / FREE and the direction (admin 2026-09-19). Both start at the values that reproduce the
+  // previous screen exactly: every account, and each sort's own natural direction — so opening the
+  // panel shows what it has always shown, and the two controls only ever narrow or flip deliberately.
+  const [userPaid, setUserPaid] = useState<'all' | 'paid' | 'free'>('all');
+  const [userDir, setUserDir] = useState<'' | 'asc' | 'desc'>('');
+  // The direction ACTUALLY in force. Derived from the same table the server sorts by
+  // (`src/lib/adminUserSort.ts`), never from a second copy of it here — an arrow pointing down over a
+  // list sorted up is the kind of drift nothing fails to reveal.
+  const effectiveUserDir = effectiveDirection(userDir, userSort);
   const [userSearch, setUserSearch] = useState('');
   /**
    * THE USER TABLE IS PAGED ON THE **SERVER** (admin 2026-09-14: "pehle sirf 10-12 line hi load ho").
@@ -215,7 +225,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // Back to page one whenever the list MEANS something different. Without this, an admin who pressed
   // "Load more" five times and then typed a search would fetch 150 rows of the new result — the same
   // reset `usePagedList` does for every client-side list, done here against the server instead.
-  useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort]);
+  useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort, userPaid, userDir]);
   const [toastMsg, setToastMsg] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -1217,7 +1227,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     setUsersLoading(true);
     setUsersError('');
     try {
-      const r = await fetch(`/api/admin/users?sort=${userSort}&search=${encodeURIComponent(userSearch)}&paged=1&limit=${userLimit}`, { headers });
+      // `dir` is omitted while it is '' — an absent parameter is what the server reads as "this
+      // sort's natural direction", so an untouched control sends nothing rather than a guess at it.
+      const dirParam = userDir ? `&dir=${userDir}` : '';
+      const r = await fetch(`/api/admin/users?sort=${userSort}&paid=${userPaid}${dirParam}&search=${encodeURIComponent(userSearch)}&paged=1&limit=${userLimit}`, { headers });
       // HONESTY (admin bug 2026-07-15: "users list show nahi ho rahi"): the old code did
       // `Array.isArray(d) ? d : []`, so a 401 (expired admin token) / 500 (Firestore error) response
       // body — an OBJECT, not an array — was silently shown as "No users found", indistinguishable from
@@ -1242,7 +1255,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       setUsers([]);
       setUsersError(`Couldn't reach the server: ${e?.message || 'network error'}`);
     } finally { setUsersLoading(false); }
-  }, [adminToken, userSort, userSearch, userLimit]);
+  }, [adminToken, userSort, userSearch, userLimit, userPaid, userDir]);
 
   const fetchPromos = useCallback(async () => {
     try {
@@ -2156,6 +2169,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </button>
                   ))}
                 </div>
+                {/* PAID / FREE (admin 2026-09-19). "Paid" means what the admin said it means — this
+                    person has given NavBharatAI real money at least once — and it is the SAME rule
+                    the account panel beside it uses, resolved on the server so the browser never
+                    re-derives it from the ₹ column. */}
+                <div className="flex gap-1 bg-card p-1 rounded-xl border border-line">
+                  {([['all', 'All'], ['paid', 'Paid'], ['free', 'Free']] as const).map(([val, lbl]) => (
+                    <button
+                      key={val}
+                      onClick={() => setUserPaid(val)}
+                      aria-pressed={userPaid === val}
+                      title={val === 'paid'
+                        ? 'Has recharged the wallet with real money at least once'
+                        : val === 'free' ? 'Has never paid — still on gifted credit' : 'Every account'}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${userPaid === val ? 'bg-emerald-600 text-on-accent' : 'text-muted hover:text-ink'}`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                {/* ASCENDING / DESCENDING. It reads out the direction CURRENTLY in force, including
+                    the one the chosen sort has by default — so the arrow is never a claim the list
+                    contradicts, and pressing it always does what the label just said it would. */}
+                <button
+                  onClick={() => setUserDir(effectiveUserDir === 'desc' ? 'asc' : 'desc')}
+                  aria-label={`Sort ${effectiveUserDir === 'desc' ? 'descending' : 'ascending'} — press to reverse`}
+                  title={effectiveUserDir === 'desc' ? 'Highest / newest first — press for the reverse' : 'Lowest / oldest first — press for the reverse'}
+                  className="flex items-center gap-1.5 px-3 py-2.5 bg-card border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95"
+                >
+                  {effectiveUserDir === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
+                  {effectiveUserDir === 'desc' ? 'Desc' : 'Asc'}
+                </button>
                 <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-raised border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95">
                   <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Load
                 </button>
@@ -2222,7 +2266,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           {/* Real since 2026-09-17: this read a field that was only ever written as 0 (walletLifetime.ts). */}
                           <td className="py-3 px-4 font-mono text-accent-text">{(u.totalTokensUsed || 0).toLocaleString()}</td>
                           <td className="py-3 px-4 font-mono text-success">₹{(u.remainingBalance || 0).toFixed(2)}</td>
-                          <td className="py-3 px-4 font-mono text-success">₹{Number(u.moneySpent || 0).toLocaleString('en-IN')}</td>
+                          {/* The ₹ figure, and beside it the FILTER'S OWN verdict for this row.
+                              Without it, filtering to Paid on a base where every row reads ₹0 looks
+                              exactly like a broken filter — and the verdict is the server's
+                              `hasEverPaid`, never `moneySpent > 0` re-derived here, so the column and
+                              the filter can never tell the admin two different things. An older
+                              server that does not send the field shows the ₹ alone, as before. */}
+                          <td className="py-3 px-4 font-mono text-success whitespace-nowrap">
+                            ₹{Number(u.moneySpent || 0).toLocaleString('en-IN')}
+                            {typeof u.hasEverPaid === 'boolean' && (
+                              <span
+                                title={u.hasEverPaid
+                                  ? 'Has recharged the wallet with real money at least once'
+                                  : 'Has never paid — still on gifted credit'}
+                                className={`ml-2 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                                  u.hasEverPaid ? 'bg-emerald-500/15 text-success' : 'bg-well text-muted'
+                                }`}
+                              >
+                                {u.hasEverPaid ? 'Paid' : 'Free'}
+                              </span>
+                            )}
+                          </td>
                           <td className="py-3 px-4">
                             {u.banned ? <span className="text-danger font-black text-[9px] uppercase flex items-center gap-1"><BanIcon className="w-3 h-3"/>Banned</span> : <span className="text-success font-black text-[9px] uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/>Active</span>}
                           </td>

@@ -69031,6 +69031,69 @@ and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All
 2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
    already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
 3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.
+## 2026-09-19 — TAPPING TERMINAL ASKED FOR A TERMINAL, AND GOT A KEYBOARD
+
+Admin, verbatim: *"code studio (IDE) me agar terminal par click karte hai to 'keynote' open ho jata
+hai, isko abhi roko, jab tak typing ke liye inputbox me click na kiya jaye, automatic keyboard open
+na ho!"*
+
+**ROOT CAUSE.** `ShellTerminal.tsx` carried an effect on `[active]` that refit xterm and then FOCUSED
+an input — on a touch device, the command bar. Focusing an input on a phone raises the on-screen
+keyboard, so tapping TERMINAL covered with a keyboard the transcript the user had gone there to read.
+
+⚠️ **The line it replaces was itself a fix (2026-08-05), and half its reasoning still holds.** Its
+comment reads: *"On a touch device, focus goes to the COMMAND BAR — focusing xterm there raises a
+keyboard whose keys xterm cannot receive (the exact reported dead end)."* That is still true and still
+enforced: when focus IS wanted on touch it goes to the bar or the in-box bridge, never to xterm. What
+changed is only WHO decides to focus — the user, by tapping. Both ways in are one tap and untouched
+(the bar is visible at the bottom; tapping the box arms `focusBridge`), so nothing is lost.
+
+**A desktop keeps its auto-focus.** A mouse has no keyboard to raise, and clicking TERMINAL on a
+desktop has always meant "let me type". The test is the POINTER, never the width: a coarse pointer is
+what has a soft keyboard, and a wide touch tablet has one while a narrow desktop window does not.
+
+**🔎 THE SIBLING, SAME SHAPE, SAME SCREEN (rule 3): Code Studio's SEARCH panel.** Its input carried a
+bare `autoFocus`, and that panel is reached by NAVIGATION — the bottom nav's Search item, or
+Ctrl+Shift+F. So tapping Search raised the keyboard before the user had asked to type anything. Now
+`autoFocus={!softKeyboardWouldOpen()}`; a desktop is unchanged, because Ctrl+Shift+F is pressed in
+order to type.
+
+**THE OTHER HALF (50/50): the predicate has one home.** `src/lib/dismissKeyboard.ts` already owned "the
+on-screen keyboard, touch only" and already ran this exact media query to decide whether to BLUR after
+Send. Closing the keyboard was only ever half the subject; opening it uninvited is the other half. So
+`softKeyboardWouldOpen()` lives there, `dismissKeyboardOnMobile` now reads it, and `ShellTerminal`'s
+private copy of the query is gone (its `showCommandBar` initialises from the shared predicate). A test
+asserts the module contains exactly ONE `matchMedia` call, so the two halves can never disagree about
+whether the device in someone's hand has a keyboard.
+
+**THE SPLIT THIS WORK ENCODES — the rule is about AUTOMATIC focus, not about focus.** Fixed: focus the
+user did not ask for (a panel you navigate to). **Deliberately kept, and now listed in a test so a
+later sweep cannot strip them blindly:** a control the user opened IN ORDER to type — FilesPanel's
+new-file and rename fields, CodeVersioning's "name this version", LocalizationManager's add-key and
+cell edit, ChatToolbar's search box, WebAppPlayer's password prompt, the report-note dialog. That tap
+already said "I want to type", and removing those would cost every one of those flows a second tap.
+Focusing a BUTTON or a panel div (ExitConfirmDialog's Cancel, HistoryPopup's panel) is not this defect
+at all — no keyboard follows — and both are named in the test so they are never "fixed" by mistake.
+
+**Evidence.** `tests/noKeyboardUntilAsked.test.ts` (10 cases): the predicate on coarse / fine / absent
+`matchMedia`, one-`matchMedia` lock on the module, the refit still unconditional, the focus conditional,
+no private pointer copy left, both user-initiated ways in still present, and the deliberate-`autoFocus`
+inventory. **Proven by reversion:** restoring `if (showCommandBar) barInputRef.current?.focus()` fails
+the terminal case; restoring the bare `autoFocus` fails the sibling case.
+
+**Two EXISTING cases in `tests/shellTerminalInput.test.ts` were updated rather than deleted**, because
+one of them pinned the behaviour the admin has now withdrawn. Its replacement records the withdrawal
+verbatim, keeps asserting the half that still holds (never focus xterm on touch), and adds that the
+two user-initiated paths survive. The other only pinned WHERE the pointer test lived.
+
+### 🔴 STILL OPEN (rule 6)
+1. **Nobody has seen this on a phone.** Every claim is source-level plus the predicate's unit
+   behaviour. The honest confirmation is the admin tapping TERMINAL on their device.
+2. **One boundary case is deliberately NOT changed and is put to the admin instead:**
+   `sda/DoseCalculator.tsx` autoFocuses its "search any medicine" box, and that screen is navigated
+   to. Reading the instruction strictly, that is the same defect; reading the screen, its whole
+   purpose is a lookup, so the keyboard may be exactly what a doctor wants. One line either way —
+   recorded rather than decided unilaterally.
 
 ## 2026-09-19 — Autopsy a48d0f9e: "Repair some parts." — and we were holding the list
 

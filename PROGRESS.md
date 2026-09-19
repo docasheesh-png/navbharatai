@@ -70617,7 +70617,23 @@ merged. Recorded here hand-to-hand per the env registry's own rule. So the Weak 
 are the first Nemotron calls this platform has ever made; Normal and Strong are untouched until that
 flag names them, and Strong's PLAN can never be taken at all (`PLAN_FORBIDDEN_TIERS`).
 
-### ⚠️ The host was not stated, and the failure mode is silent
+### ✅ CORRECTED THE SAME DAY: the host WAS NVIDIA's own, and it is now set
+
+The admin sent a screenshot of **`build.nvidia.com`** — so the key is NVIDIA's own endpoint, and the
+OpenRouter default this code ships with was wrong for it. They then set
+**`NEMOTRON_BASE_URL = https://integrate.api.nvidia.com/v1`**, recorded here hand-to-hand.
+
+**So the judge was silently off for about an hour** — between the key landing and the host being
+corrected — and that hour is exactly the failure mode described below. Nothing reported it; the only
+reason it was caught is that the host was asked about rather than assumed. The model ids needed no
+override: NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b`, the same as the code default.
+
+⚠️ **AND THE ADMIN'S WORRY IS WORTH RECORDING, because it came from my own unclear writing.** They
+read the trial-credits caveat as *"the key is useless, where should I buy a real one?"* It was neither:
+the key was fine and NVIDIA genuinely is the cheap option they had seen advertised — the only caveat
+was that a trial pool is finite. A caveat stated without its scope reads as a rejection.
+
+### The failure mode that hour demonstrated
 
 `NEMOTRON_BASE_URL` was left unset, so the OpenRouter default is in force. That is right for an
 OpenRouter key and WRONG for one bought at `build.nvidia.com` (which needs

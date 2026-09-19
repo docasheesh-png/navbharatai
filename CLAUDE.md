@@ -1033,6 +1033,20 @@ the code (it is actually read somewhere) on 2026-07-11.
   **no tools** — so it is also the safest slot for a vendor whose tool-calling is unmeasured here.
   🔒 **Super sits IN FRONT of the Claude backstop on Weak/Normal, never in place of it** (Haiku still
   last on Weak, Sonnet on Normal); **Strong is untouched**; Nemotron is the lead rung of no tier.
+  🔴 **STRONG NEVER TAKES THE PLAN RUNG, whatever the flag says** (admin 2026-09-19). `on` reaches
+  Strong's JUDGE but not its PLAN: a judge delivers a verdict on a finished app, a plan decides the
+  app's whole shape before a line is written, and Strong is the tier somebody paid premium for. It is
+  a FLOOR (`PLAN_FORBIDDEN_TIERS`), not a default — no env value lifts it.
+  📋 **What a key alone does, which is almost nothing:** with `NEMOTRON_API_KEY` set and the flag
+  unset, ONLY the Super backstop rung on Weak/Normal activates — reached solely when the three rungs
+  above it have failed. Judge and plan stay exactly as they are (`glm-5.3` / `glm-4.7-flashx`).
+  ⛔ **NOT for free chat, Professional/Doctor AI or the image generator today** (asked 2026-09-19).
+  The image generator is impossible at any price — Nemotron 3 is text-only. Free chat is affordable
+  (`allowedOnFreeTier` clears both sizes: Super index 1.85, Ultra 6.20, ceiling 11.60) and would add
+  the independent fourth vendor that ladder lacks, but there is no Nemotron provider in
+  `src/server/AI/Router/providers/`, so it is a build, not config — and it should wait until the
+  build-engine judge has produced real evidence. Professional on a **`:free` endpoint is refused on
+  privacy**, not cost: those terms allow training, and that surface carries symptoms.
   ⛔ **Deliberately NOWHERE:** architect, sub-agents, reviewer, heals (cached tool loops); **vision**
   (Nemotron 3 is text-only); the **guards** (deterministic code at ₹0); the cheap intent classifier
   (free today) — so **Nemotron 3 Nano is on no list at all**.

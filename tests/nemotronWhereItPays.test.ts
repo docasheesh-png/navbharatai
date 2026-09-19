@@ -163,6 +163,21 @@ describe('the plan rung', () => {
   it('an unallowed tier keeps its own plan rung', () => {
     expect(seq(planLadder('mini', ON('weak')))[0]).toBe('GLM:glm-5.3');
   });
+
+  it('🔴 STRONG NEVER TAKES THE PLAN, not even on `on` — a premium build is not DESIGNED by an unmeasured vendor', () => {
+    // Admin decision 2026-09-19, correcting a mismatch: the first draft let `on` reach Strong's plan
+    // while the evaluation had promised "Weak and Normal". A judge REPORTS on a finished app; a plan
+    // decides its whole shape before a line is written. Strong is the tier somebody paid premium for.
+    for (const flag of ['on', 'true', 'strong', 'premium', 'weak,normal,strong']) {
+      expect(nemotronAllowedFor('plan', 'mini', ON(flag)), flag).toBe(false);
+      expect(seq(planLadder('mini', ON(flag)))[0], flag).toBe('GLM:glm-5.3');
+    }
+    // …while the JUDGE on Strong is deliberately still allowed — that is the whole saving.
+    expect(nemotronAllowedFor('judge', 'mini', ON('on'))).toBe(true);
+    // And Weak/Normal plans are unaffected by the floor.
+    expect(nemotronAllowedFor('plan', 'weak', ON('on'))).toBe(true);
+    expect(nemotronAllowedFor('plan', 'off', ON('on'))).toBe(true);
+  });
 });
 
 describe('the ladder rung is INSURANCE, never the insurance itself', () => {

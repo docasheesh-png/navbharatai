@@ -173,10 +173,32 @@ export function nemotronRungOk(env: NodeJS.ProcessEnv = process.env): boolean {
  */
 export type NemotronRole = 'judge' | 'plan' | 'rung';
 
+/**
+ * 🔴 THE PLAN IS NEVER TAKEN ON STRONG — admin decision, 2026-09-19, and it corrects a real mismatch
+ * between what the evaluation promised and what the first draft of this file did.
+ *
+ * That draft gated the plan on the tier allowlist alone, so `AGENTV3_NEMOTRON=on` moved Strong's plan
+ * rung to Ultra as well — while the plan I had put to the admin said, in writing, "Plan (Weak and
+ * Normal)". Nothing failed; the code was simply broader than the sentence describing it, which is the
+ * drift this repo has paid for repeatedly (a comment cannot be typechecked).
+ *
+ * WHY STRONG IS THE ONE TO PROTECT, and why the JUDGE is not treated the same way: a judge delivers a
+ * VERDICT on a finished app — if it is wrong, the gate is wrong and the build is still the build. A
+ * PLAN decides the app's whole shape before a line is written. Strong is the tier a user paid premium
+ * for, so an unmeasured vendor may report on that build but may not design it.
+ *
+ * ⚠️ This is a FLOOR, not a default: it cannot be lifted by `AGENTV3_NEMOTRON=on`, because "on" is how
+ * somebody enables a feature broadly and is exactly the value that would otherwise reach through.
+ * Changing it is a code change with an admin decision behind it, which is the point.
+ */
+const PLAN_FORBIDDEN_TIERS: ReadonlySet<PowerLevel> = new Set<PowerLevel>(['mini']);
+
 export function nemotronAllowedFor(
   role: NemotronRole,
   tier: PowerLevel,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return role === 'rung' ? nemotronRungOk(env) : nemotronTierAllowed(tier, env);
+  if (role === 'rung') return nemotronRungOk(env);
+  if (role === 'plan' && PLAN_FORBIDDEN_TIERS.has(tier)) return false;
+  return nemotronTierAllowed(tier, env);
 }

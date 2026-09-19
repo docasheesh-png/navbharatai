@@ -70490,3 +70490,67 @@ Existing suites updated rather than weakened: `tests/tierLadder.test.ts` and
 with the reason written in place — and the keyless-variant cases now also re-prove the absolute rule
 (Weak reaches neither Sonnet nor Opus) *with a new vendor on the ladder*, and that
 `AGENTV3_CHEAP_FLOOR=off` remains the GLM/Kimi kill switch alone.
+
+### 🔴 SAME DAY, BEFORE ANY KEY WAS SET: the code was BROADER than the sentence describing it
+
+The admin asked the plain question — *"keys dalne ke baad, nvidia aapne kaha kaha lagaya?"* — and the
+answer was produced by RUNNING the policy for all three env states rather than from memory. That is
+what surfaced it: with `AGENTV3_NEMOTRON=on`, **Strong's plan rung also moved to Ultra**, while the
+evaluation put to the admin had said, in writing, *"Plan — Weak and Normal"*.
+
+Nothing failed. The flag is per-tier, so `weak,normal` had always kept Strong out; the defect was that
+`on` — the value somebody types to enable a feature broadly — reached a place the documentation
+promised it would not. A comment cannot be typechecked, and this is the third time in this file's
+history that a sentence and the code it described drifted apart in exactly that direction.
+
+**Fixed as a FLOOR, not a default** (`PLAN_FORBIDDEN_TIERS` in `nemotron.ts`): Strong can never take
+the Nemotron plan rung, whatever the flag says. Lifting it is a code change with an admin decision
+behind it.
+
+**Why Strong, and why the JUDGE is deliberately NOT treated the same way** — the admin chose this after
+being shown both options: a judge delivers a VERDICT on a finished app, so a wrong one means a wrong
+gate on a build that is still the build; a PLAN decides the app's whole shape before a line is written.
+Strong is the tier somebody paid premium for, so an unmeasured vendor may report on that build but may
+not design it. The judge stays on all three tiers, which is where the saving is.
+
+Test-locked in `nemotronWhereItPays.test.ts` (five flag spellings, including `on` and
+`weak,normal,strong`, all refused for Strong's plan while Strong's JUDGE stays allowed and Weak/Normal
+plans are unaffected) and proven by reversion — deleting the floor line fails that case.
+
+### 📋 And the answer itself, recorded because it is what an operator needs
+
+| env state | Weak | Normal | Strong |
+|---|---|---|---|
+| key only, no flag | rung only | rung only | nothing |
+| key + `AGENTV3_NEMOTRON=weak` | judge + plan + rung | nothing | nothing |
+| key + `AGENTV3_NEMOTRON=on` | judge + plan + rung | judge + plan + rung | **judge only** |
+
+**A key ALONE changes almost nothing** — only the Super backstop rung on Weak/Normal, which is reached
+only when the three rungs above it have failed.
+
+### 🚫 ASKED AND ANSWERED: Nemotron in free chat, Professional and the image generator
+
+The admin asked whether the free endpoints could serve those three surfaces while Nemotron is free.
+Answered from the code, not from the rate card:
+
+- **Image generator — NO, and not for a cost reason.** Nemotron 3 is text-in / text-out. It cannot
+  generate an image at any price.
+- **Free chat — possible, but it is a BUILD, not config,** and it should wait. `allowedOnFreeTier`
+  clears both sizes comfortably (Super index 1.85, Ultra 6.20, against the `kimi-k2.7` ceiling of
+  11.60), and the ladder would genuinely gain what its own entry says it lacks — a fourth INDEPENDENT
+  vendor, where today the one non-Google rung shares a key with the free leader and dies in the same
+  429 storm. But `src/server/AI/Router/providers/` has no Nemotron provider, so this is a build the
+  size of `OpenAiChatProvider.ts`.
+- **Professional / Doctor AI on a FREE endpoint — NO.** Free tiers carry data-training terms, and that
+  surface is where a user types their symptoms. A Privacy Policy that says otherwise is CI-locked
+  (`privacyPolicyTruth.test.ts`), so this is the 2026-09-02 shape exactly: the policy saying one thing
+  while the code does another.
+- **The general rule, restated:** a `:free` endpoint has no SLA, hard rate limits and can be withdrawn
+  without notice. In the build engine it is one rung behind a backstop; in CHAT it would be the leader
+  every user sees. Nemotron's PAID rate is cheap enough ($0.085 for Super) that chasing the free tier
+  trades real trust for very little money.
+
+**Recommended order, and the reason:** not one Nemotron call has been made against a real endpoint, so
+the build engine's judge on WEAK is the safest possible first test — a bad verdict there costs
+NavBharatAI, which pays for that tier itself, and reaches no paying user. Free chat is the opposite: it
+is the highest-volume surface and every failure is visible immediately.

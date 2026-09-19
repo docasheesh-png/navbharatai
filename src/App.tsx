@@ -43,6 +43,8 @@ import { isComingSoonTool } from './lib/comingSoonTools';
 import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
+import { startFreshCase } from './lib/sdaCaseStore';
+import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
@@ -568,6 +570,8 @@ export default function App() {
     codeReview?: import('./services/buildService').CodeReviewResult;
   }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
   const [sdaResetKey, setSdaResetKey] = useState(0);
+  /** Which Doctor AI case History asked for, if any — see SDAChat's `openCaseId`. */
+  const [sdaOpenCaseId, setSdaOpenCaseId] = useState<string | undefined>(undefined);
   // The Mode sheet (admin 2026-08-25): footer Mode button → pick FREE / a new FREE chat / any expert.
   const [showModePicker, setShowModePicker] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -1746,8 +1750,13 @@ export default function App() {
         setHasGeneratedCode(false);
         setIsAppBuilt(false);
       } else if (v === 'sda_chat') {
-        // Force SDAChat to fully remount, wiping all its internal state
-        try { localStorage.removeItem('sda_messages'); } catch {}
+        // Closing Doctor AI ends the CASE on screen and reopens on a fresh one — the same promise ✕
+        // makes for every professional. 🔴 It used to keep that promise by DELETING the transcript
+        // (`removeItem('sda_messages')`), which with one shared key and one shared Firestore document
+        // destroyed the patient's case outright. `startFreshCase` keeps the promise without the loss:
+        // the next case gets its own address, and this one stays in History as its own row.
+        setSdaOpenCaseId(undefined);
+        startFreshCase(typeof window !== 'undefined' ? window.localStorage : null, newSdaCaseId(), user?.uid);
         setSdaResetKey(k => k + 1);
       } else if (PROFESSIONAL_CHATS[v]) {
         // ✕ ENDS A PROFESSIONAL CHAT (admin 2026-08-19: "close (x) kar de, to chat close nahi hota").
@@ -2539,6 +2548,7 @@ export default function App() {
     sessions, user, currentSessionId, resumeUciInputState, mode,
     v3ResumeInFlightRef,
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
+    setSdaOpenCaseId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
     setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
     toggleTab, addToast, addLog, initialFreeChatMessages: initialNbiMessages,
@@ -3397,7 +3407,7 @@ export default function App() {
           {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
           {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <SDAChat key={sdaResetKey} userId={user?.uid} />
+              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} />
             </div>
           )}
 
@@ -4056,10 +4066,22 @@ export default function App() {
                 // The image studio is Other Tools' own view — free and paid together, nothing forked.
                 if (id === IMAGE_MODE_ID) { toggleTab(IMAGE_MODE_ID as ViewType); return; }
                 if (medicalViewBlocked(id, isNativeApp())) return; // defense in depth behind the filter
+                // ✅ DOCTOR AI NOW STARTS FRESH TOO (2026-09-19). It was the one row still resuming,
+                // because every case shared one Firestore document and one transcript key — so "new
+                // chat" would have destroyed the previous patient's workup. Each case now owns its
+                // address (sdaCaseStore.ts), so starting one deletes nothing: the case before it keeps
+                // its own row in History → SDA. Same call the ✕ makes, so there is one way to begin a
+                // case rather than a second copy of the rule.
+                if (id === 'sda_chat') {
+                  setSdaOpenCaseId(undefined);
+                  startFreshCase(typeof window !== 'undefined' ? window.localStorage : null, newSdaCaseId(), user?.uid);
+                  setSdaResetKey(k => k + 1);
+                  toggleTab(id as ViewType);
+                  return;
+                }
                 // A professional restores itself from localStorage on mount, so a fresh chat means
                 // ENDING the live one first — which ARCHIVES it into Professional History rather than
-                // dropping it. `startsFreshOnPick` is what holds Doctor AI back: it has no archive, so
-                // a new chat there would destroy the previous case. See modePicker.ts.
+                // dropping it. See modePicker.ts.
                 if (startsFreshOnPick(id)) {
                   const store = professionalStore();
                   if (store) endProfessionalChat(store, id);

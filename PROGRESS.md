@@ -69742,6 +69742,84 @@ what the screen now actually does.
 
 ---
 
+## 2026-09-19 — 🔴 A Doctor AI case is never overwritten by the next one (branch `claude/a-doctor-ai-case-is-never-overwritten`)
+
+**This CLOSES the open root cause recorded the same day** ("Doctor AI has no per-conversation archive,
+so 'always a new chat' would destroy the previous medical case"). Investigating it for real found the
+loss was **already live in production**, with no involvement from the Mode list at all.
+
+### What was actually wrong
+
+- The Firestore document id was the fixed **`sda_<userId>`** — ONE row per doctor, for ever. Every new
+  case overwrote the previous patient's workup in place.
+- `startNewCase()` in `SDAChat.tsx` did **`localStorage.removeItem('sda_messages')`** — one shared
+  transcript key for every case.
+- 🔎 **SIBLING (rule 3): closing the Doctor AI tab with ✕ carried its own copy of that same
+  `removeItem`** in `App.tsx`. Two doors, one bug, two copies of the delete — which is how the class
+  survived. The Mode list would have been a third.
+
+**So a doctor who pressed "New case", or simply closed the tab, lost the case before it — locally and
+on the server, with nothing to reopen.** Nothing warned them.
+
+### The correction to an earlier claim in this file
+
+It was recorded that Doctor AI "has no archive because `ProfessionalHistoryView` does not iterate
+`sda_chat`". True, and looking at the wrong surface: Doctor AI was never in the professionals' archive.
+`HistoryView` already reads `chat_sessions`, already has an **SDA filter**, and SDAChat already writes
+there with `tab: 'sda_chat'`. **The defect was never a missing screen — it was one address for an
+unbounded number of cases.**
+
+### The fix — `src/lib/sdaCaseStore.ts` (new, pure)
+
+🔑 **A per-case id already existed.** `newSdaCaseId()` mints one per case so the SERVER's clinical store
+cannot bleed Patient A's red flags into Patient B's workup. It was correct and was simply never used to
+address the document. This is that id, applied: `sda_<userId>_<caseId>`, and `sda_messages_<caseId>`.
+
+- **The migration BINDS, it does not copy.** A doctor mid-case when this ships continues **in the legacy
+  row** — nothing copied, nothing duplicated, nothing deleted, the row keeps its place and its history.
+  Copying forward would have left two rows showing one conversation, and the only way to avoid that is
+  to delete the original: deleting patient case notes to tidy a key format is not a trade worth taking.
+  Only the NEXT case gets a new address; every case after that is per-case from birth.
+- **`startFreshCase` is the ONE way to start a case**, called by both former deleters. It deletes
+  nothing — starting a case means pointing at a new address. *A step nobody has to remember is a step
+  nobody can forget.*
+- 🔴 **Two identities were being conflated, and separating them was required, not cosmetic.**
+  `rewindCase` (an edit/delete) rotates the case id on purpose, to abandon accumulated clinical state.
+  Once the document is addressed BY the case, that would move the patient to a new row on every
+  corrected typo, orphaning the row their case was already in. Now `caseIdRef` is the CASE (patient,
+  row, document) and `clinicalSessionRef` is what the server keys its clinical store on. Caught in
+  design, before it shipped.
+- **The legacy transcript is offered to exactly one case** — the one bound to the legacy row. Letting a
+  new case fall back to it would open the new patient on the previous patient's transcript: the exact
+  clinical-safety failure `newSdaCaseId` exists to prevent, re-entering through the back door.
+- **History opens the case that was tapped.** `caseIdFromDocId` → `openCaseId`; a legacy row honestly
+  reports `null`, meaning "continue whatever case that row is bound to".
+- Device transcripts are capped (`MAX_LOCAL_CASES = 8`, current case never evicted). **The Firestore row
+  is the durable copy and is never pruned**, so eviction costs a fetch, never a case.
+- A case id is **validated** before becoming a Firestore path segment — a `/` would address a different
+  collection instead of failing.
+
+### Verification
+
+`tests/aDoctorAiCaseIsNeverOverwritten.test.ts` — 28 cases. **Reversion-proven six ways**: legacy
+fallback widened to every case → 1 red · stored binding ignored → 1 red · `removeItem` restored in
+`startNewCase` → 1 red · the two identities re-conflated → 1 red · the ✕ sibling deleting again → 1 red ·
+History no longer naming the case → 1 red.
+
+`AppKnowledgeBase.ts` records the capability, so every AI in the app can answer "where is my old case?".
+
+### Still open, stated plainly
+
+- ~~Doctor AI "always a new chat" in the Mode list is still NOT enabled.~~ **DONE in this same change**:
+  #3128 merged while this was being built, so the Mode list arrived on `main` and the last piece of the
+  admin's spec — *"agar kisi bhi professional ya free par tap kiya jayega hamesa new chat hi open hoga"* —
+  could finally be kept. It routes through `startFreshCase`, the SAME call the ✕ makes, and deliberately
+  NOT through `endProfessionalChat`: that would archive under a key nothing reads and leave the real
+  transcript untouched. `startsFreshOnPick` still means "needs the PROFESSIONAL archive" and still
+  excludes Doctor AI, which is correct — a test pins both halves.
+- Doctor AI remains hidden in the Play native shell (`playCompliance`), so this is a web surface today.
+- Retention is unaffected: `DataRetentionManager` clears `chat_sessions` by the `userId` FIELD, which
+  every per-case row carries — verified, not assumed.
 ## 2026-09-19 — Autopsy: a Play-bundle build that died in 12 seconds (`12thmentors/app-50-files-2026-09-19`)
 
 Admin forwarded an APK/AAB failure report. Run `35432078670`, user `shwasanas2008@gmail.com`,

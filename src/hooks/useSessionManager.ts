@@ -15,6 +15,7 @@ import { safeLS } from '../lib/localStorageSafe';
 import { generateUCI, getRandomElement, generateSmartHeuristicSummary, dedupAndSortMessages, asMessageArray } from '../lib/chatUtils';
 import { pickGreetingForAgent } from '../lib/agentGreetings';
 import { resolveSessionSurface } from '../lib/sessionRouting';
+import { caseIdFromDocId } from '../lib/sdaCaseStore';
 
 export interface SessionManagerDeps {
   // values read
@@ -31,6 +32,8 @@ export interface SessionManagerDeps {
   setFiles: (v: any) => void;
   setSessions: (v: any) => void;
   setSdaResetKey: (v: any) => void;
+  /** Tells SDAChat WHICH case to open — see sdaCaseStore.caseIdFromDocId. */
+  setSdaOpenCaseId: (v: string | undefined) => void;
   setCurrentProSessionId: (v: any) => void;
   setProMessages: (v: any) => void;
   setMessages: (v: any) => void;
@@ -63,6 +66,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
     sessions, user, currentSessionId, resumeUciInputState, mode,
     v3ResumeInFlightRef,
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
+    setSdaOpenCaseId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
     setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
     toggleTab, addToast, addLog, initialFreeChatMessages,
@@ -197,8 +201,13 @@ export function useSessionManager(deps: SessionManagerDeps) {
     // surface — Free/Pro/SDA each own a separate message state, so dumping
     // everything into the Free-chat state regardless of origin was the bug.
     if (isSdaSession) {
-      // SDA persists itself via a userId-keyed Firestore doc (see SDAChat.tsx);
-      // remounting makes it re-fetch its own latest content.
+      // Open the case the doctor actually tapped. SDA used to persist itself under ONE userId-keyed
+      // document, so "remount and let it re-fetch its own latest content" was the only thing a restore
+      // could mean — there was only ever one case to fetch. Now each case owns its document, so the
+      // row's id names the case, and the remount opens THAT patient rather than the most recent one.
+      // A legacy row carries no case id and reports null, which correctly means "continue whatever
+      // case that row is bound to" (see sdaCaseStore.resolveCaseDoc).
+      setSdaOpenCaseId(caseIdFromDocId(targetSession.id, user?.uid || '') || undefined);
       setSdaResetKey(k => k + 1);
     } else if (isProSession) {
       setCurrentProSessionId(targetSession.id);

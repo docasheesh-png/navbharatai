@@ -122,9 +122,33 @@ export async function putRepoSecrets(
  * response can carry request details, and this string is shown on screen.
  */
 export function describeGhError(err: unknown): string {
-  const status = (err as { response?: { status?: number } })?.response?.status;
+  const status = ghErrorStatus(err);
   if (status === 403) return 'GitHub refused — your connected account may not have permission to change this repository’s secrets.';
   if (status === 404) return 'GitHub could not find that repository, or your account cannot see it.';
   if (status === 401) return 'Your GitHub connection has expired. Reconnect GitHub and try again.';
   return 'GitHub could not be reached just now. Please try again in a moment.';
+}
+
+/**
+ * The HTTP status a failed GitHub call came back with, or null when there was no response at all
+ * (a network error, a DNS failure, an abort) — which is a different thing from a status and must not
+ * be flattened into one. Declared here, beside the only other reader, so the shape of an axios error
+ * is understood in exactly one place rather than re-typed at each call site.
+ */
+export function ghErrorStatus(err: unknown): number | null {
+  const status = (err as { response?: { status?: unknown } })?.response?.status;
+  return typeof status === 'number' ? status : null;
+}
+
+/**
+ * GitHub's `x-ratelimit-remaining` header from a failed call, or null.
+ *
+ * ⚠️ It exists because GitHub answers **403 for an exhausted rate limit as well as for a permission
+ * denial**. Without this header the two are indistinguishable, and telling a rate-limited user that
+ * their account lacks permission sends them to fix access they already have.
+ */
+export function ghRateLimitRemaining(err: unknown): string | null {
+  const headers = (err as { response?: { headers?: Record<string, unknown> } })?.response?.headers;
+  const raw = headers?.['x-ratelimit-remaining'];
+  return typeof raw === 'string' || typeof raw === 'number' ? String(raw) : null;
 }

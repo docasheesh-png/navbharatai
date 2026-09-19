@@ -68721,6 +68721,89 @@ class list by construction), each candidate once. All ten fixed by running the c
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
 
+## 2026-09-19 — The Android app blurred, every frame, something nobody could see
+
+**The admin corrected the target:** *"website par problem nahi hai. bas mobile app ko fast karo, bina
+tode!!"* — the Capacitor Android app, not the site.
+
+🔴 **THAT CORRECTION ALSO RETIRES MOST OF THE PREVIOUS ENTRY'S RELEVANCE, and it should be said plainly
+rather than left for someone to notice.** The app is **bundled mode** (`webDir: 'dist'`, no
+`server.url`, locked by `tests/nativeShellInvariants.test.ts`), so its JavaScript and CSS are already
+on the device. **The 3,600 ms first paint measured hours earlier was a DOWNLOAD cost and does not
+exist in the app at all.** The boot frame shipped in #3114 is a website fix; in the app it is worth
+very little. Everything below is about the app.
+
+### What was found, and why this one and not the other forty-two
+
+The global mobile bottom nav (`App.tsx`, `showsGlobalMobileNav`) was:
+
+```
+fixed bottom-0 left-0 right-0 … bg-[var(--surface-base)]/95 backdrop-blur-xl
+```
+
+Three facts, and the third is what makes it indefensible:
+
+1. `fixed`, full width, and `showsGlobalMobileNav` is true for **essentially the whole mobile app**
+   (mobile device mode, not focus mode, not Code Studio, not the bot builder) — so it sits over the
+   scrolling content at all times.
+2. `backdrop-blur-xl` is a **24px** blur, and what is behind it **moves while the user scrolls**, so
+   the compositor must re-blur that full-width strip **on every frame**.
+3. The surface over that blur was **95% opaque**. At most **5%** of the result could ever reach anyone's
+   eye.
+
+**A per-frame, full-width GPU blur, to produce an effect nobody can see.** On a desktop GPU it is
+invisible in both senses, which is exactly why it survived; in an Android WebView on a mid-range Mali
+or Adreno it is the classic reason a 60fps scroll becomes a stuttering one — and the report came from
+an Android phone.
+
+🔎 **THE CONTRAST IS THE EVIDENCE.** All 43 `backdrop-blur` sites were read, not sampled. Almost every
+other one is a **modal backdrop** (`fixed inset-0 bg-scrim`): it exists only while a dialog is open, it
+blurs a background that is not moving, and the blur is the whole point of it. Two more are transient —
+the focus-mode exit button and the GitHub-push status strip. **This was the only blur living
+permanently over the app's own scrolling content.** A finding that explains why one case differs from
+forty-two is worth more than one that merely names a cost.
+
+### The fix, and its deliberate narrowness
+
+`bg-surface` — the same `--surface-base` colour, opaque, no blur. That is also what a native Android
+tab bar looks like.
+
+⚠️ **Opaque, not merely un-blurred.** Dropping the blur and keeping `/95` would have been the worse of
+both worlds: still a per-frame blend, and now *unblurred* moving content ghosting through. The 5% that
+is lost was never visible through a 24px blur anyway.
+
+⚠️ **Nothing else was touched, on purpose** (*"bina tode"*). The focus-mode button keeps its blur and
+now says why in place: it renders only in focus mode, it is 36×36px rather than full width, and at 60%
+opacity its blur is genuinely visible — the opposite trade to the one removed.
+
+### ⚠️ THE HONEST LIMIT, stated before anyone quotes this as a measurement
+
+**No session here can drive a real Android device, so this is a mechanism-level finding from the code
+plus how WebView compositing works — NOT a frame-rate measurement on a phone.** What is certain is the
+cost side (a per-frame blur is real work) and the visual side (removing it cannot change more than that
+5%). Whether the admin's scroll feels different is a fact only the next `.aab` on a real phone can
+settle, and this entry claims nothing beyond that.
+
+### Locked
+
+`tests/theAppDoesNotBlurWhatNobodyCanSee.test.ts`, 3 cases, proven by four reversions: the blur
+returning to the nav (2 fail), the bar going translucent again (1), a new unjustified fixed blurred bar
+anywhere in `src/**` (1), and the justification marker being deleted (1).
+
+🔒 **The third case is the one that outlives this bug.** It sweeps every `.tsx` outside `src/server` for
+a `fixed` blur that is not a full-bleed overlay, and an exception must carry a `BLUR-OVER-SCROLL-OK`
+marker **in the twelve lines above it** — justified in place, never on a list inside the test. A list in
+a test file drifts away from the code it excuses, and the next reader cannot tell a considered
+exception from a forgotten one.
+
+### 🔴 STILL OPEN for the app (rule 6) — neither is a code fix
+
+1. **Cloud Run cold start, measured at 4,815 ms**, with `--min-instances 0`. In bundled mode the
+   frontend is already local, so *"kuch der baad response aata hai"* in the APP can only be the server.
+   This is the most likely remaining cause of that half of the report, and settling it means checking
+   whether the Cloud Scheduler ping on `/api/warm` actually exists, or paying for `--min-instances 1`.
+2. **A frontend change reaches installed users ONLY through a fresh `.aab`**, which is admin-triggered
+   only. Until one is built and live on Play, nothing here changes anything for a single real user.
 ---
 
 ## 2026-09-19 — THE ACCOUNT SWITCHER IS REMOVED (admin-mandated)
@@ -68957,3 +69040,55 @@ sooner, and that is the whole of it.
 **Locked:** `tests/theFirstFrameIsNotBlank.test.ts`, 8 cases, proven by four reversions — deleting the
 frame (2 fail), dropping a theme's colour (1), growing a button inside it (1), and putting
 `PreviewSurface` back as a static import (2).
+## 2026-09-19 — 🚫 THE APP DOES NOT PAINT A SCROLL TRACK (admin screenshot: "yeh website ka feel deti hai")
+
+Admin, with a phone screenshot of the home screen: *"app ke andar bhi right side me blue vertical light
+show ho rahi hai, jo page ke scroll ke time up/down hoti hai. yeh website ka feel deti hai. isko mobile
+app me se hata do! jisse app ka feel aye."*
+
+A native Android or iOS app never paints a PERSISTENT scroll track — both platforms draw a transient
+indicator that fades when the finger lifts. A bar that sits there while you read belongs to a browser,
+and it was the loudest web tell left in the shell.
+
+### 🔎 Why it was BLUE — and the dead duplicate that made it hard to see
+
+`.custom-scrollbar` was declared **twice**: in `src/index.css` inside `@layer base` (indigo, via the
+STANDARD `scrollbar-color` property) and again in an unlayered `<style>` inside `App.tsx` (white, via
+`::-webkit-scrollbar-thumb`). Unlayered beats layered, so the white copy read like the winner.
+
+It was not. **Since Chromium 121 a non-`auto` `scrollbar-color`/`scrollbar-width` makes the engine
+ignore every `::-webkit-scrollbar` pseudo-element on that box**, and every Android WebView in the field
+is past 121. The screenshot is indigo, not grey — the mechanism and the observation agree, and the
+App.tsx copy had been painting nothing for an unknown length of time while still reading like the
+authority. It is deleted; one scrollbar now has one home.
+
+### The fix — `html.nb-native-shell`, unlayered, both mechanisms
+
+- `scrollbar-width: none` + `scrollbar-color: transparent transparent` (what Chromium 121+ reads) AND
+  `::-webkit-scrollbar { display: none }` (what older engines read). A box must lose its bar under
+  either engine, so both are set rather than one being "the" answer.
+- **Unlayered on purpose.** `@layer base` loses to any unlayered rule, and `.custom-scrollbar` lives in
+  that layer — a layered hide would have lost to the very rule it replaces.
+- **Carries `html` on purpose.** `.nb-native-shell *` and `.custom-scrollbar` are both (0,1,0), so the
+  winner would be decided by source order against a `<style>` rendered into the body — i.e. by luck,
+  re-rolled by whoever adds the next inline block. `html.nb-native-shell` is (0,1,1) and wins by
+  construction.
+- **Gated, so the WEBSITE keeps its scrollbar.** The class is added to `<html>` by index.html's
+  pre-paint script only when `window.Capacitor` exists. A desktop visitor has a pointer and genuinely
+  needs a bar to drag; taking it away would be an accessibility regression, not a polish.
+- Hiding is not disabling — `display: none` on the pseudo-element leaves the box fully scrollable, the
+  same technique `.no-scrollbar` has used here for months.
+
+Test-locked and reversion-proven in both halves in `tests/theAppHasNoScrollbarsInTheApp.test.ts`
+(7 cases): removing the CSS block turns **3** red, restoring the App.tsx duplicate turns **2** red. The
+suite also asserts the two cascade facts above, because neither is visible from the rule itself.
+
+Side effect, stated: the app reclaims the ~8px gutter the non-overlay scrollbar was holding, and the
+theme-colour ratchet recorded `src/App.tsx` 20 → 18 literals (two colours left with the dead block).
+
+### Still open (rule 6) — the rest of the "native, not Capacitor" list
+
+Answered in the same message as a ranked audit rather than built: Android App Links (`autoVerify`) so
+`navbharatai.com` links open the app, predictive-back on targetSdk 36, a native share sheet beyond the
+two existing `navigator.share` call sites, `@capacitor/network` for an honest offline state, and
+screen-to-screen transitions. None of them is started; each needs the admin's word on scope.

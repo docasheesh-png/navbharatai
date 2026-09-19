@@ -19,11 +19,14 @@ import { getAllPublishGuides, getPublishGuide, renderPublishGuideText, type Stor
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 // ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
 // never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
-import { SHIP_WORKFLOW_FILES, isShipWorkflow, workflowPath, type ShipWorkflowFile } from '../../lib/shipWorkflows';
 import {
-  missingSigningSecrets, signingVerdict, ANDROID_SIGNING_SECRETS,
+  SHIP_WORKFLOW_FILES, SHIP_WORKFLOWS, isShipWorkflow, workflowPath, type ShipWorkflowFile,
+} from '../../lib/shipWorkflows';
+import {
+  missingSigningSecrets, signingVerdict, ANDROID_SIGNING_SECRETS, signingNotReadyMessage,
   signingLookupReason, signingLookupIsDurable, signingLookupNote, isSigningSecretFailure,
 } from '../../lib/signingReadiness';
+import { shouldRefuseUnsignedDispatch, ensureUploadKeystore } from '../lib/androidSigningSetup';
 import { generateUploadKeystore } from '../lib/androidKeystore';
 import {
   listRepoSecretNames, putRepoSecrets, describeGhError, ghErrorStatus, ghRateLimitRemaining,
@@ -171,41 +174,53 @@ export function registerMobileShipRoutes(app: Express): void {
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
 
     const headers = githubApiHeaders(token);
-    let existing: string[];
-    try {
-      existing = await listRepoSecretNames(headers, String(owner), String(repo));
-    } catch (err) {
-      // We could not read the repository, so we must not write to it: creating a key beside one we
-      // simply failed to see is the single outcome this route exists to prevent.
-      return res.status(502).json({ error: describeGhError(err) });
-    }
 
-    const already = ANDROID_SIGNING_SECRETS.filter((n) => existing.includes(n));
-    if (already.length > 0 && replace !== true) {
+    // ONE implementation of read-then-maybe-create, shared with the SETUP route (rule 2). It used to
+    // live here alone, which is why the setup path could not reuse it and the key was only ever made
+    // after a build had already failed. `replace` is handled here rather than inside it: the shared
+    // helper is deliberately incapable of overwriting a key, so the only way to replace one stays an
+    // explicit request on this route.
+    const ensured = await ensureUploadKeystore(
+      headers, String(owner), String(repo),
+      typeof appName === 'string' ? appName : String(repo),
+    );
+
+    if (ensured.state === 'blocked' && ensured.present.length === 0) {
+      return res.status(502).json({ error: ensured.note || 'The signing key could not be set up.' });
+    }
+    if (ensured.state === 'blocked') {
+      // Some landed and some did not — the half-configured case, named exactly rather than left to be
+      // discovered at build time.
+      return res.status(502).json({
+        error: ensured.note || 'The signing key could not be saved to your repository.',
+        written: ensured.present,
+      });
+    }
+    if ((ensured.state === 'present' || ensured.state === 'partial') && replace !== true) {
       return res.status(409).json({
         error: 'This repository already has a signing key set up.',
-        present: already,
+        present: ensured.present,
         hint: 'If you have already published this app, keep that key — a new one cannot update it. '
           + 'Replace it only if the app has never been on the Play Store.',
       });
     }
 
-    const key = generateUploadKeystore(typeof appName === 'string' ? appName : String(repo));
-    const outcome = await putRepoSecrets(headers, String(owner), String(repo), [
-      ['ANDROID_KEYSTORE_BASE64', key.base64],
-      ['ANDROID_KEYSTORE_PASSWORD', key.storePassword],
-      ['ANDROID_KEY_ALIAS', key.keyAlias],
-      ['ANDROID_KEY_PASSWORD', key.keyPassword],
-    ]);
-
-    if (outcome.failedAt) {
-      // A repository holding two of four is the "half-configured key" case signingReadiness names, and
-      // the user is told exactly which landed rather than discovering it at build time.
-      return res.status(502).json({
-        error: outcome.error || 'The signing key could not be saved to your repository.',
-        written: outcome.written,
-        failedAt: outcome.failedAt,
-      });
+    // Replacing on request: the shared helper will not overwrite, so an explicit replace writes here.
+    const key = ensured.key ?? generateUploadKeystore(typeof appName === 'string' ? appName : String(repo));
+    if (!ensured.key) {
+      const outcome = await putRepoSecrets(headers, String(owner), String(repo), [
+        ['ANDROID_KEYSTORE_BASE64', key.base64],
+        ['ANDROID_KEYSTORE_PASSWORD', key.storePassword],
+        ['ANDROID_KEY_ALIAS', key.keyAlias],
+        ['ANDROID_KEY_PASSWORD', key.keyPassword],
+      ]);
+      if (outcome.failedAt) {
+        return res.status(502).json({
+          error: outcome.error || 'The signing key could not be saved to your repository.',
+          written: outcome.written,
+          failedAt: outcome.failedAt,
+        });
+      }
     }
 
     return res.json({
@@ -597,6 +612,38 @@ export function registerMobileShipRoutes(app: Express): void {
       return res.status(400).json({ error: `Only the generated build workflows can be started (${DISPATCHABLE_WORKFLOWS.join(', ')}).` });
     }
     if (typeof ref !== 'string' || !ref.trim()) return res.status(400).json({ error: 'A branch name is required.' });
+
+    // ── THE GUARD LIVES HERE NOW, NOT IN THE BROWSER (autopsy 2026-09-19) ───────────────────────────
+    //
+    // A pre-flight identical in intent has been in `StoreBuildPanel.tsx` since 2026-09-15, and it could
+    // not have protected the user whose report prompted this: the Android app is BUNDLED mode, so its
+    // frontend is whatever shipped in the last `.aab` (versionCode 91, 2026-08-25) — three weeks older
+    // than that check. A guard that ships in the app binary protects nobody until they reinstall; this
+    // route updates for everyone the moment it merges. The client check stays as the fast, friendly
+    // path — this is the one that is actually true.
+    //
+    // 🔒 SAME RULE AS THE CLIENT'S, NOT A STRICTER ONE: only a real verdict refuses. If we cannot read
+    // the repository's secret names we allow the dispatch exactly as before, because our own blindness
+    // is not evidence about the user's repository — and the workflow's own pre-flight still catches it
+    // honestly. ANDROID ONLY: the iOS workflow needs Apple credentials, a different set entirely, and
+    // asking about Android's names there would refuse every legitimate iOS build.
+    if (workflow === SHIP_WORKFLOWS.androidAab) {
+      let names: string[] | null = null;
+      try {
+        names = await listRepoSecretNames(githubApiHeaders(token), String(owner), String(repo));
+      } catch { /* unknown — never refuse a build on our own failed lookup */ }
+      if (shouldRefuseUnsignedDispatch(names)) {
+        const missing = missingSigningSecrets(names);
+        return res.status(409).json({
+          error: signingNotReadyMessage(missing),
+          code: 'SIGNING_NOT_READY',
+          missing,
+          // The one-press route that fixes it, named in the refusal so an older client that knows
+          // nothing about this response still shows the user a sentence with the way out in it.
+          canCreateKey: true,
+        });
+      }
+    }
 
     try {
       await axios.post(

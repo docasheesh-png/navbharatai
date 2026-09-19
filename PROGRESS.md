@@ -69955,3 +69955,74 @@ every fact in the report but is **not verified**. Watch for `[SIGNING] secrets l
 server log and `preflight.couldCheck: false` on the next such report. If `forbidden` dominates, the real
 fix is upstream: NavBharatAI should create these repositories where the user is an admin, or say plainly
 at setup time that it cannot manage signing for this one.
+
+---
+
+## 2026-09-19 — The guard that only ran on your phone (root cause of the 12-second Play-bundle failure)
+
+Follow-up to the same-day autopsy, and it **corrects that autopsy's leading hypothesis**.
+
+🔴 **THE FIRST DIAGNOSIS WAS WRONG, and it is recorded rather than quietly replaced.** I proposed that
+`12thmentors` was an *organization* where the user had write but not admin, so listing Actions secrets
+403'd. `mobileSetup.ts` takes `owner` from `GET /user` — **the token's own login** — so the repository is
+always in the user's PERSONAL account and they always have admin on it. The hypothesis was consistent
+with the report and false.
+
+### The real root cause
+
+**The pre-flight lives in the browser bundle, and the user's browser bundle is older than the
+pre-flight.**
+
+- `signingReadiness`'s only caller was `StoreBuildPanel.tsx`, i.e. client code.
+- The Android app is **BUNDLED mode** (`webDir: 'dist'`, no `server.url`), so an installed user's
+  frontend is whatever shipped in the last `.aab`: **versionCode 91, uploaded 2026-08-25** — three weeks
+  BEFORE the check was written on 2026-09-15. **No installed Android user has that code at all.**
+- And `/api/mobile-ship/trigger`, the SERVER route that actually starts the build, **checked nothing** —
+  so an old client, a cached web bundle, or any caller reached the dispatch unguarded.
+
+This file's own deployment rule states it: a SERVER change reaches installed app users immediately; a
+FRONTEND change does not. A guard shipped in the app binary protects nobody until they reinstall.
+
+### The fix — architectural, both halves of the 50/50 law
+
+1. **PREVENT.** `ensureUploadKeystore` (`lib/androidSigningSetup.ts`) is called from
+   `/api/mobile-ship/setup`, so the upload key is created **when the repository is created** — before
+   the button that needs it can be pressed. Best-effort: it can never fail the setup, because the
+   installable `.apk` needs no key and taking that away to solve a problem the user may not have is the
+   trade this repo forbids.
+2. **GUARD.** `/api/mobile-ship/trigger` now refuses an unsigned Play dispatch itself (409
+   `SIGNING_NOT_READY`), so the correct path is the only path for every client, old or new, from the
+   moment this merges.
+
+🔒 **Same rule as the client's, not a stricter one:** `shouldRefuseUnsignedDispatch(null)` is **false** —
+only a real verdict refuses, never our own blindness. And it is **Android-only**: the iOS workflow needs
+Apple credentials, a different set entirely, so asking about Android's names there would refuse every
+legitimate iOS build.
+🔒 **An existing key is never replaced and a partial one is never completed** — a published app is tied
+to its upload key, and a fresh keystore beside somebody's existing password produces "Cannot recover
+key" at build time. A failed READ can never fall through to a WRITE.
+🔒 **One implementation, two callers.** The read-then-maybe-create logic used to live only inside
+`/signing-setup`, which is exactly why the setup path could not reuse it and the key was only ever made
+after a build had already failed. `/signing-setup` now delegates to the same helper.
+🔒 **The key still reaches the user.** It is the only moment it exists outside their repository
+(NavBharatAI keeps no copy), so one shared `receiveKeystore` in the panel downloads and shows it from
+BOTH arrival paths.
+
+### Two existing assertions were REPOINTED, not deleted
+
+`tests/githubSecretWrite.test.ts` asserted the never-replace and never-write-after-a-failed-read rules
+against this route's source. The rules moved into the shared module; the assertions now follow them
+there **and** additionally pin that the route still delegates. Both were re-proven by reversion after
+repointing — deleting them would have been the weakening this repo forbids.
+
+Test-locked and reversion-proven **five** ways in `tests/theGuardThatOnlyRanOnYourPhone.test.ts`
+(7 cases): removing the server guard, making it refuse on a failed lookup, dropping `signing` from the
+setup response, allowing an existing key to be replaced, and never handing the created key to the user —
+each turns a **different** case red.
+
+### Still open (rule 6)
+
+Installed Android users still carry the old frontend, so they will meet the SERVER's 409 rather than the
+friendly in-panel offer until a fresh `.aab` ships — which happens only on the admin's word. The refusal
+carries the full plain-words message and `canCreateKey`, so even an old client shows a sentence with the
+way out in it, but the one-press button itself is new code.

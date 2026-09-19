@@ -210,6 +210,37 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     return h;
   }, [githubToken]);
 
+  /**
+   * Hand a freshly-made upload key to the user — download it and show it.
+   *
+   * ONE implementation, because the key now arrives from TWO places: the SETUP response (created
+   * before any build, which is the fix for a user meeting a red failure first) and the explicit
+   * "Create my signing key" press. A second copy of the download code is how the two would drift, and
+   * this is the one moment the key exists outside the user's repository — NavBharatAI keeps no copy,
+   * so dropping it here means they simply never get it.
+   */
+  const receiveKeystore = useCallback((k: {
+    base64: string; storePassword: string; keyAlias: string; sha256Fingerprint: string;
+  }, repoName: string) => {
+    try {
+      const bytes = Uint8Array.from(atob(String(k.base64)), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${repoName}-upload.keystore`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch { /* the key is on the repository either way; the panel still shows the password */ }
+    setNewKey({
+      fingerprint: String(k.sha256Fingerprint || ''),
+      password: String(k.storePassword || ''),
+      alias: String(k.keyAlias || ''),
+    });
+    setSigningGap(null);
+  }, []);
+
   /** Step 1 — assemble the app into a repository GitHub can build. */
   const prepare = useCallback(async () => {
     if (!sessionId) { setError('Choose which app to package first.'); return; }
@@ -233,13 +264,24 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         return;
       }
       setSetup(data as SetupResult);
+      // The upload key is now made during setup, so the Play button can never be the first place a
+      // user hears about it. This is the ONLY moment it exists outside their repository — NavBharatAI
+      // keeps no copy — so it is handed over here rather than mentioned. Absent is normal and silent:
+      // a repository that already had a key, or one we could not write to, simply sends nothing, and
+      // the .apk path needs no key at all.
+      const handed = (data as { keystore?: { base64?: string } | null })?.keystore;
+      if (handed?.base64) {
+        receiveKeystore(handed as {
+          base64: string; storePassword: string; keyAlias: string; sha256Fingerprint: string;
+        }, String((data as { repo?: string }).repo || 'app'));
+      }
       setPhase('ready');
     } catch {
       if (liveRef.current) { setError('Could not reach the server.'); setPhase('idle'); }
     } finally {
       if (liveRef.current) setBusyNote('');
     }
-  }, [sessionId, appName, appId, iconDataUrl, backgroundColor, ghHeaders]);
+  }, [sessionId, appName, appId, iconDataUrl, backgroundColor, ghHeaders, receiveKeystore]);
 
   /**
    * Start the workflow on GitHub. Returns false when GitHub refused, so the caller can stop the whole
@@ -310,26 +352,19 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         setError(d?.hint ? `${d.error} ${d.hint}` : (d?.error || 'The signing key could not be created.'));
         return;
       }
-      try {
-        const bytes = Uint8Array.from(atob(String(d.keystoreBase64)), (c) => c.charCodeAt(0));
-        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${setup.repo}-upload.keystore`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch { /* the key is on the repository either way; the panel still shows the password */ }
-      setNewKey({ fingerprint: String(d.sha256Fingerprint || ''), password: String(d.storePassword || ''), alias: String(d.keyAlias || '') });
-      setSigningGap(null);
+      receiveKeystore({
+        base64: String(d.keystoreBase64),
+        storePassword: String(d.storePassword || ''),
+        keyAlias: String(d.keyAlias || ''),
+        sha256Fingerprint: String(d.sha256Fingerprint || ''),
+      }, setup.repo);
       setError('');
     } catch {
       setError('The signing key could not be created just now. Please try again in a moment.');
     } finally {
       setMakingKey(false);
     }
-  }, [setup, ghHeaders, makingKey]);
+  }, [setup, ghHeaders, makingKey, receiveKeystore]);
 
   const runCycle = useCallback(async (kind: BuildKind) => {
     if (!setup) return;

@@ -68720,3 +68720,58 @@ class list by construction), each candidate once. All ten fixed by running the c
 
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
+
+---
+
+## 2026-09-19 — 🚫 THE APP DOES NOT PAINT A SCROLL TRACK (admin screenshot: "yeh website ka feel deti hai")
+
+Admin, with a phone screenshot of the home screen: *"app ke andar bhi right side me blue vertical light
+show ho rahi hai, jo page ke scroll ke time up/down hoti hai. yeh website ka feel deti hai. isko mobile
+app me se hata do! jisse app ka feel aye."*
+
+A native Android or iOS app never paints a PERSISTENT scroll track — both platforms draw a transient
+indicator that fades when the finger lifts. A bar that sits there while you read belongs to a browser,
+and it was the loudest web tell left in the shell.
+
+### 🔎 Why it was BLUE — and the dead duplicate that made it hard to see
+
+`.custom-scrollbar` was declared **twice**: in `src/index.css` inside `@layer base` (indigo, via the
+STANDARD `scrollbar-color` property) and again in an unlayered `<style>` inside `App.tsx` (white, via
+`::-webkit-scrollbar-thumb`). Unlayered beats layered, so the white copy read like the winner.
+
+It was not. **Since Chromium 121 a non-`auto` `scrollbar-color`/`scrollbar-width` makes the engine
+ignore every `::-webkit-scrollbar` pseudo-element on that box**, and every Android WebView in the field
+is past 121. The screenshot is indigo, not grey — the mechanism and the observation agree, and the
+App.tsx copy had been painting nothing for an unknown length of time while still reading like the
+authority. It is deleted; one scrollbar now has one home.
+
+### The fix — `html.nb-native-shell`, unlayered, both mechanisms
+
+- `scrollbar-width: none` + `scrollbar-color: transparent transparent` (what Chromium 121+ reads) AND
+  `::-webkit-scrollbar { display: none }` (what older engines read). A box must lose its bar under
+  either engine, so both are set rather than one being "the" answer.
+- **Unlayered on purpose.** `@layer base` loses to any unlayered rule, and `.custom-scrollbar` lives in
+  that layer — a layered hide would have lost to the very rule it replaces.
+- **Carries `html` on purpose.** `.nb-native-shell *` and `.custom-scrollbar` are both (0,1,0), so the
+  winner would be decided by source order against a `<style>` rendered into the body — i.e. by luck,
+  re-rolled by whoever adds the next inline block. `html.nb-native-shell` is (0,1,1) and wins by
+  construction.
+- **Gated, so the WEBSITE keeps its scrollbar.** The class is added to `<html>` by index.html's
+  pre-paint script only when `window.Capacitor` exists. A desktop visitor has a pointer and genuinely
+  needs a bar to drag; taking it away would be an accessibility regression, not a polish.
+- Hiding is not disabling — `display: none` on the pseudo-element leaves the box fully scrollable, the
+  same technique `.no-scrollbar` has used here for months.
+
+Test-locked and reversion-proven in both halves in `tests/theAppHasNoScrollbarsInTheApp.test.ts`
+(7 cases): removing the CSS block turns **3** red, restoring the App.tsx duplicate turns **2** red. The
+suite also asserts the two cascade facts above, because neither is visible from the rule itself.
+
+Side effect, stated: the app reclaims the ~8px gutter the non-overlay scrollbar was holding, and the
+theme-colour ratchet recorded `src/App.tsx` 20 → 18 literals (two colours left with the dead block).
+
+### Still open (rule 6) — the rest of the "native, not Capacitor" list
+
+Answered in the same message as a ranked audit rather than built: Android App Links (`autoVerify`) so
+`navbharatai.com` links open the app, predictive-back on targetSdk 36, a native share sheet beyond the
+two existing `navigator.share` call sites, `@capacitor/network` for an honest offline state, and
+screen-to-screen transitions. None of them is started; each needs the admin's word on scope.

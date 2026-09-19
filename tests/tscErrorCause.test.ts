@@ -143,15 +143,34 @@ describe('the other missing-declaration signatures', () => {
     expect(cause.advice).toMatch(/rather than removing the import/i);
   });
 
+  // ⚠️ UPDATED 2026-09-19 (autopsy 64bc1b6e) — THIS CASE PINNED THE BEHAVIOUR THAT WAS JUST WITHDRAWN,
+  // and it is rewritten rather than deleted so the withdrawal is legible.
+  //
+  // It read `says NOTHING about %s`, with the reason *"a relative path — a missing FILE, a different
+  // cause the endgame already resolves"*. That reasoning was about WHERE the remedy lives. It did not
+  // account for WHEN the pressure arrives: `writeTypecheckNote` tells the model to *"fix them NOW, in
+  // this turn, before writing the next file"* the instant the import is written, long before any
+  // endgame — and in that build a parallel sub-agent, holding the compiler's raw words and no remedy,
+  // wrote three 231-byte PLACEHOLDER pages over files another sub-agent was assigned to create.
+  //
+  // 🔒 THE HALF THAT STILL HOLDS IS WHAT THIS CASE NOW GUARDS: a relative or aliased specifier must
+  // never be handed the PACKAGE remedy. Sending the model to `npm install ./Dashboard` was the real
+  // hazard the original case existed to prevent, and it is still prevented.
   it.each([
-    ['./Dashboard', 'a relative path — a missing FILE, a different cause the endgame already resolves'],
+    ['./Dashboard', 'a relative path'],
     ['../types/game', 'a parent-relative path'],
     ['@/components/Card', 'the @/ alias every scaffold here maps to src'],
-  ])('says NOTHING about %s (%s)', (spec) => {
+  ])('never offers the package remedy for %s (%s) — it is a FILE in this project', (spec) => {
     const errors = parseTscErrors(
       `src/x.ts(1,20): error TS2307: Cannot find module '${spec}' or its corresponding type declarations.`,
     );
-    expect(tscErrorCauses(errors)).toEqual([]);
+    const causes = tscErrorCauses(errors);
+    expect(causes).toHaveLength(1);
+    expect(causes[0].id.startsWith('missing-file:')).toBe(true);
+    expect(causes[0].advice).not.toMatch(/npm install/);
+    expect(causes[0].advice).toContain('not a package');
+    // And the remedy it DOES give is the one the autopsy paid for.
+    expect(causes[0].advice).toMatch(/NEVER write a placeholder\/stub/);
   });
 
   it('a scoped package keeps its scope', () => {

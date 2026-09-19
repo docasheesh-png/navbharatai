@@ -85,7 +85,11 @@ describe('ShellTerminal input during startup', () => {
  */
 describe('ShellTerminal mobile command bar', () => {
   it('exists, and only for coarse (touch) pointers — desktop xterm typing is untouched', () => {
-    expect(code).toContain("matchMedia?.('(pointer: coarse)')");
+    // The pointer test moved into `lib/dismissKeyboard.ts` on 2026-09-19 so the module that CLOSES
+    // the on-screen keyboard and the code that must not OPEN it read one predicate. The fact this
+    // case protects is unchanged: the bar appears for a coarse pointer and nowhere else.
+    expect(code).toContain('useState<boolean>(softKeyboardWouldOpen)');
+    expect(code).toContain("import { softKeyboardWouldOpen } from '../../lib/dismissKeyboard'");
     expect(code).toContain('showCommandBar');
   });
 
@@ -120,8 +124,21 @@ describe('ShellTerminal mobile command bar', () => {
     expect(code).toMatch(/keepFocus = \(e: React\.PointerEvent\) => e\.preventDefault\(\)/);
   });
 
-  it('on a touch device, tab-activation focuses the BAR, never xterm — whose keyboard cannot type', () => {
-    expect(code).toMatch(/if \(showCommandBar\) barInputRef\.current\?\.focus\(\);\s*else termRef\.current\?\.focus\(\);/);
+  it('🔴 SUPERSEDED 2026-09-19 — tab-activation focuses NOTHING on touch, because focus opens a keyboard', () => {
+    // This case used to assert `if (showCommandBar) barInputRef.current?.focus(); else term…` — i.e.
+    // that activating the tab focused the BAR on touch. The admin withdrew the auto-focus itself:
+    // *"agar terminal par click karte hai to keyboard open ho jata hai, isko abhi roko, jab tak typing
+    // ke liye inputbox me click na kiya jaye, automatic keyboard open na ho!"* Tapping TERMINAL asked
+    // for a terminal, and the keyboard covered the transcript they went there to read.
+    //
+    // ⚠️ HALF THE OLD REASONING STILL HOLDS AND IS STILL ASSERTED: when focus IS wanted on touch it
+    // must go to the bar or the bridge, NEVER to xterm, whose hidden textarea a soft keyboard cannot
+    // reach. What changed is only who decides to focus — the user, by tapping.
+    expect(code).not.toContain('barInputRef.current?.focus();\n      else termRef.current?.focus();');
+    expect(code).toContain('if (!softKeyboardWouldOpen()) termRef.current?.focus();');
+    // The two user-initiated ways in are untouched, so the terminal is still typeable on a phone.
+    expect(code).toContain('onClick={focusBridge}');
+    expect(code).toContain('{showCommandBar && (');
   });
 });
 

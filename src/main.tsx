@@ -43,6 +43,7 @@ import { installNativeApiRewrite } from './lib/apiBase';
 import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
 import { syncNativeMetaConsent, nativeMetaConsentGranted } from './lib/metaNativeConsent';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
+import { COLD_START_EVENT, coldStartPayload, coldStartVerdict } from './lib/coldStart';
 import { installErrorCapture } from './lib/recentErrors';
 import { HARDWARE_BACK_EVENT } from './lib/androidBack';
 
@@ -244,6 +245,44 @@ function initWebVitals() {
   } catch {}
 }
 
+/**
+ * COLD START — one sample per launch, through the web-vitals consent gate and sink.
+ *
+ * Deliberately NOT a new endpoint or a new consent decision: this is non-essential telemetry of exactly
+ * the same kind as LCP/CLS/FID above, so it rides the same rules. A second pipeline would be a second
+ * thing to keep in sync with the user's choice.
+ *
+ * 🔴 IT DOES NOT INCLUDE THE NATIVE PRELUDE. JavaScript begins existing when the WebView starts loading
+ * the document; the Android process start, the Activity and the WebView's own creation are invisible
+ * from here. The payload says so in a field, so a dashboard built from these rows cannot quietly
+ * present the web half as the whole launch.
+ */
+function measureColdStart(appReady: number): void {
+  try {
+    if (!import.meta.env.PROD) return;
+    if (!hasAnalyticsConsent()) return; // no consent, no telemetry — and no retry later: the moment is gone
+    const nav = performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined;
+    const fcp = performance.getEntriesByType?.('paint')?.find((e) => e.name === 'first-contentful-paint');
+    const verdict = coldStartVerdict({
+      navigationType: nav?.type,
+      responseStart: nav?.responseStart,
+      domContentLoaded: nav?.domContentLoadedEventEnd,
+      firstContentfulPaint: fcp?.startTime,
+      appReady,
+      // `hidden` right now is the cheap, reliable half of "was this launch watched": a pre-warm or a
+      // user who switched away mid-launch is hidden by the time this frame runs.
+      wasHiddenDuringLaunch: typeof document !== 'undefined' && document.visibilityState === 'hidden',
+      nativeShell: typeof (window as { Capacitor?: unknown }).Capacitor !== 'undefined',
+    });
+    if (!verdict.usable) return; // a reload, a background pre-warm or a partial timing — never averaged in
+    void fetch('/api/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: COLD_START_EVENT, props: coldStartPayload(verdict), ts: Date.now() }),
+    }).catch(() => {});
+  } catch { /* a measurement must never be able to break a launch */ }
+}
+
 // Start web-vitals now if consent was granted in a previous session, and also when the user accepts
 // via the banner this session (the consent module dispatches CONSENT_EVENT on change).
 initWebVitals();
@@ -301,6 +340,17 @@ createRoot(document.getElementById('root')!).render(
 // so a genuinely-broken deploy still can't loop.
 requestAnimationFrame(() => {
   try { localStorage.removeItem('navbharat_chunk_reload_at'); } catch { /* best effort */ }
+
+  // HOW LONG DID THAT TAKE? (admin 2026-09-19, item E of five.)
+  //
+  // This frame is already the app's "shell mounted and painted" moment — the flag cleared above proves
+  // it — so it is the honest place to stamp app-ready rather than inventing a second signal that could
+  // drift from it. `measureColdStart` decides whether the numbers describe a launch a human actually
+  // watched, and posts through the SAME consent gate and the SAME sink as web-vitals above.
+  //
+  // Measured BEFORE anything is optimised, on purpose: dist/assets is 5.9 MB and nobody knows what that
+  // costs at launch. A speed change judged on a feeling is how a plausible number survives for a month.
+  measureColdStart(performance.now());
 
   // Bundled native shell polish (Capacitor): hide splash screen, apply status bar theme, install
   // back button handler. Runs after React mounts so the back button handler can navigate. NO-OP

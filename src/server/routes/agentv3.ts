@@ -160,7 +160,7 @@ import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../Agent
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
-import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild } from '../AgentV3/inBuildGreen';
+import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
@@ -13858,9 +13858,10 @@ async function noteBuildOutcome(
         }, Date.now())) return;
         inBuildGreenInFlight = true;
         inBuildGreenLastAttempt = Date.now();
+        const inBuildGreenStartedAt = Date.now();
         try {
           const writesBefore = inBuildWriteTick;
-          const shot = await withTimeout(actuator.browseUrl!(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'in-build-green');
+          const shot = await withTimeout(actuator.browseUrl!(workspaceId, internalPreviewUrl(lastPreviewUrl)), IN_BUILD_PROOF_BUDGET_MS, 'in-build-green');
           const verdict = analyzePreviewHtml(shot.html, {
             painted: shot.painted,
             source: shot.source,
@@ -13872,19 +13873,38 @@ async function noteBuildOutcome(
             try { files = { ...(await collectWorkspaceFiles(actuator, workspaceId)).files }; } catch { /* captured writes below are the reliable source */ }
             for (const [pth, c] of writtenFiles) files[pth] = c;
           }
-          const outcome = attemptOutcome({ shot, verdict, writesBefore, writesAfter: inBuildWriteTick });
+          const judged = attemptOutcome({ shot, verdict, writesBefore, writesAfter: inBuildWriteTick });
+          // ⚠️ PROVEN AND NOTHING TO SAVE IS ITS OWN OUTCOME, NOT A MISSING BRANCH. This used to read
+          // `if (proven && files.length > 0) … else if (kind !== 'proven') …`, which recorded NOTHING
+          // for a proven render with an empty file set — a third way for this check to disappear from
+          // its own report, on top of the swallowed throw below. Naming it removes the asymmetry: the
+          // record call is now unconditional and every attempt leaves exactly one line.
+          const outcome: AttemptOutcome = judged.kind === 'proven' && Object.keys(files).length === 0
+            ? { kind: 'nothing-to-save' }
+            : judged;
           const elapsedMs = Date.now() - buildStartedAt;
-          if (outcome.kind === 'proven' && Object.keys(files).length > 0) {
+          if (outcome.kind === 'proven') {
             // The same key the end-of-build GreenGuard reads — no second store, no second rule.
             await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
             inBuildGreenAt = Date.now();
             try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
-            try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
             events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
-          } else if (outcome.kind !== 'proven') {
-            try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs }) }); } catch { /* best-effort */ }
           }
-        } catch { /* a proof that could not run leaves the build exactly as unprotected as before — never worse */ }
+          try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
+        } catch (err) {
+          // 🔴 A PROOF THAT COULD NOT RUN STILL HAS TO SAY SO (2026-09-19). This used to be a bare
+          // `catch {}`, on the reasoning that a failed proof "leaves the build exactly as unprotected
+          // as before — never worse". True of the APP, and false of the REPORT: a proof that timed out
+          // and a proof that never fired looked identical, so nobody could tell whether this check was
+          // working at all. Its older sibling records `LAST_CHANCE_PROOF_UNAVAILABLE` for exactly this;
+          // this one inherited none of that discipline. Still `info` and still never a blocker — the
+          // build is left untouched, only the timeline stops being silent.
+          try {
+            const why = String((err as { message?: string })?.message ?? err ?? '').slice(0, 160);
+            const note = inBuildGreenNote({ kind: 'gave-up', why }, { elapsedMs: Date.now() - buildStartedAt });
+            buildDiag.record({ phase: 'preview', ...note, detail: `${Date.now() - inBuildGreenStartedAt}ms in this attempt · ${note.detail ?? ''}` });
+          } catch { /* the timeline is best-effort — it must never break the build it is describing */ }
+        }
         finally { inBuildGreenInFlight = false; }
       };
       // The trigger: a published preview, and every successful tool result after it while unproven —

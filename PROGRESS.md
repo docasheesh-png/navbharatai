@@ -70378,6 +70378,69 @@ struggle was the USER's: they asked to "repair some parts" and were asked back w
   dedup NOTE already tells the model it has read the file before; it reads it anyway, and the full
   499-line file ships in the prompt each time.
 
+## 2026-09-19 — THE PROOF THAT COULD NOT SAY WHAT HAPPENED TO IT (PR #3140)
+
+`IN_BUILD_GREEN` shipped on 2026-09-18 to answer the admin's *"navbharatai dwara app banne ke baad
+tutni nahi chahiye!!!!!"*. Reading it the day after, in the course of chasing the
+`IN_BUILD_GREEN_UNCHECKED` lines in autopsies `a48d0f9e` / `64bc1b6e`, **three separate ways for the
+check to disappear from its own report** were found. None of them touches the app; all of them make
+the check impossible to diagnose from a build report — which is why the reports could not tell me
+whether it had ever worked.
+
+1. **The swallowed throw.** The attempt is wrapped in `withTimeout(…, 35 s)`, while `browseUrl`'s own
+   bounds add up to about **120 s** — a 60 s wait for the sandbox's browser tooling
+   (`_playwrightReady` race), a 30 s browse command (`BROWSE_PAINT_DEADLINE_MS + 20_000`), and a 30 s
+   curl fallback. So our budget can run out first, and the rejection landed in a bare `catch {}`:
+   **a proof that timed out and a proof that never fired produced the same report — nothing.** This is
+   also exactly the first attempt's situation, since it fires on the `preview` event (the server is
+   *listening*, not painted) and is often the first thing in the sandbox to want a browser at all.
+2. **The branch with no `else`.** `if (proven && files.length > 0) … else if (kind !== 'proven') …`
+   recorded nothing for a **proven render with an empty file set** — the app worked, the snapshot did
+   not happen, and the timeline said neither.
+3. **One kind carrying three facts.** `inconclusive` collapsed a curl fallback, an unpainted browser
+   snapshot and a dead dev server, so even when it DID record, the message could only hedge — *"no
+   real-browser capture, or the server was down"* — and named no cause anybody could act on.
+
+🔎 **THE CLASS: a drifted sibling, and the ORIGINAL is in the same file.** `LAST_CHANCE_PROOF` — the
+older copy of this same act — already records `rendered=… · inconclusive=… · serverDown=…` in its
+detail, already has `LAST_CHANCE_PROOF_UNAVAILABLE` for "could not open it at all", and already has
+`LAST_CHANCE_PROOF_SKIPPED` for "not attempted, and why". The proof written second inherited none of
+it. Same shape as the `safeRelPath` and `journeyScript`/`pageCheckScript` cases this file records.
+
+**Fixed:** `attemptOutcome` returns `no-browser` / `server-down` / `not-painted` as three distinct
+facts (order: a capture that never ran the app's JavaScript makes every judgement below it
+meaningless; `serverDown` is `analyzePreviewHtml`'s own early exit); a new `nothing-to-save` names
+case 2 and the record call is now **unconditional**, so every attempt leaves exactly one line; a new
+`gave-up` carries the caught reason and the budget. The 35 s bound is now the named
+`IN_BUILD_PROOF_BUDGET_MS` with the trade written beside it — **deliberately smaller than
+`browseUrl`'s worst case, because the write counter is read before the browser opens and again after
+the files are collected, so the budget IS the race window.** A longer budget would mostly buy `raced`
+outcomes on a busy loop.
+
+🔒 **AND `autoResolved` STOPPED LYING.** It was `true` for every outcome, including `raced`,
+`not-rendered` and the whole blind family — the same shape as the `JOURNEY_PASSED` bug this repo has
+already paid for once (a passing code whose own message said the check had not run). Only `proven`
+claims it now. **No verdict, count or bill can move:** every line stays `severity: 'info'`, and
+`shippingIssueCount` filters on `error` / `warning` and never reads an `info` line.
+
+⚠️ **WHAT THIS DELIBERATELY DOES NOT DO, and why.** It does not change the trigger, the timing or the
+budget, and it does not make `IN_BUILD_GREEN` succeed. I could not establish from the reports which of
+the three blind causes actually fired, **because the conflation above is precisely what removed that
+information** — so a timing change now would be a fix from a guess, which the fourth absolute rule
+forbids. This is the instrumentation that makes the next step evidence-led, exactly as the
+`TIME_TO_FIRST_RENDER` entry in `CLAUDE.md` requires of its own two candidate protections.
+
+**What to watch on the first real builds:** which `IN_BUILD_GREEN_UNCHECKED` *detail* appears. A crop
+of "without a real browser" means the sandbox's browser tooling is not ready when the proof first
+fires (the fix is to wait for it, not to widen the budget); "nothing had painted" means the trigger is
+too early; "could not complete" means the budget is genuinely too small for the work and the race
+window has to be re-argued.
+
+**Tests:** `tests/theProofThatCouldNotSayWhatHappened.test.ts` (13 cases), **reversion-proven three
+times** — restoring the bare `catch {}` fails 1, restoring the branch asymmetry fails 1, restoring
+`autoResolved: true` fails 2. Two cases in `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts` were
+**rewritten, not deleted**, recording in place that the single `inconclusive` kind was withdrawn and
+keeping the half that still holds ("not rendered yet" is never confused with "could not tell").
 ---
 
 ## 2026-09-19 — NVIDIA Nemotron 3, only where it pays: the judge, the plan, and one backstop rung

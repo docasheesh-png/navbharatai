@@ -68936,6 +68936,71 @@ and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All
 2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
    already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
 3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.
+## 2026-09-19 — 🔗 A navbharatai.com LINK OPENS THE APP (admin: "mujhe sabse acchi native app banani hai")
+
+First of five items the admin approved after the scrollbar fix (A–E). Tapping a navbharatai.com link
+in WhatsApp opened a **browser**. Every app we are compared to opens its own links, and this is both a
+native-feel defect and a growth leak — share links, referral codes, published apps, all of it leaked to
+a browser tab.
+
+### The shape of the problem, because both halves fail in OPPOSITE directions
+
+- **Claim a URL we cannot serve** ⇒ the app opens, dumps the user on Home, and has EATEN the page they
+  asked for. Strictly worse than never claiming it — the browser would at least have shown it.
+- **Serve a URL we do not claim** ⇒ code nobody reaches.
+
+So the claim and the destination had to become ONE fact. `src/lib/deepLinkRoute.ts` is that fact:
+`routeForPath` says where a URL goes, `APP_LINK_CLAIMS` says what to write in the manifest, and
+`tests/aLinkOpensTheApp.test.ts` asserts the manifest against it **in both directions**. A path added
+to one and not the other fails CI. Same shape as autopsy 1a7f4a58's fix, deliberately — that autopsy
+was two subsystems answering one question differently, and App.tsx already had **two** private copies
+of the path test (`readAdminRoute`, `readStoreRoute`); a deep link would have made three. Both now ask
+the shared rule, and its ORDER preserves today's behaviour exactly (admin before store;
+`?view=appstore` honoured on any path).
+
+### What ships
+
+- **`src/lib/deepLinkRoute.ts`** — pure. `deepLinkTarget` additionally checks the ORIGIN, which is the
+  security half: a deep link names its own origin, and honouring a path from `https://evil.example/admin`
+  because the PATH matched would let any website open any screen of the app.
+- **`AndroidManifest.xml`** — an `autoVerify` intent filter over `navbharatai.com` and
+  `www.navbharatai.com`, claiming `/`, `/admin`, `/store`, `/store/app/*` and nothing else.
+  ⚠️ **`/privacy` and `/terms` are deliberately NOT claimed**: Play and Meta fetch them with tools that
+  may not run JavaScript, and a person who taps a privacy link asked for that page.
+- **`src/server/lib/assetLinks.ts` + a route in `server.ts`** — serves
+  `/.well-known/assetlinks.json` from `ANDROID_CERT_SHA256`. Mounted beside the Apple domain-association
+  route and for the same reason: `express.static`'s `dotfiles` default is `ignore`, so a `.well-known`
+  path never reaches it. **Env-only, no file** — because that same Apple module records that `public/`
+  is not copied into the runtime image, so a committed `.well-known` file is absent exactly where
+  Android fetches from.
+- **`App.tsx`** — `handleAppLinkOpen` writes the path onto the local origin **before** switching view.
+  That order IS the feature: `/store/app/<id>` is read out of `window.location` by NavAppStore, so a
+  view switch without the path lands on Browse and the shared app is lost.
+
+### Not live until the admin sets one value
+
+`ANDROID_CERT_SHA256` is **unset**, so the route 404s, verification fails and every link keeps going to
+the browser — today's behaviour exactly. It is the SHA-256 of the app's signing certificate, read from
+Play Console → Setup → App signing. **It is not a secret** (it is published at that public URL by every
+App-Links app on earth); the keystore is, and no session can reach it. **Both** certificates should be
+set, comma-separated — under Play App Signing the upload key and Google's app-signing key are different,
+and which one reaches a phone depends on how the app was installed. A malformed entry is DROPPED rather
+than passed through, because Android rejects the whole file on one bad entry and would silently disable
+link handling for the good fingerprint beside it — the shape that already bit `BRAVE_API_KEY` (trailing
+space) and `ALERT_EMAIL_FROM` (an `=` for a `<`). Registered in `CLAUDE.md`.
+
+### Two existing tests broke, and both were right to
+
+- `githubNativeReturnWiring.test.ts` sliced the deep-link listener as `at + 1600` **characters**. One
+  added line at the top of the callback pushed `setGithubToken(token)` out of the window and produced a
+  failure about GitHub sign-in, which was untouched. The slice now ends at an **anchor**
+  (`removeGithubUrlOpen`), so it no longer depends on how much unrelated code sits above it.
+- `webAppPlayerSandbox.test.ts` asserted the literal `startsWith('/store/app/')` **inside App.tsx**. The
+  rule moved; the behaviour did not. It now asserts the rule in its new home AND that App.tsx really
+  asks it — strictly stronger than the old single grep.
+
+Test-locked in `tests/aLinkOpensTheApp.test.ts` (22 cases) and **reversion-proven twice**: making the
+manifest claim `/privacy` turns **2** red; setting the view before writing the path turns **1** red.
 ## 2026-09-19 — 🚫 THE APP DOES NOT PAINT A SCROLL TRACK (admin screenshot: "yeh website ka feel deti hai")
 
 Admin, with a phone screenshot of the home screen: *"app ke andar bhi right side me blue vertical light

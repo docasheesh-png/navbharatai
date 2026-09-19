@@ -17,6 +17,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, ge
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
 import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
+import { runReferralPreflight } from '../lib/referralPreflight';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -139,6 +140,9 @@ const GROWING_COLLECTIONS: readonly string[] = [
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 import { routeParam, routeParams } from '../lib/expressCompat';
 import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../lib/walletLifetime';
+import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
+import { walletPassesPaidFilter } from '../lib/adminUserListQuery';
+import { parsePaidFilter, parseSortDirection, directed } from '../../lib/adminUserSort';
 import { isRevenueRow, purchaseRow, filterPurchases, sortPurchases, summarisePurchases, type PurchaseRowWithUser, type PurchaseStatusFilter, type PurchaseSort } from '../lib/purchaseLedger';
 
 /**
@@ -2006,11 +2010,24 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         );
       }
 
-      if (sort === 'alpha') users.sort((a: any, b: any) => (a.userEmail || '').localeCompare(b.userEmail || ''));
-      else if (sort === 'tokens') users.sort((a: any, b: any) => (b.tokenBalance || 0) - (a.tokenBalance || 0));
-      else if (sort === 'ai_per_day') users.sort((a: any, b: any) => lifetimeTokensUsed(b) - lifetimeTokensUsed(a));
-      else if (sort === 'paid') users.sort((a: any, b: any) => lifetimeMoneySpentInr(b) - lifetimeMoneySpentInr(a));
-      else if (sort === 'recent') users.sort((a: any, b: any) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+      // PAID / FREE (admin 2026-09-19). Applied BEFORE `total` is counted, so the envelope's
+      // "Showing 25 of N" states the filtered count — an N that ignored the filter would be a number
+      // the rows below it contradict.
+      const paidFilter = parsePaidFilter(req.query.paid);
+      if (paidFilter !== 'all') users = users.filter((u: any) => walletPassesPaidFilter(u, paidFilter));
+
+      // ASCENDING / DESCENDING (admin 2026-09-19). Every comparator below is written ASCENDING and
+      // wrapped by `directed(...)`, which inverts the COMPARISON rather than reversing the array — a
+      // reverse also flips every tie, and ties on a 0 balance are the common case here. Omitting
+      // `?dir=` yields each sort's natural direction, i.e. exactly the previous behaviour.
+      const dir = parseSortDirection(req.query.dir, sort);
+      const asc = <T,>(f: (a: T, b: T) => number) => directed(f, dir);
+
+      if (sort === 'alpha') users.sort(asc((a: any, b: any) => (a.userEmail || '').localeCompare(b.userEmail || '')));
+      else if (sort === 'tokens') users.sort(asc((a: any, b: any) => (a.tokenBalance || 0) - (b.tokenBalance || 0)));
+      else if (sort === 'ai_per_day') users.sort(asc((a: any, b: any) => lifetimeTokensUsed(a) - lifetimeTokensUsed(b)));
+      else if (sort === 'paid') users.sort(asc((a: any, b: any) => lifetimeMoneySpentInr(a) - lifetimeMoneySpentInr(b)));
+      else if (sort === 'recent') users.sort(asc((a: any, b: any) => new Date(a.updatedAt || 0).getTime() - new Date(b.updatedAt || 0).getTime()));
 
       // WHEN DID THEY JOIN, AND WHEN WERE THEY LAST HERE (admin 2026-09-11)?
       //
@@ -2073,6 +2090,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           totalTokensPurchased: lifetimeTokensPurchased(u),
           remainingBalance: u.remaining_balance || 0,
           moneySpent: lifetimeMoneySpentInr(u),
+          // The SAME predicate the filter used — never `moneySpent > 0` re-derived in the browser,
+          // which would be a third answer to "has this person paid?" on the very screen that asks it.
+          hasEverPaid: hasEverPaid(u as { totalMoneySpent?: unknown }),
           banned: u.banned || false,
           createdAt: u.updatedAt || u.createdAt || '',
           joinedAt: joined.atMs,
@@ -2634,6 +2654,29 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e) {
       // A panel that 500s tells the admin nothing. Report the failure AS the answer.
       return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /**
+   * CAN THE REFERRAL GIFT ACTUALLY PAY? The same shape as the hosting preflight below: one press asks
+   * Google with the real credential and the real package, and every refusal names its next step.
+   * Read-only — the probe sends a token Google cannot decode, so nothing is ever paid by it.
+   */
+  app.get('/api/admin/referral/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      res.json(await runReferralPreflight());
+    } catch (e) {
+      // A checker that 500s tells the admin nothing. Report the failure AS a failed check.
+      res.json({
+        verdict: 'incomplete',
+        checks: [{
+          id: 'preflight', label: 'Setup check', state: 'unknown',
+          detail: e instanceof Error ? e.message : String(e),
+          remedy: 'Re-run the check.',
+        }],
+        nextAction: 'Re-run the check.',
+        manual: [],
+      });
     }
   });
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 /**
  * WHAT REFERRALS COST, AND WHO LOOKS LIKE A FARM.
@@ -33,12 +34,30 @@ interface Summary {
   }>;
 }
 
+/** One line of the setup check — the server's shape (referralPreflight.ts), rendered as is. */
+interface SetupCheck {
+  id: string;
+  label: string;
+  state: 'ok' | 'failed' | 'skipped' | 'unknown';
+  detail: string;
+  remedy: string;
+}
+
+interface SetupReport {
+  verdict: 'ready' | 'blocked' | 'incomplete';
+  checks: SetupCheck[];
+  nextAction: string;
+  manual: string[];
+}
+
 const rupees = (tokens: number | undefined): string =>
   `₹${((Number(tokens) || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 export function ReferralCostCard({ adminToken }: { adminToken: string }): React.ReactElement {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [setup, setSetup] = useState<SetupReport | null>(null);
+  const [checking, setChecking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +75,28 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * DELIBERATELY ON A BUTTON, like the hosting checks on the Monitor: it makes a real Google call,
+   * and a panel that pings Google on every render would be a quiet bill and a noisy log.
+   */
+  const checkSetup = useCallback(async () => {
+    setChecking(true);
+    try {
+      const r = await fetch('/api/admin/referral/preflight', { headers: { 'x-admin-token': adminToken } });
+      const body = (await r.json()) as SetupReport;
+      setSetup(Array.isArray(body?.checks) ? body : null);
+    } catch (e) {
+      setSetup({
+        verdict: 'incomplete',
+        checks: [{ id: 'fetch', label: 'Setup check', state: 'unknown', detail: e instanceof Error ? e.message : String(e), remedy: 'Re-run the check.' }],
+        nextAction: 'Re-run the check.',
+        manual: [],
+      });
+    } finally {
+      setChecking(false);
+    }
+  }, [adminToken]);
+
   const watch = (data?.topReferrers ?? []).filter((r) => r.worthALook);
 
   return (
@@ -67,14 +108,63 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
             What the four-step welcome gift has paid out, and who is worth a look.
           </p>
         </div>
-        <button
-          onClick={() => void load()}
-          disabled={loading}
-          className="rounded-lg bg-raised px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-muted transition-colors hover:text-ink disabled:opacity-40"
-        >
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void checkSetup()}
+            disabled={checking}
+            className="rounded-lg bg-raised px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-muted transition-colors hover:text-ink disabled:opacity-40"
+          >
+            {checking ? 'Checking…' : 'Check referral setup'}
+          </button>
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="rounded-lg bg-raised px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-muted transition-colors hover:text-ink disabled:opacity-40"
+          >
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
       </div>
+
+      {setup && (
+        <div className="mt-4 rounded-xl border border-line bg-surface p-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-muted">Setup check</span>
+            <span className={`text-[9px] font-black uppercase ${setup.verdict === 'ready' ? 'text-success' : setup.verdict === 'blocked' ? 'text-warn' : 'text-muted'}`}>
+              {setup.verdict === 'ready' ? 'Ready to pay' : setup.verdict === 'blocked' ? 'Not paying yet' : 'Not fully checked'}
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {setup.checks.map((c) => (
+              <li key={c.id} className="flex items-start gap-2">
+                {c.state === 'ok'
+                  ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+                  : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />}
+                <div>
+                  <p className="text-[10px] font-bold text-ink">{c.label}</p>
+                  {c.detail && <p className="text-[10px] font-semibold text-muted">{c.detail}</p>}
+                  {c.state !== 'ok' && c.remedy && (
+                    <p className="text-[10px] font-semibold text-accent-text">{c.remedy}</p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {setup.nextAction && (
+            <p className="mt-2.5 text-[10px] font-bold text-ink">Next: {setup.nextAction}</p>
+          )}
+          {setup.manual.length > 0 && (
+            <div className="mt-3 border-t border-line pt-2">
+              <p className="text-[9px] font-black uppercase tracking-widest text-muted">Cannot be checked from here — by hand</p>
+              <ul className="mt-1 space-y-1">
+                {setup.manual.map((m) => (
+                  <li key={m} className="text-[10px] font-semibold leading-relaxed text-muted">• {m}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {!data ? (
         <p className="mt-4 text-[11px] font-semibold text-muted">Loading…</p>
@@ -86,7 +176,9 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
         <>
           {!data.enabled && (
             <p className="mt-4 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-muted">
-              REFERRAL_REWARDS is not set, so nothing is being paid. Any figures below are historic.
+              REFERRAL_REWARDS is not set, so nothing is being paid — and since 2026-09-17 the flat welcome gift is
+              retired too, so a new user receives ₹0 until this is on. Press &ldquo;Check referral setup&rdquo; to see
+              which step is missing. Any figures below are historic.
             </p>
           )}
           {data.capped && (

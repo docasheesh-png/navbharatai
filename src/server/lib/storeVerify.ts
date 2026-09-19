@@ -134,6 +134,15 @@ function googleServiceAccount(env: NodeJS.ProcessEnv = process.env): { clientEma
   }
 }
 
+/**
+ * The service account's email, or null when `GOOGLE_PLAY_SA_JSON` is unset or does not parse.
+ * For the admin's referral setup check — an email is not a secret (it appears on every IAM screen),
+ * and "which account are we even using?" is the first question a refused call raises.
+ */
+export function googleServiceAccountEmail(env: NodeJS.ProcessEnv = process.env): string | null {
+  return googleServiceAccount(env)?.clientEmail ?? null;
+}
+
 /** The Play Developer API scope — purchases. The default, and what every existing caller wants. */
 export const PLAY_DEVELOPER_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
 /** The Play Integrity scope — decoding a device-integrity token. A DIFFERENT scope, same account. */

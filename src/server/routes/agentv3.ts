@@ -13596,11 +13596,18 @@ async function noteBuildOutcome(
       // isn't defined until a few hundred lines down, so this holder is reassigned once it is, and
       // the thunk below is safe because no sub-agent can actually run before that reassignment does.
       let onFileWriteForSubAgents: ((path: string, content: string) => void) | undefined;
+      // Same forward-reference shape again: the dispatcher below takes the spawn built from these
+      // deps, so it cannot be named here as a value — only read later, through the thunk.
+      let dispatcherForSubAgents: ToolDispatcher | undefined;
       // Hoisted (2026-09-18) so the post-build reviewer can be spawned from the SAME deps with a
       // smaller step cap on a proven-green app — see greenReviewPlan. One wiring, two spawns.
       const subAgentDeps: SubAgentDeps = {
         ignoreRules: () => ignoreRulesForBuild,
         onFileWrite: (path, content) => onFileWriteForSubAgents?.(path, content),
+        // Count a sub-agent's write-time compiles in the ARCHITECT's numbers, which is what the report
+        // reads (autopsy 3ce8459b, 2026-09-19). A thunk for the same forward-reference reason as the
+        // two lines above: `dispatcher` is constructed BELOW, with this very object as an argument.
+        writeTypecheckStats: () => dispatcherForSubAgents?.sharedWriteTypecheckStats(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -13834,6 +13841,9 @@ async function noteBuildOutcome(
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
+      // so a child's write-time compiles accumulate into the object the report actually reads.
+      dispatcherForSubAgents = dispatcher;
       // WHOSE CODE IS THE READINESS GATE JUDGING? (autopsy e4ebcb5f — see `buildAuthorship.ts`.)
       // `writtenFiles` is the ONE set every writer feeds — the architect's tools, the fast lanes
       // (which write through `dispatcher.dispatch('write_file')`) and every sub-agent — so it is the

@@ -58,6 +58,25 @@ export interface ApkFailureReport {
     detail: Record<string, string | string[]> | null;
     logExcerpt: string[];
   };
+  /**
+   * COULD THE PRE-FLIGHT HAVE SEEN THIS? — recorded only on a signing-secret failure (2026-09-19).
+   *
+   * `signingReadiness` exists to stop a Play-bundle press that cannot succeed, and it falls through
+   * whenever it has no verdict. A real report (`12thmentors/app-50-files-2026-09-19`, dead in twelve
+   * seconds with all four secrets absent) proved the fall-through fires in production — and the report
+   * itself could not say so, because it carried nothing about the gate at all. This is that fact.
+   *
+   * ⚠️ OPTIONAL BY CONSTRUCTION. Every report written before this date has no such field and is still
+   * a valid report; absent means "not asked", never "the gate was fine".
+   */
+  preflight?: {
+    /** Could we list the repository's Actions secrets at report time? */
+    couldCheck: boolean;
+    /** Why not — `forbidden` / `not-found` also mean the one-press key creation would fail. */
+    reason?: string;
+    /** The plain-words version of `reason`, so the inbox needs no lookup table. */
+    note?: string;
+  } | null;
   /** Simple triage, mirroring the AgentV3 inbox's own pattern — set only by an admin action. */
   fixed?: boolean;
   fixedAt?: number | null;

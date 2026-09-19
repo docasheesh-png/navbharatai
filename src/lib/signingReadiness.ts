@@ -67,3 +67,87 @@ export function signingNotReadyMessage(missing: readonly string[]): string {
     : `Your signing key is only partly set up — ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} still missing. `
       + 'All four have to be present before a Play Store bundle can be signed. The installable .apk needs none of them.';
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THE GATE DECLINED TO DECIDE — added 2026-09-19 after a real report.
+//
+// A user pressed "Google Play bundle" on `12thmentors/app-50-files-2026-09-19`, and the run died in
+// TWELVE SECONDS with all four secrets missing. The pre-flight above is exactly the thing that exists
+// to stop that press, and it did not stop it — so it must have answered `unknown`, which falls through
+// to the build by design (see the comment on `signingVerdict`).
+//
+// 🔴 AND NOBODY COULD SAY WHY, WHICH IS THE ACTUAL DEFECT. The route swallowed every failure into one
+// bare `catch`, so "GitHub refused this token permission to read the secrets" and "GitHub had a bad
+// second" produced the identical verdict, no log line, and nothing in the failure report the admin
+// reads. That report lists nine steps and the failure, and says not one word about the gate that was
+// supposed to prevent it — so an autopsy cannot even tell whether the gate ran. It is the same shape
+// as `JOURNEY_NOT_RUN`, whose check had never once launched a browser while reporting a pass.
+//
+// ⚠️ THIS DELIBERATELY DOES NOT CHANGE ANY VERDICT, AND MUST NOT BE "FINISHED" BY MAKING IT ONE.
+// Blocking on a 403 would be the trade this repo forbids: a repository whose secrets were set by
+// somebody ELSE (an org where this user has write but not admin) genuinely CAN build, and would be
+// refused on our own lack of permission. Measure first — CLAUDE.md's own `POST_GREEN_WRITES` /
+// `TIME_TO_FIRST_RENDER` precedent — and build the stronger protection when the measurement produces
+// evidence. What this adds is the evidence.
+
+/** Why a secrets lookup produced no verdict. `unavailable` is the honest catch-all. */
+export type SigningLookupReason = 'forbidden' | 'not-found' | 'rate-limited' | 'unavailable';
+
+/**
+ * Classify a failed secrets lookup from its HTTP status.
+ *
+ * ⚠️ GitHub answers **403 for a rate limit as well as for a permission denial**, so the status alone
+ * cannot separate them — and calling a rate limit "you do not have permission" would send a user to
+ * fix an access problem they do not have. `x-ratelimit-remaining: 0` is what distinguishes them, so it
+ * is an input here rather than an afterthought. Anything unreadable stays `unavailable`.
+ */
+export function signingLookupReason(
+  status: number | null | undefined,
+  rateLimitRemaining?: string | number | null,
+): SigningLookupReason {
+  const remaining = rateLimitRemaining == null || rateLimitRemaining === ''
+    ? null
+    : Number(rateLimitRemaining);
+  if (status === 429) return 'rate-limited';
+  if (status === 403) return remaining === 0 ? 'rate-limited' : 'forbidden';
+  if (status === 404) return 'not-found';
+  return 'unavailable';
+}
+
+/**
+ * Is this reason a DURABLE fact about the repository rather than a passing hiccup?
+ *
+ * It matters beyond the wording: the same repository permission that lists secrets is the one that
+ * WRITES them, so a durable reason means the one-press "Create my signing key" offer will fail too —
+ * the user is about to be handed a button that cannot work. Retrying is the right advice for the
+ * others and the wrong advice for these.
+ */
+export function signingLookupIsDurable(reason: SigningLookupReason): boolean {
+  return reason === 'forbidden' || reason === 'not-found';
+}
+
+/** One admin-facing line naming what happened. Never carries a token, a secret or a value. */
+export function signingLookupNote(reason: SigningLookupReason): string {
+  switch (reason) {
+    case 'forbidden':
+      return 'GitHub refused this token permission to read the repository\'s Actions secrets — '
+        + 'listing (and writing) them needs admin access to that repository.';
+    case 'not-found':
+      return 'GitHub reported no such repository for this token.';
+    case 'rate-limited':
+      return 'GitHub rate-limited the request.';
+    default:
+      return 'The secrets lookup did not complete.';
+  }
+}
+
+/**
+ * Did this build fail for want of the Android signing secrets? Read from the failure's own detail, so
+ * it cannot drift from what the classifier actually produced.
+ */
+export function isSigningSecretFailure(detail: Record<string, string | string[]> | null | undefined): boolean {
+  const missing = detail?.['missing'];
+  if (!Array.isArray(missing) || missing.length === 0) return false;
+  const known = new Set<string>(ANDROID_SIGNING_SECRETS);
+  return missing.some((m) => known.has(String(m ?? '').trim().toUpperCase()));
+}

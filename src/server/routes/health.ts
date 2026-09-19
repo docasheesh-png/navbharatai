@@ -18,6 +18,7 @@ import { adminRequestOk } from '../lib/adminAuth';
 import { normalizeFeePct } from '../../lib/platformFee';
 import { grievanceOfficerFrom, type GrievanceOfficer } from '../../content/legal/grievance';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
+import { imageProConfigured } from '../lib/imageProGen';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -59,6 +60,24 @@ export interface PublicConfig {
    * compliance page is precisely the drift these documents warn about.
    */
   grievance: GrievanceOfficer;
+  /**
+   * Whether the PAID image tier can actually serve an image right now.
+   *
+   * 🔴 WHY THIS IS PUBLISHED AT ALL (admin 2026-09-19: "image generate kam nahi kar raha hai").
+   * `imageProConfigured()` was checked ONLY inside `POST /api/image/pro/generate`, so the browser
+   * could not tell a working paid tier from a dead one. A user chose Pro, wrote a prompt, pressed
+   * send, and learned from a red banner that the tier had never been switched on. The server knew
+   * before they typed a character; nothing carried the fact to the screen.
+   *
+   * 🔒 NOT A SECRET, and that boundary matters because this route must never leak one: this says
+   * only whether a FEATURE is on — the same thing the 503 tells any caller who presses send, and
+   * the same shape as the pixel id above (present or absent, never its value). The endpoint, the
+   * key and the model id stay server-side.
+   *
+   * ⚠️ The client treats an UNREACHABLE config as "available" — today's behaviour exactly — so a
+   * blip can never hide a paid tier that works. The 503 remains the honest backstop.
+   */
+  imageProAvailable: boolean;
 }
 
 /**
@@ -73,12 +92,17 @@ export function buildPublicConfig(
   rawPixelId: string | undefined | null,
   rawFeePct?: unknown,
   rawGrievance?: Parameters<typeof grievanceOfficerFrom>[0],
+  imageProAvailable = false,
 ): PublicConfig {
   const pixel = String(rawPixelId ?? '').trim();
   return {
     metaPixelId: /^\d{8,20}$/.test(pixel) ? pixel : null,
     platformFeePct: normalizeFeePct(rawFeePct),
     grievance: grievanceOfficerFrom(rawGrievance ?? null),
+    // Passed IN rather than read from `process.env` here, so this function stays pure and the
+    // availability rule has exactly one owner: `imageProConfigured()`. A second copy of "is Pro on?"
+    // is how the two halves come to disagree.
+    imageProAvailable: imageProAvailable === true,
   };
 }
 
@@ -234,7 +258,9 @@ export function registerHealthRoutes(app: Express): void {
   // of injecting junk into every page.
   app.get('/api/public-config', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=300');
-    res.json(buildPublicConfig(process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer()));
+    res.json(buildPublicConfig(
+      process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer(), imageProConfigured(),
+    ));
   });
 
   // U-15 — public status page (self-contained, polls /api/health).

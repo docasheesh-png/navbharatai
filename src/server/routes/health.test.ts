@@ -45,7 +45,11 @@ describe('buildPublicConfig — the advertising pixel id, and nothing secret', (
     // purchase screen either way, and the browser needs it to show the split before the user pays.
     // `grievance` was added 2026-09-12 and is safe for a stronger reason: the IT Rules, 2021 REQUIRE
     // a Grievance Officer's name and contact to be published, so these values are public by law.
-    expect(Object.keys(buildPublicConfig('1234567890123456')).sort()).toEqual(['grievance', 'metaPixelId', 'platformFeePct']);
+    // `imageProAvailable` joined this shape on 2026-09-19 and was reviewed against the rule this
+    // case exists for: it says only whether a FEATURE is switched on — the same thing the paid
+    // route's 503 tells any caller who presses send — and never the endpoint, key or model id.
+    expect(Object.keys(buildPublicConfig('1234567890123456')).sort())
+      .toEqual(['grievance', 'imageProAvailable', 'metaPixelId', 'platformFeePct']);
   });
 
   it('the grievance block carries the published contact and nothing beyond it', () => {

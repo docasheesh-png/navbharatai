@@ -69507,6 +69507,44 @@ screen-to-screen transitions. None of them is started; each needs the admin's wo
 
 ---
 
+## 2026-09-19 — THE SIDEBAR'S "CONNECT MY WEBSITE" IS REMOVED (admin-mandated)
+
+**Admin:** *"navbharatai ke slidebar menu me sabse last me 'connect my website' naam ka button hai.
+isko hata do! already kayi jagah ho chuka hai. setting me, deploy me hai. to alag se button banane ki
+need nahi hai!"*
+
+**The claim was verified against the code before anything was deleted**, and it held exactly:
+`ConnectMyWebsitePanel` was mounted from THREE places, all rendering the same component —
+`SettingsPanel.tsx` (Settings → App Settings → Domain), `ViewPanels.tsx` (Publish & Deploy → Custom
+Domain), and `App.tsx`'s `connect_domain` view, which only the sidebar row could open. So this removes
+an ENTRANCE, never the flow. The two that remain sit where someone is already thinking about their
+app; the one removed sat in a general navigation menu beside "About Us" and "Donate".
+
+🔒 **THE VIEW WENT WITH THE BUTTON, and that is the part worth recording.** `toggleTab('connect_domain')`
+appeared exactly once in the whole repo — in that row. Deleting the row alone would have left the
+`activeView === 'connect_domain'` branch in `App.tsx` unreachable and `'connect_domain'` in `ViewType`
+unholdable. **This repo has already paid for that exact mistake**: the sidebar's "App Builder v5.0" row
+(deleted 2026-09-12) navigated to a view `App.tsx` had stopped rendering, so the most builder-looking
+entry in the menu did nothing at all. Removed here: the row, the branch, the lazy import in `App.tsx`,
+the `ViewType` member and the now-unused `Globe` icon import.
+
+🔒 **No persisted state can strand anyone in the removed view** — checked rather than assumed:
+`activeView` is restored only as `admin` / `appstore` / `nbi_pro_chat` / `home`, and `openTabs` starts
+empty (or with the v5 tab) on every load. A view id surviving in storage would have rendered a blank
+screen.
+
+⚠️ **FOUR PLACES WERE STILL SENDING PEOPLE THERE, and none of them is code a gate can check.**
+`AppKnowledgeBase.ts` named the sidebar door in a `path`, a `howToUse` and a long PUBLISH/HOSTING
+paragraph — every AI in the app answers *"domain kahan jodun?"* from that file, so it would have given
+directions to a button that no longer exists, and a user who hunts and finds nothing concludes the
+feature was taken away. Three source comments in `ViewPanels.tsx`, `SettingsPanel.tsx` and
+`ConnectMyWebsitePanel.tsx` described it too. All corrected in the same change — the lesson CLAUDE.md
+already records for the four comments that claimed GPT was on the weak ladder: `tsc` and vitest cannot
+read a comment, so a stale one survives every gate.
+
+Test-locked in `tests/oneDoorNotThree.test.ts` — 8 cases, including that BOTH surviving doors still
+mount the panel (a removal that gutted the flow would otherwise pass) and that no comment or knowledge-
+base line still points at the removed one. Proven by reversion: restoring the row turns 2 cases red.
 ## 2026-09-19 — "image generate kam nahi kar raha hai": the paid tier could only be found dead by spending a prompt
 
 **The report.** A screenshot of the Pro image studio on a phone: the toggle on `PRO ₹1`, the prompt

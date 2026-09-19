@@ -4332,13 +4332,13 @@ export default function App() {
         </button>
       )}
 
+      {/* SCROLLBAR RULES DELIBERATELY ABSENT (2026-09-19). They used to sit at the top of this block —
+          a second copy of .custom-scrollbar / .no-scrollbar, already declared in src/index.css. The copy
+          here read like the winner (unlayered beats @layer base) and was DEAD: since Chromium 121 a
+          non-auto scrollbar-color, which index.css sets, makes the engine ignore every
+          ::-webkit-scrollbar pseudo-element on that box. One rule, one home — index.css. The native
+          shell hides scrollbars outright there, under html.nb-native-shell. */}
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes bounce-slow {
           0%, 100% { transform: translateY(-5%); animation-timing-function: cubic-bezier(0.8, 0, 1, 1); }
           50% { transform: translateY(0); animation-timing-function: cubic-bezier(0, 0, 0.2, 1); }

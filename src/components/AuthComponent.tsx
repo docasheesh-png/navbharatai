@@ -17,12 +17,11 @@ import {
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
-import { SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, switchBannerText, googleNativeCustomParameters } from '../lib/accountRoster';
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
 import { motion } from 'motion/react';
-import { X, AlertCircle, Users } from 'lucide-react';
+import { X, AlertCircle } from 'lucide-react';
 import { Github } from './ui/BrandIcons';
 import {
   shouldOfferReferralBox, referralBoxAlreadyOffered, markReferralBoxOffered, holdReferralCode,
@@ -245,29 +244,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // Custom states for Secure Verification System
   const [otpSending, setOtpSending] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
-  /**
-   * "You are switching, not starting over" — read ONCE on mount (admin 2026-09-02).
-   *
-   * Tapping an account in the switch menu opened this screen exactly as a stranger sees it: "Sign in",
-   * every method offered, no sign it knew who was asked for. Someone who just pointed at their own
-   * face and email lands there and concludes the switch failed. Nothing about the flow is wrong — it
-   * forgets, one screen later, what it was just told.
-   *
-   * ⚠️ READ, NOT CONSUMED. `handleGoogleSignIn` still removes the email hint when it uses it as a
-   * `login_hint`; taking it here as well would clear it before the provider ever saw it and quietly
-   * put the account chooser back to a full list. Display and use must not compete for the same key.
-   *
-   * ⚠️ AND NO AUTO-LAUNCH. Firing the provider popup from an effect would lose the click's user
-   * gesture and browsers would block it — a blocked popup is worse than the extra tap this saves. The
-   * fix is to make the right button obvious, not to press it for them.
-   */
-  const [switchBanner] = useState<string>(() => {
-    try {
-      return switchBannerText(localStorage.getItem(SIGN_IN_HINT_KEY), localStorage.getItem(SIGN_IN_PROVIDER_KEY));
-    } catch {
-      return ''; // private mode / blocked storage — the ordinary sign-in screen is a fine fallback
-    }
-  });
   const [successMessage, setSuccessMessage] = useState('');
   
   // NATIVE AUTH TRAIL (admin iPhone debug 2026-07-17): a live, on-screen list of the exact sign-in
@@ -565,15 +541,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   const socialSignIn = async (
     provider: AuthProvider,
     onCredential?: (r: UserCredential) => void,
-    /**
-     * The account this call is switching TO, e.g. `handleGoogleSignIn`'s `signInHint` — the SAME value
-     * it already put on the web `GoogleAuthProvider` via `setCustomParameters`. Threaded through
-     * explicitly rather than re-read from `SIGN_IN_HINT_KEY` here, because the web path already
-     * consumed (and cleared) that key before this function runs; reading it a second time would
-     * always see it empty. See `googleNativeCustomParameters` for why the NATIVE branch needs its own
-     * copy of it at all.
-     */
-    signInHint?: string,
   ): Promise<'ok' | 'cancelled' | 'redirecting'> => {
     // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "jab koi user kisi bhi id se login kare, to
     // old session automatic force logout ho jana chahiye"). Every login — any account, any method — starts
@@ -599,16 +566,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         let credential;
         if (isGoogle) {
           mark('opening Google sign-in…');
-          // THE ONE-TAP SWITCH (admin 2026-09-16: "easy one tap swich nahi ho raha"). Without this,
-          // every native switch opened Google's sign-in sheet with NO idea which account was wanted —
-          // the exact hint the web path already sends via `GoogleAuthProvider.setCustomParameters`,
-          // dropped the moment the flow reached a real phone. See `googleNativeCustomParameters`.
-          const googleParams = googleNativeCustomParameters(signInHint);
           // raceNativeAuth (2026-07-17): a wiring/SDK fault once left this promise PENDING FOREVER
           // (the redirect URL never reached GIDSignIn) — the user saw an infinite spinner. The bridge
           // now always answers within the window or the user gets an honest, retryable error.
           const nativeResult = await raceNativeAuth(
-            FirebaseAuthentication.signInWithGoogle(googleParams ? { customParameters: googleParams } : undefined),
+            FirebaseAuthentication.signInWithGoogle(),
             'Google sign-in timed out — please try again.',
           );
           const idToken = nativeResult.credential?.idToken;
@@ -761,31 +723,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setError('');
     setLoading(true);
     const provider = new GoogleAuthProvider();
-    // THE ACCOUNT THE USER WAS REACHING FOR (admin 2026-08-22). When this screen was opened by tapping
-    // a specific account in the switch menu, Google is told which one, so the chooser lands on it
-    // instead of making the user pick again from a list they just picked from.
-    //
-    // `prompt: 'select_account'` stays either way — a login_hint alone can silently sign them straight
-    // back into the wrong account when only one session is live with Google, which is the failure this
-    // whole menu exists to avoid. The hint is consumed once and cleared, so it cannot steer a LATER,
-    // unrelated sign-in.
-    //
-    // 🔒 And it is genuinely READ here. The previous attempt wrote `nbai:switch-to` for "the sign-in
-    // screen to offer first" and nothing ever consumed it — a stored hint standing in for a working
-    // handoff. Writing a key nobody reads is not a feature.
-    let signInHint = '';
+    // ALWAYS SHOW GOOGLE'S ACCOUNT CHOOSER. `prompt: 'select_account'` is the whole policy now that
+    // the account switcher is gone (admin 2026-09-19): there is no stored account this screen could
+    // be "reaching for", so there is nothing to pre-select and nothing to get wrong. A `login_hint`
+    // alone can silently sign someone straight back into the account they are trying to leave, so
+    // its removal along with the switcher makes this path strictly more predictable, not less.
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      signInHint = (localStorage.getItem(SIGN_IN_HINT_KEY) || '').trim();
-      if (signInHint) localStorage.removeItem(SIGN_IN_HINT_KEY);
-    } catch { /* private mode / blocked storage — the chooser simply shows every account */ }
-    provider.setCustomParameters(signInHint
-      ? { prompt: 'select_account', login_hint: signInHint }
-      : { prompt: 'select_account' });
-    try {
-      // The web provider above already carries this hint via setCustomParameters; the native branch
-      // inside socialSignIn cannot see that (it never touches `provider`), so the same value is
-      // passed through explicitly too — one hint, read once, honoured on both paths.
-      const outcome = await socialSignIn(provider, undefined, signInHint);
+      const outcome = await socialSignIn(provider);
       // The user's own cancel: just re-enable the buttons — no error banner, no navigation.
       if (outcome === 'cancelled') setLoading(false);
     } catch (err: any) {
@@ -1244,13 +1189,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-success text-[10px] font-bold">
               <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-success shrink-0">✓</div>
               <span>{successMessage}</span>
-            </div>
-          )}
-
-          {switchBanner && (
-            <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-start gap-3">
-              <Users className="w-4 h-4 text-accent-text shrink-0 mt-0.5" />
-              <span className="text-[11px] leading-relaxed text-accent-text">{switchBanner}</span>
             </div>
           )}
 

@@ -70554,3 +70554,56 @@ Answered from the code, not from the rate card:
 the build engine's judge on WEAK is the safest possible first test — a bad verdict there costs
 NavBharatAI, which pays for that tier itself, and reaches no paying user. Free chat is the opposite: it
 is the highest-volume surface and every failure is visible immediately.
+## 2026-09-19 — `জungle`: a label in the user's own language must not arrive broken
+
+The ❌ item this autopsy's first PR (#3134) recorded as open, now built — and built from **measurement**,
+because the honest position was that the rule had not been shown to be precise.
+
+**The defect:** build `3ce8459b` shipped `{ value: 'forest', label: 'জungle' }` — one Bengali letter
+then the Latin "ungle". The summary shown to the user said `জঙ্গল` (correct) while the running app
+showed the broken token. **Nothing caught it**: the design gate passed, accessibility scored 100/100,
+the reviewer returned PASS at 90/100. All three read STRUCTURE; **none of them reads the TEXT**.
+
+**`scriptIntegrity.ts`** — deterministic, zero model calls, advisory (it can never block, fail or heal
+a build). Recorded as `SCRIPT_INTEGRITY`, on a clean pass too, because a check only ever visible when
+it complains cannot be told apart from one that never ran (the `JOURNEY_NOT_RUN` lesson). It is also in
+`buildFindingSuggestions`, so the user is OFFERED the fix rather than it sitting in an admin report —
+a broken label is the one defect they can see and cannot explain.
+
+### The study changed the design twice, and that is the point
+
+Ran against this repository's own **1,092 real Indic lines** plus a hand-built corpus:
+
+1. **The first tokenizer MISSED `वीडियोdownload`.** Combining marks (ी, ो) are `\p{M}`, not `\p{L}`, so
+   `[^\p{L}\p{N}]` shredded the word at every matra. **`জungle` was caught only because `জ` happens to
+   carry no matra** — i.e. by luck. Marks are part of a word here.
+2. **Scanning raw SOURCE flagged `\bस्क्रीनशॉट\b` and `[A-Za-zऀ-ॿ]`** — a regex word boundary and a
+   character-class range, **6 of the 8 hits on the real corpus, not one of them a label**. So only
+   string LITERALS are read, and a literal that looks like a pattern is skipped.
+
+### And a third change, from my own reversion test
+
+The first version cut `${...}` holes before tokenising, with a comment calling it necessary. **The
+reversion proved it changed nothing** — `$`, `{` and `}` are already non-word characters, so
+`` `${count}টি` `` tokenises to `count` and `টি` either way. **Deleted rather than kept "for safety":**
+a guard that cannot fail is worse than none, and the comment justifying it stated a reason that was not
+true. The behavioural test cases stayed.
+
+**Final precision, measured after the simplification:** 6 flags across the whole repository outside the
+new files — 2 are this bug quoted in comments, 3 are a deliberate mixed-script *user-input* fixture
+(`"kितni files hai?"`), 1 is the Devanagari-detection test's own fixture. **Zero are UI labels.** And
+the analyzer runs on the GENERATED APP's files, never on NavBharatAI's own source.
+
+Test-locked and reversion-proven in `tests/aLabelMustNotArriveBroken.test.ts` (9 cases): dropping
+combining marks turns 1 red, removing the pattern guard turns a different one red, and removing the
+clean-pass record turns a third red.
+
+🔒 **It cannot change a build's verdict or its bill.** Same shape as the ACCESSIBILITY finding that has
+shipped for months — a `warning` through `obs()` — so it contributes to the report, never to `!ok`,
+which is what the "working app or free" billing rules gate on.
+
+### Why this is a moat and not a nicety
+
+The class only exists for an app whose UI is written in an Indic script — the case NavBharatAI is built
+for and the one Lovable / Bolt / v0 / Cursor have no reason to check. A user who asked for a Bengali app
+and got a word that reads as nonsense does not file a bug; they leave.

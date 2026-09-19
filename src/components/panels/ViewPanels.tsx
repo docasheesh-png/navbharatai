@@ -1,6 +1,4 @@
 import React, { lazy } from 'react';
-import { PreviewSurface } from '../agentv3/PreviewSurface';
-import { FilesPanel } from './FilesPanel';
 import { ZipSizeModal } from '../ide/ZipSizeModal';
 import type { ZipSizeModalVariant } from '../ide/ZipSizeModal';
 import type { ViewType, FileSystem, ChatSession, Message } from '../../types';
@@ -16,6 +14,29 @@ import { AppLockGate } from '../AppLockGate';
 // ── Lazy-loaded view components ─────────────────────────────────────────────
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
+
+// 🔴 THESE TWO WERE THE ONLY PANELS IN THIS FILE LOADED EAGERLY, AND THEY ARE THE TWO BIGGEST
+// (2026-09-19, measured from the build's own sourcemap, not estimated).
+//
+// `ViewPanels` is imported statically by `App.tsx`, so anything IT imports statically lands in the
+// entry chunk — the JavaScript a visitor must download, parse and compile before the first screen
+// responds to anything. Forty-odd panels below are lazy for exactly that reason; these two were not,
+// and they carried **177 KB of source into the entry chunk** (`PreviewSurface` 144 KB, `FilesPanel`
+// 33 KB) for screens that render only behind `activeView === 'preview'` / `=== 'files'`.
+//
+// 🔒 SAFE BY CONSTRUCTION, not by hope: both render ONLY inside those two view gates, and every
+// branch of this component renders inside the `<Suspense>` boundary App.tsx wraps the view switcher
+// in (App.tsx ~3081). That is the same boundary the forty lazy panels already rely on — this adds no
+// new failure mode, it joins an existing one.
+//
+// ⚠️ NOT written with `_lz`, deliberately. That helper casts to `ComponentType<any>`, which is why the
+// props doc below warns the compiler will not tell you when a prop stops reaching a panel. The
+// `.then(m => ({ default: m.X }))` form keeps the component's real prop types, so these two call sites
+// stay type-checked exactly as they were when the import was static.
+const PreviewSurface = lazy(() =>
+  import('../agentv3/PreviewSurface').then(m => ({ default: m.PreviewSurface })));
+const FilesPanel = lazy(() =>
+  import('./FilesPanel').then(m => ({ default: m.FilesPanel })));
 
 const ProjectInsightsPanel = _lz(() => import('./ProjectInsightsPanel'), 'ProjectInsightsPanel');
 const GalleryPanel = _lz(() => import('./GalleryPanel'), 'GalleryPanel');

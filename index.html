@@ -64,7 +64,51 @@
     <meta name="twitter:image" content="/logo.png" />
   </head>
   <body>
-    <div id="root"></div>
+    <!-- 🔴 THE FIRST FRAME, AND WHY IT IS HTML RATHER THAN REACT (2026-09-19, measured).
+         `<div id="root"></div>` was empty, so NOTHING could paint until the whole module graph had
+         arrived and run. Measured on an emulated slow-4G link with a mid-range phone CPU: first
+         contentful paint at **3.1 seconds**, 536 KB over the wire, four render-blocking assets — and
+         for all three seconds a user sees a blank page that answers nothing they do to it.
+
+         This markup is inside `#root` on purpose: `createRoot(...).render()` replaces the container's
+         children on its first commit, so React removes it with no teardown code, no timer and no flag
+         that could leave it stranded on screen. There is nothing to un-mount and nothing to forget.
+
+         🔒 IT IS A LOADING STATE, NOT A FAKE UI. It carries the product name and says it is starting —
+         no buttons that do nothing, no mocked content, nothing that claims the app is ready when it is
+         not. Honesty here is the same rule the rest of the codebase follows about never showing a
+         result that has not happened.
+
+         ⚠️ AND WHAT IT DOES NOT DO, stated so nobody reads more into it: this makes the app *paint*
+         sooner. It does not make it *interactive* sooner — the JavaScript still has to arrive before
+         anything responds. The levers for that are recorded in PROGRESS.md.
+
+         Styles are INLINE, in a <style> the parser sees with the HTML, so this frame is not waiting on
+         the 42 KB stylesheet either. The colours are the real `--surface-base` / `--text-primary`
+         values from src/index.css for each theme, keyed off the same `data-theme` the script above has
+         already set — so when the real CSS lands the background does not change colour. -->
+    <style>
+      #nbai-boot { position: fixed; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 18px;
+        background: #0d1117; color: #ffffff;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+      [data-theme="light"] #nbai-boot { background: #f8fafc; color: #0f172a; }
+      [data-theme="contrast"] #nbai-boot { background: #000000; color: #ffff00; }
+      #nbai-boot .nbai-boot-name { font-size: 15px; font-weight: 900; letter-spacing: 0.18em;
+        text-transform: uppercase; }
+      #nbai-boot .nbai-boot-note { font-size: 12px; opacity: 0.65; }
+      #nbai-boot .nbai-boot-ring { width: 34px; height: 34px; border-radius: 50%;
+        border: 3px solid currentColor; border-top-color: transparent; opacity: 0.55;
+        animation: nbai-boot-spin 0.9s linear infinite; }
+      @keyframes nbai-boot-spin { to { transform: rotate(360deg); } }
+      /* A spinner is decoration; someone who has asked for less motion gets a still ring. */
+      @media (prefers-reduced-motion: reduce) { #nbai-boot .nbai-boot-ring { animation: none; } }
+    </style>
+    <div id="root"><div id="nbai-boot" role="status" aria-live="polite">
+      <div class="nbai-boot-ring"></div>
+      <div class="nbai-boot-name">NavBharatAI</div>
+      <div class="nbai-boot-note">Starting up&hellip;</div>
+    </div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

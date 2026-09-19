@@ -18,11 +18,16 @@ describe('the three ladders, exactly as the admin listed them', () => {
   // OUTPUT_BUDGET_STARVED failures in another (b3a2c81e). FlashX is 4.x, so the defect cannot occur —
   // and it is cheaper ($0.07/$0.40 against $0.15/$0.50). Rungs 2-4 are untouched on every tier.
   it('WEAK: glm-4.7-flashx → kimi-k2.7-code → glm-5.3 → Haiku (Haiku last, as the 2026-07-13 amendment said)', () => {
-    expect(seq(TIER_LADDERS.weak)).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
+    // ⚠️ NEMOTRON:nemotron-super joined on 2026-09-19, one rung IN FRONT OF the Claude backstop.
+    // This case's intent is unchanged and is the reason the rung went where it did: Haiku is still
+    // LAST, so an unproven vendor reduces how often we reach the insurance without BECOMING it.
+    expect(seq(TIER_LADDERS.weak)).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE_HAIKU:haiku']);
     expect(TIER_LADDERS.weak[TIER_LADDERS.weak.length - 1].provider).toBe('CLAUDE_HAIKU');
   });
   it('NORMAL: glm-4.7-flashx → kimi-k2.7-code-highspeed → glm-5.3 → Sonnet', () => {
-    expect(seq(TIER_LADDERS.off)).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
+    // Same insertion as Weak, same reason — Sonnet stays last.
+    expect(seq(TIER_LADDERS.off)).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE:sonnet']);
+    expect(TIER_LADDERS.off[TIER_LADDERS.off.length - 1].provider).toBe('CLAUDE');
   });
   it('the retired glm-5.3-flash is on NO ladder, and on no plan rung either', () => {
     for (const level of POWER_LEVELS_ORDERED) {
@@ -172,12 +177,17 @@ describe('the plan phase runs on the tier\'s best cheap reasoner, then its own l
     for (const r of Object.values(PLAN_RUNG)) expect(r.provider).not.toBe('CLAUDE_OPUS');
   });
   it('the plan chain is the plan rung followed by the tier ladder minus that rung — no other tier\'s model', () => {
-    expect(seq(planLadder('weak'))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'CLAUDE_HAIKU:haiku']);
-    expect(seq(planLadder('off'))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'CLAUDE:sonnet']);
-    expect(seq(planLadder('mini'))).toEqual(['GLM:glm-5.3', 'KIMI:kimi-k3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
-    expect(seq(planLadder('max'))).toEqual(seq(planLadder('mini')));
+    // ⚠️ Read with NO env: the Nemotron plan rung is FLAGGED, so with AGENTV3_NEMOTRON unset the plan
+    // chain is exactly what it was before 2026-09-19 — which is what these two lines now prove.
+    // (The flagged-on shape is asserted in nemotronWhereItPays.test.ts.)
+    expect(seq(planLadder('weak', {}))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE_HAIKU:haiku']);
+    expect(seq(planLadder('off', {}))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE:sonnet']);
+    expect(seq(planLadder('mini', {}))).toEqual(['GLM:glm-5.3', 'KIMI:kimi-k3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
+    expect(seq(planLadder('max', {}))).toEqual(seq(planLadder('mini', {})));
   });
   it('🔒 a weak plan never reaches Sonnet/Opus', () => {
-    for (const r of planLadder('weak')) expect(['CLAUDE', 'CLAUDE_OPUS']).not.toContain(r.provider);
+    for (const env of [{}, { AGENTV3_NEMOTRON: 'on', NEMOTRON_API_KEY: 'k' }]) {
+      for (const r of planLadder('weak', env)) expect(['CLAUDE', 'CLAUDE_OPUS']).not.toContain(r.provider);
+    }
   });
 });

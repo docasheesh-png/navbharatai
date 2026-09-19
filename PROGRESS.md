@@ -70380,6 +70380,180 @@ struggle was the USER's: they asked to "repair some parts" and were asked back w
 
 ---
 
+## 2026-09-19 — NVIDIA Nemotron 3, only where it pays: the judge, the plan, and one backstop rung
+
+Admin, after reading the full evaluation: *"ok, kaha jahan hame fayda hai. banao."* — and then
+*"mai api kharid ke laga dunga."* So this ships **keyless-safe**: with no key and no flag, every build
+is byte-identical to the day before, and a test proves it.
+
+### 🔴 THE ONE FACT THAT DECIDED EVERYTHING, AND IT INVERTS THE STICKER PRICE
+
+Nemotron looks cheaper than our cheap lead rung — Super $0.085/$0.40 against glm-4.7-flashx
+$0.07/$0.40 — and **for us it is not**, because the route it is bought through does not honour
+prompt-cache markers (the OpenRouter path goes via DeepInfra; its dashboard shows a ~0.2% global
+cache-hit rate). Our builds are the opposite of cache-indifferent, measured from this repo's own
+autopsies:
+
+| build | input tokens | cache-read | ratio |
+|---|---|---|---|
+| Gita b6f88a72 | 1,520,722 | 1,427,968 | **93.9%** |
+| Build C | 721,982 | 654,848 | **90.7%** |
+| a weak/free build | 1,080,000 | — | 137 : 1 in:out |
+
+FlashX charges **$0.01/MTok** for that 92%. Nemotron charges full input rate for all of it. On the
+architect slice (480k in, 94% cached) that is **$0.0083 against $0.0426 — Super is 6.2× DEARER** than
+the rung it appeared to undercut, and 9× on the Bedrock listing.
+
+### 🔑 AND THE SAME ARITHMETIC FOUND WHERE THE MONEY ACTUALLY IS
+
+Because the cache rescues every tool loop and rescues nothing else, **the JUDGE is 78% of a cheap-lead
+build's entire real provider cost** — $0.0915 of $0.1176 on the measured profile. It is one call over
+the app, not a 70-call loop over a stable prefix. The builder was never the opportunity; the judge was,
+and nobody had looked.
+
+`selectReviewJudge`'s runner sends system + messages and reads back TEXT — **no tools at all** — so the
+judge is also the *safest* place for a vendor whose tool-calling nobody here has measured. Cheapest and
+safest turn out to be the same slot, which is why it is the first one taken.
+
+### What shipped
+
+| Role | Model | Gate |
+|---|---|---|
+| **Judge** (all tiers) | Ultra, $0.50/$2.20 | `AGENTV3_NEMOTRON` tier allowlist |
+| **Plan** (Weak/Normal) | Ultra | same flag — a plan call happens on EVERY build |
+| **Ladder rung** (Weak/Normal) | Super, in front of the Claude backstop | KEY only, like every other rung |
+
+**Rejected, each for a measured reason and each test-locked:** the architect, sub-agents, reviewer and
+heal passes (cached tool loops, 6.2× dearer, and where tool-calling accuracy is critical); **vision**
+(Nemotron 3 is text-only and cannot read an image); the **guards** — lint, typecheck, build, preview,
+journey, fuzz, CVE, the mutation and duplicate-import guards — which are deterministic CODE at ₹0, so a
+model there would raise cost *and* lose determinism; and the **cheap intent classifier**, which runs
+free today, so **Nemotron 3 Nano ($0.05/$0.20) is on no list here** — nothing is cheaper than nothing.
+
+### Three decisions worth not re-deriving
+
+1. **The flag is an ALLOWLIST, not a boolean.** `AGENTV3_NEMOTRON=weak` tries the judge only on the
+   tier NavBharatAI pays for itself, so an unmeasured judge verdict costs us and never a paying user.
+   `on` means every tier; an **unrecognised value means OFF, never everywhere** — somebody who wanted
+   all of them would type `on`, so a present-but-unreadable value cannot have meant that.
+2. **The rung is KEYED, the judge and plan are FLAGGED.** A rung is reached only after everything above
+   it failed, so it is insurance and gating insurance behind a second switch is how it comes to be
+   missing on the day it is needed. A judge or plan call happens on every build — letting a mere
+   credential start that is the `AGENTV3_FILE_EMBEDDINGS` defect this repo has already paid for once.
+   `AGENTV3_NEMOTRON=off` is the hard kill that removes all three.
+3. **Super goes IN FRONT of the Claude backstop, never in place of it.** An unproven vendor may reduce
+   how often we reach the insurance; it may not BE the insurance. Haiku is still last on Weak, Sonnet
+   still last on Normal, and **Strong is untouched** — a premium build never opens on a 12B-active
+   model. A test asserts Nemotron is the lead rung of no tier, which is exactly where it would lose.
+
+### ⚠️ A correction to my own evaluation, made before it could mislead
+
+My cost table put **Grok** on the Strong judge at $3.00/MTok. `resolveJudgeKind` is keyed to
+`mode`, and the only call site passes `onlyOpus ? 'power' : 'paid'` — so **Weak, Normal AND Strong all
+judge on glm-5.3 today**, and Grok judges only the Opus-toggle path. The −27% figure I quoted for
+Strong assumed Grok and is therefore wrong; the honest saving is the same **absolute** ~$0.048 per
+build on every tier, which is −41% of a Weak build and a smaller share of a dearer one. The placement
+does not change — the judge is still the slice worth taking — but the number I gave for Strong was
+built on a rung that does not run.
+
+### Honest gaps, recorded rather than discovered later (rule 6)
+
+1. **Judge QUALITY is unmeasured, and the judge is the worst place for that to bite** — a weak judge
+   passes a broken app quietly and no cost table shows it. Hence the flag defaults to OFF and the
+   rollout is Weak first, verdicts read by hand on the first builds.
+2. **Not one call has been made against a real Nemotron endpoint.** Every claim here is source-level
+   plus the published rates. The model ids and base URL are env-overridable precisely because each
+   host spells them differently and the purchase has not happened yet.
+3. **The rate defaults are deliberately the DEARER readings** — Super at Bedrock's $0.15/$0.65 rather
+   than the $0.085/$0.40 cheapest host, and no cache line at all. A rate that is too high inflates only
+   our own cost report; one that is too low eats margin on every build silently.
+4. **Sonnet has no cache line in the rate card** (found in passing), so every cached Sonnet token is
+   priced at the full $3.00 while Anthropic's real cache-read is $0.30. Margin-safe and wrong all the
+   same, on the panel used to judge spend — the `E2B_USD_PER_HOUR` shape again. **Open, separate item.**
+
+### Evidence
+
+`tests/nemotronWhereItPays.test.ts` — **36 cases**: the keyless identity (no key ⇒ no role, no rung, no
+change to the plan chain or the judge), whitespace-only key, the allowlist's six malformed values, the
+hard kill, the rung's position relative to the Claude backstop on both tiers, Strong untouched,
+Nemotron as no tier's lead rung, heal openers unchanged, both rate lines plus the real host ids and the
+`:free` suffix, the no-cache-line assertion, the unknown-model-bills-dearest rule, white-label scrubbing
+of the vendor and all four purchase hosts, the closed `NemotronRole` union, the two-gate cap in the
+route, and that the runner sends no vendor-specific thinking parameter (which would be a hard 400).
+
+**Proven by reversion, five ways** — each reverted, run, restored: a key alone switching the judge on;
+an unrecognised flag meaning everywhere; an unknown Nemotron billing at the cheapest family line; Super
+promoted to the lead rung; the vendor name dropped from the scrubber.
+
+Existing suites updated rather than weakened: `tests/tierLadder.test.ts` and
+`tests/tierChainFidelity.test.ts` pin the ladders rung-for-rung by design, so both gained the new rung
+with the reason written in place — and the keyless-variant cases now also re-prove the absolute rule
+(Weak reaches neither Sonnet nor Opus) *with a new vendor on the ladder*, and that
+`AGENTV3_CHEAP_FLOOR=off` remains the GLM/Kimi kill switch alone.
+
+### 🔴 SAME DAY, BEFORE ANY KEY WAS SET: the code was BROADER than the sentence describing it
+
+The admin asked the plain question — *"keys dalne ke baad, nvidia aapne kaha kaha lagaya?"* — and the
+answer was produced by RUNNING the policy for all three env states rather than from memory. That is
+what surfaced it: with `AGENTV3_NEMOTRON=on`, **Strong's plan rung also moved to Ultra**, while the
+evaluation put to the admin had said, in writing, *"Plan — Weak and Normal"*.
+
+Nothing failed. The flag is per-tier, so `weak,normal` had always kept Strong out; the defect was that
+`on` — the value somebody types to enable a feature broadly — reached a place the documentation
+promised it would not. A comment cannot be typechecked, and this is the third time in this file's
+history that a sentence and the code it described drifted apart in exactly that direction.
+
+**Fixed as a FLOOR, not a default** (`PLAN_FORBIDDEN_TIERS` in `nemotron.ts`): Strong can never take
+the Nemotron plan rung, whatever the flag says. Lifting it is a code change with an admin decision
+behind it.
+
+**Why Strong, and why the JUDGE is deliberately NOT treated the same way** — the admin chose this after
+being shown both options: a judge delivers a VERDICT on a finished app, so a wrong one means a wrong
+gate on a build that is still the build; a PLAN decides the app's whole shape before a line is written.
+Strong is the tier somebody paid premium for, so an unmeasured vendor may report on that build but may
+not design it. The judge stays on all three tiers, which is where the saving is.
+
+Test-locked in `nemotronWhereItPays.test.ts` (five flag spellings, including `on` and
+`weak,normal,strong`, all refused for Strong's plan while Strong's JUDGE stays allowed and Weak/Normal
+plans are unaffected) and proven by reversion — deleting the floor line fails that case.
+
+### 📋 And the answer itself, recorded because it is what an operator needs
+
+| env state | Weak | Normal | Strong |
+|---|---|---|---|
+| key only, no flag | rung only | rung only | nothing |
+| key + `AGENTV3_NEMOTRON=weak` | judge + plan + rung | nothing | nothing |
+| key + `AGENTV3_NEMOTRON=on` | judge + plan + rung | judge + plan + rung | **judge only** |
+
+**A key ALONE changes almost nothing** — only the Super backstop rung on Weak/Normal, which is reached
+only when the three rungs above it have failed.
+
+### 🚫 ASKED AND ANSWERED: Nemotron in free chat, Professional and the image generator
+
+The admin asked whether the free endpoints could serve those three surfaces while Nemotron is free.
+Answered from the code, not from the rate card:
+
+- **Image generator — NO, and not for a cost reason.** Nemotron 3 is text-in / text-out. It cannot
+  generate an image at any price.
+- **Free chat — possible, but it is a BUILD, not config,** and it should wait. `allowedOnFreeTier`
+  clears both sizes comfortably (Super index 1.85, Ultra 6.20, against the `kimi-k2.7` ceiling of
+  11.60), and the ladder would genuinely gain what its own entry says it lacks — a fourth INDEPENDENT
+  vendor, where today the one non-Google rung shares a key with the free leader and dies in the same
+  429 storm. But `src/server/AI/Router/providers/` has no Nemotron provider, so this is a build the
+  size of `OpenAiChatProvider.ts`.
+- **Professional / Doctor AI on a FREE endpoint — NO.** Free tiers carry data-training terms, and that
+  surface is where a user types their symptoms. A Privacy Policy that says otherwise is CI-locked
+  (`privacyPolicyTruth.test.ts`), so this is the 2026-09-02 shape exactly: the policy saying one thing
+  while the code does another.
+- **The general rule, restated:** a `:free` endpoint has no SLA, hard rate limits and can be withdrawn
+  without notice. In the build engine it is one rung behind a backstop; in CHAT it would be the leader
+  every user sees. Nemotron's PAID rate is cheap enough ($0.085 for Super) that chasing the free tier
+  trades real trust for very little money.
+
+**Recommended order, and the reason:** not one Nemotron call has been made against a real endpoint, so
+the build engine's judge on WEAK is the safest possible first test — a bad verdict there costs
+NavBharatAI, which pays for that tier itself, and reaches no paying user. Free chat is the opposite: it
+is the highest-volume surface and every failure is visible immediately.
 ## 2026-09-19 — `জungle`: a label in the user's own language must not arrive broken
 
 The ❌ item this autopsy's first PR (#3134) recorded as open, now built — and built from **measurement**,

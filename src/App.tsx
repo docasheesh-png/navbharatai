@@ -128,6 +128,7 @@ import { useZipImport } from './hooks/useZipImport';
 import { useGitHubConnect } from './hooks/useGitHubConnect';
 import { useSettings } from './hooks/useSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
+import OfflineBanner from './components/OfflineBanner';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
 import { generateUCI } from './lib/chatUtils';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
@@ -585,13 +586,31 @@ export default function App() {
     addLog(`STATE_TRACE: activeAgent=${activeAgent}, activeView=${activeView}`, 'info');
   }, [activeAgent, activeView]);
 
-  // Phase 6.2 — show toast when network goes offline/online (especially useful on mobile).
+  /**
+   * OFFLINE IS A STATE, SO IT GETS A SURFACE THAT LASTS (admin 2026-09-19, item C of five).
+   *
+   * Phase 6.2 raised a TOAST here on `networkStatus.online`. Two things were wrong with that, and the
+   * second is the one that mattered:
+   *
+   *   1. a toast disappears after a few seconds while the condition lasts for minutes, so anyone who
+   *      looked away came back to an app that was quietly failing with no explanation. The persistent
+   *      <OfflineBanner/> below is the fix for that half.
+   *   2. it read `navigator.onLine`, which reports TRUE on a phone with one bar and no data, a captive
+   *      portal or dead DNS — the common WebView case. `reachable` is a real round trip instead. See
+   *      src/lib/reachability.ts.
+   *
+   * What survives as a toast is the RECOVERY, which genuinely is a moment rather than a state — and it
+   * is announced only to somebody who actually saw the banner, never on first load.
+   */
+  const wasUnreachableRef = useRef(false);
   useEffect(() => {
-    if (!networkStatus.online) {
-      addToast('No internet connection — changes may not save', 'warning');
+    if (!networkStatus.reachable) { wasUnreachableRef.current = true; return; }
+    if (wasUnreachableRef.current) {
+      wasUnreachableRef.current = false;
+      addToast('Back online', 'success');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [networkStatus.online]);
+  }, [networkStatus.reachable]);
   
   const setActiveAgent = useCallback((newAgent: string) => {
     addLog(`setActiveAgent called: ${newAgent}`, 'info');
@@ -4394,6 +4413,11 @@ export default function App() {
           )}
         </nav>
       )}
+
+      {/* OFFLINE — a persistent bar, not a toast that vanishes while the condition lasts (item C).
+          Driven by `reachable` (a real round trip), never by navigator.onLine. Rendered here, at the
+          app root, so it appears on every screen rather than in whichever panel happened to add it. */}
+      <OfflineBanner reachable={networkStatus.reachable} />
 
       {/* Focus Mode — floating "bring the header back" button. Pinned to the TOP-right corner (admin
           request) so it never collides with the composer at the bottom edge; always visible (works on

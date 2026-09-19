@@ -68723,6 +68723,53 @@ Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hove
 
 ---
 
+## 2026-09-19 — 📡 THE APP SAYS SO WHEN IT CANNOT REACH THE NETWORK (admin item C of five)
+
+### 🔴 The gap was NOT a missing signal. It was an unreliable one — and searching for the wrong word nearly made this a duplicate
+
+`find src -iname "*offline*" -o -iname "*network*"` turned up **`src/hooks/useNetworkStatus.ts`** and
+**`src/lib/offlineQueue.ts`**, both live, both wired. Safeguard #6 exactly: the feature existed, under a
+name I had not guessed. What was actually wrong is narrower and worse than "there is nothing":
+
+- `navigator.onLine === false` is **trustworthy** — the OS is certain there is no interface.
+- `navigator.onLine === true` means only **"an interface exists"**. One bar and no data, a captive
+  portal, dead DNS — all report TRUE. **In a WebView that is the common case**, and in it the app
+  showed no offline state at all while every request failed with a generic error.
+
+And the surface was a **toast**: it vanishes after a few seconds while the condition lasts for minutes,
+so anyone who looked away returned to an app that was quietly failing with nothing on screen.
+
+### The fix — one hook, not a second one
+
+`src/lib/reachability.ts` is the pure decision; `useNetworkStatus` gains a `reachable` field driven by a
+real round trip. **`online` is left exactly as it was**, so its existing consumer is untouched. A second
+hook would have been a second answer to one question — the class autopsy 1a7f4a58 named.
+
+- **A 503 is a SUCCESS.** The question is whether a packet made the round trip, not whether the server
+  is healthy. Conflating them would show "you are offline" to a user whose connection is perfect while
+  we deploy.
+- **Two failures to declare offline, one success to clear.** The same threshold the site-uptime sweep
+  already uses, for the same reason: telling somebody they are offline when they are not is the
+  expensive mistake; being slow to say it is cheap.
+- **💸 No polling while things are fine.** A probe runs on a REASON — app start, an online/offline
+  event, returning to the foreground (throttled to one per 20 s) — and a backoff timer exists **only
+  while we believe we are offline**. `retryDelayMs` returns `null` when reachable, so a healthy app
+  schedules nothing. A background poll from every client would be real traffic at this scale for no
+  information.
+- `/api/ready`, not `/api/health`: readiness has no dependency checks. `cache: 'no-store'` plus a
+  cache-buster, because a cached 200 proves nothing about the network right now.
+
+`OfflineBanner` is persistent, announced to screen readers, offers a manual Retry (someone who has just
+walked back into signal should not wait out a backoff), names **no vendor** (the White-Label Law applies
+to failures too), and uses theme tokens only. The toast survives for the **recovery** — which genuinely
+is a moment rather than a state — and only for somebody who actually saw the banner, never on first load.
+
+Test-locked in `tests/theAppSaysWhenItCannotReachTheNetwork.test.ts` (23 cases) and **reversion-proven
+twice**: dropping the threshold to one failure turns **3** red; polling while healthy turns **1** red.
+
+⚠️ `WifiOff` had to be added to `src/declarations.d.ts` — this repo hand-maintains a
+`declare module 'lucide-react'` shim listing only the icons in use, so an icon that exists at runtime
+still fails `tsc` until it is declared. Worth knowing before assuming a lucide icon is missing.
 ## 2026-09-19 — ⏱️ MEASURE THE COLD START BEFORE OPTIMISING IT (admin item E of five)
 
 The audit that produced items A–E found `dist/assets` at **5.9 MB** and the splash released at **1 s**,
@@ -69081,6 +69128,173 @@ can never fail for the reason it was written — so the source is comment-stripp
 and the "is it gated?" check used a negative regex that matched the GOOD rule, because
 `html.nb-native-shell .nb-screen-enter` contains a space before the class. It now reads every selector
 that mentions the class and requires each to be gated.
+## 2026-09-19 — "Open karte hi scroll lag hota hai": the first frame was blank for 3.6 seconds
+
+**The report (admin).** *"navbharatai jab user isko open karta hai, to page scroll karne me lag hota
+hai! kuch der baad response ata hai."*
+
+**Reproduced the only way this sandbox can: the real built app, driven over CDP in the pre-baked
+Chromium, on an emulated slow-4G link (1.6 Mbps, 150 ms RTT) with a throttled phone CPU.** Every number
+below is measured, three to five runs each, not estimated.
+
+### 🔴 The first hypothesis was mine, it was the obvious one, and the measurement KILLED it
+
+The build ships ~2.4 MB of JavaScript and CSS eagerly (entry 863 KB, `firebase-vendor` 819 KB,
+`react-vendor` 194 KB, CSS 558 KB). The natural reading — *"that is seconds of parse and compile on a
+cheap phone, which is the lag"* — is **wrong**, and it took an experiment that could have gone the
+other way to show it. Each chunk was loaded ALONE, in a page containing nothing else, at 6× CPU
+throttle, five runs, median:
+
+| chunk | on disk | load + parse + compile + execute |
+|---|---|---|
+| `firebase-vendor` | 800 KB | **35 ms** |
+| `react-vendor` | 189 KB | **24 ms** |
+| entry `index` | 843 KB | **100 ms** |
+
+**~160 ms in total.** V8 compiles lazily; bundle bytes are not CPU seconds. A fix aimed at "make the
+bundle smaller so the CPU has less to do" would have been effort spent on a number that was never the
+problem — and it would have been reported as a fix.
+
+### What the measurement actually found
+
+`index.html` shipped **`<div id="root"></div>`** — literally empty. Nothing could paint until the whole
+module graph had arrived and run:
+
+- **first contentful paint 3,600 ms** (3,616 / 3,600 / 3,528 across runs), 557 KB over the wire
+- for all of that time the screen is blank, so scrolling and tapping do nothing and the app looks hung
+
+That is the reported symptom, in the order the user experiences it: open → blank → *kuch der baad* the
+app appears. The lag is **the absence of a first frame**, not a slow one.
+
+### What shipped
+
+**1 · An honest boot frame inside `#root`** (`index.html`). Inline `<style>` so it does not wait on the
+42 KB stylesheet, real `--surface-base` values for all three themes so nothing changes colour when the
+CSS lands, `prefers-reduced-motion` respected. **FCP 3,600 ms → 2,380 ms** (2,388 / 2,372 / 2,380 —
+consistent to within 16 ms across runs).
+
+🔒 **React removes it, and that IS the mechanism** — `createRoot(...).render()` replaces the container's
+children on its first commit, so there is no timer, no flag and nothing that can strand it on screen.
+Verified end-to-end in the browser, not assumed: at 0.9 s the page reads `NAVBHARATAI / Starting up…`;
+after the app mounts `document.getElementById('nbai-boot')` is **null** and the real login UI is there.
+
+🔒 **It is a LOADING STATE, not fake UI** — no button, no link, no input, nothing that claims the app is
+ready. The regression test asserts that, because a splash is exactly the place where fake UI would feel
+harmless.
+
+**2 · The two panels that were in the first-load path and should not have been**
+(`ViewPanels.tsx`). That file lazy-loads forty-odd panels precisely because `App.tsx` imports it
+statically — and `PreviewSurface` (144 KB of source) and `FilesPanel` (33 KB) were static, though both
+render only behind one `activeView` gate, inside the same `<Suspense>` boundary the lazy forty use.
+Entry chunk **863 KB → 783 KB**, wire bytes **557 KB → 536 KB**.
+⚠️ Written with `.then(m => ({ default: m.X }))` rather than the file's `_lz` helper, deliberately:
+`_lz` casts to `ComponentType<any>`, which is why that file's own props doc warns the compiler will not
+tell you when a prop stops reaching a panel. These two keep their real prop types.
+
+⚠️ **Measured honestly: on the login page this second change makes NO difference to main-thread time.**
+Five runs each, before median 533 ms busy, after 597 ms — inside the noise, and if anything worse. It is
+21 KB less to download on a mobile data plan and 177 KB of source no longer compiled on first load; it
+is not a speed fix and is not claimed as one.
+
+### ⚠️ What did NOT change, stated plainly
+
+**LCP is unchanged (~3.4–3.6 s) and so is time-to-interactive.** The app still cannot respond until its
+JavaScript arrives. The user now sees the product instead of a blank page one and a quarter seconds
+sooner, and that is the whole of it.
+
+### 🔴 OPEN ROOT CAUSES (rule 6) — each measured, none fixed here
+
+1. **Cloud Run cold start, measured at 4,815 ms.** `dist/server.cjs` is 9.6 MB and `cloudbuild.yaml`
+   deploys with `--min-instances 0`. A user opening the app when no instance is warm waits ~5 s for
+   the FIRST API response — which is precisely *"kuch der baad response aata hai"*, and it would be
+   invisible to every client-side measurement above. `GET /api/warm` exists (`routes/warm.ts`) and
+   `server.ts` expects an external Cloud Scheduler ping; **whether that scheduler job actually exists
+   cannot be checked from a session** — it is a console fact. This is the single most likely cause of
+   the reported symptom that is NOT client-side, and settling it needs one look at Cloud Scheduler, or
+   `--min-instances 1` (a standing monthly cost, so an admin decision, and the rate is not quoted here
+   because nobody has measured it).
+2. **Firestore is in the first-load path and the login screen does not need it.** Inside
+   `firebase-vendor`: `@firebase/firestore` **1,213 KB** of source plus `re2js` 246 KB, against
+   `@firebase/auth` 451 KB. Auth must run at boot; Firestore must not. Deferring it would cut roughly
+   a fifth of the bytes that block first paint — and it touches ~109 import sites including the login
+   path, so it is a real project with real breakage risk, not a tidy-up. Recorded, not attempted.
+3. **`motion` (337 KB `motion-dom` + 120 KB `framer-motion` of source) is the largest single thing in
+   the entry chunk**, for animations in `Toast`, `SidebarNav`, `TopNav` and `AuthComponent`. The
+   library's own `LazyMotion` + `m` pattern exists for exactly this, and it is a per-call-site change
+   across every usage.
+4. **The LOGGED-IN app is unmeasured.** Everything above is the logged-out landing screen, because this
+   sandbox cannot sign in or reach the live site. If the admin's lag is inside the app after login, the
+   cause may be none of the above — `App.tsx` holds **103 `useState` and 58 `useEffect` in one 4,363-line
+   component**, and only 2 of 191 components are memoised, so every one of those setters re-renders the
+   whole shell. That is a structural observation, NOT a measurement, and is written here as a lead
+   rather than a finding.
+
+**Locked:** `tests/theFirstFrameIsNotBlank.test.ts`, 8 cases, proven by four reversions — deleting the
+frame (2 fail), dropping a theme's colour (1), growing a button inside it (1), and putting
+`PreviewSurface` back as a static import (2).
+## 2026-09-19 — TAPPING TERMINAL ASKED FOR A TERMINAL, AND GOT A KEYBOARD
+
+Admin, verbatim: *"code studio (IDE) me agar terminal par click karte hai to 'keynote' open ho jata
+hai, isko abhi roko, jab tak typing ke liye inputbox me click na kiya jaye, automatic keyboard open
+na ho!"*
+
+**ROOT CAUSE.** `ShellTerminal.tsx` carried an effect on `[active]` that refit xterm and then FOCUSED
+an input — on a touch device, the command bar. Focusing an input on a phone raises the on-screen
+keyboard, so tapping TERMINAL covered with a keyboard the transcript the user had gone there to read.
+
+⚠️ **The line it replaces was itself a fix (2026-08-05), and half its reasoning still holds.** Its
+comment reads: *"On a touch device, focus goes to the COMMAND BAR — focusing xterm there raises a
+keyboard whose keys xterm cannot receive (the exact reported dead end)."* That is still true and still
+enforced: when focus IS wanted on touch it goes to the bar or the in-box bridge, never to xterm. What
+changed is only WHO decides to focus — the user, by tapping. Both ways in are one tap and untouched
+(the bar is visible at the bottom; tapping the box arms `focusBridge`), so nothing is lost.
+
+**A desktop keeps its auto-focus.** A mouse has no keyboard to raise, and clicking TERMINAL on a
+desktop has always meant "let me type". The test is the POINTER, never the width: a coarse pointer is
+what has a soft keyboard, and a wide touch tablet has one while a narrow desktop window does not.
+
+**🔎 THE SIBLING, SAME SHAPE, SAME SCREEN (rule 3): Code Studio's SEARCH panel.** Its input carried a
+bare `autoFocus`, and that panel is reached by NAVIGATION — the bottom nav's Search item, or
+Ctrl+Shift+F. So tapping Search raised the keyboard before the user had asked to type anything. Now
+`autoFocus={!softKeyboardWouldOpen()}`; a desktop is unchanged, because Ctrl+Shift+F is pressed in
+order to type.
+
+**THE OTHER HALF (50/50): the predicate has one home.** `src/lib/dismissKeyboard.ts` already owned "the
+on-screen keyboard, touch only" and already ran this exact media query to decide whether to BLUR after
+Send. Closing the keyboard was only ever half the subject; opening it uninvited is the other half. So
+`softKeyboardWouldOpen()` lives there, `dismissKeyboardOnMobile` now reads it, and `ShellTerminal`'s
+private copy of the query is gone (its `showCommandBar` initialises from the shared predicate). A test
+asserts the module contains exactly ONE `matchMedia` call, so the two halves can never disagree about
+whether the device in someone's hand has a keyboard.
+
+**THE SPLIT THIS WORK ENCODES — the rule is about AUTOMATIC focus, not about focus.** Fixed: focus the
+user did not ask for (a panel you navigate to). **Deliberately kept, and now listed in a test so a
+later sweep cannot strip them blindly:** a control the user opened IN ORDER to type — FilesPanel's
+new-file and rename fields, CodeVersioning's "name this version", LocalizationManager's add-key and
+cell edit, ChatToolbar's search box, WebAppPlayer's password prompt, the report-note dialog. That tap
+already said "I want to type", and removing those would cost every one of those flows a second tap.
+Focusing a BUTTON or a panel div (ExitConfirmDialog's Cancel, HistoryPopup's panel) is not this defect
+at all — no keyboard follows — and both are named in the test so they are never "fixed" by mistake.
+
+**Evidence.** `tests/noKeyboardUntilAsked.test.ts` (10 cases): the predicate on coarse / fine / absent
+`matchMedia`, one-`matchMedia` lock on the module, the refit still unconditional, the focus conditional,
+no private pointer copy left, both user-initiated ways in still present, and the deliberate-`autoFocus`
+inventory. **Proven by reversion:** restoring `if (showCommandBar) barInputRef.current?.focus()` fails
+the terminal case; restoring the bare `autoFocus` fails the sibling case.
+
+**Two EXISTING cases in `tests/shellTerminalInput.test.ts` were updated rather than deleted**, because
+one of them pinned the behaviour the admin has now withdrawn. Its replacement records the withdrawal
+verbatim, keeps asserting the half that still holds (never focus xterm on touch), and adds that the
+two user-initiated paths survive. The other only pinned WHERE the pointer test lived.
+
+### 🔴 STILL OPEN (rule 6)
+1. **Nobody has seen this on a phone.** Every claim is source-level plus the predicate's unit
+   behaviour. The honest confirmation is the admin tapping TERMINAL on their device.
+2. **One boundary case is deliberately NOT changed and is put to the admin instead:**
+   `sda/DoseCalculator.tsx` autoFocuses its "search any medicine" box, and that screen is navigated
+   to. Reading the instruction strictly, that is the same defect; reading the screen, its whole
+   purpose is a lookup, so the keyboard may be exactly what a doctor wants. One line either way —
+   recorded rather than decided unilaterally.
 
 ## 2026-09-19 — Autopsy a48d0f9e: "Repair some parts." — and we were holding the list
 

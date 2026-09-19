@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Terminal } from 'xterm';
 import type { FitAddon } from 'xterm-addon-fit';
 import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
+import { softKeyboardWouldOpen } from '../../lib/dismissKeyboard';
 
 /**
  * REAL shell for Code Studio — a genuine TTY in the user's own sandbox (admin 2026-08-04: "kya ham,
@@ -142,9 +143,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
    * Desktop keyboards work fine through xterm and are unchanged; the bar appears only for coarse
    * (touch) pointers.
    */
-  const [showCommandBar] = useState<boolean>(
-    () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches,
-  );
+  const [showCommandBar] = useState<boolean>(softKeyboardWouldOpen);
   const [barText, setBarText] = useState('');
   const barInputRef = useRef<HTMLInputElement | null>(null);
   /**
@@ -235,13 +234,23 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
 
   useEffect(() => {
     if (!active) return;
-    // A hidden container has no size, so xterm sized itself to nothing. Refit and focus on return.
-    // On a touch device, focus goes to the COMMAND BAR — focusing xterm there raises a keyboard
-    // whose keys xterm cannot receive (the exact reported dead end).
+    // A hidden container has no size, so xterm sized itself to nothing: the REFIT is why this effect
+    // exists and it always runs.
+    //
+    // 🔴 THE FOCUS DOES NOT (admin 2026-09-19: *"agar terminal par click karte hai to keyboard open ho
+    // jata hai, isko abhi roko"*). This used to focus the command-bar input whenever the terminal
+    // became active, which on a phone raises the on-screen keyboard over the transcript the user
+    // tapped TERMINAL to read — and they had asked for a terminal, not for a text field.
+    //
+    // ⚠️ The line it replaces was itself a fix, and its reasoning still holds: when focus IS wanted on
+    // touch it must go to the command bar, never to xterm, whose keys a soft keyboard cannot reach.
+    // That is preserved — what changed is only WHO decides. Both ways in are one tap and unchanged:
+    // the command bar is visible at the bottom, and tapping the terminal box arms `focusBridge`.
+    // A desktop keeps its auto-focus: a mouse has no keyboard to raise, and clicking TERMINAL there
+    // has always meant "let me type".
     const t = setTimeout(() => {
       try { fitRef.current?.fit(); } catch { /* mid-layout */ }
-      if (showCommandBar) barInputRef.current?.focus();
-      else termRef.current?.focus();
+      if (!softKeyboardWouldOpen()) termRef.current?.focus();
     }, 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps

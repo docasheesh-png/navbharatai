@@ -19,6 +19,7 @@ import { auth } from '../../lib/firebase';
 import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
+import { softKeyboardWouldOpen } from '../../lib/dismissKeyboard';
 import { CursorPopup } from './CursorPopup';
 import { IDEScreen, Tab } from '../../types/ide';
 import { AgentMode } from './ModeSelector';
@@ -935,10 +936,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <div className="flex flex-col h-full bg-card">
               <div className="p-4 space-y-2 border-b border-line shrink-0">
                  <h3 className="text-ink font-black uppercase tracking-widest text-[10px] mb-1 flex items-center gap-2"><Search className="w-3 h-3" /> Search</h3>
+                 {/* 🔴 `autoFocus` here raised the on-screen keyboard the moment somebody tapped
+                     Search in the bottom nav — the terminal's defect (admin 2026-09-19) in a second
+                     place, which is what makes it a class rather than one bug. A desktop keeps it:
+                     Ctrl+Shift+F is pressed in order to type, and a mouse raises no keyboard. */}
                  <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    autoFocus
+                    autoFocus={!softKeyboardWouldOpen()}
                     className="w-full bg-well border border-line rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500/50"
                     placeholder="Search all files…"
                  />

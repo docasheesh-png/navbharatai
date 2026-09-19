@@ -69820,3 +69820,67 @@ History no longer naming the case → 1 red.
 - Doctor AI remains hidden in the Play native shell (`playCompliance`), so this is a web surface today.
 - Retention is unaffected: `DataRetentionManager` clears `chat_sessions` by the `userId` FIELD, which
   every per-case row carries — verified, not assumed.
+## 2026-09-19 — Autopsy: a Play-bundle build that died in 12 seconds (`12thmentors/app-50-files-2026-09-19`)
+
+Admin forwarded an APK/AAB failure report. Run `35432078670`, user `shwasanas2008@gmail.com`,
+08:28:12 → 08:28:24 UTC — **twelve seconds**, step 1 of 9 failed, eight skipped:
+`Missing signing secret(s): ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD`.
+
+### The five-bucket ledger
+
+- ✅ **Held (5).** The money law: a failed build cost **₹0** — `apkCharge.ts` debits only at DELIVERY of
+  the built binary, so nothing was taken. The workflow's own pre-flight refused rather than handing back
+  an unsigned bundle Play would reject anyway. `navbharatCanFixItself: false` was truthful. The failure
+  text named the four secrets in plain words. And the post-failure path raised the one-press *"Create my
+  signing key"* offer instead of the manual keytool guide.
+- 🔀 **Workaround (1).** That offer IS a deferred fix: it turns a dead end into one press, but it is a
+  *recovery* from a press that should never have been allowed.
+- 🥵 **Struggle (1).** The pre-flight (`signingReadiness.ts`, built 2026-09-15 for this exact failure,
+  from an earlier report of the same shape) fell through. By design — `unknown` never blocks.
+- ⏭️ **Skipped (1).** Nothing recorded that it fell through, or why.
+- ❌ **Still broken (1).** A press that could not succeed spent a GitHub Actions run, and the user's
+  first news of the problem was a failure.
+
+### The missing subsystem (step 2)
+
+**There is no record of a gate that DECLINED TO DECIDE.** The route collapsed every failure into one
+bare `catch` returning `unknown` — so a 403 (*this token may never read this repository's secrets*, a
+durable fact) and a transient 502 were indistinguishable, produced no log line, and left nothing in the
+report. The admin's report carries nine steps and a failure and **not one word about the gate that
+exists to prevent it**, so an autopsy cannot tell whether it ran, was skipped, or answered `unknown`.
+That is the `JOURNEY_NOT_RUN` class again — a check whose non-execution was invisible.
+
+### What shipped, and the 50/50 half that deliberately did NOT
+
+- `signingLookupReason(status, rateLimitRemaining)` — ⚠️ GitHub answers **403 for an exhausted rate
+  limit as well as for a permission denial**, so the status alone cannot separate them; calling a rate
+  limit "you have no permission" would send a user to fix access they already have.
+- `signingLookupIsDurable` — `forbidden` / `not-found` mean the **one-press key creation would fail
+  too**, because the permission that lists a repository's secrets is the one that writes them.
+- The status route returns `reason` and logs ONE admin line for the durable reasons (the `BRAVE_API_KEY`
+  rejection-log precedent). The **verdict is byte-identical**.
+- `ApkFailureReport.preflight` — recorded on a signing failure only: could we list that repository's
+  secrets at report time, and if not, why. Optional, so every older report stays valid.
+- `ghErrorStatus` / `ghRateLimitRemaining` centralised in `githubSecrets.ts`; `describeGhError` now reads
+  the status through the shared one instead of re-typing the axios error shape.
+
+🔴 **NO VERDICT CHANGED, ON PURPOSE.** Blocking on a 403 is the trade this repo forbids: a repository
+whose secrets were set by somebody ELSE — an org where this user has write but not admin — genuinely can
+build, and would be refused on OUR lack of permission. This is CLAUDE.md's own `POST_GREEN_WRITES` /
+`TIME_TO_FIRST_RENDER` pattern: **measure first, build the stronger protection when the measurement
+produces evidence.** A test asserts `signingVerdict` still takes names alone.
+
+Test-locked and reversion-proven three ways in `tests/theGateThatDeclinedToDecide.test.ts` (9 cases):
+dropping the rate-limit distinction turns 1 red, computing `preflight` and not passing it to the stored
+report turns a different one red, and restoring the anonymous `unknown` turns a third red.
+
+### Still open (rule 6)
+
+**Why the lookup failed for this repository is not known, and this change is what will answer it.** The
+leading hypothesis — `12thmentors` is an ORG, and listing Actions secrets needs **admin** on the repo
+while pushing needs only write, which is why setup succeeded and the gate did not — is consistent with
+every fact in the report but is **not verified**. Watch for `[SIGNING] secrets lookup declined` in the
+server log and `preflight.couldCheck: false` on the next such report. If `forbidden` dominates, the real
+fix is upstream: NavBharatAI should create these repositories where the user is an admin, or say plainly
+at setup time that it cannot manage signing for this one.

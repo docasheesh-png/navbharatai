@@ -20,9 +20,14 @@ import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 // ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
 // never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
 import { SHIP_WORKFLOW_FILES, isShipWorkflow, workflowPath, type ShipWorkflowFile } from '../../lib/shipWorkflows';
-import { missingSigningSecrets, signingVerdict, ANDROID_SIGNING_SECRETS } from '../../lib/signingReadiness';
+import {
+  missingSigningSecrets, signingVerdict, ANDROID_SIGNING_SECRETS,
+  signingLookupReason, signingLookupIsDurable, signingLookupNote, isSigningSecretFailure,
+} from '../../lib/signingReadiness';
 import { generateUploadKeystore } from '../lib/androidKeystore';
-import { listRepoSecretNames, putRepoSecrets, describeGhError } from '../lib/githubSecrets';
+import {
+  listRepoSecretNames, putRepoSecrets, describeGhError, ghErrorStatus, ghRateLimitRemaining,
+} from '../lib/githubSecrets';
 import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } from '../lib/mobileBuildRepair';
 // Tier 2 of the self-healing loop: when the deterministic rules cannot name or fix the failure, the AI
 // pass reads the failing step and the files involved and writes the fix itself — the same loop Claude
@@ -130,9 +135,19 @@ export function registerMobileShipRoutes(app: Express): void {
       );
       const names = (r.data?.secrets || []).map((s: { name?: unknown }) => String(s?.name ?? ''));
       return res.json({ verdict: signingVerdict(names), missing: missingSigningSecrets(names) });
-    } catch {
+    } catch (err) {
       // Includes the ordinary case of a token that may not read secrets — honestly unknown, not missing.
-      return res.json({ verdict: 'unknown', missing: [] });
+      //
+      // ⚠️ THE VERDICT IS UNCHANGED, AND THAT IS DELIBERATE (see signingReadiness.ts). What is new is
+      // that the failure is no longer anonymous: a 403 that will ALSO block the one-press key creation
+      // is a durable fact about the repository, and it used to be indistinguishable from a bad second.
+      const reason = signingLookupReason(ghErrorStatus(err), ghRateLimitRemaining(err));
+      if (signingLookupIsDurable(reason)) {
+        // ONE admin-only line, the same shape as the BRAVE_API_KEY rejection log: no token, no secret,
+        // no value — the absence of this line after real traffic is how you know lookups are working.
+        console.warn(`[SIGNING] secrets lookup declined for ${owner}/${repo} — ${signingLookupNote(reason)}`);
+      }
+      return res.json({ verdict: 'unknown', missing: [], reason });
     }
   });
 
@@ -883,13 +898,20 @@ async function recordApkFailureReport(
       log,
     });
     if (!full.failure) return; // GitHub disagreed with the earlier /runs read — nothing to report
+    // WAS THE GATE ABLE TO SEE THIS REPOSITORY? Asked only when the build died for want of the signing
+    // secrets, because that is the one failure `signingReadiness` exists to have prevented — and the
+    // report used to carry no trace of it, so an autopsy could not tell whether the gate had run, been
+    // skipped, or answered `unknown`. One extra call, on the one failure where the answer is the story.
+    const preflight = isSigningSecretFailure(full.failure.detail)
+      ? await describeSigningPreflight(headers, owner, repo)
+      : null;
     void saveApkFailureReport({
       userId: uid, email,
       owner, repo, workflow, building: full.app.building,
       runId: String(full.build.runId), runUrl: full.build.link,
       startedAt: full.build.startedAt, completedAt: full.build.completedAt,
       durationSeconds: full.build.durationSeconds,
-      steps: full.steps, failure: full.failure,
+      steps: full.steps, failure: full.failure, preflight,
     });
   } catch { /* best-effort — the user's own build status must never wait on this */ }
 }
@@ -925,4 +947,30 @@ async function failedJobLog(
     }
   }
   return parts.join('\n');
+}
+
+/**
+ * Can this token list the repository's Actions secrets? Answered for the failure report, never for a
+ * verdict.
+ *
+ * 🔒 BEST-EFFORT AND SILENT, like everything else on the report path: it rides alongside a user's live
+ * build status, so it may never throw and may never slow that down. An answer it could not get is
+ * recorded as `couldCheck: false` with `unavailable` — honestly "we do not know", which is a different
+ * claim from "the user has no permission" and must stay one.
+ */
+async function describeSigningPreflight(
+  headers: Record<string, string>,
+  owner: string,
+  repo: string,
+): Promise<{ couldCheck: boolean; reason?: string; note?: string }> {
+  try {
+    await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/actions/secrets?per_page=1`,
+      { headers },
+    );
+    return { couldCheck: true };
+  } catch (err) {
+    const reason = signingLookupReason(ghErrorStatus(err), ghRateLimitRemaining(err));
+    return { couldCheck: false, reason, note: signingLookupNote(reason) };
+  }
 }

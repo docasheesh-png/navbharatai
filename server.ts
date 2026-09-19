@@ -171,6 +171,7 @@ import path from 'path';
 import https from 'https';
 import fs from 'fs';
 import { appleDomainAssociation, APPLE_DOMAIN_ASSOCIATION_PATH } from './src/server/lib/appleDomainAssociation';
+import { assetLinksJson, malformedFingerprints, ASSET_LINKS_PATH } from './src/server/lib/assetLinks';
 import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
 import { canonicalHostRedirect, canonicalHostFromEnv } from './src/server/lib/canonicalHost';
 import { auditEnv } from './src/server/audit_env';
@@ -477,6 +478,30 @@ setInterval(() => {
       return;
     }
     res.type('text/plain').send(body);
+  });
+
+  // ANDROID APP LINKS (admin 2026-09-19) — mounted here for the SAME reason as the Apple route above:
+  // `express.static`'s `dotfiles` default is 'ignore', so a `.well-known` path never reaches it.
+  //
+  // This is what makes a navbharatai.com link open the APP instead of a browser. Android fetches it
+  // once at install and re-checks periodically; until `ANDROID_CERT_SHA256` is set it 404s, which is
+  // exactly today's behaviour (the path is not served at all right now), so link handling simply stays
+  // off rather than breaking. An empty 200 would be read as a malformed statement list and send the
+  // admin debugging a parse error instead of a missing value.
+  app.get(ASSET_LINKS_PATH, (_req: any, res: any) => {
+    const body = assetLinksJson(process.env);
+    if (!body) {
+      // Said once, on the request, because a fingerprint that is present but MALFORMED is the failure
+      // with nothing to see: Android rejects the whole file, so a single typo disables link handling
+      // for the good fingerprint beside it. Never logs the value itself.
+      const bad = malformedFingerprints(process.env).length;
+      if (bad > 0) {
+        console.warn(`[APP_LINKS] ${bad} ANDROID_CERT_SHA256 entr${bad === 1 ? 'y is' : 'ies are'} not a SHA-256 fingerprint (32 hex pairs joined by colons) — App Links stay off.`);
+      }
+      res.status(404).type('text/plain').send('Android App Links are not configured.');
+      return;
+    }
+    res.type('application/json').send(body);
   });
 
   app.use('/__/auth', proxyFirebaseAuth);

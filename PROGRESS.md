@@ -69958,6 +69958,53 @@ at setup time that it cannot manage signing for this one.
 
 ---
 
+## 2026-09-19 — ONE CAPSULE, NOT THIRTY: an empty NavBharatAI Pro chat opens clean
+
+**Admin, with a screenshot of the empty Pro chat:** *"in sab ko ek button ke andar band karo… jab user
+navbharatai pro open kare to bas 'Say hi, or describe an app to build…' dikhe, niche 'OR START FROM A
+TEMPLATE' par 'template' word ek capsule jaisa hi, is par click karne ke baad sare capsule (jo abhi dikh
+rhe hai, woh dikhe.) isse navbharatai pro ki screen clean dikhegi user confuse nahi hoga!!"*
+
+**The cure for a wall is not a shorter wall.** This picker had already been shortened once — on
+2026-09-12 thirty-odd chips filling eight or nine lines were cut to about twelve plus a
+"More templates (N)" expander, on reasoning that was exactly right and did not go far enough. The first
+screen still carried twelve starters, an ⚡ Unlock-with-Pro row, and — for anyone who had saved some — a
+"Your templates" row above both: a menu handed to someone who had not said they wanted one.
+
+**What an empty chat shows now:** the greeting sentence, the heading *Or start from a template*, one
+`⌄ Templates` capsule, and the `Screenshot → App` button. Nothing else.
+
+🔒 **NOT ONE TEMPLATE WAS REMOVED, and nothing moved to another screen.** Open the capsule and the
+contents are what used to be on show, in the same order: the user's saved templates first, then the same
+twelve starters in the same category order, the same inner "More templates (N)" expander, the same locked
+Pro row. A door in front of the room, never a smaller room — and that promise, not the collapse, is what
+`tests/oneCapsuleNotThirty.test.ts` guards, item by item.
+
+⚠️ **The chevron is load-bearing.** The word "Templates" alone reads like a link to another page — the
+same objection the existing "More templates (N)" comment records — so the capsule states, before it is
+tapped, that it opens here.
+
+🖼️ **`Screenshot → App` stays OUTSIDE, deliberately.** It is not a template; it is a second way into the
+build flow. Filing it under "Templates" would put a wrong label on a door nobody would open looking for
+it. Asserted to be outside the gate, so a later tidy-up cannot quietly sweep it in.
+
+🔁 **It opens CLOSED every time.** The panel is not remounted between chats, so `useState(false)` alone
+would hand a picker opened in one conversation to the next empty one; an effect on `coldStartVisible`
+closes both it and the inner expander the moment a conversation starts.
+
+**A neighbouring test had to be re-anchored, and that is worth recording rather than burying.**
+`starterTilesAreTextButtons.test.ts` found the chip block as *"the first `flex flex-wrap justify-center`
+wrap after the heading"* — a POSITION, not a thing. The saved-template chips now sit between the heading
+and the starters and carry the same classes, so the test silently switched to asserting on a different
+block with a different contract and failed for a reason unrelated to what it tests. It is anchored on
+`starterShown.map` now: the map that names the list it is about. Its own comment already records being
+bitten by a character-window anchor once; this is the second time the same lesson was paid for.
+
+**Also updated in the same commit (CLAUDE.md's AppKnowledgeBase rule):** every AI answers "template
+kahan hain?" from `AppKnowledgeBase.ts`, which said the buttons *"appear under the message box"*. That
+would have become a lie the moment this shipped — and directions to an invisible button are worse than
+none, because the user hunts, finds nothing, and concludes the feature was taken away. It now names the
+capsule, says it opens closed every time, and says explicitly that nothing was removed.
 ## 2026-09-19 — The guard that only ran on your phone (root cause of the 12-second Play-bundle failure)
 
 Follow-up to the same-day autopsy, and it **corrects that autopsy's leading hypothesis**.
@@ -70096,3 +70143,83 @@ is never assigned — each turns a different case red.
 - **`startTier: "gemini"`** stale telemetry (unchanged from the earlier autopsy that recorded it).
 - **`IN_BUILD_GREEN_UNCHECKED` has not once succeeded** in the reports seen so far, while other actors
   in the same build prove the app rendered. It shipped 2026-09-18; treat it as unproven, not working.
+## 2026-09-19 — Autopsies `a48d0f9e` + `64bc1b6e`: the compiler named a symptom whose remedy was invisible, and a parallel agent paid for it with a placeholder
+
+Two admin reports in one sitting. `a48d0f9e` ("Repair some parts", weak/free, 90 s, zero files, ₹0 —
+correctly not charged) and `64bc1b6e` ("upload channel + answer editing for MENTORS + a test terminal",
+weak/free, still running when captured, 43 KIMI calls, 1.08M input tokens for 7,928 output).
+
+### What shipped here
+
+**ONE class, two causes, one module (`tscErrorCause.ts`) — read by all three places a model ever sees a
+compile error (write-time check, endgame repair, fast-lane repair), so the fix lands at every moment
+rather than at one call site.**
+
+1. 🔴 **TS2307 on a RELATIVE path now has a remedy, and it forbids the placeholder.** In `64bc1b6e` a
+   parallel frontend sub-agent added three routes to `src/App.tsx` for pages a SECOND sub-agent was
+   assigned to create, met three `TS2307`s, and wrote **three 231-byte stub pages**. Its own reasoning,
+   verbatim from the report: *"I can see the three pages the other task is supposed to create aren't
+   present yet … I should create minimal placeholder pages so the build passes. The other task can
+   overwrite them with real content."*
+   **Our own write-time check is what applied the pressure** — `writeTypecheckNote` says *"fix them NOW,
+   in this turn, before writing the next file"* — and `tscErrorCause.ts` had, deliberately, no entry for
+   this error. The line removed read: *"A RELATIVE specifier means a file that is not there — a
+   different cause with a different remedy, already handled by the endgame's own
+   `referencedMissingModules`. Only bare packages land here."* Every clause true; the conclusion wrong,
+   because it reasoned about WHERE the remedy lives and not about WHEN the pressure arrives.
+   ⚠️ The parallel write lock cannot catch this and says so in its own docblock — it promises only that
+   same-path writes serialise, *"never corruption"*. The damage is not corruption: it is a placeholder
+   WINNING a race against real content, which is the "built but not really working" state absolute rule
+   2 forbids.
+
+2. 🔎 **`X.ts` + `X/index.ts` shadowing is now named, with both paths.** `../data` resolved to
+   `src/data.ts` while `seedQuestionBank` lived in `src/data/index.ts`. Both existed. The compiler said
+   only *"has no exported member"*; every `grep` and `cat` of the index showed the export present. It
+   cost **11 shell commands and ~60 seconds** — including `cat src/data/index.ts | xxd` hunting for an
+   invisible character (and `xxd` is not installed in the sandbox) — settled only by `tsc --listFiles`,
+   the one command that names both files.
+   🔒 **Claimed only on evidence:** the advice fires when the caller's own `sources` really contains both
+   candidates (endgame and fast-lane repair hold the whole tree). The write-time check holds one file and
+   therefore says **nothing** — "both exist" is the entire content of the advice, so a guess at it would
+   send the model to the wrong file.
+
+`tests/aPlaceholderIsNotAFix.test.ts` — 13 cases on the two errors verbatim from the report. Proven by
+reversion twice: restoring the bare-packages-only skip turns 3 red; claiming the shadow without checking
+both files exist turns 2 red.
+
+### The five-bucket ledgers, for the record
+
+**`a48d0f9e`** — ✅ 0 self-heals · 🔀 1 (the model never started the app; the platform started it itself)
+· ⏭️ 3 (`JOURNEY_NOT_DERIVED`, `GRAPH_RESTORED_STUBS` 10/29 placeholder facts, `RUNTIME_UNCHECKED`)
+· ❌ 2 (`ACCESSIBILITY` 70/100, 34 unlabelled form fields; `RELEASE_GATE` YELLOW) · 🥵 1 — and the
+struggle was the USER's: they asked to "repair some parts" and were asked back what was broken.
+
+**`64bc1b6e`** — ✅ 3 (2 import auto-fixes; the throughput bench catching GLM and moving to KIMI)
+· 🔀 1 (the stub, above) · ⏭️ 2 · ❌ 3 · 🥵 3 (GLM crawled **31 s** before being benched; the
+`seedQuestionBank` hunt; `src/index.css` read **4×**, `types.ts` 4×, `App.tsx` 4+× with the
+"you have already read this" note ignored each time).
+
+### Still open (rule 6) — named, not guessed, and deliberately not raced
+
+- 🔴 **The platform's own findings are computed AFTER the model has answered.** In `a48d0f9e` the final
+  answer was at t=6 s and `POST_ANSWER_TIMING` at t=20 s, so the 34 named accessibility defects could
+  not reach a turn whose entire request was *"repair some parts"*. The cheap half — feed the PREVIOUS
+  build's unresolved findings into an edit turn's prompt — needs no new analysis and is the next lever.
+- 🔗 **`ACCESSIBILITY` and `JOURNEY_NOT_DERIVED` are the same root cause, reported as unrelated lines.**
+  `journeyDerivation` needs `data-testid` | `name` | `id` | `placeholder` | `aria-label`; the
+  accessibility pass found 34 fields with none of them. That single generation defect is also why
+  `RELEASE_GATE` cannot leave YELLOW for any form app.
+- ⚠️ **`IN_BUILD_GREEN_UNCHECKED` contradicted two other actors in the same report** (t=36 "could not
+  tell whether it rendered"; t=37 "✅ Preview verified"; t=58 `GREEN_GUARD_SAVE`). Root cause located:
+  it fires on a `preview` event, which means *the server is listening* — `PREVIEW_PUBLISHED` says so in
+  its own message — not *the app has painted*; it opened the browser **640 ms** after the first HTTP 200
+  and had no second trigger, because its only retry signal is a `tool_result` from a loop that had
+  already ended. **NOT fixed here: PR #3134 is live in that exact file and records the same symptom as
+  open.** Racing it would produce a conflict whoever is right (CLAUDE.md, concurrent sessions, rule 4).
+- 🔌 **One vendor's outage takes BOTH the routing decision and the build's first rung.** In `64bc1b6e`
+  the complexity second opinion came back *"model-unavailable"* and 31 s later GLM was benched for
+  crawling — the doubt-reader and rung 1 are the same vendor, so a three-feature request scored 5 and
+  opened on the cheapest engine.
+- 💸 **Re-reads are the cost driver on weak builds.** 1.08M input tokens for 7,928 output (137:1). The
+  dedup NOTE already tells the model it has read the file before; it reads it anyway, and the full
+  499-line file ships in the prompt each time.

@@ -491,6 +491,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // of thirty-odd chips was the thing a first-time user scrolled past. Collapsed by default on purpose:
   // expanded-by-default would be the wall again with one extra button on top of it.
   const [startersExpanded, setStartersExpanded] = useState(false);
+  /**
+   * ONE CAPSULE, NOT THIRTY (admin 2026-09-19: *"jab user navbharatai pro open kare to bas 'Say hi,
+   * or describe an app to build…' dikhe, niche 'OR START FROM A TEMPLATE' par 'template' word ek
+   * capsule jaisa hi, is par click karne ke baad sare capsule … dikhe. isse navbharatai pro ki
+   * screen clean dikhegi user confuse nahi hoga!!"*).
+   *
+   * Closed by default and NOT persisted: the whole point is that an empty chat opens clean every
+   * time, so a session that left it open must not hand the wall to the next one. The effect beside
+   * `coldStartVisible` closes it again the moment a conversation starts.
+   */
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   // Paid-public (billing PR 5): learn whether this user is on paid billing and, if so, their wallet
   // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
   // Refetches when the user changes, after a build finishes (balance was just spent), after a 402, and
@@ -3812,6 +3823,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       : null,
   });
 
+  // Closing the picker when the cold start goes away is what makes "clean every time" true across
+  // chats: this component is not remounted between them, so without it a picker left open would
+  // still be open on the next empty chat. `startersExpanded` (the inner More/Fewer) rides along for
+  // the same reason — reopening the capsule should show the short list, not wherever someone left it.
+  useEffect(() => {
+    if (!coldStartVisible) { setTemplatesOpen(false); setStartersExpanded(false); }
+  }, [coldStartVisible]);
+
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-surface text-body">
       {showHostingChooser && (
@@ -4115,39 +4134,32 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
                 {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
                     composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
-                {/* The user's OWN saved templates (on-device) — shown first when present. Each is a one-tap
-                    prompt with a remove (×). Saved via the 🔖 action on any message you sent. */}
-                {chatMode === 'build' && savedTpls.length > 0 && (
-                  <div className="mt-5">
-                    <div className="text-[11px] uppercase tracking-wide text-faint mb-2">Your templates</div>
-                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
-                      {pagedSavedTpls.visible.map((t) => (
-                        <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-warn overflow-hidden">
-                          <button
-                            type="button"
-                            title={t.prompt}
-                            onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
-                            className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 hover:bg-amber-500/15 transition-colors"
-                          >
-                            <span aria-hidden>🔖</span>{t.label}
-                          </button>
-                          <button
-                            type="button"
-                            title="Remove this template"
-                            aria-label="Remove template"
-                            onClick={() => handleRemoveTemplate(t.id)}
-                            className="px-1.5 py-1 text-warn hover:text-danger hover:bg-raised transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                      <LoadMore list={pagedSavedTpls} label="templates" />
-                    </div>
-                  </div>
-                )}
-                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
-                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {/* 🔴 ONE CAPSULE, NOT THIRTY (admin 2026-09-19: *"jab user navbharatai pro open kare to
+                    bas ‘Say hi, or describe an app to build…’ dikhe, niche ‘OR START FROM A TEMPLATE’ par
+                    ‘template’ word ek capsule jaisa hi, is par click karne ke baad sare capsule (jo abhi
+                    dikh rhe hai, woh dikhe.) isse navbharatai pro ki screen clean dikhegi user confuse
+                    nahi hoga!!"*).
+
+                    The 2026-09-12 change already shortened this list once — thirty-odd chips filled eight
+                    or nine lines and read as a wall — and the first screen still opened with about twelve
+                    buttons, an ⚡ Unlock-with-Pro row, and (for anyone who had saved some) a Your-templates
+                    row above them all. The cure for a wall is not a shorter wall: an empty chat now opens
+                    with the one sentence that tells the user what to do, and a SINGLE capsule for everyone
+                    who would rather pick than type.
+
+                    🔒 NOT ONE TEMPLATE WAS REMOVED, and nothing moved to a different screen. Open the
+                    capsule and the contents are byte-for-byte what used to be on show: your saved
+                    templates, the same twelve starters in the same category order, the same
+                    "More templates (N)" expander inside them, and the same locked Pro row. This is a
+                    door in front of the room, never a smaller room.
+
+                    The ⌄ chevron is load-bearing. The word "Templates" alone reads like a link to some
+                    other page — the same objection the "More templates (N)" comment below records — so the
+                    capsule has to say, before it is tapped, that it opens HERE.
+
+                    🖼️ "Screenshot → App" deliberately stays OUTSIDE. It is not a template; it is a second
+                    way into the build flow, and filing it under "Templates" would be a wrong label on a
+                    door nobody would open looking for it. Two things on an empty screen is still clean. */}
                 {chatMode === 'build' && (() => {
                   // TIER-AWARE starters (admin 2026-08-02): a FREE user (powerUnlocked=false) is only offered
                   // `simple` apps their weak tier actually ships, so their FIRST build works — plus a curated
@@ -4161,76 +4173,123 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   return (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-faint mb-2">Or start from a template</div>
-                    {/* 🔴 BUTTONS, NOT TILES (admin 2026-09-12: *"in tiles se user confused hota hai, ki
-                        sayad kuch load ho raha hai … bas simple text button rahne do, koi discription nahi,
-                        koi preview image/background nahi"*).
- 
-                        Each starter used to be a CARD carrying a layout sketch — grey and indigo bars standing
-                        for "a list", "a dashboard". The reasoning was sound and the outcome was not: grey bars
-                        stacked in a card ARE the universal visual language for a skeleton loader, so on an
-                        empty chat — the one moment this picker appears — a first-time user read the whole grid
-                        as "still loading" and waited instead of tapping. The cold-start helper was producing
-                        the cold stare it exists to prevent.
- 
-                        So: emoji + one or two words, and nothing else. No sketch, no category caption, no
-                        description — anything that is not the app's name gives the eye something to wait for.
-                        The labels themselves were shortened for the same reason ("Stopwatch & timer" →
-                        "Stopwatch"): a pill has to read as a button, and a sentence inside one does not.
- 
-                        The sketch solved a REAL problem though — a flat row of identical chips makes a to-do
-                        app and a CRM look alike — so that half is kept without costing a pixel: the chips are
-                        ORDERED by category, so related apps sit together even with no heading above them.
-                        That ordering now happens inside `pickerSections` rather than here, because the list
-                        has to be split before it is rendered. */}
-                    <div className="flex flex-wrap justify-center gap-1.5 max-w-lg mx-auto">
-                      {starterShown.map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          title={t.prompt}
-                          onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-line bg-raised text-xs text-muted hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-accent-text transition-colors"
-                        >
-                          <span aria-hidden>{t.icon}</span>{t.label}
-                        </button>
-                      ))}
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        aria-expanded={templatesOpen}
+                        title={templatesOpen ? 'Hide the starter templates' : "Start from one of NavBharatAI’s ready-made apps"}
+                        onClick={() => setTemplatesOpen((v) => !v)}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-line bg-raised text-xs text-muted hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-accent-text transition-colors"
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${templatesOpen ? 'rotate-180' : ''}`} aria-hidden />
+                        Templates
+                      </button>
                     </div>
-                    {/* One expander, and it names the number it is hiding — "More templates" alone reads
-                        like a link to somewhere else, while "More templates (19)" reads like the rest of
-                        this list. Collapsing again is allowed because a user who opened it to look for one
-                        app should be able to put the wall back. */}
-                    {starterMore.length > 0 && (
-                      <div className="flex justify-center mt-2">
-                        <button
-                          type="button"
-                          aria-expanded={startersExpanded}
-                          onClick={() => setStartersExpanded((v) => !v)}
-                          className="px-3 py-1 rounded-full text-[11px] text-faint hover:text-accent-text hover:bg-indigo-500/10 transition-colors"
-                        >
-                          {startersExpanded ? 'Show fewer templates' : 'More templates (' + starterMore.length + ')'}
-                        </button>
-                      </div>
-                    )}
-                    {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
-                        recharge surface) instead of dropping a prompt the weak tier would flail on. */}
-                    {starterLocked.length > 0 && (
-                      <div className="mt-4">
-                        <div className="text-[11px] uppercase tracking-wide text-accent-text mb-2 flex items-center justify-center gap-1">
-                          <span aria-hidden>⚡</span> Unlock with Pro
-                        </div>
-                        <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
-                          {starterLocked.map((t) => (
-                            <button
-                              key={t.id}
-                              type="button"
-                              title={`${t.label} needs a Pro tier — the free tier is tuned for simple apps. Tap to unlock.`}
-                              onClick={() => setSettingsOpen(true)}
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-accent-text hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-accent-text transition-colors"
-                            >
-                              <span aria-hidden>{t.icon}</span>{t.label}<span aria-hidden className="ml-0.5 opacity-70">🔒</span>
-                            </button>
-                          ))}
-                        </div>
+                    {templatesOpen && (
+                      <div className="mt-3">
+                        {/* The user's OWN saved templates (on-device) — shown first when present. Each is a
+                            one-tap prompt with a remove (×). Saved via the 🔖 action on any message you sent. */}
+                        {savedTpls.length > 0 && (
+                            <div className="mb-3">
+                              <div className="text-[11px] uppercase tracking-wide text-faint mb-2">Your templates</div>
+                              <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                                {pagedSavedTpls.visible.map((t) => (
+                                  <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-warn overflow-hidden">
+                                    <button
+                                      type="button"
+                                      title={t.prompt}
+                                      onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                                      className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 hover:bg-amber-500/15 transition-colors"
+                                    >
+                                      <span aria-hidden>🔖</span>{t.label}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title="Remove this template"
+                                      aria-label="Remove template"
+                                      onClick={() => handleRemoveTemplate(t.id)}
+                                      className="px-1.5 py-1 text-warn hover:text-danger hover:bg-raised transition-colors"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                                <LoadMore list={pagedSavedTpls} label="templates" />
+                              </div>
+                            </div>
+                        )}
+                              {/* 🔴 BUTTONS, NOT TILES (admin 2026-09-12: *"in tiles se user confused hota hai, ki
+                                  sayad kuch load ho raha hai … bas simple text button rahne do, koi discription nahi,
+                                  koi preview image/background nahi"*).
+ 
+                                  Each starter used to be a CARD carrying a layout sketch — grey and indigo bars standing
+                                  for "a list", "a dashboard". The reasoning was sound and the outcome was not: grey bars
+                                  stacked in a card ARE the universal visual language for a skeleton loader, so on an
+                                  empty chat — the one moment this picker appears — a first-time user read the whole grid
+                                  as "still loading" and waited instead of tapping. The cold-start helper was producing
+                                  the cold stare it exists to prevent.
+ 
+                                  So: emoji + one or two words, and nothing else. No sketch, no category caption, no
+                                  description — anything that is not the app's name gives the eye something to wait for.
+                                  The labels themselves were shortened for the same reason ("Stopwatch & timer" →
+                                  "Stopwatch"): a pill has to read as a button, and a sentence inside one does not.
+ 
+                                  The sketch solved a REAL problem though — a flat row of identical chips makes a to-do
+                                  app and a CRM look alike — so that half is kept without costing a pixel: the chips are
+                                  ORDERED by category, so related apps sit together even with no heading above them.
+                                  That ordering now happens inside `pickerSections` rather than here, because the list
+                                  has to be split before it is rendered. */}
+                              <div className="flex flex-wrap justify-center gap-1.5 max-w-lg mx-auto">
+                                {starterShown.map((t) => (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    title={t.prompt}
+                                    onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-line bg-raised text-xs text-muted hover:border-indigo-500/70 hover:bg-indigo-500/10 hover:text-accent-text transition-colors"
+                                  >
+                                    <span aria-hidden>{t.icon}</span>{t.label}
+                                  </button>
+                                ))}
+                              </div>
+                              {/* One expander, and it names the number it is hiding — "More templates" alone reads
+                                  like a link to somewhere else, while "More templates (19)" reads like the rest of
+                                  this list. Collapsing again is allowed because a user who opened it to look for one
+                                  app should be able to put the wall back. */}
+                              {starterMore.length > 0 && (
+                                <div className="flex justify-center mt-2">
+                                  <button
+                                    type="button"
+                                    aria-expanded={startersExpanded}
+                                    onClick={() => setStartersExpanded((v) => !v)}
+                                    className="px-3 py-1 rounded-full text-[11px] text-faint hover:text-accent-text hover:bg-indigo-500/10 transition-colors"
+                                  >
+                                    {startersExpanded ? 'Show fewer templates' : 'More templates (' + starterMore.length + ')'}
+                                  </button>
+                                </div>
+                              )}
+                              {/* Free→paid carrot: LOCKED pro showcases. Tapping opens the tier/upgrade popover (real
+                                  recharge surface) instead of dropping a prompt the weak tier would flail on. */}
+                              {starterLocked.length > 0 && (
+                                <div className="mt-4">
+                                  <div className="text-[11px] uppercase tracking-wide text-accent-text mb-2 flex items-center justify-center gap-1">
+                                    <span aria-hidden>⚡</span> Unlock with Pro
+                                  </div>
+                                  <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                                    {starterLocked.map((t) => (
+                                      <button
+                                        key={t.id}
+                                        type="button"
+                                        title={`${t.label} needs a Pro tier — the free tier is tuned for simple apps. Tap to unlock.`}
+                                        onClick={() => setSettingsOpen(true)}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-accent-text hover:border-indigo-400/70 hover:bg-indigo-500/15 hover:text-accent-text transition-colors"
+                                      >
+                                        <span aria-hidden>{t.icon}</span>{t.label}<span aria-hidden className="ml-0.5 opacity-70">🔒</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                       </div>
                     )}
                     {/* GLOWING "Screenshot → App" button (admin 2026-07-22) — sits with the templates as a

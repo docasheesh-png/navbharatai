@@ -105,20 +105,20 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
   const charCount = editablePrompt.length;
 
   return (
-    <div className="h-full overflow-y-auto overscroll-contain bg-[#0d1117] text-gray-300 p-4 md:p-6">
+    <div className="h-full overflow-y-auto overscroll-contain bg-surface text-muted p-4 md:p-6">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Mic className="w-6 h-6 text-indigo-400" />
+          <h1 className="text-2xl font-bold text-ink flex items-center gap-2">
+            <Mic className="w-6 h-6 text-accent-text" />
             Voice to App
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-faint text-sm mt-1">
             Just speak — NavBharatAI Pro will build your app
           </p>
         </div>
 
         {!speechSupported && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-yellow-400 text-sm">
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-warn text-sm">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             Speech recognition is not supported in this browser. Type your prompt below.
           </div>
@@ -126,12 +126,12 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 flex flex-col gap-4">
-            <div className="rounded-xl border border-white/10 bg-[#161b22] p-5">
+            <div className="rounded-xl border border-line bg-card p-5">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-sm font-medium text-gray-400">Voice Recorder</span>
+                <span className="text-sm font-medium text-muted">Voice Recorder</span>
                 <button
                   onClick={() => setLang((l) => (l === 'hi-IN' ? 'en-US' : 'hi-IN'))}
-                  className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/10 transition-colors"
+                  className="flex items-center gap-1.5 rounded-md border border-line bg-raised px-3 py-1.5 text-xs text-muted hover:bg-raised-hover transition-colors"
                 >
                   <Languages className="w-3.5 h-3.5" />
                   {lang === 'hi-IN' ? 'Hindi' : 'English'}
@@ -145,31 +145,31 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                   className={[
                     'relative w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 focus:outline-none',
                     isRecording
-                      ? 'bg-red-600 shadow-lg shadow-red-600/40'
-                      : 'bg-white/10 hover:bg-white/20',
+                      ? 'bg-red-600 shadow-lg shadow-red-600/40 text-on-accent'
+                      : 'bg-raised hover:bg-raised-hover',
                     !speechSupported ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
                   ].join(' ')}
                 >
                   {isRecording && (
-                    <span className="absolute inset-0 rounded-full bg-red-600 animate-ping opacity-40" />
+                    <span className="absolute inset-0 rounded-full bg-red-600 animate-ping opacity-40 text-on-accent" />
                   )}
                   {isRecording ? (
-                    <MicOff className="w-8 h-8 text-white relative z-10" />
+                    <MicOff className="w-8 h-8 text-ink relative z-10" />
                   ) : (
-                    <Mic className="w-8 h-8 text-gray-300 relative z-10" />
+                    <Mic className="w-8 h-8 text-muted relative z-10" />
                   )}
                 </button>
 
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-faint">
                   {isRecording ? 'Recording… click to stop' : 'Click to start speaking'}
                 </p>
               </div>
 
               {(finalText || interimText) && (
-                <div className="mt-2 rounded-lg border border-white/10 bg-[#0d1117] p-3 min-h-[60px] text-sm leading-relaxed">
-                  {finalText && <span className="text-white">{finalText}</span>}
+                <div className="mt-2 rounded-lg border border-line bg-surface p-3 min-h-[60px] text-sm leading-relaxed">
+                  {finalText && <span className="text-ink">{finalText}</span>}
                   {interimText && (
-                    <span className="text-gray-400 italic">
+                    <span className="text-muted italic">
                       {finalText ? ' ' : ''}
                       {interimText}
                     </span>
@@ -180,7 +180,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
               {(finalText || interimText) && (
                 <button
                   onClick={clearTranscript}
-                  className="mt-3 flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                  className="mt-3 flex items-center gap-1.5 text-xs text-faint hover:text-muted transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Clear
@@ -188,10 +188,10 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
               )}
             </div>
 
-            <div className="rounded-xl border border-white/10 bg-[#161b22] p-5">
+            <div className="rounded-xl border border-line bg-card p-5">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-400">App Description</span>
-                <span className="text-xs text-gray-600">{charCount} chars</span>
+                <span className="text-sm font-medium text-muted">App Description</span>
+                <span className="text-xs text-faint">{charCount} chars</span>
               </div>
 
               <textarea
@@ -199,7 +199,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                 onChange={(e) => setEditablePrompt(e.target.value)}
                 placeholder="Describe your app… or speak using the mic above"
                 rows={5}
-                className="w-full resize-none rounded-lg border border-white/10 bg-[#0d1117] px-3 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-colors"
+                className="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-body placeholder-faint focus:border-indigo-500/50 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-colors"
               />
 
               <div className="mt-3 flex flex-wrap gap-2">
@@ -207,17 +207,17 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                   <button
                     key={qp}
                     onClick={() => applyQuickPrompt(qp)}
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-300 hover:bg-indigo-500/20 hover:border-indigo-500/40 hover:text-indigo-300 transition-colors"
+                    className="rounded-full border border-line bg-raised px-3 py-1 text-xs text-muted hover:bg-indigo-500/20 hover:border-indigo-500/40 hover:text-accent-text transition-colors"
                   >
                     {qp}
                   </button>
                 ))}
               </div>
 
-              <div className="mt-4 rounded-lg border border-white/10 overflow-hidden">
+              <div className="mt-4 rounded-lg border border-line overflow-hidden">
                 <button
                   onClick={() => setEnhancersOpen((o) => !o)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-white/5 text-sm text-gray-400 hover:bg-white/10 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-raised text-sm text-muted hover:bg-raised-hover transition-colors"
                 >
                   <span>Prompt Enhancers</span>
                   {enhancersOpen ? (
@@ -235,8 +235,8 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
                         className={[
                           'rounded-full border px-3 py-1 text-xs transition-colors',
                           activeEnhancers.includes(e)
-                            ? 'border-indigo-500/60 bg-indigo-500/20 text-indigo-300'
-                            : 'border-white/10 bg-white/5 text-gray-400 hover:border-indigo-500/30 hover:text-gray-300',
+                            ? 'border-indigo-500/60 bg-indigo-500/20 text-accent-text'
+                            : 'border-line bg-raised text-muted hover:border-indigo-500/30 hover:text-muted',
                         ].join(' ')}
                       >
                         {e}
@@ -249,21 +249,21 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
               <button
                 onClick={handleGenerate}
                 disabled={!editablePrompt.trim()}
-                className="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors"
+                className="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-on-accent transition-colors"
               >
                 <Zap className="w-4 h-4" />
                 Build My App
               </button>
 
               {status === 'success' && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2.5 text-green-400 text-sm">
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2.5 text-success text-sm">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                   Your prompt is ready in NavBharatAI Pro chat — press Send to start the real build
                 </div>
               )}
 
               {status === 'error' && (
-                <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-red-400 text-sm">
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-danger text-sm">
                   <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span>{errorMsg}</span>
                 </div>
@@ -272,15 +272,15 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
           </div>
 
           <div className="flex flex-col gap-4">
-            <div className="rounded-xl border border-white/10 bg-[#161b22] p-5">
+            <div className="rounded-xl border border-line bg-card p-5">
               <div className="flex items-center gap-2 mb-4">
-                <Info className="w-4 h-4 text-yellow-400" />
-                <span className="text-sm font-medium text-gray-300">Pro Tips</span>
+                <Info className="w-4 h-4 text-warn" />
+                <span className="text-sm font-medium text-muted">Pro Tips</span>
               </div>
               <ul className="flex flex-col gap-3">
                 {TIPS.map((tip, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs text-gray-400 leading-relaxed">
-                    <span className="mt-0.5 w-4 h-4 flex-shrink-0 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-bold">
+                  <li key={i} className="flex items-start gap-2 text-xs text-muted leading-relaxed">
+                    <span className="mt-0.5 w-4 h-4 flex-shrink-0 rounded-full bg-indigo-500/20 text-accent-text flex items-center justify-center text-[10px] font-bold">
                       {i + 1}
                     </span>
                     {tip}
@@ -291,12 +291,12 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
 
             {activeEnhancers.length > 0 && (
               <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
-                <p className="text-xs text-indigo-400 font-medium mb-2">Active Enhancers</p>
+                <p className="text-xs text-accent-text font-medium mb-2">Active Enhancers</p>
                 <div className="flex flex-wrap gap-1.5">
                   {activeEnhancers.map((e) => (
                     <span
                       key={e}
-                      className="rounded-full bg-indigo-500/20 px-2.5 py-0.5 text-xs text-indigo-300"
+                      className="rounded-full bg-indigo-500/20 px-2.5 py-0.5 text-xs text-accent-text"
                     >
                       {e}
                     </span>

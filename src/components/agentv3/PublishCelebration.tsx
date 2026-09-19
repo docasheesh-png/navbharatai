@@ -130,24 +130,24 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
           the Open / Copy / Share row, the whole point of the screen, was simply not reachable.
           `nb-sheet` caps it to what is really visible and the card scrolls inside that. */}
       <div
-        className="nb-sheet relative w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl border border-white/10 bg-[#0d1117] p-6 shadow-2xl"
+        className="nb-sheet relative w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl border border-line bg-surface p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           ref={closeRef}
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-3 top-3 rounded-xl p-2 text-zinc-500 hover:bg-white/5 hover:text-white"
+          className="absolute right-3 top-3 rounded-xl p-2 text-faint hover:bg-raised hover:text-ink"
         >
           <X className="h-4 w-4" />
         </button>
 
         <div className="text-center">
           <div className="mx-auto mb-3 text-4xl" aria-hidden="true">{pending ? '🚀' : '🎉'}</div>
-          <h2 className="text-xl font-black text-white">
+          <h2 className="text-xl font-black text-ink">
             {pending ? 'Your app is on its way' : firstPublish ? 'Your app is live' : 'Update published'}
           </h2>
-          <p className="mt-1 text-[12px] leading-relaxed text-zinc-400">
+          <p className="mt-1 text-[12px] leading-relaxed text-muted">
             {pending
               // HONESTY (rule 2): the publish succeeded, but the link did not answer when we checked.
               // Saying "live" here and handing over a link that shows an error would be the worst
@@ -161,8 +161,8 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
           </p>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-center">
-          <span className="break-all text-sm font-bold text-emerald-300">{prettyUrl(url)}</span>
+        <div className="mt-4 rounded-2xl border border-line bg-well px-4 py-3 text-center">
+          <span className="break-all text-sm font-bold text-success">{prettyUrl(url)}</span>
         </div>
 
         {/* Open · Copy · Share. SHARE IS NOT AN AFTERTHOUGHT: the first thing a person does with their
@@ -173,22 +173,22 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-500"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-on-accent hover:bg-emerald-500"
           >
             <ExternalLink className="h-3.5 w-3.5" /> Open
           </a>
           <button
             onClick={copy}
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10"
+            className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-raised py-2.5 text-xs font-bold text-body hover:bg-raised-hover"
           >
-            {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? 'Copied' : 'Copy'}
           </button>
           <a
             href={whatsappShareUrl(url, appName)}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2.5 text-xs font-bold text-zinc-200 hover:bg-white/10"
+            className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-raised py-2.5 text-xs font-bold text-body hover:bg-raised-hover"
           >
             <Share2 className="h-3.5 w-3.5" /> Share
           </a>

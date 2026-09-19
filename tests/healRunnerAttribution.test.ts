@@ -167,6 +167,9 @@ describe('the fast-lane shadow ledger is observational, by construction', () => 
   it('the real ledger is untouched — the bill must be byte-identical to before', () => {
     // The whole safety claim of this change: measurement only.
     expect(agentv3).toContain('const providerLedger = createProviderUsageLedger()');
-    expect(agentv3).toContain('providerLedger.add(used, cacheRead > 0');
+    // NOTE 2026-09-18: the call became multi-line when it gained the options argument
+    // (producedNothing + phase). What this case guards is unchanged — the REAL ledger is still fed by
+    // the real path, so the shadow ledger remains measurement only and the bill is unaffected.
+    expect(agentv3).toMatch(/providerLedger\.add\(\s*\n\s*used,\s*\n\s*cacheRead > 0/);
   });
 });

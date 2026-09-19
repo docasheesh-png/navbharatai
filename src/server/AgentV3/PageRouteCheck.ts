@@ -387,18 +387,33 @@ export function summarizePageCheck(
    * away by the marker grep, so every failure of this check looked identical from the outside.
    */
   stdout?: string | null,
-): { ok: boolean; summary: string } {
+): { ok: boolean; ran: boolean; summary: string } {
   // "Nothing to check" and "the check produced nothing" are different facts, and only the first is good
   // news. Collapsing them would have reported a check that never ran as a clean result — which is what
   // the NODE_PATH bug above would have done on every single build.
+  // 🔴 `ran` IS THE HALF THE MESSAGE ALREADY HAD AND THE CODE DID NOT (autopsy c6e4c6ff, 2026-09-18).
+  // The summary below has always been honest — "it produced no result, so nothing about those pages was
+  // verified" — but the route could only read `ok`, so it recorded **PAGE_RENDER_FAILED**: a failure
+  // verdict on six routes nobody ever opened. Meanwhile the release gate, which guards its own read on
+  // `pageResults.length > 0`, correctly called the same check SKIPPED. One build report carried both
+  // sentences about one check, and the gate was the one telling the truth.
+  //
+  // This is the JOURNEY_PASSED bug mirrored: there, zero results were coded as a PASS; here, as a
+  // FAILURE. Same root cause — a two-state verdict for a three-state fact — and the same fix
+  // `summarizeJourneys` already took. Its lesson, verbatim: "The message was honest; the code was not,
+  // and the code is what a reader scanning a report sees."
   if (results.length === 0) {
     return attempted > 0
       ? {
         ok: false,
+        ran: false,
         summary: `The page-render check could not be completed for ${attempted} route${attempted === 1 ? '' : 's'} — it produced no result, so nothing about those pages was verified.`
           + browserScriptFailureNote(parseScriptDiagnostic(stdout)),
       }
-      : { ok: true, summary: 'No additional page routes were found to check.' };
+      // Nothing to check is not a pass either: reporting "all N routes rendered" when N is zero is the
+      // same false claim in the opposite direction. `ok` stays true so it is not a warning; `ran` is
+      // false so it can never be coded as evidence the pages work.
+      : { ok: true, ran: false, summary: 'No additional page routes were found to check.' };
   }
   const bad = results.filter((r) => r.verdict !== 'ok');
   // Performance is reported ALONGSIDE the render verdict, never as one: a slow page still renders, and
@@ -411,10 +426,11 @@ export function summarizePageCheck(
   // still rendered, and failing a build over it would be a false alarm about a working app.
   const a11y = a11ySummary(results);
   if (bad.length === 0) {
-    return { ok: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.${perf}${a11y}` };
+    return { ok: true, ran: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.${perf}${a11y}` };
   }
   return {
     ok: false,
+    ran: true,
     summary: `${bad.length} of ${results.length} page route${results.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}.${perf}${a11y}`,
   };
 }

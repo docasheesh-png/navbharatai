@@ -56,7 +56,7 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
   return (
     <div className="fixed inset-0 z-[150] flex items-end sm:items-center sm:justify-center">
       <div
-        className="absolute inset-0 bg-black/70 cursor-pointer touch-manipulation"
+        className="absolute inset-0 bg-scrim cursor-pointer touch-manipulation"
         onClick={() => { if (!sending) onCancel(); }}
         aria-hidden="true"
       />
@@ -64,20 +64,20 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
         role="dialog"
         aria-modal="true"
         aria-label="Describe the problem"
-        className="relative w-full sm:max-w-lg bg-zinc-900 border border-zinc-700 shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh]"
+        className="relative w-full sm:max-w-lg bg-card border border-line shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh]"
       >
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-line shrink-0">
+          <AlertTriangle className="w-4 h-4 text-warn shrink-0" />
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-100 truncate">What went wrong?</div>
-            {buildLabel && <div className="text-[11px] text-zinc-500 truncate">{buildLabel}</div>}
+            <div className="text-sm font-semibold text-body truncate">What went wrong?</div>
+            {buildLabel && <div className="text-[11px] text-faint truncate">{buildLabel}</div>}
           </div>
           <button
             type="button"
             onClick={onCancel}
             disabled={sending}
             aria-label="Cancel"
-            className="ml-auto p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40 shrink-0 touch-manipulation"
+            className="ml-auto p-1.5 rounded-lg text-muted hover:text-body hover:bg-raised disabled:opacity-40 shrink-0 touch-manipulation"
           >
             <X className="w-4 h-4" />
           </button>
@@ -91,26 +91,26 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
             maxLength={REPORT_NOTE_MAX}
             rows={5}
             placeholder="Tell us what happened in your own words — what you expected, and what you got instead. For example: “the Save button does nothing”, “it built a to-do app but I asked for a shop”, “the page is blank on my phone”."
-            className="w-full resize-y rounded-xl bg-zinc-950 border border-zinc-700 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 leading-relaxed"
+            className="w-full resize-y rounded-xl bg-surface border border-line px-3 py-2.5 text-sm text-body placeholder-faint focus:outline-none focus:border-indigo-500 leading-relaxed"
           />
           <div className="mt-1.5 flex items-center gap-2 text-[11px]">
-            <span className="text-zinc-500">
+            <span className="text-faint">
               Your build details are attached automatically — you only need to describe the problem.
             </span>
             {/* The counter appears only when it starts to matter. A permanent 2000-character counter
                 is noise; one that arrives near the limit is a warning. */}
             {left <= 200 && (
-              <span className={`ml-auto tabular-nums shrink-0 ${left <= 0 ? 'text-red-400' : 'text-amber-400'}`}>{left}</span>
+              <span className={`ml-auto tabular-nums shrink-0 ${left <= 0 ? 'text-danger' : 'text-warn'}`}>{left}</span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-zinc-800 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center gap-2 px-4 py-3 border-t border-line shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <button
             type="button"
             onClick={onCancel}
             disabled={sending}
-            className="px-3 py-2 rounded-xl text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+            className="px-3 py-2 rounded-xl text-sm text-muted hover:bg-raised disabled:opacity-40 touch-manipulation"
           >
             Cancel
           </button>
@@ -118,7 +118,7 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
             type="button"
             onClick={() => onSend(note)}
             disabled={sending}
-            className="ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold touch-manipulation"
+            className="ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-on-accent text-sm font-semibold touch-manipulation"
           >
             {sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : 'Send report'}
           </button>

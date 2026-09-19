@@ -144,20 +144,20 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
   };
 
   return (
-    <div className="flex-1 h-full overflow-auto bg-[#0d1117] p-6 space-y-5">
-      <h2 className="text-lg font-black text-white tracking-tight">Community Gallery</h2>
+    <div className="flex-1 h-full overflow-auto bg-surface p-6 space-y-5">
+      <h2 className="text-lg font-black text-ink tracking-tight">Community Gallery</h2>
 
       {/* Remix needs a plan — the offer, with a real way to take it. */}
       {needsPlan && (
         <div className={cn(cardClasses(), 'p-5 space-y-3 border-indigo-500/30 bg-indigo-500/5')}>
           <div className="flex items-center gap-2">
-            <GitFork className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-sm font-black text-white uppercase tracking-tight">
+            <GitFork className="w-4 h-4 text-accent-text" />
+            <h3 className="text-sm font-black text-ink uppercase tracking-tight">
               {needsPlan.signIn ? 'Sign in to remix this app' : 'Remixing is part of a hosting plan'}
             </h3>
           </div>
-          <p className="text-[11px] text-[#c9d1d9] leading-relaxed">{needsPlan.message}</p>
-          <p className="text-[11px] text-[#8b949e] leading-relaxed">
+          <p className="text-[11px] text-body leading-relaxed">{needsPlan.message}</p>
+          <p className="text-[11px] text-muted leading-relaxed">
             A plan also removes the "Made with NavBharatAI" badge, connects your own domain, and keeps
             NavBharatAI ad-free for you. It is paid from your normal wallet balance — there is no card
             to add.
@@ -169,7 +169,7 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
             <Button variant="secondary" onClick={() => setNeedsPlan(null)}>Not now</Button>
           </div>
           {!onOpenPlans && (
-            <p className="text-[10px] text-[#8b949e]">Open Wallet &amp; Billing from the sidebar menu to start a plan.</p>
+            <p className="text-[10px] text-muted">Open Wallet &amp; Billing from the sidebar menu to start a plan.</p>
           )}
         </div>
       )}
@@ -177,14 +177,14 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
       {/* ── Publish your own ─────────────────────────────────────────────────────────────────── */}
       <div className={cn(cardClasses(), 'p-5 space-y-3')}>
         <div className="flex items-center gap-2">
-          <Upload className="w-4 h-4 text-emerald-400" />
-          <h3 className="text-sm font-black text-white uppercase tracking-tight">Share your app</h3>
+          <Upload className="w-4 h-4 text-success" />
+          <h3 className="text-sm font-black text-ink uppercase tracking-tight">Share your app</h3>
         </div>
         {!user ? (
-          <p className="text-[11px] text-[#8b949e]">Sign in to share your app with other people.</p>
+          <p className="text-[11px] text-muted">Sign in to share your app with other people.</p>
         ) : (
           <>
-            <p className="text-[11px] text-[#8b949e]">
+            <p className="text-[11px] text-muted">
               Other people can open your app, read how it was built, and start their own from it.
               Your environment files and keys are never published — and if a key is still inside your
               code, NavBharatAI refuses to publish and tells you exactly where it is.
@@ -193,35 +193,35 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What does it do?" />
             <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags, comma separated (shop, hindi, invoice)" />
             <Button size="sm" onClick={publish} disabled={publishing || !title.trim() || !description.trim()}
-              className="uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700">
+              className="uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 text-on-accent">
               {publishing ? 'Checking…' : 'Send for review'}
             </Button>
           </>
         )}
 
-        {message && <div className="text-[11px] text-amber-300">{message}</div>}
+        {message && <div className="text-[11px] text-warn">{message}</div>}
         {blockers.length > 0 && (
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-[11px] font-bold text-red-400">
+            <div className="flex items-center gap-2 text-[11px] font-bold text-danger">
               <AlertTriangle className="w-3 h-3" /> Remove these before publishing
             </div>
             {blockers.map((b, i) => (
-              <div key={i} className="bg-black/30 rounded px-3 py-1.5 text-[10px]">
-                <span className="font-mono text-amber-300">{b.path}:{b.line}</span>
-                <span className="text-[#8b949e]"> — {b.message}</span>
+              <div key={i} className="bg-well rounded px-3 py-1.5 text-[10px]">
+                <span className="font-mono text-warn">{b.path}:{b.line}</span>
+                <span className="text-muted"> — {b.message}</span>
               </div>
             ))}
           </div>
         )}
 
         {mine.length > 0 && (
-          <div className="pt-2 border-t border-white/5 space-y-1">
-            <div className="text-[11px] font-bold text-[#8b949e]">Your submissions</div>
+          <div className="pt-2 border-t border-line space-y-1">
+            <div className="text-[11px] font-bold text-muted">Your submissions</div>
             {pagedMine.visible.map((m) => (
               <div key={m.id} className="flex items-center justify-between text-[11px]">
-                <span className="text-zinc-200 truncate">{m.title}</span>
+                <span className="text-body truncate">{m.title}</span>
                 <span className={cn('shrink-0 uppercase text-[9px] font-bold tracking-widest',
-                  m.status === 'approved' ? 'text-emerald-400' : m.status === 'rejected' ? 'text-red-400' : 'text-amber-400')}>
+                  m.status === 'approved' ? 'text-success' : m.status === 'rejected' ? 'text-danger' : 'text-warn')}>
                   {m.status === 'pending' ? 'waiting for review' : m.status}
                   {m.reviewNote ? ` — ${m.reviewNote}` : ''}
                 </span>
@@ -236,40 +236,40 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
       <div className={cn(cardClasses(), 'p-5 space-y-3')}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-sky-400" />
-            <h3 className="text-sm font-black text-white uppercase tracking-tight">Apps people have shared</h3>
+            <Globe className="w-4 h-4 text-info" />
+            <h3 className="text-sm font-black text-ink uppercase tracking-tight">Apps people have shared</h3>
           </div>
           <div className="flex items-center gap-2">
-            <Search className="w-3 h-3 text-zinc-500" />
+            <Search className="w-3 h-3 text-faint" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className="h-7 text-[11px]" />
           </div>
         </div>
 
         {loading ? (
-          <p className="text-[11px] text-[#8b949e]">Loading…</p>
+          <p className="text-[11px] text-muted">Loading…</p>
         ) : apps.length === 0 ? (
-          <p className="text-[11px] text-[#8b949e]">
+          <p className="text-[11px] text-muted">
             {query ? 'Nothing matches that search.' : 'No apps have been shared yet — yours could be the first.'}
           </p>
         ) : (
           <div className="space-y-2">
             {pagedApps.visible.map((a) => (
-              <div key={a.id} className="bg-black/30 rounded px-3 py-2 space-y-1">
+              <div key={a.id} className="bg-well rounded px-3 py-2 space-y-1">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-[12px] font-bold text-white truncate">{a.title}</div>
-                    <div className="text-[11px] text-[#8b949e]">{a.description}</div>
+                    <div className="text-[12px] font-bold text-ink truncate">{a.title}</div>
+                    <div className="text-[11px] text-muted">{a.description}</div>
                   </div>
                   <Button size="sm" onClick={() => remix(a)} disabled={!user}
-                    className="shrink-0 uppercase tracking-widest bg-sky-600 hover:bg-sky-700">
+                    className="shrink-0 uppercase tracking-widest bg-sky-600 hover:bg-sky-700 text-on-accent">
                     <Sparkles className="w-3 h-3 mr-1" /> Remix
                   </Button>
                 </div>
-                <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+                <div className="flex items-center gap-3 text-[10px] text-faint">
                   <span>by {a.authorName}</span>
                   <span>{a.fileCount} files</span>
                   <span className="flex items-center gap-1"><GitFork className="w-3 h-3" />{a.remixCount}</span>
-                  {a.tags.map((t) => <span key={t} className="px-1.5 py-0.5 rounded bg-white/5">{t}</span>)}
+                  {a.tags.map((t) => <span key={t} className="px-1.5 py-0.5 rounded bg-raised">{t}</span>)}
                 </div>
               </div>
             ))}

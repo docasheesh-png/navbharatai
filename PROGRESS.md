@@ -66600,6 +66600,46 @@ TeamCollaboration's two badge labels on Light (`text-muted` on `bg-well` over an
 lock covers surface, card and raised, not `well`); and white on `bg-emerald-600` at 3.65:1 on every
 theme, which still wants a `bg-success` fill token rather than per-button patches.
 
+## 2026-09-18 — #3070 MERGED, and PR J: twenty-five files on the new `main`
+
+**The admin merged #3070 at 10:06 UTC** — steps A through I, 55 files, literals 11,487 → 2,825, five
+themes down to three, the ratchet and the codemod live on `main` and deploying to Cloud Run. This
+branch was restarted from the merged `main` per the constitution's merged-PR rule rather than stacked
+on the old history.
+
+**Twenty-five files in one run, the largest batch yet because the remaining files are small:**
+ConnectedServices 60 → 0 · CodeMinifier 58 → 11 · VoiceToApp 56 → 0 · LoadBoard 55 → 0 · ReportSheet
+54 → 2 · HostingPlanCard 54 → 0 · AppLockSettings 54 → 0 · VirtualKeyboard 52 → 7 ·
+ActivityTimelineRow 51 → 0 · AuthSettings 51 → 0 · StorageSettings 49 → 0 · NextSuggestionsBulb 48 → 1
+· ProfessionalChat 48 → 2 · CodeVersioning 46 → 3 · RepoAnalystTool 46 → 0 · ReportsListView 45 → 0 ·
+**Editor 44 → 5** · PublishToNavStore 44 → 0 · DatabaseSettings 44 → 0 · AICodeReview 43 → 3 ·
+SecretRequestCard 42 → 1 · AppLockGate 41 → 0 · NotificationBell 39 → 0 · ReferralPanel 39 → 3 ·
+BotBuildHelp 36 → 4. Baseline **2,825 → 1,668** (132 files).
+
+**✅ A second open item closed: Code Studio's editor TABS.** PR F recorded them as a later-PR file at
+**1.82:1** on Light — `bg-[#2d2d2d] text-[#969696]`, a fixed dark tab whose grey label compat remapped
+to Light's muted grey. `Editor.tsx` was in this batch and the tab is now `bg-[#2d2d2d] text-on-accent`:
+white on the fixed dark tab, correct on every theme. (Monaco's own `vs-dark` syntax theme on Light is a
+separate product decision and stays open.)
+
+**🔴 One more refinement of the fixed-subtree rule, and the bug hiding underneath it.** AICodeReview's
+connect-error strip is `text-warn bg-amber-500/10` inside a fixed `bg-[#0f141b]` header. A 10% tint does
+not replace the box beneath it, so on Light a dark-amber label sat on near-black. The "does this element
+have its own background?" guard now requires a **resting, OPAQUE** background (`hasOwnOpaqueBackground`).
+- ⚠️ **And the first version of that helper was right by accident, which the reversion proof caught.**
+  Its value pattern `[\w[\]#.]+` has no hyphen, so on `bg-amber-500/10` it matched only `amber`, failed
+  the trailing lookahead on the `-`, and returned false — the right answer for the wrong reason, and the
+  WRONG answer for every opaque hyphenated fill (`bg-indigo-600` read as "no background at all"). The
+  reversion test did not fail when I deleted the opacity check, which is the only reason I looked. **A
+  test that passes when you delete the line it is meant to protect is not a test.** Both halves are now
+  proven by reversion separately, and the whole batch was restored and re-migrated under the fix.
+
+**Three source guards re-anchored, each with the reason recorded in place:** `themeBrandText.test.ts`
+asserted the hosting slab carried `bg-[#21262d]` — it now names `bg-raised` directly instead of relying
+on compat to remap a GitHub-dark literal, so the test's own claim ("a surface class the theme layer
+maps, not a black overlay") is satisfied more strongly than before; and `mobileNav.test.ts` x2 asserted
+`border-white/5` inside strings whose real claim is the compact header and composer PADDING, so only
+the border class moved to `border-line`.
 ## 2026-09-18 — "hospital management system" was scored 5, the same as the word "hi" (the admin's failure table, part 2)
 
 Part 1 (#3076) made every build ENDING nameable. This is the first fix aimed at the failure RATE
@@ -66837,6 +66877,190 @@ The guard is what makes that discoverable instead of silent.
 session's theme work (PRs C and G) after #3071 merged. That file was deliberately NOT touched here —
 this change is server-side only.
 
+## 2026-09-18 — A request the signals read every letter of and recognised NOTHING is not a greeting either
+
+**The sibling of the 2026-09-17 script fix, which was never hunted (rule 3).** `signalsCouldNotRead`
+covers a request whose SCRIPT the ASCII patterns cannot read. This is the case where they read every
+letter and recognise nothing — and it is the commoner one by far.
+
+Measured on `main` before the change, with `analyzeRequest({ prompt })`:
+
+```
+ 58 | complex_app  | ecommerce website
+  5 | chat         | E commerce website          ← one SPACE
+  5 | chat         | restaurant billing app with menu, KOT, GST invoice, table mgmt
+  5 | chat         | kirana store billing software with stock, customers, udhaar khata
+  5 | chat         | medical store app — batch wise stock, expiry alert, GST bill, ledger
+  5 | chat         | gym management app: members, plans, fee reminders, attendance
+  5 | chat         | coaching institute app with batches, fees, tests, results
+  5 | chat         | salon appointment app with services, staff, slots, bills
+  5 | chat         | society management app: flats, maintenance bills, complaints, visitors
+```
+
+**Five is the score of the word "hi".** The kirana app's full verdict was
+`startTier: 'gemini'`, `escalationPath: ['gemini','haiku','sonnet']`, **`ambiguous: false`** — a
+confident wrong answer about exactly the apps NavBharatAI exists to build. And `complexityRouting`
+reads that 5 against a line of 40 with a ±3 margin, so `AGENTV3_COMPLEX_TO_KIMI` — shipped ON by
+default on 2026-09-17 to open big apps on KIMI — could not fire for any of them.
+
+### The fix introduces no new number, and no new keyword
+
+1. **`classify()`** returns the task type AND whether any signal actually matched. `detectTaskType`
+   ended in a bare `return 'chat'`, so "this is a greeting" and "nothing fired" were the same answer.
+   One list of signals, not two — a predicate that re-tested them would be free to drift.
+2. **`signalsFoundNothing`** is that state, exported and pure. Deliberately NOT a new keyword list:
+   adding "billing", "kirana", "salon" would fix today's five and leave tomorrow's five.
+3. The floor is **`scriptNeutralFloor`, unchanged** — the same function, the same `BASE_SCORE` bands,
+   the same raise-only rule. Its evidence (enumerated parts, length) never needed a vocabulary, so it
+   was always equally valid for English; it had simply only been wired to the script case.
+4. **`needsSecondOpinion`** fires for the same state, gated on `scriptNeutralFloor > 0` so a greeting,
+   a question or a three-word ask buys no model call at all.
+5. **`e-?commerce` → `e[\s-]?commerce`.** Same keyword, one separator wider. This is PR #3077's
+   recorded open case, and it was a one-space defect rather than a routing question.
+
+After, measured:
+
+```
+  5 | gemini  | ask-model: no  | hi / thanks bhai / what can you generate?
+ 15 | gemini  | ask-model: no  | build a todo app
+ 58 | sonnet  | ask-model: no  | ecommerce website  AND  E commerce website
+ 30 | haiku   | ask-model: YES | kirana store billing software …
+ 30 | haiku   | ask-model: YES | society management app: flats, maintenance bills …
+ 58 | sonnet  | ask-model: no  | ek hospital management system banao …
+```
+
+### Why the score and not the tier (rule 6, said plainly)
+
+PR #3077 recorded this class and did not fix it, for a stated reason: *"that score also drives
+`startTier` and `escalationPath`, so changing it trades one problem for a possible other."* That is
+right, and it is why **no threshold moved**. The floor lands on `BASE_SCORE.coding` (30), a band this
+module's own docblock already reasons about — *"the light band keeps the one-shot and simple lanes
+and the same 80-step ceiling; only the score-58 band changes any of those."* And `ambiguous` was
+traced first: **nothing outside `RequestAnalyser` reads it.**
+
+🔴 **STILL OPEN:** a `complex` verdict from the refiner drives only the KIMI opener (`buildIsComplex`);
+it does not raise `startTier`. So a kirana app now starts in the light band and opens on KIMI, but a
+model saying "complex" still cannot move it to the standard band. That is a second change with its
+own evidence, not a line to slip in here.
+
+### Tests
+
+`tests/theSignalsReadEveryLetterAndRecognisedNothing.test.ts` — 9 cases: the seven real requests, the
+things that must cost nothing, the raise-only rule, the three e-commerce spellings, and a regression
+guard on the script case this is a sibling of.
+
+**Proven by reversion** — each of these turns the suite red, and each was restored:
+- `const unread = unreadable || signalsFoundNothing(prompt)` → `unreadable`
+- removing the new branch in `needsSecondOpinion`
+- `e[\s-]?commerce` → `e-?commerce`
+
+## 2026-09-18 — Autopsy b6f88a72 (Gita reader): the app was fine; four things we said about it were not
+
+Free Weak build, **6.1 min**, real cost $0.38, `ok: true`, release gate YELLOW. The app was genuinely
+built and genuinely rendering. Every defect below is in what the ENGINE said about it.
+
+**Ledger — 251 events, 0 errors, 7 warnings.**
+✅ self-healed 4 · 🔀 workaround 1 (GLM benched → KIMI) · ⏭️ skipped 2 (journey, test suite) ·
+❌ shipped imperfect 3 (the summary's self-contradiction, vulnerable vite, stale snapshot) ·
+🥵 struggle 5 (label-chase, 6× re-read, 2.7 MB grep, three "I can't size this yet", 25 s dead rung).
+
+### 🔴 1. The user's summary contradicted itself in one message
+
+It said **"Has Favorites / Wishlist — save shlokas from any verse card"** and, six lines later,
+**"⚠️ One thing you asked for isn't in the app yet: wishlist / favorites"**. Both about the same
+working feature.
+
+Root cause, read from `RequirementCoverage.ts`: `artifact` (broad, and it would have matched) is
+tested against `surface` — file and component NAMES — and a **one-file app contributes none**. The
+whole burden then falls on `evidence`, a list of four literal function names
+(`toggleFavourite|isFavourite|addToWishlist|toggleBookmark`); this app's handler is `toggleSave`. So
+it was recorded **confirmedMissing** — stated as fact, not advisory.
+
+It also cost real time: the agent read the evaluator, concluded "the evaluator is looking for the
+literal word", and spent **five `edit_file` calls (one of which failed) renaming a tab label**
+"सहेजे गए" → "पसंदीदा" — to satisfy a detector that reads function names, so the rename could never
+have worked.
+
+**Fixed:** when the surface has no name and `evidence` does not fire, the same broad `artifact`
+pattern is tested against the BODIES — the question this module already asks, asked where a one-file
+app answers it. The list's own comment says `artifact` is broad "so a feature built under a
+reasonable alternate name still counts"; that intent had simply never reached a one-file app. Error
+direction is the justification: broader coverage costs a nag we do not print, the reverse tells a
+user their working feature is missing and buys a heal pass.
+
+### 🔴 2. "in Hindi" was read as an order to TRANSLATE
+
+`requestAnalysis` recorded **`taskType: 'translate'`, score 15, cheapest band** — reproduced exactly:
+`RE.translate` carried `in hindi`, and the prompt opens *"Build a Bhagavad Gita reader **in Hindi**"*.
+
+⚠️ It is worst for precisely the users this app exists for:
+`'ek dukaan ka app banao in hindi with stock, bills, customers'` → **`translate`, score 10**.
+
+**Fixed:** the translation VERB stays (`translate|translation|anuvad|convert to`); the bare language
+phrases go. A real translation request still classifies as one; a request that merely names its
+output language falls through and is floored honestly. The Gita prompt: **15 → 58, cheapest band →
+standard band, `ambiguous: false` → `true`**.
+
+⚠️ **Stated plainly, because it is a behaviour change:** the score-58 band is the one that takes a
+build out of the one-shot and simple lanes. A many-part request that matches no signal now leaves
+the fast lane. That is intended — it is a multi-feature app — but it is not a no-op.
+
+🔎 **This is the THIRD sibling of one class**, and the shape is now unmistakable: the signals said
+`chat` for a script they could not read (fixed 09-17), `chat` when nothing fired (fixed today), and
+`translate` when the WRONG thing fired (this build). A keyword list standing in for understanding,
+reporting `ambiguous: false` each time.
+
+### 🔴 3. The agent's own `grep` tool excluded nothing
+
+One reviewer call carries **`promptChars: 2,709,481`** — a `grep <pattern> .` that walked
+`node_modules/.vite/deps/*.js.map`. It was truncated to ~12k tokens before the model, so the sandbox
+paid for the walk and the model still did not get its answer. **Eight other search paths in the same
+file carry a skip set; `case 'grep'` ran a bare `grep -rn`.** Fixed with that same vocabulary.
+
+### 📋 Recorded, NOT fixed here (rule 6) — each measured from this report
+
+1. **Our own scaffold ships a vulnerable vite.** `vite@5.4.21`, 3 advisories; `npm audit fix`
+   exited 1 because the fix is `vite@8` — a major upgrade. The user did not choose this version;
+   we did. Every build from this template carries it, and the report tells the USER to decide.
+2. **We wrote a Playwright suite and then reported we could not run it.** `E2E_SCAFFOLDED` →
+   `TEST_SUITE_UNVERIFIED` → `RELEASE_GATE: YELLOW` cites "this project HAS a test suite, but it
+   could not be run here". The suite is ours; the YELLOW is self-inflicted.
+3. **`JOURNEY_NOT_DERIVED`** — "no field this check could address honestly (no name, id, placeholder,
+   label or test id)". The app has a search box. It is OUR golden template's input that carries no
+   label, so our own journey check cannot test the app we seeded.
+4. **`PREVIEW_SNAPSHOT_STALE`** — the copy was taken, then the production-defaults and test-scaffold
+   passes changed files. Those passes run after the snapshot on every build, so this is ordering,
+   not chance.
+5. **The reviewer read `src/App.tsx` six times and `src/index.css` five times**, each time told by
+   the tool result that it already had the file, then returned no findings — 71 calls,
+   **1,520,722 input tokens** (1,427,968 cache-read).
+6. **Three times in six minutes the user was told "still working out how big it is."** The ETA was
+   inside its own band (368 s actual vs a 200–422 s band) and was never shown because it was
+   unevidenced.
+7. **A static Gita reader was given a Neon `DATABASE_URL` and a `RENDER_API_KEY` in `.env`** from
+   saved keys. `.gitignore` covers `.env`, so nothing leaked — but an app with no server should not
+   be handed a deploy credential.
+8. **`glm-4.7-flashx` was benched at 25 s** for answering below a usable rate — the first real
+   evidence on the rung that became the Weak/Normal lead on 2026-09-17.
+
+### 📌 The flag the admin actually set did not fire, and the report says so honestly
+
+`PROJECT_MODE`: *"Software Project Mode is ON for this account, but this prompt is not a mega-project
+— normal path. Signals: 0 enumerated feature lines."* `detectMegaProject` counts enumerated
+**lines**; this prompt is one paragraph of commas. So this build did not test the thing it was
+meant to test, and the honest way to test it is a prompt with ≥8 feature LINES and a big-software
+noun.
+
+### Tests
+
+`tests/aOneFileAppKeepsItsFeaturesInline.test.ts` (6) — the shipped app's own code, the genuine
+missing feature that must still be reported, the multi-file case, the no-bodies case, and a
+source-anchored guard on the grep command.
+`tests/theSignalsReadEveryLetterAndRecognisedNothing.test.ts` (+2 = 11) — the real prompt, the
+dukaan prompt, and the genuine translation requests that must not regress.
+
+**Proven by reversion** — each turns its suite red, and each was restored: `in hindi` back in the
+translate signal · the inline-artifact line removed · the excludes dropped from the grep command.
 ## 2026-09-18 — THE DONE SIGNAL: the engine computed "this app is finished" and threw the answer away
 
 Admin asked for this by name. What shipped is **the measurement first and the steer second**, and the
@@ -67270,6 +67494,34 @@ after a botched restore is exactly the false green this repo warns about.
 
 **Next in this series (admin: "ek ek kar ke sabhi build karo"):** F (reviewer cheap on green), then
 E (time-to-first-render + who wrote after green), then B/C on E's numbers. D never.
+
+## 2026-09-18 — Option E: who wrote after the app was green (`TIME_TO_FIRST_RENDER`, `POST_GREEN_WRITES`)
+
+Third of the series, stacked on Option A (it needs A's first-render moment). Before either stronger
+protection is built — verify-and-revert on every post-green write, or arming the freeze before the
+~36-pass gate stretch — this answers the question both depend on, because **as of today no report
+shows a pass breaking a green app** (and #3084 found the same for the loop and shipped
+`READY_BEFORE_END` first).
+
+- `TIME_TO_FIRST_RENDER` — recorded once on A's proof (`BuildDiagnostics.recordTimeToFirstRender`),
+  the render-side sibling of `TIME_TO_FIRST_CALL`. "4 minutes" is now a number.
+- `greenFreeze.setWriteObserver` — a second observer at the SAME chokepoint as the refusal observer,
+  fired on every ALLOWED `assertWriteAllowed` with `currentPass()` (null = the build loop). One
+  place, so nothing is threaded through the twenty sites that persist a file; infra paths excluded.
+- `postGreenWrites.ts` (pure) — the ledger, grouped by writer, read against the END verdict
+  (`endVerdictFrom(previewGreen, previewProvenBroken)`, green wins as in Green Stop). Severity is the
+  finding: nothing wrote / wrote-and-rendered / unchecked → info; **wrote and PROVEN BROKEN → warning
+  naming the writers.** Bounded at 2,000 entries and `MAX_NAMED_PASSES` = 6 in the line.
+- Both codes registered as `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — measurements of the engine,
+  never findings about the user's app.
+
+**What decides B/C:** a run of real builds. If `POST_GREEN_WRITES` warnings appear and name the same
+writers, that writer class is the target (a gate pass → C with evidence; the build loop → B). If they
+do not appear, the 10–20 minutes are not breakage and "make the first draft right" is the lever.
+
+**Tests:** `tests/whoWroteAfterTheAppWasGreen.test.ts` — the grouping, all four verdict lines, the
+observer at the chokepoint (allowed vs refused are disjoint; infra excluded; a throwing observer
+never breaks a write; dispose), idempotent timing, and source-anchored wiring guards.
 ---
 
 ## 2026-09-18 — 🔴 FOUR VARIABLES HELD ONE FACT, AND THE TWO PRODUCERS DID NOT AGREE (evidence ledger, 7th appearance)
@@ -67348,8 +67600,253 @@ curl count as proof, and making the gate fill unconditional — each turns the s
 - **The `useState of null` from autopsy `95598899` remains unexplained** — it needs the failing file's
   contents, which the report does not carry, and no plausible-sounding guess is recorded in its place.
 
+## 2026-09-18 — AUTOPSY `e9b25b08`: a build ORDER was built as an EDIT of our own scaffold, and it blocked the admin's first Project-Mode test
+
+**The build:** free/Weak, `"Build a search engines like google"`, 90 seconds, **stopped by the user**,
+₹0 (correctly). Delivered by `kimi-k2.7-code` after the planned `glm-4.7-flashx` lead rung was benched.
+
+### The five buckets (honest counts)
+
+- ✅ **Self-healed: 0.**
+- 🔀 **Worked around: 1** — GLM FlashX *"answering far below a usable rate after 31s — abandoned"*,
+  benched; KIMI made the build's only model call.
+- ⏭️ **Skipped: 2** — Software Project Mode created no plan (*"this turn is not a fresh build"*);
+  typecheck / page-render / journey all skipped with no preview.
+- ❌ **Still broken: 4** — design consistency 62/100 (grade C, 16 colours); accessibility 84/100 (two
+  buttons with no accessible name); release gate RED; **the ₹0 reason was false** (below).
+- 🥵 **Struggle: 5** — 6 s setup · **31 s inside a dead GLM call (34% of the build)** · 47 s first
+  model call · **four `read_file` calls on one scaffold file at 9–15 s each** · and the user pressing
+  Stop at 69 seconds having been shown nothing built. Sandbox: 3.0 min up, **2.7 min (89%) idle**.
+
+### 🔴 The chain, every link measured on `main` rather than assumed
+
+| | |
+|---|---|
+| 1 | `classifyIntentWithConfidence("Build a search engines like google")` → **`new_build`, HIGH** |
+| 2 | HIGH confidence ⇒ the intention reader is **deliberately never consulted** |
+| 3 | `isExplicitCompleteBuild(...)` → **false** (only a prompt carrying the literal word "complete"/"full" passes) |
+| 4 | so the route's deterministic net forced `new_build` → `edit_existing` |
+| 5 | the workspace held **the platform's own golden scaffold**, and `projectExists = fileCount > 0` cannot tell that from the user's app |
+| 6 | user told *"✏️ Editing your existing app (4 source files)"* about an app they never wrote |
+| 7 | `PROJECT_MODE: "this turn is not a fresh build, so no plan was created"` — **the admin's own first test of the flag they had switched on that morning** |
+
+Measured, same run:
+
+```
+   edit      | Build a search engine like google
+   edit      | build a todo website
+   edit      | ek dukaan ka billing app banao
+   edit      | make a game like ludo
+FRESH-BUILD  | Create a complete Hospital OPD Management System
+```
+
+🔴 **THE 2026-07-07 REPORT NAMED THIS CAUSE AND IT WAS TREATED IN VOCABULARY.** Its own words, still
+in `IntentClassifier.ts`: *"a handful of scaffold/test files had been restored from history
+(projectExists=true)"*. The remedy chosen then was `isExplicitCompleteBuild`, a PROMPT guard — so the
+cause survived, and two months later a prompt one word outside that guard hit it again.
+
+### The fixes (all five reversion-proven)
+
+**1 · The net asks about the USER's app, not about files on disk.** `userProjectFiles.ts` —
+`SCAFFOLD_PATHS` is **derived** from `goldenBaseFiles`, never re-listed, so adding a scaffold file
+updates it automatically. A workspace holding only our starter files holds no app of the user's.
+🔒 It cannot endanger a real app: any app a user has built carries files the scaffold does not, so the
+net still fires. 🔒 **UNKNOWN MEANS YES** — an unreadable listing answers `true`, today's behaviour
+exactly, and the only direction in which this could reach a real app.
+⚠️ Stated plainly: `src/App.tsx` IS a scaffold path, so a one-file app reads as "no app of your own
+yet" and an explicit build order there starts a fresh build. That is what the order asked for.
+
+**2 · A safety net must not overrule the signal it stands in for.** `SmartIntent.readerAnswered` is
+true only when the LLM reader itself answered; the net skips a `new_build` it decided. The net's own
+comment names its population — *"even if the LLM is down/slow"* — and every one of those paths
+(high-confidence keyword, timeout, failure, "unclear") still returns `false` and is byte-identical.
+⚠️ **This alone does NOT fix the reported build, and that was measured rather than assumed** — a plain
+build order is HIGH confidence, so the reader never sees one. My first version was exactly that guard;
+my own test caught it. The two guards answer different halves and only together close the class.
+
+**3 · The downgrade is no longer silent.** `BUILD_ORDER_READ_AS_EDIT` (info) names the file count, how
+many are the user's own, and whether the reader ran. Registered in `PROCESS_ONLY_CODES` and
+`NEVER_SUGGEST` — how a turn was ROUTED is a fact about our engine, never a finding about their app.
+That silence is why this class survived from July to today: the report said only *"not a fresh build"*,
+with nothing anywhere saying why it was not one.
+
+**4 · A build the user stopped is not an empty build.** `zeroBillReasonFor` — three states where the
+route had a two-branch ternary, so a stop was recorded as *"empty build (0 files produced)"* under a
+comment reading *"the build failed"*. Both false. Third instance of the `JOURNEY_PASSED` /
+`PAGE_RENDER_FAILED` class. **The bill is unchanged (₹0 in every branch); only the sentence stops lying.**
+
+**Test:** `tests/aBuildOrderIsNotAnEdit.test.ts` — 25 cases, **proven by reversion five ways**
+(scaffold not excluded → 3 fail · unknown-means-empty → 1 · `readerAnswered` always false → 1 · the
+code dropped from `PROCESS_ONLY` → 1 · the stopped branch removed → 1).
+
+### Still open, recorded rather than guessed (rule 6)
+
+1. **`glm-4.7-flashx` has now failed to lead TWO consecutive reports** — `2ec15a71` (abandoned at 18 s)
+   and this one (31 s). `CLAUDE.md`'s own 2026-09-17 entry calls its coding quality unmeasured and says
+   to watch it. The ladder is admin-mandated, so this is a decision, not a fix: on a third report the
+   recommendation is to drop FlashX and let KIMI lead Weak/Normal.
+2. **`read_file` took 9–15 seconds per call**, four times on one file — roughly half of a 90-second
+   build. Cause not established from this report.
+3. **`framework: python-fastapi`** was recorded for an app whose only service is *"frontend on port
+   5173"* and whose file is `index.html`. A misdetection with real consequences (scaffold, run command);
+   not investigated here.
+4. **"A search engine like Google" is something this platform cannot build** — it needs a crawler and an
+   index, not a web app — and the engine said nothing. Second report supporting an honest
+   capability gate (the VPN-app build spent 18 minutes on the same class).
+## 2026-09-18 — Admin Security → BUILT APPS: every user's built app, twelve at a time, each with a preview (branch `claude/every-built-app-has-a-preview`)
+
+Admin, verbatim, with a screenshot of the Security tab: *"1. admin panel ki security me jitni bhi apps dikh
+rahi hai, chahe woh live hai ya offline, sabhi ka preview chalna chahiye. 2. is security wale option me
+sabhi users ki build app dikhni chahiye. 3. ek dam se sara data load na ho, 12-12 ke set me load karwo."*
+
+### What the old panel read, and why it could answer none of the three
+
+`GET /api/admin/deployments` is the PUBLISH registry (`agentv3_deployments`): a record exists only once
+an app has been published, and the panel pulled 200 rows in one request. So a user's app that was built
+and never published was invisible, an offline app had no preview (its only "preview" was the live link it
+no longer had), and everything arrived at once.
+
+**And the screenshot showed a fourth defect nobody had asked about: rows reading LIVE or OFFLINE with
+NOTHING after the badge — no id, no link, no owner.** Root cause in `DeploymentStore`: `setStatus`,
+`markOrphaned` and `setOutboundVerdict` wrote with `set(…, { merge: true })`, which CREATES the document
+when it is absent. Unpublish and restore call `setStatus` for whatever workspace id they were handed, so
+a moderation on an app whose registry record had already been deleted minted a doc holding only
+`{ status, updatedAt }`. A status describes a publish; it cannot be the first thing written about one.
+
+### What ships
+
+- **The source of "built" is the durable FILE store, not the publish registry.** `listWorkspaceAppsPage`
+  (`WorkspaceFileStore.ts`) pages `workspace_files_v3` newest-save-first, resumed from a DOCUMENT
+  SNAPSHOT cursor (exact under this ordering with no composite index), skipping green-guard snapshot
+  keys and emptied indexes and refilling the page (bounded) so twelve means twelve. `ok: false` is a
+  failed read, never "no apps". `getWorkspaceAppsMany` is the batched join for the other direction.
+- **Each page is joined in ONE batched read per store** — `deploymentStore.getMany` (existing) and the
+  new `sandboxStore.getMany` — so a page costs three round trips, never thirty-six.
+- **`adminBuiltApps.ts` (pure):** `parseAppsQuery` (a workspace id → exact; a uid → owner prefix range;
+  a link → registry equality; a fragment → `text`, filtered client-side over loaded rows, said so on
+  screen — a fragment answered server-side is the full scan the admin asked to stop), `publishStateOf`
+  (`live` requires a URL via `isLiveDeployment`, the one definition; a status-only ghost reads **"Not
+  published"**, never Live), `builtAppRow` / `joinBuiltAppRows` (order kept), opaque cursor codec that
+  only ever decodes to a workspace id, `clampPageSize` (default 12, hard cap 48).
+- **`GET /api/admin/apps`** — one page of `BUILT_APPS_PAGE_SIZE`; a `status` filter pages the REGISTRY
+  instead (equality + `__name__` order, the one paging an equality filter can do without a composite
+  index; the response says `order: 'id'`). Orphaned live publishes (`orphaned: true`, files purged, so
+  the file-store list cannot reach them) ride the first page as their own strip — a live site nobody
+  can moderate is the hole `markOrphaned` exists to close. 502 on a failed read.
+- **`POST /api/admin/apps/:workspaceId/preview`** — renders the DURABLE files with the same
+  `renderPreview` the user's pane uses. 🔒 **Never touches a sandbox**: an admin looking at somebody's
+  app must not resume that user's E2B machine. Test-locked by grep against the route block.
+- **`previewPlan` (client):** the SAVED COPY of the last green build (`snapshotUrl`, a real `dist/` on
+  its own subdomain) wins when the row has one; else the in-browser render (labelled "frontend only");
+  else an honest "nothing to preview". Live or offline makes no difference to whether a preview exists.
+- **`admin/BuiltAppsPanel.tsx`** — the list, "Load 12 more", search (Enter), state filter, the preview
+  modal (sandboxed iframe: `src` for the copy, `srcDoc` for the render). Unpublish/Ban still open the
+  dashboard's confirmation dialog (the copy that guards a permanent act was not moved); after an action
+  the panel re-reads THAT row and swaps it in place, so the page and scroll position survive. Ban is
+  offered only where a registry record exists to hold it — on a never-published app it would "succeed"
+  and change nothing.
+- **Ghost writes fixed at the class:** the three methods use `update()` (refuses a missing doc →
+  `false`); `recordFromDoc` names every record by its DOCUMENT id so an old ghost at least shows its id.
+  `listPage`, `listOrphaned`, `findByUrl` added. `src/declarations.d.ts` gains lucide's `Ban` (the
+  dashboard's `XSquare` sits behind a `@ts-ignore`; the shim is the right place).
+- `AppKnowledgeBase`: `admin-built-apps`.
+
+### Tests
+
+`tests/everyBuiltAppHasAPreview.test.ts` — page-size clamp, every query mode, the ghost as "never",
+the three-source join, cursor opacity, owner offset paging, every state's words, the preview plan for
+live AND offline, and source-anchored guards: the three store methods `update` and never merge-set
+(comments stripped), the preview route reads durable files and no actuator/sandbox, the panel asks for
+12. `BuiltAppsPanel.render.test.tsx` — first paint promises nothing it has not read.
+`tests/adminAppModeration.test.ts` re-anchored on the panel (reason recorded in place).
+
+### Open (rule 6)
+
+- The state filter pages by app id, not by date (equality + `__name__` needs no index; equality +
+  `updatedAt` would). The screen says so. A composite index would give date order — an admin console
+  decision, not code.
+- A never-published app cannot be BANNED (nothing in the registry for the deploy gate to re-check). If
+  the admin wants "this workspace may never publish", that is a new pre-publish block, not this panel.
 ---
 
+## 2026-09-18 — A turn that produced NOTHING is our cost, never the user's bill
+
+**The admin's question, verbatim: *"kya ham ₹ kuch jyada hi charge to nahi kar rahe hai??"*** The
+honest answer was that the 4× markup is defensible — at ₹152.90 that build was still far below Bolt
+(~₹360 for the same token volume) and Lovable (₹720–₹1,440 per feature) — and that applying it to
+work which delivered nothing is not.
+
+**The evidence, from build `b6f88a72` (verified from raw token counts, not report fields):** real cost
+$0.398342 (LLM $0.381374 + E2B $0.016968) = ₹38.24, billed $1.593365 = ₹152.90 at ₹95.96/$. Of that,
+the post-build reviewer consumed **~520,000 input tokens — 34% of the build, ≈₹12 — and returned
+`responseChars: 0` on every single call.** The user paid ×4 on it.
+
+### The class: `turnStarvedItsBudget` already names the turn. Its tokens went two different wrong ways.
+
+`floorBudget.ts`'s predicate — no text, no tool call, and either truncated or reasoning-only — is the
+exact definition of "carried nothing a caller can use". What happened to those tokens depended on
+which runner produced them, and both outcomes were wrong in **opposite** directions:
+
+- **A runner that THROWS** (`OpenAiToolRunner`, i.e. every GLM/Kimi rung) rejects before
+  `onTurnComplete` is reached, so the tokens reached **neither the ledger nor the build sink** — real
+  money paid to a provider, recorded nowhere, invisible to the admin cost card *and* to
+  `buildCostCeiling`'s mid-build stop. This is the "abandoned provider call recorded as zero tokens"
+  open root cause from the `b6f88a72` autopsy, closed here.
+- **A runner that does NOT throw** (the Claude path — `AgentRunner` carries its own net at the loop
+  level) returns the starved turn as a plain success, so its tokens went into the sink, the ledger,
+  **and straight onto the user's bill at the full markup.**
+
+### The rule, in one sentence
+
+Those tokens are counted **in full** as OUR cost, and subtracted from the base the user's markup is
+applied to. `src/server/AgentV3/unbilledTurns.ts` owns the whole concept (pure: `billableEntries`,
+`splitUnbilledCost`, `markAbandonedTurn`, `abandonedTurnUsage`); `ProviderModelEntry.unbilled` is an
+optional SUBSET of `usage`, never a deduction from it, so `realProviderCostUsd`, `ledgerCostUsd`,
+`byProvider()` and `total()` all keep seeing every rupee.
+
+🔒 **A clamp that shrank OUR number too would hide our own bleeding on the exact panel used to judge
+it** — the `E2B_USD_PER_HOUR` shape. So the gap is not merely visible, it is *explained*: both the
+normal settle and the watchdog finalizer record `UNBILLED_BARREN_WORK` naming the absorbed rupees.
+The code is in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — what we chose not to charge for is an
+accounting fact about our engine, never a finding about the user's app (the
+provider-error-as-app-blocker class, autopsy `4efab9d7`, through yet another door).
+
+🔑 **Reported through `onTurnComplete`, not a second channel.** The abandoned turn's usage rides the
+error (`markAbandonedTurn`, a non-enumerable Symbol so it can never leak into a serialised error
+body) and is handed to the one callback every build turn and every heal turn already passes through.
+A parallel channel is precisely how the heal gates' tokens went unattributed for months.
+
+⚠️ **The case that decides whether this is safe, and it is test-locked:** a reviewer sub-agent reading
+files returns **tool calls and no text**. `turnStarvedItsBudget` is FALSE the moment any tool call
+exists, so that work stays billable. Billing it as "produced nothing" would make the engine's real
+work free — the opposite error, and a far more expensive one.
+
+### What this does and does not deliver — stated plainly
+
+**On `b6f88a72` itself this change would have saved the user ₹0.** That build ran on Kimi, whose
+runner throws on starvation, so its reviewer's calls were not starved turns at all — they completed,
+made tool calls, and the *pass* ended barren when it timed out. That is a different thing, and this
+change does not touch it.
+
+🔴 **STILL OPEN, and it is where the ₹50 actually is:** there is no per-PASS attribution in the
+ledger. `ProviderUsageLedger` knows which VENDOR was paid, never what FOR, so "leave the reviewer's
+barren pass out of the bill" is not expressible today. The design is a thin billing-phase
+`AsyncLocalStorage` (the `aiSpendZone.ts` shape, deliberately NOT overloading `runInPass`, which
+answers a different question) read by `captureTurnUsage`, with the route marking a phase barren where
+it already records `REVIEW_INCOMPLETE`. `REVIEW_PARTIAL` and `REVIEW_LATE` must NOT count as barren —
+a salvaged verdict means something was produced.
+
+⚠️ **And none of this is the cost fix.** It is rule 5's honesty layer. The real saving is not spending
+those tokens at all — a reviewer that cannot write to a green app should not be reading the whole
+project at full budget either — which is a separate change, already specified to another session
+alongside the EARLY GREEN latch ordering.
+
+Test-locked in `tests/aTurnThatProducedNothingIsNotTheUsersBill.test.ts` (29 cases), each behavioural
+half proven by reversion: the success-path mark, the catch-path report, the ledger's subset, and the
+billing subtraction were each removed in turn and the matching cases observed to fail. Four existing
+pinned-literal guards were updated (not loosened) because the throw site gained a wrapper and the
+billing return gained a field — each with the reason recorded in place, per the trail those same
+comments already carry.
 ## 2026-09-18 — 🔎 THE STACK NAMED THE FILE, AND THREE CAPTURES THREW IT AWAY (closing the `95598899` blocker)
 
 **Admin:** *"woh crash report wala kaam bhi kar do"* — make a runtime crash bring its own file, so no
@@ -67464,3 +67961,762 @@ restoring one `hover:bg-raised` fails the scanner by name, and setting `--surfac
 **Open, deliberately not done here:** `bg-card` and `bg-surface` have no hover partner, because nothing
 in the app currently hovers them onto themselves — the scanner covers all four surfaces, so the day one
 appears it fails rather than shipping silently.
+## 2026-09-18 — A HOSPITAL SYSTEM ASKED FOR IN TAMIL SCORED 5 — THE SCORE OF "hi"
+
+Follow-on to the same day's domain-sizing work, on the admin's word ("han, wahi bhasha wala kaam
+uthao"). That entry closed the gap for English and Hindi and recorded this half as **open**, because
+this repo held no vocabulary at all for the other languages of the market and inventing one would be
+a guess. This is that vocabulary, measured rather than guessed.
+
+**THE DEFECT, root-caused.** `RequirementGapAnalyzer`'s thirteen domain regexes were English, with
+romanised Hindi and then Devanagari appended by hand, twice. A prompt in **Bengali, Tamil, Telugu,
+Urdu, Marathi, Gujarati, Kannada, Malayalam, Punjabi or Odia** therefore named NO domain:
+`analyzeRequirementGaps` returned `general`, `namesBusinessDomain` returned false, and
+`RequestAnalyser`'s last resort — which asks exactly that question — fell to `chat` at `BASE_SCORE`
+**5**. Everything downstream followed the score down: **80 steps instead of 150, no blueprint, a
+small-app ETA, and the cheap flash rung instead of Kimi.** The user typed their own language and got
+a toy.
+
+**THE SECOND DEFECT, same file, same cause.** `INDIA_CONTEXT_RE` names the languages in ENGLISH
+("hindi", "tamil"), so a prompt typed entirely IN one of those scripts was never recognised as an
+Indian-market prompt at all — `indiaFirstGuidance` (₹, UPI, DD/MM/YYYY) never reached the builder, and
+a user writing in Tamil got `$` / Stripe / MM-DD-YYYY defaults.
+
+**THE 50/50 HALF — why it could arise.** There was no PLACE for a language. The vocabulary lived
+inside one-line regex literals, so adding one meant editing thirteen lines and every editor had to
+re-derive the boundary rules below. `src/server/lib/indicDomainTerms.ts` is that place: one table, one
+boundary builder, one compiled cache, consulted at the **single** point where a domain is chosen —
+`selectDomain`, extracted because BOTH readers (the analyzer and the suggestion bulb) carried the same
+filter+reduce inline. So `analyzeRequirementGaps`, `missingDomainFeatures`, the admin's Failure
+Category panel, `namesBusinessDomain`, `BuildTimeEstimator`, `RoleChats` and `domainKnowledge` all
+gained every language at once, with no second copy to keep in sync.
+
+**🔒 THE BOUNDARY IS THE WHOLE DIFFICULTY, and it is why the terms are NOT pasted into the regexes.**
+JavaScript's `\b` is ASCII-only, so an unanchored Indic term matches inside longer, unrelated words —
+the way `माल` (goods) matches inside `मालिक` (owner). Two assertions, both needed:
+* LEFT `(?<![\p{L}\p{N}\p{M}])` — a term can never be found mid-word or at a word's end.
+* RIGHT `(?!\p{M}*[\p{L}\p{N}])` — trailing COMBINING MARKS may follow (so an inflected `दुकानों`
+  still matches `दुकान`), but not a mark-then-letter. **That second half is what a naive "marks are
+  allowed" rule gets wrong**: in Indic scripts a virama IS a mark, so `ಯೋಗ` (yoga) would otherwise
+  match inside `ಯೋಗ್ಯ` (suitable).
+A term marked `+` is a STEM (left assertion only), for the case suffixes Tamil/Telugu/Kannada/
+Malayalam/Bengali attach directly to a noun — `மருத்துவமனை` inside `மருத்துவமனையில்`. A term earns
+`+` only when every longer word starting with it is the same domain; otherwise it stays a whole word
+and an inflected form is simply missed. **A miss costs today's behaviour; a false positive costs a
+wrongly-sized, dearer build** — that asymmetry decided every borderline word.
+
+**Words dropped for precision, not forgotten:** `तेर्वु`/`தேர்வு` (exam, but also "selection"),
+`সংরক্ষণ` (means data storage as often as a reservation), `आरक्षण` (in India, quota far more often
+than a booking), `भूमि`/generic "home" words (`घर`, `ঘর`, `ಮನೆ`, `വീട്`), and every "hotel" word (in
+India it means both an eatery and lodging, and English `hotel` is in no domain regex either). `अप्पु`
+(Telugu loan) was demoted from stem to whole word because it is a prefix of `అప్పుడు` ("then").
+
+**Evidence.** `tests/theLanguagesOfTheMarketNameTheirDomain.test.ts` — 17 cases: **71 INFLECTED
+prompts** across ten languages each resolving to its own domain end-to-end and sizing as
+`complex_app`/58/`sonnet`; a **16-line collision corpus** of ordinary sentences that CONTAIN a domain
+term (`கடைசி`, `ಯೋಗ್ಯ`, `সুদানের`, `জিম্বাবুয়ের`, `अप्पुडु`, `कडलास`, `मालिक`, `उपयोग`) naming no
+domain; eleven ordinary app requests in eleven scripts staying `general` and ≤20; the English/Hindi
+corpus asserted unchanged. **Proven by reversion**: removing the matcher from `selectDomain` and the
+script test from `detectIndiaContext` turns 6 of the 17 red; narrowing the script range by one script
+turns 2 red.
+
+**A tie was INHERITED rather than re-decided.** `ഭക്ഷണത്തിന്റെ ഓർഡർ ആപ്പ്` ("a food order app")
+resolves to `ecommerce`, not `restaurant` — because `a food order app` does too in English, and has
+since the 2026-07-21 feature-score fix (with no English feature word in an Indic prompt, nothing
+breaks the tie and array order keeps the earlier domain). Giving the Indic path its own tie-break
+would make one sentence mean two things in two languages. Pinned as a test so it is a decision.
+
+**Drift policed, not merely noted.** `AgentV3/LanguageDetect.ts` already enumerates these nine script
+ranges for a DIFFERENT question (which language to write an app's labels in, gated on 15% dominance).
+Rather than refactor a module with its own tests, or leave two copies of one fact, a test DERIVES the
+invariant from that table and asserts the two agree — the `ladderClaimsMatchTheTable` pattern.
+
+### 🔴 STILL OPEN (rule 6) — four honest gaps, none of them guessed at
+
+1. **`namesBusinessDomain`'s guards are English-only.** `PAGE_DELIVERABLE_SIGNAL` and
+   `SIMPLE_APP_SIGNAL` (`appComplexitySignals.ts`) stop "a coming-soon **page** for my restaurant"
+   being sized as a whole app. An Indic-language page request passes both guards, so it sizes as
+   `complex_app`. **Not fixed here because that file is mid-flight in PR #3079** — CLAUDE.md's
+   concurrency rule 4 (do not edit another session's file while it is in flight).
+2. **Feature detection is still English-only.** For an Indic prompt every domain feature reads as
+   `likelyMissing`, so the requirement guidance tells the builder to INCLUDE things the user already
+   asked for (harmless — it would build them anyway) and, more importantly, the feature score cannot
+   break a tie between two domains (see the food-order case above). Closing it means Indic terms per
+   FEATURE, not per domain — a much larger table, and a separate change with its own evidence.
+3. **A SIMPLE app prompt in an Indic script still scores 5, not 15.** No consequence today (both are
+   ≤20, so the same tier and the same step cap), which is why it was not chased.
+4. **Assamese, Sindhi, Kashmiri, Konkani, Manipuri and Bodo are not covered.** Assamese is partly
+   carried by the Bengali terms (shared script); the rest would need vocabulary nobody here has
+   measured. Recorded rather than filled with guesses.
+## 2026-09-18 — `AGENTV3_PROJECT_MODE=on`, and the door it opens was bolted (the gate read bullets; users write commas)
+
+The admin set `AGENTV3_PROJECT_MODE=on` in Cloud Run — the two-month-old pending decision recorded in
+`CLAUDE.md`, taken on this session's recommendation. **The first thing done after the switch was to
+measure what it had actually switched on, and the answer was: almost nothing.**
+
+**Measured on `main`, before touching a line** (`megaProjectSignals`, 14 realistic prompts):
+
+| prompt | fires? | why |
+|---|---|---|
+| `school ERP with students, teachers, attendance, fees, exams, timetable, library, transport` | **no** | bullets = **0** |
+| `ek hospital management system banao jisme OPD, IPD, pharmacy, billing, lab reports, doctor schedule, patient history sab ho` | **no** | bullets = **0** |
+| `banao ek full fledged ERP for my factory with production, inventory, purchase, sales, accounts, payroll, quality, dispatch` | **no** | bullets = **0** |
+| `Build a hospital management system:\n- patients\n- doctors\n- …` | yes | 8 bullet LINES |
+
+**Zero of fourteen.** `bullets` was `split('\n').filter(/^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/)` — a count of
+markdown list LINES. `ProjectPlan.test.ts`'s own passing case is a hospital system written as a
+bulleted spec. **The gate was built to read a DEVELOPER's spec; a real user writes one line with
+commas.**
+
+🔑 **THIS IS THE SAME CLASS AS THE FIX SHIPPED HOURS EARLIER THE SAME DAY.** `COMPLEX_APP_SIGNAL`
+listed the words a developer writes (saas, crm, checkout) and scored `hospital management system` **5**
+— the score of the word "hi". That was fixed in the SIZER (`namesBusinessDomain`). The two GATES that
+decide "is this a project?" were never hunted, and both were blind the same way:
+
+| gate | feeds | what it could see |
+|---|---|---|
+| `megaProjectSignals` (`AgentV3/ProjectPlan.ts`) | Software Project Mode (`AGENTV3_PROJECT_MODE`) | bullet lines only |
+| `featureCount` (`lib/appScopeAnalyzer.ts`) | the mega-app roadmap (`AGENTV3_MEGA_ROADMAP`, **on by default**) | bullet lines + loose verbs |
+
+On the school-ERP prompt the second one scored **0**: eight named modules, and the only thing it could
+match was the single word "with", halved to nothing.
+
+### The fix — one counter, centralized (rule 4 step 2: fix the class)
+
+`src/server/AgentV3/enumeratedFeatures.ts` — `countEnumeratedFeatures`, PURE. It reads a bulleted spec
+**and** the way a person actually types a list: inline `a, b, c`, `a and b`, Hinglish `a aur b`, and
+the list-opening connectives that separate the REQUEST from the LIST (`with`, `jisme`, `including`,
+`:` …), so *"ek hospital management system banao jisme OPD, IPD, …"* counts the modules and not the ask.
+
+🔒 **STRICT BY CONSTRUCTION, because both consumers are GATES and over-counting costs real money:**
+a run needs `MIN_RUN_ITEMS = 3` pieces before any of it counts (one comma in a sentence enumerates
+nothing); an item is at most `MAX_ITEM_WORDS = 5` words (a comma-joined SENTENCE inflates nothing);
+items are de-duplicated; the count is bounded at `MAX_COUNTED = 40`.
+
+**⚠️ `MEGA_BULLETS_WITH_NOUN` moved 8 → 6, and 6 is borrowed, not invented:** `complexityFromPrompt`
+already floors a named complex app's `featureCount` at six — this repo's own standing answer to "how
+many parts before this is a complex app". Here it is the weaker half of an AND, since a big-software
+noun must be present too.
+
+**Measured margin (the whole justification):** every ordinary app prompt counts **0–2**; every real
+project prompt counts **5–8**. Six sits in the gap, not on an edge.
+
+### 🔎 Sibling fixed in the same change (rule 3)
+
+`featureCount` in `appScopeAnalyzer.ts` now takes `Math.max(legacy, countEnumeratedFeatures(text))` —
+**a MAX, never a sum**: a bulleted PRD already counts once through `numbered`, and adding the shared
+count on top would double it and push ordinary prompts over `FEATURE_COUNT_MEGA`. That gate spends a
+real planner call (up to a minute) on every user's build, so it may only ever become more right, never
+more eager. **Measured blast radius: three project prompts flipped to `analyze`, ZERO ordinary prompts
+flipped.** No spend increase on ordinary builds.
+
+### Test
+
+`tests/theGateReadsBulletsUsersWriteCommas.test.ts` — 17 cases. It pins the bug as measured (both real
+corpora, not synthetic strings), and its ORDINARY corpus is the precision lock: a later widening that
+drags a todo app into either gate fails CI. **Reversion-proven in all three halves:** bullet-only
+counter → 8 fail; threshold back to 8 → 2 fail; sibling un-fixed → 1 fail; restored → 17 pass.
+
+### Still open, not guessed at (rule 6)
+
+1. **Whether Software Project Mode actually builds these apps better is unmeasured** — it has still
+   never completed a real build. This change only means the door now opens for the requests it was
+   written for. The honest thing to watch is the `PROJECT_MODE` report line and whether module plans
+   appear and advance.
+2. **The three gaps recorded on 2026-07-04 are unchanged:** an IMPORTED repo never creates a plan; a
+   reopened incomplete plan needs a typed "continue"; contract DRIFT is caught only by the whole-
+   workspace `tsc`, not by a dedicated contract check.
+3. **A bare category noun still does not fire, deliberately** — "CRM banao", "hospital management
+   system" with nothing enumerated name nothing to decompose. Whether such a prompt should instead be
+   ASKED what it needs is a product question, not a threshold one.
+
+## 2026-09-18 — A status is never the first word written about a record: the ghost-write sibling hunt (branch `claude/a-status-is-never-the-first-word`, stacked on #3101)
+
+Rule 3 applied to the defect in the admin's own screenshot (#3101): `DeploymentStore.setStatus` /
+`markOrphaned` / `setOutboundVerdict` minted status-only registry docs because `set(…, { merge: true })`
+CREATES a missing document. That is a CLASS, not an instance — so every merge-set in `src/server` was
+listed (85 outside the two stores already fixed) and each judged by its semantics: **create-or-update
+of a whole record with its identity** (`record`, `save`, memory docs, counters, the file store's meta
+doc) keeps its merge, because the first write of a new record must land; **a patch of a status, flag or
+stamp onto a record that must already exist** must never be able to write first.
+
+### Converted to `update()` (refuses a missing doc; honest `false`/no-op instead of a ghost)
+
+| Store | Method | What the ghost would have been |
+|---|---|---|
+| `SandboxStore` | `markPaused` | a sandbox record with only `pausedAt` — the one writer there whose payload carries no `workspaceId`/`sandboxId` (a `clear()` between the sweep's read and its stamp) |
+| `AdminApkReportStore` | `markApkReportFixed` | a blank row in the admin's APK Reports tab |
+| `userReportStore` | `setReportStatus` | a blank row in the admin's User Reports tab |
+| `TeamStore` | `setInviteStatus`, `removeMember`, `updateMemberRole` | a ghost invite; a "removed" member with no uid; **a member row with a role and nobody behind it** |
+| `MentionNotificationStore` | `markRead` | a `{ read: true }` notification with no text, sorting as NaN to the top of an inbox (NOT_FOUND swallowed per id, so one stale id cannot fail the batch) |
+| `ShareStore` | `revokeShare` | a share with only `status: 'revoked'` (returns before writing when the share does not exist) |
+| `CheckpointStore` | `setCheckpointLabel` | a checkpoint holding only a name — and the function's own contract promised an honest `false` |
+| `AppBuildStore` | `setLatestRun`, `setOutcome` | the very row its own comment says the list cannot read back (no workflow, no name) |
+| `HostingBillingStore` | `markDebited` | a minted `{ debited: true }` under a bill key makes the next claim's `create` fail and absorbs a day |
+| `zipUploadStore` | `noteSharedProgress` | an upload record with no owner |
+
+**Left as merge-set, deliberately, with the reason:** `authMiddleware.setUserRole` (a role may be
+assigned to a uid whose profile doc does not exist yet — create-or-update is the intent);
+`BuildOutcomeStore.claimReport`, `userReportStore.markReportReadByReporter` / `addReportMessage` (inside
+transactions that check `snap.exists` first); `ManualEditTracker.consumeManualEdits` (a reset to empty);
+every `record`/`save`/counter writer.
+
+### Readers
+
+Two admin-facing readers that fetch a WHOLE collection now skip a row with no timestamp, so a ghost
+already in the data never renders blank: `userReportStore.listReports` (unordered branch — the ordered
+branch already excludes such docs, because Firestore drops documents missing an `orderBy` field, which
+is also why `listApkReports` needed nothing) and `MentionNotificationStore.listForUser`.
+
+### Tests
+
+`tests/aStatusIsNeverTheFirstWord.test.ts` — sixteen patchers asserted `update()` and no `merge: true`
+per method body (comments stripped); four create-or-update writers asserted to STILL merge (so a
+mechanical sweep cannot break a first save); the honesty half (revoke's existence check precedes the
+write, markRead's per-id catch, both reader guards). Existing store suites (checkpoint, share, team, APK
+report, restore) unchanged and green.
+
+### Open (rule 6)
+
+Ghost docs already written before today are not deleted by this change — the readers hide them; a
+one-off cleanup would be an admin-console decision (Firestore query: docs in `agentv3_deployments` /
+`user_reports` / `admin_apk_reports` with no `updatedAt`/`at`/`reportedAt`).
+---
+
+## 2026-09-18 — The Pro image tier moves to Z-Image, and the price falls to ₹1
+
+**Admin, after comparing Z-Image Turbo against GPT Image 1 Mini:** *"Z-Image Turbo + Z-Image-Edit … price bhi 1 inr / image karo"*.
+
+### Why this is a cut in price AND a rise in quality, not a trade
+
+| | cost/image | ₹ at 95.76/$ | margin at the price |
+|---|---|---|---|
+| **Z-Image Turbo** (new) | $0.005 | ₹0.48 | **₹1 → +₹0.52 (2.1×)** |
+| FLUX.2 Klein 4B (replaced) | $0.014 | ₹1.34 | ₹2 → +₹0.66 (1.5×) |
+| GPT Image 1 Mini — low | $0.005 | ₹0.48 | affordable, but not a premium tier |
+| GPT Image 1 Mini — high | $0.036 | ₹3.45 | 🔴 a LOSS at either price |
+
+Three reasons Z-Image won, and none of them is only price: it is **~a third of FLUX.2 Klein's cost**;
+it is **#1 open-source on the Artificial Analysis Image Arena**, above FLUX.2 [dev], HunyuanImage 3.0
+and Qwen-Image; and it is **open weights, so many vendors serve it** ($0.0047–$0.01 at WaveSpeed,
+Atlas, Replicate, SiliconFlow, getimg, …) — the GLM/Kimi key-pool situation, with competition and no
+lock-in. GPT Image 1 Mini is single-vendor and is only cheap at a quality tier that cannot deliver the
+thing the Pro tier exists for (*"paid walo ko inhance karna hai"*).
+
+**The break-even rupee went UP, not down: ₹1 ÷ $0.005 = ₹200/$**, against ₹2 ÷ $0.014 = ₹142.9/$. The
+rupee would have to halve again before a Pro image stopped covering its own cost.
+
+### 🔑 Z-Image is a FAMILY, so the mode picks the model
+
+`Z-Image-Turbo` generates from words; **`Z-Image-Edit`** is the variant fine-tuned to follow an editing
+instruction against a supplied picture. `imageProModel(env, mode)` is therefore mode-aware, with
+`IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` pinnable separately and `IMAGE_PRO_MODEL` kept as the
+one-endpoint escape hatch. Sending the generation model a picture and an instruction would return a
+fresh image and quietly ignore one of them — a request that succeeds and answers the wrong question,
+which is precisely the half-working state the second absolute rule forbids. Test-locked.
+
+### 🔴 THE PRICE WAS IN THREE PLACES, AND THAT IS THE REAL DEFECT THIS FIXED
+
+`IMAGE_PRO_PRICE_INR` on the server, `PRICE_INR` in the Pro studio, and the bare string `'Pro ₹2'` on
+the free/pro toggle. Moving ₹2 → ₹1 meant three edits, and the third is exactly the one a later
+change forgets — the price a user is SHOWN and the price they are CHARGED are the same promise.
+The client cannot import the server module (it would pull server code into the browser bundle), so
+`tests/theProPriceIsOneNumber.test.ts` fails CI when they drift — the idiom
+`privacyPolicyTruth.test.ts` already uses. The toggle's literal is gone; it renders the constant.
+
+⚠️ **UNPROVEN, AND DELIBERATELY NOT ASSUMED: Devanagari.** Z-Image's bilingual text rendering is
+**Chinese and English**. No reliable claim was found for Hindi text inside an image, for Z-Image or
+for GPT Image 1 Mini. For an India-first app that is the differentiator, and it is the FIRST thing to
+test once `IMAGE_PRO_ENDPOINT` + `IMAGE_PRO_KEY` are set. Recorded as an open question rather than
+answered with a plausible guess.
+
+⚠️ **Still not live.** Both env keys remain unset, so the Pro tier still reports an honest "not
+available" and charges nothing; this change moves which engine it will call and what it will cost
+when the admin picks a host. Five of my own earlier cases in `imageProTier.test.ts` pinned ₹2/$0.014
+and were updated with the reason recorded in place — intent unchanged (the quote is price × count;
+the margin cannot invert silently; a malformed cost never falls back to zero).
+---
+
+## 2026-09-18 — Autopsy `1a7f4a58` (Qiikr): the platform killed the app's own frontend and previewed its API
+
+**Free Weak build, KIMI `kimi-k2.7-code`, 36.6 min, `ok: true`, billed ₹613.08.** A full-stack
+classifieds marketplace: a Vite frontend on **5173** and an Express API on **3001**. Both are the
+app's own. The build ended with `RELEASE_GATE: UNKNOWN`, a preview serving `Cannot GET /`, and a
+`GREEN_GUARD_RESTORED` rollback.
+
+### The root cause, proven by reproduction rather than reasoning
+
+Replaying the report's own `package.json` and `.env.example` through the shipped code:
+
+```
+declaredPortsFrom({ package.json })                 → null      ← the bug
+declaredPortsFrom({ package.json, .env.example })   → 3001      ← the BACKEND
+decideSupersede({ newPort: 3001, recipe: 5173 })    → staleports [5173], retireRecipe true
+```
+
+Two independent defects, and the build needed both to fail:
+
+1. **A script that delegates hides every port the app declares.** The app's `--port 5173` is explicit
+   and rank-1 — and it lives in `dev:client`, behind
+   `"dev": "concurrently \"npm run dev:server\" \"npm run dev:client\""`. `fromScripts` read the text
+   of `dev` and stopped at the `npm run` boundary, so the strongest signal in the file was invisible.
+   Delegation via `concurrently` / `npm-run-all` is the NORMAL way to write a full-stack dev script.
+2. **The supersede veto is singular where the fact is plural.** "Never kill the port the app itself
+   declares" is the right rule; `declaredPortFrom` can name only the strongest port, so on a
+   two-process app the veto protects one and leaves the other killable **by construction**. Here it
+   protected the API (3001, read from `.env.example`) and freed the frontend.
+
+So when the agent restarted the backend alone while diagnosing the database, `update_preview :3001`
+killed the Vite server and retired the recipe pointing at it. The preview then served `Cannot GET /`
+— that Express app only serves static files under `NODE_ENV=production`, which the agent itself
+correctly diagnosed at minute 30. Minutes 18–31 went on chasing it; the build ran out of budget one
+`update_preview` call short of the fix.
+
+### Fixed at the class
+
+- `declaredPortsFrom` follows `npm run` / `pnpm run` / `yarn run` / `bun run` / `npm-run-all` / `run-p`
+  delegation, bounded at depth 3 and cycle-safe. A bare `yarn <word>` is deliberately NOT a delegation
+  — reading `yarn add express` as a script called "add" would answer about something that is not the app.
+- `decideSupersede` takes `sourceDeclaredPorts` — the whole SET. Both fields are honoured and unioned,
+  so a caller passing only the singular one behaves exactly as before. Widening a veto can only ever
+  REFUSE to kill, which this file already argues is the safe direction.
+- `recipeMatchesApp` simplified: a recipe naming a port this app declares is never stale. The old
+  second clause (`newPort !== declared`) was how ONE port had to express "the app is on its own port",
+  and on a full-stack app it retired the frontend's recipe the moment the API was verified.
+- `server/src/index.ts` added to `DECLARED_PORT_FILES` — the report's Express entry point was at
+  exactly that path, and the list held `server/index.ts` and `src/server/index.ts` but not the
+  combination.
+
+`tests/theVetoIsSingularTheAppIsPlural.test.ts` (21 cases). Proven by reversion in both halves:
+removing the delegation walk turns 6 red; reverting the veto to the single strongest port turns 2 red.
+
+### ⚠️ Stated plainly, because a reversion proof said so
+
+For **this** app the delegation fix alone is sufficient — once `--port 5173` is found it outranks the
+env example, so even the singular veto would have saved it. The plural veto is still the DNA fix, and
+the test proves why with a real shape: an app stating its frontend port in `vite.config.ts` (rank 4)
+and its API port in `.env.example` (rank 2) reproduces the original bug exactly. The singular
+version's correctness depends on which of the app's two ports happens to rank higher, and the ranking
+was designed to answer a different question.
+
+### 🔴 Still open (rule 6) — recorded, not guessed at
+
+- **THE PREVIEW IS STILL AIMED AT THE API, and this fix does not change that.** It stops the frontend
+  being KILLED and stops its recipe being RETIRED — so the preview door, which resolves through the
+  recipe, still leads to the frontend for every later view. But the in-build `preview` event follows
+  the port the agent explicitly asked for. The agent asked for 3001 because `portSweep.sweepFoundSummary`
+  told it to: *"Your app is running on port 3001, not the 5173 this project's framework normally uses"*
+  — a sentence that is simply false when both ports are the app's. **The real fix is the missing
+  subsystem below**, and guessing at it in `portSweep` alone would thread declared ports through
+  `E2BActuator.ts`, which PR #3086 is editing right now.
+- **THE MISSING SUBSYSTEM: nothing answers "which of this app's ports is the one a human should look
+  at?"** Three subsystems hold parts of the answer and none is asked the question: `PortDiscovery`
+  knows what is LISTENING (a fact about a process), `declaredPort` knows what the app CLAIMS, and
+  `serviceGraph` knows the services and their ports — and is explicitly advisory, *"nothing is started
+  from it yet"*. Worth recording exactly: in this report the graph printed `Single service: qiikr
+  (frontend on port 5173)` while the supersede line printed `superseded now that the current app is
+  verified on port 3001`. **Two subsystems, one report, opposite conclusions, and the wrong one had
+  the kill switch.** ⚠️ The graph was not actually right, either — it produced 5173 from
+  `DEFAULT_PORTS.frontend`, not by reading the app, and called a two-process project single-service.
+  This is the port-shaped instance of the EVIDENCE LEDGER root cause opened by autopsy `697b38ee`.
+- **`npx prisma studio` burned 300 seconds** — 8.2% of the build's wall clock — on a server started
+  with `&` inside a command E2B ran to its five-minute deadline. Same class as PR #3086's `timeout 5`
+  finding (a command's shape versus its words); left to that PR's author rather than raced.
+- **Three orphaned `tsx watch` processes** survived the agent's own `pkill` and produced the
+  `EADDRINUSE` that cost a further ~90s restart.
+- **`DESIGN_PARTIALLY_HEALED` was a false positive, and the model was right about it.** The detector
+  flagged `LIST_WITHOUT_EMPTY_STATE` on `CreateListing.tsx` — a FORM page. The model said so in the
+  report (*"CreateListing.tsx is a form page, so the user's note about 'a list with no empty state' is
+  a bit confusing"*), complied anyway, and the repair improved 0 of 1 pages after 5 model calls and 62
+  seconds. A detector a model can out-reason is a detector that costs money to obey.
+- **`PREVIEW_ERROR: Cannot read properties of null (reading 'useState')` recurs here**, the same
+  signature left unexplained by autopsy `95598899`. Still unexplained — it needs the failing file's
+  contents, which this report does not carry either. **Two sightings now, so it is a pattern rather
+  than a one-off.**
+- **Billing:** ₹613.08 charged on a free wallet for a build whose `RELEASE_GATE` is `UNKNOWN` and
+  whose preview never rendered. `ok: true`, so "working app or free" never fired. Whether an UNKNOWN
+  gate should bill in full is an admin decision, not a code one — raised, not changed.
+
+## 2026-09-18 — 🔴 HOTFIX: `main` carried a tracked `node_modules` symlink pointing at itself (branch `claude/node-modules-is-not-a-file`)
+
+**What happened.** Commit `8210e4be` ("Merge origin/main into claude/vigilant-feynman-9aobjz — main is
+green again"), from a session working in a git worktree, committed `node_modules` as a SYMLINK to
+`/home/user/navbharatai/node_modules` — a worktree convenience that `git add -A` swept up. It reached
+`main` through #3079 (`caa7e47e`). In the main clone that symlink points at ITSELF: the moment a session
+merged `main`, git replaced its real install with the loop — `ls node_modules` → "Too many levels of
+symbolic links", `npx vitest` → "package not found, will be installed", `npm run typecheck` printing
+nothing. This session's re-gate on the stacked ghost-write branch came back with three EMPTY sections
+before the cause was found. CI never noticed because `npm ci` deletes `node_modules` first.
+
+**Root cause is the ignore PATTERN, not the commit.** `.gitignore` said `node_modules/`; the trailing
+slash matches a directory only, so a symlink of that name is not ignored (proven in a scratch repo:
+`node_modules/` → the symlink is tracked; `node_modules` → it is not). The commit was the first time
+anyone made a symlink there; the pattern had been one keystroke from this since day one.
+
+**Fix:** `git rm --cached node_modules`; `.gitignore` line is `node_modules` (no slash);
+`tests/nodeModulesIsNotAFile.test.ts` locks both — the ignore line, an empty `git ls-files node_modules`,
+and a local install that is never a symlink to itself.
+
+**For every other live session:** after merging a `main` that carries `caa7e47e` and not this fix,
+`rm node_modules && npm ci` restores the install. Do not "fix" it by committing anything under
+`node_modules`.
+---
+
+## 2026-09-18 — Admin order: "ab yeh nahi ana chahiye" — ONE answer about which port is the app
+
+Admin, on autopsy `1a7f4a58`, pointing at the two lines that contradicted each other in one report:
+
+```
+SERVICE_GRAPH_SINGLE  "Single service: qiikr (frontend on port 5173)."
+(supersede)           "superseded now that the current app is verified on port 3001"
+```
+
+**Two subsystems, one report, opposite conclusions — and the wrong one held the kill switch.**
+
+### The graph was not merely ignored; it was also guessing
+
+Worth recording because it changes what "listen to the graph" means: the graph's `5173` came from
+`DEFAULT_PORTS.frontend`, **not from the app**. It was right by coincidence (Vite's default equals this
+app's pin) and wrong about everything else — it called a two-process project "Single service", because
+`buildServiceGraph` read only the text of `dev` and `"dev": "concurrently \"npm run dev:server\"
+\"npm run dev:client\""` contains no port and no clue.
+
+### What shipped
+
+- **`npmScripts.ts` — the ONE script parser.** Four modules kept private copies of "find a port in a
+  command" and all four stopped at the `npm run` boundary (`declaredPort`, `serviceGraph`,
+  `DevServerRecovery`, `E2BActuator`). `portsInCommand`, `delegatesTo` and a cycle-safe, depth-bounded
+  `walkScript` now live in one file that the readers import — the drifted-copy class this repo has
+  already paid for with four `safeRelPath`s and two complex-app detectors.
+- **The graph READS the fan-out.** `expandDelegated` turns a delegating entry script into the services
+  the author actually wrote. Qiikr now reports `2 services: qiikr (dev:client) — frontend :5173;
+  qiikr (dev:server) — backend :3001`, start order backend-first, with **5173 read from `--port 5173`**
+  — proven by moving the app's pin and watching the answer follow.
+  🔒 Conservative, per that file's own warning that inventing a service is worse than the gap: it needs
+  ≥2 delegated scripts that exist, classify, and yield ≥2 DISTINCT kinds. Two frontends behind one
+  script stay one service.
+  ⚠️ `classifyScript` gained `assumeRunnable`: its name gate (`dev|start|serve|preview`) exists to FIND
+  the entry script among all scripts, and inside a known fan-out it rejected every real name (`api`,
+  `web`, `client`). My own test caught that — `run-p api web` classified as nothing. Worker/cron
+  detection still runs ahead of it.
+- **`appPorts.ts` — the single derivation.** `appPortsFrom(files)` → `{ preview, frontend, backends,
+  all, multiService }`, built on the graph and unioned with `declaredPortsFrom` (the graph reads
+  scripts; an app also states ports in `.env.example`, `listen()` and `vite.config.ts`, and the veto
+  must not answer "not yours" because of which file it was written in). `previewPortFor` answers the
+  question nobody was asking: **a frontend always wins** — the API is the web app's dependency, and a
+  person opening a "preview" means the thing with a user interface.
+- **Every actor reads it.** `update_preview` feeds the supersede veto from `appPortMap.all`, and when
+  the port it just published is the app's API while the app also has a web page, it says so to the
+  agent instead of letting it believe the app moved. The port sweep's summary stops asserting a move:
+  *"Port 3001 is this project's API/secondary service … Nothing has moved. Point the preview at 5173."*
+- **`tests/oneAnswerAboutWhichPortIsTheApp.test.ts` (15 cases)** includes the contradiction guard
+  itself: the graph's preview port must be a port the supersede refuses to free, asserted through the
+  same function. Proven by reversion twice — un-expanding the fan-out turns 4 red, taking the port map
+  away from the sweep turns 1 red.
+
+### 🔴 Still open (rule 6)
+
+- **The health check's own line is not yet port-map-aware.** `devServerHealthLine` still says
+  *"dev server is UP on port N. Call update_preview with port=N"*, and on a backend-only restart that N
+  is the API. The sweep line beside it now contradicts it honestly, and `update_preview` corrects it
+  after the fact — but the cleanest fix is one more reader of `appPortsFrom`, in `DevServerRecovery`.
+  Deliberately not done in the same change: that file was PR #3086's subject hours earlier, and the
+  right moment to touch it is after this lands.
+- **Nothing STARTS the second service yet.** The graph now describes both processes and their order;
+  the runner still launches one. That was always the graph's stated purpose — *"Before building a
+  multi-process runner we need to know how often a real project even has a second service"* — and this
+  change is what finally makes that measurement real. A full-stack app whose API is not running still
+  renders a web page with failing fetches.
+## 2026-09-18 — Admin order: "paise tabhi charge hone chahiye, jab preview chale"
+
+Admin, choosing option (c) after autopsy `1a7f4a58` billed a free-tier user **₹613.08** for a build
+whose `RELEASE_GATE` said `UNKNOWN` and whose preview served `Cannot GET /`.
+
+### Nothing in the money path was broken — and that is the finding
+
+Every existing guard did exactly what it says on the tin:
+
+| guard | needs |
+|---|---|
+| `zeroBillForUnrenderedPreview` | `previewVerifiedFailed` — **we looked and it failed** |
+| `zeroBillForFailedBuild` | `!result.ok` — **the build reported failure** |
+
+That build was **neither**. We never managed to look at all, and the build reported success. So the
+full tiered markup applied to a build nobody could show had produced a working app.
+
+🔑 **The distinction is one this codebase already makes everywhere else and had never applied to
+money.** `previewProvenBroken` exists precisely because *"we looked and it was broken"* and *"we could
+not look"* are different facts, and only the first is evidence. The two billing guards cover the
+first. This covers the second — and the second is the commonest of the three.
+
+### What ships — `previewEarnsMarkup.ts`
+
+`decideMarkupOnProof` waives the SERVICE MARGIN, not the cost, when no real check saw the app render:
+the user pays `realCostUsd + sandboxUsd` — the same two numbers the bill already used, before the
+markup — and nothing on top. On the report's own figures that is **₹613.08 → ₹172.37**.
+
+- The proof read is `buildObs.previewRendered`, whose only producer is `markAppRendered` (one fact,
+  one write). Never *"the build said ok"*.
+- Applied at **both** billing paths — the settle and the Fix-67 deadline finalizer — because those two
+  priced one build differently once already, which is why Fix 67 exists. `expectsArtifacts` rides to
+  the finalizer on `billingCtx`, defaulting to `false` so an absent fact stands the rule down.
+- It can only ever REDUCE (`min(decided, real)`), runs BEFORE every zeroing rule so those still take
+  precedence, and leaves `decideCancelledBuildBill` safe (that one starts from this number and may
+  never exceed it).
+- A turn with no app expected is untouched — the same carve-out `zeroBillForUnrenderedPreview` makes.
+- Report code `MARKUP_WAIVED_NO_PREVIEW`; the user is told in branded words with no vendor name.
+- Kill switch `AGENTV3_MARKUP_NEEDS_PREVIEW=off`.
+
+⚠️ **It is not ₹0, and that was the admin's explicit choice** — they were offered ₹0 and refused it,
+for the reason autopsy `4efab9d7` already records: free-when-unproven hands away every build whose app
+works but whose proof WE failed to collect.
+
+### ⚠️ A number I gave the admin was wrong, corrected here
+
+I told them in chat that our real cost on that build was *"~₹145"*. It is **₹172.37**: I priced the
+tokens and forgot the sandbox, which the bill's own formula includes BEFORE the markup. The formula
+reproduces exactly — `tieredMarkup(1.698349 + 0.098019) = 4 + 0.796368 × 3 = 6.389104` against the
+report's `billedUsd: 6.389103` — which is what makes these the real figures rather than an estimate.
+`tests/paisaTabhiJabPreviewChale.test.ts` pins ₹172.37 so the number cannot drift again.
+
+### 🔴 Still open (rule 6)
+
+- **This does not refund the build that prompted it.** The rule applies from the next build onward;
+  whether that ₹613 should be credited back is the admin's call, not a code change.
+- **A high `MARKUP_WAIVED_NO_PREVIEW` rate is not a billing problem — it is the engine failing to
+  prove its own work.** That is the number to watch, and the honest reading of it is that we are
+  giving away margin because our own verification could not look, not because users' apps are broken.
+
+## 2026-09-18 — The prune raced the deploy: the registry cleanup leaves the build path
+
+**The report.** A merge to `main` deployed and failed:
+`ERROR: (gcloud.run.deploy) Image 'gcr.io/gen-lang-client-0866594388/navbharat-cloud-run:1431bafe89cf92e7e8ff65017d17aa540205eae5' not found.`
+Cloud Build `6dd83d51-d46f-45ec-883f-5015fa306203`, commit `1431baf`, failing at step 4 — the deploy —
+asking for the image its own step 2 had pushed ninety seconds earlier.
+
+**What was ruled out first, and it matters that it was.** `1431baf` changed seven TypeScript and
+documentation files. Neither `cloudbuild.yaml` nor `Dockerfile` had been touched in weeks. So the
+commit could not have caused the build to produce a different image, and the failure is in the
+pipeline's own behaviour rather than in the change being deployed.
+
+**The mechanism.** `cloudbuild.yaml` Step 5 was a registry prune — the ONLY thing in this project that
+deletes a platform image — and it ran on the deploy path, last, after the new revision went live. Four
+PRs merged inside three minutes that evening, so four Cloud Builds ran concurrently. Build B's Step 5
+therefore executed inside build A's push→deploy window, and in that window BOTH of Step 5's guards are
+blind at once:
+
+- the **in-use guard** reads `gcloud run revisions list`, and an image pushed but not yet deployed is
+  referenced by no revision;
+- the **age floor** reads `--sort-by=TIMESTAMP`, which is the image's CREATED time out of its config,
+  and this pipeline builds with `--cache-from`, so BuildKit cache reuse can hand a freshly pushed image
+  an older creation time.
+
+Step 5's own comment had predicted exactly this, in writing: *"age alone could still mis-rank a new
+image. That is precisely why guard (1) exists and is not optional."* Guard (1) is the one that cannot
+see an undeployed image. The delete then ran with `--force-delete-tags`, which removes the
+`:$COMMIT_SHA` tag along with the digest — the precise shape of the failure the deploy reported.
+
+⚠️ **Stated as it is: this is a mechanism consistent with every observed fact, not a proven one.** No
+session here can read the GCR audit log. The fix is correct whichever way that turns out, because a
+step that only ever DELETES can only ever stop deletions — but if a deploy fails the same way again,
+the cause is elsewhere and this entry is wrong.
+
+**The fix (admin's choice, asked as a fork and answered "a").** Step 5 is REMOVED rather than patched.
+A guard cannot be added that closes this: the fact the prune would need — "is another build about to
+deploy this image?" — does not exist anywhere it can read. Running the cleanup on Google's own schedule,
+off the build path, makes the race **unrepresentable** instead of narrower. The three substitutions only
+Step 5 read (`_KEEP_IMAGES`, `_PRUNE_MIN_AGE`, `_PRUNE_MAX`) went with it.
+
+🔴 **THE HONEST COST, and it is an ADMIN ACTION, not a code one.** Registry storage was ~32% of the
+monthly bill, which is why the prune existed. Until a native **Artifact Registry cleanup policy** is
+created in the console, images accumulate with nothing deleting them. `ROADMAP.md`'s cost table now says
+so on the line the admin reads, instead of still crediting a prune that no longer exists.
+
+⚠️ **And the replacement's own limit is recorded rather than left to be discovered:** a native policy
+cannot see Cloud Run. This repo already found that for the user-apps registry (2026-09-13,
+`imageRetention.ts`) — with `--min-instances 0` a cold start re-pulls the live revision's image, so a
+keep-newest-N rule can delete the running site's image, worst exactly when a deploy has FAILED and
+traffic is still on an older revision. It is survivable for the PLATFORM registry only because one
+service deploys in order, so the bad case needs a long run of consecutive failed deploys. Size the keep
+count for that. The strictly better end state is the server-side sweep this repo already runs for user
+apps (`imageCleanupSweep.ts`, which DOES read Cloud Run before deleting) pointed at the platform
+registry too — a build, not a console setting, and deliberately not in this change.
+
+**Locked (`tests/thePruneMustNotRaceTheDeploy.test.ts`, 5 cases, proven by reversion three ways):** no
+step may delete a registry image; the deploy must be the LAST step; every substitution a step uses is
+declared; **and every declared substitution is used** — that last one is the hazard the REMOVAL created
+rather than the bug it fixed. Cloud Build's default `substitution_option` is `MUST_MATCH` and this file
+sets no `ALLOW_LOOSE`, so an orphaned `_KEEP_IMAGES` left behind would have failed every future build at
+config parse, long after anyone remembered why. Reversion proofs: re-declaring `_KEEP_IMAGES` fails 1;
+re-adding a `--force-delete-tags` step fails 2; any step after the deploy fails 1.
+
+⚠️ **One thing the admin must check in the console, because no code can see it:** if the Cloud Build
+trigger carries a substitution override for any of those three removed names, that row must be deleted
+there too, or the next build fails at config parse with *"key in the substitution data is not matched in
+the template"*.
+---
+
+## 2026-09-18 — A PASS that delivered nothing is our cost, never the user's bill (the ₹12 the turn-level fix could not reach)
+
+The turn-level half shipped earlier today and **said in its own header that it could not reach this
+case**, which is where the money actually was. Build `b6f88a72`'s post-build reviewer made **40 calls,
+spent 523,374 input tokens = 34.4% of the build (≈₹12), returned `responseChars: 0` on every one** —
+and then timed out with no verdict at all. Its turns were **not starved**: they completed and made
+tool calls, reading `src/App.tsx` six times. Every TURN produced something. **The PASS produced nothing.**
+
+That was inexpressible, because `ProviderUsageLedger` recorded which VENDOR was paid and never what
+FOR. "Leave the reviewer's barren pass out of the bill" had nowhere to be written down.
+
+### `billingPhase.ts` — the missing dimension
+
+An `AsyncLocalStorage` zone, the mechanism `aiSpendZone.ts` and `noClaudeZone.ts` already use and for
+the reason `aiSpendZone` states: threading a label through every call site is fragile by design, and
+the heal gates that forgot to thread `onTurnComplete` had their tokens filed under `'other'` for
+months. The reviewer opens the zone ONCE; its sub-agent inherits it with no line of its own.
+
+🔑 **The property that makes it correct for an ABANDONED pass:** `raceTimeout` walks away from the
+reviewer and the reviewer keeps spending. Because the zone propagates through awaits, those late turns
+are still tagged — and because "this phase was barren" is applied at SETTLE rather than by mutating
+the ledger, tokens arriving *after* the verdict are covered by it too. A pass we walked away from is
+exactly the money this exists to find.
+
+⚠️ **NOT `runInPass`.** Same mechanism, different question: that one decides whether a pass may WRITE
+to a green app. Overloading it would tie two unrelated policies to one string — a pass that must be
+allowed to write but billed, or billed but not allowed to write, could not then be expressed.
+
+### The verdict, and the three places it must not reach
+
+`barrenPhases.add(PHASE_POST_BUILD_REVIEW)` sits at exactly ONE branch: the `REVIEW_INCOMPLETE` one,
+where the reviewer timed out or errored, the grace window did not collect it, and `salvageReview`
+found nothing in its own narration. **`REVIEW_LATE` and `REVIEW_PARTIAL` stay billable** — both
+DELIVERED something, and *"we walked away from it"* is not the same fact as *"it produced nothing"*.
+The unattributed remainder carries no phase at all, so a verdict can never reach it. A test asserts
+the single call site and its distance from the other two branches.
+
+🔒 **A barren phase and a starved turn OVERLAP without subtracting twice.** A barren slice is unbilled
+in its ENTIRETY, which is a UNION and not a sum — adding the two rules would hand back money we never
+spent. Idempotent by construction, so the two may overlap freely.
+
+🔒 **The ledger SPLITS rather than relabels** (keyed provider + model + phase, still NUL-separated —
+that separator is a byte none of the three can contain, which is what makes the key exact). Verified
+before relying on it: every consumer of `entries()` aggregates (`realProviderCostUsd`, `ledgerCostUsd`,
+and `priceProviderUsage`, which sums **by provider**), so more rows change no total.
+
+Both settle paths — the normal one and the deadline finalizer — take the SAME verdict; CLAUDE.md's
+Fix 67 is what those two drifting apart already cost once. The verdict set is declared **above**
+`finalizeOnDeadline` so the closure is correct by PLACEMENT rather than by timing.
+
+⚠️ **Only one phase is named, deliberately.** The reviewer is the only pass whose "delivered nothing"
+verdict already exists in the route. Inventing that verdict for the other passes would be a guess, and
+a guess that hands money back is still a guess. Adding a phase is one `runInBillingPhase` call **plus**
+the rule that decides it is barren — never a rule alone.
+
+`tests/aBarrenPassIsNotTheUsersBill.test.ts` — 23 cases, proven by three reversions (the verdict, the
+zone tag, the subtraction). The ledger's 4th argument became an options object in the same change, so
+`producedNothing` and `phase` do not become a fifth and sixth positional.
+
+### What it is worth, honestly
+
+On `b6f88a72` this is the ₹12 of real cost — **₹50 of the user's ₹152.90 bill at ×4**. But #3093
+(the lean reviewer on a green app) has since landed, so on a green build that spend should now
+largely not happen at all. This is the net beneath it: the saving is not spending the tokens, and
+this only guarantees that when they ARE spent for nothing, the user does not pay for them.
+
+---
+
+## 2026-09-18 — A build-time secret that reached nothing, and the switch-on order for referral rewards
+
+**The admin asked to turn the referral rewards on** (*"refral money abhi jo hai (250+250) ko hata kar
+woh 400 new on kare?"*). Reading the code to answer produced two findings and one fix.
+
+### 🔴 The fix: `PLAY_INTEGRITY_CLOUD_PROJECT` was never passed to the build
+
+`android/app/build.gradle` reads `System.getenv("PLAY_INTEGRITY_CLOUD_PROJECT")` and bakes it into
+`BuildConfig`. **`.github/workflows/android-aab.yml`'s gradle step did not pass it** — its `env:`
+block carried the keystore values, the version numbers and the two Facebook secrets, and nothing else.
+
+So the whole chain would have been: admin sets the repo secret → CI green → bundle ships → app
+installs → gradle read an EMPTY string → baked `"0"` → *not configured* → every integrity check
+`unavailable` → **every referral claim pays ₹0**, with nothing failing anywhere. That is the exact
+shape CLAUDE.md records for `VITE_META_PIXEL_ID`: a value set in the right-sounding place that
+silently reaches nothing. It would have cost a Play review cycle and users earning zero.
+
+🔒 **`tests/aSecretThatReachesNothing.test.ts` is DERIVED, not a list.** It extracts every
+`System.getenv(...)` from `build.gradle` and asserts the workflow passes each one, so a build-time
+variable added later is covered the day it appears without anyone remembering the file exists. It
+carries its own "the sweep actually sees something" case, because a guard that silently stops
+matching guards nothing. Proven by reversion.
+
+**Why the gap existed at all, named so it is recognised again:** the two halves live in different
+files, in different languages, and nothing connected them. A name present in one and absent from the
+other is invisible to `tsc`, to vitest and to CI.
+
+### ⚠️ The second finding: the SERVER gate needs two Cloud Run keys as well
+
+`deviceCheckConfigured` (`deviceIntegrity.ts:69`) is `GOOGLE_PLAY_SA_JSON && GOOGLE_PLAY_PACKAGE_NAME`
+— both **Cloud Run** keys. Either missing ⇒ every check is `unavailable` ⇒ nothing pays, however
+correct the Android half is. An Android-only checklist is therefore an incomplete one.
+
+### 🔴 THE ORDER, AND WHY ORDER IS THE WHOLE POINT
+
+`flatWelcomeGiftSuppressed()` is exactly `referralRewardsEnabled()`, so **turning on
+`REFERRAL_REWARDS` stands the flat ₹500 welcome gift down by construction** — the admin does not
+"remove the 250+250" separately, and removing it would switch both off. That is correct and is also
+the trap: with the ladder on and the device check not configured, a new user gets **the flat gift
+suppressed AND ₹0 from the ladder — nothing at all**, silently, because the gate fails CLOSED by
+design (there is no later gate to catch a wrong "yes").
+
+So, in this order, and `REFERRAL_REWARDS` LAST:
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388` (console display name
+   `navBharat ai real`) — the Play Integrity API, not Safe Browsing and not Play Developer.
+2. **The `GOOGLE_PLAY_SA_JSON` service account holds the `playintegrity` scope.** A token minted for
+   a scope the account lacks is issued happily and refused at the call, so "it was created" is not
+   "it will work".
+3. **`PLAY_INTEGRITY_CLOUD_PROJECT`** = the project **NUMBER** (digits), as a **GitHub repo secret** —
+   not a Cloud Run key, because it is baked into the `.aab`. A non-numeric value parses to 0 and reads
+   as not-configured, which is the safe direction.
+4. **The workflow fix above** (shipped here) — without it step 3 is inert.
+5. **`GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME`** (`com.navbharat.ai`) set in Cloud Run.
+6. **A `.aab` carrying `DeviceIntegrityPlugin` is LIVE on Play.** The plugin exists and is registered
+   in `MainActivity`, but release 91 and earlier do not have it. Play → App content → **Data safety**
+   must be updated before that rollout: the build collects a device identifier, Privacy Policy §3.2
+   already discloses it, and a Play declaration that contradicts the policy is a violation.
+7. **Then** `REFERRAL_REWARDS=on`. Referred user ₹400, organic ₹300, referrer ₹75, lifetime cap ₹1,500.
+
+**How to verify it really works, rather than looks configured:** on a phone running the new bundle,
+create an account and verify email. **₹100 arriving means the whole chain is live.** Nothing arriving
+means one link is broken, and it is one of the seven above. ⚠️ The website will never pay ₹1 — that is
+the design (*"websites par kuch bhi nahi dena"*), not a fault.
+## 2026-09-18 — Theme PR K: thirty heaviest files, and the codemod stops manufacturing dead hovers (branch `claude/theme-pr-k`)
+
+**Baseline 1,668 → 1,019 literals, 132 → 112 files.** The thirty heaviest files by the ratchet's own
+census ran through `scripts/themeMigrate.mjs`; twenty-five went to zero or near it. Five were untouched
+by design (0 exact, 0 fixes) and stay counted: `MultiPageBuilder.tsx`, `previewUtils.ts`,
+`SEOOptimizer.tsx`, `frameworkOptions.ts`, `AppScanPanel.tsx` — data tables of colour names, a
+third-party mockup (a Google/Twitter card, LIGHT fixed fill), and generated preview markup. Hand work,
+not codemod work, and not this PR.
+
+### 🔴 The codemod was still MAKING the defect #3095 guards against
+
+`bg-white/5` and `bg-white/10` both map to `bg-raised`, so a chip written `bg-white/5 hover:bg-white/10`
+came out `bg-raised hover:bg-raised` — pixel-identical at rest and on hover. PR J fixed nine of those
+by hand; this run produced five more, and the full suite caught them. Fix at the class, in the codemod:
+a post-pass moves a hover that lands on the surface the element already rests on to that surface's
+`-hover` token (`raised-hover` / `well-hover`, both real per-theme values), for `hover:` and
+`group-hover:`. `tests/themeMigrate.test.ts` line 238 had been ASSERTING the dead pair as correct
+output; corrected, reason recorded, plus five cases for the post-pass.
+
+### 🔴 …and the guard itself could not see inside a template
+
+`tests/hoverIsNotANoOp.test.ts` judged only whole `className=` attributes. A class list chosen by a
+ternary inside a template literal, or handed to a `buttonClassName` prop, never reached it — and ten
+dead hovers were sitting in exactly those places on `main` while it was green (AdminDashboard,
+ReportSheet, AgentV3Panel ×?, FrameworkPicker ×3, APKBuilder, VoiceToApp, DoseCalculator ×2). The guard
+now judges every quoted string as well (a string carrying both a resting surface and a hover to it is a
+class list by construction), each candidate once. All ten fixed by running the codemod on those files.
+
+### Gate
+
+Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
+`themeSystem`, `theme` all green.

@@ -5086,7 +5086,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                                     ? 'bg-indigo-600 text-on-accent'
                                     : locked
                                     ? 'bg-raised text-faint cursor-not-allowed'
-                                    : 'bg-raised text-muted hover:bg-raised'
+                                    : 'bg-raised text-muted hover:bg-raised-hover'
                                 }`}
                               >
                                 <span className="flex items-center justify-between">
@@ -5695,7 +5695,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <div className="mb-2">
                       <button
                         onClick={() => { setCompareMode((v) => !v); setCompareSel([]); setCompareResult(null); }}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${compareMode ? 'bg-indigo-600/30 text-accent-text' : 'bg-raised hover:bg-raised text-muted'}`}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${compareMode ? 'bg-indigo-600/30 text-accent-text' : 'bg-raised hover:bg-raised-hover text-muted'}`}
                         title="Pick two versions to see what changed between them — nothing is modified"
                       >
                         <FileDiff className="w-3 h-3" /> {compareMode ? 'Comparing — pick two versions' : 'Compare two versions'}
@@ -5772,7 +5772,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                                 setCompareResult(null);
                                 if (next.length === 2) void runCompare(next, allCheckpoints.map((x) => x.sha).filter(Boolean));
                               }}
-                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0 ${compareSel.includes(c.sha) ? 'bg-indigo-600 text-on-accent' : 'bg-raised hover:bg-raised text-muted'}`}
+                              className={`flex items-center gap-1 px-1.5 py-0.5 rounded shrink-0 ${compareSel.includes(c.sha) ? 'bg-indigo-600 text-on-accent' : 'bg-raised hover:bg-raised-hover text-muted'}`}
                               title="Pick this version for the comparison"
                             >
                               {compareSel.includes(c.sha) ? <Check className="w-3 h-3" /> : <FileDiff className="w-3 h-3" />} Pick

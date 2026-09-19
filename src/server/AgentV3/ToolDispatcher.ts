@@ -6,7 +6,8 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
-import { declaredPortFrom, DECLARED_PORT_FILES } from './declaredPort';
+import { DECLARED_PORT_FILES } from './declaredPort';
+import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
@@ -3299,9 +3300,24 @@ export class ToolDispatcher {
       case 'grep': {
         const pattern = reqStr(input, 'pattern');
         const path = optStr(input, 'path') ?? '.';
+        /**
+         * 🔴 THE ONE SEARCH IN THIS FILE THAT EXCLUDED NOTHING (build b6f88a72, 2026-09-18).
+         *
+         * Eight other search paths here carry a `SKIP_DIR` / `EXCLUDE` pattern for exactly these
+         * directories; the agent-facing `grep` tool ran a bare `grep -rn`. A reviewer's
+         * `grep <pattern> .` therefore walked `node_modules/.vite/deps/*.js.map` and returned a
+         * result of **2,709,481 characters** — which was then truncated to ~12k tokens, so the
+         * machine paid for the walk and the model still did not get its answer.
+         *
+         * The set is copied from this file's own `SKIP_DIR`, so there is one vocabulary of
+         * "not the user's code", not two. An explicit path is still searched as given — only the
+         * unqualified walk is bounded, which is the case that produced this.
+         */
+        const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.next', '__pycache__'];
+        const excludes = EXCLUDED_DIRS.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
         const { stdout } = await this.actuator.runCommand(
           this.workspaceId,
-          `grep -rn ${shellQuote(pattern)} ${shellQuote(path)} || true`,
+          `grep -rn ${excludes} ${shellQuote(pattern)} ${shellQuote(path)} || true`,
         );
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
         return redactSecrets(stdout.trim()) || '(no matches)';
@@ -8332,6 +8348,9 @@ export class ToolDispatcher {
          * database ports never (see previewSupersede.ts). Best-effort: a failure here degrades the
          * preview, it must never touch a build that already succeeded.
          */
+        // Hoisted above the supersede block because the REPLY below reads it too — one derivation of
+        // the app's ports, used by the veto and by what the agent is told.
+        let appPortMap: AppPortMap | null = null;
         try {
           const [recipe, record] = await Promise.all([
             sandboxStore.getRecipe(this.workspaceId),
@@ -8347,7 +8366,7 @@ export class ToolDispatcher {
            * that declares nothing leaves `sourceDeclaredPort` null and the behaviour byte-identical to
            * before, because the veto simply has nothing to veto.
            */
-          let sourceDeclaredPort: number | null = null;
+          let sourceDeclaredPorts: number[] = [];
           try {
             const portFiles: Record<string, string | undefined> = {};
             for (const path of DECLARED_PORT_FILES) {
@@ -8355,9 +8374,17 @@ export class ToolDispatcher {
                 portFiles[path] = await withTimeout(this.actuator.readFile(this.workspaceId, path), 3_000, 'supersede-declared-port');
               } catch { /* absent is normal — most apps have only one or two of these */ }
             }
-            sourceDeclaredPort = declaredPortFrom(portFiles)?.port ?? null;
+            // EVERY port the app declares, not the strongest one. A full-stack app's frontend and API
+            // are both its own, and the singular answer protected one while leaving the other killable
+            // — report `1a7f4a58` killed a Vite frontend to bless the app's own Express API.
+            //
+            // 🔒 ONE DERIVATION. `appPortsFrom` is the same function the service graph's answer comes
+            // from, so this decision and the graph's report line cannot contradict each other the way
+            // they did in that report ("Single service … on port 5173" beside "verified on port 3001").
+            appPortMap = appPortsFrom(portFiles);
+            sourceDeclaredPorts = appPortMap.all;
           } catch { /* a port hint must never be able to affect a build */ }
-          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPort });
+          const decision = decideSupersede({ newPort: port, recipe, declaredPort: record?.declaredPort, sourceDeclaredPorts });
           if (decision.staleports.length > 0) {
             await withTimeout(
               this.actuator.runCommand(this.workspaceId, buildPreKillPortCommand(decision.staleports)),
@@ -8388,7 +8415,21 @@ export class ToolDispatcher {
         // the running app in their own Preview panel, and a copied sandbox address is a free, unmetered
         // ticket onto NavBharatAI's bill for anyone it's forwarded to (see redactPreviewUrls, which
         // strips it from your visible text as a backstop — but do not rely on that; do not print it).
-        return `Live preview published (port ${port} verified UP). Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
+        /**
+         * 🔒 "A SECOND PROCESS OF THIS APP CAME UP" IS NOT "THE APP MOVED" (autopsy `1a7f4a58`).
+         *
+         * The agent is not corrected or overridden — it asked for this port and it gets it. But when
+         * the port it published is this app's API while the app also has a web page, the reply says so,
+         * because that is the one fact the whole failed build turned on: the platform told the agent
+         * "your app is running on port 3001", it believed it, and the user's preview served
+         * `Cannot GET /` for the rest of the build.
+         */
+        const secondary = appPortMap && isSecondaryAppPort(appPortMap, port)
+          ? ` NOTE: port ${port} is this project's ${appPortMap.frontend === port ? 'web app' : 'API/secondary service'};`
+            + ` its web page is served on port ${appPortMap.preview}. A person opening the preview should see the web page,`
+            + ` so once that server is up, call update_preview with port=${appPortMap.preview}.`
+          : '';
+        return `Live preview published (port ${port} verified UP).${secondary} Internal url for your own tool calls only, NEVER to be quoted in your reply to the user: ${url}`;
       }
 
       case 'task': {

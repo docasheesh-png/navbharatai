@@ -77,7 +77,10 @@ describe('the number on the bill and the number on the screen are the same numbe
     // Two measurements taken at different moments would count different seconds, and only the user
     // would ever notice the disagreement.
     expect(route).toContain('const livePreviewCharge = billableSandboxDetail(actuator, workspaceId, buildStartedAt);');
-    expect(route).toContain('email, livePreviewCharge.usd)');
+    // NOTE 2026-09-18: the settle call gained a trailing `barrenPhases` argument. What this case
+    // guards is unchanged — the SAME single measurement feeds the bill and the breakdown, so the two
+    // can never count different seconds.
+    expect(route).toContain('email, livePreviewCharge.usd, barrenPhases)');
     expect(route).toContain('usdInrRate(), livePreviewCharge)');
   });
 

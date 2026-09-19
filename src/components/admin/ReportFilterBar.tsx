@@ -47,7 +47,7 @@ export function ReportFilterBar({
           onChange={(e) => set({ query: e.target.value })}
           onKeyDown={(e) => { if (e.key === 'Enter') onSubmitSearch?.(); }}
           placeholder={searchPlaceholder || 'Search: name, email, workspace, prompt words…'}
-          className="flex-1 min-w-0 bg-[#0d1117] border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white placeholder:text-[#8b949e] focus:outline-none focus:border-indigo-500"
+          className="flex-1 min-w-0 bg-surface border border-line rounded-xl px-3 py-2 text-[12px] text-ink placeholder:text-muted focus:outline-none focus:border-indigo-500"
         />
         {trailing}
       </div>
@@ -60,20 +60,20 @@ export function ReportFilterBar({
             onClick={() => set({ status: v })}
             className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border ${
               value.status === v
-                ? v === 'failed' ? 'border-rose-500/60 bg-rose-500/15 text-rose-200'
-                  : v === 'succeeded' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200'
+                ? v === 'failed' ? 'border-rose-500/60 bg-rose-500/15 text-danger'
+                  : v === 'succeeded' ? 'border-emerald-500/60 bg-emerald-500/15 text-success'
                   // Amber, not indigo — indigo is "All", and two chips that look identical when
                   // selected is how an admin loses track of what they are looking at.
-                  : v === 'unknown' ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
-                  : 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
-                : 'border-white/10 text-[#8b949e] hover:text-white hover:border-white/20'
+                  : v === 'unknown' ? 'border-amber-500/60 bg-amber-500/15 text-warn'
+                  : 'border-indigo-500/60 bg-indigo-500/15 text-accent-text'
+                : 'border-line text-muted hover:text-ink hover:border-line'
             }`}
           >
             {label}{typeof count === 'number' ? ` ${count}` : ''}
           </button>
         ))}
 
-        <span className="w-px h-5 bg-white/10 mx-1" aria-hidden="true" />
+        <span className="w-px h-5 bg-raised mx-1" aria-hidden="true" />
 
         {/* PAID / FREE (admin 2026-09-14: "filter me paid/free user wala filter nhi lagaya — woh
             lagao!! jis user ne real ₹ se token purchase kiye hai, woh paid user hai").
@@ -86,7 +86,7 @@ export function ReportFilterBar({
         <select
           value={value.tier ?? 'all'}
           onChange={(e) => set({ tier: e.target.value as ListFilterState['tier'] })}
-          className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-indigo-500"
+          className="bg-surface border border-line rounded-lg px-2 py-1.5 text-[11px] text-ink focus:outline-none focus:border-indigo-500"
           aria-label="Filter by paid or free user"
           title="Paid = this account has bought tokens with real ₹"
         >
@@ -96,7 +96,7 @@ export function ReportFilterBar({
         <select
           value={value.date}
           onChange={(e) => set({ date: e.target.value as ListFilterState['date'] })}
-          className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-indigo-500"
+          className="bg-surface border border-line rounded-lg px-2 py-1.5 text-[11px] text-ink focus:outline-none focus:border-indigo-500"
           aria-label="Filter by date"
         >
           {DATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -106,7 +106,7 @@ export function ReportFilterBar({
           <select
             value={value.uid}
             onChange={(e) => set({ uid: e.target.value })}
-            className="bg-[#0d1117] border border-white/10 rounded-lg px-2 py-1.5 text-[11px] text-white max-w-[16rem] focus:outline-none focus:border-indigo-500"
+            className="bg-surface border border-line rounded-lg px-2 py-1.5 text-[11px] text-ink max-w-[16rem] focus:outline-none focus:border-indigo-500"
             aria-label="Filter by user"
           >
             <option value="">Every user</option>
@@ -122,7 +122,7 @@ export function ReportFilterBar({
           <button
             type="button"
             onClick={() => onChange({ query: '', status: 'all', date: 'all', uid: '', tier: 'all' })}
-            className="text-[10px] font-bold px-2 py-1.5 rounded-lg text-[#8b949e] hover:text-white underline"
+            className="text-[10px] font-bold px-2 py-1.5 rounded-lg text-muted hover:text-ink underline"
           >
             Clear
           </button>

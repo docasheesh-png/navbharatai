@@ -130,32 +130,32 @@ export const WorkspaceLogs: React.FC<WorkspaceLogsProps> = ({ workspaceId, userI
   useEffect(() => { void fetchDiagnostics(); }, [fetchDiagnostics, doneCount]);
 
   const colorFor = (k: LogLine['kind']) =>
-    k === 'done' ? 'text-emerald-400' : k === 'file' ? 'text-sky-400' : k === 'info' ? 'text-[#8b949e]' : 'text-[#c9d1d9]';
+    k === 'done' ? 'text-success' : k === 'file' ? 'text-info' : k === 'info' ? 'text-muted' : 'text-body';
 
   if (!userId) {
-    return <div className="p-6 text-white text-center text-sm">Please log in to see your app&apos;s logs.</div>;
+    return <div className="p-6 text-ink text-center text-sm">Please log in to see your app&apos;s logs.</div>;
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-white">
+    <div className="flex flex-col h-full bg-surface text-ink">
       {/* Build log */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 shrink-0">
-        <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-1.5">
-          <Activity className="w-3.5 h-3.5 text-indigo-400" />
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-line shrink-0">
+        <span className="text-[10px] font-black uppercase tracking-widest text-muted flex items-center gap-1.5">
+          <Activity className="w-3.5 h-3.5 text-accent-text" />
           Build log
-          {running && <span className="text-amber-400 normal-case font-bold tracking-normal">— build running…</span>}
+          {running && <span className="text-warn normal-case font-bold tracking-normal">— build running…</span>}
         </span>
       </div>
       <div ref={scrollBoxRef} onScroll={onScroll} className="flex-1 overflow-y-auto no-scrollbar px-3 py-2 font-mono text-[11px] leading-relaxed select-text">
-        {!loaded && <div className="text-[#8b949e]">Loading logs…</div>}
+        {!loaded && <div className="text-muted">Loading logs…</div>}
         {loaded && lines.length === 0 && (
-          <div className="text-[#8b949e]">
+          <div className="text-muted">
             No build activity recorded yet for this workspace. Start a build in NavBharatAI Pro chat — its live progress will appear here.
           </div>
         )}
         {pagedLines.visible.map((l, i) => (
           <div key={i} className={`${colorFor(l.kind)} whitespace-pre-wrap break-words`}>
-            <span className="text-[#484f58] select-none">{fmtTime(l.ts)} </span>
+            <span className="text-faint select-none">{fmtTime(l.ts)} </span>
             {l.text}
           </div>
         ))}
@@ -164,16 +164,16 @@ export const WorkspaceLogs: React.FC<WorkspaceLogsProps> = ({ workspaceId, userI
       </div>
 
       {/* Runtime errors from the app's own browser console */}
-      <div className="border-t border-white/10 shrink-0 max-h-[38%] flex flex-col">
-        <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5">
-          <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e] flex items-center gap-1.5">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+      <div className="border-t border-line shrink-0 max-h-[38%] flex flex-col">
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-line">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-warn" />
             Runtime errors ({previewErrors.length})
           </span>
           <button
             onClick={() => void fetchDiagnostics()}
             disabled={diagLoading}
-            className="p-1 text-[#8b949e] hover:text-white hover:bg-white/5 rounded disabled:opacity-40"
+            className="p-1 text-muted hover:text-ink hover:bg-raised rounded disabled:opacity-40"
             aria-label="Refresh runtime errors"
             title="Refresh"
           >
@@ -182,11 +182,11 @@ export const WorkspaceLogs: React.FC<WorkspaceLogsProps> = ({ workspaceId, userI
         </div>
         <div className="overflow-y-auto no-scrollbar px-3 py-2 font-mono text-[11px] leading-relaxed select-text">
           {previewErrors.length === 0 ? (
-            <div className="text-[#8b949e]">No runtime errors captured from your app&apos;s preview. Open the Preview — any console error it hits is recorded here.</div>
+            <div className="text-muted">No runtime errors captured from your app&apos;s preview. Open the Preview — any console error it hits is recorded here.</div>
           ) : (
             previewErrors.map((e, i) => (
-              <div key={i} className="text-red-400 whitespace-pre-wrap break-words mb-1">
-                <span className="text-[#484f58] select-none">{e.ts ? fmtTime(e.ts) : ''} </span>
+              <div key={i} className="text-danger whitespace-pre-wrap break-words mb-1">
+                <span className="text-faint select-none">{e.ts ? fmtTime(e.ts) : ''} </span>
                 {e.message}
               </div>
             ))

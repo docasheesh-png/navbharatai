@@ -187,10 +187,12 @@ export function fillContext(line, idx, insideFill = null) {
   // A label INSIDE a filled box — an element with no background of its own, nested (by indentation)
   // under an opener whose className carries a solid fill. The same-element rule cannot see a parent,
   // and this shape (an avatar badge, a status bar's labels) is where the audit found labels going dark.
-  // ⚠️ A RESTING background only. `hover:bg-emerald-500/10` paints nothing at rest, so an element
-  // carrying just that is still sitting on whatever encloses it — and reading it as "has its own
-  // background" is what put a `text-ink` label on a fixed near-black dropdown (invisible on Light).
-  if (insideFill && !/(?<![\w-:])bg-/.test(span)) return insideFill === 'light' ? 'fixed-light' : 'yes';
+  // ⚠️ A RESTING, OPAQUE background only. `hover:bg-emerald-500/10` paints nothing at rest, and a
+  // translucent tint (`bg-amber-500/10`) lets the fixed box show straight through — in both cases the
+  // element is still sitting on whatever encloses it. Reading either as "has its own background" is
+  // what put a `text-ink` label on a fixed near-black dropdown and a `text-warn` strip on a fixed
+  // near-black header, both invisible on Light.
+  if (insideFill && !hasOwnOpaqueBackground(span)) return insideFill === 'light' ? 'fixed-light' : 'yes';
   const start = lineStart(line, idx);
   const bounded = line[start - 1] === '`' || line[start + span.length] === '`';
   if (!bounded) return 'no';
@@ -331,6 +333,24 @@ function gradientIsWash(span) {
     || /(?<![\w-])(?:from|via|to)-\w+-\d{2,3}\/\d{1,3}(?![\w-])/.test(span);
 }
 
+/**
+ * Does this element paint a surface of its OWN? Only a resting, opaque background does: a variant
+ * prefix means it is not painted at rest, and an opacity under 80% means the surface beneath still
+ * shows through and still decides what is readable on top.
+ */
+export function hasOwnOpaqueBackground(span) {
+  // ⚠️ The value class MUST carry `-`: a Tailwind colour is `amber-500`, and a class without it
+  // matched only `amber`, failed the trailing lookahead on the hyphen, and returned false for EVERY
+  // hyphenated background — which made this helper right about tints purely by accident.
+  for (const m of span.matchAll(/(?<![\w-])((?:[a-z-]+:)*)bg-([\w[\]#.-]+)(?:\/(\d{1,3}))?(?![\w/-])/g)) {
+    if (m[1]) continue;                       // hover:, focus:, md: — not the resting state
+    if (m[2] === 'gradient' || m[2].startsWith('gradient-')) continue;
+    if (m[3] !== undefined && Number(m[3]) < 80) continue; // a tint, not a surface
+    return true;
+  }
+  return false;
+}
+
 /** A themed surface the element declares for ITSELF — it ends any fixed subtree it sits in. */
 function declaresThemedSurface(span) {
   return /(?<![\w-])(?:[a-z-]+:)*bg-(?:surface|card|raised|well)(?![\w-])/.test(span);
@@ -411,6 +431,30 @@ export function migrate(src) {
       if (!/(?:^|\s)(?:[a-z-]+:)*(?:bg|text|rounded|px|py|p|flex|w|h|border|font|shadow|inline|block)[\w-]*(?:\s|$)/.test(body)) return q; // not a class list
       changed[INHERITED_LABEL] = (changed[INHERITED_LABEL] || 0) + 1; fix++;
       return `${q[0]}${body} text-on-accent${q[0]}`;
+    });
+  }
+  // A HOVER TO THE SURFACE IT ALREADY HAS IS NOT A HOVER (PR #3095's guard, tests/hoverIsNotANoOp.test.ts).
+  // `bg-white/5` and `bg-white/10` both map to `bg-raised`, so a chip written as
+  // `bg-white/5 hover:bg-white/10` came out as `bg-raised hover:bg-raised` — pixel-identical on rest and
+  // hover, i.e. a control that no longer answers the pointer. Nine of those were fixed by hand in PR J;
+  // the codemod must not keep producing them. Where a class list rests on a themed surface and hovers to
+  // the SAME one, the hover moves to that surface's `-hover` token, which every theme declares as a real
+  // step away from the resting value.
+  const DEAD_HOVER_LABEL = 'hover to the surface it already has → its -hover token';
+  for (let i = 0; i < out.length; i++) {
+    const m3 = maskEmbeddedSources(out[i]);
+    out[i] = out[i].replace(/'[^'\n]*'|"[^"\n]*"/g, (q, offset) => {
+      if (m3.slice(offset, offset + q.length) !== q) return q;
+      let body = q.slice(1, -1);
+      for (const surface of ['raised', 'well']) {
+        const resting = new RegExp(`(?<![\\w:-])bg-${surface}(?![\\w/-])`);
+        const dead = new RegExp(`(?<![\\w-])((?:group-)?hover:)bg-${surface}(?![\\w/-])`, 'g');
+        if (resting.test(body) && dead.test(body)) {
+          body = body.replace(dead, (_, v) => `${v}bg-${surface}-hover`);
+          changed[DEAD_HOVER_LABEL] = (changed[DEAD_HOVER_LABEL] || 0) + 1; fix++;
+        }
+      }
+      return `${q[0]}${body}${q[0]}`;
     });
   }
   return { out: out.join('\n'), changed, left, exact, fix };

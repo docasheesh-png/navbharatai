@@ -167,45 +167,45 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Verify your mobile number">
-      <div className="w-full sm:max-w-md bg-[#0d1117] border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-scrim p-0 sm:p-4" role="dialog" aria-modal="true" aria-label="Verify your mobile number">
+      <div className="w-full sm:max-w-md bg-surface border border-line rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
-            <Smartphone className="w-4 h-4 text-emerald-400" />
-            <h3 className="text-sm font-bold text-white">Verify your mobile number</h3>
+            <Smartphone className="w-4 h-4 text-success" />
+            <h3 className="text-sm font-bold text-ink">Verify your mobile number</h3>
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-zinc-500 hover:text-white"><X className="w-4 h-4" /></button>
+          <button onClick={onClose} aria-label="Close" className="text-faint hover:text-ink"><X className="w-4 h-4" /></button>
         </div>
 
-        {reason && <p className="text-[12px] text-zinc-400 mb-3 leading-relaxed">{reason}</p>}
+        {reason && <p className="text-[12px] text-muted mb-3 leading-relaxed">{reason}</p>}
 
         {stage === 'taken' ? (
           <div className="space-y-3">
-            <p className="text-[12px] text-amber-300 leading-relaxed">{error}</p>
+            <p className="text-[12px] text-warn leading-relaxed">{error}</p>
             {/* The door, not a dead end — this is the whole reason the refusal is worth showing. */}
             <button
               onClick={() => { onSignInInstead(normalizePhone(phone) ?? phone); onClose(); }}
-              className="w-full text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 hover:text-white hover:bg-emerald-600/30"
+              className="w-full text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-success hover:text-ink hover:bg-emerald-600/30"
             >
               Sign in with this number instead
             </button>
-            <button onClick={() => { setStage('enter'); setError(''); }} className="w-full text-[11px] text-zinc-500 hover:text-zinc-300">
+            <button onClick={() => { setStage('enter'); setError(''); }} className="w-full text-[11px] text-faint hover:text-muted">
               Use a different number
             </button>
           </div>
         ) : stage === 'code' ? (
           <div className="space-y-3">
-            <p className="text-[12px] text-zinc-400">We sent a code to {normalizePhone(phone)}.</p>
+            <p className="text-[12px] text-muted">We sent a code to {normalizePhone(phone)}.</p>
             <input
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
               inputMode="numeric"
               autoComplete="one-time-code"
               placeholder="6-digit code"
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white tracking-[0.3em] text-center outline-none focus:border-emerald-500/60"
+              className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-sm text-ink tracking-[0.3em] text-center outline-none focus:border-emerald-500/60"
             />
-            {error && <p className="text-[11px] text-red-400">{error}</p>}
-            <button onClick={confirm} disabled={busy} className="w-full flex items-center justify-center gap-2 text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600 text-white disabled:opacity-40">
+            {error && <p className="text-[11px] text-danger">{error}</p>}
+            <button onClick={confirm} disabled={busy} className="w-full flex items-center justify-center gap-2 text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600 text-on-accent disabled:opacity-40">
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />} Verify
             </button>
           </div>
@@ -217,13 +217,13 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
               inputMode="tel"
               autoComplete="tel"
               placeholder="+91 Mobile number"
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500/60"
+              className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-emerald-500/60"
             />
-            {error && <p className="text-[11px] text-red-400">{error}</p>}
-            <button onClick={send} disabled={busy} className="w-full flex items-center justify-center gap-2 text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600 text-white disabled:opacity-40">
+            {error && <p className="text-[11px] text-danger">{error}</p>}
+            <button onClick={send} disabled={busy} className="w-full flex items-center justify-center gap-2 text-[12px] font-bold px-3 py-2.5 rounded-xl bg-emerald-600 text-on-accent disabled:opacity-40">
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Smartphone className="w-3.5 h-3.5" />} Send code
             </button>
-            <p className="text-[10px] text-zinc-600 leading-relaxed">
+            <p className="text-[10px] text-faint leading-relaxed">
               One number, one account. You only do this once — after that, importing works everywhere.
             </p>
           </div>

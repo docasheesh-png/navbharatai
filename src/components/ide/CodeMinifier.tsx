@@ -311,20 +311,20 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
   const browser = (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-card)' }}>
       <div
-        className="flex items-center gap-2 px-3 py-2.5 border-b text-xs font-semibold text-gray-300 shrink-0"
+        className="flex items-center gap-2 px-3 py-2.5 border-b text-xs font-semibold text-muted shrink-0"
         style={{ borderColor: 'rgba(255,255,255,0.08)' }}
       >
-        <FolderOpen size={13} className="text-indigo-400" />
+        <FolderOpen size={13} className="text-accent-text" />
         Your apps
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {appsLoading ? (
-          <div className="flex items-center gap-2 px-3 py-4 text-xs text-gray-500">
+          <div className="flex items-center gap-2 px-3 py-4 text-xs text-faint">
             <Loader2 size={13} className="animate-spin" /> Loading your apps…
           </div>
         ) : apps.length === 0 ? (
-          <p className="px-3 py-4 text-xs text-gray-500 leading-relaxed">
+          <p className="px-3 py-4 text-xs text-faint leading-relaxed">
             No saved apps found on this account yet. You can still paste code on the right and optimise it.
           </p>
         ) : (
@@ -334,23 +334,23 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
               <div key={a.sessionId}>
                 <button
                   onClick={() => openApp(a.sessionId)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left border-b hover:bg-white/5 transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left border-b hover:bg-raised transition-colors"
                   style={{ borderColor: 'rgba(255,255,255,0.05)' }}
                 >
-                  {open ? <ChevronDown size={13} className="text-indigo-400 shrink-0" /> : <ChevronRight size={13} className="text-gray-500 shrink-0" />}
+                  {open ? <ChevronDown size={13} className="text-accent-text shrink-0" /> : <ChevronRight size={13} className="text-faint shrink-0" />}
                   <span className="flex-1 min-w-0">
-                    <span className="block text-xs text-gray-200 truncate">{a.label}</span>
+                    <span className="block text-xs text-body truncate">{a.label}</span>
                   </span>
                 </button>
 
                 {open && (
                   <div style={{ background: 'var(--surface-base)' }}>
                     {filesLoading ? (
-                      <div className="flex items-center gap-2 px-6 py-3 text-xs text-gray-500">
+                      <div className="flex items-center gap-2 px-6 py-3 text-xs text-faint">
                         <Loader2 size={12} className="animate-spin" /> Opening files…
                       </div>
                     ) : fileList.length === 0 ? (
-                      <p className="px-6 py-3 text-xs text-gray-600">No files here that can be optimised.</p>
+                      <p className="px-6 py-3 text-xs text-faint">No files here that can be optimised.</p>
                     ) : (
                       fileList.map((f) => {
                         const { dir, name } = splitPath(f.path);
@@ -360,15 +360,15 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                             key={f.path}
                             onClick={() => void openFile(f.path)}
                             className={`w-full flex items-center gap-2 pl-6 pr-3 py-2 text-left transition-colors ${
-                              active ? 'bg-indigo-600/20' : 'hover:bg-white/5'
+                              active ? 'bg-indigo-600/20' : 'hover:bg-raised'
                             }`}
                           >
-                            <FileCode size={12} className={active ? 'text-indigo-300 shrink-0' : 'text-gray-600 shrink-0'} />
+                            <FileCode size={12} className={active ? 'text-accent-text shrink-0' : 'text-faint shrink-0'} />
                             <span className="flex-1 min-w-0">
-                              {dir && <span className="block text-[10px] text-gray-600 truncate">{dir}</span>}
-                              <span className={`block text-xs truncate ${active ? 'text-indigo-200' : 'text-gray-300'}`}>{name}</span>
+                              {dir && <span className="block text-[10px] text-faint truncate">{dir}</span>}
+                              <span className={`block text-xs truncate ${active ? 'text-accent-text' : 'text-muted'}`}>{name}</span>
                             </span>
-                            <span className="text-[10px] text-gray-600 shrink-0">{formatBytes(f.bytes)}</span>
+                            <span className="text-[10px] text-faint shrink-0">{formatBytes(f.bytes)}</span>
                           </button>
                         );
                       })
@@ -392,13 +392,13 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
       >
         <button
           onClick={() => setBrowserOpen((v) => !v)}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border border-white/10 hover:bg-white/5 transition-colors"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border border-line hover:bg-raised transition-colors"
           aria-label={browserOpen ? 'Hide your apps' : 'Show your apps'}
         >
-          <PanelLeft size={13} className={browserOpen ? 'text-indigo-400' : ''} />
+          <PanelLeft size={13} className={browserOpen ? 'text-accent-text' : ''} />
           <span className="hidden sm:inline">Apps</span>
         </button>
-        <Code2 size={16} className="text-indigo-400 shrink-0" />
+        <Code2 size={16} className="text-accent-text shrink-0" />
         <span className="font-semibold text-sm truncate">Code Minifier &amp; Optimizer</span>
       </div>
 
@@ -423,14 +423,14 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
               className="flex items-center gap-2 px-3 py-2 border-b text-xs shrink-0"
               style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
             >
-              <span className="font-medium text-gray-200 truncate">{sourceName}</span>
+              <span className="font-medium text-body truncate">{sourceName}</span>
               {selectedPath ? (
-                <span className="text-[10px] text-gray-500 truncate hidden sm:inline">{splitPath(selectedPath).dir}</span>
+                <span className="text-[10px] text-faint truncate hidden sm:inline">{splitPath(selectedPath).dir}</span>
               ) : (
                 <select
                   value={pasteLanguage}
                   onChange={(e) => setPasteLanguage(e.target.value as PasteLanguage)}
-                  className="text-[11px] rounded border border-white/10 px-1 py-0.5 outline-none"
+                  className="text-[11px] rounded border border-line px-1 py-0.5 outline-none"
                   style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}
                   aria-label="Language of the pasted code"
                 >
@@ -441,11 +441,11 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 </select>
               )}
               <div className="flex-1" />
-              <span className="text-gray-500 shrink-0">{formatBytes(new Blob([inputCode]).size)}</span>
+              <span className="text-faint shrink-0">{formatBytes(new Blob([inputCode]).size)}</span>
             </div>
 
             {loadingFile ? (
-              <div className="flex-1 flex items-center justify-center gap-2 text-xs text-gray-500">
+              <div className="flex-1 flex items-center justify-center gap-2 text-xs text-faint">
                 <Loader2 size={14} className="animate-spin" /> Opening file…
               </div>
             ) : (
@@ -454,7 +454,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 onChange={(e) => { setInputCode(e.target.value); if (selectedPath) setSelectedPath(null); }}
                 placeholder="Pick a file from your app on the left — or paste code here."
                 spellCheck={false}
-                className="flex-1 resize-none p-3 text-xs font-mono leading-relaxed outline-none text-gray-200 placeholder-gray-600"
+                className="flex-1 resize-none p-3 text-xs font-mono leading-relaxed outline-none text-body placeholder-faint"
                 style={{ background: 'var(--surface-base)' }}
               />
             )}
@@ -466,20 +466,20 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
               className="flex items-center gap-2 px-3 py-2 border-b text-xs shrink-0"
               style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
             >
-              <span className="font-medium text-gray-200">Optimised</span>
+              <span className="font-medium text-body">Optimised</span>
               <div className="flex-1" />
               {outputCode && (
                 <>
                   <button
                     onClick={handleCopy}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-white/10 hover:bg-white/5 transition-colors"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-line hover:bg-raised transition-colors"
                   >
-                    {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+                    {copied ? <Check size={11} className="text-success" /> : <Copy size={11} />}
                     <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
                   </button>
                   <button
                     onClick={handleDownload}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-white/10 hover:bg-white/5 transition-colors"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-line hover:bg-raised transition-colors"
                   >
                     <Download size={11} />
                     <span className="hidden sm:inline">Download</span>
@@ -498,12 +498,12 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 <button
                   onClick={() => void handleApply()}
                   disabled={!canApply || applying}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
                 >
                   {applying ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
                   {applying ? 'Saving into your app…' : `Apply to ${sourceName}`}
                 </button>
-                <p className="mt-1.5 text-[11px] text-gray-500 leading-snug flex items-start gap-1">
+                <p className="mt-1.5 text-[11px] text-faint leading-snug flex items-start gap-1">
                   <History size={11} className="mt-0.5 shrink-0" />
                   {selectedPath
                     ? 'This replaces the file in your app. A restore point is saved first, so you can undo it any time from Versioning.'
@@ -512,9 +512,9 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 {onOptimized && (
                   <button
                     onClick={handleUseInPreview}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs border border-white/10 hover:bg-white/5 transition-colors"
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs border border-line hover:bg-raised transition-colors"
                   >
-                    {usedInPreview ? <Check size={12} className="text-green-400" /> : <Zap size={12} />}
+                    {usedInPreview ? <Check size={12} className="text-success" /> : <Zap size={12} />}
                     {usedInPreview ? 'Loaded into preview' : 'Just try it in the preview (does not change your app)'}
                   </button>
                 )}
@@ -523,7 +523,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
 
             {applyNote && (
               <div
-                className={`px-3 py-2 text-xs border-b shrink-0 leading-snug ${applyFailed ? 'text-amber-300' : 'text-green-300'}`}
+                className={`px-3 py-2 text-xs border-b shrink-0 leading-snug ${applyFailed ? 'text-warn' : 'text-success'}`}
                 style={{
                   borderColor: 'rgba(255,255,255,0.08)',
                   background: applyFailed ? 'rgba(245,158,11,0.08)' : 'rgba(63,185,80,0.08)',
@@ -535,7 +535,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
 
             {outputCode ? (
               <pre
-                className="flex-1 overflow-auto p-3 text-xs font-mono leading-relaxed text-green-300 whitespace-pre-wrap break-all"
+                className="flex-1 overflow-auto p-3 text-xs font-mono leading-relaxed text-success whitespace-pre-wrap break-all"
                 style={{ background: 'var(--surface-base)' }}
               >
                 {outputCode}
@@ -543,7 +543,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-6" style={{ background: 'var(--surface-base)' }}>
                 <Zap size={28} className="text-gray-700" />
-                <p className="text-xs text-gray-500 leading-relaxed">
+                <p className="text-xs text-faint leading-relaxed">
                   The optimised code will appear here, with a button to save it into your app.
                 </p>
               </div>
@@ -558,7 +558,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
         style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'var(--surface-card)' }}
       >
         {problem && (
-          <p className="mb-2 flex items-start gap-1.5 text-xs text-amber-300 leading-snug">
+          <p className="mb-2 flex items-start gap-1.5 text-xs text-warn leading-snug">
             <AlertTriangle size={13} className="mt-0.5 shrink-0" />
             <span className="break-words">{problem}</span>
           </p>
@@ -566,16 +566,16 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
 
         {stats && stats.savedBytes > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-gray-400">
-              {formatBytes(stats.originalBytes)} → <span className="text-indigo-300 font-semibold">{formatBytes(stats.minifiedBytes)}</span>
+            <span className="text-muted">
+              {formatBytes(stats.originalBytes)} → <span className="text-accent-text font-semibold">{formatBytes(stats.minifiedBytes)}</span>
             </span>
-            <span className="px-2 py-0.5 rounded-full bg-green-600/15 text-green-300 font-semibold">
+            <span className="px-2 py-0.5 rounded-full bg-green-600/15 text-success font-semibold">
               {stats.savedPercent.toFixed(1)}% smaller
             </span>
           </div>
         )}
 
-        <label className="mb-2 flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none w-fit">
+        <label className="mb-2 flex items-center gap-2 text-xs text-muted cursor-pointer select-none w-fit">
           <input
             type="checkbox"
             checked={keepConsole}
@@ -588,7 +588,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
         <button
           onClick={() => void handleMinify()}
           disabled={!inputCode.trim() || minifying}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-on-accent"
         >
           {minifying ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} />}
           {minifying ? 'Optimising…' : 'Optimise this code'}

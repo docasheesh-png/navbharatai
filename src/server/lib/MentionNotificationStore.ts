@@ -107,7 +107,9 @@ class MentionNotificationStore {
       const snap = await col.get();
       const out: MentionNotification[] = [];
       snap.forEach((d) => out.push(d.data() as MentionNotification));
-      return out.sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_INBOX);
+      // A row with no timestamp is not a notification — an old `{ read: true }` ghost (see markRead) —
+      // and would otherwise sort as NaN and render blank at the top of somebody's inbox.
+      return out.filter((n) => typeof n.createdAt === 'number').sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_INBOX);
     } catch {
       return [];
     }
@@ -118,7 +120,10 @@ class MentionNotificationStore {
     const col = this.col(uid);
     if (!col || !ids?.length) return false;
     try {
-      await Promise.all(ids.slice(0, MAX_INBOX).map((id) => col.doc(String(id)).set({ read: true }, { merge: true })));
+      // An UPDATE, never a merge-set: marking an id that is not in the inbox must not MINT a notification
+      // holding only `read: true` (the DeploymentStore.setStatus class, 2026-09-18). A missing one is
+      // already as read as it can be, so its NOT_FOUND is swallowed per id rather than failing the batch.
+      await Promise.all(ids.slice(0, MAX_INBOX).map((id) => col.doc(String(id)).update({ read: true }).catch(() => undefined)));
       return true;
     } catch {
       return false;

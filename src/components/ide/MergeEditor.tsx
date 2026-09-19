@@ -39,26 +39,26 @@ export const MergeEditor: React.FC<MergeEditorProps> = ({ fileName, content, onR
   let conflictIdx = -1;
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-gray-200">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 shrink-0">
+    <div className="flex flex-col h-full bg-surface text-body">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-line shrink-0">
         <div className="flex items-center gap-2">
-          <GitMerge className="w-4 h-4 text-amber-400" />
+          <GitMerge className="w-4 h-4 text-warn" />
           <span className="text-sm font-semibold">Resolve Conflicts</span>
-          <span className="text-xs text-gray-500 font-mono truncate max-w-[40ch]">{fileName}</span>
-          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+          <span className="text-xs text-faint font-mono truncate max-w-[40ch]">{fileName}</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-warn">
             {parsed.conflictCount} conflict{parsed.conflictCount === 1 ? '' : 's'}
           </span>
         </div>
         <div className="flex items-center gap-2">
           {onCancel && (
-            <button onClick={onCancel} className="px-3 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 text-gray-300 flex items-center gap-1">
+            <button onClick={onCancel} className="px-3 py-1.5 text-xs rounded bg-raised hover:bg-raised-hover text-muted flex items-center gap-1">
               <X className="w-3.5 h-3.5" /> Cancel
             </button>
           )}
           <button
             onClick={() => onResolved?.(resolved)}
             disabled={!onResolved || !allChosen}
-            className="px-3 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center gap-1"
+            className="px-3 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent flex items-center gap-1"
           >
             <Check className="w-3.5 h-3.5" /> Apply Resolution
           </button>
@@ -70,7 +70,7 @@ export const MergeEditor: React.FC<MergeEditorProps> = ({ fileName, content, onR
           if (seg.type === 'stable') {
             if (seg.lines.length === 0) return null;
             return (
-              <pre key={i} className="font-mono text-xs whitespace-pre-wrap text-gray-400 px-2 leading-5">
+              <pre key={i} className="font-mono text-xs whitespace-pre-wrap text-muted px-2 leading-5">
                 {seg.lines.join('\n')}
               </pre>
             );
@@ -81,27 +81,27 @@ export const MergeEditor: React.FC<MergeEditorProps> = ({ fileName, content, onR
           return (
             <div key={i} className="rounded-lg border border-amber-500/30 overflow-hidden">
               <div className="flex items-center gap-1 px-2 py-1.5 bg-amber-500/10 border-b border-amber-500/20">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mr-2">Conflict {idx + 1}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-warn mr-2">Conflict {idx + 1}</span>
                 {CHOICES.map(c => (
                   <button
                     key={c.key}
                     onClick={() => setChoice(idx, c.key)}
                     className={`px-2.5 py-1 text-[11px] font-semibold rounded transition-colors ${
-                      choice === c.key ? 'bg-emerald-600 text-white' : 'bg-white/5 text-gray-300 hover:bg-white/10'
+                      choice === c.key ? 'bg-emerald-600 text-on-accent' : 'bg-raised text-muted hover:bg-raised-hover'
                     }`}
                   >
                     {c.label}
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 divide-x divide-white/10">
+              <div className="grid grid-cols-2 divide-x divide-line">
                 <div className={choice === 'theirs' ? 'opacity-40' : ''}>
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10">Ours</div>
-                  <pre className="font-mono text-xs whitespace-pre-wrap px-2 py-1.5 leading-5 text-indigo-200">{seg.ours.join('\n') || '(empty)'}</pre>
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-accent-text bg-indigo-500/10">Ours</div>
+                  <pre className="font-mono text-xs whitespace-pre-wrap px-2 py-1.5 leading-5 text-accent-text">{seg.ours.join('\n') || '(empty)'}</pre>
                 </div>
                 <div className={choice === 'ours' ? 'opacity-40' : ''}>
-                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10">Theirs</div>
-                  <pre className="font-mono text-xs whitespace-pre-wrap px-2 py-1.5 leading-5 text-emerald-200">{seg.theirs.join('\n') || '(empty)'}</pre>
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-success bg-emerald-500/10">Theirs</div>
+                  <pre className="font-mono text-xs whitespace-pre-wrap px-2 py-1.5 leading-5 text-success">{seg.theirs.join('\n') || '(empty)'}</pre>
                 </div>
               </div>
             </div>
@@ -109,9 +109,9 @@ export const MergeEditor: React.FC<MergeEditorProps> = ({ fileName, content, onR
         })}
       </div>
 
-      <div className="shrink-0 border-t border-white/10">
-        <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">Resolved preview</div>
-        <pre className="font-mono text-xs whitespace-pre-wrap px-3 pb-3 max-h-40 overflow-auto text-gray-300 leading-5">{resolved}</pre>
+      <div className="shrink-0 border-t border-line">
+        <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-faint">Resolved preview</div>
+        <pre className="font-mono text-xs whitespace-pre-wrap px-3 pb-3 max-h-40 overflow-auto text-muted leading-5">{resolved}</pre>
       </div>
     </div>
   );

@@ -33,7 +33,14 @@ const SIZES = [
   { id: 'icon', label: 'Icon', desc: '1024×1024' },
 ];
 
-const PRICE_INR = 2;
+/**
+ * What one Pro image costs the user, in ₹.
+ *
+ * ⚠️ A COPY, and the server's `IMAGE_PRO_PRICE_INR` is the authority — this file runs in the browser
+ * and must not import server code. `tests/theProPriceIsOneNumber.test.ts` fails CI if the two ever
+ * disagree, because a price shown here and charged there are the same promise to the same person.
+ */
+const PRICE_INR = 1;
 
 const SUGGESTIONS = [
   'A neon-lit Mumbai street after rain, cinematic',

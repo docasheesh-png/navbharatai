@@ -216,19 +216,19 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const showQuick = config.quickPrompts && messages.filter((m) => m.role === 'user').length === 0;
 
   return (
-    <div className="relative flex flex-col h-full min-h-0 bg-[#0d1117] text-white">
+    <div className="relative flex flex-col h-full min-h-0 bg-surface text-ink">
       {/* HEADER — deliberately compact (admin 2026-08-25). On a phone this bar, the toolbar and the
           composer all compete with the keyboard for a small screen, and the header is the only one of
           the three the user never interacts with. Every row it gives back is a row of conversation. */}
-      <div className="px-4 py-2 border-b border-white/5 flex items-center gap-2 shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0"><Sparkles className="w-3.5 h-3.5" /></div>
+      <div className="px-4 py-2 border-b border-line flex items-center gap-2 shrink-0">
+        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-accent-text flex items-center justify-center shrink-0"><Sparkles className="w-3.5 h-3.5" /></div>
         <span className="font-bold text-sm truncate min-w-0">{config.name}</span>
         {/* Free-allowance chip — only when the daily gate is on for a signed-in user. It is a COUNTER
             now, not an upsell: it used to be a button that opened a Pass paywall, and there is nothing
             left to sell. Unlimited accounts show nothing at all rather than a crown they cannot act on. */}
         {pass?.enabled && pass?.signedIn && !pass.unlimited && (
-          <span className="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[#c9d1d9]">
-            <span className={pass.remainingFree <= 3 ? 'text-amber-300' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+          <span className="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-full bg-raised border border-line text-body">
+            <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
           </span>
         )}
       </div>
@@ -240,7 +240,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         })()}
         {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
           <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
-            <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>
+            <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-on-accent' : 'bg-card border border-line text-body'}`}>
               {/* Real, tappable source links (admin 2026-08-25). The bubble stays plain text —
                   LinkedText emits only strings and anchors, so wrapping is unchanged. */}
               <LinkedText text={String(m.content ?? '')} />
@@ -269,12 +269,12 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           </div>
         ))}
         {loading && (
-          <div className="flex justify-start"><div className="bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2.5"><TirangaLoader className="w-4 h-4 text-indigo-400" /></div></div>
+          <div className="flex justify-start"><div className="bg-card border border-line rounded-2xl px-4 py-2.5"><TirangaLoader className="w-4 h-4 text-accent-text" /></div></div>
         )}
         {showQuick && (
           <div className="flex flex-wrap gap-2 pt-2">
             {config.quickPrompts!.map((q, i) => (
-              <button key={i} onClick={() => send(q)} className="text-[12px] px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[#c9d1d9]">{q}</button>
+              <button key={i} onClick={() => send(q)} className="text-[12px] px-3 py-1.5 rounded-full bg-raised hover:bg-raised-hover border border-line text-body">{q}</button>
             ))}
           </div>
         )}
@@ -284,10 +284,10 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       {files.length > 0 && (
         <div className="px-3 pt-2 flex flex-wrap gap-2 shrink-0">
           {files.map((f, i) => (
-            <span key={i} className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
+            <span key={i} className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-accent-text">
               <FileText className="w-3 h-3" />
               <span className="max-w-[140px] truncate">{f.name}</span>
-              <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="hover:text-white"><X className="w-3 h-3" /></button>
+              <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="hover:text-ink"><X className="w-3 h-3" /></button>
             </span>
           ))}
         </div>
@@ -316,14 +316,14 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         />
       </div>
 
-      <div className="px-3 py-2 border-t border-white/5 flex items-end gap-2 shrink-0">
+      <div className="px-3 py-2 border-t border-line flex items-end gap-2 shrink-0">
         <AttachMenu
           onFiles={(fl) => addFiles(fl)}
           fileAccept={ACCEPTED_TYPES}
           disabled={loading || files.length >= MAX_FILES}
           badge={files.length}
           title="Attach (photo, gallery, or file)"
-          buttonClassName="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-[#c9d1d9] flex items-center justify-center"
+          buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover disabled:opacity-40 border border-line text-body flex items-center justify-center"
         />
         <textarea
           ref={composerRef}
@@ -352,7 +352,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           }}
           placeholder={`Ask ${config.name}…`}
           rows={1}
-          className="flex-1 resize-none bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/40 max-h-32"
+          className="flex-1 resize-none bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/40 max-h-32"
         />
         <ProfessionalVoiceButton
           professionalId={config.id}
@@ -363,11 +363,11 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         />
         {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
         {loading ? (
-          <button onClick={stop} title="Stop" className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shrink-0">
+          <button onClick={stop} title="Stop" className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent flex items-center justify-center shrink-0">
             <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
           </button>
         ) : (
-          <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
+          <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-on-accent flex items-center justify-center shrink-0">
             <Send className="w-4 h-4" />
           </button>
         )}
@@ -375,14 +375,14 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
 
       {/* Paywall / login card — shown when the gate blocks a turn (or the user taps the quota chip). */}
       {paywall && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-5" onClick={() => setPaywall(null)}>
-          <div className="w-full max-w-sm rounded-2xl bg-[#161b22] border border-white/10 p-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setPaywall(null)} className="absolute right-3 top-3 text-[#586069] hover:text-white"><X className="w-4 h-4" /></button>
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-scrim p-5" onClick={() => setPaywall(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-card border border-line p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setPaywall(null)} className="absolute right-3 top-3 text-faint hover:text-ink"><X className="w-4 h-4" /></button>
             {paywall === 'wallet' ? (
               <>
-                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Wallet className="w-6 h-6" /></div>
-                <h3 className="font-bold text-white mb-1">Your balance is empty</h3>
-                <p className="text-sm text-[#8b949e] mb-4">
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-warn flex items-center justify-center"><Wallet className="w-6 h-6" /></div>
+                <h3 className="font-bold text-ink mb-1">Your balance is empty</h3>
+                <p className="text-sm text-muted mb-4">
                   The assistants use the same balance as your builds — you only pay for what you actually use.
                   Add credit to carry on.
                 </p>
@@ -395,18 +395,18 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
               </>
             ) : paywall === 'login' ? (
               <>
-                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-indigo-300 flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
-                <h3 className="font-bold text-white mb-1">Sign in to continue</h3>
-                <p className="text-sm text-[#8b949e]">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 50} free messages every day.</p>
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-accent-text flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
+                <h3 className="font-bold text-ink mb-1">Sign in to continue</h3>
+                <p className="text-sm text-muted">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 50} free messages every day.</p>
               </>
             ) : (
               <>
                 {/* Was a "Get the Professional Pass — ₹99/month" checkout. The Pass is gone (admin
                     2026-08-10), so this card no longer sells anything: it states the allowance, says
                     when it returns, and offers the one action that genuinely helps today. */}
-                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Clock className="w-6 h-6" /></div>
-                <h3 className="font-bold text-white mb-1">That's today's free messages</h3>
-                <p className="text-sm text-[#8b949e] mb-4">
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-warn flex items-center justify-center"><Clock className="w-6 h-6" /></div>
+                <h3 className="font-bold text-ink mb-1">That's today's free messages</h3>
+                <p className="text-sm text-muted mb-4">
                   You've used all {pass?.freeDailyLimit ?? 50} of them. They come back tomorrow — or add credit and carry on now, paying only for what you use.
                 </p>
                 <button

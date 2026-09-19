@@ -112,7 +112,9 @@ export async function noteSharedProgress(uploadId: string, chunksSeen: number, b
   const d = db();
   if (!d) return;
   try {
-    await d.collection(COLLECTION).doc(uploadId).set({ chunksSeen, bytes }, { merge: true });
+    // An UPDATE, never a merge-set: progress on an upload that does not exist must not MINT an upload
+    // record with no owner (the DeploymentStore.setStatus class, 2026-09-18).
+    await d.collection(COLLECTION).doc(uploadId).update({ chunksSeen, bytes });
   } catch { /* progress is telemetry, not the upload */ }
 }
 

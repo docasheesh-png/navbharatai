@@ -125,7 +125,10 @@ class AppBuildStore {
     if (!db || !userId || !owner || !repo || !runId) return false;
     try {
       const id = buildRecordId(userId, owner, repo);
-      await db.collection('app_builds').doc(id).set({ runId: String(runId) }, { merge: true });
+      // An UPDATE, never a merge-set: a run id on a row that does not exist would MINT a build row with no
+      // workflow and no name — the very row this method's comment says the list cannot read back
+      // (the DeploymentStore.setStatus class, 2026-09-18).
+      await db.collection('app_builds').doc(id).update({ runId: String(runId) });
       return true;
     } catch {
       return false;
@@ -147,11 +150,11 @@ class AppBuildStore {
     if (!db || !userId || !owner || !repo) return false;
     try {
       const id = buildRecordId(userId, owner, repo);
-      await db.collection('app_builds').doc(id).set({
+      await db.collection('app_builds').doc(id).update({ // same reasoning as setLatestRun: never mint a row
         outcome,
         failureCode: outcome === 'failure' ? (failureCode ?? null) : null,
         finishedAt: Date.now(),
-      }, { merge: true });
+      });
       return true;
     } catch {
       return false;

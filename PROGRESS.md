@@ -69078,6 +69078,110 @@ and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All
 2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
    already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
 3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.
+## 2026-09-19 — "Open karte hi scroll lag hota hai": the first frame was blank for 3.6 seconds
+
+**The report (admin).** *"navbharatai jab user isko open karta hai, to page scroll karne me lag hota
+hai! kuch der baad response ata hai."*
+
+**Reproduced the only way this sandbox can: the real built app, driven over CDP in the pre-baked
+Chromium, on an emulated slow-4G link (1.6 Mbps, 150 ms RTT) with a throttled phone CPU.** Every number
+below is measured, three to five runs each, not estimated.
+
+### 🔴 The first hypothesis was mine, it was the obvious one, and the measurement KILLED it
+
+The build ships ~2.4 MB of JavaScript and CSS eagerly (entry 863 KB, `firebase-vendor` 819 KB,
+`react-vendor` 194 KB, CSS 558 KB). The natural reading — *"that is seconds of parse and compile on a
+cheap phone, which is the lag"* — is **wrong**, and it took an experiment that could have gone the
+other way to show it. Each chunk was loaded ALONE, in a page containing nothing else, at 6× CPU
+throttle, five runs, median:
+
+| chunk | on disk | load + parse + compile + execute |
+|---|---|---|
+| `firebase-vendor` | 800 KB | **35 ms** |
+| `react-vendor` | 189 KB | **24 ms** |
+| entry `index` | 843 KB | **100 ms** |
+
+**~160 ms in total.** V8 compiles lazily; bundle bytes are not CPU seconds. A fix aimed at "make the
+bundle smaller so the CPU has less to do" would have been effort spent on a number that was never the
+problem — and it would have been reported as a fix.
+
+### What the measurement actually found
+
+`index.html` shipped **`<div id="root"></div>`** — literally empty. Nothing could paint until the whole
+module graph had arrived and run:
+
+- **first contentful paint 3,600 ms** (3,616 / 3,600 / 3,528 across runs), 557 KB over the wire
+- for all of that time the screen is blank, so scrolling and tapping do nothing and the app looks hung
+
+That is the reported symptom, in the order the user experiences it: open → blank → *kuch der baad* the
+app appears. The lag is **the absence of a first frame**, not a slow one.
+
+### What shipped
+
+**1 · An honest boot frame inside `#root`** (`index.html`). Inline `<style>` so it does not wait on the
+42 KB stylesheet, real `--surface-base` values for all three themes so nothing changes colour when the
+CSS lands, `prefers-reduced-motion` respected. **FCP 3,600 ms → 2,380 ms** (2,388 / 2,372 / 2,380 —
+consistent to within 16 ms across runs).
+
+🔒 **React removes it, and that IS the mechanism** — `createRoot(...).render()` replaces the container's
+children on its first commit, so there is no timer, no flag and nothing that can strand it on screen.
+Verified end-to-end in the browser, not assumed: at 0.9 s the page reads `NAVBHARATAI / Starting up…`;
+after the app mounts `document.getElementById('nbai-boot')` is **null** and the real login UI is there.
+
+🔒 **It is a LOADING STATE, not fake UI** — no button, no link, no input, nothing that claims the app is
+ready. The regression test asserts that, because a splash is exactly the place where fake UI would feel
+harmless.
+
+**2 · The two panels that were in the first-load path and should not have been**
+(`ViewPanels.tsx`). That file lazy-loads forty-odd panels precisely because `App.tsx` imports it
+statically — and `PreviewSurface` (144 KB of source) and `FilesPanel` (33 KB) were static, though both
+render only behind one `activeView` gate, inside the same `<Suspense>` boundary the lazy forty use.
+Entry chunk **863 KB → 783 KB**, wire bytes **557 KB → 536 KB**.
+⚠️ Written with `.then(m => ({ default: m.X }))` rather than the file's `_lz` helper, deliberately:
+`_lz` casts to `ComponentType<any>`, which is why that file's own props doc warns the compiler will not
+tell you when a prop stops reaching a panel. These two keep their real prop types.
+
+⚠️ **Measured honestly: on the login page this second change makes NO difference to main-thread time.**
+Five runs each, before median 533 ms busy, after 597 ms — inside the noise, and if anything worse. It is
+21 KB less to download on a mobile data plan and 177 KB of source no longer compiled on first load; it
+is not a speed fix and is not claimed as one.
+
+### ⚠️ What did NOT change, stated plainly
+
+**LCP is unchanged (~3.4–3.6 s) and so is time-to-interactive.** The app still cannot respond until its
+JavaScript arrives. The user now sees the product instead of a blank page one and a quarter seconds
+sooner, and that is the whole of it.
+
+### 🔴 OPEN ROOT CAUSES (rule 6) — each measured, none fixed here
+
+1. **Cloud Run cold start, measured at 4,815 ms.** `dist/server.cjs` is 9.6 MB and `cloudbuild.yaml`
+   deploys with `--min-instances 0`. A user opening the app when no instance is warm waits ~5 s for
+   the FIRST API response — which is precisely *"kuch der baad response aata hai"*, and it would be
+   invisible to every client-side measurement above. `GET /api/warm` exists (`routes/warm.ts`) and
+   `server.ts` expects an external Cloud Scheduler ping; **whether that scheduler job actually exists
+   cannot be checked from a session** — it is a console fact. This is the single most likely cause of
+   the reported symptom that is NOT client-side, and settling it needs one look at Cloud Scheduler, or
+   `--min-instances 1` (a standing monthly cost, so an admin decision, and the rate is not quoted here
+   because nobody has measured it).
+2. **Firestore is in the first-load path and the login screen does not need it.** Inside
+   `firebase-vendor`: `@firebase/firestore` **1,213 KB** of source plus `re2js` 246 KB, against
+   `@firebase/auth` 451 KB. Auth must run at boot; Firestore must not. Deferring it would cut roughly
+   a fifth of the bytes that block first paint — and it touches ~109 import sites including the login
+   path, so it is a real project with real breakage risk, not a tidy-up. Recorded, not attempted.
+3. **`motion` (337 KB `motion-dom` + 120 KB `framer-motion` of source) is the largest single thing in
+   the entry chunk**, for animations in `Toast`, `SidebarNav`, `TopNav` and `AuthComponent`. The
+   library's own `LazyMotion` + `m` pattern exists for exactly this, and it is a per-call-site change
+   across every usage.
+4. **The LOGGED-IN app is unmeasured.** Everything above is the logged-out landing screen, because this
+   sandbox cannot sign in or reach the live site. If the admin's lag is inside the app after login, the
+   cause may be none of the above — `App.tsx` holds **103 `useState` and 58 `useEffect` in one 4,363-line
+   component**, and only 2 of 191 components are memoised, so every one of those setters re-renders the
+   whole shell. That is a structural observation, NOT a measurement, and is written here as a lead
+   rather than a finding.
+
+**Locked:** `tests/theFirstFrameIsNotBlank.test.ts`, 8 cases, proven by four reversions — deleting the
+frame (2 fail), dropping a theme's colour (1), growing a button inside it (1), and putting
+`PreviewSurface` back as a static import (2).
 ## 2026-09-19 — TAPPING TERMINAL ASKED FOR A TERMINAL, AND GOT A KEYBOARD
 
 Admin, verbatim: *"code studio (IDE) me agar terminal par click karte hai to 'keynote' open ho jata

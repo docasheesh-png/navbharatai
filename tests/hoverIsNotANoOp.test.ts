@@ -50,6 +50,16 @@ function noOpHoversIn(src: string): string[] {
       if (cls.includes(`bg-${s}`) && (cls.includes(`hover:bg-${s}`) || cls.includes(`group-hover:bg-${s}`))) {
         out.push(`bg-${s} + hover:bg-${s}`);
       }
+      // 📱 `active:` IS THE ONLY FEEDBACK A PHONE HAS — a finger never hovers, so a press that
+      // repaints the resting surface leaves a touch user with a control that does not answer at all.
+      // Added 2026-09-19: the admin reported the mobile editor toolbar dead, and the codemod had
+      // emitted `bg-raised active:bg-raised` into it — the very defect this file was written for,
+      // one variant over, and invisible to it because it only ever read `hover:`.
+      // The resting-surface rule is unchanged: `hover:bg-raised active:bg-raised` with no resting
+      // fill still paints on press and is NOT a finding.
+      if (cls.includes(`bg-${s}`) && cls.includes(`active:bg-${s}`)) {
+        out.push(`bg-${s} + active:bg-${s}`);
+      }
     }
   }
   return out;

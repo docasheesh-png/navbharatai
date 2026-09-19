@@ -1585,6 +1585,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   cleared field, a dropped paste) would have read as a deliberate zero. On the lifetime cap that is
   "no referrer ever earns anything, for ever", with the console showing the key as configured and
   nothing failing anywhere. An explicit `0` is still honoured — nobody types a zero by accident.
+  🔎 **HOW TO CHECK IT WITHOUT GUESSING (added 2026-09-19):** admin → Reports → Referral cost →
+  **"Check referral setup"** (`GET /api/admin/referral/preflight`, `src/server/lib/referralPreflight.ts`).
+  It asks Google with the real credential and the real package and names the missing step — a 400 on
+  the probe is the GOOD answer. Two links it cannot see are listed as hand work: the repo secret at
+  build time, and Play → Data safety. ⚠️ **Since #3030 (2026-09-17) the flat welcome gift is RETIRED
+  by the admin's own ruling, so with this flag unset a new account receives ₹0 — that is the ruling
+  landing, not a regression** (admin report 2026-09-19).
   🔴 **A CLAIM IS A REQUEST, NOT A FACT.** The first version of the claim route proved WHO was asking
   (the device) and WHETHER anything was owed (the paid-steps list) and never asked whether the step
   had been DONE — so any caller on a genuine Android phone could POST all four and collect ₹400 per

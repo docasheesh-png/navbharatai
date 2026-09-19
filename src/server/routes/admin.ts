@@ -17,6 +17,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, ge
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
 import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
+import { runReferralPreflight } from '../lib/referralPreflight';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -2634,6 +2635,29 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e) {
       // A panel that 500s tells the admin nothing. Report the failure AS the answer.
       return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  /**
+   * CAN THE REFERRAL GIFT ACTUALLY PAY? The same shape as the hosting preflight below: one press asks
+   * Google with the real credential and the real package, and every refusal names its next step.
+   * Read-only — the probe sends a token Google cannot decode, so nothing is ever paid by it.
+   */
+  app.get('/api/admin/referral/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      res.json(await runReferralPreflight());
+    } catch (e) {
+      // A checker that 500s tells the admin nothing. Report the failure AS a failed check.
+      res.json({
+        verdict: 'incomplete',
+        checks: [{
+          id: 'preflight', label: 'Setup check', state: 'unknown',
+          detail: e instanceof Error ? e.message : String(e),
+          remedy: 'Re-run the check.',
+        }],
+        nextAction: 'Re-run the check.',
+        manual: [],
+      });
     }
   });
 

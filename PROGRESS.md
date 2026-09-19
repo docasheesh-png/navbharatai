@@ -70026,3 +70026,77 @@ Installed Android users still carry the old frontend, so they will meet the SERV
 friendly in-panel offer until a fresh `.aab` ships — which happens only on the admin's word. The refusal
 carries the full plain-words message and `canCreateKey`, so even an old client shows a sentence with the
 way out in it, but the one-press button itself is new code.
+
+## 2026-09-19 — "0 welcome credit ho rahe": it is the admin's own 17-Sept ruling landing, and the replacement cannot pay yet — so the admin gets a check that names the missing step (branch `claude/vigilant-feynman-9aobjz`)
+
+**Admin (with the Users table showing every account that joined on 19-Sept at 0 tokens):** *"maine jo
+merge kiya uske baad, 0 welcome credit ho rahe — referral code, mail verification, mobile verification,
+github verification wala bhi on karwao."*
+
+### The diagnosis, from the code and the git log — not a regression, a decision
+
+- **The ₹0 is #3030 (`f530ffbc`, 2026-09-17 22:24), merged on the admin's own ruling of that day:**
+  *"nahi welcome bonus ₹500 band karna hai! sirf refer aur verification wale ₹400 dene hai … weekly
+  reward, welcome reward yeh sab hatao."* `giftPolicy.ts` → `flatWelcomeGiftAllowed()` returns `false`,
+  unconditionally; `routes/wallet.ts` (the single money-moving caller) grants 0 and `retiredGiftSummary`
+  hides the banner. Every account created after that merge receives nothing on arrival. **Working as
+  ruled.** The 25,000-token accounts in the same screenshot are older wallets, gifted under the old plan
+  and never clawed back (also by design).
+- **The replacement — the four earned steps — is switched off and could not pay if it were on.**
+  `REFERRAL_REWARDS` is unset (`referralRewardsEnabled()` false: the API answers `enabled: false`, the
+  panel shows nothing). And even set, every rupee sits behind `checkDeviceIntegrity`, which FAILS
+  CLOSED: `deviceCheckConfigured` needs `GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME` (both Cloud
+  Run, both almost certainly unset since `STORE_BILLING` never went live); the Play Integrity API must
+  be enabled; the service account must be allowed to decode for the app; and the phone must be running
+  a bundle that carries `DeviceIntegrityPlugin` — first present in **android-aab run #117** (built
+  `749cf054`, the #2953 merge), built WITH the `PLAY_INTEGRITY_CLOUD_PROJECT` repo secret. The registry
+  still records `ANDROID_LATEST_VERSION_CODE = 91`.
+- **This exact state was predicted and recorded twice** — 2026-09-17 *"ADMIN DECISION PENDING:
+  `REFERRAL_REWARDS` — asked, answered 'not yet'"* (with the ₹0 table) and the 2026-09-18 switch-on
+  guide (seven ordered steps, `REFERRAL_REWARDS` LAST). What was missing was not another guide.
+
+### What was missing: the guide's own verification step was "make an account on a phone and see if ₹100 arrives"
+
+That costs a Play rollout per attempt and names nothing when it fails — six links, spread across Cloud
+Run, Google Cloud, Play Console and a GitHub secret, and a wrong one produces the same ₹0 as a missing
+one. **This is the problem `hostingPreflight.ts` already solved for hosting**, so it got the same answer:
+
+- **`src/server/lib/referralPreflight.ts`** — asks Google from the SAME code, with the SAME credential
+  and the SAME package a real claim uses: package name (against `ANDROID_PACKAGE_NAME`), the
+  service-account JSON (unset vs unparseable are different failures), a Play-Integrity-scoped token
+  minted from it, then ONE `decodeIntegrityToken` call with a token Google cannot read — **a 400 is the
+  GOOD answer** (API on, credential accepted, package known); `SERVICE_DISABLED` → the API screen; a
+  plain 403 → Play Console → App integrity; 404 → the package; anything else `unknown`, never `failed`.
+  Then `ANDROID_LATEST_VERSION_CODE` against `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117`, and
+  `REFERRAL_REWARDS` LAST — so `nextAction` (the first remedy) is always the earliest missing step and
+  the admin cannot be sent to the flag first. Reuses `isApiDisabled` / `skipped` / `preflightVerdict` /
+  `nextAction` from the hosting preflight rather than a second copy of the 403 parser.
+- **Two links no server can see are WORDS, not states** (`manual`): whether the live `.aab` was built
+  with the repo secret, and Play → Data safety. Reporting either as a state would be inventing one.
+  The third manual line is the website rule — ₹0 there by design.
+- **`GET /api/admin/referral/preflight`** (admin token) and a **"Check referral setup"** button on the
+  Referral cost card (admin → Reports), ON A BUTTON like the hosting checks, because it makes a real
+  Google call. The card's "not set" banner now also says the flat gift is retired, so the ₹0 is
+  explained on the screen where it is seen.
+- `storeVerify.ts` exports `googleServiceAccountEmail` (an email is not a secret; "which account are we
+  using?" is the first question a refused call raises).
+
+Test-locked in `tests/referralPreflight.test.ts` (23 cases): every classifier branch, the skip-never-ok
+rule, the probe's exact URL and body, the flag-last order, and the wiring (route behind
+`verifyAdminToken`, card fetches on a button and never in the render effect).
+
+### What the admin has to do — none of it is code, and the order matters
+
+1. Enable the **Play Integrity API** in the Google Cloud project that owns the Play service account.
+2. Set **`GOOGLE_PLAY_SA_JSON`** (whole JSON, one string) + **`GOOGLE_PLAY_PACKAGE_NAME=com.navbharat.ai`**
+   in Cloud Run; in Play Console → Release → App integrity link the app to that Cloud project.
+3. Set the GitHub repo secret **`PLAY_INTEGRITY_CLOUD_PROJECT`** (the project NUMBER, digits) — then
+   build a fresh `.aab` (run ≥ #121, from `main`), update Play → Data safety, roll it out, and set
+   `ANDROID_LATEST_VERSION_CODE` to that run number once it is downloadable.
+4. Press **Check referral setup** until every line is green.
+5. Only then **`REFERRAL_REWARDS=on`**.
+
+⚠️ **Stated plainly (rule 3): the users in the screenshot are on the WEBSITE, and the website will
+never pay them a rupee** — that is the admin's own 2026-09-15 rule (*"websites par kuch bhi nahi
+dena"*), not a fault. If web sign-ups are meant to get something, that is a design change to decide
+explicitly, not something to slip in here; nothing in this change alters who is paid.

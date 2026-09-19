@@ -1616,6 +1616,35 @@ the code (it is actually read somewhere) on 2026-07-11.
   declaration that contradicts the policy is a violation, not a mismatch — and this is the same shape
   as the 2026-09-02 incident where the policy said "we never share your data with advertisers" while
   the Meta pixel was being built.
+- **🔗 ANDROID APP LINKS — a navbharatai.com link opens the APP, not a browser (built 2026-09-19).
+  ⚠️ `ANDROID_CERT_SHA256` is NOT set, and unset means today's behaviour exactly** — the
+  `/.well-known/assetlinks.json` route answers 404, Android's verification fails, and every link keeps
+  going to the browser as it does now. Read by `src/server/lib/assetLinks.ts`; the route is mounted in
+  `server.ts` BESIDE the Apple one and for the same reason (`express.static`'s `dotfiles` default is
+  `ignore`, so a `.well-known` path never reaches it).
+  🔴 **THE VALUE IS NOT A SECRET, which is why it may be discussed here at all.** It is the SHA-256
+  fingerprint of the app's signing certificate, and it is PUBLISHED at that public URL by every app on
+  earth that has App Links on. The **keystore** is the secret; the fingerprint is its public identity.
+  The admin reads it from **Play Console → Setup → App signing**. No session can read it — the keystore
+  lives only with the admin (`ANDROID_KEYSTORE_*` are repo secrets Claude cannot see).
+  ⚠️ **SET BOTH CERTIFICATES, comma-separated.** Under Play App Signing an app has two — the **upload**
+  key the admin signs with and the **app signing** key Google re-signs with — and which one reaches a
+  phone depends on how the app was installed. Listing one makes the other fail with nothing to see.
+  🔒 **A MALFORMED ENTRY IS DROPPED, NOT PASSED THROUGH.** Android rejects the WHOLE statement file if
+  any entry is malformed, so one typo would silently disable link handling for the good fingerprint
+  beside it — the same shape as the trailing space in `BRAVE_API_KEY` and the `=` in
+  `ALERT_EMAIL_FROM`. The route logs one admin line naming how many entries were unreadable, never the
+  value.
+  🔒 **THE CLAIMED PATHS ARE AN ALLOWLIST, AND THE MANIFEST CANNOT DRIFT FROM THE CODE.** `/`, `/admin`,
+  `/store`, `/store/app/*` — exactly what `src/lib/deepLinkRoute.ts` can resolve, asserted against
+  `AndroidManifest.xml` in both directions by `tests/aLinkOpensTheApp.test.ts`. **`/privacy` and
+  `/terms` are deliberately NOT claimed**: Play and Meta fetch them with tools that may not run
+  JavaScript, and a person who taps a privacy link asked for that page. Claiming a URL the app cannot
+  serve is WORSE than not claiming it — the app opens, lands on Home, and the link is eaten.
+  **How to verify it after setting it:** open `https://navbharatai.com/.well-known/assetlinks.json` in a
+  browser (JSON back ⇒ configured; 404 ⇒ unset or every entry malformed), then reinstall the app and
+  tap a navbharatai.com link. Android re-checks the file on install and periodically, so an app already
+  installed may take a while — a reinstall settles it immediately.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

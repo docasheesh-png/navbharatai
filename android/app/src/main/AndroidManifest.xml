@@ -46,6 +46,40 @@
                 <data android:scheme="com.navbharat.ai" />
             </intent-filter>
 
+            <!-- ANDROID APP LINKS (admin 2026-09-19: "mujhe sabse acchi native app banani hai").
+                 Tapping a navbharatai.com link opened a BROWSER, which is both the loudest "this is a
+                 website" moment left and a growth leak — share links, referral codes, published apps.
+
+                 `autoVerify` asks Android to fetch https://navbharatai.com/.well-known/assetlinks.json
+                 and confirm this package is named there beside our signing certificate's SHA-256. That
+                 file is served by server.ts from ANDROID_CERT_SHA256 (see src/server/lib/assetLinks.ts).
+                 UNTIL THAT VALUE IS SET verification fails and Android hands these URLs back to the
+                 browser — i.e. exactly today's behaviour, which is what makes this safe to ship first.
+
+                 🔒 THE PATHS ARE AN ALLOWLIST, NOT `pathPrefix="/"`. Claiming a URL the app cannot serve
+                 is WORSE than not claiming it: the app opens, dumps the user on Home, and has eaten the
+                 page they asked for. So this list is exactly src/lib/deepLinkRoute.ts's APP_LINK_CLAIMS,
+                 and tests/aLinkOpensTheApp.test.ts fails CI if the two ever disagree.
+
+                 NOT claimed, deliberately: /privacy and /terms. Play and Meta fetch those with tools
+                 that may not run JavaScript, and a person tapping a privacy link asked for that page —
+                 not for our home screen. They stay with the browser.
+
+                 An intent filter matches the PATH only; a query string cannot be matched. That is why
+                 /?view=appstore — the older share link, still in circulation — rides the "/" claim and
+                 is resolved in JavaScript by deepLinkTarget. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="navbharatai.com" />
+                <data android:scheme="https" android:host="www.navbharatai.com" />
+                <data android:path="/" />
+                <data android:path="/admin" />
+                <data android:path="/store" />
+                <data android:pathPrefix="/store/app/" />
+            </intent-filter>
+
         </activity>
 
         <!-- META (Facebook / Instagram) APP EVENTS — the values are supplied by build.gradle from the

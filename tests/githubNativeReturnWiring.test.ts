@@ -21,11 +21,21 @@ const app = read('src/App.tsx');
 const modals = read('src/components/panels/AppModals.tsx');
 const hook = read('src/hooks/useGitHubConnect.ts');
 
-/** The native deep-link listener, sliced from its registration to the end of its callback. */
+/**
+ * The native deep-link listener, sliced from its registration to the end of its callback.
+ *
+ * ⚠️ THE END IS AN ANCHOR, NOT A CHARACTER COUNT (changed 2026-09-19). It was `at + 1600`, and adding
+ * ONE line to the top of the callback — the App Links branch — pushed `setGithubToken(token)` past the
+ * window and turned this into a failure about GitHub sign-in, which was untouched. A fixed length makes
+ * every assertion below silently depend on how much unrelated code sits above it. `removeGithubUrlOpen`
+ * is assigned immediately after the callback closes, so it is the callback's real end.
+ */
 const urlOpenListener = (() => {
   const at = app.indexOf("addListener('appUrlOpen'");
   expect(at, 'the native OAuth deep-link listener is gone').toBeGreaterThan(-1);
-  return app.slice(at, at + 1600);
+  const end = app.indexOf('removeGithubUrlOpen = () =>', at);
+  expect(end, 'the listener no longer ends where this test expects').toBeGreaterThan(at);
+  return app.slice(at, end);
 })();
 
 describe('a successful native sign-in clears the waiting overlay', () => {

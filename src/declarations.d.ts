@@ -280,6 +280,7 @@ declare module 'lucide-react' {
   export const User: Icon;
   export const Volume2: Icon;
   export const Wifi: Icon;
+  export const WifiOff: Icon;
   export const X: Icon;
   export const Zap: Icon;
   export const ZapIcon: Icon;

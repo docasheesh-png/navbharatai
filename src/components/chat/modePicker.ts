@@ -163,19 +163,20 @@ export function modePickerEntries(opts: { hideMedical: boolean; activeView?: str
  * by ENDING the live one first: `endProfessionalChat` archives the transcript into Professional History
  * and clears the live slot. Nothing is lost.
  *
- * 🔴 **DOCTOR AI IS OUTSIDE THIS RULE, AND ITS ABSENCE IS THE DECISION — not an oversight.**
- * Its transcript lives in `sda_messages` plus ONE fixed Firestore document per user (`sda_${uid}`),
- * and `ProfessionalHistoryView` iterates `PROFESSIONAL_CHATS`, which does not contain it. So "always a
- * new chat" would delete the previous case locally at once and overwrite it in Firestore as soon as the
- * new one had two messages — medical case notes, gone, with nothing to reopen. Tapping Doctor AI
- * therefore RESUMES, exactly as it does today.
+ * ✅ **DOCTOR AI STARTS FRESH TOO SINCE 2026-09-19 — but NOT through this function.**
  *
- * ⚠️ AND IT IS NOT A ONE-LINE FLIP, which is the part worth writing down. Adding Doctor AI here would
- * call `endProfessionalChat('sda_chat')`, which writes an archive under a key NOTHING reads and does not
- * touch `sda_messages` at all — a "new chat" that silently is not one. Making it real needs two things
- * this repo does not have: a per-conversation archive for Doctor AI, and its own clearing path
- * (`sda_messages` plus the remount key App.tsx's ✕ already uses). Recorded as an open root cause in
- * PROGRESS.md.
+ * It was held back while its transcript lived in `sda_messages` plus ONE fixed Firestore document per
+ * user (`sda_${uid}`): "always a new chat" would have deleted the previous case locally and overwritten
+ * it in Firestore as soon as the new one had two messages. `src/lib/sdaCaseStore.ts` removed that —
+ * every case now owns its own document and its own transcript key, so starting one deletes nothing and
+ * the case before it keeps its row in History → SDA.
+ *
+ * ⚠️ IT IS STILL NOT `endProfessionalChat`, and that has not changed. Doctor AI's transcript is not in
+ * the professional store at all, so archiving it there would write under a key NOTHING reads and leave
+ * the real transcript untouched — a "new chat" that silently is not one. App.tsx calls `startFreshCase`
+ * for it instead: the SAME call the ✕ makes, so there is one way to begin a case rather than a second
+ * copy of the rule. This function stays exactly what its name says — which rows need the PROFESSIONAL
+ * archive — and Doctor AI is correctly not one of them.
  */
 /**
  * Does picking this row need its live conversation archived first? PURE.
@@ -189,7 +190,7 @@ export function modePickerEntries(opts: { hideMedical: boolean; activeView?: str
  * Emptying it changed no behaviour and broke no test. A switch that looks like the control and is not
  * is worse than no switch: the next person flips it, sees nothing, and goes looking in the wrong file.
  * It is deleted rather than "fixed", because making it load-bearing would have been worse still — see
- * the note above for what a Doctor AI new-chat actually needs.
+ * the note above, and `sdaCaseStore.ts` for how a Doctor AI new-chat is actually done.
  */
 export function startsFreshOnPick(id: string): boolean {
   return id in PROFESSIONAL_CHATS;

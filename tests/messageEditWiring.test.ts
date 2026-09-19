@@ -94,15 +94,33 @@ describe('Doctor AI: the rewind is TRUE on the server, not just on screen', () =
      * carried on treating it as fact. Rotating the id abandons that accumulation, so the server
      * re-seeds from the SURVIVING transcript.
      */
+    /**
+     * ⚠️ UPDATED 2026-09-19, and the RULE above is unchanged — only the name of the thing that rotates.
+     *
+     * This used to assert `caseIdRef.current = freshId` and a write to the shared `'sda_messages'` key,
+     * because ONE ref served two jobs: the server's clinical-store key AND the case's identity. That
+     * was harmless while every case shared one Firestore document. It stopped being harmless when each
+     * case got its own document (`sdaCaseStore.ts`): rotating the CASE here would move the patient to a
+     * new document — and a new History row — every time the doctor corrected a typo, orphaning the row
+     * their case was already in.
+     *
+     * So the refs were split, and this case now pins BOTH halves: the clinical session still rotates
+     * (the rule this test was written for), and the case must NOT. Asserting only the rename would have
+     * dropped the guard that the original rule depended on.
+     */
     const at = sda.indexOf('const rewindCase');
     expect(at).toBeGreaterThan(-1);
-    const fn = sda.slice(at, at + 1200);
+    const fn = sda.slice(at, sda.indexOf('const handleSend'));
     expect(fn).toContain('newSdaCaseId()');
-    expect(fn).toContain('caseIdRef.current = freshId');
+    expect(fn).toContain('clinicalSessionRef.current = newSdaCaseId()');
+    // The patient, their document and their History row all stay put across a retraction.
+    expect(fn).not.toContain('caseIdRef.current =');
+    expect(fn).not.toContain('caseDocRef.current =');
     // Red flags are derived from turns that may no longer exist.
     expect(fn).toContain('setActiveRedFlags([])');
-    // The rewind must be persisted, or a reload resurrects the retracted turns.
-    expect(fn).toContain("localStorage.setItem('sda_messages'");
+    // The rewind must be persisted, or a reload resurrects the retracted turns — now under THIS case's
+    // own key, so persisting a retraction can never touch another patient's transcript.
+    expect(fn).toContain('localStorage.setItem(sdaMessagesKey(caseIdRef.current)');
   });
 
   it('a re-ask after a rewind sends the SURVIVING history, not the stale closure', () => {

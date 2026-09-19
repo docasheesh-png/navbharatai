@@ -68723,6 +68723,56 @@ Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hove
 
 ---
 
+## 2026-09-19 — THE ACCOUNT SWITCHER IS REMOVED (admin-mandated)
+
+**Admin, looking at the sign-in screen a "switch" had just dropped them on:** *"1 tab swich kam nahi
+kar raha hai. isko hata do! pura multiple account login wala system hata do … jab account switch ke
+samay login hi karna padega har baar to fayda hi kya hua, switching ka! ek account login hi rahne
+do."*
+
+**They were reading the feature correctly, and `accountRoster.ts` said so in its own header from the
+day it shipped:** *"the Firebase SDK holds ONE live session per app instance. So switching
+re-authenticates with the provider rather than keeping five sessions live in parallel."* The menu
+nevertheless said **"Switch account"** — Google's and Instagram's words for a mechanism that really
+does hold several sessions at once.
+
+🔴 **THE SHAPE WORTH RECOGNISING AGAIN: four separate repairs went into the WORDING of a promise the
+code could not keep, and none into the mechanism.** A banner on the sign-in screen explaining that
+you were switching (2026-09-02); a `login_hint` so the chooser landed on the right row (2026-08-22);
+a per-row `title` admitting *"this signs you in again"*; and a 2026-09-12 edit moving that admission
+off the screen because it *"bina bat ke jagah kha raha hai"*. Each was a reasonable local fix. Their
+sum is a feature whose every visible part exists to explain why it does not do what it is called.
+
+**Honest about what was possible, since the admin's own words were "apse nahi hoga":** real parallel
+sessions ARE buildable — several named Firebase app instances, each with its own persistence. It was
+never attempted; what shipped was the metadata half. On its own that half saves typing an email
+address and costs a screen that looks like the switch failed, so removing it is right whether or not
+the full thing is ever built.
+
+**Removed:** `src/lib/accountRoster.ts` (+ its test), `tests/accountSwitchHonesty.test.ts`, the
+dropdown's whole switch block in `TopNav.tsx`, the sign-in-screen switch banner, and the stored-hint
+plumbing (`SIGN_IN_HINT_KEY` / `SIGN_IN_PROVIDER_KEY` / `googleNativeCustomParameters`).
+
+🔒 **THE PART A CODE-ONLY DELETION WOULD HAVE MISSED: the roster is DELETED from devices that have
+one.** `nbai:accounts` is a list of everyone who ever signed in on that phone — the roster's own
+header warned about exactly that on a shared machine — and with the switcher gone there would be no
+screen left that could clear it. `App.tsx` now removes all three keys where it used to write them.
+
+⚠️ **Two `login_hint` uses REMAIN and are correct — they were checked, not swept up.** GitHub's native
+`allow_signup` parameter, and the account-LINKING flow, which hints the email out of the pending
+credential in hand so a user proving they own that address is not made to pick it from a list.
+Neither reads stored accounts. `tests/oneAccountAtATime.test.ts` therefore forbids
+`login_hint: signInHint` and any read of the `nbai:sign-in*` keys, NOT the string `login_hint`.
+
+Google sign-in keeps `prompt: 'select_account'`, which is now the whole policy: with no hint, that is
+what stops Google silently reusing its single live session and signing someone back into the account
+they opened the screen to leave.
+
+`AppKnowledgeBase.ts` updated in the same change (every AI in the app answers "where do I switch
+accounts?" from it; the old entry would have given directions to a menu that no longer exists).
+
+Test-locked in `tests/oneAccountAtATime.test.ts` — 11 cases, proven by two reversions (restoring a
+`switchTo` turns it red; removing the storage cleanup turns two more red).
 ## 2026-09-19 — TAPPING TERMINAL ASKED FOR A TERMINAL, AND GOT A KEYBOARD
 
 Admin, verbatim: *"code studio (IDE) me agar terminal par click karte hai to 'keynote' open ho jata

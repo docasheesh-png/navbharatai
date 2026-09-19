@@ -1220,6 +1220,28 @@ export function emptyBuildOutcomeIssue(
  * and proved nothing is still an honest failure — silence about an app is not good news about it, and
  * "no files" must never become a way to pass.
  *
+ * 🔴 AND IT USED TO END THE CONVERSATION ON THE ONE PROMPT IT COULD NOT ANSWER (report
+ * a48d0f9e, 2026-09-19). The user typed **"Repair some parts."** — a request to FIX things. The turn
+ * ran a typecheck and a lint, both clean, changed no file, and replied *"Nothing needed changing … it
+ * works"*, followed by *"tell me exactly what's not working and I'll fix them"*.
+ *
+ * Thirty-five seconds EARLIER, the same build had already recorded, in this same report:
+ * `ACCESSIBILITY — 70/100, 34 form field(s) with no label across 21 files. Worst: Marksheets (12),
+ * ReportCards (11), Students (10)` — and a YELLOW release gate. **We held a list of thirty-four
+ * concrete, named defects and asked the user to name one for us.**
+ *
+ * The findings were not lost: `buildFindingSuggestions` maps them to user-facing titles for the 💡
+ * bulb. But that is a SEPARATE surface, read from the PREVIOUS build's saved report, which the user has
+ * to go and open — while the answer to the question they actually asked said there was nothing.
+ *
+ * 🔒 SO THE SUMMARY NOW CARRIES THEM, and it reuses that exact table rather than inventing a second
+ * vocabulary: the same titles, the same ranking, the same `NEVER_SUGGEST` exclusions, so a
+ * process-only code can no more reach this sentence than it can reach the bulb.
+ *
+ * ⚠️ WITH NO FINDINGS THE SENTENCE IS BYTE-IDENTICAL to what it has always said — the whole
+ * behaviour rides on a list being non-empty, so a build with nothing to report cannot regress. And it
+ * changes the WORDS only: `ok` stays true and the turn stays free, because a check that checked is
+ * still a check that checked.
  * Pure + exported for testing.
  */
 export function verifiedNoChangeSummary(opts: {
@@ -1233,16 +1255,36 @@ export function verifiedNoChangeSummary(opts: {
   userAskedToBuildAnApp: boolean;
   /** A real browser was opened on the running app and it rendered. The one piece of proof that counts. */
   appRendered: boolean;
+  /**
+   * What this build ALREADY MEASURED and has not fixed — the user-facing titles from
+   * `buildFindingSuggestions`, in its ranking. See the 🔴 note below: empty or absent leaves the
+   * sentence byte-identical to what it has always said.
+   */
+  openFindings?: readonly string[];
 }): string | null {
   if (!opts.expectsArtifacts || opts.filesWritten > 0) return null;
   if (opts.sandboxUnavailable) return null;              // nothing could have been verified either
   if (!opts.isEditMode || opts.existingProjectFiles <= 0) return null; // no app to have been fine already
   if (opts.userAskedToBuildAnApp) return null;           // they wanted an app produced; none was
   if (!opts.appRendered) return null;                    // no proof ⇒ no success
+
+  const found = (opts.openFindings ?? []).map((t) => String(t || '').trim()).filter(Boolean);
+  if (found.length === 0) {
+    return (
+      'Nothing needed changing — I checked your app from end to end and it works. '
+      + 'It compiles, the production build succeeds, the server starts, and I opened it in a real browser '
+      + 'and watched it render. No file was modified, because none had to be.'
+    );
+  }
+  const list = found.length === 1
+    ? found[0]
+    : `${found.slice(0, -1).join(', ')} and ${found[found.length - 1]}`;
   return (
-    'Nothing needed changing — I checked your app from end to end and it works. '
-    + 'It compiles, the production build succeeds, the server starts, and I opened it in a real browser '
-    + 'and watched it render. No file was modified, because none had to be.'
+    'I checked your app from end to end and it works — it compiles, the production build succeeds, '
+    + 'the server starts, and I opened it in a real browser and watched it render. No file was modified, '
+    + 'because nothing is stopping it from running. '
+    + `I can see ${found.length} thing${found.length === 1 ? '' : 's'} worth fixing though: ${list}. `
+    + "Say the word and I'll fix them."
   );
 }
 
@@ -19709,6 +19751,15 @@ async function noteBuildOutcome(
         // 697b38ee proved a working app was reported as a failed empty build because delivery is
         // measured in files written. Tested FIRST, and only on real browser evidence — a turn that
         // wrote nothing and proved nothing still falls through to the honest failure below.
+        // WHAT THIS BUILD ALREADY MEASURED AND HAS NOT FIXED (report a48d0f9e — see the note on
+        // `verifiedNoChangeSummary`). These findings are recorded well before this point (the quality
+        // lint runs in the post-answer integrity pass, ~35s earlier in that report), so naming them
+        // here costs nothing and needs no new analysis. Best-effort by construction: the user's answer
+        // must never depend on the diagnostics read succeeding.
+        let openFindings: string[] = [];
+        try {
+          openFindings = buildFindingSuggestions(buildDiag.report()?.issues, 3).map((x) => x.title);
+        } catch { /* no findings layer — the sentence falls back to exactly what it always said */ }
         const verifiedNoChange = verifiedNoChangeSummary({
           expectsArtifacts,
           filesWritten: writtenFiles.size,
@@ -19717,13 +19768,17 @@ async function noteBuildOutcome(
           existingProjectFiles: editFileTree?.length ?? 0,
           userAskedToBuildAnApp,
           appRendered: previewVerifiedRendered,
+          openFindings,
         });
         if (verifiedNoChange) {
           result = { ...result, summary: verifiedNoChange };
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'VERIFIED_NO_CHANGE', autoResolved: true,
             message: 'No file changed and none had to: this was a check-and-finish turn on an existing app, '
-              + 'and the app was opened in a real browser and rendered. Reported as a success rather than as an empty build.',
+              + 'and the app was opened in a real browser and rendered. Reported as a success rather than as an empty build.'
+              + (openFindings.length > 0
+                ? ` The reply also names the ${openFindings.length} open finding(s) this build measured: ${openFindings.join(', ')}.`
+                : ''),
           });
         } else {
           // TWO GUARDS, ONE CONDITION, AND THE SECOND IS NOT THE FIRST WITH A CHECK REMOVED (merge of

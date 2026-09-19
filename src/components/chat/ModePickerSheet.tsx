@@ -17,12 +17,18 @@ export function ModePickerSheet({
   activeView: string;
   /** Native-shell Play compliance: hides the medical-class experts (same rule as the hub). */
   hideMedical: boolean;
-  /** 'free' | 'free_new' | a professional view id. The CALLER navigates; this sheet only reports. */
+  /**
+   * The id of the row that was tapped. The CALLER navigates; this sheet only reports.
+   *
+   * ⚠️ Deliberately NOT a list of the possible values — that list lives in modePicker.ts (`ModeEntry`)
+   * and the copy that used to stand here still said `free_new` months after the row was renamed. A
+   * restated fact is a fact that goes stale where no compiler can see it.
+   */
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const entries = useMemo(() => modePickerEntries({ hideMedical }), [hideMedical]);
+  const entries = useMemo(() => modePickerEntries({ hideMedical, activeView }), [hideMedical, activeView]);
   const visible = useMemo(() => filterModeEntries(entries, query), [entries, query]);
   const current = activeModeId(activeView);
 
@@ -35,14 +41,15 @@ export function ModePickerSheet({
     </span>
   );
 
-  // The admin's exact spec for row 1: 'navbharatai "free" — free bold me alag style me dikhe'.
+  // 'navbharatai "free" — free bold me alag style me dikhe' (admin 2026-08-25). The styling belongs to
+  // the WORD, so the recent row gets it too when the open AI happens to be the free chat — otherwise the
+  // same name would be painted two different ways in one list.
   const rowLabel = (e: ModeEntry) => {
-    if (e.kind === 'free' || e.kind === 'free_new') {
+    if (e.name === 'NavBharatAI FREE') {
       return (
         <span className="text-[13px] text-ink">
           NavBharatAI{' '}
           <span className="font-black italic tracking-tight bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">FREE</span>
-          {e.kind === 'free_new' && <span className="ml-1 font-black text-warn">+</span>}
         </span>
       );
     }
@@ -95,7 +102,11 @@ export function ModePickerSheet({
               >
                 {rowIcon(e)}
                 <span className="flex-1 min-w-0 truncate">{rowLabel(e)}</span>
-                {e.kind === 'free_new' && <span className="text-[9px] font-bold uppercase tracking-wider text-muted shrink-0">New chat</span>}
+                {/* THE TAGS ARE WHAT SEPARATE THE TWO ROWS OF ONE AI. With Teacher AI open the list holds
+                    "Teacher AI · Recent" (go back) and "Teacher AI · New chat" (start over) — identical
+                    names, opposite actions, so an unlabelled pair would be a coin flip. */}
+                {e.kind === 'recent' && <span className="text-[9px] font-bold uppercase tracking-wider text-accent-text shrink-0">Recent</span>}
+                {(e.kind === 'free' || e.kind === 'professional') && <span className="text-[9px] font-bold uppercase tracking-wider text-muted shrink-0">New chat</span>}
                 {current === e.id && <Check className="w-4 h-4 text-accent-text shrink-0" aria-label="Current mode" />}
               </button>
             </div>

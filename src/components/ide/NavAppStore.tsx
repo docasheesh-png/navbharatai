@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
+import PullToRefresh from '../PullToRefresh';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
@@ -498,8 +499,28 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   }, [dlBusy]);
 
 
+  /**
+   * PULL TO REFRESH — real, because this list is a real fetch (admin 2026-09-19, item D of five).
+   *
+   * Apps published by OTHER creators appear only when we ask the server again: `/api/nav-store/apps`
+   * and `/api/nav-store/web/apps` are plain HTTP, with no live subscription behind them. So a pull here
+   * genuinely gets you something, which is the whole condition for putting the gesture on a screen —
+   * the History list is deliberately NOT wrapped, because its Firestore snapshot already keeps it
+   * current and a spinner there would be theatre. See src/lib/pullToRefresh.ts.
+   *
+   * Everything the tabs can show is reloaded, not just the visible one: the user's pull means "get me
+   * the current state of this screen", and refreshing one tab while leaving the next stale is the kind
+   * of half-answer that makes people pull twice.
+   */
+  const handlePullRefresh = useCallback(async () => {
+    await Promise.allSettled([loadStatus(), loadApps(), loadWebApps()]);
+  }, [loadStatus, loadApps, loadWebApps]);
+
   return (
-    <div className="h-full overflow-y-auto overscroll-contain bg-surface text-ink" style={{ WebkitOverflowScrolling: 'touch' }}>
+    <PullToRefresh
+      onRefresh={handlePullRefresh}
+      className="h-full overflow-y-auto overscroll-contain bg-surface text-ink"
+    >
       <div className="max-w-3xl mx-auto px-4 py-5 sm:px-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
@@ -1303,7 +1324,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         </div>
       )}
       {playingId && <WebAppPlayer appId={playingId} onClose={() => setPlayingId(null)} />}
-    </div>
+    </PullToRefresh>
   );
 };
 

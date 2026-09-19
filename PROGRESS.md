@@ -68721,6 +68721,101 @@ class list by construction), each candidate once. All ten fixed by running the c
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
 
+---
+
+## 2026-09-19 — ⏱️ MEASURE THE COLD START BEFORE OPTIMISING IT (admin item E of five)
+
+The audit that produced items A–E found `dist/assets` at **5.9 MB** and the splash released at **1 s**,
+and could say **nothing** about what that costs a real user at launch — because nobody had ever measured
+it. This repo already knows the price of skipping that step: the `E2B_USD_PER_HOUR` correction in
+`CLAUDE.md` records a derivation that "could not fail" and put a number **half the real one** on the
+admin's own cost panel for a month. So E is an instrument, not an optimisation.
+
+### 🔴 What it cannot see, said in the payload and not only in a comment
+
+JavaScript begins existing when the WebView starts loading our document. The Android process starting,
+the Activity, the WebView's own creation and the splash appearing are **invisible from here**. So
+`toAppReady` is the **web half** of a cold start and the true figure is larger by an amount only a
+native trace can give. The row carries `excludesNativeLaunch: true` so a dashboard built from these
+rows cannot quietly present the half as the whole — reporting it as "the cold start" would be exactly
+the confident, unfalsifiable number this project has been bitten by before.
+
+### A load no human experienced is rejected BY NAME, never averaged away
+
+- **`reload` / `back_forward`** reuse a warm process and a warm cache. Not a cold start.
+- **Backgrounded** — an OS pre-warm, or the user switching away mid-launch. Nobody watched it, and a
+  hidden document has throttled timers, so the numbers would be long *and* meaningless.
+- **Incomplete or implausible** (> 120 s) — a stalled tab or a clock that moved, not a slow launch.
+
+Each is a distinct reason rather than a silent drop, because "we got no samples" and "we got samples
+and discarded them" lead to different next steps.
+
+### Reuses the existing pipeline rather than adding one
+
+Same sink (`/api/analytics/event`), same **consent gate** (`hasAnalyticsConsent`), same `PROD` guard as
+the web-vitals block it sits beside — this is non-essential telemetry of exactly that kind, and a second
+pipeline would be a second thing to keep in sync with the user's choice. It is stamped in the
+`requestAnimationFrame` that **already** proves the shell painted (the one that clears the stale-chunk
+flag), rather than inventing a second "ready" signal that could drift from it. Phases reported:
+`toFirstByte`, `toDomReady`, `toFirstPaint`, **`toAppReady`**, and `scriptBoot` — the last being the
+half that is ours to fix.
+
+Test-locked in `tests/measureTheColdStartBeforeOptimising.test.ts` (15 cases) and **reversion-proven
+twice**: averaging in a backgrounded launch turns **1** red; dropping the `excludesNativeLaunch`
+admission turns **2** red.
+
+⚠️ **The same brittleness I had fixed two hours earlier, reproduced in my own new test:** the wiring
+assertions sliced `main.tsx` by a fixed `at + 2200` characters and fell off the end of the function.
+Now anchor-based, like `githubNativeReturnWiring.test.ts`. A second slip is recorded in place too — the
+test asserted the event's VALUE where the source correctly uses the shared CONSTANT, which is the
+stronger thing to require.
+
+### Next step, deliberately NOT taken here
+
+No speed change ships in this PR. The point is to have the number first; `dist/assets` at 5.9 MB is a
+hypothesis about the cause, not a measurement of it.
+## 2026-09-19 — ↻ PULL TO REFRESH: REAL, OR ABSENT (admin item D of five)
+
+The gesture every native list has and this app had nowhere — the only way to see new data was to leave
+the screen and come back.
+
+### 🔴 The hard part was not the gesture. It was deciding where the gesture is HONEST
+
+A spinner over data that is already current is precisely the "built but not really working" state the
+second absolute rule bans, and the obvious target turned out to be the worst one:
+
+| screen | how it loads | verdict |
+|---|---|---|
+| **App Mart** | plain HTTP (`/api/nav-store/apps`, `/api/nav-store/web/apps`) — apps published by other creators appear **only** on a re-fetch | ✅ **wrapped** |
+| **History** | a Firestore **`onSnapshot` live listener** — already current on every device the moment anything changes | ❌ **not wrapped**, deliberately |
+
+Pulling on History would spin and fetch what is already on screen. That is theatre, so it is not there —
+and `tests/pullToRefreshIsRealOrAbsent.test.ts` asserts the absence, so nobody "finishes the job" later.
+
+### The gesture, and the conflicts it has to avoid
+
+`src/lib/pullToRefresh.ts` holds every decision, pure and unit-tested; the component is the DOM half.
+
+- **Each start condition is a real conflict**, not defensive noise: mid-list would steal the first
+  pixels of every upward flick; two fingers is a pinch; a refresh already in flight must not start
+  another.
+- **The axis lock keeps the app's other gestures.** This app has horizontally scrollable tab rows and a
+  swipe-to-open menu. A tie goes to **not** pulling — the safe side is leaving the other gesture alone.
+- **Resistance 0.5, threshold 64px, travel clamped at 96px.** Content moving less than the finger is
+  what makes a pull feel attached to a surface rather than to a scrollbar. A test asserts the clamp sits
+  **above** the threshold: the other way round would make the gesture impossible to complete with
+  nothing failing anywhere.
+- **One haptic, latched at the arming point** — the moment a native list confirms the gesture. Without
+  the latch a finger resting on the threshold rattles.
+- **The refresh is awaited**, so the indicator lasts as long as the work, and a failed fetch still ends
+  the gesture (the list reports its own error).
+
+`hapticNow()` was added to `nativeShell.ts` rather than writing a fourth copy of the
+load-the-shell-context dance at a call site; on the web it is a no-op by construction.
+
+Test-locked in `tests/pullToRefreshIsRealOrAbsent.test.ts` (19 cases) and **reversion-proven twice**:
+making a diagonal tie count as a pull turns **1** red; replacing the refresh with a no-op — the banned
+spinner — turns **1** red.
 ## 2026-09-19 — The Android app blurred, every frame, something nobody could see
 
 **The admin corrected the target:** *"website par problem nahi hai. bas mobile app ko fast karo, bina
@@ -68986,6 +69081,98 @@ can never fail for the reason it was written — so the source is comment-stripp
 and the "is it gated?" check used a negative regex that matched the GOOD rule, because
 `html.nb-native-shell .nb-screen-enter` contains a space before the class. It now reads every selector
 that mentions the class and requires each to be gated.
+
+## 2026-09-19 — Autopsy a48d0f9e: "Repair some parts." — and we were holding the list
+
+Free/Weak, `glm-4.7-flashx`, 90 seconds, 3 model calls, 0 files written, ₹0, `ok: true`.
+
+### The ledger
+
+**✅ Self-healed — 0.** Nothing was healed because nothing was written.
+
+**🔀 Worked around — 1.** `PLATFORM_PREVIEW_UP` says *"No preview had been published, so the platform
+started the app itself"* — 154 ms after `PREVIEW_PUBLISHED` announced a live address. The platform's
+own probe had begun ~14 s earlier, so the sentence states in the present tense a condition that was
+last true fourteen seconds before it was written. Nothing broke; the report reads as if two subsystems
+disagree about whether a preview exists.
+
+**⏭️ Skipped — 4.**
+1. 🔴 **`ACCESSIBILITY`: 70/100, 34 form fields with no label across 21 files** (Marksheets 12,
+   ReportCards 11, Students 10) — recorded, never acted on, and never mentioned to a user who had just
+   asked for repairs.
+2. **`GRAPH_RESTORED_STUBS`: 10 of 29 files carry PLACEHOLDER facts from a cold resume** — they
+   contribute nothing to recall, evaluate, the architecture analysis or the readiness score. A third of
+   the project was invisible on a turn whose entire job was *find what is broken*.
+3. `JOURNEY_NOT_DERIVED` — no journey could be addressed honestly.
+4. `RUNTIME_UNCHECKED` — the app rendered, but its console could not be captured.
+
+**❌ Still broken — 2.** The user's request went unanswered (below), and the release gate closed YELLOW.
+
+**🥵 Struggle — 3.** `TIME_TO_FIRST_CALL` 11 s of setup **plus** an 11 s first model call = **22 s of a
+90 s build, 24%, before the agent said one word**. The `typecheck` tool took 9 s (4 s of it the
+`npm install` guard). And the system prompt is **88,072 characters, sent three times, to produce 141
+output tokens in total** — 81,313 input tokens against 141 out, 67% served from cache.
+
+### 🔴 The finding: we asked the user to name a defect while holding thirty-four of them
+
+The prompt was **"Repair some parts."** The turn ran a typecheck and a lint, both clean, changed no
+file, and replied:
+
+> *"Type-check and linter both show the app is clean … tell me exactly what's not working right now and
+> I'll fix them."*
+
+and the delivered summary was *"Nothing needed changing — I checked your app from end to end and it
+works."*
+
+**Thirty-five seconds EARLIER the same build had recorded 34 named, located, actionable defects.** The
+agent never saw them: the quality lint runs in the post-answer integrity pass, after the agent has
+finished. They were not lost either — `buildFindingSuggestions` maps `ACCESSIBILITY` to the user-facing
+*"Make it usable for everyone"* for the 💡 bulb. **But that is a separate surface, fed by the PREVIOUS
+build's saved report, which the user has to go and open** — while the reply to the question they
+actually asked said there was nothing.
+
+**Fixed:** `verifiedNoChangeSummary` now carries those findings, reusing that exact table — same
+titles, same ranking, same `NEVER_SUGGEST` exclusions — so no second vocabulary exists and a
+process-only code can no more reach this sentence than it can reach the bulb. With no findings the
+sentence is **byte-identical** to what it has always said, so a build with nothing to report cannot
+regress; `ok` and billing are untouched, because a check that checked is still a check that checked.
+
+### 🔎 The missing subsystem: two subsystems found the SAME defect and neither could say so
+
+`ACCESSIBILITY` reports *34 form fields with no label*. `JOURNEY_NOT_DERIVED` reports *"the forms in
+this app have no field this check could address honestly (no name, id, placeholder, label or test
+id)"*. **That is one defect described twice.** Unlabelled fields are why the app scores 70/100 AND why
+its user journey could not be run AND why the release gate could not go past YELLOW — the gate's own
+words are *"whether it actually SAVES anything is untested"*.
+
+**So the upstream fix is one line of builder contract, not three repairs:** a generated form field gets
+a `<label>` (or `aria-label`) and a stable `name`/`id`. Do that and the accessibility warning, the
+underivable journey and the yellow gate all disappear **at the source** — the 50/50 law's other half.
+That is the single highest-value change this report points at, and it is NOT in this change: it means
+touching the architect prompt, which every build shares, and it deserves its own evidence and its own
+canary. **Recorded as an OPEN root cause, not attempted.**
+
+### 🔴 Also open, recorded rather than guessed
+
+1. **`GRAPH_RESTORED_STUBS` — 10 of 29 files are placeholders after a cold resume.** Ten of them are
+   config (`package.json`, the tsconfigs, `index.html`) but `src/index.css` is real code. On a "what is
+   broken?" turn the engine reasoned with a third of the project blank and said nothing about it to
+   anyone but the admin report.
+2. **`requestAnalysis.startTier: "gemini"`, `startBand: "cheapest band"`** — on a build whose ladder is
+   `GLM → KIMI → GLM → CLAUDE_HAIKU`. A stale label naming a vendor that is on no tier ladder at all;
+   the same class `ladderClaimsMatchTheTable.test.ts` was written for, in telemetry rather than in a
+   comment. Admin-only, so nobody is misled but us.
+3. **22 seconds before the first word**, per the struggle bucket above.
+
+**Locked:** `tests/repairSomePartsHadAnAnswer.test.ts`, 7 cases.
+
+⚠️ **AND THE FIRST DRAFT OF THAT TEST HAD TWO ASSERTIONS THAT COULD NOT FAIL — found by reverting, not
+by reading.** (a) The wiring guard asserted the line that COMPUTES the findings, so removing the
+argument that PASSES them — *the original bug, exactly* — left all six cases green. (b) It asserted
+that `RELEASE_GATE` stays out of the offers, but that code is absent from the suggestion table
+entirely, so deleting it from `NEVER_SUGGEST` changed nothing. Both replaced with assertions that do
+break: the options object must contain `openFindings`, and an `autoResolved`/`observation` finding must
+never be offered. Five reversions now bite.
 ## 2026-09-19 — 🔗 A navbharatai.com LINK OPENS THE APP (admin: "mujhe sabse acchi native app banani hai")
 
 First of five items the admin approved after the scrollbar fix (A–E). Tapping a navbharatai.com link

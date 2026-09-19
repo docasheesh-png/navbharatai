@@ -77,6 +77,38 @@ const NO_DECLARATION_FILE_RE = /^Could not find a declaration file for module '(
 /** TS2307 — the module is not there at all. */
 const CANNOT_FIND_MODULE_RE = /^Cannot find module '([^']+)'/;
 
+/**
+ * TS2305 — the module WAS found and does not export the symbol.
+ *
+ * tsc writes the specifier double-quoted inside single quotes: `Module '"../data"' has no exported
+ * member 'seedQuestionBank'`. Both halves are captured because the remedy needs the specifier (which
+ * file was actually read) and the symbol (which file really has it).
+ */
+const NO_EXPORTED_MEMBER_RE = /^Module '"([^"]+)"' has no exported member '([^']+)'/;
+
+/** File extensions TypeScript resolves, in the order it tries them. */
+const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'] as const;
+
+/**
+ * Resolve a RELATIVE specifier against the importing file — `src/hooks/x.ts` + `../data` → `src/data`.
+ *
+ * Extension-less and pure: the caller appends the candidates it wants to test. Returns '' for anything
+ * that is not relative, so a package specifier can never be mistaken for a path in this project.
+ */
+export function resolveRelativeSpecifier(fromFile: string, specifier: string): string {
+  const spec = String(specifier ?? '').trim();
+  if (!spec.startsWith('.')) return '';
+  const from = String(fromFile ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+  const dir = from.includes('/') ? from.slice(0, from.lastIndexOf('/')) : '';
+  const parts = dir ? dir.split('/') : [];
+  for (const seg of spec.split('/')) {
+    if (seg === '.' || seg === '') continue;
+    if (seg === '..') { parts.pop(); continue; }
+    parts.push(seg);
+  }
+  return parts.join('/');
+}
+
 const REACT_TYPES_INSTALL = 'npm install --save-dev @types/react @types/react-dom';
 
 /**
@@ -113,8 +145,11 @@ export function packageOfSpecifier(specifier: string): string {
 /**
  * The causes behind a set of compiler errors — empty when none of them is a missing declaration.
  *
- * `sources` is whatever file text the caller already holds, keyed by path; it is used ONLY to tell the
- * two React-member causes apart, and its absence never suppresses advice. Deduplicated by `id`, so ten
+ * `sources` is whatever file text the caller already holds, keyed by path. It tells the two
+ * React-member causes apart AND decides the index-shadow cause, which is claimed only when both
+ * candidate files are genuinely present in it — a caller holding one file simply says less, never
+ * something weaker-evidenced. (⚠️ This line used to read "used ONLY to tell the two React-member
+ * causes apart"; it is a live input to a third cause since 2026-09-19.) Deduplicated by `id`, so ten
  * errors from one missing package produce one line, and capped at `MAX_CAUSES`. PURE, never throws.
  */
 export function tscErrorCauses(
@@ -193,13 +228,68 @@ export function tscErrorCauses(
     }
 
     const missing = CANNOT_FIND_MODULE_RE.exec(message);
-    // A RELATIVE specifier means a file that is not there — a different cause with a different remedy,
-    // already handled by the endgame's own `referencedMissingModules`. Only bare packages land here.
     if (missing && isBarePackage(missing[1])) {
       const pkg = packageOfSpecifier(missing[1]);
       add(`dependency-missing:${pkg}`,
         `\`${pkg}\` is imported but is not installed in this project. Add it — \`npm install ${pkg}\` — rather `
         + `than removing the import or writing a local stand-in for it.`);
+      continue;
+    }
+
+    // 🔴 A RELATIVE specifier that is not there — THE ERROR THAT BOUGHT A PLACEHOLDER (autopsy
+    // 64bc1b6e, 2026-09-19). The line this replaces read: *"a different cause with a different remedy,
+    // already handled by the endgame's own `referencedMissingModules`. Only bare packages land here."*
+    // Every clause was true and the conclusion was wrong, because it reasoned about WHERE the remedy
+    // lives and not about WHEN the pressure is applied. `writeTypecheckNote` says *"fix them NOW, in
+    // this turn, before writing the next file"* the instant the import is written — long before any
+    // endgame — so at that moment the model held the compiler's raw words and NO remedy.
+    //
+    // What it did with them is in its own reasoning, quoted from that build: *"I can see the three
+    // pages the other task is supposed to create aren't present yet … I should create minimal
+    // placeholder pages so the build passes. The other task can overwrite them with real content."*
+    // It then wrote three 231-byte stubs over files a CONCURRENT sub-agent was assigned to build.
+    //
+    // ⚠️ The write lock cannot catch this and says so: `parallelBuild.ts` promises only that same-path
+    // writes serialise — *"worst case … degrades to serial-write order, never corruption"*. True, and
+    // beside the point: the damage is not corruption, it is a placeholder WINNING a race against real
+    // content. So the remedy has to arrive before the placeholder is written, which is here.
+    if (missing) {
+      const spec = missing[1] ?? '';
+      const target = resolveRelativeSpecifier(e?.file ?? '', spec);
+      add(`missing-file:${target || spec}`,
+        `\`${spec}\` is a FILE this project does not have yet${target ? ` (it would be \`${target}\`)` : ''} — `
+        + `not a package, so installing something cannot fix it. Write the real file, or correct the import path. `
+        + `⛔ NEVER write a placeholder/stub just to clear this error: another task may be writing the real file, `
+        + `and a stub can overwrite it — the user then gets an empty screen where their feature should be.`);
+      continue;
+    }
+
+    // 🔎 `X.ts` AND `X/index.ts` BOTH EXIST, so the import reads the one nobody meant (same autopsy).
+    // `../data` resolved to `src/data.ts` while the symbol lived in `src/data/index.ts`; the compiler
+    // says only "has no exported member", every `grep` and `cat` of the index shows the export present,
+    // and the contradiction is unresolvable from the message. It cost 11 shell commands and ~60 seconds
+    // — including a `cat … | xxd` hunting for an invisible character — and was settled only by
+    // `tsc --listFiles`, which is the one command that names BOTH files.
+    //
+    // 🔒 CLAIMED ONLY ON EVIDENCE. The shadow is asserted when the caller's own `sources` really
+    // contains both candidates (the endgame and the fast-lane repair hold the whole tree). A caller
+    // holding one file — the write-time check — says nothing rather than guessing, because "both exist"
+    // is the entire content of the advice and a guess at it would send the model to the wrong file.
+    const noMember = NO_EXPORTED_MEMBER_RE.exec(message);
+    if (noMember) {
+      const base = resolveRelativeSpecifier(e?.file ?? '', noMember[1] ?? '');
+      if (base) {
+        const fileWins = TS_EXTENSIONS.map((x) => `${base}${x}`).find((c) => sourceFor(c) !== '');
+        const indexLoses = TS_EXTENSIONS.map((x) => `${base}/index${x}`).find((c) => sourceFor(c) !== '');
+        if (fileWins && indexLoses) {
+          add(`index-shadowed:${base}`,
+            `Both \`${fileWins}\` and \`${indexLoses}\` exist, and TypeScript resolves \`${noMember[1]}\` to the `
+            + `FILE — so \`${noMember[2]}\` is being looked for in \`${fileWins}\`, not in the index you can see it in. `
+            + `Import from \`${noMember[1]}/index\` explicitly, or move the export into \`${fileWins}\`. `
+            + `Do not keep re-reading the index: it is not the file being read.`);
+          continue;
+        }
+      }
     }
   }
   return out;

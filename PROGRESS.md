@@ -68487,6 +68487,73 @@ report's `billedUsd: 6.389103` — which is what makes these the real figures ra
   prove its own work.** That is the number to watch, and the honest reading of it is that we are
   giving away margin because our own verification could not look, not because users' apps are broken.
 
+## 2026-09-18 — The prune raced the deploy: the registry cleanup leaves the build path
+
+**The report.** A merge to `main` deployed and failed:
+`ERROR: (gcloud.run.deploy) Image 'gcr.io/gen-lang-client-0866594388/navbharat-cloud-run:1431bafe89cf92e7e8ff65017d17aa540205eae5' not found.`
+Cloud Build `6dd83d51-d46f-45ec-883f-5015fa306203`, commit `1431baf`, failing at step 4 — the deploy —
+asking for the image its own step 2 had pushed ninety seconds earlier.
+
+**What was ruled out first, and it matters that it was.** `1431baf` changed seven TypeScript and
+documentation files. Neither `cloudbuild.yaml` nor `Dockerfile` had been touched in weeks. So the
+commit could not have caused the build to produce a different image, and the failure is in the
+pipeline's own behaviour rather than in the change being deployed.
+
+**The mechanism.** `cloudbuild.yaml` Step 5 was a registry prune — the ONLY thing in this project that
+deletes a platform image — and it ran on the deploy path, last, after the new revision went live. Four
+PRs merged inside three minutes that evening, so four Cloud Builds ran concurrently. Build B's Step 5
+therefore executed inside build A's push→deploy window, and in that window BOTH of Step 5's guards are
+blind at once:
+
+- the **in-use guard** reads `gcloud run revisions list`, and an image pushed but not yet deployed is
+  referenced by no revision;
+- the **age floor** reads `--sort-by=TIMESTAMP`, which is the image's CREATED time out of its config,
+  and this pipeline builds with `--cache-from`, so BuildKit cache reuse can hand a freshly pushed image
+  an older creation time.
+
+Step 5's own comment had predicted exactly this, in writing: *"age alone could still mis-rank a new
+image. That is precisely why guard (1) exists and is not optional."* Guard (1) is the one that cannot
+see an undeployed image. The delete then ran with `--force-delete-tags`, which removes the
+`:$COMMIT_SHA` tag along with the digest — the precise shape of the failure the deploy reported.
+
+⚠️ **Stated as it is: this is a mechanism consistent with every observed fact, not a proven one.** No
+session here can read the GCR audit log. The fix is correct whichever way that turns out, because a
+step that only ever DELETES can only ever stop deletions — but if a deploy fails the same way again,
+the cause is elsewhere and this entry is wrong.
+
+**The fix (admin's choice, asked as a fork and answered "a").** Step 5 is REMOVED rather than patched.
+A guard cannot be added that closes this: the fact the prune would need — "is another build about to
+deploy this image?" — does not exist anywhere it can read. Running the cleanup on Google's own schedule,
+off the build path, makes the race **unrepresentable** instead of narrower. The three substitutions only
+Step 5 read (`_KEEP_IMAGES`, `_PRUNE_MIN_AGE`, `_PRUNE_MAX`) went with it.
+
+🔴 **THE HONEST COST, and it is an ADMIN ACTION, not a code one.** Registry storage was ~32% of the
+monthly bill, which is why the prune existed. Until a native **Artifact Registry cleanup policy** is
+created in the console, images accumulate with nothing deleting them. `ROADMAP.md`'s cost table now says
+so on the line the admin reads, instead of still crediting a prune that no longer exists.
+
+⚠️ **And the replacement's own limit is recorded rather than left to be discovered:** a native policy
+cannot see Cloud Run. This repo already found that for the user-apps registry (2026-09-13,
+`imageRetention.ts`) — with `--min-instances 0` a cold start re-pulls the live revision's image, so a
+keep-newest-N rule can delete the running site's image, worst exactly when a deploy has FAILED and
+traffic is still on an older revision. It is survivable for the PLATFORM registry only because one
+service deploys in order, so the bad case needs a long run of consecutive failed deploys. Size the keep
+count for that. The strictly better end state is the server-side sweep this repo already runs for user
+apps (`imageCleanupSweep.ts`, which DOES read Cloud Run before deleting) pointed at the platform
+registry too — a build, not a console setting, and deliberately not in this change.
+
+**Locked (`tests/thePruneMustNotRaceTheDeploy.test.ts`, 5 cases, proven by reversion three ways):** no
+step may delete a registry image; the deploy must be the LAST step; every substitution a step uses is
+declared; **and every declared substitution is used** — that last one is the hazard the REMOVAL created
+rather than the bug it fixed. Cloud Build's default `substitution_option` is `MUST_MATCH` and this file
+sets no `ALLOW_LOOSE`, so an orphaned `_KEEP_IMAGES` left behind would have failed every future build at
+config parse, long after anyone remembered why. Reversion proofs: re-declaring `_KEEP_IMAGES` fails 1;
+re-adding a `--force-delete-tags` step fails 2; any step after the deploy fails 1.
+
+⚠️ **One thing the admin must check in the console, because no code can see it:** if the Cloud Build
+trigger carries a substitution override for any of those three removed names, that row must be deleted
+there too, or the next build fails at config parse with *"key in the substitution data is not matched in
+the template"*.
 ---
 
 ## 2026-09-18 — A PASS that delivered nothing is our cost, never the user's bill (the ₹12 the turn-level fix could not reach)
@@ -68555,6 +68622,72 @@ On `b6f88a72` this is the ₹12 of real cost — **₹50 of the user's ₹152.90
 largely not happen at all. This is the net beneath it: the saving is not spending the tokens, and
 this only guarantees that when they ARE spent for nothing, the user does not pay for them.
 
+---
+
+## 2026-09-18 — A build-time secret that reached nothing, and the switch-on order for referral rewards
+
+**The admin asked to turn the referral rewards on** (*"refral money abhi jo hai (250+250) ko hata kar
+woh 400 new on kare?"*). Reading the code to answer produced two findings and one fix.
+
+### 🔴 The fix: `PLAY_INTEGRITY_CLOUD_PROJECT` was never passed to the build
+
+`android/app/build.gradle` reads `System.getenv("PLAY_INTEGRITY_CLOUD_PROJECT")` and bakes it into
+`BuildConfig`. **`.github/workflows/android-aab.yml`'s gradle step did not pass it** — its `env:`
+block carried the keystore values, the version numbers and the two Facebook secrets, and nothing else.
+
+So the whole chain would have been: admin sets the repo secret → CI green → bundle ships → app
+installs → gradle read an EMPTY string → baked `"0"` → *not configured* → every integrity check
+`unavailable` → **every referral claim pays ₹0**, with nothing failing anywhere. That is the exact
+shape CLAUDE.md records for `VITE_META_PIXEL_ID`: a value set in the right-sounding place that
+silently reaches nothing. It would have cost a Play review cycle and users earning zero.
+
+🔒 **`tests/aSecretThatReachesNothing.test.ts` is DERIVED, not a list.** It extracts every
+`System.getenv(...)` from `build.gradle` and asserts the workflow passes each one, so a build-time
+variable added later is covered the day it appears without anyone remembering the file exists. It
+carries its own "the sweep actually sees something" case, because a guard that silently stops
+matching guards nothing. Proven by reversion.
+
+**Why the gap existed at all, named so it is recognised again:** the two halves live in different
+files, in different languages, and nothing connected them. A name present in one and absent from the
+other is invisible to `tsc`, to vitest and to CI.
+
+### ⚠️ The second finding: the SERVER gate needs two Cloud Run keys as well
+
+`deviceCheckConfigured` (`deviceIntegrity.ts:69`) is `GOOGLE_PLAY_SA_JSON && GOOGLE_PLAY_PACKAGE_NAME`
+— both **Cloud Run** keys. Either missing ⇒ every check is `unavailable` ⇒ nothing pays, however
+correct the Android half is. An Android-only checklist is therefore an incomplete one.
+
+### 🔴 THE ORDER, AND WHY ORDER IS THE WHOLE POINT
+
+`flatWelcomeGiftSuppressed()` is exactly `referralRewardsEnabled()`, so **turning on
+`REFERRAL_REWARDS` stands the flat ₹500 welcome gift down by construction** — the admin does not
+"remove the 250+250" separately, and removing it would switch both off. That is correct and is also
+the trap: with the ladder on and the device check not configured, a new user gets **the flat gift
+suppressed AND ₹0 from the ladder — nothing at all**, silently, because the gate fails CLOSED by
+design (there is no later gate to catch a wrong "yes").
+
+So, in this order, and `REFERRAL_REWARDS` LAST:
+
+1. **Play Integrity API enabled** in `gen-lang-client-0866594388` (console display name
+   `navBharat ai real`) — the Play Integrity API, not Safe Browsing and not Play Developer.
+2. **The `GOOGLE_PLAY_SA_JSON` service account holds the `playintegrity` scope.** A token minted for
+   a scope the account lacks is issued happily and refused at the call, so "it was created" is not
+   "it will work".
+3. **`PLAY_INTEGRITY_CLOUD_PROJECT`** = the project **NUMBER** (digits), as a **GitHub repo secret** —
+   not a Cloud Run key, because it is baked into the `.aab`. A non-numeric value parses to 0 and reads
+   as not-configured, which is the safe direction.
+4. **The workflow fix above** (shipped here) — without it step 3 is inert.
+5. **`GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME`** (`com.navbharat.ai`) set in Cloud Run.
+6. **A `.aab` carrying `DeviceIntegrityPlugin` is LIVE on Play.** The plugin exists and is registered
+   in `MainActivity`, but release 91 and earlier do not have it. Play → App content → **Data safety**
+   must be updated before that rollout: the build collects a device identifier, Privacy Policy §3.2
+   already discloses it, and a Play declaration that contradicts the policy is a violation.
+7. **Then** `REFERRAL_REWARDS=on`. Referred user ₹400, organic ₹300, referrer ₹75, lifetime cap ₹1,500.
+
+**How to verify it really works, rather than looks configured:** on a phone running the new bundle,
+create an account and verify email. **₹100 arriving means the whole chain is live.** Nothing arriving
+means one link is broken, and it is one of the seven above. ⚠️ The website will never pay ₹1 — that is
+the design (*"websites par kuch bhi nahi dena"*), not a fault.
 ## 2026-09-18 — Theme PR K: thirty heaviest files, and the codemod stops manufacturing dead hovers (branch `claude/theme-pr-k`)
 
 **Baseline 1,668 → 1,019 literals, 132 → 112 files.** The thirty heaviest files by the ratchet's own

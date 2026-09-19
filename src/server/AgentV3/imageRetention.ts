@@ -19,8 +19,15 @@
 // the app dies at the next visitor with nothing in our code to explain it. "Keep the newest N" is not
 // a substitute for that guard, and the case where it is worst is the one that matters most: when a
 // publish has FAILED, traffic stays on an OLDER revision while the newer, broken images push the live
-// one out of the newest-N window. That is this repo's own hard-won finding — `cloudbuild.yaml` Step 5
-// says it in those words about the PLATFORM's image, and the guards below are the same guards.
+// one out of the newest-N window. That is this repo's own hard-won finding — `cloudbuild.yaml` says it
+// in those words about the PLATFORM's image, and the guards below are the same guards.
+//
+// ⚠️ UPDATED 2026-09-18: the platform's own in-build prune (its Step 5) was REMOVED, because running a
+// delete on the DEPLOY PATH let it race a concurrent build's freshly pushed image — a failure mode
+// orthogonal to the guards here, and one this sweep cannot have because it runs on a schedule, alone,
+// hours from any deploy. The platform registry is now covered by a native cleanup policy set in the
+// console, with the Cloud-Run blindness above accepted there for the reason `cloudbuild.yaml` records:
+// one service that deploys in order, so the bad case needs a long run of consecutive failed deploys.
 //
 // A native policy is still worth setting as a BACKSTOP for a registry that has already accumulated a
 // backlog; it is an admin action, recorded in the sweep's notes rather than performed from here.
@@ -33,8 +40,8 @@ export const ARTIFACT_REGISTRY_API = 'https://artifactregistry.googleapis.com/v1
  * How many of an app's newest images survive, beyond whatever is in use.
  *
  * Three, not one: the newest is normally what is running, so keeping only that would leave nothing to
- * roll back TO the moment a bad publish went out. `cloudbuild.yaml` keeps fifteen for the platform's
- * own image and explains why five was too few — but that is one image for one service that deploys
+ * roll back TO the moment a bad publish went out. The platform's own image kept fifteen, and
+ * `cloudbuild.yaml` explains why five was too few — but that is one image for one service that deploys
  * many times a day, whereas this is one image per USER APP and the multiplier is the number of apps.
  * Three covers "undo the last publish, and the one before it" and stops there.
  */
@@ -55,8 +62,8 @@ export const DEFAULT_MIN_AGE_MS = 24 * 60 * 60 * 1000;
  * The most versions one run may delete.
  *
  * ⚠️ THIS BOUND IS NOT TIDINESS — it is a regression this repo has already paid for once. The first
- * registry cleanup in `cloudbuild.yaml` deleted in an unbounded loop, ran for about an hour against an
- * accumulated backlog, and turned five-minute deploys into timeouts. A backlog drains over a few runs;
+ * registry cleanup in `cloudbuild.yaml` (since removed — see that file) deleted in an unbounded loop,
+ * ran for about an hour against an accumulated backlog, and turned five-minute deploys into timeouts. A backlog drains over a few runs;
  * steady state is a handful of versions a day. Bounded work that always finishes beats complete work
  * that sometimes does not.
  */
@@ -185,7 +192,8 @@ export function buildDeleteVersionRequest(token: string, versionName: string): R
  * a preference. Buildpacks reuse cached layers, so a freshly pushed image can carry a BUILD time from
  * days ago — which would make a brand-new image look old enough to delete. `cloudbuild.yaml` records
  * running into exactly that with `--sort-by=TIMESTAMP`, and names it as the reason the in-use guard
- * cannot be dropped. Pushed time is the one clock that cannot be stale.
+ * cannot be dropped — and then as half the reason its own prune had to leave the deploy path
+ * altogether. Pushed time is the one clock that cannot be stale.
  */
 export function parseImageList(raw: unknown): { images: ImageVersion[]; nextPageToken: string } {
   const r = raw && typeof raw === 'object' ? raw as Record<string, any> : null;

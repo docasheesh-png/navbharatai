@@ -153,6 +153,48 @@ html.nb-native-shell .nb-screen-enter {
   }
 }
 
+/* NO SCROLLBAR INSIDE THE APP — NATIVE SHELL ONLY (admin 2026-09-19, phone screenshot: "right side me
+   blue vertical light … yeh website ka feel deti hai. isko mobile app me se hata do").
+
+   A native Android or iOS app never paints a PERSISTENT scroll track. Both platforms draw a transient
+   indicator that fades the moment the finger lifts, and most do not draw one at all inside a card. A
+   bar that sits there while you read is the single most recognisable "this is a web page" tell left in
+   the shell, and it is the one the admin photographed.
+
+   🔎 WHY IT WAS BLUE, which is what identifies the rule that actually paints it. `.custom-scrollbar`
+   is defined TWICE in this repo — here inside `@layer base` (indigo, via the STANDARD `scrollbar-color`
+   property) and, until this change, again in an unlayered `<style>` inside App.tsx (white, via the
+   `::-webkit-scrollbar-thumb` pseudo-element). Unlayered beats layered, so the white copy looked like
+   the winner. It is not: since Chromium 121 a non-`auto` `scrollbar-color`/`scrollbar-width` makes the
+   engine ignore every `::-webkit-scrollbar` pseudo-element on that box, and every Android WebView in
+   the field is past 121. The screenshot is indigo, not grey — the observation and the mechanism agree,
+   and the App.tsx copy had been silently dead. It is deleted in the same change, so one scrollbar has
+   one definition again.
+
+   🔒 THE SELECTOR CARRIES `html` DELIBERATELY. `.nb-native-shell *` and `.custom-scrollbar` are both
+   (0,1,0), so which one wins would come down to source order against a `<style>` tag rendered into the
+   body — i.e. to luck, re-decided by whoever adds the next inline block. `html.nb-native-shell` is
+   (0,1,1) and wins by construction. Both spellings are set because they are two independent mechanisms:
+   Chromium honours the standard properties, older engines the pseudo-element, and a box must lose its
+   scrollbar under either.
+
+   Hiding is not disabling: `display: none` on the pseudo-element leaves the box fully scrollable — the
+   same technique `.no-scrollbar` has used here for months. And the website keeps its scrollbar: the
+   class is added to `<html>` by index.html's pre-paint script ONLY when `window.Capacitor` is present,
+   so a desktop visitor — who has a POINTER and genuinely needs a bar to drag — is untouched. */
+html.nb-native-shell,
+html.nb-native-shell * {
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+  -ms-overflow-style: none;
+}
+html.nb-native-shell::-webkit-scrollbar,
+html.nb-native-shell *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* NATIVE-FEEL FIX (admin audit 2026-07-26). The default mobile tap-highlight paints a translucent
    grey/blue rectangle over whatever you touch — the single most recognisable "this is a web page in
    an app" tell, because no native Android or iOS control behaves that way. Removing it costs nothing:

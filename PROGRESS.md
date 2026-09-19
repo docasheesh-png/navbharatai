@@ -68853,3 +68853,95 @@ and `text-ink` were each grepped in the **built** `dist/assets/index-*.css`. All
 2. **`bg-[#007acc]`, the status bar, stays a literal on purpose** — VS Code's blue, a fixed brand fill
    already carrying `text-on-accent`. It remains in the baseline so the ratchet holds it.
 3. **The symbol row's real failure mode is unproven**, as stated above. Recorded rather than guessed.
+
+## 2026-09-19 — Autopsy a48d0f9e: "Repair some parts." — and we were holding the list
+
+Free/Weak, `glm-4.7-flashx`, 90 seconds, 3 model calls, 0 files written, ₹0, `ok: true`.
+
+### The ledger
+
+**✅ Self-healed — 0.** Nothing was healed because nothing was written.
+
+**🔀 Worked around — 1.** `PLATFORM_PREVIEW_UP` says *"No preview had been published, so the platform
+started the app itself"* — 154 ms after `PREVIEW_PUBLISHED` announced a live address. The platform's
+own probe had begun ~14 s earlier, so the sentence states in the present tense a condition that was
+last true fourteen seconds before it was written. Nothing broke; the report reads as if two subsystems
+disagree about whether a preview exists.
+
+**⏭️ Skipped — 4.**
+1. 🔴 **`ACCESSIBILITY`: 70/100, 34 form fields with no label across 21 files** (Marksheets 12,
+   ReportCards 11, Students 10) — recorded, never acted on, and never mentioned to a user who had just
+   asked for repairs.
+2. **`GRAPH_RESTORED_STUBS`: 10 of 29 files carry PLACEHOLDER facts from a cold resume** — they
+   contribute nothing to recall, evaluate, the architecture analysis or the readiness score. A third of
+   the project was invisible on a turn whose entire job was *find what is broken*.
+3. `JOURNEY_NOT_DERIVED` — no journey could be addressed honestly.
+4. `RUNTIME_UNCHECKED` — the app rendered, but its console could not be captured.
+
+**❌ Still broken — 2.** The user's request went unanswered (below), and the release gate closed YELLOW.
+
+**🥵 Struggle — 3.** `TIME_TO_FIRST_CALL` 11 s of setup **plus** an 11 s first model call = **22 s of a
+90 s build, 24%, before the agent said one word**. The `typecheck` tool took 9 s (4 s of it the
+`npm install` guard). And the system prompt is **88,072 characters, sent three times, to produce 141
+output tokens in total** — 81,313 input tokens against 141 out, 67% served from cache.
+
+### 🔴 The finding: we asked the user to name a defect while holding thirty-four of them
+
+The prompt was **"Repair some parts."** The turn ran a typecheck and a lint, both clean, changed no
+file, and replied:
+
+> *"Type-check and linter both show the app is clean … tell me exactly what's not working right now and
+> I'll fix them."*
+
+and the delivered summary was *"Nothing needed changing — I checked your app from end to end and it
+works."*
+
+**Thirty-five seconds EARLIER the same build had recorded 34 named, located, actionable defects.** The
+agent never saw them: the quality lint runs in the post-answer integrity pass, after the agent has
+finished. They were not lost either — `buildFindingSuggestions` maps `ACCESSIBILITY` to the user-facing
+*"Make it usable for everyone"* for the 💡 bulb. **But that is a separate surface, fed by the PREVIOUS
+build's saved report, which the user has to go and open** — while the reply to the question they
+actually asked said there was nothing.
+
+**Fixed:** `verifiedNoChangeSummary` now carries those findings, reusing that exact table — same
+titles, same ranking, same `NEVER_SUGGEST` exclusions — so no second vocabulary exists and a
+process-only code can no more reach this sentence than it can reach the bulb. With no findings the
+sentence is **byte-identical** to what it has always said, so a build with nothing to report cannot
+regress; `ok` and billing are untouched, because a check that checked is still a check that checked.
+
+### 🔎 The missing subsystem: two subsystems found the SAME defect and neither could say so
+
+`ACCESSIBILITY` reports *34 form fields with no label*. `JOURNEY_NOT_DERIVED` reports *"the forms in
+this app have no field this check could address honestly (no name, id, placeholder, label or test
+id)"*. **That is one defect described twice.** Unlabelled fields are why the app scores 70/100 AND why
+its user journey could not be run AND why the release gate could not go past YELLOW — the gate's own
+words are *"whether it actually SAVES anything is untested"*.
+
+**So the upstream fix is one line of builder contract, not three repairs:** a generated form field gets
+a `<label>` (or `aria-label`) and a stable `name`/`id`. Do that and the accessibility warning, the
+underivable journey and the yellow gate all disappear **at the source** — the 50/50 law's other half.
+That is the single highest-value change this report points at, and it is NOT in this change: it means
+touching the architect prompt, which every build shares, and it deserves its own evidence and its own
+canary. **Recorded as an OPEN root cause, not attempted.**
+
+### 🔴 Also open, recorded rather than guessed
+
+1. **`GRAPH_RESTORED_STUBS` — 10 of 29 files are placeholders after a cold resume.** Ten of them are
+   config (`package.json`, the tsconfigs, `index.html`) but `src/index.css` is real code. On a "what is
+   broken?" turn the engine reasoned with a third of the project blank and said nothing about it to
+   anyone but the admin report.
+2. **`requestAnalysis.startTier: "gemini"`, `startBand: "cheapest band"`** — on a build whose ladder is
+   `GLM → KIMI → GLM → CLAUDE_HAIKU`. A stale label naming a vendor that is on no tier ladder at all;
+   the same class `ladderClaimsMatchTheTable.test.ts` was written for, in telemetry rather than in a
+   comment. Admin-only, so nobody is misled but us.
+3. **22 seconds before the first word**, per the struggle bucket above.
+
+**Locked:** `tests/repairSomePartsHadAnAnswer.test.ts`, 7 cases.
+
+⚠️ **AND THE FIRST DRAFT OF THAT TEST HAD TWO ASSERTIONS THAT COULD NOT FAIL — found by reverting, not
+by reading.** (a) The wiring guard asserted the line that COMPUTES the findings, so removing the
+argument that PASSES them — *the original bug, exactly* — left all six cases green. (b) It asserted
+that `RELEASE_GATE` stays out of the offers, but that code is absent from the suggestion table
+entirely, so deleting it from `NEVER_SUGGEST` changed nothing. Both replaced with assertions that do
+break: the options object must contain `openFindings`, and an `autoResolved`/`observation` finding must
+never be offered. Five reversions now bite.

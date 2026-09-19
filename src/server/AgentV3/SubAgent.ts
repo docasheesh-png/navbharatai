@@ -109,6 +109,17 @@ export interface SubAgentDeps {
   framework?: string;
 
   /**
+   * The parent's LIVE write-time-typecheck stats, so a sub-agent's compiles are counted in the build
+   * report instead of vanishing with its own dispatcher.
+   *
+   * 🔴 A THUNK, FOR THE SAME REASON `ignoreRules` IS ONE: the spawn is constructed BEFORE the parent
+   * dispatcher exists (the spawn is an argument to that constructor), so a value here would capture
+   * `undefined` and silently share nothing — the feature would look present and count nothing, which
+   * is precisely the failure being fixed.
+   */
+  writeTypecheckStats?: () => import('./writeTimeTypecheck').WriteTypecheckStats | undefined;
+
+  /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
    * sub-agent shell command has ever reached a build report**. The phase that writes the app is the
    * phase whose `npm install`, `tsc` and `vite build` output is missing from the one document the
@@ -185,6 +196,13 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // C2 — arm the guard on the child too. Read at SPAWN time via the thunk, so it sees the rules
     // however late they were loaded.
     try { childDispatcher.setIgnoreRules(deps.ignoreRules?.() ?? []); } catch { /* never block a spawn */ }
+    // Count this child's compiles in the PARENT's numbers. Read through the thunk at SPAWN time for
+    // the same reason the guard above is: the parent dispatcher does not exist when this spawn is
+    // built. Absent ⇒ the child keeps its own object, i.e. exactly today's behaviour.
+    try {
+      const shared = deps.writeTypecheckStats?.();
+      if (shared) childDispatcher.shareWriteTypecheckStats(shared);
+    } catch { /* never block a spawn */ }
     // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
     // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client
     // reducer set done:true and overwrote the top-level summary (the "Step limit reached (40)"

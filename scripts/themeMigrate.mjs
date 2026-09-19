@@ -440,7 +440,12 @@ export function migrate(src) {
   // the codemod must not keep producing them. Where a class list rests on a themed surface and hovers to
   // the SAME one, the hover moves to that surface's `-hover` token, which every theme declares as a real
   // step away from the resting value.
-  const DEAD_HOVER_LABEL = 'hover to the surface it already has → its -hover token';
+  // 📱 `active:` IS THE ONLY FEEDBACK A PHONE HAS, so it joined this pass on 2026-09-19 (admin's Code
+  // Studio screenshot). A finger never hovers: `bg-raised active:bg-raised` on the mobile editor
+  // toolbar meant the button did not answer a tap at all, and this codemod had emitted it — the same
+  // collapsed mapping the comment above describes, one variant over, invisible to the guard that
+  // caught the first one because that guard only read `hover:`.
+  const DEAD_HOVER_LABEL = 'hover/press to the surface it already has → its -hover token';
   for (let i = 0; i < out.length; i++) {
     const m3 = maskEmbeddedSources(out[i]);
     out[i] = out[i].replace(/'[^'\n]*'|"[^"\n]*"/g, (q, offset) => {
@@ -448,7 +453,7 @@ export function migrate(src) {
       let body = q.slice(1, -1);
       for (const surface of ['raised', 'well']) {
         const resting = new RegExp(`(?<![\\w:-])bg-${surface}(?![\\w/-])`);
-        const dead = new RegExp(`(?<![\\w-])((?:group-)?hover:)bg-${surface}(?![\\w/-])`, 'g');
+        const dead = new RegExp(`(?<![\\w-])((?:group-)?hover:|active:)bg-${surface}(?![\\w/-])`, 'g');
         if (resting.test(body) && dead.test(body)) {
           body = body.replace(dead, (_, v) => `${v}bg-${surface}-hover`);
           changed[DEAD_HOVER_LABEL] = (changed[DEAD_HOVER_LABEL] || 0) + 1; fix++;

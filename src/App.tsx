@@ -5,6 +5,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
 // Native Supabase-connect return — the SAME deep-link shape, its own path (2026-09-14 fix).
 import { nonceFromSupabaseDeepLink, errorFromSupabaseDeepLink, SUPABASE_NATIVE_RETURN_EVENT } from './lib/supabaseOauthReturn';
+import { routeForPath, deepLinkTarget, type DeepLinkView } from './lib/deepLinkRoute';
 import { readTapFeedbackPrefs, shouldOpenMenuOnSwipe } from './lib/tapFeedbackPrefs';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
@@ -366,23 +367,25 @@ export default function App() {
   // into the existing admin view (login → MFA → dashboard). Keeping it a URL (not a visible menu item)
   // means the admin entry isn't advertised in the UI, and it reuses ALL the existing, tested admin
   // wiring rather than duplicating it. A trailing slash is tolerated.
-  const readAdminRoute = (): boolean => {
-    try { return typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/admin'; } catch { return false; }
+  // Both readers below ask ONE rule (src/lib/deepLinkRoute.ts), which is also what the native shell
+  // uses for an incoming App Link and what the Android manifest's claimed paths are asserted against.
+  // Before this they were two private path tests, and a deep link would have needed a third — which is
+  // precisely how autopsy 1a7f4a58's two subsystems came to answer the same question differently.
+  const readUrlRoute = (): DeepLinkView | null => {
+    try {
+      if (typeof window === 'undefined') return null;
+      return routeForPath(window.location.pathname, window.location.search)?.view ?? null;
+    } catch { return null; }
   };
+  const readAdminRoute = (): boolean => readUrlRoute() === 'admin';
   // Nav App Store deep-link (admin 2026-08-01): navbharatai.com/?view=appstore (or /store) opens the
   // Nav App Store panel straight away, so a shareable link can drop someone directly on the store's
   // Browse tab (public, no login needed) instead of them hunting through Other AI → Publish & Deploy.
   // It reuses the existing 'appstore' view — no duplicate wiring. A trailing slash on /store is tolerated.
-  const readStoreRoute = (): boolean => {
-    try {
-      if (typeof window === 'undefined') return false;
-      // `/store` opens the store; `/store/app/<id>` is a SHARE LINK to one web app — it must land in
-      // the store too (NavAppStore reads the id itself and opens the player directly).
-      const path = window.location.pathname.replace(/\/+$/, '');
-      if (path === '/store' || path.startsWith('/store/app/')) return true;
-      return new URLSearchParams(window.location.search).get('view') === 'appstore';
-    } catch { return false; }
-  };
+  // `/store` opens the store; `/store/app/<id>` is a SHARE LINK to one web app — it must land in the
+  // store too (NavAppStore reads the id itself and opens the player directly). `?view=appstore` is the
+  // older share link, still in circulation. All three live in routeForPath now.
+  const readStoreRoute = (): boolean => readUrlRoute() === 'appstore';
   /**
    * "wahi se start ho" (admin 2026-09-17) — the places the app may land somebody in on launch.
    *
@@ -2610,6 +2613,33 @@ export default function App() {
     // SupabaseConnectCard listens for — it stays mounted the whole time on native (no page navigation),
     // so it cannot pick this up on its own. Kept as its own function (not inlined into the appUrlOpen
     // callback below) so the GitHub listener's own shape and tested content stay unchanged.
+    /**
+     * AN APP LINK ARRIVED — take the user where the link said, not to Home (admin 2026-09-19).
+     *
+     * This is the half that makes the manifest's `autoVerify` worth having. Android hands us the FULL
+     * https URL; the native shell's own document lives at localhost, so `window.location` knows nothing
+     * about it. Two things therefore have to happen, in this order:
+     *
+     *   1. WRITE THE PATH ONTO THE LOCAL ORIGIN FIRST. `/store/app/<id>` is a share link to ONE app, and
+     *      NavAppStore reads that id from `window.location.pathname` itself. Setting the view without
+     *      writing the path would open the store's Browse tab — the app opens, and the link the person
+     *      actually tapped is gone. That is the failure this whole feature exists to avoid.
+     *   2. Then switch the view.
+     *
+     * `deepLinkTarget` rejects anything that is not https on one of OUR hosts, so the custom-scheme
+     * returns handled below (com.navbharat.ai://…) can never reach this — the two are disjoint by
+     * protocol, not by ordering.
+     */
+    const handleAppLinkOpen = (url: string | undefined): boolean => {
+      const target = deepLinkTarget(url);
+      if (!target) return false;
+      try {
+        window.history.replaceState(null, '', `${target.path || '/'}${target.search}`);
+      } catch { /* history unavailable — the view switch below is still worth doing */ }
+      setActiveView(target.view);
+      return true;
+    };
+
     const handleSupabaseUrlOpen = (url: string | undefined): boolean => {
       const sbNonce = nonceFromSupabaseDeepLink(url);
       const sbErr = errorFromSupabaseDeepLink(url);
@@ -2637,6 +2667,7 @@ export default function App() {
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
           if (handleSupabaseUrlOpen(data?.url)) return; // see handleSupabaseUrlOpen above
+          if (handleAppLinkOpen(data?.url)) return; // an https navbharatai.com link — see above
           // A TICKET, when the server had a verified identity to bind one to; the raw token otherwise.
           // Both are handled because the server chooses, not the client — see githubOauthReturn.ts.
           // The ticket path exists because a custom URI scheme is claimable by any installed app, and

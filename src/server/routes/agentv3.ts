@@ -36,6 +36,7 @@ import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepE
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
+import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
@@ -17092,6 +17093,20 @@ async function noteBuildOutcome(
                 // A clean pass is recorded too. A check that is only ever visible when it complains
                 // cannot be told apart from a check that never ran.
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'ACCESSIBILITY', message: a11yLintSummary(quality), autoResolved: true });
+              }
+            }
+            // A LABEL IN THE USER'S OWN LANGUAGE MUST NOT ARRIVE BROKEN (autopsy 3ce8459b).
+            // The three checks above read STRUCTURE; none of them reads the TEXT, which is how
+            // `label: 'জungle'` shipped past a 100/100 accessibility score and a PASS review.
+            // Deterministic and free — no model call — and advisory: it can never affect a build.
+            if (hasUserApp) {
+              const mixed = findMixedScriptText(integrityFiles);
+              if (mixed.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'SCRIPT_INTEGRITY', ...obs(scriptIntegritySummary(mixed)) });
+              } else {
+                // Recorded when clean too: a check only ever visible when it complains cannot be told
+                // apart from a check that never ran — the `JOURNEY_NOT_RUN` lesson.
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY', message: scriptIntegritySummary(mixed), autoResolved: true });
               }
             }
           } catch { /* the quality lint is advisory — it can never affect a build */ }

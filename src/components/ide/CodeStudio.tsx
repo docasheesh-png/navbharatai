@@ -1418,13 +1418,17 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            </button>
          )}
 
-         <div className="flex-1 flex justify-center mx-4">
+         {/* The label had no `truncate` and the box a fixed `h-6`, so on a phone the text wrapped to
+             three lines INSIDE a 24px button and spilled over the title beside it — visible in the
+             admin's screenshot (2026-09-19). One line, clipped; and the Ctrl hint is desktop-only,
+             because a phone has no Ctrl key to offer. */}
+         <div className="flex-1 min-w-0 flex justify-center mx-4">
             <button
                onClick={() => setIsCommandPaletteOpen(true)}
-               className="w-full max-w-sm h-6 bg-well rounded-md border border-line flex items-center justify-center gap-2 text-[10px] text-faint hover:bg-well-hover hover:border-line transition-all font-medium"
+               className="w-full max-w-sm h-6 min-w-0 px-2 bg-well rounded-md border border-line flex items-center justify-center gap-2 text-[10px] text-faint hover:bg-well-hover hover:border-line transition-all font-medium overflow-hidden"
             >
-               <Search className="w-3 h-3" />
-               Search Files & Commands (Ctrl+Shift+P)
+               <Search className="w-3 h-3 shrink-0" />
+               <span className="truncate whitespace-nowrap">Search Files<span className="hidden sm:inline"> &amp; Commands (Ctrl+Shift+P)</span></span>
             </button>
          </div>
 
@@ -1852,7 +1856,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                  <button
                    onClick={() => setIsPanelOpen(true)}
                    aria-label="Open terminal panel"
-                   className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-line flex items-center justify-center text-muted hover:text-ink transition-all shadow-2xl"
+                   className="w-10 h-10 bg-raised hover:bg-raised-hover rounded-lg border border-line flex items-center justify-center text-muted hover:text-ink transition-all shadow-2xl"
                  >
                     <ChevronUp className="w-5 h-5" />
                  </button>
@@ -1895,7 +1899,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    <button
                      key={label}
                      onClick={() => { setMobileMoreOpen(false); onTap(); }}
-                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-body hover:bg-raised active:bg-raised"
+                     className="w-full flex items-center gap-3 px-4 py-3 text-sm text-body hover:bg-raised active:bg-raised-hover"
                    >
                      <Icon className="w-4 h-4 text-muted" />
                      <span className="font-medium">{label}</span>

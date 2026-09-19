@@ -871,7 +871,7 @@ export function SettingsPanel({
                              <button
                                key={lang}
                                onClick={() => setPreferredLanguage(lang)}
-                               className={`px-3 py-2.5 min-h-[44px] rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-warn' : 'bg-raised border-line text-muted hover:border-amber-500/30 active:bg-raised'}`}
+                               className={`px-3 py-2.5 min-h-[44px] rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-warn' : 'bg-raised border-line text-muted hover:border-amber-500/30 active:bg-raised-hover'}`}
                              >
                                {labels[lang]}
                              </button>

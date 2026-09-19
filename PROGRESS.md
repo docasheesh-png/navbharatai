@@ -70074,8 +70074,148 @@ friendly in-panel offer until a fresh `.aab` ships — which happens only on the
 carries the full plain-words message and `canCreateKey`, so even an old client shows a sentence with the
 way out in it, but the one-press button itself is new code.
 
+## 2026-09-19 — "0 welcome credit ho rahe": it is the admin's own 17-Sept ruling landing, and the replacement cannot pay yet — so the admin gets a check that names the missing step (branch `claude/vigilant-feynman-9aobjz`)
+
+**Admin (with the Users table showing every account that joined on 19-Sept at 0 tokens):** *"maine jo
+merge kiya uske baad, 0 welcome credit ho rahe — referral code, mail verification, mobile verification,
+github verification wala bhi on karwao."*
+
+### The diagnosis, from the code and the git log — not a regression, a decision
+
+- **The ₹0 is #3030 (`f530ffbc`, 2026-09-17 22:24), merged on the admin's own ruling of that day:**
+  *"nahi welcome bonus ₹500 band karna hai! sirf refer aur verification wale ₹400 dene hai … weekly
+  reward, welcome reward yeh sab hatao."* `giftPolicy.ts` → `flatWelcomeGiftAllowed()` returns `false`,
+  unconditionally; `routes/wallet.ts` (the single money-moving caller) grants 0 and `retiredGiftSummary`
+  hides the banner. Every account created after that merge receives nothing on arrival. **Working as
+  ruled.** The 25,000-token accounts in the same screenshot are older wallets, gifted under the old plan
+  and never clawed back (also by design).
+- **The replacement — the four earned steps — is switched off and could not pay if it were on.**
+  `REFERRAL_REWARDS` is unset (`referralRewardsEnabled()` false: the API answers `enabled: false`, the
+  panel shows nothing). And even set, every rupee sits behind `checkDeviceIntegrity`, which FAILS
+  CLOSED: `deviceCheckConfigured` needs `GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME` (both Cloud
+  Run, both almost certainly unset since `STORE_BILLING` never went live); the Play Integrity API must
+  be enabled; the service account must be allowed to decode for the app; and the phone must be running
+  a bundle that carries `DeviceIntegrityPlugin` — first present in **android-aab run #117** (built
+  `749cf054`, the #2953 merge), built WITH the `PLAY_INTEGRITY_CLOUD_PROJECT` repo secret. The registry
+  still records `ANDROID_LATEST_VERSION_CODE = 91`.
+- **This exact state was predicted and recorded twice** — 2026-09-17 *"ADMIN DECISION PENDING:
+  `REFERRAL_REWARDS` — asked, answered 'not yet'"* (with the ₹0 table) and the 2026-09-18 switch-on
+  guide (seven ordered steps, `REFERRAL_REWARDS` LAST). What was missing was not another guide.
+
+### What was missing: the guide's own verification step was "make an account on a phone and see if ₹100 arrives"
+
+That costs a Play rollout per attempt and names nothing when it fails — six links, spread across Cloud
+Run, Google Cloud, Play Console and a GitHub secret, and a wrong one produces the same ₹0 as a missing
+one. **This is the problem `hostingPreflight.ts` already solved for hosting**, so it got the same answer:
+
+- **`src/server/lib/referralPreflight.ts`** — asks Google from the SAME code, with the SAME credential
+  and the SAME package a real claim uses: package name (against `ANDROID_PACKAGE_NAME`), the
+  service-account JSON (unset vs unparseable are different failures), a Play-Integrity-scoped token
+  minted from it, then ONE `decodeIntegrityToken` call with a token Google cannot read — **a 400 is the
+  GOOD answer** (API on, credential accepted, package known); `SERVICE_DISABLED` → the API screen; a
+  plain 403 → Play Console → App integrity; 404 → the package; anything else `unknown`, never `failed`.
+  Then `ANDROID_LATEST_VERSION_CODE` against `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117`, and
+  `REFERRAL_REWARDS` LAST — so `nextAction` (the first remedy) is always the earliest missing step and
+  the admin cannot be sent to the flag first. Reuses `isApiDisabled` / `skipped` / `preflightVerdict` /
+  `nextAction` from the hosting preflight rather than a second copy of the 403 parser.
+- **Two links no server can see are WORDS, not states** (`manual`): whether the live `.aab` was built
+  with the repo secret, and Play → Data safety. Reporting either as a state would be inventing one.
+  The third manual line is the website rule — ₹0 there by design.
+- **`GET /api/admin/referral/preflight`** (admin token) and a **"Check referral setup"** button on the
+  Referral cost card (admin → Reports), ON A BUTTON like the hosting checks, because it makes a real
+  Google call. The card's "not set" banner now also says the flat gift is retired, so the ₹0 is
+  explained on the screen where it is seen.
+- `storeVerify.ts` exports `googleServiceAccountEmail` (an email is not a secret; "which account are we
+  using?" is the first question a refused call raises).
+
+Test-locked in `tests/referralPreflight.test.ts` (23 cases): every classifier branch, the skip-never-ok
+rule, the probe's exact URL and body, the flag-last order, and the wiring (route behind
+`verifyAdminToken`, card fetches on a button and never in the render effect).
+
+### What the admin has to do — none of it is code, and the order matters
+
+1. Enable the **Play Integrity API** in the Google Cloud project that owns the Play service account.
+2. Set **`GOOGLE_PLAY_SA_JSON`** (whole JSON, one string) + **`GOOGLE_PLAY_PACKAGE_NAME=com.navbharat.ai`**
+   in Cloud Run; in Play Console → Release → App integrity link the app to that Cloud project.
+3. Set the GitHub repo secret **`PLAY_INTEGRITY_CLOUD_PROJECT`** (the project NUMBER, digits) — then
+   build a fresh `.aab` (run ≥ #121, from `main`), update Play → Data safety, roll it out, and set
+   `ANDROID_LATEST_VERSION_CODE` to that run number once it is downloadable.
+4. Press **Check referral setup** until every line is green.
+5. Only then **`REFERRAL_REWARDS=on`**.
+
+⚠️ **Stated plainly (rule 3): the users in the screenshot are on the WEBSITE, and the website will
+never pay them a rupee** — that is the admin's own 2026-09-15 rule (*"websites par kuch bhi nahi
+dena"*), not a fault. If web sign-ups are meant to get something, that is a design change to decide
+explicitly, not something to slip in here; nothing in this change alters who is paid.
 ---
 
+## 2026-09-19 — Autopsy `3ce8459b`: the report said nothing was written, over a build that wrote four files
+
+Bengali poem-to-video app (`অহমিকা`), weak tier, free user, KIMI `kimi-k2.7-code`, 9.9 min, `ok: true`,
+RELEASE_GATE **YELLOW**, 4 files written, ₹168.49 billed on a real cost of $0.468 + $0.027 sandbox
+(tieredMarkup ×4 — arithmetic verified correct).
+
+### Five-bucket ledger
+
+- ✅ **Self-healed (4):** the write-time typecheck caught `TS2367` in `useVideoGenerator.ts` and the
+  model fixed it in the same turn; an import kind mismatch auto-fixed; 2 missing deps added to
+  `package.json`; `REVIEW_LEAN` held the green-build reviewer to 12 steps / 45 s and it obeyed.
+- 🔀 **Worked around (1):** `COMPLEXITY_ROUTING` — the deterministic scorer "recognised nothing in this
+  request" (score **10**) and an LLM second opinion rescued it to COMPLEX. See ❌ below: the prompt is
+  **Bengali**, and the scorer's vocabulary is English/Hindi.
+- ⏭️ **Skipped (2):** `JOURNEY_NOT_DERIVED` (no addressable form field — already an open root cause);
+  `.env.example` read failed, agent moved on.
+- ❌ **Still broken (4):**
+  1. **`WRITE_TIME_TYPECHECK` reported "no TypeScript source was written this build"** — false. **FIXED
+     BELOW.**
+  2. **A corrupted label shipped to the user.** `src/App.tsx` contains `{ value: 'forest', label:
+     'জungle' }` — one Bengali character followed by Latin "ungle". The user-facing summary says
+     `জঙ্গল` (correct) while the running app shows the broken token. **No gate caught it**: not the
+     design gate, not accessibility (100/100), not the reviewer (PASS, 90/100).
+  3. **`requestAnalysis.startTier: "gemini"`** — Gemini is on **no** ladder since 2026-09-14; the real
+     chain was `KIMI → GLM → CLAUDE_HAIKU`. Admin-only telemetry that misleads an autopsy.
+  4. **`taskType: "chat"`** on a build that wrote four files — same Bengali blindness as the scorer.
+- 🥵 **Struggle (3):** `IN_BUILD_GREEN_UNCHECKED` fired **four times** (492 s, 508 s, 561 s, 577 s) and
+  recorded nothing every time, while the architect's own `screenshot` succeeded and `GREEN_GUARD_SAVE`
+  later said the app rendered in a real browser — the missing EVIDENCE LEDGER, one actor's proof
+  invisible to another; the reviewer re-read `App.tsx` five times and `useVideoGenerator.ts` five times
+  despite the "you have already read this" notes; ETA **2.3× over** its own band (4.3 min promised,
+  9.9 min actual, `withinBand: false`) — correctly **not shown** to the user, so no harm done.
+
+### The missing subsystem, and the fix that shipped
+
+**Per-build ACCOUNTING held on the Architect's dispatcher is blind to everything it delegates — and the
+guard built for this class cannot see it.** The Architect delegates all app code to sub-agents by
+design; each sub-agent gets its own `ToolDispatcher` with its own fresh `_writeTypecheckStats`; the
+report reads the Architect's. Both counters at zero is the tell: the object was never touched.
+
+🔴 **Fourth occurrence.** `onFileWrite`, `framework` and `onCommand` came before it.
+`subAgentGetsTheWholeWiring.test.ts` was written after the third and compares the child call's
+**argument count** against the constructor's arity — and this state is an **instance field**, so it was
+invisible to that guard by construction.
+
+**Fixed:** `sharedWriteTypecheckStats()` exposes the live object, `shareWriteTypecheckStats()` adopts a
+parent's, `SubAgent` adopts it at spawn, and the route passes it as a **thunk** — the parent dispatcher
+does not exist when the spawn is built (it takes the spawn as an argument), so a value would capture
+`undefined` and share nothing, which is precisely the failure being fixed. Same reasoning
+`ignoreRules` already records. Absent ⇒ today's behaviour exactly.
+
+Test-locked and reversion-proven three ways in `tests/theArchitectCannotSeeWhatItDelegated.test.ts`
+(6 cases): no sharing at spawn, sharing a COPY instead of the reference, and a thunk over a holder that
+is never assigned — each turns a different case red.
+
+### Still open (rule 6) — recorded, not guessed
+
+- **The mixed-script corruption (`জungle`).** A deterministic within-token script-mixing check would
+  catch it at zero model cost and is an India-first edge no competitor has. Not built here: it needs a
+  precision study against real Indic UI strings (`MP3 ফাইল` and `৫টি` must never trip it) and this
+  autopsy's budget went to the honesty defect above.
+- **The complexity scorer and `RequestAnalyser` are English/Hindi-only.** A Bengali prompt — the second
+  most spoken language in India — scores as if it were empty (`score 10`, `taskType: "chat"` for a
+  four-file build). The LLM second opinion rescued THIS build; that is a workaround, not a fix.
+- **`startTier: "gemini"`** stale telemetry (unchanged from the earlier autopsy that recorded it).
+- **`IN_BUILD_GREEN_UNCHECKED` has not once succeeded** in the reports seen so far, while other actors
+  in the same build prove the app rendered. It shipped 2026-09-18; treat it as unproven, not working.
 ## 2026-09-19 — Autopsies `a48d0f9e` + `64bc1b6e`: the compiler named a symptom whose remedy was invisible, and a parallel agent paid for it with a placeholder
 
 Two admin reports in one sitting. `a48d0f9e` ("Repair some parts", weak/free, 90 s, zero files, ₹0 —

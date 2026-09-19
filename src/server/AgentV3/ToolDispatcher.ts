@@ -2103,13 +2103,43 @@ export class ToolDispatcher {
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
   private readonly _writeTypecheckQueue = new WriteTypecheckQueue<import('./EndgameRepair').TscError[] | null>();
-  private readonly _writeTypecheckStats: WriteTypecheckStats = emptyWriteTypecheckStats();
+  private _writeTypecheckStats: WriteTypecheckStats = emptyWriteTypecheckStats();
   /** `null` until the first TS write probes for a tsconfig — a JS project is never compiled. */
   private _isTsProject: boolean | null = null;
 
   /** The write-time typecheck's own numbers, for the build report (`WRITE_TIME_TYPECHECK`). */
   writeTypecheckStats(): WriteTypecheckStats {
     return { ...this._writeTypecheckStats };
+  }
+
+  /**
+   * The LIVE stats object, so a child dispatcher can accumulate into this one.
+   *
+   * 🔴 ROOT CAUSE (autopsy 3ce8459b, 2026-09-19). The Architect delegates all app code to sub-agents by
+   * design, and each sub-agent gets its OWN `ToolDispatcher` with its own fresh stats. The report reads
+   * the ARCHITECT's. So a build that wrote four TypeScript files — and whose write-time typecheck
+   * demonstrably fired, quoting `TS2367` back into the sub-agent's own edit result — reported
+   * *"no TypeScript source was written this build (0 write(s) skipped)"*. Both counters zero is the
+   * tell: that object was never touched, not that nothing happened.
+   *
+   * ⚠️ AND IT IS THE FOURTH TIME THE CHILD DISPATCHER HAS MISSED SOMETHING THE PARENT HAD —
+   * `onFileWrite`, `framework`, `onCommand` before it. `subAgentGetsTheWholeWiring.test.ts` was built
+   * after the third and guards the CONSTRUCTOR'S ARITY; this state is an instance field, so it was
+   * invisible to that guard by construction. Per-build ACCOUNTING is the door the arity test does not
+   * watch, and `theArchitectCannotSeeWhatItDelegated.test.ts` is the one that watches it.
+   */
+  sharedWriteTypecheckStats(): WriteTypecheckStats {
+    return this._writeTypecheckStats;
+  }
+
+  /**
+   * Accumulate into the parent's stats object instead of a private one.
+   *
+   * Replaces the reference rather than copying, so every later increment lands in the shared object.
+   * Called once, at spawn, before the child has run anything — a fresh child has nothing to lose.
+   */
+  shareWriteTypecheckStats(stats: WriteTypecheckStats): void {
+    this._writeTypecheckStats = stats;
   }
 
   /**

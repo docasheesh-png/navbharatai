@@ -70076,6 +70076,73 @@ way out in it, but the one-press button itself is new code.
 
 ---
 
+## 2026-09-19 — Autopsy `3ce8459b`: the report said nothing was written, over a build that wrote four files
+
+Bengali poem-to-video app (`অহমিকা`), weak tier, free user, KIMI `kimi-k2.7-code`, 9.9 min, `ok: true`,
+RELEASE_GATE **YELLOW**, 4 files written, ₹168.49 billed on a real cost of $0.468 + $0.027 sandbox
+(tieredMarkup ×4 — arithmetic verified correct).
+
+### Five-bucket ledger
+
+- ✅ **Self-healed (4):** the write-time typecheck caught `TS2367` in `useVideoGenerator.ts` and the
+  model fixed it in the same turn; an import kind mismatch auto-fixed; 2 missing deps added to
+  `package.json`; `REVIEW_LEAN` held the green-build reviewer to 12 steps / 45 s and it obeyed.
+- 🔀 **Worked around (1):** `COMPLEXITY_ROUTING` — the deterministic scorer "recognised nothing in this
+  request" (score **10**) and an LLM second opinion rescued it to COMPLEX. See ❌ below: the prompt is
+  **Bengali**, and the scorer's vocabulary is English/Hindi.
+- ⏭️ **Skipped (2):** `JOURNEY_NOT_DERIVED` (no addressable form field — already an open root cause);
+  `.env.example` read failed, agent moved on.
+- ❌ **Still broken (4):**
+  1. **`WRITE_TIME_TYPECHECK` reported "no TypeScript source was written this build"** — false. **FIXED
+     BELOW.**
+  2. **A corrupted label shipped to the user.** `src/App.tsx` contains `{ value: 'forest', label:
+     'জungle' }` — one Bengali character followed by Latin "ungle". The user-facing summary says
+     `জঙ্গল` (correct) while the running app shows the broken token. **No gate caught it**: not the
+     design gate, not accessibility (100/100), not the reviewer (PASS, 90/100).
+  3. **`requestAnalysis.startTier: "gemini"`** — Gemini is on **no** ladder since 2026-09-14; the real
+     chain was `KIMI → GLM → CLAUDE_HAIKU`. Admin-only telemetry that misleads an autopsy.
+  4. **`taskType: "chat"`** on a build that wrote four files — same Bengali blindness as the scorer.
+- 🥵 **Struggle (3):** `IN_BUILD_GREEN_UNCHECKED` fired **four times** (492 s, 508 s, 561 s, 577 s) and
+  recorded nothing every time, while the architect's own `screenshot` succeeded and `GREEN_GUARD_SAVE`
+  later said the app rendered in a real browser — the missing EVIDENCE LEDGER, one actor's proof
+  invisible to another; the reviewer re-read `App.tsx` five times and `useVideoGenerator.ts` five times
+  despite the "you have already read this" notes; ETA **2.3× over** its own band (4.3 min promised,
+  9.9 min actual, `withinBand: false`) — correctly **not shown** to the user, so no harm done.
+
+### The missing subsystem, and the fix that shipped
+
+**Per-build ACCOUNTING held on the Architect's dispatcher is blind to everything it delegates — and the
+guard built for this class cannot see it.** The Architect delegates all app code to sub-agents by
+design; each sub-agent gets its own `ToolDispatcher` with its own fresh `_writeTypecheckStats`; the
+report reads the Architect's. Both counters at zero is the tell: the object was never touched.
+
+🔴 **Fourth occurrence.** `onFileWrite`, `framework` and `onCommand` came before it.
+`subAgentGetsTheWholeWiring.test.ts` was written after the third and compares the child call's
+**argument count** against the constructor's arity — and this state is an **instance field**, so it was
+invisible to that guard by construction.
+
+**Fixed:** `sharedWriteTypecheckStats()` exposes the live object, `shareWriteTypecheckStats()` adopts a
+parent's, `SubAgent` adopts it at spawn, and the route passes it as a **thunk** — the parent dispatcher
+does not exist when the spawn is built (it takes the spawn as an argument), so a value would capture
+`undefined` and share nothing, which is precisely the failure being fixed. Same reasoning
+`ignoreRules` already records. Absent ⇒ today's behaviour exactly.
+
+Test-locked and reversion-proven three ways in `tests/theArchitectCannotSeeWhatItDelegated.test.ts`
+(6 cases): no sharing at spawn, sharing a COPY instead of the reference, and a thunk over a holder that
+is never assigned — each turns a different case red.
+
+### Still open (rule 6) — recorded, not guessed
+
+- **The mixed-script corruption (`জungle`).** A deterministic within-token script-mixing check would
+  catch it at zero model cost and is an India-first edge no competitor has. Not built here: it needs a
+  precision study against real Indic UI strings (`MP3 ফাইল` and `৫টি` must never trip it) and this
+  autopsy's budget went to the honesty defect above.
+- **The complexity scorer and `RequestAnalyser` are English/Hindi-only.** A Bengali prompt — the second
+  most spoken language in India — scores as if it were empty (`score 10`, `taskType: "chat"` for a
+  four-file build). The LLM second opinion rescued THIS build; that is a workaround, not a fix.
+- **`startTier: "gemini"`** stale telemetry (unchanged from the earlier autopsy that recorded it).
+- **`IN_BUILD_GREEN_UNCHECKED` has not once succeeded** in the reports seen so far, while other actors
+  in the same build prove the app rendered. It shipped 2026-09-18; treat it as unproven, not working.
 ## 2026-09-19 — Autopsies `a48d0f9e` + `64bc1b6e`: the compiler named a symptom whose remedy was invisible, and a parallel agent paid for it with a placeholder
 
 Two admin reports in one sitting. `a48d0f9e` ("Repair some parts", weak/free, 90 s, zero files, ₹0 —

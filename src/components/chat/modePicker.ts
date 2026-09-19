@@ -101,7 +101,10 @@ export const IMAGE_MODE_NAME = 'Image Generator AI';
 export const RECENT_MODE_PREFIX = 'recent:';
 
 export const recentModeId = (viewId: string): string => `${RECENT_MODE_PREFIX}${viewId}`;
-export const isRecentModeId = (id: string): boolean => id.startsWith(RECENT_MODE_PREFIX);
+// Deliberately NOT exported: `viewFromRecentId` is the ONE public way to ask. A caller handed a bare
+// predicate has to slice the prefix off itself, and a hand-rolled slice is exactly the drift that put a
+// bare view id through onPick once already.
+const isRecentModeId = (id: string): boolean => id.startsWith(RECENT_MODE_PREFIX);
 /** The view a recent-row id points at, or null when the id is not a recent row. */
 export const viewFromRecentId = (id: string): string | null =>
   isRecentModeId(id) ? id.slice(RECENT_MODE_PREFIX.length) : null;

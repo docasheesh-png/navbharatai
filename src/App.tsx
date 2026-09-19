@@ -44,7 +44,7 @@ import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './compo
 import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
-import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, isRecentModeId, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
 import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';

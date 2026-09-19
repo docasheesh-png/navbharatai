@@ -69504,3 +69504,33 @@ Answered in the same message as a ranked audit rather than built: Android App Li
 `navbharatai.com` links open the app, predictive-back on targetSdk 36, a native share sheet beyond the
 two existing `navigator.share` call sites, `@capacitor/network` for an honest offline state, and
 screen-to-screen transitions. None of them is started; each needs the admin's word on scope.
+
+---
+
+## 2026-09-19 — One Settings door in the sidebar (admin: "list wala hata do")
+
+Admin, verbatim: *"sidebar menu me 'setting' ke 2 option dikh rahe hai. ek list me hai, ek system
+matrix me (squire) — ek hatao. list wala hata do! bas, system matrix wala squire wala rahne do."*
+
+Both rows called the same `toggleTab('settings')`, so the list row was pure duplication. The drawer's
+Core Navigation list now renders `drawerItems` (`visibleItems` minus `settings`), and the System
+Matrix square tile is the drawer's single Settings door.
+
+**The obvious fix was the wrong one, and that is the point of the change.** Adding `'settings'` to
+`SIDEBAR_HIDDEN` — the mechanism this file already uses for Git, Preview, Files, History and
+Professionals — would have removed the row from the desktop/tablet RAIL as well. The rail renders
+`visibleItems` and has **no System Matrix section**; that section is inside the mobile drawer only. The
+rail's only other Settings door is TopNav's user dropdown, which renders solely when `user` is truthy,
+so a **signed-out desktop user would have been left with no way into Settings at all** — a change whose
+entire purpose was to remove a *second* door would have removed the *only* one. There is no duplicate
+on the rail: it shows Settings exactly once already. Hence the filter is scoped to the drawer.
+
+`menuItems` is untouched: TopNav does `menuItems.find(m => m.id === tabId); if (!item) return null`,
+and the mobile footer reads this entry's icon for its "More" button — the same load-bearing distinction
+already recorded beside `SIDEBAR_HIDDEN`.
+
+Test-locked and reversion-proven in `tests/oneSettingsDoorInTheSidebar.test.ts` (6 cases): restoring
+the drawer's unfiltered list turns 1 red, and the tempting global `SIDEBAR_HIDDEN` fix turns a
+different one red. The suite strips whole-line `//` comments before splitting rail from drawer, because
+the explanatory comment names "System Matrix" itself and would otherwise match text that renders
+nothing.

@@ -137,6 +137,19 @@ export function SidebarNav({
   const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history', 'professionals']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
+  // Settings appeared TWICE in the mobile drawer (admin 2026-09-19: "sidebar menu me Settings ke 2 option
+  // dikh rahe hai — ek list me hai, ek System Matrix me (square). List wala hata do, System Matrix wala
+  // rahne do"). Both opened the same view, so the list row is dropped and the System Matrix tile below is
+  // the drawer's single Settings door.
+  //
+  // 🔒 IT IS DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS LOAD-BEARING.
+  // The desktop/tablet RAIL renders `visibleItems` and has NO System Matrix section — it is drawer-only —
+  // so hiding Settings globally would leave the rail with no Settings entry at all. The only other door on
+  // that surface is TopNav's user dropdown, which renders solely when someone is signed in, so a
+  // signed-out desktop user would have been stranded with no way into Settings. There is no duplicate to
+  // remove on the rail: it shows Settings exactly once already.
+  const drawerItems = visibleItems.filter(item => item.id !== 'settings');
+
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }
     if (item.id === 'history' && !user) {
@@ -252,7 +265,7 @@ export function SidebarNav({
                     <div className="w-1 h-3 bg-indigo-500 rounded-full text-on-accent"></div>
                     Core Navigation
                   </div>
-                  {visibleItems.map(item => (
+                  {drawerItems.map(item => (
                     <NavItem
                       key={item.id}
                       item={item}

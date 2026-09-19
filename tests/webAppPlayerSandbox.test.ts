@@ -60,9 +60,16 @@ describe('the mirror the player depends on stays CORS-open', () => {
 });
 
 describe('the share deep link stays wired end to end', () => {
-  it('App.tsx routes /store/app/<id> into the store view', () => {
+  it('/store/app/<id> routes into the store view — rule AND wiring', () => {
+    // ⚠️ THE RULE MOVED, THE BEHAVIOUR DID NOT (2026-09-19). This used to assert the literal
+    // `startsWith('/store/app/')` inside App.tsx. That path test now lives in src/lib/deepLinkRoute.ts,
+    // because the native shell needs the SAME answer for an incoming Android App Link and two private
+    // copies of one question is how autopsy 1a7f4a58 happened. Asserting both halves is strictly
+    // stronger than the old single grep: the rule must exist, and App.tsx must actually ask it.
+    const rule = readFileSync(join(process.cwd(), 'src/lib/deepLinkRoute.ts'), 'utf8');
+    expect(rule).toContain("startsWith('/store/app/')");
     const app = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
-    expect(app).toContain("startsWith('/store/app/')");
+    expect(app).toContain('routeForPath(window.location.pathname, window.location.search)');
   });
 
   it('NavAppStore opens the player straight from the link', () => {

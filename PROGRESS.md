@@ -70149,6 +70149,87 @@ dena"*), not a fault. If web sign-ups are meant to get something, that is a desi
 explicitly, not something to slip in here; nothing in this change alters who is paid.
 ---
 
+## 2026-09-19 — admin Users list: a Paid/Free filter and an Asc/Desc button
+
+**The ask,** verbatim: *"admin penal me user ke colom me, ek buton /filter aur add karna hai. 1. paid
+(jis user ne life me 1 bar bhi navbharatai ko real money se wallet recharge kiya hai) /free user
+2. assending/dessending"*
+
+### 🔑 "Paid" was NOT a new rule to invent, and inventing one was the real risk
+
+The admin's definition — *has this person ever given NavBharatAI real money* — is already a function
+in this repo, and the admin surface has already chosen which one: `adminUserLookup.ts` imports
+`FreeTierBuildRouting.hasEverPaid` with its own comment saying why — *"ONE rule, shared with the
+build router … so the admin list and the engine can never disagree about who is a paying user."*
+A fresh predicate here would have put **two answers on one screen**: the filter calling somebody paid
+while the account sheet a click away called them free. So the filter imports that one, and
+`walletPassesPaidFilter` is a wrapper with no arithmetic of its own — test-locked by asserting it
+agrees with `hasEverPaid` wallet for wallet, and that its source contains neither `totalMoneySpent`
+nor `lastRechargeAt`.
+
+The row now carries the server's own `hasEverPaid` verdict, so the browser never re-derives it from
+`moneySpent > 0` — which would have been a *third* answer, on the very screen that asks the question.
+
+### 🔴 FOUND WHILE DOING IT — OPEN root cause (rule 6): there are already TWO `hasEverPaid`, and they disagree
+
+| Where | Rule |
+|---|---|
+| `AgentV3/FreeTierBuildRouting.hasEverPaid` | `Number(totalMoneySpent) > 0` |
+| `lib/giftSpend.hasEverPaid` | `lifetimeMoneySpentInr(w) > 0 \|\| lastRechargeAt` |
+
+They disagree about a wallet carrying `lastRechargeAt` with **no** `totalMoneySpent` — the first calls
+that person free, the second calls them a customer. Read strictly against the admin's own words
+("recharge kiya hai"), the second is closer; read against what the build router and the billing tier
+actually do, the first is what the platform believes.
+
+**Not resolved here, deliberately.** Unifying them is a money-semantics decision — *does a recharge
+timestamp alone make somebody a customer?* — with the build router, the billing tier and the gift/
+hosting plan all downstream of it. Changing it inside a filter PR would be a fix trading one problem
+for a larger one. Recorded as an open root cause; the filter is self-consistent with the rest of the
+admin panel in the meantime.
+
+### The direction button, and the two things that make it honest
+
+* **`src/lib/adminUserSort.ts` holds `DEFAULT_SORT_DIRECTION` — ONE copy, shared.** The panel draws
+  an arrow for the direction currently in force and the server decides what that direction is; two
+  copies of the table would mean an arrow pointing down over a list sorted up, **with nothing failing
+  to reveal it**. `src/lib/` is this repo's existing home for a rule both halves need (`routes/health.ts`
+  already imports `normalizeFeePct` from `lib/platformFee.ts` the same way).
+* **Direction is per-sort data, not a constant.** "Descending" is the sensible reading of four of the
+  five sorts, but names run from A — so `alpha` is `asc` and the rest `desc`, and one flag then means
+  the same thing on all five. Omitting `?dir=` reproduces the previous order exactly; the panel sends
+  nothing at all while the button is untouched, rather than guessing at the default.
+* 🔒 **THE COMPARATOR IS INVERTED, NEVER THE ARRAY.** `sort(cmp).reverse()` also flips every TIE, and
+  with 717 wallets ties on a 0 balance are the common case, not an edge one — pressing the button
+  would have reshuffled hundreds of equal rows. Every comparator in the route is now written
+  ASCENDING and wrapped by `directed(...)`; a test asserts all five are wrapped, and asserts that the
+  rejected `.reverse()` implementation produces the wrong tie order.
+
+### Two smaller things that would each have looked like a bug
+
+1. **The filter runs BEFORE `total` is counted**, so the envelope's "Showing 25 of N" states the
+   filtered count. An N that ignored the filter is a number the rows beneath it contradict.
+2. **The per-row Paid/Free badge.** Every row in the admin's screenshot reads **₹0** (the welcome
+   gift is credits, not money), so filtering to *Paid* correctly returns an empty list — which is
+   indistinguishable from a broken filter unless each row says which side it is on. The badge is the
+   filter's own verdict, not a second computation.
+
+Both controls reset paging and refetch, so Load-more cannot page into stale results and a filter never
+needs a manual *Load* press to take effect.
+
+### Evidence
+
+`tests/paidOrFreeAndWhichWayUp.test.ts` — **22 cases**: the filter's safe-direction parsing (six
+malformed values all meaning `all`), agreement with `hasEverPaid` wallet for wallet, a gifted balance
+never reading as a customer, the shared default table, an absent/malformed `dir` falling back per
+sort, `effectiveDirection === parseSortDirection` (so the two halves cannot be different functions),
+tie stability in both directions, and the wiring on both sides.
+
+**Proven by reversion, four ways** — each reverted, run, restored: moving the filter after the count;
+returning the bare ascending comparator (the `.reverse()` shape); defaulting the filter to `paid` so
+a typo hides accounts; and giving the panel its own copy of the defaults.
+
+`AppKnowledgeBase.ts` updated with both controls and the Hindi/Hinglish keywords an admin would type.
 ## 2026-09-19 — Autopsy `3ce8459b`: the report said nothing was written, over a build that wrote four files
 
 Bengali poem-to-video app (`অহমিকা`), weak tier, free user, KIMI `kimi-k2.7-code`, 9.9 min, `ok: true`,

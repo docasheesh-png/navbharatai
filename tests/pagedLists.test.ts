@@ -166,6 +166,16 @@ describe('🔴 THE SERVER HALF — the one a button cannot fix', () => {
   it('and the panel reads BOTH shapes, asks for a page, and resets on a new search', () => {
     expect(admin).toContain('paged=1&limit=${userLimit}');
     expect(admin).toContain('Array.isArray(d) ? d : Array.isArray(d?.users) ? d.users : null');
-    expect(admin).toContain('useEffect(() => { setUserLimit(USER_PAGE); setUserTotal(null); }, [userSearch, userSort]);');
+    // ⚠️ The dependency list GREW on 2026-09-19 (the Paid/Free filter and the Asc/Desc button), and
+    // this case's intent is unchanged: every control that changes WHICH rows come back must reset
+    // paging, or Load-more pages into the previous result. Asserted as "these four are all present"
+    // rather than as one exact string, so adding a fifth control does not fail a case about paging —
+    // while leaving one OUT still does.
+    const resetLine = admin.split('\n').find((l) => l.includes('setUserLimit(USER_PAGE); setUserTotal(null);'));
+    expect(resetLine, 'the paging reset effect is gone').toBeTruthy();
+    const deps = String(resetLine);
+    for (const dep of ['userSearch', 'userSort', 'userPaid', 'userDir']) {
+      expect(deps, `${dep} must reset paging`).toContain(dep);
+    }
   });
 });

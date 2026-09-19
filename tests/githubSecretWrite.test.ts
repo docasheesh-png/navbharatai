@@ -117,18 +117,29 @@ describe('the route refuses to replace a key that is already there', () => {
   const route = read('../src/server/routes/mobileShip.ts');
   const body = route.slice(route.indexOf("'/api/mobile-ship/signing-setup'"), route.indexOf("app.get('/api/mobile-ship/runs'"));
 
+  // ⚠️ THE TWO RULES BELOW MOVED, THEY DID NOT WEAKEN (2026-09-19). Read-then-maybe-create was lifted
+  // out of this route into `lib/androidSigningSetup.ts` so the SETUP path could reuse it — the key is
+  // now created before a build can be pressed, instead of only after one has failed. These assertions
+  // therefore follow the rule to where it lives, and additionally pin that this route still delegates.
+  // Deleting either of them, rather than repointing, is what would have weakened the protection.
+  const shared = read('../src/server/lib/androidSigningSetup.ts');
+
   it('409s when any of the four already exist, unless replace is literally true', () => {
-    expect(body).toContain('already.length > 0 && replace !== true');
+    expect(shared).toContain("if (present.length === ANDROID_SIGNING_SECRETS.length) return { state: 'present', present };");
+    expect(shared).toContain("if (present.length > 0) return { state: 'partial', present };");
+    expect(body).toContain("(ensured.state === 'present' || ensured.state === 'partial') && replace !== true");
     expect(body).toContain('409');
     expect(body).toContain('a new one cannot update it');
   });
 
   /** A repository we could not READ must not be written to: the key we cannot see is the one at risk. */
   it('never generates a key when the existing secrets could not be listed', () => {
-    const listFail = body.indexOf('return res.status(502).json({ error: describeGhError(err) });');
-    const generate = body.indexOf('generateUploadKeystore(');
+    const listFail = shared.indexOf("return { state: 'blocked', present: [], reason, note: signingLookupNote(reason) };");
+    const generate = shared.indexOf('const key = generateUploadKeystore(appName);');
     expect(listFail).toBeGreaterThan(-1);
     expect(listFail).toBeLessThan(generate);
+    // And the route must not have grown its own second path around the shared one.
+    expect(body).toContain('const ensured = await ensureUploadKeystore(');
   });
 
   /** 🔒 The key must exist in exactly two places: the user's repository, and their browser once. */

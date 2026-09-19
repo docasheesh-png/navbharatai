@@ -44,6 +44,9 @@ import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflig
 import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { apkRefusalForProject } from '../lib/frameworkCapability';
+// ONE implementation of "make sure this repository can sign a Play bundle", shared with the
+// /signing-setup route so the two can never drift on what counts as already-set-up (rule 2).
+import { ensureUploadKeystore, type EnsureSigningResult } from '../lib/androidSigningSetup';
 
 /** GitHub's own limit on a repository name, plus the characters it accepts. */
 export function isValidRepoName(name: string): boolean {
@@ -214,11 +217,46 @@ export function registerMobileSetupRoutes(app: Express): void {
         project.files, project.binaryFiles,
         `Prepare ${name} for the app stores (NavBharatAI)`,
       );
+      // ── THE KEY IS MADE NOW, NOT AFTER A FAILED BUILD (autopsy 2026-09-19) ────────────────────────
+      //
+      // One-press upload-key creation has existed since 2026-09-15, and the button that offers it only
+      // appeared AFTER a Play build had already failed — so every user met a red failure first and the
+      // way out second. The repository exists as of the line above and the user owns it (`owner` is
+      // this token's own login), so this is the earliest moment the key CAN be created, and it is
+      // before any button that needs it can be pressed.
+      //
+      // 🔒 BEST-EFFORT, AND IT MUST NEVER FAIL THE SETUP. The installable .apk needs no key at all, so
+      // a user whose key could not be created still has a working app to try on their phone — failing
+      // setup here would take that away to solve a problem they may not even have. An existing key is
+      // never touched, and a `partial` one is never completed (see `ensureUploadKeystore`).
+      let signing: { state: string; present: readonly string[]; note?: string } = { state: 'blocked', present: [] };
+      let newKey: EnsureSigningResult['key'];
+      try {
+        const outcome = await ensureUploadKeystore(headers, owner, repoName, name);
+        signing = { state: outcome.state, present: outcome.present, note: outcome.note };
+        newKey = outcome.key;
+      } catch {
+        signing = { state: 'blocked', present: [], note: 'The signing key could not be set up just now.' };
+      }
+
       return res.json({
         ok: true,
         owner,
         repo: repoName,
         branch: defaultBranch,
+        // Whether a Play bundle can be signed, answered at SETUP so nothing downstream has to guess.
+        // ⚠️ `keystore` is the ONLY time the key exists outside the user's repository — NavBharatAI
+        // keeps no copy — so the client hands it to them to save and must not discard it silently.
+        signing,
+        keystore: newKey
+          ? {
+            base64: newKey.base64,
+            storePassword: newKey.storePassword,
+            keyAlias: newKey.keyAlias,
+            sha256Fingerprint: newKey.sha256Fingerprint,
+            validUntil: newKey.validUntil,
+          }
+          : null,
         repoUrl: `https://github.com/${owner}/${repoName}`,
         createdRepo: created,
         commitSha: sha,

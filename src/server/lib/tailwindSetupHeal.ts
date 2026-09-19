@@ -23,6 +23,7 @@
 // PURE: files in, files out. No network, no filesystem.
 
 import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
+import { configDialectFor, configModuleSource } from './configModuleDialect';
 
 /** The v3 companion pins. tailwindcss itself comes from the shared allowlist. */
 const POSTCSS_PIN = '^8';
@@ -155,18 +156,35 @@ export function applyTailwindSetup(input: Record<string, string>): TailwindHealR
 
     // The configs only when the packages were missing too — an app that declared Tailwind but keeps
     // its config somewhere unusual is left alone.
+    // 🔴 THE DIALECT IS THE PROJECT'S, NEVER A CONSTANT (APK build report 12thmentors,
+    // 2026-09-19). Both configs used to be written with a hardcoded `module.exports`, while
+    // `Scaffold.ts` creates every one of these projects with `"type": "module"` and `export
+    // default`. So on an ESM project — which is all of them — this heal's own output was the
+    // incompatible pair Node refuses to load: *"module is not defined in ES module scope"*, thrown
+    // by Vite while loading the PostCSS config, 46 seconds into a build, before one file was
+    // transformed. The heal that exists to stop a runner death was writing one.
+    //
+    // `configDialectFor` reads package.json's `"type"` — the same field Node reads — so a CommonJS
+    // project still gets `module.exports` and nothing regresses for one.
+    const dialect = configDialectFor(files);
     if (!Object.keys(files).some((p) => POSTCSS_CONFIG.test(p)) && !('postcss' in pkg)) {
-      files['postcss.config.js'] = 'module.exports = {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n';
+      files['postcss.config.js'] = configModuleSource(
+        dialect,
+        '{\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}',
+      );
       changed['postcss.config.js'] = files['postcss.config.js'];
     }
     if (!Object.keys(files).some((p) => TAILWIND_CONFIG.test(p))) {
       files['tailwind.config.js'] =
         '/** @type {import(\'tailwindcss\').Config} */\n'
-        + 'module.exports = {\n'
-        + "  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],\n"
-        + '  theme: { extend: {} },\n'
-        + '  plugins: [],\n'
-        + '};\n';
+        + configModuleSource(
+          dialect,
+          '{\n'
+          + "  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],\n"
+          + '  theme: { extend: {} },\n'
+          + '  plugins: [],\n'
+          + '}',
+        );
       changed['tailwind.config.js'] = files['tailwind.config.js'];
     }
   }

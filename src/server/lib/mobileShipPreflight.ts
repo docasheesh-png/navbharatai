@@ -31,6 +31,7 @@ import { resolveLocalImport } from '../AgentV3/ArchitectureAnalysis';
 import { isBinaryAssetSpecifier } from '../AgentV3/fileClassification';
 import { scaffoldMissingUiPrimitives } from './uiPrimitiveScaffold';
 import { detectTailwindProblems, applyTailwindSetup } from './tailwindSetupHeal';
+import { detectDialectMismatches, applyDialectFix } from './configModuleDialect';
 import { detectProjectKind } from './mobileProjectAssembler';
 import {
   AI_REPAIR_MAX_FILES, runAiRepair,
@@ -132,6 +133,17 @@ export async function preflightVerify(files: Record<string, string>): Promise<Pr
         path: 'package.json',
         message: `the app imports "${pkg}" but package.json does not declare it`,
       });
+    }
+
+    // Check 5 — CONFIG MODULE DIALECT (APK build report 12thmentors, 2026-09-19). A root config
+    // written in CommonJS inside a `"type": "module"` project (or the reverse) is refused by NODE at
+    // LOAD time, so it passes all four checks above and dies on the runner in under a minute:
+    // *"module is not defined in ES module scope"*. It is invisible to them by construction — the
+    // file parses, imports nothing and declares no package; the fault is in the RELATIONSHIP between
+    // its extension, its contents and one field in package.json, and a per-file checker cannot see a
+    // relationship. Healed deterministically in Tier 0c by renaming, never by rewriting.
+    for (const m of detectDialectMismatches(files)) {
+      problems.push({ kind: 'syntax', path: m.path, message: m.message });
     }
 
     // Check 4 — TAILWIND WIRING (2026-08-27). CSS is not an import graph the reconciler walks, so an
@@ -256,6 +268,24 @@ export async function preflightAndHeal(
       files = tw.files;
       Object.assign(changed, tw.changed);
       notes.push(...tw.notes);
+      report = await preflightVerify(files);
+      if (report.ok) return { ok: true, files, changed, problems: [], notes, aiRounds };
+    }
+  }
+
+  // Tier 0c — deterministic: a root config whose dialect contradicts package.json's `"type"` has its
+  // export form corrected IN PLACE, and only for the one shape where the two dialects are provably
+  // identical (a comment header plus `module.exports = <object literal>`). A config that calls
+  // require(), computes its value or assigns a named property is left exactly as written and stays in
+  // the report — a rewrite there would be a guess. Renaming to `.cjs` would be the more general fix
+  // and is deliberately NOT used: `mergeWorkspaceFiles` is additive, so the old file would survive in
+  // the user's own app and postcss-load-config prefers `.js`. One correct shape, no model involved.
+  if (detectDialectMismatches(files).length > 0) {
+    const dm = applyDialectFix(files);
+    if (Object.keys(dm.changed).length > 0) {
+      files = dm.files;
+      Object.assign(changed, dm.changed);
+      notes.push(...dm.notes);
       report = await preflightVerify(files);
       if (report.ok) return { ok: true, files, changed, problems: [], notes, aiRounds };
     }

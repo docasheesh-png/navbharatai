@@ -69668,3 +69668,77 @@ weakened** — they split and index on the tier marker, and their intent is unch
 
 `AppKnowledgeBase.ts` updated, so every AI in the app answers "why can't I make a Pro image?" with
 what the screen now actually does.
+
+---
+
+## 2026-09-19 — AUTOPSY: a user's APK died in 46 seconds on a CommonJS config inside an ESM project
+
+**The report** (APK build, `12thmentors/app-50-files-2026-09-19`, run 35432100524, 46 s, stage
+`webbuild`). The runner never transformed a single module:
+
+```
+[Failed to load PostCSS config: [ReferenceError] module is not defined in ES module scope
+ This file is being treated as an ES module because it has a '.js' file extension and
+ package.json contains "type": "module".]
+```
+
+`postcss.config.js` said `module.exports = …`; `package.json` said `"type": "module"`. Each half is
+ordinary and correct alone. **The PAIR is fatal, and nothing in the pipeline was looking at pairs.**
+The report's own verdict was `navbharatCanFixItself: false` — for a failure that is one line to fix.
+
+### 🔴 The cause is OURS, and it is the module whose job was preventing exactly this
+
+`tailwindSetupHeal.ts` exists to complete a broken Tailwind setup *"BEFORE the GitHub runner dies on
+it"*. It wrote **both** configs with a hardcoded `module.exports`, while `Scaffold.ts` — which creates
+every one of these projects — writes `"type": "module"` and `export default`. So the heal's own output
+was the incompatible pair, **on every ESM project it ever fired for**. The guard against a runner death
+was generating one.
+
+Fixed at the source: the dialect is now read from `package.json`'s `"type"` (`configDialectFor`), the
+same field Node reads. A CommonJS project still gets `module.exports`, so nothing regresses for one.
+
+### Step 2 — the MISSING SUBSYSTEM, named: nothing checked a file against its PROJECT
+
+`mobileShipPreflight`'s three checks are esbuild SYNTAX, unresolved local imports, missing npm
+packages — **and the offending file passes all three.** `module.exports = {}` is valid JavaScript
+(parser happy), it imports nothing (resolver happy), it declares no package (reconciler happy). The
+fault is in the RELATIONSHIP between an extension, a file's contents and one field in `package.json`,
+and a checker that looks at one file at a time is structurally incapable of seeing a relationship.
+
+⚠️ **And it only bites at LOAD time**, which is why it reaches the runner: Vite `import()`s the PostCSS
+config before transforming anything, so the app "compiles fine" everywhere we test it and dies on the
+one machine that actually builds. New module `configModuleDialect.ts`; Check 5 + deterministic Tier 0c
+in the preflight.
+
+### 🔒 The fix converts IN PLACE and renames nothing — a rename would have been the new bug
+
+Node's own suggestion is `.cjs`, and it is the more general fix. It cannot be used here: the heal
+reaches the user's workspace through `mergeWorkspaceFiles(workspaceId, changed)`, which is **additive
+and cannot express a deletion**. A rename would leave the broken `postcss.config.js` beside the new
+`postcss.config.cjs` in the user's own app — and postcss-load-config prefers `.js` — so the GitHub
+build would pass while their preview stayed broken. **Fixing one problem by creating another is what
+the fourth absolute rule forbids**, so the conversion is in place and only for the one shape where the
+two dialects are provably identical: a comment header plus `module.exports = <object literal>`.
+
+A config that calls `require()`, computes its value or assigns a named property is **reported and left
+byte-identical** — a rewrite there would be a guess about code this module did not write. The `@type`
+JSDoc header is carried across, because dropping it would silently cost the user their editor
+autocompletion.
+
+### Step 5 — the 50/50 half
+
+The upstream fix (the heal writes the project's dialect) is the 50%. The other 50% is that a **model**
+can write the same broken pair into any app, and that heal never fires when a config already exists —
+which is what Check 5 covers. Scope is root configs only (`*.config.js`, `.*rc.js`): a `.js` file under
+`src/` is loaded by the BUNDLER, which handles CommonJS interop in its own graph and never consults
+`"type"`.
+
+Test-locked in `tests/aConfigMustSpeakItsProjectsDialect.test.ts` — 21 cases built from the report's
+exact bytes, including the refusals and the no-rename guarantee. Proven by reversion: restoring the
+hardcoded `'cjs'` turns 2 red, one of them *"the heal's OWN OUTPUT no longer trips the detector"*.
+
+⚠️ **OPEN, said plainly:** this session cannot see the failing repository, so whether that app's
+`postcss.config.js` came from our heal or from the model is **not established** — only that our heal
+generates exactly this pair. Both paths are now covered, which is why the uncertainty does not block
+the fix. And `mergeWorkspaceFiles` having no deletion path is a real limitation recorded here rather
+than worked around: until it does, no heal in this pipeline can rename or remove a file.

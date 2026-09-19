@@ -70156,3 +70156,57 @@ struggle was the USER's: they asked to "repair some parts" and were asked back w
 - 💸 **Re-reads are the cost driver on weak builds.** 1.08M input tokens for 7,928 output (137:1). The
   dedup NOTE already tells the model it has read the file before; it reads it anyway, and the full
   499-line file ships in the prompt each time.
+
+---
+
+## 2026-09-19 — One defect, three gate failures: 34 unlabelled fields (autopsy `a48d0f9e`, follow-up)
+
+The 09-19 autopsy of `a48d0f9e` recorded three findings as if they were unrelated:
+
+- `ACCESSIBILITY` 70/100 — *"34 form field(s) with no label … Worst: src/pages/Marksheets.tsx (12),
+  src/pages/ReportCards.tsx (11), src/pages/Students.tsx (10)"*
+- `JOURNEY_NOT_DERIVED` — *"the forms in this app have no field this check could address honestly"*
+- `RELEASE_GATE: YELLOW` — *"no user journey was proven, so whether it actually SAVES anything is untested"*
+
+**They are ONE defect.** `journeyDerivation` addresses a field by `data-testid` | `name` | `id` |
+`placeholder` | `aria-label`; the accessibility pass counts fields carrying none of them. The same
+missing attribute is why a screen reader cannot announce the field AND why the platform cannot prove
+the app saves anything — and the second is what holds the release gate at YELLOW for **any** app with
+a form.
+
+### Both halves of the 50/50 law
+
+**1 · PREVENTION — the contract now reaches EVERY tier.** 🔴 The rule existed and was **weak-only**:
+`weakBuildDisciplineBlock` returns `''` for a non-weak build, so a Normal or Strong build was never
+asked for a label at all. That is exactly why this looked covered on inspection — the weak block reads
+as though the builder is always told. The requirement now sits in the always-on architect prompt
+(`systemPrompt.ts`), beside the design-kit contract, and asks for a real `name` **and** a label,
+naming both consequences so it cannot be read as a cosmetic nicety. Placeholder text is explicitly not
+a label; it must be done as the field is written, never as a later pass.
+
+⚠️ It lengthens the static architect prompt, which is the cache prefix under `AGENTV3_CACHE_PREFIX` —
+one invalidation, then it re-stabilises. Stated rather than discovered on the next cost report.
+
+**2 · HONESTY — the report names the fix, not only the symptom** (fourth absolute rule, step 5).
+`noJourneyReason` stopped at *"no journey was derived"*, which reads like an environmental limit of the
+CHECK. It is a fixable defect in the generated app, and the same build had already counted the very
+fields. The sentence now adds: *"Give each field a `name` and a label and this check can prove the app
+really saves what is typed — the same fix a screen reader needs."* The other two reasons (no pages, no
+form at all) are untouched — a chat app is never told to add a `name` to fields it does not have.
+
+`tests/oneCauseNotTwoLines.test.ts` — 7 cases, proven by reversion twice (removing the always-on
+contract turns 4 red; restoring the symptom-only sentence turns 2 red).
+
+### Still open (rule 6)
+
+- **`IN_BUILD_GREEN_UNCHECKED`** — root cause located (it fires on a `preview` event, which means the
+  server is listening, not that the app painted; it opened the browser 640 ms after the first HTTP 200
+  and had no second trigger because its only retry signal is a `tool_result` from a loop that had
+  ended). **Still not fixed: PR #3134 is open in that file.** Not raced, per the concurrent-session rule.
+- **Why a recorded LESSON did not reach the model.** ⚠️ Do NOT build a "feed past findings into the
+  prompt" mechanism — `BuildLessons.ts` → `reflectMem` → `userLessonBrainStore` already does exactly
+  that, runs on every build, and includes WARNINGS (so the accessibility finding is in scope). The
+  report even says *"applied: preferences, decisions, lessons"*. The open question is why it did not
+  arrive in a usable form; the one measured clue is `grounding: 1 file, ~74 tokens (budget 4000)` —
+  1.85% of the available budget. Settling it needs the PREDECESSOR build's report and the context that
+  turn actually received. Recorded rather than guessed.

@@ -298,7 +298,7 @@ import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneG
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
-import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
+import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
@@ -15998,8 +15998,27 @@ async function noteBuildOutcome(
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
             const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
-            const recordVerdict = (v: { pass: boolean; score: number; findings: string[] }, tag: string): void => {
-              try { buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true }); } catch { /* diagnostics best-effort */ }
+            const recordVerdict = (v: { pass: boolean; score: number; findings: string[]; reviewed?: boolean }, tag: string): void => {
+              // 🔴 A REVIEW THAT DID NOT HAPPEN IS NEVER PRINTED AS "PASS" (2026-09-19).
+              //
+              // This line used to render `PASS` for anything with `pass: true` and then DROP the
+              // findings on a pass (`v.pass ? '' : ' — ' + …`). So a judge that threw — no key, wrong
+              // host, exhausted credits — was recorded as `PASS (score 0)` with its own honest
+              // explanation thrown away, and a reply nobody could parse as `PASS (score 100)`, which
+              // is indistinguishable from a real pass at the one place a human looks.
+              //
+              // ⚠️ It is a SEPARATE CODE, not a reworded message: `CHEAP_REVIEW` is what somebody greps
+              // for to ask "what did the reviewer say?", and a run where it said nothing must not
+              // answer that question with a number. Registered in PROCESS_ONLY_CODES because it is a
+              // fact about OUR instrument, never a finding about the user's app (same rule as
+              // JOURNEY_NOT_RUN and PAGE_RENDER_NOT_RUN).
+              try {
+                if (!judgeActuallyRan(v)) {
+                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'CHEAP_REVIEW_NOT_RUN', message: `${tag}: NOT REVIEWED — ${v.findings[0] || 'the reviewer produced no usable verdict'}`, autoResolved: true });
+                  return;
+                }
+                buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true });
+              } catch { /* diagnostics best-effort */ }
             };
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is checking the build…', ts: Date.now() });
             let verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);

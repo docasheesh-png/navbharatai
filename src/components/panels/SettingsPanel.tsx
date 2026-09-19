@@ -35,7 +35,7 @@ const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'Data
 const StorageSettings  = _lz(() => import('../settings/StorageSettings'),  'StorageSettings');
 const AuthSettings     = _lz(() => import('../settings/AuthSettings'),     'AuthSettings');
 // "Your Website" hub (admin 2026-07-29): the ONE real domain-connect flow, now reachable from
-// App Settings → Domain (it already existed for Sidebar → More and Home → Other AI → Custom Domain).
+// App Settings → Domain (it already existed for Home → Other AI → Custom Domain).
 const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
 // REAL workspace logs — live v5.0 build events + the app's own captured runtime errors.
 const WorkspaceLogs    = _lz(() => import('../ide/WorkspaceLogs'),         'WorkspaceLogs');
@@ -1054,7 +1054,8 @@ export function SettingsPanel({
             {/* Domain (admin 2026-07-29): the ONE real "connect my website" flow — pick the app you
                 built, enter your purchased domain, get the exact DNS records, press Check until Live.
                 DNS + SSL are handled inside this flow (SSL auto-provisions once DNS verifies). Same
-                real component used by Sidebar → More and Home → Other AI → Custom Domain. */}
+                real component used by Home → Other AI → Custom Domain. The sidebar carried a third
+                door until 2026-09-19; it was removed as a duplicate, so THIS is now the primary one. */}
             {settingsScreen === 'domain' && (
               <motion.div
                 key="domain"

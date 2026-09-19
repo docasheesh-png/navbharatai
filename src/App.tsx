@@ -108,7 +108,6 @@ const SDAChat = _lz(() => import('./components/sda/SDAChat'), 'SDAChat');
 const ProfessionalsView = _lz(() => import('./components/professionals/ProfessionalsView'), 'ProfessionalsView');
 const ProfessionalChat = _lz(() => import('./components/professionals/ProfessionalChat'), 'ProfessionalChat');
 const ProfilePage = _lz(() => import('./components/profile/ProfilePage'), 'ProfilePage');
-const ConnectMyWebsitePanel = _lz(() => import('./components/panels/ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
 const RepoAnalystTool = _lz(() => import('./components/repoAnalyst/RepoAnalystTool'), 'RepoAnalystTool');
 const DonationPanel = _lz(() => import('./components/panels/DonationPanel'), 'DonationPanel');
 const AboutPanel = _lz(() => import('./components/panels/AboutPanel'), 'AboutPanel');
@@ -4023,10 +4022,6 @@ export default function App() {
           {/* Separate 'engine_builder' v5.0 view REMOVED — v5.0 is now reached only via the two
               gates (sidebar "NavBharatAI Pro" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
-
-          {activeView === 'connect_domain' && (
-            <ConnectMyWebsitePanel onBack={() => toggleTab('home')} uid={user?.uid} />
-          )}
 
           {activeView === 'donation' && (
             <DonationPanel

@@ -128,6 +128,22 @@ export async function triggerHaptic(ctx: NativeShellContext, style: 'light' | 'm
 }
 
 /**
+ * One haptic, for a caller that holds no shell context (added 2026-09-19 for pull-to-refresh).
+ *
+ * `triggerHaptic` above takes an injected context, which is right for the boot path and for tests but
+ * makes a one-off buzz inside a component three lines of plumbing — and three lines of plumbing is how
+ * a fourth copy of the load-the-context dance gets written. This loads the context itself and swallows
+ * everything: on the web `loadNativeShellContext` yields no Capacitor, so it is a no-op by construction.
+ *
+ * Fire-and-forget on purpose. A feedback buzz must never be something a gesture waits for.
+ */
+export function hapticNow(style: 'light' | 'medium' | 'heavy' = 'light'): void {
+  void loadNativeShellContext()
+    .then((ctx) => triggerHaptic(ctx, style))
+    .catch(() => { /* no shell, no plugin, no problem */ });
+}
+
+/**
  * Handle Android hardware back button and iOS interactive pop gesture.
  * On Android: prevent default browser back (which exits the app), forward to React Router instead.
  * On iOS: swipe-back is handled natively, no action needed.

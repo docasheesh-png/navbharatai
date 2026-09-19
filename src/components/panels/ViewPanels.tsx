@@ -56,7 +56,8 @@ const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOpt
 const APKBuilder        = _lz(() => import('../ide/APKBuilder'),         'APKBuilder');
 const FigmaImporter     = _lz(() => import('../ide/FigmaImporter'),      'FigmaImporter');
 // Custom Domain now uses the REAL, workspace-scoped Firebase-native connect flow (root-cause fix
-// 2026-07-27) — both this entry and Sidebar → "Connect my website" share ONE real implementation.
+// 2026-07-27) — both this entry and Settings → App Settings → Domain share ONE real implementation.
+// (The sidebar's third "Connect my website" door was removed on 2026-09-19 as a duplicate.)
 const ConnectMyWebsitePanel = _lz(() => import('./ConnectMyWebsitePanel'), 'ConnectMyWebsitePanel');
 const TeamCollaboration = _lz(() => import('../ide/TeamCollaboration'),  'TeamCollaboration');
 const PWANotifications  = _lz(() => import('../ide/PWANotifications'),   'PWANotifications');
@@ -590,7 +591,7 @@ export function ViewPanels({
       )}
 
       {/* Custom Domain — the REAL, workspace-scoped Firebase-native connect flow (honest
-          pending/active/not-configured states), same implementation as Sidebar → "Connect my website". */}
+          pending/active/not-configured states), same implementation as Settings → App Settings → Domain. */}
       {activeView === 'domain' && (
         <div className="flex-1 h-full overflow-y-auto">
           <ConnectMyWebsitePanel onBack={() => toggleTab('studio')} uid={user?.uid} />

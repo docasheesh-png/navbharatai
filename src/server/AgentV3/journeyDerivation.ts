@@ -466,8 +466,17 @@ export function noJourneyReason(files: Record<string, string>): string {
   // to tell a chat app it takes no user input (see formSourcesFor).
   const anyForm = pages.some((p) => formSourcesFor(p, files).some((s) => inputTags(s.source).length > 0));
   if (!anyForm) return 'this app has no form for a journey to fill in — nothing here takes user input';
+  // ⚠️ THE REMEDY, NOT ONLY THE SYMPTOM (autopsy a48d0f9e, 2026-09-19). This sentence used to stop at
+  // "no journey was derived", which reads like an environmental limit of the CHECK. It is not: it is a
+  // fixable defect in the generated app, and in that report the SAME build's accessibility pass had
+  // already counted the very same fields — "34 form field(s) with no label" across three named files.
+  // One cause, reported as two unrelated lines, and the release gate then said "whether it actually
+  // SAVES anything is untested" as though nothing could be done about it. Naming the fix costs nothing
+  // and is what turns this line into something a build can act on.
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
-    + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason';
+    + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '
+    + 'Give each field a `name` and a label and this check can prove the app really saves what is typed — '
+    + 'the same fix a screen reader needs.';
 }
 
 // ---------------------------------------------------------------------------------------------

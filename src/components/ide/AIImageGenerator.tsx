@@ -8,6 +8,7 @@ import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageEx
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
 import { ImageStudioPro } from './ImageStudioPro';
+import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -97,7 +98,12 @@ function readTier(): 'free' | 'pro' {
 }
 
 export function AIImageGenerator({ onImageGenerated }: Props) {
-  const [tier, setTier] = useState<'free' | 'pro'>(readTier);
+  // The user's REMEMBERED choice, and what is actually shown, are two different things — see
+  // `effectiveTier` below. Keeping them separate is what lets a dead paid tier be hidden WITHOUT
+  // overwriting a preference the user really expressed: the day Pro is switched on, their choice
+  // returns by itself.
+  const [chosenTier, setChosenTier] = useState<'free' | 'pro'>(readTier);
+  const [proAvailable, setProAvailable] = useState<ImageProAvailability>(null);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
   const [style, setStyle] = useState('minimal');
@@ -351,21 +357,34 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   // Persisted best-effort: a storage that refuses (private window, blocked site data) must leave the
   // toggle working for this session rather than break the panel.
   useEffect(() => {
-    try { localStorage.setItem(TIER_KEY, tier); } catch { /* per-viewer convenience only */ }
-  }, [tier]);
+    try { localStorage.setItem(TIER_KEY, chosenTier); } catch { /* per-viewer convenience only */ }
+  }, [chosenTier]);
+
+  // Ask the server whether the paid tier can serve, BEFORE the user writes anything. While the
+  // answer is unknown (`null`) the panel behaves exactly as it did before this existed.
+  useEffect(() => {
+    let live = true;
+    void fetchImageProAvailable().then((ok) => { if (live) setProAvailable(ok); });
+    return () => { live = false; };
+  }, []);
+
+  // 🔒 A tier that CANNOT serve is never the one on screen. Only an explicit `false` forces Free, so
+  // an unknown or unreachable answer leaves the user exactly where they chose to be.
+  const effectiveTier: 'free' | 'pro' = proAvailable === false ? 'free' : chosenTier;
+  const proOff = proAvailable === false;
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
 
   return (
-    <div className={`h-full flex flex-col text-ink overflow-hidden ${tier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
+    <div className={`h-full flex flex-col text-ink overflow-hidden ${effectiveTier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
       {/* Header. In Pro it collapses to a single slim bar carrying only the toggle — the studio below
           introduces itself, and a dense title block would undo the restraint the whole surface is for.
           The toggle itself is never hidden: a user must always be one press from the free tier, which
           is exactly what Pro's own error messages tell them to do. */}
       <div className={`flex items-center gap-3 border-b border-line ${
-        tier === 'pro' ? 'px-4 sm:px-6 py-2.5 bg-transparent' : 'px-6 py-4 bg-card'
+        effectiveTier === 'pro' ? 'px-4 sm:px-6 py-2.5 bg-transparent' : 'px-6 py-4 bg-card'
       }`}>
-        {tier === 'free' && (
+        {effectiveTier === 'free' && (
           <>
             <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
               <Wand2 className="w-5 h-5 text-accent-text" />
@@ -383,26 +402,45 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
           <div role="tablist" aria-label="Image quality tier" className="flex items-center bg-well border border-line rounded-full p-0.5">
-            {(['free', 'pro'] as const).map((t) => (
-              <button
-                key={t}
-                role="tab"
-                aria-selected={tier === t}
-                onClick={() => setTier(t)}
-                className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
-                  tier === t
-                    ? (t === 'pro' ? 'bg-amber-400 text-black' : 'bg-emerald-400 text-black')
-                    : 'text-muted hover:text-body'
-                }`}
-              >
-                {t === 'pro' ? `Pro ₹${PRO_PRICE_INR}` : 'Free'}
-              </button>
-            ))}
+            {(['free', 'pro'] as const).map((t) => {
+              // The paid chip stops being a control when the paid tier cannot serve. It is still
+              // SHOWN — hiding it would leave a user who had chosen Pro unable to see what happened
+              // to their choice — but it says so, and pressing it can no longer cost them a prompt.
+              const dead = t === 'pro' && proOff;
+              return (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={effectiveTier === t}
+                  aria-disabled={dead}
+                  disabled={dead}
+                  title={dead ? IMAGE_PRO_UNAVAILABLE_NOTE : undefined}
+                  onClick={() => { if (!dead) setChosenTier(t); }}
+                  className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
+                    dead
+                      ? 'text-faint cursor-not-allowed'
+                      : effectiveTier === t
+                        ? (t === 'pro' ? 'bg-amber-400 text-black' : 'bg-emerald-400 text-black')
+                        : 'text-muted hover:text-body'
+                  }`}
+                >
+                  {t === 'pro' ? `Pro ₹${PRO_PRICE_INR}` : 'Free'}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {tier === 'pro' ? (
+      {/* ⚠️ A `title` on the chip above is DESKTOP-ONLY — a finger never hovers, and a phone is where
+          this was reported. So the fact is also stated in the layout, once, where the toggle is. */}
+      {proOff && (
+        <div className="px-4 sm:px-6 py-2 bg-amber-500/10 border-b border-line">
+          <p className="text-xs text-body">{IMAGE_PRO_UNAVAILABLE_NOTE}</p>
+        </div>
+      )}
+
+      {effectiveTier === 'pro' ? (
         <div className="flex-1 min-h-0">
           <ImageStudioPro onImageGenerated={onImageGenerated} />
         </div>

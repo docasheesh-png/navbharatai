@@ -137,6 +137,21 @@ export function SidebarNav({
   const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history', 'professionals']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
+  // Settings and Donate each appeared TWICE in the mobile drawer — once in this list, once as a System
+  // Matrix tile below (admin 2026-09-19: "sidebar menu me Settings ke 2 option dikh rahe hai — ek list me
+  // hai, ek System Matrix me (square). List wala hata do, System Matrix wala rahne do", then "Donate bhi!
+  // upar wala hatao"). Each pair opened the same view, so the list row is dropped and the System Matrix
+  // tile is the drawer's single door to both.
+  //
+  // 🔒 THEY ARE DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS
+  // LOAD-BEARING. The desktop/tablet RAIL renders `visibleItems` and has NO System Matrix section — that
+  // section is drawer-only — so hiding either id globally would leave the rail with no entry for it at
+  // all. Settings' only other door on that surface is TopNav's user dropdown, which renders solely when
+  // someone is signed in, so a signed-out desktop user would have been stranded; Donate has no other door
+  // there whatsoever. And neither is duplicated on the rail: it lists each exactly once already.
+  const DRAWER_HIDDEN = new Set(['settings', 'donation']);
+  const drawerItems = visibleItems.filter(item => !DRAWER_HIDDEN.has(item.id));
+
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }
     if (item.id === 'history' && !user) {
@@ -252,7 +267,7 @@ export function SidebarNav({
                     <div className="w-1 h-3 bg-indigo-500 rounded-full text-on-accent"></div>
                     Core Navigation
                   </div>
-                  {visibleItems.map(item => (
+                  {drawerItems.map(item => (
                     <NavItem
                       key={item.id}
                       item={item}

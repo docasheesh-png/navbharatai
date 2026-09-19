@@ -41,7 +41,13 @@ describe('AI Tools tiles are reachable via Other AI', () => {
     ['ai_image_gen', 'Home → Other AI → AI Image Gen'],
     ['bot_builder', 'Home → Other AI → Bot Builder'],
   ])('%s path is the real Other AI doorway (not Settings)', (id, path) => {
-    expect(kb(id)!.path).toBe(path);
+    // ⚠️ `startsWith`, not `toBe` (2026-09-19). The rule this case encodes is the one in its own name
+    // and in the note above — the doorway is Other AI and never the retired Settings one. Exact
+    // equality was STRICTER than that rule, and it broke the day AI Image Gen legitimately gained a
+    // SECOND door ("… · also: any chat → Mode → Image Generator AI"). A tool reachable from two
+    // places is a better tool; a path that may only ever name one place is not the invariant anybody
+    // meant to lock. The Settings guard below is untouched and is the half that actually protects.
+    expect(kb(id)!.path.startsWith(path), `${id}: "${kb(id)!.path}"`).toBe(true);
     expect(kb(id)!.path).not.toMatch(/Settings/);
   });
   it('those tiles really live in the AI Tools group in code', () => {

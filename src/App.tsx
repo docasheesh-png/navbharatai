@@ -46,7 +46,7 @@ import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav
 import { startFreshCase } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
-import { isModeSurface, FREE_MODE_ID, NEW_FREE_MODE_ID } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
 import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
@@ -4057,9 +4057,23 @@ export default function App() {
               onClose={() => setShowModePicker(false)}
               onPick={(id) => {
                 setShowModePicker(false);
-                if (id === FREE_MODE_ID) { toggleTab('nbi_chat'); return; }
-                if (id === NEW_FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
+                // ROW 1 — the only row that starts nothing. It names the AI already open and takes the
+                // user back to THAT conversation (admin: "1st option, jo ki open kon sa yeh batata hai").
+                const resume = viewFromRecentId(id);
+                if (resume) { toggleTab(resume as ViewType); return; }
+                // Everything else opens a NEW chat, which is the whole point of the change.
+                if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
+                // The image studio is Other Tools' own view — free and paid together, nothing forked.
+                if (id === IMAGE_MODE_ID) { toggleTab(IMAGE_MODE_ID as ViewType); return; }
                 if (medicalViewBlocked(id, isNativeApp())) return; // defense in depth behind the filter
+                // A professional restores itself from localStorage on mount, so a fresh chat means
+                // ENDING the live one first — which ARCHIVES it into Professional History rather than
+                // dropping it. `startsFreshOnPick` is what holds Doctor AI back: it has no archive, so
+                // a new chat there would destroy the previous case. See modePicker.ts.
+                if (startsFreshOnPick(id)) {
+                  const store = professionalStore();
+                  if (store) endProfessionalChat(store, id);
+                }
                 toggleTab(id as ViewType);
               }}
             />

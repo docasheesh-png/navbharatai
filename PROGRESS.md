@@ -69507,6 +69507,108 @@ screen-to-screen transitions. None of them is started; each needs the admin's wo
 
 ---
 
+## 2026-09-19 — 🧭 THE MODE LIST SHOWS WHERE YOU ARE (admin's spec, free mode's expert list)
+
+Admin, with a screenshot of the picker: the list opened with two hardcoded rows — **"NavBharatAI FREE"**
+(which RESUMED whatever was open) and **"NavBharatAI FREE +"** (a new chat) — and every expert row
+resumed its existing conversation.
+
+> *"1st jahan navbharatai likha hai, waha hardcod navbharatai nahi hoga, waha woh AI ayega jo chatbox
+> me active hai … agar teacher ai open hai, to 1st number par teacher ai ayega!"*
+> *"agar kisi bhi professional ya free par tap kiya jayega hamesa new chat hi open hoga
+> (exept : 1st option, jo ki open kon sa yeh batata hai)"*
+> *"1. recent chat, 2. navbharatai free, 3. images generator ai, 4. doctor ai,........ and so on!"*
+
+### The list now
+
+| # | row | tap |
+|---|---|---|
+| 1 | **the AI open right now, by its own name** | goes back to THAT conversation — the one row that starts nothing |
+| 2 | **NavBharatAI FREE** | always a brand-new free chat |
+| 3 | **Image Generator AI** | Other Tools' own `imagegen` view — free AND paid together |
+| 4 | Doctor AI, then every professional | a new chat |
+
+**The open AI appears twice on purpose** (admin, asked directly): Teacher AI open ⇒ row 1 "Teacher AI"
+*and* Teacher AI in the list. So the two rows carry different **ids** (`recent:teacher_ai` vs
+`teacher_ai`) and different **tags** (`Recent` vs `New chat`). One id would have collapsed two opposite
+actions into one, silently; one tag would have made it a coin flip for the person looking at it.
+
+**No recent row when no AI is open** (the Professionals hub) — a row offering to resume nothing is the
+fake-button class. And `imagegen` joins `isModeSurface`, or the image studio would be a room with no
+door back.
+
+### Nothing is lost, and that took the most care
+
+- **Free** — `startNewChat` mints a new session id; the previous record keeps its own, so the old chat
+  stays in History.
+- **A professional** — `endProfessionalChat` ARCHIVES the transcript into Professional History and then
+  clears the live slot, so the next mount is genuinely fresh. Not `removeItem`.
+- 🔴 **Doctor AI RESUMES, and that is a decision rather than an omission.** Its transcript is
+  `sda_messages` plus ONE fixed Firestore document per user (`sda_<uid>`), and
+  `ProfessionalHistoryView` iterates `PROFESSIONAL_CHATS`, which does not contain it. "Always a new
+  chat" would delete the previous case locally at once and overwrite it in Firestore as soon as the new
+  one had two messages — **medical case notes, gone, with nothing to reopen.** Told to the admin before
+  any code was written.
+  ⚠️ **And it is NOT a one-line flip**, which is the part worth recording: adding Doctor AI to
+  `startsFreshOnPick` would call `endProfessionalChat('sda_chat')`, which writes an archive under a key
+  **nothing reads** and never touches `sda_messages` — a "new chat" that silently is not one. Making it
+  real needs a per-conversation archive for Doctor AI plus its own clearing path. **OPEN root cause.**
+
+### 🔴 The reversion proof caught a lever of mine that did nothing
+
+The first draft shipped `RESUMES_INSTEAD_OF_STARTING_FRESH = new Set(['sda_chat'])` read as
+`id in PROFESSIONAL_CHATS && !set.has(id)`. Doctor AI is **not** in `PROFESSIONAL_CHATS`, so the set
+decided nothing: emptying it changed no behaviour and broke no test. **A switch that looks like the
+control and is not is worse than no switch** — the next person flips it, sees nothing happen, and goes
+looking in the wrong file. Deleted, with the reason written where it stood; the guard is now plainly
+`id in PROFESSIONAL_CHATS`, and a test pins that it never reaches Doctor AI, the image row or the free row.
+
+### Two existing tests changed, both recorded rather than deleted
+
+- `modePicker.test.ts` pinned the OLD rules ("FREE resumes", "FREE + starts new", the ✓ on the list
+  row). Those assertions were right about the rule that was withdrawn, so each is rewritten in place
+  with the reason — a test removed silently is a rule nobody can see was changed.
+- `polishBuilderTools.test.ts` asserted the KB path with **exact equality**, which is stricter than the
+  rule in its own name ("the doorway is Other AI, not Settings"). It broke the moment AI Image Gen
+  legitimately gained a second door. Now `startsWith`; the Settings guard — the half that actually
+  protects — is untouched.
+
+`AppKnowledgeBase.ts` records the new door, so every AI in the app can tell a user about it.
+
+Test-locked in `src/components/chat/modePicker.test.ts` (27 cases) and **reversion-proven four ways**:
+a bare recent id turns 1 red; widening the archive guard turns 2 red; dropping the archive call turns
+1 red; rendering a recent row with nothing open turns 1 red.
+## 2026-09-19 — One door per thing in the sidebar (admin: "list wala hata do")
+
+Admin, verbatim: *"sidebar menu me 'setting' ke 2 option dikh rahe hai. ek list me hai, ek system
+matrix me (squire) — ek hatao. list wala hata do! bas, system matrix wala squire wala rahne do."* —
+then, on seeing the same shape one row down: *"'donate' bhi! upar wala hatao."*
+
+**Settings** and **Donate** each appeared twice in the mobile drawer: once in the Core Navigation list
+(from `menuItems`) and once as a System Matrix square tile. Each pair called the same `toggleTab(...)`,
+so the list row was pure duplication. The drawer's list now renders `drawerItems` (`visibleItems` minus
+`DRAWER_HIDDEN`), and the System Matrix tile is the drawer's single door to both.
+
+**The obvious fix was the wrong one, and that is the point of the change.** Adding these ids to
+`SIDEBAR_HIDDEN` — the mechanism this file already uses for Git, Preview, Files, History and
+Professionals — would have removed the rows from the desktop/tablet RAIL as well. The rail renders
+`visibleItems` and has **no System Matrix section**; that section is inside the mobile drawer only.
+Settings' only other door on the rail is TopNav's user dropdown, which renders solely when `user` is
+truthy, so a **signed-out desktop user would have been left with no way into Settings at all**; **Donate
+has no other door on that surface whatsoever**. A change whose entire purpose was to remove a *second*
+door would have removed the *only* one. And neither is duplicated on the rail — it lists each exactly
+once already. Hence the filter is scoped to the drawer.
+
+`menuItems` is untouched: TopNav does `menuItems.find(m => m.id === tabId); if (!item) return null`,
+and the mobile footer reads this entry's icon for its "More" button — the same load-bearing distinction
+already recorded beside `SIDEBAR_HIDDEN`.
+
+Test-locked and reversion-proven in `tests/oneDoorPerThingInTheSidebar.test.ts` (6 cases), against all
+three ways this rots: restoring the drawer's unfiltered list turns 1 red, dropping `donation` from
+`DRAWER_HIDDEN` (the request half-done) turns the same one red, and the tempting global `SIDEBAR_HIDDEN`
+fix turns a *different* one red. The suite strips whole-line `//` comments before splitting rail from
+drawer, because the explanatory comment names "System Matrix" itself and would otherwise match text that
+renders nothing.
 ## 2026-09-19 — THE SIDEBAR'S "CONNECT MY WEBSITE" IS REMOVED (admin-mandated)
 
 **Admin:** *"navbharatai ke slidebar menu me sabse last me 'connect my website' naam ka button hai.

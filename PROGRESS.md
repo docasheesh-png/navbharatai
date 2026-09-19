@@ -69958,6 +69958,53 @@ at setup time that it cannot manage signing for this one.
 
 ---
 
+## 2026-09-19 — ONE CAPSULE, NOT THIRTY: an empty NavBharatAI Pro chat opens clean
+
+**Admin, with a screenshot of the empty Pro chat:** *"in sab ko ek button ke andar band karo… jab user
+navbharatai pro open kare to bas 'Say hi, or describe an app to build…' dikhe, niche 'OR START FROM A
+TEMPLATE' par 'template' word ek capsule jaisa hi, is par click karne ke baad sare capsule (jo abhi dikh
+rhe hai, woh dikhe.) isse navbharatai pro ki screen clean dikhegi user confuse nahi hoga!!"*
+
+**The cure for a wall is not a shorter wall.** This picker had already been shortened once — on
+2026-09-12 thirty-odd chips filling eight or nine lines were cut to about twelve plus a
+"More templates (N)" expander, on reasoning that was exactly right and did not go far enough. The first
+screen still carried twelve starters, an ⚡ Unlock-with-Pro row, and — for anyone who had saved some — a
+"Your templates" row above both: a menu handed to someone who had not said they wanted one.
+
+**What an empty chat shows now:** the greeting sentence, the heading *Or start from a template*, one
+`⌄ Templates` capsule, and the `Screenshot → App` button. Nothing else.
+
+🔒 **NOT ONE TEMPLATE WAS REMOVED, and nothing moved to another screen.** Open the capsule and the
+contents are what used to be on show, in the same order: the user's saved templates first, then the same
+twelve starters in the same category order, the same inner "More templates (N)" expander, the same locked
+Pro row. A door in front of the room, never a smaller room — and that promise, not the collapse, is what
+`tests/oneCapsuleNotThirty.test.ts` guards, item by item.
+
+⚠️ **The chevron is load-bearing.** The word "Templates" alone reads like a link to another page — the
+same objection the existing "More templates (N)" comment records — so the capsule states, before it is
+tapped, that it opens here.
+
+🖼️ **`Screenshot → App` stays OUTSIDE, deliberately.** It is not a template; it is a second way into the
+build flow. Filing it under "Templates" would put a wrong label on a door nobody would open looking for
+it. Asserted to be outside the gate, so a later tidy-up cannot quietly sweep it in.
+
+🔁 **It opens CLOSED every time.** The panel is not remounted between chats, so `useState(false)` alone
+would hand a picker opened in one conversation to the next empty one; an effect on `coldStartVisible`
+closes both it and the inner expander the moment a conversation starts.
+
+**A neighbouring test had to be re-anchored, and that is worth recording rather than burying.**
+`starterTilesAreTextButtons.test.ts` found the chip block as *"the first `flex flex-wrap justify-center`
+wrap after the heading"* — a POSITION, not a thing. The saved-template chips now sit between the heading
+and the starters and carry the same classes, so the test silently switched to asserting on a different
+block with a different contract and failed for a reason unrelated to what it tests. It is anchored on
+`starterShown.map` now: the map that names the list it is about. Its own comment already records being
+bitten by a character-window anchor once; this is the second time the same lesson was paid for.
+
+**Also updated in the same commit (CLAUDE.md's AppKnowledgeBase rule):** every AI answers "template
+kahan hain?" from `AppKnowledgeBase.ts`, which said the buttons *"appear under the message box"*. That
+would have become a lie the moment this shipped — and directions to an invisible button are worse than
+none, because the user hunts, finds nothing, and concludes the feature was taken away. It now names the
+capsule, says it opens closed every time, and says explicitly that nothing was removed.
 ## 2026-09-19 — The guard that only ran on your phone (root cause of the 12-second Play-bundle failure)
 
 Follow-up to the same-day autopsy, and it **corrects that autopsy's leading hypothesis**.

@@ -33,9 +33,16 @@ const panel = readFileSync(join(__dirname, '..', 'src/components/agentv3/AgentV3
 function chipBlock(): string {
   const at = panel.indexOf('Or start from a template');
   expect(at, 'the picker heading moved').toBeGreaterThan(-1);
-  const from = panel.indexOf('<div className="flex flex-wrap justify-center', at);
+  // 🔴 ANCHORED ON `starterShown`, NOT ON "the first chip wrap after the heading" (2026-09-19).
+  // The looser anchor bound this test to a POSITION, and the position moved the day the picker went
+  // behind the one "Templates" capsule: the user's own saved templates now sit between the heading
+  // and the starters, in a wrap with the same `flex flex-wrap justify-center` classes. This test then
+  // silently switched to asserting on the SAVED-template chips — a different block with a different
+  // contract (a 🔖, a label, and a × to remove) — and failed for a reason that has nothing to do with
+  // what it is about. The map it cares about names the list it cares about, so that is the anchor.
+  const from = panel.lastIndexOf('<div className="flex flex-wrap justify-center', panel.indexOf('starterShown.map'));
   const to = panel.indexOf('</div>', panel.indexOf('))}', from));
-  expect(from, 'the chip wrap was not found after the heading').toBeGreaterThan(at);
+  expect(from, 'the starter chip wrap was not found').toBeGreaterThan(at);
   expect(to).toBeGreaterThan(from);
   return panel.slice(from, to);
 }

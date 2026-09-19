@@ -1,16 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown, Shield, UserPlus } from 'lucide-react';
+import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown, Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 import { signOutEverywhere } from '../../lib/firebase';
-import {
-  readRoster, forgetAccount, addAccountLabel, canAddAccount,
-  accountLabel, accountInitial, writeRoster, type RosterAccount,
-  SIGN_IN_HINT_KEY, SIGN_IN_PROVIDER_KEY, SWITCH_ACCOUNT_LABEL, accountRows,
-} from '../../lib/accountRoster';
 import { NotificationBell } from '../NotificationBell';
 
 interface MenuItem {
@@ -62,60 +57,11 @@ export function TopNav({
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  // PROFILE SWITCHING (admin 2026-08-22: "apne photo par click kar ke switch profile kare, ek saath
-  // 5 id"). The roster is metadata only — see accountRoster.ts for why no token is ever stored, and
-  // for the honest boundary: the SDK holds one live session, so switching re-authenticates rather
-  // than keeping five sessions in parallel. Read when the menu opens, so it is never stale.
-  const [roster, setRoster] = useState<RosterAccount[]>([]);
-  useEffect(() => {
-    if (dropdownOpen) setRoster(readRoster(typeof localStorage !== 'undefined' ? localStorage : null));
-  }, [dropdownOpen]);
-
-  const store = () => (typeof localStorage !== 'undefined' ? localStorage : null);
-
-  /**
-   * Sign in as another account — WITHOUT signing out of this one first.
-   *
-   * 🔒 THE BUG THIS REPLACES (admin 2026-08-22: "add account click kare aur koi bhi other account
-   * login nahi kare to logout ho ja raha hai"). This used to call performSignOut() and reload onto
-   * the sign-in screen, so pressing "Add account" logged you out immediately — and changing your mind
-   * cost you your session for pressing a button that promised to ADD one. A cancelled action must
-   * cost nothing.
-   *
-   * Firebase can sign a new user in while one is active: on success it becomes the current user, on
-   * cancel nothing changes. So the existing sign-in modal is opened over the app and no sign-out
-   * happens at all. See switchRequiresSignOutFirst() for why this is not merely deferred.
-   *
-   * It also removes a hint that never worked: the old code wrote `nbai:switch-to` for "the sign-in
-   * screen to offer first", and NOTHING has ever read that key — so a switch dropped the user on a
-   * generic sign-in screen with no help, having already logged them out.
-   *
-   * `target` is kept for the email hint the sign-in screen can prefill; passing none means "add a new
-   * one".
-   */
-  const switchTo = async (target?: RosterAccount) => {
-    setDropdownOpen(false);
-    try {
-      const hint = target?.email?.trim();
-      if (hint) store()?.setItem(SIGN_IN_HINT_KEY, hint);
-      else store()?.removeItem(SIGN_IN_HINT_KEY);
-      // …and WHICH METHOD signed them in, so the sign-in screen can say "continue with Google" instead
-      // of offering every method as if it had never met them. Written and cleared together with the
-      // email so the two can never disagree — a provider left behind from an earlier switch would
-      // name the wrong method on the next one.
-      const via = target?.provider?.trim();
-      if (hint && via) store()?.setItem(SIGN_IN_PROVIDER_KEY, via);
-      else store()?.removeItem(SIGN_IN_PROVIDER_KEY);
-    } catch { /* the hint is a convenience; never block the sign-in on it */ }
-    setShowAuth(true);
-  };
-
-  /** Remove one account from THIS DEVICE. Never claims to sign it out anywhere else. */
-  const removeAccount = (uid: string) => {
-    const next = forgetAccount(roster, uid);
-    setRoster(next);
-    writeRoster(store(), next);
-  };
+  // ONE ACCOUNT AT A TIME (admin 2026-09-19). The avatar menu used to carry a "Switch account" list
+  // of every account this device had seen, plus "Add another account". It is GONE — see
+  // `tests/oneAccountAtATime.test.ts` for the reasoning, in one line: the Firebase SDK holds a single
+  // live session, so every switch re-authenticated, and a switcher that makes you sign in again is
+  // not a switcher. Signing out and signing in is the same number of taps and tells the truth.
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -303,81 +249,6 @@ export function TopNav({
                     </p>
                     <p className="text-[10px] text-faint truncate">{user.email}</p>
                   </div>
-                  {/* SWITCH PROFILE (admin 2026-08-22). Other remembered accounts, one tap each.
-                      Honest wording throughout: "Remove from this device" never says "sign out",
-                      because this list cannot sign anyone out anywhere else — and someone would use
-                      it believing they had secured a shared computer. */}
-                  {/* The list now ALWAYS shows, with the current account first and ticked. It used to
-                      render only the OTHERS and hide itself when there were none — so a user with one
-                      account saw no list at all and just an "Add another account" button, which is
-                      exactly why this menu read as an add-only control (admin 2026-08-22). */}
-                  <div className="py-1 border-b border-line">
-                    <p className="px-4 pt-1 pb-1.5 text-[9px] font-black text-faint uppercase tracking-widest">{SWITCH_ACCOUNT_LABEL}</p>
-                    {/* THE LINE THAT STOOD HERE IS NOW ON THE ROW ITSELF (admin 2026-09-12: "yeh
-                        description bina bat ke jagah kha raha hai … unprofessional lagta hai").
-
-                        WHAT IT SAID AND WHY IT EXISTED, because deleting it outright would re-open a
-                        reported bug. `accountRoster.ts` stores metadata and NEVER a token — a refresh
-                        token in localStorage is a permanent account takeover for anyone who reaches
-                        that storage — and the Firebase SDK holds ONE live session per app instance. So
-                        a switch genuinely re-authenticates: correct, deliberate, and documented in that
-                        module's header, which even warns "the UI must not overstate it". Meanwhile the
-                        menu says "Switch account", Gmail's exact words for a mechanism that DOES keep
-                        sessions live at once — and the mismatch is what the admin originally reported
-                        as broken login (2026-09-02).
-
-                        So the FACT is kept and only its PLACEMENT changes: it now rides the `title` of
-                        the row you actually tap, which costs no space and reads on hover or long-press.
-                        The promise still matches the mechanism; it just no longer sits in the open. */}
-                    {accountRows(roster, user.uid, user).map((a) => (
-                        <div key={a.uid} className={cn('group flex items-center gap-2 px-2 transition-colors', a.isCurrent ? 'bg-raised' : 'hover:bg-raised')}>
-                          <button
-                            onClick={() => { if (!a.isCurrent) void switchTo(a); }}
-                            disabled={a.isCurrent}
-                            title={a.isCurrent
-                              ? 'You are signed in as this account'
-                              : `Switch to ${accountLabel(a)} — this signs you in again (one tap with Google, your password for email accounts)`}
-                            className="flex-1 flex items-center gap-3 px-2 py-2 text-left min-w-0 disabled:cursor-default"
-                          >
-                            {a.photo ? (
-                              <img src={a.photo} alt="" className="w-6 h-6 rounded-lg object-cover shrink-0" referrerPolicy="no-referrer" />
-                            ) : (
-                              <div className="w-6 h-6 rounded-lg bg-raised flex items-center justify-center shrink-0">
-                                <span className="text-[10px] font-black text-muted">{accountInitial(a)}</span>
-                              </div>
-                            )}
-                            <span className="min-w-0">
-                              <span className="block text-[11px] font-bold text-ink truncate">{accountLabel(a)}</span>
-                              {a.email && a.name && <span className="block text-[9px] text-faint truncate">{a.email}</span>}
-                            </span>
-                          </button>
-                          {a.isCurrent ? (
-                            <span className="shrink-0 px-1 text-[9px] font-black uppercase tracking-widest text-success">Current</span>
-                          ) : (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); removeAccount(a.uid); }}
-                              title="Remove from this device"
-                              aria-label={`Remove ${accountLabel(a)} from this device`}
-                              className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-faint hover:text-danger transition-all"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      {/* Sits at the BOTTOM of the account list, where the admin asked for it — the
-                          accounts you have are the point of this menu, and adding one is the last
-                          option under them rather than the name of the whole control. */}
-                      <button
-                        onClick={() => { if (!canAddAccount(roster)) return; void switchTo(); }}
-                        disabled={!canAddAccount(roster)}
-                        title={addAccountLabel(roster)}
-                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-raised transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <UserPlus className="w-4 h-4 text-success shrink-0" />
-                        <span className="text-[11px] font-bold text-ink truncate">{addAccountLabel(roster)}</span>
-                      </button>
-                    </div>
                   {/* Menu items */}
                   <div className="py-1">
                     <button

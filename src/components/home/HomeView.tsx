@@ -68,6 +68,22 @@ interface HomeViewProps {
    */
 }
 
+/**
+ * The two sizes a product card's header pair can take — ONE definition, so the pair can only ever
+ * swap, never drift apart (admin 2026-09-19).
+ *
+ * Each card shows two lines: the brand name (`title`) and what the card DOES (`subtitle`). The
+ * admin looked at the phone grid and asked for the first three to read the other way round —
+ * "Free chat bada karo … position/colour wahi, bas size badal do". So the lines stay exactly where
+ * they are and keep their colours; only which one is large changes, driven by `lead` on the card.
+ *
+ * `lead: 'subtitle'` = the DOING line is the large one. App Mart carries no `lead` and keeps the
+ * default, because its title already IS the doing line — it is the one card that was already in
+ * the shape the other three were moved into.
+ */
+const LINE_BIG = 'text-sm sm:text-lg';
+const LINE_SMALL = 'text-[9px] sm:text-[11px]';
+
 const PRODUCT_CARDS = [
   {
     id: 'free',
@@ -79,8 +95,9 @@ const PRODUCT_CARDS = [
     iconBg: 'bg-orange-500/15',
     iconColor: 'text-warn',
     Icon: MessageSquare,
-    title: 'NavBharatAI',
-    subtitle: 'Free AI Chat',
+    title: 'NavBharatAI Chat',
+    subtitle: 'Free Chat',
+    lead: 'subtitle' as const,
     description: 'Ask anything in Hindi, English, or Hinglish — instant answers, explanations, ideas, creative writing, and everyday help. Your free AI companion to learn and get things done. (For building apps, use NavBharatAI Pro.)',
     features: ['Chat in Hindi, English & Hinglish', 'Instant answers, research & learning', 'Creative writing, summaries & translation'],
     featureIcon: CheckCircle2,
@@ -101,7 +118,8 @@ const PRODUCT_CARDS = [
     iconColor: 'text-accent-text',
     Icon: Bot,
     title: 'NavBharatAI Pro',
-    subtitle: 'Agentic App Builder',
+    subtitle: 'App Builder',
+    lead: 'subtitle' as const,
     description: 'Describe any app in plain language and NavBharatAI Pro plans, codes, previews and deploys it — automatically, end-to-end. This is the coding & app-building engine.',
     features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', "NavBharatAI's most powerful AI engine"],
     featureIcon: Zap,
@@ -122,7 +140,8 @@ const PRODUCT_CARDS = [
     iconColor: 'text-accent-text',
     Icon: LayoutGrid,
     title: 'Other',
-    subtitle: 'Builder Tools & Utilities',
+    subtitle: 'Tools',
+    lead: 'subtitle' as const,
     description: 'Every extra AI utility to design, develop, ship and monetize your app — bot builder, image gen, debugger, deploy, SEO, monetization and more.',
     features: ['Design, develop, test & minify', 'Publish, deploy & custom domain', 'Monetize, analytics & team'],
     featureIcon: CheckCircle2,
@@ -350,6 +369,7 @@ export const HomeView = ({
             const FeatIcon = card.featureIcon;
             const handler = handlers[card.id];
             const comingSoon = (card as { comingSoon?: boolean }).comingSoon === true;
+            const leadIsSubtitle = (card as { lead?: 'title' | 'subtitle' }).lead === 'subtitle';
 
             return (
               <motion.button
@@ -392,8 +412,8 @@ export const HomeView = ({
 
                   {/* Title + description */}
                   <div className="flex flex-col gap-1">
-                    <h2 className="font-black text-ink text-sm sm:text-lg leading-tight">{card.title}</h2>
-                    <p className={cn('text-[9px] sm:text-[11px] font-bold uppercase tracking-wider sm:tracking-widest leading-tight', card.iconColor)}>{card.subtitle}</p>
+                    <h2 className={cn('font-black text-ink leading-tight', leadIsSubtitle ? LINE_SMALL : LINE_BIG)}>{card.title}</h2>
+                    <p className={cn('font-bold uppercase tracking-wider sm:tracking-widest leading-tight', leadIsSubtitle ? LINE_BIG : LINE_SMALL, card.iconColor)}>{card.subtitle}</p>
                   </div>
 
                   {(card as { phoneTagline?: string }).phoneTagline && (

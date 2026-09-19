@@ -18,8 +18,11 @@ import { join } from 'node:path';
 const CLASSES = {
   'FileExplorer row actions (delete / open in GitHub)':
     'opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity flex items-center gap-0.5',
+  // ⚠️ This was `hover:bg-white/10` until 2026-09-19 — a COPY of a class string that moved when the
+  // editor went to theme tokens. The measurement stayed valid (the script renders the string it is
+  // given), and it is still the restated-fact drift this repo keeps paying for. Kept in sync by hand.
   'Editor tab close ✕ (background tab)':
-    'p-0.5 rounded hover:bg-white/10 transition-opacity opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100',
+    'p-0.5 rounded hover:bg-raised transition-opacity opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100',
   'DebugPanel remove-breakpoint ✕':
     'p-1 -m-1 text-zinc-500 hover:text-rose-400 opacity-70 group-hover:opacity-100 transition-opacity shrink-0',
 };

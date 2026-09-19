@@ -483,6 +483,18 @@ describe('🔒 a hover to the surface it already has is not a hover (PR #3095\'s
   });
   it('is counted as a readability FIX, not an exact swap', () => {
     const r = migrate('"bg-white/5 hover:bg-white/10"');
-    expect(r.changed['hover to the surface it already has → its -hover token']).toBe(1);
+    expect(r.changed['hover/press to the surface it already has → its -hover token']).toBe(1);
+  });
+
+  it('📱 a PRESS counts too — on a phone `active:` is the only feedback there is', () => {
+    // Added 2026-09-19. A finger never hovers, so `bg-raised active:bg-raised` is a button that does
+    // not answer a tap — and this codemod emitted exactly that into the mobile editor toolbar, where
+    // the admin then reported the controls dead. Same collapsed mapping, one variant over.
+    expect(migrate('"bg-white/10 active:bg-white/20"').out).toBe('"bg-raised active:bg-raised-hover"');
+    expect(migrate('"bg-black/30 active:bg-black/40"').out).toBe('"bg-well active:bg-well-hover"');
+    // A press with no RESTING fill of that surface paints a real change and must be left alone.
+    expect(migrate('"hover:bg-white/10 active:bg-white/10"').out).toBe('"hover:bg-raised active:bg-raised"');
+    // And a press to a DIFFERENT surface is already honest feedback.
+    expect(migrate('"bg-well active:bg-white/5"').out).toBe('"bg-well active:bg-raised"');
   });
 });

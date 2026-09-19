@@ -36,13 +36,20 @@ const PROVIDER_HOST_RE = new RegExp(
     String.raw`mistral\.ai`,
     String.raw`cohere\.(?:com|ai)`,
     String.raw`bedrock-runtime\.[\w-]+\.amazonaws\.com`,
+    // Nemotron (2026-09-19) is bought through a RESELLER, so the host names the gateway rather than
+    // the model's maker — and each of these is a vendor name a user must never see. `nvidia\.com`
+    // covers `integrate.api.nvidia.com`, NVIDIA's own endpoint, via the leading subdomain group.
+    String.raw`nvidia\.com`,
+    String.raw`openrouter\.ai`,
+    String.raw`deepinfra\.com`,
+    String.raw`together\.(?:ai|xyz)`,
   ].join('|') + String.raw`)(?::\d+)?\b`,
   'gi',
 );
 
 // Model ids first (so `glm-5.2` doesn't leave a stray `-5.2`), then vendor names, then the Claude tier words.
-const MODEL_ID_RE = /\b(?:glm|kimi|claude|gemini|grok|gpt|deepseek|mistral|llama|qwen|nova|titan)[-/][\w.:-]+/gi;
-const AI_VENDOR_RE = /\b(?:anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|cohere|mistral|perplexity|bedrock)\b/gi;
+const MODEL_ID_RE = /\b(?:glm|kimi|claude|gemini|grok|gpt|deepseek|mistral|llama|qwen|nova|titan|nvidia|nemotron)[-/][\w.:-]+/gi;
+const AI_VENDOR_RE = /\b(?:anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|cohere|mistral|perplexity|bedrock|nvidia|nemotron|openrouter|deepinfra)\b/gi;
 const MODEL_TIER_RE = /\b(?:sonnet|opus|haiku)\b/gi; // Claude tier words identify the vendor
 
 /**
@@ -83,5 +90,5 @@ export function hasProviderLeak(s: string): boolean {
   // would have cleaned, which is the worst of both.
   if (PROVIDER_HOST_RE.test(String(s ?? ''))) { PROVIDER_HOST_RE.lastIndex = 0; return true; }
   PROVIDER_HOST_RE.lastIndex = 0;
-  return /\b(?:glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|xai|openai|gpt|deepseek|moonshot|z\.?ai|bedrock|cohere|mistral)\b|(?:glm|kimi|claude|gemini|grok|gpt)[-/][\w.:-]+/i.test(String(s ?? ''));
+  return /\b(?:glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|xai|openai|gpt|deepseek|moonshot|z\.?ai|bedrock|cohere|mistral|nvidia|nemotron|openrouter|deepinfra)\b|(?:glm|kimi|claude|gemini|grok|gpt|nvidia|nemotron)[-/][\w.:-]+/i.test(String(s ?? ''));
 }

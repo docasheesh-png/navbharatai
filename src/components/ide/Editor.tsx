@@ -273,7 +273,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   return (
     <div className="flex flex-col h-full bg-card overflow-hidden">
       {/* Tab bar */}
-      <div className="h-9 bg-card flex items-center overflow-x-auto no-scrollbar shrink-0 select-none">
+      <div className="h-9 bg-surface flex items-center overflow-x-auto no-scrollbar shrink-0 select-none">
         {openTabs.map((tab) => {
           const isActive = tab.path === activeTab;
           const TabIcon = iconForFile(tab.path);
@@ -282,8 +282,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               key={tab.path}
               onClick={() => onTabChange(tab.path)}
               className={cn(
-                "h-full flex items-center px-3 gap-2 border-r border-[#1e1e1e] cursor-pointer min-w-[120px] max-w-[200px] transition-all group",
-                isActive ? "bg-card text-ink" : "bg-[#2d2d2d] text-on-accent hover:bg-[#2a2d2e]"
+                "h-full flex items-center px-3 gap-2 border-r border-line cursor-pointer min-w-[120px] max-w-[200px] transition-all group",
+                isActive ? "bg-card text-ink" : "bg-well text-muted hover:bg-well-hover"
               )}
             >
               <TabIcon className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-accent-text" : "text-muted")} />
@@ -417,7 +417,11 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             // no theme attribute is set — so every theme (Light included) renders readable code.
             style={{
               fontFamily: "'Courier New', monospace",
-              caretColor: '#569cd6',
+              // The caret follows the theme's accent rather than VS Code's blue (2026-09-19): it was
+              // the one colour left in this file the census still counted, and a mid-blue caret on
+              // High contrast's black is the weakest mark on the screen. The hex is the no-theme
+              // fallback, which is why it does not count as a literal.
+              caretColor: 'var(--accent, #569cd6)',
               background: 'var(--surface-card, #1e1e1e)',
               color: 'var(--text-body, #d4d4d4)',
             }}
@@ -463,7 +467,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
       {/* Mobile ACTION toolbar (admin 2026-07-31): a phone has no Ctrl key, so the key editor actions
           (Undo / Redo / Find / Run) become ≥40px tap buttons here. Hidden on desktop, where the real
           keyboard shortcuts do the job. */}
-      <div className="md:hidden h-11 bg-[#1f1f1f] border-t border-line flex items-center px-2 gap-1.5 shrink-0 text-on-accent">
+      <div className="md:hidden h-11 bg-card border-t border-line flex items-center px-2 gap-1.5 shrink-0">
           {([
             { label: 'Undo', Icon: RotateCcw, mirror: false, run: () => editorRef.current?.trigger('mobile-toolbar', 'undo', {}) },
             { label: 'Redo', Icon: RotateCcw, mirror: true, run: () => editorRef.current?.trigger('mobile-toolbar', 'redo', {}) },
@@ -473,7 +477,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               key={label}
               onClick={() => { editorRef.current?.focus(); run(); }}
               aria-label={label}
-              className="min-w-[40px] h-9 px-2 bg-raised active:bg-raised rounded-lg text-on-accent flex items-center justify-center border border-line"
+              className="min-w-[40px] h-9 px-2 bg-raised active:bg-raised-hover rounded-lg text-ink flex items-center justify-center border border-line"
             >
               <Icon className={cn('w-4 h-4', mirror && 'scale-x-[-1]')} />
             </button>
@@ -486,8 +490,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
               onClick={handleSave}
               aria-label="Save file"
               className={cn(
-                'min-w-[40px] h-9 px-3 rounded-lg text-on-accent flex items-center gap-1.5 font-bold text-xs ml-auto transition-colors',
-                justSaved ? 'bg-emerald-600 text-on-accent' : 'bg-raised active:bg-raised',
+                'min-w-[40px] h-9 px-3 rounded-lg flex items-center gap-1.5 font-bold text-xs ml-auto transition-colors',
+                justSaved ? 'bg-emerald-600 text-on-accent' : 'bg-raised active:bg-raised-hover text-ink',
               )}
             >
               {justSaved ? <><Check className="w-4 h-4" /> Saved</> : <><Save className="w-4 h-4" /> Save</>}
@@ -495,29 +499,24 @@ export const Editor: React.FC<EditorProps> = React.memo(({
           )}
       </div>
 
-      {/* Mobile Input Helper Toolbar - Hidden on desktop */}
-      <div className="md:hidden h-10 bg-card border-t border-line flex items-center px-1 overflow-x-auto no-scrollbar gap-1 shrink-0">
-          {['{', '}', '(', ')', '[', ']', ';', ':', '"', "'", '<', '>', '/', '=', '+', '-', '*', '_'].map((char, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                if (editorRef.current) {
-                  const selection = editorRef.current.getSelection();
-                  const range = new (window as any).monaco.Range(
-                    selection.startLineNumber,
-                    selection.startColumn,
-                    selection.endLineNumber,
-                    selection.endColumn
-                  );
-                  editorRef.current.executeEdits('helper', [{ range, text: char, forceMoveMarkers: true }]);
-                }
-              }}
-              className="min-w-[32px] h-8 bg-raised rounded-lg text-ink font-mono text-xs flex items-center justify-center border border-line"
-            >
-              {char}
-            </button>
-          ))}
-      </div>
+      {/* 🔴 THE SYMBOL ROW IS GONE (admin 2026-09-19: "woh kaam nahi kar rahe hai. actualy unki
+          need hi nahi hai. hata do!!").
+
+          It was an 18-key strip — { } ( ) [ ] ; : " ' < > / = + - * _ — inserting one character into
+          the model on tap. Two things were wrong with it, and one thing was wrong about it existing:
+            • it reached for the monaco GLOBAL to build a Range, the only place in this repo that did.
+              Every button that works on this bar (Undo / Redo / Find / Save, immediately above) goes
+              through `editorRef.current` alone — so the one control with an unguarded global was also
+              the one control the admin reported dead.
+            • it never called `editorRef.current.focus()` first, unlike every neighbour, so the edit
+              landed at whatever stale selection a blurred editor still held.
+          And the reason not to repair it: a phone's own keyboard already carries all eighteen
+          characters, and Monaco is configured with `autoClosingBrackets: 'always'` and
+          `autoClosingQuotes: 'always'`, so the pairs it offered are what typing produces for free. A
+          row of buttons that duplicates the keyboard is screen height taken away from the code.
+
+          ⚠️ Do NOT re-add it. If some device genuinely cannot type a character, the fix is a Monaco
+          command through `editorRef` — never a second insertion path with its own globals. */}
     </div>
   );
 }, (prev, next) => {

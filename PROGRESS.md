@@ -69545,3 +69545,95 @@ read a comment, so a stale one survives every gate.
 Test-locked in `tests/oneDoorNotThree.test.ts` — 8 cases, including that BOTH surviving doors still
 mount the panel (a removal that gutted the flow would otherwise pass) and that no comment or knowledge-
 base line still points at the removed one. Proven by reversion: restoring the row turns 2 cases red.
+## 2026-09-19 — "image generate kam nahi kar raha hai": the paid tier could only be found dead by spending a prompt
+
+**The report.** A screenshot of the Pro image studio on a phone: the toggle on `PRO ₹1`, the prompt
+*"make a 4k hd image of human jumped from sky"* typed in the bar, and a red banner above it —
+*"NavBharatAI Pro images are not switched on yet. Free generation is working — switch the toggle to
+Free."*
+
+**What was actually true, read from the code rather than guessed.** That banner is
+`imageProFailureMessage('unconfigured')`, returned as a 503 by `POST /api/image/pro/generate` when
+`imageProConfigured()` is false. It is false because the paid tier needs BOTH `IMAGE_PRO_KEY` and
+`IMAGE_PRO_ENDPOINT`, and neither is in Cloud Run — neither appears in this repo's own env registry
+either. So the message was **correct, honest, and not a bug**: Pro has never been switched on.
+
+### 🔴 The defect that IS ours, and it is the 50/50 law's other half
+
+The symptom's root cause is two missing env values, which live in a console no session can reach
+(rule 6). The other 50% — *why could the problem arise at all?* — is ours entirely:
+
+**`imageProConfigured()` was read in exactly ONE place: inside the generate route.** So the browser
+had no way to tell a working paid tier from a dead one. The Pro chip looked, selected and behaved
+like a live tier; the user chose it, composed a prompt, pressed send, and learned from a red banner
+what the server had known before they opened the screen. The second absolute rule asks for an honest
+"not available" state — and a state you can only reach by spending effort is not an honest state, it
+is a trap with an apology at the end of it.
+
+### The fix — publish the fact the server already knows
+
+* **`PublicConfig` carries `imageProAvailable`** (`routes/health.ts`, served by `GET
+  /api/public-config`, the same runtime route that already carries the pixel id, the platform fee and
+  the grievance contacts). 🔒 **Reviewed against that route's one rule:** it says only whether a
+  FEATURE is on — the same thing the 503 tells any caller who presses send — never the endpoint, the
+  key or the model id. `health.test.ts`'s key-shape guard was updated *with that reasoning written
+  down*, not silently widened.
+* **It is PASSED IN, not read from `process.env` inside `buildPublicConfig`**, so that function stays
+  pure and "is Pro on?" keeps exactly one owner. A second copy of the question is how the two halves
+  come to disagree. A caller that forgets the argument gets **`false`** — a route that does not know
+  must never claim a paid tier works.
+* **`src/lib/imageProAvailability.ts`** is the client half: `fetchImageProAvailable()`,
+  `imageProAvailableFrom()` (pure) and the one user-facing note.
+* **`AIImageGenerator.tsx`** asks on mount. When the answer is an explicit `false`: the Pro chip is
+  `disabled` (so pressing it can no longer cost a prompt), a line beside the toggle states it, and
+  the screen shows Free.
+
+### ⚠️ Three directions that are deliberate, and each is the safe one
+
+1. **An unreachable or unparseable config means AVAILABLE — today's behaviour exactly.** Failing the
+   other way would hide a *working* paid tier on a network blip, which is strictly worse than today,
+   because the server's 503 is still there as the backstop. This change can only ever ADD
+   information; it never removes a working path.
+2. **A server that does not publish the field yet also reads as available**, so deploying the client
+   ahead of the server cannot switch Pro off.
+3. **The user's REMEMBERED choice is never overwritten.** `chosenTier` (persisted) and
+   `effectiveTier` (displayed) are two values now. Forcing the *displayed* tier to Free while
+   writing that back to `localStorage` would have quietly deleted a preference the user really
+   expressed; the day Pro is switched on, their choice returns by itself.
+
+⚠️ **A `title` on the chip is desktop-only** — a finger never hovers, and a phone is where this was
+reported — so the fact is also stated in the layout, once, beside the toggle.
+
+### 🔴 What this does NOT do, said plainly (rule 6)
+
+**It does not make Pro work.** Pro remains off until someone sets `IMAGE_PRO_KEY` and
+`IMAGE_PRO_ENDPOINT` in Cloud Run against a Z-Image host. This change only stops a user discovering
+that by wasting a prompt. Presenting it as a fix for "image generation is not working" would be the
+cosmetic-patch-as-fix the fourth absolute rule forbids.
+
+### 🔴 OPEN — the free tier was NOT verified, and the banner asserts it unconditionally
+
+`imageProFailureMessage('unconfigured')` states *"Free generation is working"* as a **fact, without
+checking it**. If the free ladder were also down, that sentence would be a lie in the one message a
+stranded user reads. It was not changed here because the honest alternative needs a real signal, and
+**this session could not obtain one**: the sandbox's egress proxy rejects `image.pollinations.ai`
+(`connect_rejected`), so the free provider could not be probed at all. Structurally the free path
+still has three rungs (Pollinations → Gemini → Grok) and both paid keys are configured, so it *should*
+serve — **"should" is not "verified", and the difference is the whole point of recording this.**
+
+### Evidence
+
+`tests/proTellsYouBeforeYouType.test.ts` — **13 cases**: the published boolean, the `false` default,
+the closed key shape, the route asking `imageProConfigured()` and naming no env var, the client's
+four safe-direction reads, the note's white-label cleanliness, and the panel's behaviour (asks on
+mount, displays Free without overwriting the choice, dead chip unpressable, unknown changes nothing).
+
+**Proven by reversion, three ways:** persisting `effectiveTier` instead of `chosenTier` fails the
+preference case; defaulting the server field to `true` fails the default case; removing the `if
+(!dead)` guard fails the unpressable case. Each was reverted, run, and restored.
+
+Two EXISTING cases in `ImageStudioPro.render.test.tsx` were **updated to the new variable name, not
+weakened** — they split and index on the tier marker, and their intent is unchanged.
+
+`AppKnowledgeBase.ts` updated, so every AI in the app answers "why can't I make a Pro image?" with
+what the screen now actually does.

@@ -71,7 +71,10 @@ describe('🔒 money is stated before it is taken, and never hidden', () => {
   it('the free tier advertises no price at all', () => {
     // The free path must stay visibly free — the admin's instruction was "free image ko aise hi
     // rahne do", and a ₹ sign on it would contradict that before a user even pressed anything.
-    const free = code(GEN).split("tier === 'pro'")[0];
+    // ⚠️ The marker is `effectiveTier` since 2026-09-19: the displayed tier and the user's
+    // REMEMBERED choice became two variables, so a dead paid tier can be hidden without
+    // overwriting a preference. The intent of this case is unchanged — only the name it splits on.
+    const free = code(GEN).split("effectiveTier === 'pro'")[0];
     expect(free).not.toMatch(/₹/);
   });
 });
@@ -87,9 +90,9 @@ describe('🔒 the toggle is a control, reachable from BOTH tiers', () => {
     // The header hides its title block in Pro but must never hide the toggle: every Pro failure
     // message tells the user to switch back to Free, and that instruction has to be followable.
     const src = code(GEN);
-    const freeOnlyBlock = src.indexOf("{tier === 'free' && (");
+    const freeOnlyBlock = src.indexOf("{effectiveTier === 'free' && (");
     const toggle = src.indexOf('role="tablist"');
-    const bodySwap = src.indexOf("{tier === 'pro' ? (");
+    const bodySwap = src.indexOf("{effectiveTier === 'pro' ? (");
     expect(freeOnlyBlock).toBeGreaterThan(-1);
     expect(toggle).toBeGreaterThan(freeOnlyBlock);
     expect(toggle, 'the toggle must be in the header, above the body swap').toBeLessThan(bodySwap);

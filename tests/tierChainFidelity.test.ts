@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { buildTurnRunner, ladderRunners, enforceNoClaude } from '../src/server/routes/agentv3';
 import { TIER_LADDERS, healLadder } from '../src/server/AgentV3/tierLadder';
 import { sonnetModel, opusModel, haikuModel } from '../src/server/AgentV3/models';
+import { nemotronUltraModel, nemotronSuperModel } from '../src/server/AgentV3/nemotron';
 import type { ChainRung } from '../src/server/AgentV3/runnerChainSummary';
 
 /**
@@ -15,6 +16,10 @@ import type { ChainRung } from '../src/server/AgentV3/runnerChainSummary';
  */
 const ENV_KEYS = [
   'AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'KIMI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
+  // NEMOTRON joined the Weak/Normal ladders on 2026-09-19 (one rung in front of the Claude backstop).
+  // Keyed here so this suite keeps asserting the FULL ladder; `nemotronWhereItPays.test.ts` asserts
+  // the keyless case, i.e. that a build with no Nemotron key is byte-identical to before.
+  'NEMOTRON_API_KEY', 'AGENTV3_NEMOTRON', 'NEMOTRON_BASE_URL', 'NEMOTRON_ULTRA_MODEL', 'NEMOTRON_SUPER_MODEL',
   'AGENTV3_LADDER_WEAK', 'AGENTV3_LADDER_NORMAL', 'AGENTV3_LADDER_STRONG', 'AGENTV3_DISABLE_HAIKU_BACKSTOP',
   'GLM_MODEL', 'KIMI_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL',
 ] as const;
@@ -24,6 +29,7 @@ beforeEach(() => {
   process.env.GLM_API_KEY = 'test-glm';
   process.env.KIMI_API_KEY = 'test-kimi';
   process.env.OPENAI_API_KEY = 'test-openai';
+  process.env.NEMOTRON_API_KEY = 'test-nemotron';
   process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
 });
 afterEach(() => {
@@ -38,7 +44,10 @@ function chainFor(opts: Parameters<typeof buildTurnRunner>[0]): ChainRung[] {
 }
 const seq = (chain: ChainRung[]): string[] => chain.map((r) => `${r.name}:${r.modelId ?? ''}`);
 const ladderSeq = (rungs: readonly { provider: string; model: string }[]): string[] => rungs.map((r) => {
-  const model = r.model === 'sonnet' ? sonnetModel() : r.model === 'opus' ? opusModel() : r.model === 'haiku' ? haikuModel() : r.model;
+  // The Nemotron rungs carry SYMBOLIC names for the same reason the Claude rungs do — each host
+  // spells the real id differently, so the id lives in nemotron.ts and is env-overridable.
+  const model = r.model === 'sonnet' ? sonnetModel() : r.model === 'opus' ? opusModel() : r.model === 'haiku' ? haikuModel()
+    : r.model === 'nemotron-ultra' ? nemotronUltraModel() : r.model === 'nemotron-super' ? nemotronSuperModel() : r.model;
   return `${r.provider}:${model}`;
 });
 
@@ -70,7 +79,9 @@ describe('the constructed chain IS the tier ladder', () => {
 describe('a missing key removes a rung — it never substitutes another tier\'s model', () => {
   it('Normal with only a Kimi key runs Kimi alone', () => {
     delete process.env.GLM_API_KEY; delete process.env.ANTHROPIC_API_KEY;
-    expect(seq(chainFor({ tier: 'off' }))).toEqual(['KIMI:kimi-k2.7-code-highspeed']);
+    // The Nemotron rung survives because this suite keys it — its own keyless case lives in
+    // nemotronWhereItPays.test.ts. The point of THIS case is unchanged: no GLM rung, no Claude rung.
+    expect(seq(chainFor({ tier: 'off' }))).toEqual(['KIMI:kimi-k2.7-code-highspeed', `NEMOTRON:${nemotronSuperModel()}`]);
   });
   it('Strong without a GLM key still has ITS OWN Kimi rung (added 2026-09-16) — kimi-k3 → Sonnet → Opus', () => {
     delete process.env.GLM_API_KEY;
@@ -82,10 +93,14 @@ describe('a missing key removes a rung — it never substitutes another tier\'s 
   });
   it('Weak without GLM/Kimi keys still never reaches Sonnet — Haiku alone', () => {
     delete process.env.GLM_API_KEY; delete process.env.KIMI_API_KEY;
-    expect(seq(chainFor({ tier: 'weak', noClaude: true }))).toEqual([`CLAUDE_HAIKU:${haikuModel()}`]);
+    // 🔒 THE ABSOLUTE RULE, RE-PROVEN WITH A NEW VENDOR ON THE LADDER: Nemotron now sits in front of
+    // the Haiku backstop, and Weak still reaches neither Sonnet nor Opus. Haiku is still LAST.
+    const weak = seq(chainFor({ tier: 'weak', noClaude: true }));
+    expect(weak).toEqual([`NEMOTRON:${nemotronSuperModel()}`, `CLAUDE_HAIKU:${haikuModel()}`]);
+    expect(weak.some((r) => /^CLAUDE:|^CLAUDE_OPUS:/.test(r))).toBe(false);
   });
   it('🔴 a tier with NO keyed rung yields an honest refusal, not a borrowed engine', async () => {
-    for (const k of ['GLM_API_KEY', 'KIMI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) delete process.env[k];
+    for (const k of ['GLM_API_KEY', 'KIMI_API_KEY', 'OPENAI_API_KEY', 'NEMOTRON_API_KEY', 'ANTHROPIC_API_KEY']) delete process.env[k];
     const runner = buildTurnRunner({ tier: 'off' });
     await expect(runner.runTurn({ system: '', messages: [], tools: [] } as never)).rejects.toThrow(/Normal engine is not available/);
     // …and the refusal names no vendor (White-Label Law).
@@ -93,7 +108,11 @@ describe('a missing key removes a rung — it never substitutes another tier\'s 
   });
   it('AGENTV3_CHEAP_FLOOR=off is still the kill switch for the GLM/Kimi rungs only', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'off';
-    expect(seq(chainFor({ tier: 'off' }))).toEqual([`CLAUDE:${sonnetModel()}`]);
+    // ⚠️ AND IT IS STILL THE GLM/KIMI KILL SWITCH ALONE — it does NOT reach Nemotron, deliberately.
+    // That flag names the "cheap floor"; silently widening it to a vendor bought later would make one
+    // env var mean two things, which is how a kill switch stops being understood. Nemotron's own hard
+    // kill is AGENTV3_NEMOTRON=off (asserted in nemotronWhereItPays.test.ts).
+    expect(seq(chainFor({ tier: 'off' }))).toEqual([`NEMOTRON:${nemotronSuperModel()}`, `CLAUDE:${sonnetModel()}`]);
     expect(seq(chainFor({ tier: 'mini' }))).toEqual([`CLAUDE:${sonnetModel()}`, `CLAUDE_OPUS:${opusModel()}`]);
   });
 });

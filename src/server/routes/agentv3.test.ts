@@ -1977,12 +1977,25 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
 
   it('normal plans on glm-5.3-flash first; strong on glm-5.3 first, Kimi k3 second, Opus last', () => {
     // Strong's ladder gained a Kimi rung (kimi-k3) on 2026-09-16, second after glm-5.3.
-    expect(planRunnerChainNames(false, 'off')).toEqual(['GLM', 'KIMI', 'GLM', 'CLAUDE']);
+    // ⚠️ Normal (and Weak) gained a NEMOTRON rung on 2026-09-19, one place in front of the Claude
+    // backstop. This helper is table-derived and does NOT filter by key, so the rung shows here even
+    // with no key configured — at runtime `ladderRunners` skips it, which is what makes a keyless
+    // deployment byte-identical (asserted in tests/nemotronWhereItPays.test.ts). Strong is untouched.
+    expect(planRunnerChainNames(false, 'off')).toEqual(['GLM', 'KIMI', 'GLM', 'NEMOTRON', 'CLAUDE']);
     expect(planRunnerChainNames(false, 'mini')).toEqual(['GLM', 'KIMI', 'CLAUDE', 'CLAUDE_OPUS']);
   });
 
   it('the guard still strips every Claude rung from a weak plan whatever the ladder said', () => {
     expect(planRunnerChainNames(true, 'mini')).toEqual(['GLM', 'KIMI']);
+  });
+
+  it('🔒 the weak guard strips Claude but KEEPS Nemotron — it is not a Claude rung', () => {
+    // The absolute rule is about Sonnet/Opus, and Nemotron is a different vendor entirely. This is
+    // asserted so a future reading of `enforceNoClaude` cannot quietly widen to "anything new".
+    const names = planRunnerChainNames(true, 'off');
+    expect(names).toContain('NEMOTRON');
+    expect(names).not.toContain('CLAUDE');
+    expect(names).not.toContain('CLAUDE_OPUS');
   });
 });
 

@@ -69578,6 +69578,37 @@ looking in the wrong file. Deleted, with the reason written where it stood; the 
 Test-locked in `src/components/chat/modePicker.test.ts` (27 cases) and **reversion-proven four ways**:
 a bare recent id turns 1 red; widening the archive guard turns 2 red; dropping the archive call turns
 1 red; rendering a recent row with nothing open turns 1 red.
+## 2026-09-19 — One door per thing in the sidebar (admin: "list wala hata do")
+
+Admin, verbatim: *"sidebar menu me 'setting' ke 2 option dikh rahe hai. ek list me hai, ek system
+matrix me (squire) — ek hatao. list wala hata do! bas, system matrix wala squire wala rahne do."* —
+then, on seeing the same shape one row down: *"'donate' bhi! upar wala hatao."*
+
+**Settings** and **Donate** each appeared twice in the mobile drawer: once in the Core Navigation list
+(from `menuItems`) and once as a System Matrix square tile. Each pair called the same `toggleTab(...)`,
+so the list row was pure duplication. The drawer's list now renders `drawerItems` (`visibleItems` minus
+`DRAWER_HIDDEN`), and the System Matrix tile is the drawer's single door to both.
+
+**The obvious fix was the wrong one, and that is the point of the change.** Adding these ids to
+`SIDEBAR_HIDDEN` — the mechanism this file already uses for Git, Preview, Files, History and
+Professionals — would have removed the rows from the desktop/tablet RAIL as well. The rail renders
+`visibleItems` and has **no System Matrix section**; that section is inside the mobile drawer only.
+Settings' only other door on the rail is TopNav's user dropdown, which renders solely when `user` is
+truthy, so a **signed-out desktop user would have been left with no way into Settings at all**; **Donate
+has no other door on that surface whatsoever**. A change whose entire purpose was to remove a *second*
+door would have removed the *only* one. And neither is duplicated on the rail — it lists each exactly
+once already. Hence the filter is scoped to the drawer.
+
+`menuItems` is untouched: TopNav does `menuItems.find(m => m.id === tabId); if (!item) return null`,
+and the mobile footer reads this entry's icon for its "More" button — the same load-bearing distinction
+already recorded beside `SIDEBAR_HIDDEN`.
+
+Test-locked and reversion-proven in `tests/oneDoorPerThingInTheSidebar.test.ts` (6 cases), against all
+three ways this rots: restoring the drawer's unfiltered list turns 1 red, dropping `donation` from
+`DRAWER_HIDDEN` (the request half-done) turns the same one red, and the tempting global `SIDEBAR_HIDDEN`
+fix turns a *different* one red. The suite strips whole-line `//` comments before splitting rail from
+drawer, because the explanatory comment names "System Matrix" itself and would otherwise match text that
+renders nothing.
 ## 2026-09-19 — THE SIDEBAR'S "CONNECT MY WEBSITE" IS REMOVED (admin-mandated)
 
 **Admin:** *"navbharatai ke slidebar menu me sabse last me 'connect my website' naam ka button hai.

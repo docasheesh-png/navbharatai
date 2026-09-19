@@ -68720,3 +68720,53 @@ class list by construction), each candidate once. All ten fixed by running the c
 
 Full gate on the final state; `themeTokensOnly` (ratchet), `themeMigrate`, `hoverIsNotANoOp`,
 `themeSystem`, `theme` all green.
+
+---
+
+## 2026-09-19 — 📡 THE APP SAYS SO WHEN IT CANNOT REACH THE NETWORK (admin item C of five)
+
+### 🔴 The gap was NOT a missing signal. It was an unreliable one — and searching for the wrong word nearly made this a duplicate
+
+`find src -iname "*offline*" -o -iname "*network*"` turned up **`src/hooks/useNetworkStatus.ts`** and
+**`src/lib/offlineQueue.ts`**, both live, both wired. Safeguard #6 exactly: the feature existed, under a
+name I had not guessed. What was actually wrong is narrower and worse than "there is nothing":
+
+- `navigator.onLine === false` is **trustworthy** — the OS is certain there is no interface.
+- `navigator.onLine === true` means only **"an interface exists"**. One bar and no data, a captive
+  portal, dead DNS — all report TRUE. **In a WebView that is the common case**, and in it the app
+  showed no offline state at all while every request failed with a generic error.
+
+And the surface was a **toast**: it vanishes after a few seconds while the condition lasts for minutes,
+so anyone who looked away returned to an app that was quietly failing with nothing on screen.
+
+### The fix — one hook, not a second one
+
+`src/lib/reachability.ts` is the pure decision; `useNetworkStatus` gains a `reachable` field driven by a
+real round trip. **`online` is left exactly as it was**, so its existing consumer is untouched. A second
+hook would have been a second answer to one question — the class autopsy 1a7f4a58 named.
+
+- **A 503 is a SUCCESS.** The question is whether a packet made the round trip, not whether the server
+  is healthy. Conflating them would show "you are offline" to a user whose connection is perfect while
+  we deploy.
+- **Two failures to declare offline, one success to clear.** The same threshold the site-uptime sweep
+  already uses, for the same reason: telling somebody they are offline when they are not is the
+  expensive mistake; being slow to say it is cheap.
+- **💸 No polling while things are fine.** A probe runs on a REASON — app start, an online/offline
+  event, returning to the foreground (throttled to one per 20 s) — and a backoff timer exists **only
+  while we believe we are offline**. `retryDelayMs` returns `null` when reachable, so a healthy app
+  schedules nothing. A background poll from every client would be real traffic at this scale for no
+  information.
+- `/api/ready`, not `/api/health`: readiness has no dependency checks. `cache: 'no-store'` plus a
+  cache-buster, because a cached 200 proves nothing about the network right now.
+
+`OfflineBanner` is persistent, announced to screen readers, offers a manual Retry (someone who has just
+walked back into signal should not wait out a backoff), names **no vendor** (the White-Label Law applies
+to failures too), and uses theme tokens only. The toast survives for the **recovery** — which genuinely
+is a moment rather than a state — and only for somebody who actually saw the banner, never on first load.
+
+Test-locked in `tests/theAppSaysWhenItCannotReachTheNetwork.test.ts` (23 cases) and **reversion-proven
+twice**: dropping the threshold to one failure turns **3** red; polling while healthy turns **1** red.
+
+⚠️ `WifiOff` had to be added to `src/declarations.d.ts` — this repo hand-maintains a
+`declare module 'lucide-react'` shim listing only the icons in use, so an icon that exists at runtime
+still fails `tsc` until it is declared. Worth knowing before assuming a lucide icon is missing.

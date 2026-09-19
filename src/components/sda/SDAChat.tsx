@@ -12,6 +12,20 @@ import { db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
 import { escapeHtml } from '../../lib/escapeHtml';
 import { newSdaCaseId } from '../../lib/sdaCaseId';
+import {
+  CASE_DOC_KEY,
+  LEGACY_MESSAGES_KEY,
+  CASE_ID_KEY,
+  CASE_INDEX_KEY,
+  isUsableCaseId,
+  legacySdaDocId,
+  messageKeysFor,
+  noteCaseUsed,
+  parseCaseIndex,
+  perCaseSdaDocId,
+  resolveCaseDoc,
+  sdaMessagesKey,
+} from '../../lib/sdaCaseStore';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
@@ -50,6 +64,12 @@ interface AttachedFile {
 
 interface SDAChatProps {
   userId?: string;
+  /**
+   * Open THIS case instead of whatever was last open — set when the doctor taps a specific case in
+   * History. Without it a History row could only ever say "open Doctor AI", and with one row per case
+   * that would be a list where every entry led to the same place.
+   */
+  openCaseId?: string;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -248,7 +268,7 @@ const buildCasePDF = (
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
+export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -311,47 +331,140 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   // deliberate stop so the catch stays silent instead of showing "service unavailable".
   const abortRef = useRef<AbortController | null>(null);
   const stoppedRef = useRef(false);
+  /**
+   * The document THIS case reads and writes. Resolved once the legacy row has been looked for (see the
+   * cross-device effect below) and then held, because for the one case that was open when per-case
+   * documents shipped the answer is the LEGACY row — which no amount of re-deriving from the case id
+   * could produce.
+   */
+  const caseDocRef = useRef<string>('');
+  const boundToLegacyRef = useRef(false);
+
+  /**
+   * 🔑 TWO IDENTITIES, AND CONFLATING THEM ORPHANS A CASE.
+   *
+   * `caseIdRef` is the CASE — this patient, this History row, this document. It rotates only when the
+   * doctor starts a new case.
+   *
+   * `clinicalSessionRef` is what the SERVER keys its clinical store on. It rotates far more often: an
+   * edit or a delete calls `rewindCase`, which deliberately abandons the accumulated clinical state so
+   * a retracted finding cannot survive in it.
+   *
+   * They used to be one ref, which was correct while the document id was a constant. The moment the
+   * document is addressed BY the case, a rewind would move the patient to a new address every time the
+   * doctor corrected a typo — orphaning the row their case was already in. Two names, because they
+   * answer two questions.
+   */
+  const clinicalSessionRef = useRef<string>('');
+
   if (!caseIdRef.current) {
-    let id = '';
-    try { id = localStorage.getItem('sda_case_id') || ''; } catch { /* ignore */ }
+    // `openCaseId` wins: the doctor tapped a specific case in History and expects THAT patient.
+    let id = isUsableCaseId(openCaseId) ? (openCaseId as string) : '';
     if (!id) {
-      id = newSdaCaseId();
-      try { localStorage.setItem('sda_case_id', id); } catch { /* ignore */ }
+      try { id = localStorage.getItem(CASE_ID_KEY) || ''; } catch { /* ignore */ }
     }
+    // A stored id is validated, not trusted — it is about to become a Firestore path segment, and a
+    // '/' in one addresses a different collection instead of failing (see isUsableCaseId).
+    if (!isUsableCaseId(id)) id = newSdaCaseId();
+    try { localStorage.setItem(CASE_ID_KEY, id); } catch { /* ignore */ }
     caseIdRef.current = id;
+    clinicalSessionRef.current = id;
+
+    // A case opened BY ID from History is per-case by definition — its row is a per-case row, so the
+    // legacy binding cannot apply to it and no lookup is needed.
+    if (isUsableCaseId(openCaseId) && userId) {
+      caseDocRef.current = perCaseSdaDocId(userId, id);
+      try { localStorage.setItem(CASE_DOC_KEY, caseDocRef.current); } catch { /* ignore */ }
+    } else {
+      try { caseDocRef.current = localStorage.getItem(CASE_DOC_KEY) || ''; } catch { /* ignore */ }
+      boundToLegacyRef.current = !!userId && caseDocRef.current === legacySdaDocId(userId);
+    }
   }
 
-  // Restore messages from localStorage on mount (handles 1-2 hour gaps without reload)
+  /**
+   * Remember this case on the device and drop the transcripts that fell off the end. The Firestore row
+   * is the durable copy and is never pruned, so an evicted transcript costs a fetch, never a case.
+   */
+  const rememberCaseLocally = (caseId: string) => {
+    try {
+      const { index, evictedKeys } = noteCaseUsed(parseCaseIndex(localStorage.getItem(CASE_INDEX_KEY)), caseId);
+      localStorage.setItem(CASE_INDEX_KEY, JSON.stringify(index));
+      for (const key of evictedKeys) localStorage.removeItem(key);
+    } catch { /* quota or private mode — the screen is still correct for this session */ }
+  };
+
+  // Restore THIS case's transcript from the device on mount (handles 1-2 hour gaps without reload).
+  // `messageKeysFor` offers the pre-migration key as a fallback ONLY for a case bound to the legacy
+  // row — a brand-new case falling back to it would open the new patient on the previous patient's
+  // transcript, which is exactly the clinical-safety failure the per-case id exists to prevent.
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('sda_messages');
-      if (saved) {
+      for (const key of messageKeysFor(caseIdRef.current, boundToLegacyRef.current)) {
+        const saved = localStorage.getItem(key);
+        if (!saved) continue;
         const parsed: SDAMessage[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 1) {
           setMessages(parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp) })));
+          break;
         }
       }
     } catch { /* ignore corrupt storage */ }
+    rememberCaseLocally(caseIdRef.current);
     if (!userId) hydratedRef.current = true;
   }, []);
 
-  // Persist messages to localStorage on every change (skip if only welcome msg)
+  // Persist this case's transcript under ITS OWN key (skip if only the welcome message). The
+  // pre-migration key is never written again, so no two cases can ever share a transcript.
   useEffect(() => {
     if (messages.length > 1) {
       try {
-        localStorage.setItem('sda_messages', JSON.stringify(messages.slice(-150)));
+        localStorage.setItem(sdaMessagesKey(caseIdRef.current), JSON.stringify(messages.slice(-150)));
       } catch { /* quota */ }
     }
   }, [messages]);
 
-  // Cross-device resume: fetch the user's deterministic SDA case doc and use it
-  // if it's newer than whatever localStorage restored above.
+  /**
+   * Cross-device resume, and the MIGRATION, in one pass — because they ask the same question: which
+   * document is this case in?
+   *
+   * The per-case document is looked for first. Only when there is none is the pre-migration
+   * `sda_<userId>` row consulted, and if it holds a real conversation this case BINDS to it: the old
+   * row keeps its place in History with its history intact, and nothing is copied, duplicated or
+   * deleted. Every case after this one is per-case from birth. See `resolveCaseDoc` for why a binding
+   * beats a copy.
+   */
   useEffect(() => {
     if (!userId) return;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'chat_sessions', `sda_${userId}`));
-        if (snap.exists()) {
+        const perCase = perCaseSdaDocId(userId, caseIdRef.current);
+        let snap = caseDocRef.current === legacySdaDocId(userId)
+          ? null
+          : await getDoc(doc(db, 'chat_sessions', perCase));
+
+        if (!snap || !snap.exists()) {
+          const legacySnap = await getDoc(doc(db, 'chat_sessions', legacySdaDocId(userId)));
+          const legacyHasCase = legacySnap.exists() && Array.isArray(legacySnap.data()?.messages)
+            && legacySnap.data()!.messages.length > 1;
+          const resolved = resolveCaseDoc({
+            userId,
+            caseId: caseIdRef.current,
+            storedDocId: caseDocRef.current || null,
+            legacyExists: legacyHasCase,
+          });
+          caseDocRef.current = resolved.docId;
+          boundToLegacyRef.current = resolved.boundToLegacy;
+          if (resolved.shouldPersist) {
+            try { localStorage.setItem(CASE_DOC_KEY, resolved.docId); } catch { /* ignore */ }
+          }
+          if (resolved.boundToLegacy) snap = legacySnap;
+        } else {
+          caseDocRef.current = perCase;
+          boundToLegacyRef.current = false;
+          try { localStorage.setItem(CASE_DOC_KEY, perCase); } catch { /* ignore */ }
+        }
+
+        if (snap && snap.exists()) {
           const data = snap.data();
           const remoteMessages: SDAMessage[] = Array.isArray(data.messages)
             ? data.messages.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))
@@ -360,7 +473,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
             const remoteUpdated = data.lastUpdated ? new Date(data.lastUpdated).getTime() : 0;
             let localUpdated = 0;
             try {
-              const saved = localStorage.getItem('sda_messages');
+              const saved = localStorage.getItem(sdaMessagesKey(caseIdRef.current))
+                ?? (boundToLegacyRef.current ? localStorage.getItem(LEGACY_MESSAGES_KEY) : null);
               if (saved) {
                 const parsed = JSON.parse(saved);
                 const last = parsed[parsed.length - 1];
@@ -387,7 +501,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   useEffect(() => {
     if (!userId || !hydratedRef.current || messages.length < 2) return;
     const t = setTimeout(() => {
-      const docId = `sda_${userId}`;
+      // The document this case is bound to. Falling back to the per-case id (rather than to the old
+      // shared one) means that if the resolve effect has not finished, the worst case is a new row —
+      // never a write on top of another case.
+      const docId = caseDocRef.current || perCaseSdaDocId(userId, caseIdRef.current);
       setDoc(doc(db, 'chat_sessions', docId), sanitizeFirestoreData({
         id: docId,
         uci: docId,
@@ -562,11 +679,12 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     const next = messages.filter((m) => keep.has(m.id));
     setMessages(next);
     setActiveRedFlags([]); // derived from turns that may no longer exist — never carry them over
-    const freshId = newSdaCaseId();
-    caseIdRef.current = freshId;
+    // Only the CLINICAL session rotates. This is the same patient — rotating the CASE id here would
+    // move them to a new document (and a new History row) every time a typo was corrected, orphaning
+    // the row the case is already in. See the two-identities note on `clinicalSessionRef`.
+    clinicalSessionRef.current = newSdaCaseId();
     try {
-      localStorage.setItem('sda_case_id', freshId);
-      localStorage.setItem('sda_messages', JSON.stringify(next));
+      localStorage.setItem(sdaMessagesKey(caseIdRef.current), JSON.stringify(next));
     } catch { /* private mode — the screen is still correct for this session */ }
     return next;
   };
@@ -638,7 +756,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           userId,
           // Isolate this patient's clinical store (server keys on sessionId; without it every case for
           // one doctor would share the userId key and contaminate each other).
-          sessionId: caseIdRef.current,
+          sessionId: clinicalSessionRef.current,
           fileData: file?.base64 || null,
           fileType: file?.type || null,
           fileName: file?.name || null,
@@ -737,12 +855,27 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     setSuggestPDF(false);
     // Rotate the per-case id so the NEW patient starts from an empty server clinical store — the
     // previous patient's demographics / red-flags / recent turns can never carry over (clinical safety).
+    //
+    // 🔴 THIS LINE USED TO DESTROY THE PREVIOUS PATIENT'S CASE, and it is the whole reason
+    // `sdaCaseStore.ts` exists. It read `localStorage.removeItem('sda_messages')` — one shared key for
+    // every case — and the next autosave then overwrote the one shared `sda_<userId>` document too. A
+    // doctor who pressed "New case" lost the case before it, locally and on the server, with nothing
+    // to reopen.
+    //
+    // Nothing is deleted now, and no archive step replaced it. The new case simply gets its OWN
+    // address, on the device and in Firestore, so the previous one stays exactly where it was and
+    // appears in History as its own row. A step nobody has to remember is a step nobody can forget.
     const freshId = newSdaCaseId();
     caseIdRef.current = freshId;
+    clinicalSessionRef.current = freshId; // a new patient gets an empty server clinical store too
+    caseDocRef.current = userId ? perCaseSdaDocId(userId, freshId) : '';
+    boundToLegacyRef.current = false;
     try {
-      localStorage.removeItem('sda_messages');
-      localStorage.setItem('sda_case_id', freshId);
+      localStorage.setItem(CASE_ID_KEY, freshId);
+      if (caseDocRef.current) localStorage.setItem(CASE_DOC_KEY, caseDocRef.current);
+      else localStorage.removeItem(CASE_DOC_KEY);
     } catch { /* ignore */ }
+    rememberCaseLocally(freshId);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 // ConnectMyWebsitePanel — the ONE real "Connect my website" entry point, reachable from both
-// Sidebar → More menu → "Connect my website" AND Home → Other AI → Publish & Deploy → "Custom
+// Settings → App Settings → Domain AND Home → Other AI → Publish & Deploy → "Custom
 // Domain" (root-cause fix, admin report 2026-07-27: two separate domain-connect screens existed
 // and neither one fully worked — `ide/CustomDomain.tsx` was a client-only DNS-instructions wizard
 // with no backend, and the Cloudflare-for-SaaS `ConnectDomainPanel` provisioned a hostname but
@@ -93,7 +93,7 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
   /**
    * PUBLISH FROM HERE TOO (2026-08-21).
    *
-   * This panel is the OTHER documented way into the same domain flow (Sidebar → Connect my website,
+   * This panel is the OTHER documented way into the same domain flow (Settings → App Settings → Domain,
    * and Other AI → Publish & Deploy → Custom Domain) — the file header calls it "one real flow, not
    * three different screens". When the Publish button and its red dot were added to the domain screen,
    * this entry point would have silently been the one without them: the same screen, missing the step

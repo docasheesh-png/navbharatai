@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, X, Globe, Download, Flag } from 'lucide-react';
+import { Info, Lock, Settings, Heart, X, Download, Flag } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
@@ -370,13 +370,14 @@ export function SidebarNav({
                     <Info className="w-4.5 h-4.5 text-accent-text" />
                     <span className="text-sm font-bold tracking-tight">About Us</span>
                   </button>
-                  <button
-                    onClick={() => { toggleTab('connect_domain'); setIsMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'connect_domain' ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:bg-raised hover:text-ink'}`}
-                  >
-                    <Globe className="w-4.5 h-4.5 text-accent-text" />
-                    <span className="text-sm font-bold tracking-tight">Connect my website</span>
-                  </button>
+                  {/* The "Connect my website" row that stood here is DELETED (admin 2026-09-19: *"already
+                      kayi jagah ho chuka hai. setting me, deploy me hai. to alag se button banane ki need
+                      nahi hai"*). It was a THIRD door to one room: the same `ConnectMyWebsitePanel` is
+                      mounted by Settings → App Settings → Domain and by Publish & Deploy → Custom Domain,
+                      and both of those sit where someone is already thinking about their app. This one sat
+                      in a general navigation menu beside About Us, where a domain is not on anyone's mind.
+                      Nothing was lost: the flow itself is untouched and both remaining doors are real —
+                      verified before deleting, not assumed. */}
                   {/* The hardcoded "App Builder v5.0" row that stood here is DELETED (2026-09-12). It was a
                       DEAD BUTTON: it navigated to the engine-builder view, which App.tsx stopped rendering
                       long ago ("Separate 'engine_builder' v5.0 view REMOVED"), so tapping the most

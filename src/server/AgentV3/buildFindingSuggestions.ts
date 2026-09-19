@@ -73,6 +73,17 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
     prompt: 'The app depends on libraries with known security vulnerabilities. Update them to safe versions without changing how the app behaves, and make sure it still builds and runs.',
   },
   {
+    // A broken label is the one defect the user can SEE and cannot explain, so it is offered first-class
+    // rather than left in the admin report (autopsy 3ce8459b — `label: 'জungle'` shipped to a Bengali
+    // user past a 100/100 accessibility score and a PASS review).
+    code: 'SCRIPT_INTEGRITY',
+    title: 'Fix the broken words in your app',
+    detail: 'Some text mixes two alphabets inside one word, so it reads as nonsense.',
+    prompt: 'Some labels in the app contain a single word written half in one script and half in another '
+      + '(for example a Bengali or Hindi word ending in English letters). Find every such label and rewrite '
+      + 'it correctly, entirely in the language the rest of the interface uses. Change only the text.',
+  },
+  {
     code: 'ACCESSIBILITY',
     title: 'Make it usable for everyone',
     detail: 'Some buttons and inputs cannot be used with a screen reader.',

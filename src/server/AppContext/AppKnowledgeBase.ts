@@ -1786,7 +1786,7 @@ Also supports: file attachments (text, code, .zip project import), image analysi
     howToUse: 'From Home, open the "NavBharatAI Pro" card and tap "Open Pro Builder" (or pick "NavBharatAI Pro" from the sidebar menu). Type your app idea and send to build; once it appears, ask follow-up changes directly.',
     relatedFeatures: ['free_chat', 'ide', 'engineer_ai'],
     aiSurface: 'pro_chat',
-    keywords: ['pro chat', 'pro', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
+    keywords: ['pro chat', 'pro', 'app builder', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
   },
   {
     id: 'unified-workspace',

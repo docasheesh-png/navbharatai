@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Clock, RotateCcw, Save, Check, X, Loader2, History, ChevronDown, FolderOpen } from 'lucide-react';
 import { filesHaveRealContent } from '../../lib/workspaceSource';
 import { authedHeaders } from '../../lib/authHeaders';
+import { retentionNote } from '../../lib/versionRetention';
 // Code Versioning — "Time Machine" (admin 2026-07-24): a simple, mobile-first way for a NON-technical
 // user to go back to an earlier version of their app. It reads the DURABLE, cross-device build-history
 // (every build is auto-saved as a restore point). A dropdown at the top lets a user with more than one
@@ -314,6 +315,13 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
                 );
               })}
             </div>
+            {/*
+              HOW FAR BACK CAN I GO? (admin 2026-09-20: "likh kar aana chahiye ki --din tak reverse kar
+              sakte hai"). The limit is real and it is a COUNT, not days — `retentionNote` derives the
+              sentence from the SAME constant the store enforces, so this line cannot promise a number
+              nothing keeps.
+            */}
+            <p className="mt-4 px-0.5 text-[10px] leading-relaxed text-faint">{retentionNote(points.length)}</p>
           </div>
         )}
       </div>

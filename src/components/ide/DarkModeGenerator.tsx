@@ -405,7 +405,23 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ background: 'var(--surface-base)', minHeight: '100%', color: '#e6edf3', fontFamily: 'system-ui, sans-serif', padding: 20, boxSizing: 'border-box' }}>
+    // 🔴 THIS ROOT IS THE SCROLL CONTAINER, AND `minHeight` COULD NEVER MAKE IT ONE (2026-09-20).
+    //
+    // Found by hunting the siblings of the App Mart scroll bug (#3151). ViewPanels renders every one
+    // of its 37 views inside `<div className="flex-1 h-full overflow-hidden">` — a box with a definite
+    // height that CLIPS. That wrapper delegates scrolling downward, so each view must bound its own
+    // height and own its own scroller; 36 of the 37 do it with `h-full` / `height: '100%'`.
+    //
+    // This one had `minHeight: '100%'` and no `overflow` anywhere in the file (every other `overflow`
+    // here is `hidden` on a card or `overflowX` on a code block). `min-height` sets a FLOOR, not a
+    // ceiling: the box grew with its content, so it was never taller than itself, nothing could
+    // scroll, and the wrapper simply cut off everything past the fold. Measured in a real browser
+    // before the change: content 4317px, scroller 4317px, `scrollTop` stuck at 0, the last card at
+    // y≈4231 in a 757px viewport — unreachable by pointer or touch.
+    //
+    // `height` + `overflowY` is what the other 36 views do; `overscrollBehavior` matches the three
+    // that already scroll (VoiceToApp, APKBuilder, NavAppStore) and stops the scroll chaining out.
+    <div style={{ background: 'var(--surface-base)', height: '100%', overflowY: 'auto', overscrollBehavior: 'contain', color: '#e6edf3', fontFamily: 'system-ui, sans-serif', padding: 20, boxSizing: 'border-box' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>

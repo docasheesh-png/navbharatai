@@ -73521,6 +73521,86 @@ asked.
 
 ---
 
+## 2026-09-20 — 🚪 CLOSING THE DOOR CLOSES THE ROOMS: ✕-ing NavBharatAI Free left every professional after the first
+
+**Trigger (admin, verbatim):** *"navbharatai free, me koi professional open ho, aur user header se
+'navbharatai free' ki window x(close)/band kar de! to navbharatai ke sare professional bhi band ho
+jane chahiye! (abhi nahi ho rahe hai!)"*
+
+**The word that names the defect is `sare` — ALL of them.** Closing Free took the FIRST professional
+with it and left every one after that on screen. It was reproduced against the real modules before a
+line was changed:
+
+```
+Free → Mentor → Teacher, then ✕ Free
+closing: [ 'nbi_chat', 'mentor_ai' ]        ← teacher_ai survives
+```
+
+### Two things were wrong at once, and either one alone hides the other
+
+1. **`openers` is a TREE and `computeTabClose` read one level of it.** It could answer *"who are my
+   children?"* and nothing deeper.
+2. **The tree had depth it should never have had.** The Mode sheet opens from INSIDE a professional,
+   so picking Teacher while Mentor was on screen recorded `teacher_ai → mentor_ai` — one
+   professional as another's PARENT. `nbi_chat → mentor_ai → teacher_ai`, and the one-level walk
+   stopped at Mentor. The deeper a user went, the more was left behind.
+
+### ⚠️ Fixing either alone trades one bug for another
+
+- **Subtree close alone** ⇒ ✕-closing **Mentor** would take Teacher down with it. The user never
+  entered Teacher *through* Mentor; they are siblings behind one door. That is a new bug, not a fix.
+- **Re-parenting alone** ⇒ every genuine nesting elsewhere (Settings → an option → its own option)
+  stays orphaned, because the walk is still one level deep.
+
+So both shipped together, in the two pure modules that already own the question:
+
+- **`tabClose.ts`** — `computeTabClose` now closes the whole DESCENDANT subtree, breadth-first, with
+  a `seen` set. ⚠️ That guard is not decoration: a tab can be closed and reopened from what used to
+  be its own child, so `openers` can genuinely hold a cycle, and an unguarded walk would hang the
+  header.
+- **`tabParenting.ts`** — new `parentForOpen(view, activeView, openers)` resolves **the door, not the
+  room beside it**: it walks up from `activeView` until it reaches a non-child surface and records
+  THAT. Free → Mentor → Teacher now parents *both* to Free, so no chain exists to walk. It returns
+  **`undefined`** rather than falling back to the sibling when no real door is reachable — *a child
+  surface may never be recorded as a parent*, which is the invariant that makes chains, and the
+  cycles a chain can grow into, impossible by construction rather than by care.
+
+`App.tsx`'s `toggleTab` now asks `parentForOpen` instead of writing `activeView` directly.
+
+### What it fixes beyond the tab strip
+
+`closeTab` already runs its per-tab teardown for **every** tab in `closing` — so a professional that
+now closes as a child of Free also gets `endProfessionalChat`, which **archives** the transcript into
+Professional History rather than leaving it live to restore itself on the next open. Doctor AI is
+covered too: `sda_chat` is `PROFESSIONALS_IMPLEMENTED_ELSEWHERE`, so `childSurfaceIds()` already
+includes it and its own `startFreshCase` branch runs.
+
+### Verification
+
+`tests/closingTheDoorClosesTheRooms.test.ts` replays `toggleTab`'s real opener bookkeeping rather
+than hand-writing a convenient map, so the cases describe what the app actually records. It pins the
+admin's own flow, the depth-3 Settings nesting, companions at depth, cycle termination, and the three
+things that must NOT become children whoever opened them (Settings from inside Free, the v5.0
+builder, and any professional as another's parent).
+
+**Proven by reversion, each half separately** — which is also the proof that neither is redundant:
+
+| reverted | result |
+|---|---|
+| the subtree close | **2 red** — `sare` fails again |
+| the parent resolution | **4 red**, including *"✕-closing ONE professional closes only that one"* — the new bug the subtree close would have introduced on its own |
+
+### ⚠️ One existing lock went red, and it is worth recording why
+
+`src/lib/tabParenting.test.ts` asserted that `App.tsx` contains
+`shouldRecordOpener(view as string, activeView as string)` — the NAME of the shared rule on the day
+it was written. `App.tsx` now asks `parentForOpen`, which calls that same rule as its first statement
+and then resolves *which* tab to record. **The wiring was never lost, only renamed — so the lock went
+red on a change that strengthened the very thing it guards.**
+
+Same shape as the 2026-09-20 Firestore-index autopsy's sharpest finding: a source assertion can only
+pin what the code SAYS. It now asserts the PROPERTY — the decision comes from `lib/tabParenting`, and
+the inline allowlist it replaced has not crept back — instead of one spelling of it.
 ## 2026-09-20 — 🗣️ ONE COMPOSER, EVERYWHERE: the doctor typed into a different box from everyone else
 
 **Trigger:** the admin sent two phone screenshots side by side — Mentor / Career Coach and Senior

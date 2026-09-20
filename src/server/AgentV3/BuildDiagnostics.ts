@@ -30,6 +30,7 @@ import { typecheckEvidenceFromCommands } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
+import { mergeTruncation, COMPLETE, type ReportTruncation } from './reportTruncation';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -537,6 +538,14 @@ export interface BuildDiagnosticsReport {
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
+  /**
+   * WHAT THIS COPY OF THE REPORT NO LONGER CONTAINS — see reportTruncation.ts.
+   *
+   * Written by the recorder when its own caps dropped anything, and merged again by every storage
+   * pass. `complete: true` is a measurement; ABSENT means the report predates the check and a reader
+   * must say "not recorded" rather than "nothing was lost".
+   */
+  truncation?: ReportTruncation;
   /** U-1 — the signed determinism-audit manifest for this build (routing inputs + file hashes). */
   manifest?: BuildManifestV1;
 }
@@ -653,6 +662,15 @@ export class BuildDiagnostics {
   private reviewText?: string;
   private manifest?: BuildManifestV1;
   private priorFailedBuilds: number | undefined;
+  /**
+   * How many entries each channel REALLY had, including the ones the caps below refused.
+   *
+   * 🔴 Counting the refusals is the whole fix. `this.commands.length` can only ever report the cap;
+   * a build that ran 500 commands and a build that ran exactly 300 were identical in the record, and
+   * the storage layer then cut that to 40 with no statement either. A counter costs one integer and
+   * makes "40 of 500" sayable. See reportTruncation.ts.
+   */
+  private channelTotals: { commands: number; llmCalls: number; errors: number } = { commands: 0, llmCalls: 0, errors: 0 };
   private session: BuildDiagnosticsReport['session'];
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
@@ -844,6 +862,7 @@ export class BuildDiagnostics {
         }
       } catch { /* a diagnostic must never break the command it is describing */ }
     }
+    this.channelTotals.commands += 1;
     if (this.commands.length < MAX_COMMANDS) {
       this.commands.push({
         ts: this.now(),
@@ -1163,6 +1182,7 @@ export class BuildDiagnostics {
 
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
     this.recordTimeToFirstCall(rec.latencyMs);
+    this.channelTotals.llmCalls += 1;
     if (this.llmCalls.length < MAX_LLM_CALLS) {
       this.llmCalls.push({
         ts: this.now(),
@@ -1312,6 +1332,7 @@ export class BuildDiagnostics {
    * throwing frame) is never lost to a 800-char slice.
    */
   recordFullError(err: { message: string; stack?: string; phase?: IssuePhase }): void {
+    this.channelTotals.errors += 1;
     if (this.errors.length >= MAX_ERRORS) return;
     this.errors.push({
       ts: this.now(),
@@ -2140,7 +2161,26 @@ export class BuildDiagnostics {
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
+      // DERIVED AT SERIALIZATION, like etaAccuracy above, so no ending path can forget it. This is
+      // the FIRST of the report's two truncation passes: what the recorder's own caps refused. The
+      // storage layer merges its own losses into this, keeping these totals (reportTruncation.ts).
+      truncation: this.truncationFact(),
     };
+  }
+
+  /**
+   * What the recorder's caps cost this report — the counts nothing could state before 2026-09-20.
+   *
+   * `issues` is deliberately absent even though it is capped: the timeline announces its own cap on
+   * the timeline itself (`TIMELINE_TRUNCATED`), which is the earlier, working half of this fix, and
+   * duplicating it here would double-count one loss. The three channels below had no such line.
+   */
+  private truncationFact(): ReportTruncation {
+    return mergeTruncation(COMPLETE, {
+      commands: { kept: this.commands.length, total: this.channelTotals.commands },
+      llmCalls: { kept: this.llmCalls.length, total: this.channelTotals.llmCalls },
+      errors: { kept: this.errors.length, total: this.channelTotals.errors },
+    });
   }
 }
 

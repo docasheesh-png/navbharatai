@@ -46,7 +46,7 @@ const NEW_BUILD_SIGNALS: readonly string[] = [
   'implement', 'scaffold', 'launch', 'migrate', 'install', 'integrate',
   'connect', 'configure', 'setup', 'set up', 'wire', 'style', 'render',
   // Hindi/Hinglish creation
-  'banao', 'bana do', 'banade', 'bana de', 'banade do', 'banana',
+  'banao', 'bana do', 'banade', 'bana de', 'banade do',
   'banwao', 'likho', 'likh do', 'bana dena', 'bana doge', 'design karo',
 ];
 
@@ -107,6 +107,61 @@ const BANA_DIRECT_ORDER = /\b(?:banao|bnao|banado|bnado|banaiye|banwao|banvao|ba
  * repeatedly (four stale comments about the GPT rung; `safeRelPath` in four copies). Returns the
  * matched signal so the classifier can keep reporting WHICH word decided it.
  */
+/**
+ * Things a person can ask NavBharatAI to BUILD — the noun vocabulary already carried by
+ * `BUILD_SIGNALS`, named separately because one signal below needs to ask *"is there anything
+ * buildable in this sentence at all?"* rather than *"did any build-ish word appear?"*.
+ */
+const BUILD_NOUNS: readonly string[] = [
+  'app', 'apps', 'application', 'website', 'web site', 'site', 'webpage', 'web page', 'page',
+  'screen', 'dashboard', 'portal', 'software', 'program', 'game', 'bot', 'tool', 'landing',
+  'component', 'button', 'form', 'api', 'backend', 'frontend', 'database', 'db', 'login',
+  'signup', 'sign up', 'auth', 'navbar', 'header', 'footer', 'sidebar', 'modal', 'table',
+  'chart', 'layout', 'theme', 'blog', 'store', 'shop', 'crm', 'erp', 'calculator', 'tracker',
+];
+
+/** PURE. Does this message name anything buildable? */
+export function mentionsBuildNoun(lower: string): boolean {
+  return matchesSignal(lower, BUILD_NOUNS);
+}
+
+/**
+ * The gerund `banana` completed by the auxiliary that makes it a STATEMENT OF INTENT — "banana
+ * hai", "banana tha", "banana chahta hoon". The fruit is followed by a FOOD, never by `hai`.
+ */
+const BANANA_INTENT_AUX = /\bbanana\s+(?:hai|h|he|tha|thi|chahta|chahti|chahiye|padega|padegi)\b/;
+
+/**
+ * 🔴 THE HINDI GERUND `banana` ("to make") IS A PERFECT HOMOGRAPH OF THE ENGLISH FRUIT, and it sat
+ * in `NEW_BUILD_SIGNALS` as a bare word. Measured on `main` before this change:
+ *
+ *   "banana bread recipe batao"        -> new_build · **HIGH** · signal 'banana'
+ *   "banana milkshake kaise banta hai" -> new_build · **HIGH** · signal 'banana'
+ *
+ * **Somebody asking for a recipe got an app built.** It is the failure the 2026-09-13 "read the mood
+ * first" rule exists to prevent, and worse than the case that rule was written for: HIGH confidence
+ * means the LLM intention-reader is never consulted, so nothing downstream can correct it. Found by
+ * the control corpus of autopsy `f152c1ab` — no user had to pay for it first.
+ *
+ * ⚠️ **DELETING THE WORD IS NOT THE FIX.** `"mujhe ek app banana hai"`, the object-less `"app
+ * banana"` (named in this file's own comments as the case #3039 answers downstream) and a bare
+ * `"banana hai"` are all real orders, all HIGH today, and all depend on this word. Removing it would
+ * silently demote every one of them — the trade the fourth absolute rule forbids.
+ *
+ * 🔑 THE CLASS, and it is the `bana-` shape's twin seen from the other side: **a flat word list
+ * cannot carry a word whose meaning depends on the sentence around it.** So the signal is
+ * CONDITIONAL — it counts when the message names something buildable, or when the gerund is
+ * completed into a statement of intent.
+ *
+ * 🔒 Precision-first, the same asymmetry as everywhere in this file: a miss costs ONE low-confidence
+ * turn that the intention reader then resolves WITH project context — the designed path. A false
+ * positive costs a build nobody asked for.
+ */
+export function bananaMeansBuild(lower: string): boolean {
+  if (!containsSignalWord(lower, 'banana')) return false;
+  return mentionsBuildNoun(lower) || BANANA_INTENT_AUX.test(lower);
+}
+
 export function firstNewBuildOrder(lower: string): string | undefined {
   const listed = firstSignalWord(lower, NEW_BUILD_SIGNALS);
   if (listed) return listed;
@@ -128,7 +183,9 @@ export function firstNewBuildOrder(lower: string): string | undefined {
   const split = BANA_SPLIT_ORDER.exec(lower);
   if (split) return split[0];
   const direct = BANA_DIRECT_ORDER.exec(lower);
-  return direct ? direct[0] : undefined;
+  if (direct) return direct[0];
+  // The CONDITIONAL signal, consulted last: `banana` only where the sentence is about building.
+  return bananaMeansBuild(lower) ? 'banana' : undefined;
 }
 
 /**
@@ -164,7 +221,7 @@ const BUILD_SIGNALS: readonly string[] = [
   'dashboard', 'table', 'chart', 'modal', 'sidebar', 'layout', 'theme',
   'todo app', 'landing', 'css', 'html', 'react', 'next.js', 'nextjs',
   // Hindi / Hinglish forms
-  'banao', 'bana do', 'banade', 'bana de', 'banade do', 'banana',
+  'banao', 'bana do', 'banade', 'bana de', 'banade do',
   'jodo', 'jod do', 'add karo', 'theek karo', 'thik karo', 'badlo', 'badal do',
   'hatao', 'hata do', 'banwao', 'sudharo', 'sahi karo', 'likho', 'likh do',
   'bana dena', 'bana doge', 'design karo', 'fix karo', 'update karo',

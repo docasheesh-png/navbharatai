@@ -146,26 +146,19 @@ describe('what the fix deliberately does NOT change', () => {
   });
 
   /**
-   * 🔴 A SEPARATE, PRE-EXISTING DEFECT THIS CORPUS FOUND — asserted as it BEHAVES TODAY, not as it
-   * should. `NEW_BUILD_SIGNALS` carries the bare Hindi gerund `'banana'` ("to make"), which is a
-   * homograph of the English fruit. Measured on `origin/main`, BEFORE any change in this PR:
+   * ✅ THE TRIPWIRE FIRED AND WAS ANSWERED — updated deliberately, exactly as it asked to be.
    *
-   *   "banana bread recipe batao"        -> new_build · HIGH · signal 'banana'
-   *   "banana milkshake kaise banta hai" -> new_build · HIGH · signal 'banana'
+   * This case used to assert the WRONG behaviour: `'banana'` sat in `NEW_BUILD_SIGNALS` as a bare
+   * word and it is a homograph of the English fruit, so `"banana bread recipe batao"` was
+   * `new_build · HIGH` and somebody asking for a recipe got an app built. It is fixed in
+   * `bananaMeansBuild` — the gerund is now a CONDITIONAL signal, counted only where the sentence
+   * names something buildable or completes it into a statement of intent ("banana hai").
    *
-   * Someone asking for a recipe gets an APP BUILT — the exact 29-minute failure the 2026-09-13
-   * "read the mood first" rule exists to prevent.
-   *
-   * ⚠️ NOT fixed here, deliberately, and deleting the word is NOT the fix: `"mujhe ek app banana
-   * hai"` and the object-less `"app banana"` (named in this classifier's own comments as a case
-   * #3039 answers downstream) BOTH depend on it, and both are HIGH today. The honest fix gates the
-   * gerund on a build NOUN appearing in the same message, which needs its own corpus and its own
-   * revert switch. Recorded in PROGRESS.md as an open root cause.
-   *
-   * 🔒 This assertion is a TRIPWIRE, not an endorsement: whoever fixes it will see this test go red
-   * and must update it on purpose.
+   * Kept here rather than moved: this corpus is what found it, and the pair below is the whole
+   * point — the fruit and the order share a word and must part company.
    */
-  it('KNOWN BUG, pre-existing: the fruit still reads as a build order', () => {
-    expect(firstNewBuildOrder('banana bread recipe batao')).toBe('banana');
+  it('the fruit is no longer a build order, and the order still is', () => {
+    expect(firstNewBuildOrder('banana bread recipe batao')).toBeUndefined();
+    expect(firstNewBuildOrder('mujhe ek app banana hai')).toBe('banana');
   });
 });

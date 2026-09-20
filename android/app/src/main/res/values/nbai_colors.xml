@@ -9,4 +9,16 @@
 -->
 <resources>
     <color name="nbaiSurfaceDark">#0d1117</color>
+
+    <!--
+      THE NOTIFICATION ACCENT (2026-09-20). Android tints a notification's small icon and its app-name
+      line with this colour. Left unset the system picks its own grey, which is the second half of why
+      our notifications did not read as ours — the first half being that there was no small icon at all
+      and Android fell back to rendering the launcher icon as a white square.
+
+      #4f46e5 is the app's own light-theme `--accent` (src/index.css), chosen over the dark-theme
+      #818cf8 because the notification shade is a system surface we do not control: the darker indigo
+      holds its contrast on a light shade, and the lighter one does not.
+    -->
+    <color name="nbaiNotificationAccent">#4f46e5</color>
 </resources>

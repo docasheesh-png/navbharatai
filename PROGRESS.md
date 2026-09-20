@@ -72569,8 +72569,167 @@ fact we store.
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
 
+## 2026-09-20 — LIVE FILE SYNC: the Files tab and Code Studio show the app as it is being written
+
+**Admin, verbatim:** *"navbharatai jo app banata hai, to 'file' and 'code studio' run time par live sync
+hona chahiye — abhi nahi ho raha hai. kya ham isko accuracy badha kar ek dam perfect kar sakte hai??"*
+
+**They were right, and the reason is narrow enough to name exactly.** The engine has always streamed a
+`file_changed` event on every write, and three surfaces listen to it. Two were already live, because a
+PATH is all they need: the preview reloads (`filesVersion`), and the Files tab's LIST grows
+(`state.files`). The two the admin named need the file's CONTENT, which the event does not carry — so
+they read it with `loadWorkspaceFiles()`, a WHOLE-workspace read. That read is expensive enough that the
+client was written to make it at three moments only:
+
+| effect | when it runs |
+|---|---|
+| "load on first open" | the Files tab is opened and the cache is empty |
+| "refresh on done" | `state.done` flips true |
+| "S4 rehydrate" | a cold reopen — and it says `if (running …) return;` in so many words |
+
+**None of them is "while the build is writing."** So a file created mid-build showed a name with no
+body, a file EDITED mid-build showed its body from BEFORE the build, and Code Studio — fed from the
+same cache through `onFilesSync`, which fired on `state.done` alone — showed the old project for the
+whole run.
+
+### The fix is a second QUESTION, not a second source
+
+*Which files changed?* is already answered, live, by the stream. *What is in them?* is a read — and a
+read of the four paths that just changed costs four reads, not a workspace scan. The client already
+knows which paths those are, because it received the events. Nothing new is measured, persisted or
+invented; the existing route is asked a narrower question.
+
+- **Server** — `collectNamedWorkspaceFiles` (`WorkspaceFiles.ts`), beside the whole-workspace collector
+  and sharing its exclusion, secret, binary and byte rules, so the two cannot drift. `/api/agentv3/
+  workspace-files` branches on an optional `paths` array; without it the route is byte-identical.
+- **Client** — `src/components/agentv3/liveFileSync.ts`, a pure queue + merge core, wired into
+  `AgentV3Panel` behind `running`.
+
+### 🔑 Object identity, not value, is what detects a repeated write
+
+`FileChange` is `{ path, kind }`, so a file modified twice yields two VALUE-IDENTICAL entries — a value
+comparison would call the second write "no change" and the file would keep its first body for the rest
+of the build. But the reducer re-appends the event's own object (`applyFileChange` does
+`[...without, change]`) and every SSE event parses into a fresh object, so *a different object than
+last render* **is** *written again*. That fact was already in the client; the alternative was a second
+write log beside the one the reducer keeps.
+
+### 🔴 Three things that make the narrow read correct rather than merely cheap
+
+1. **A late reply cannot silently win.** A path written AGAIN while its read is in the air is re-queued
+   (`pending` and `inFlight` are separate for exactly this), so the stale body is superseded rather
+   than becoming permanent — the event that would have asked again was consumed when it was queued.
+2. **It UPSERTS; it can never replace.** The whole-workspace load REPLACES the map, which is why the
+   rehydrate path refuses to run mid-build — a read taken while the sandbox is being written to can
+   legitimately come back partial. A named read touches only the paths it was asked for, so no surface
+   can lose a file to a badly-timed read. A path that could not be read is **skipped, never returned as
+   an empty file**: *we could not read it* is not *it is gone*.
+3. **The user's typing is protected by PATH.** The v5 surface stays MOUNTED while the user is in Code
+   Studio, so they really can be typing in a file at the moment the build writes one — a risk this
+   feature creates and had to answer. `WorkspaceSyncer.pendingPaths()` names the un-flushed files and
+   `App.tsx` drops exactly those from a `live` push. Holding back the whole batch would make the
+   feature stop working whenever the editor is open; overwriting would destroy typing. **The
+   end-of-build sync is deliberately unchanged** (it passes no `live`), so today's behaviour is not
+   touched anywhere.
+
+### Why the body does NOT ride the event stream, which was the obvious first idea
+
+`AgentEventStream` keeps a **500-event in-memory replay buffer per live build** so a late-mounting
+surface can catch up. Attaching file bodies to `file_changed` would put megabytes of source into that
+buffer for every concurrent build, to serve a surface that is usually not even open. A notification
+belongs on the stream; a payload belongs behind a request made when someone wants it.
+
+### ⚠️ It runs whether or not the Files tab is open, deliberately
+
+Code Studio is a DIFFERENT view reading the app-level file map, so gating on this panel's visible tab
+would leave the second surface the admin named permanently stale. Cost is bounded by the batch cap (24
+paths) and the request window (700 ms, a ceiling on rate — **not** a resetting debounce, which would
+starve exactly the continuously-writing build this exists for), and is proportional to what the build
+actually wrote.
+
+### Open, recorded rather than left to be discovered (rule 6)
+
+A path the SERVER could not read is settled, not re-queued — re-asking would chase a genuinely deleted
+file for the rest of the build. That one file keeps the body the surface already had until the next
+write to it or the end-of-build load. A failed REQUEST is re-queued, because that blip would otherwise
+strand a whole batch.
+
+**Kill switch:** `AGENTV3_LIVE_FILE_SYNC=off` — the route answers `liveSync: false`, the client stops
+asking for the rest of the build, and every surface behaves exactly as it did before. Default ON: the
+surfaces being stale during a build is the defect, so the env is a kill switch, not an opt-in.
+
+Test-locked in `tests/theFilesTabIsLiveWhileTheAppIsBuilt.test.ts` (28 cases), **reversion-proven five
+ways** — value-compare instead of identity, `settleSyncBatch` clearing `pending`, dropping the
+protected-path filter, collapsing "named no paths" into "named paths, all rejected", and removing the
+panel's `running` guard — each failing exactly its own case and only that case.
 ---
 
+## 2026-09-20 — In the admin console, the bottom bar IS the tab strip
+
+Admin, with a screenshot of the admin panel on a phone: *"jab admin panel open hota hai, to footer me
+yeh home|ai|preview|studio|more etc jo dikh rahe hai. isko badalna hai!! is footer me MONITOR, USERS,
+ai engine, revenue … jo abhi header me hai, unko rakho … woh 5 hard button ki jagah left right
+swipable header hoga."* And, asked about the wide screen: *"ham desktop me aise hi rahne do!"*
+
+**What was wrong.** On a phone the admin console spent its ONE always-reachable row — the bottom bar —
+on five buttons that lead OUT of the console (Home / AI / Preview / Studio / More), while the nine tabs
+that *are* the console sat in a horizontally-scrolling strip up in the header. The thumb row was given
+to the navigation nobody inside the admin panel wants.
+
+### It is the fourth branch of a pattern already there
+
+`App.tsx` keeps ONE `<nav>` and already swaps its contents per surface: Pro chat (History / Pro Chat /
+Preview / Files / Code Studio / More), the Mode surfaces (History / AI / Mode / Settings), and the
+default five. **The admin panel was falling into that third branch only because `isModeSurface` does
+not name it** — which is why the screenshot looked the way it did. So this is a fourth branch, not a
+new concept.
+
+The upward channel existed too. `v3FooterApi` is how the Pro panel's own internals drive the shared
+bar; `src/components/admin/adminFooterApi.ts` is that same channel for the console. **`select` IS
+`setActiveTab`** — there is one piece of tab state in the whole feature, so the header and the footer
+cannot disagree about which page is open.
+
+### 🔒 The footer names no tab
+
+It renders `adminFooterApi.items` — the console's own `TABS`, with its own live badges — so a tab added
+to `TABS` appears in the footer **by construction**. A hardcoded list in `App.tsx` would drift the
+first time a page was added and **nothing would fail**: both strips would render and one would simply
+be missing a page. `theAdminFooterIsTheTabStrip.test.ts` therefore asserts that the tab names
+("AI Engines", "Build Reports", "User Reports", "APK Reports") do **not** appear in `App.tsx` at all.
+
+Badges came along as data, with their honesty intact: `formatBadge` returns null for anything
+unmeasured and the footer carries the null through, so a page whose number could not be read shows
+**no** counter rather than a `0` — which on a row like User Reports would read as *"I looked, there is
+no work here"*.
+
+### 🔴 The one line that made it possible
+
+That bar carries a deliberate `touchAction: 'none'`, from the admin's own 2026-09-14 report (a drag
+upward on it moved the whole app and revealed white space beneath on iOS). **`none` forbids EVERY pan,
+horizontal included** — so a swipable footer with `none` on it is a footer that cannot be swiped, and
+the tabs past the screen edge would have been unreachable by the exact gesture that was asked for.
+
+It is now `adminStrip ? 'pan-x' : 'none'`: horizontal pan permitted on this strip only, so the
+2026-09-14 bug stays closed everywhere including here. **Proven by reversion** — tightening it back to
+`none` fails CI rather than silently killing the swipe. This is the "a fix must never trade one problem
+for another" rule applied to a gesture rather than to a code path.
+
+### What is deliberately unchanged
+
+- **Desktop, by construction rather than by a second rule.** The bar is mobile-only, so
+  `adminMobileFooterActive` returns false there, the header strip stays and no footer appears.
+- The header strip stands down with `hidden lg:flex` (AgentV3Panel's own idiom for exactly this), so a
+  wide screen inside a mobile-footer session still has tabs rather than none.
+- Publishing `null` on unmount is what returns the bar to its ordinary items the moment the console is
+  left or the admin logs out.
+- The open tab scrolls itself back into view on a tab **change** only, never on every render, so it can
+  never fight a swipe the user is in the middle of.
+- New code, so it uses the theme tokens (`text-accent-text` / `text-muted`) instead of copying the
+  older branches' `text-indigo-400` and `#484f58` — those are weak or invisible on Light, and the
+  colour ratchet counts them. The older branches were left alone: sweeping them is the migration's job
+  and would be unrelated diff.
+- `AppKnowledgeBase` gained `admin-tab-navigation`, because where the tabs live now differs by device
+  and every other admin entry's path ("Admin Dashboard → Revenue") still names the same page.
 ## 2026-09-20 — The contract was written, but nobody told the model until it was too late (autopsy `31dc61fd`, items 2 + 3)
 
 Admin: *"sabhi problem theek honi chahiye hamesha ke liye."* These were the last two ❌ items in the
@@ -73194,3 +73353,105 @@ A source assertion can only pin what the code **says**. When what is at stake is
 (here, Firestore) will **accept**, the assertion has to name the property that actually makes it
 safe. The case is rewritten in place rather than deleted, with that reasoning attached, because the
 wrong version is the evidence.
+## 2026-09-20 — "Notifications nahi aa rahe": the feature was built, shipped to nobody, and could not be diagnosed
+
+**Admin, verbatim:** *"jaise app notifications ate hai hamare mobile me woh notifications abhi
+navbharatai me nahi aa rahe hai. isko on karwane ke liye aur kya karna chahiye — ek dam native app
+jaise notification mobile me dikhe!"*
+
+**The instinct to resist, and the reason safeguard #6 exists.** The obvious reading is "push
+notifications were never built" — which is what the 2026-07-26 entry says about the *previous* time
+this was asked. Searched by FILENAME first, then by package: `@capacitor-firebase/messaging` is
+INSTALLED, `src/lib/pushNotifications.ts` is wired into `App.tsx:1261` on sign-in,
+`android/app/google-services.json` is present and names the right project and package,
+`android/build.gradle` carries the google-services plugin, `routes/push.ts` is mounted at
+`server.ts:718`, and `PushNotificationService.sendPushToUser` is a real firebase-admin sender called
+from three places. **The whole chain exists and has since 2026-08-25.**
+
+### The root cause, established rather than assumed
+
+`android-aab.yml` stamps `versionCode = run number`. Asked the Actions API for every run's head SHA
+and asked git whether the commit that introduced the plugin (`f71e101e`) is an ANCESTOR of each:
+
+| run | head | carries push? |
+|---|---|---|
+| **91** (`cc236f0f`, 12:10 on 2026-08-25) — the first production release, and the value `ANDROID_LATEST_VERSION_CODE` still holds | no | **NO** |
+| 92–95 | no | NO |
+| **96** (`7065c7dd`, 2026-08-26) | yes | **YES** |
+
+The plugin merged at 21:18 that day and run #91 was built at 12:10 the same day, **so the dates alone
+say the opposite of the truth** — which is exactly why this was checked by ancestry.
+
+**The app people have installed contains no notification code at all.** It never asks permission,
+never obtains an FCM token, never calls `/api/push`. Nothing the server does can reach it, and
+nothing the server can see says so.
+
+### The missing subsystem (step 2): nothing could tell four different failures apart
+
+`sendPushToUser` is fire-and-forget and silent **by design** — a push must never fail a build — and
+it returned `void`. So an app too old to receive, an empty device registry, a Cloud Messaging API
+that was never enabled, and a service account without permission all produced the identical outcome:
+nothing arrives, nothing errors, nothing logged. The silence is right for the callers; the
+information was being **thrown away rather than not existing**.
+
+- **`src/server/lib/pushPreflight.ts`** — the loud half, in the shape `hostingPreflight.ts` and
+  `referralPreflight.ts` already established. It probes the REAL send path with the REAL credential
+  and a token Google cannot decode, so the answer can only be a refusal and the diagnosis is WHICH
+  one. 🔒 **"Invalid argument" is the GOOD answer** and is reported `ok`: it means we authenticated,
+  the project was right, Cloud Messaging was reached, and only the fake token was refused. Reporting
+  it as a failure would send the admin to fix a setup that already works. A send that SUCCEEDS is
+  reported `unknown`, not `ok` — a check that cannot fail proves nothing (the E2B-rate lesson).
+- **`sendPushToUser` now returns `PushSendResult`.** Every existing caller ignores it; no behaviour
+  changed.
+- **`GET /api/admin/push/preflight` + `POST /api/admin/push/test`** and a **Notifications card** on
+  admin → Reports. The test sends a real notification to a real account — the only thing that proves
+  the chain — and the card never claims the second half: Firebase accepting a message is not a phone
+  showing one.
+
+### The 50/50 half — why a notification would not have LOOKED native either
+
+Three Firebase presentation settings had never been set, each failing in a way nothing reports:
+no `default_notification_icon` (Android renders the full-colour launcher icon as a featureless
+**white square**), no `default_notification_color`, no `default_notification_channel_id` (every
+message lands in Android's fallback **"Miscellaneous"** channel — the single clearest tell in
+Settings → Notifications that an app did not set this up).
+
+- `@drawable/ic_stat_nbai` at five densities, **derived** from the app's own `ic_launcher_monochrome`
+  by `scripts/notificationIcon.mjs` (crop the adaptive-icon safe zone, box-filter the alpha) — the
+  app's own mark, not new artwork. Verified numerically: it is a silhouette (93% transparent) filling
+  ~90% of its slot.
+- The channel is created at **importance 4 (High)**. Android fixes a channel's importance at creation
+  and refuses to let an app raise it later, so shipping the default once would make "my notifications
+  do not pop up" **permanently unfixable** for everyone who had already installed the app. That is the
+  one value that must be right the first time.
+- ⚠️ The channel id exists twice — named in the manifest, CREATED in the client — and a manifest
+  naming a channel nobody created is **not an error**: Android falls back to Miscellaneous again. Both
+  directions are pinned by `tests/aNotificationLooksLikeOurApp.test.ts`.
+
+### OPEN ROOT CAUSES (rule 6) — stated, not patched
+
+1. **🔴 ADMIN: only a fresh Play release makes any of this reach a phone.** Build 96 or later. Per
+   CLAUDE.md a store build is made **only when the admin asks**, so none was triggered. After it is
+   downloadable, set `ANDROID_LATEST_VERSION_CODE` to that run number — after, never before.
+2. **🔴 ADMIN: the Firebase Cloud Messaging API and the service-account role cannot be checked from a
+   session.** The new preflight is what turns each into a named next action.
+3. **iOS cannot work at all today.** `ios/App/App/GoogleService-Info.plist` is not in this repository
+   and no APNs key has ever been uploaded to Firebase. Listed as manual work in the report rather
+   than left silent.
+4. **`AppKnowledgeBase.ts` has no notifications entry, and deliberately still does not.** Adding one
+   now would have every NavBharatAI AI promise a capability today's installed app does not have —
+   the fake-success the second absolute rule forbids. It is owed the moment a release carrying push
+   is live on Play.
+5. **Only three things ever send a notification** (build finished, low balance, update broadcast).
+   Whether that is the right set is a product question for the admin, not a defect.
+
+### Proactive layer (step 6)
+
+The lever here is not more notification kinds — it is that **a feature can be complete, merged, green
+and shipped to nobody for four weeks with nothing anywhere saying so**. Push is the second case this
+month (Play Billing and Play Integrity have the same shape, and each grew its own hand-written
+"release N and earlier do not have it" constant). The real fix is one place that knows which run
+first carried each native capability and compares it with the live release — so "the app on the phone
+is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
+here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
+asked.

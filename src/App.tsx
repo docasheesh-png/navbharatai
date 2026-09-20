@@ -19,6 +19,7 @@ import { HistoryPopup } from './components/history/HistoryPopup';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 // FilesPanel → moved to ViewPanels.tsx
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
+import { adminMobileFooterActive, type AdminFooterApi } from './components/admin/adminFooterApi';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
 import { AppLockGate, AppLockScreen, useAreaLocked } from './components/AppLockGate';
 import { restoreV3Tab, v3TabIsOpen, v3IsActive, V3_TAB_FLAG, V3_ACTIVE_FLAG } from './components/agentv3/v3TabPersistence';
@@ -2486,6 +2487,14 @@ export default function App() {
   // bottom nav swaps to v5.0's own items. AgentV3Panel registers its REAL actions here (null when
   // v5.0 is closed/unmounted — the nav then falls back to the default items, never dead buttons).
   const [v3FooterApi, setV3FooterApi] = useState<V3FooterApi | null>(null);
+  /**
+   * The admin console's own tab strip, published upward so the ONE bottom bar can BE it
+   * (admin 2026-09-20). Null whenever the console is not mounted, which is what makes the bar fall
+   * straight back to its ordinary items on logout — see components/admin/adminFooterApi.ts.
+   */
+  const [adminFooterApi, setAdminFooterApi] = useState<AdminFooterApi | null>(null);
+  /** The footer strip's scroll container, so the open tab can be scrolled back into view. */
+  const adminStripRef = useRef<HTMLElement | null>(null);
   // "Fix with AI" clicked from the SIDEBAR preview (outside the v5.0 panel's own UI) — prefills the
   // v5.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
@@ -3068,6 +3077,32 @@ export default function App() {
    */
   useEffect(() => { publishMobileNavHeight(showsGlobalMobileNav); }, [showsGlobalMobileNav]);
 
+  /**
+   * ── THE BOTTOM BAR IS THE ADMIN CONSOLE'S TAB STRIP (admin 2026-09-20) ────────────────────────
+   *
+   * *"jab admin panel open hota hai, to footer me yeh home|ai|preview|studio|more … isko badalna
+   * hai!! … MONITOR, USERS, ai engine, revenue … jo abhi header me hai, unko rakho."*
+   *
+   * True only when all three hold — the bar is on screen, the admin console is the active view, and
+   * the console has actually published its tabs. That last clause is what makes this safe rather
+   * than clever: during the login gate, and for the instant before the dashboard mounts, there is no
+   * api and the bar shows its ordinary items instead of an empty strip.
+   */
+  const adminStrip = showsGlobalMobileNav && activeView === 'admin' && !!adminFooterApi;
+
+  /**
+   * KEEP THE OPEN TAB IN VIEW. Nine chips do not fit a phone's width, so after tapping Revenue and
+   * coming back the active chip can be off-screen — the user would see a strip with nothing lit and
+   * no clue where they are. Fires on the ACTIVE ID only, never on every render, so it can never
+   * fight a swipe the user is in the middle of.
+   */
+  useEffect(() => {
+    if (!adminStrip) return;
+    const el = adminStripRef.current?.querySelector('[data-admin-tab-active="true"]');
+    try { (el as HTMLElement | null)?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); }
+    catch { /* an older engine without scrollIntoViewOptions — the strip still scrolls by hand */ }
+  }, [adminStrip, adminFooterApi?.activeId]);
+
   return (
     <div
       className="h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500 bg-surface text-body"
@@ -3346,7 +3381,23 @@ export default function App() {
                  is visible, so v5.0's header controls and their footer replacements never both hide. */
               mobileFooter={v3MobileFooterActive(effectiveDeviceMode, focusMode)}
               onFooterApi={setV3FooterApi}
-              onFilesSync={(synced) => { const clean = sanitizeFileMap(synced); workspaceSyncerRef.current?.noteRemote(clean); setFiles((prev) => ({ ...prev, ...clean })); }}
+              /* LIVE FILE SYNC (admin 2026-09-20) — `live` marks a push from a build that is STILL
+                 RUNNING, so Code Studio shows the app as it is written instead of only at the end.
+                 The one risk that creates is real: the v5.0 surface stays mounted while the user is
+                 in Code Studio, so they can be typing in a file at the moment the build writes one.
+                 A path with un-flushed local edits is therefore held back — only that path, and only
+                 on a live push. The end-of-build sync is deliberately unchanged (no `live`), because
+                 by then the user's edits have flushed and the build's result is the project. */
+              onFilesSync={(synced, opts) => {
+                let clean = sanitizeFileMap(synced);
+                if (opts?.live) {
+                  const dirty = new Set(workspaceSyncerRef.current?.pendingPaths() ?? []);
+                  if (dirty.size > 0) clean = Object.fromEntries(Object.entries(clean).filter(([p]) => !dirty.has(p)));
+                }
+                if (Object.keys(clean).length === 0) return;
+                workspaceSyncerRef.current?.noteRemote(clean);
+                setFiles((prev) => ({ ...prev, ...clean }));
+              }}
               /* Phase S3 conflict guard: before a v5.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
                  hand edits are what v5.0 reads/acknowledges). Best-effort — never blocks the build. */
@@ -3895,6 +3946,11 @@ export default function App() {
               adminTotp={adminTotp}
               onTotpChange={setAdminTotp}
               mfaRequired={adminMfaRequired}
+              /* The bottom bar carries the admin tabs on mobile, so the dashboard's header strip
+                 stands down and publishes the strip upward instead (admin 2026-09-20). Desktop is
+                 untouched by construction — this boolean is false there. */
+              mobileFooter={adminMobileFooterActive(effectiveDeviceMode, focusMode)}
+              onFooterApi={setAdminFooterApi}
             />
          )}
 
@@ -4310,7 +4366,8 @@ export default function App() {
           `bg-surface` is the same `--surface-base` colour the bar already used, just opaque — which is
           also what a native Android tab bar looks like. */}
       {showsGlobalMobileNav && (
-        <nav className="fixed bottom-0 left-0 right-0 z-[150] bg-surface border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
+        <nav className={`fixed bottom-0 left-0 right-0 z-[150] bg-surface border-t border-[var(--border-soft)] flex items-stretch px-2 ${adminStrip ? 'overflow-x-auto no-scrollbar gap-1' : 'justify-around'}`}
+          ref={adminStrip ? adminStripRef : undefined}
           style={{
             // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.
             // Adding the safe-area to the height (instead of the old fixed h-14 with padding eating INTO it
@@ -4324,10 +4381,61 @@ export default function App() {
             // working, but this bar has no scrollable content of its own and a real native tab bar never
             // pans under a swipe either. `none` stops a drag from being recognised as a pan gesture here
             // at all; taps on the buttons inside are untouched (touch-action only governs panning).
-            touchAction: 'none',
+            //
+            // 🔴 EXCEPT ON THE ADMIN STRIP, AND THIS IS THE ONE LINE THAT MADE THAT FEATURE POSSIBLE
+            // (admin 2026-09-20: *"left right swipable header hoga"*). `none` forbids EVERY pan,
+            // horizontal included — so a swipable footer with `none` on it is a footer that cannot be
+            // swiped, and the nine tabs past the screen edge would have been unreachable by the exact
+            // gesture that was asked for. `pan-x` permits the horizontal pan and nothing else, so the
+            // 2026-09-14 bug it was written for — a drag UP moving the whole app — stays closed here
+            // too. Tightening this back to `none` would silently re-break the swipe.
+            touchAction: adminStrip ? 'pan-x' : 'none',
+            // Momentum on iOS, so the strip reads as a native scroller rather than a stiff row.
+            ...(adminStrip ? { WebkitOverflowScrolling: 'touch' as const } : {}),
           }}
         >
-          {activeView === 'nbi_pro_chat' && v3FooterApi ? (
+          {adminStrip ? (
+            /* ── THE ADMIN CONSOLE'S OWN TABS, IN THE FOOTER (admin 2026-09-20) ──────────────────
+               *"is footer me MONITOR, USERS, ai engine, revenue … jo abhi header me hai, unko rakho"*.
+               Nine tabs do not fit five fixed slots, which is exactly why the admin asked for a
+               swipable strip rather than a swap: the row scrolls, and every tab keeps its full name.
+
+               🔒 THIS BRANCH NAMES NO TAB. It renders `adminFooterApi.items` — the console's own
+               table, with its own live badges — so adding a tab to `TABS` in AdminDashboard puts it
+               here automatically. A hardcoded list in this file would drift the first time a page
+               was added, and nothing would fail: the strip would simply be missing it. */
+            adminFooterApi!.items.map((item) => {
+              const Icon = item.icon;
+              const active = item.id === adminFooterApi!.activeId;
+              return (
+                <button
+                  key={item.id}
+                  data-admin-tab={item.id}
+                  data-admin-tab-active={active ? 'true' : undefined}
+                  onClick={() => adminFooterApi!.select(item.id)}
+                  aria-label={item.label}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative shrink-0 flex flex-col items-center justify-center gap-0.5 px-3 h-full min-h-[44px] min-w-[68px] rounded-xl transition-all active:scale-90 ${active ? 'bg-indigo-600/15 text-accent-text' : 'text-muted'}`}
+                >
+                  <span className="relative inline-flex">
+                    <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
+                    {/* The counter the header strip already shows. `badge` is null for anything
+                        unmeasured and a null draws NOTHING — never a zero, which on this row would
+                        read as "I looked, there is no work here". */}
+                    {item.badge && (
+                      <span
+                        className={`absolute -top-1.5 -right-2.5 min-w-[14px] px-0.5 h-3.5 rounded-full text-[8px] font-black leading-[14px] text-center ${item.hot ? 'bg-red-500 text-on-accent' : 'bg-indigo-600 text-on-accent'}`}
+                        aria-label={`${item.label}: ${item.badge}`}
+                      >
+                        {item.badge}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-[64px] px-0.5">{item.label}</span>
+                </button>
+              );
+            })
+          ) : activeView === 'nbi_pro_chat' && v3FooterApi ? (
             [
               { key: 'history', icon: History,        label: 'History',  onTap: v3FooterApi.openHistory, active: false },
               { key: 'chat',    icon: MessageSquare,  label: 'Pro Chat', onTap: v3FooterApi.openChat,    active: v3FooterApi.section === 'chat' },

@@ -34,12 +34,27 @@ describe('the fixed bottom nav cannot drag the whole app up (EduTube-adjacent re
     expect(rule).toContain('overflow: hidden;');
   });
 
-  it('the fixed bottom nav opts OUT of the app-wide pan gesture — it has nothing to pan', () => {
+  it('the fixed bottom nav NEVER permits a VERTICAL pan — whatever branch it is in', () => {
+    // ⚠️ WIDENED 2026-09-20, and deliberately made STRONGER rather than looser. The admin console now
+    // renders its own tab strip in this same bar, and that strip has to be swipable sideways
+    // ("left right swipable header hoga") — so the value is no longer the bare `'none'` this test
+    // used to string-match, it is `adminStrip ? 'pan-x' : 'none'`.
+    //
+    // 🔑 `'none'` was never the property that mattered; NO VERTICAL PAN is. `pan-x` permits the
+    // horizontal gesture and nothing else, so the 2026-09-14 report — a drag UPWARD on this bar
+    // moving the whole app and showing white space beneath it — stays closed on every branch.
+    // Asserting the WHITELIST instead of one literal is what lets a fifth branch be added later
+    // without either weakening this guard or re-breaking that bug in silence.
     const app = read('src/App.tsx');
-    const i = app.indexOf('<nav className="fixed bottom-0 left-0 right-0');
+    const i = app.search(/<nav className=\{?[`"]fixed bottom-0 left-0 right-0/);
     expect(i).toBeGreaterThan(-1);
-    const body = app.slice(i, i + 1600);
-    expect(body).toContain("touchAction: 'none'");
+    const body = app.slice(i, i + 2600);
+    const expr = /touchAction:\s*([^,\n]+)/.exec(body);
+    expect(expr, 'the bar must still state a touchAction — inheriting the app-wide pan-x/pan-y is the bug').not.toBeNull();
+    const values = [...expr![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(values.length).toBeGreaterThan(0);
+    // Every value the expression can produce must forbid a vertical pan.
+    for (const v of values) expect(['none', 'pan-x']).toContain(v);
   });
 
   it('ordinary scrollable content is untouched — the pan-x/pan-y rule still exists for it', () => {

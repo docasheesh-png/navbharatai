@@ -20,9 +20,16 @@ describe('classifyFailureReason — grounded in the engine’s OWN real wording'
     expect(classifyFailureReason('Critical issue found by review: Missing Required Features').key).toBe('review-critical');
   });
 
-  it('an unmatched root cause is honestly “other”, never forced into a wrong bucket', () => {
-    const r = classifyFailureReason('the user hated the shade of blue we picked');
-    expect(r.key).toBe('other');
+  it('an unmatched root cause is never forced into a wrong bucket', () => {
+    // ⚠️ SPLIT ON 2026-09-20, and the intent is unchanged: an unmatched reason is filed honestly,
+    // never squeezed into a category it does not belong to. WHICH honest bucket now depends on a
+    // machine fact — did the build record an `OUTCOME_*` code at all? No code means the engine
+    // never said why it ended (an engine hole); a code we have no word for is the real vocabulary
+    // gap. One row for both told every reader to write regexes for the first kind.
+    expect(classifyFailureReason('the user hated the shade of blue we picked').key)
+      .toBe('no-outcome-recorded');
+    expect(classifyFailureReason('the user hated the shade of blue we picked', 'OUTCOME_BRAND_NEW', 'error').key)
+      .toBe('other');
   });
 
   it('a blank/missing root cause is its own honest state, not “other”', () => {

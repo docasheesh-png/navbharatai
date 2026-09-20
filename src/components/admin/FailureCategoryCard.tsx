@@ -17,7 +17,15 @@ import { adminGet, adminFailed } from '../../lib/adminFetch';
  * already exist to prevent — this card follows the same rule.
  */
 interface ReasonExample { workspaceId: string; rootCause: string }
-interface ReasonRow { key: string; label: string; count: number; sharePct: number; examples: ReasonExample[] }
+interface ReasonRow {
+  key: string; label: string; count: number; sharePct: number; examples: ReasonExample[];
+  /**
+   * How many of this row's failures happened inside the recent window. `null` when the server sent
+   * no window — shown as nothing at all, never as 0, because "we did not measure" and "it stopped
+   * happening" are the two answers this column exists to tell apart.
+   */
+  recentCount?: number | null;
+}
 interface DomainRow {
   domain: string; total: number; failed: number; succeeded: number;
   failureRatePct: number | null; topReasons: ReasonRow[];
@@ -42,6 +50,7 @@ interface ReportData {
   overallFailureRatePct: number | null;
   byDomain: DomainRow[];
   byReason: ReasonRow[];
+  recentWindowDays?: number;
   window: number;
   reportsRead: number;
   capped: boolean;
@@ -89,6 +98,8 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
 
   const byDomain = data?.byDomain ?? [];
   const byReason = data?.byReason ?? [];
+  // The server states its own window; 7 is only the fallback for a response written before it did.
+  const recentDays = Number(data?.recentWindowDays) > 0 ? Number(data?.recentWindowDays) : 7;
   const total = data?.totalBuilds ?? 0;
   const failed = data?.failed ?? 0;
   const rate = data?.overallFailureRatePct ?? null;
@@ -284,8 +295,22 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
                       className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left"
                     >
                       <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-ink">{r.label}</span>
-                      <span className="shrink-0 font-mono text-[11px] text-warn">
+                      <span className="shrink-0 text-right font-mono text-[11px] text-warn">
                         {r.count} <span className="text-muted">({r.sharePct}% of failures)</span>
+                        {/*
+                          THE COLUMN THAT SAYS WHETHER A FIX WORKED. The big number is a lifetime
+                          total over every project's latest build, so it can only ever go up; this
+                          is the part of it that is still happening. Zero recently, on a row with a
+                          large total, is a bug that was fixed — and nothing else on this panel
+                          could ever have shown that.
+                        */}
+                        {typeof r.recentCount === 'number' && (
+                          <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-bold ${r.recentCount > 0 ? 'bg-amber-500/10 text-warn' : 'bg-emerald-500/10 text-success'}`}>
+                            {r.recentCount > 0
+                              ? `${r.recentCount} in last ${recentDays}d`
+                              : `none in ${recentDays}d`}
+                          </span>
+                        )}
                       </span>
                     </button>
                     {expandedReason === r.key && r.examples.length > 0 && (
@@ -305,9 +330,12 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
               </div>
             )}
             <p className="mt-3 text-[10px] font-semibold leading-relaxed text-muted">
-              &ldquo;Other&rdquo; means the build&rsquo;s recorded root cause did not match any of the engine&rsquo;s
-              known failure wordings — tap it to read the real text and judge for yourself. Tap any reason to see the
-              exact examples it was matched from.
+              Every count is a LIFETIME total, so it can only ever grow; the badge beside it is the part still
+              happening in the last {recentDays} days — a large total with <strong>none in {recentDays}d</strong> is
+              a fixed bug. &ldquo;The build never recorded WHY it ended&rdquo; is not a missing word in our list:
+              those builds ended without writing down a cause, so the fix is in the engine, not in a pattern.
+              &ldquo;Other&rdquo; is the genuine wording gap — tap it to read the real text. Tap any reason to see
+              the exact examples it was matched from.
             </p>
           </div>
 

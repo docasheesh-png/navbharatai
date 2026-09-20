@@ -3333,6 +3333,31 @@ rung only when it is the known-weak 4.7-flash.
   par"): fidelity is to the MODE, not to one model id. Billing is unchanged — `powerToTier('mini')` is not
   the Opus tier, so Strong bills real cost + tiered markup, and an Opus rung that ran is priced at its real
   Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
+- **🟢 NVIDIA NEMOTRON — `NEMOTRON_API_KEY` SET, and `AGENTV3_NEMOTRON` set by the admin 2026-09-20.**
+  Recorded hand-to-hand per this registry's own rule. The key alone reaches only the **ladder rung**
+  (Weak/Normal, in FRONT of the Claude backstop, keyed rather than flagged); the **judge** and **plan**
+  roles need `AGENTV3_NEMOTRON` naming a tier — `weak` / `free` / `normal` / `strong`, comma-separated,
+  or `on` for every tier. `off` is the hard kill for all three. Read by `src/server/AgentV3/nemotron.ts`.
+  💰 **Why the judge is the prize:** by that module's own measurement the judge is **78% of a cheap-lead
+  build's entire real provider cost** ($0.0915 of $0.1176) — the one slice the prompt cache cannot
+  rescue, being a single call over the app rather than a 70-call loop over a stable prefix. Ultra does
+  it at **$0.50/MTok in** against glm-5.3's $1.40 and Grok's $3.00, with **no tools exposed**, which is
+  also why it is the safest place to try an unproven vendor.
+  🔴 **`week` IS NOT `weak`, AND UNTIL 2026-09-20 THAT WAS SILENT.** The admin reported setting
+  `AGENTV3_NEMOTRON=week`. It names no tier, so the judge and the plan stayed **OFF** while the console
+  showed the key configured and nothing anywhere said otherwise — the fourth time this repo has paid
+  for that exact shape (a trailing space in `BRAVE_API_KEY`, an `=` in `ALERT_EMAIL_FROM`, `20%` in
+  `AGENTV3_FEATURE_HEAL_PCT`). The VERDICT was always right (an unreadable value can never have meant
+  "everywhere" — somebody who wanted that would type `on`); what was missing was the report.
+  `nemotronConfigNote()` now names the offending word and the accepted ones, **in the build report's
+  `TIER_LADDER` line as a WARNING**, and once in the server log. ⚠️ The value is deliberately **NOT**
+  corrected toward the nearest word: guessing that `week` meant `weak` would make the config mean
+  whatever it resembles, and the next typo would enable a tier nobody chose. **So this must be verified
+  in the console, not assumed from this entry** — an admin build report whose `TIER_LADDER` line is
+  clean is the confirmation.
+  ⚠️ **NEVER the architect, sub-agents, reviewer or heal passes** — those are the cached 40–70-call
+  tool loops where Nemotron is **6.2× DEARER** than flashx (its route does not honour prompt-cache
+  markers). `nemotron.ts` makes every other role structurally unreachable; do not widen it.
 - **Env keys (names only):** `AGENTV3_LADDER_WEAK` / `_NORMAL` / `_STRONG` (override one tier's ladder,
   `PROVIDER:model,…`, applied whole or refused with the reason in the `TIER_LADDER` report line);
   `OPENAI_API_KEY` (the admin **bought a key on 2026-09-15** and asked what to name it; whether it is

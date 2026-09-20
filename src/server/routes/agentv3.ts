@@ -425,7 +425,8 @@ import {
   type DesignContract,
 } from '../AgentV3/designContract';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
-import { collectWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
+import { collectWorkspaceFiles, collectNamedWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
+import { liveFileSyncEnabled, requestedSyncPaths } from '../AgentV3/liveFileSync';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -8929,6 +8930,28 @@ async function noteBuildOutcome(
     }
     if (!(await assertWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    // LIVE FILE SYNC (admin 2026-09-20) — a client that names `paths` is asking "what is in the files
+    // that just changed?", not "give me the workspace". See AgentV3/liveFileSync.ts for why the
+    // content rides a request rather than the event stream, and why a NAMED read is safer mid-build
+    // than the whole-workspace one below (it can only upsert; it can never replace a live map with a
+    // half-landed set).
+    const namedPaths = requestedSyncPaths(req.body?.paths);
+    if (namedPaths) {
+      if (!liveFileSyncEnabled()) {
+        // The kill switch answers honestly rather than silently serving the whole workspace: the
+        // client is told the feature is off and stops asking, so `off` really is today's behaviour.
+        res.json({ files: {}, count: 0, skipped: namedPaths.length, liveSync: false });
+        return;
+      }
+      try {
+        const actuator = buildActuator();
+        const { files, skipped } = await collectNamedWorkspaceFiles(actuator, workspaceId, namedPaths);
+        res.json({ files, count: Object.keys(files).length, skipped: skipped.length, liveSync: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+      }
       return;
     }
     try {

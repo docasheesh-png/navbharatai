@@ -39,6 +39,16 @@ export interface WorkspaceSyncer {
   /** Are there local edits not yet pushed to v5.0 (pending or in-flight)? Used by the dirty guard. */
   hasPending(): boolean;
   /**
+   * WHICH paths have local edits not yet pushed to v5.0.
+   *
+   * `hasPending()` answers "is anything dirty?", which is the right question for a navigation guard
+   * and the wrong one for LIVE FILE SYNC (2026-09-20): a build writing `src/Invoice.tsx` while the
+   * user types in `src/App.tsx` must update the first and leave the second alone. Holding back the
+   * whole batch because one unrelated file is dirty would make the feature stop working whenever the
+   * editor is open; overwriting would destroy typing. Naming the paths is what allows neither.
+   */
+  pendingPaths(): string[];
+  /**
    * Force any pending edits to sync NOW (bypass the debounce) and resolve once the durable store has
    * them. Called BEFORE a v5.0 build starts so the build never runs on a stale file set while the user
    * has un-flushed edits — the Phase S3 conflict guard. Safe to call when nothing is pending (no-op).
@@ -102,6 +112,12 @@ export function makeWorkspaceSyncer(opts: { sync: (changed: FileMap) => Promise<
     },
     hasPending() {
       return Object.keys(pending).length > 0 || inFlight !== null;
+    },
+    pendingPaths() {
+      // Only the DEBOUNCED set is named. A batch already in flight has left the editor and is on its
+      // way to the durable store, so the build's own read of that file will carry it — protecting it
+      // here would hold back content that already agrees with what the user typed.
+      return Object.keys(pending);
     },
     async flush() {
       // Drain the pending set NOW (bypass the debounce) and wait for any in-flight sync to finish too,

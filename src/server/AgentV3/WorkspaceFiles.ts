@@ -145,6 +145,77 @@ export async function collectWorkspaceFiles(
   return { files, skipped };
 }
 
+/**
+ * The most paths ONE targeted read may ask for. A live-sync batch is the burst of writes a single
+ * build step produced, never a scan — the largest real batch this engine emits is a
+ * `write_files_batch`, and nothing legitimate asks for hundreds at once. A caller that asks for more
+ * gets the first `MAX_NAMED_FILES`; the rest arrive on the next batch, because the client re-queues
+ * whatever it did not receive.
+ */
+const MAX_NAMED_FILES = 200;
+
+/**
+ * Read a NAMED set of paths from the sandbox, with exactly the eligibility rules
+ * `collectWorkspaceFiles` applies to the whole workspace.
+ *
+ * 🔑 WHY IT LIVES HERE RATHER THAN AT ITS CALLER. `isExcludedPath`, `isBinaryAsset`, the per-file
+ * byte ceiling and the NUL-byte test are this module's answer to "which files are source text, and
+ * how are they read?". A second implementation next to the route would be a second answer, and the
+ * two would disagree the first time either changed — the drifted-copy class this repo has paid for
+ * more than once. Same partition, same caps, same skip reasons; only the candidate set differs.
+ *
+ * ⚠️ A path that cannot be read lands in `skipped`, NEVER in `files` as an empty string. A deleted
+ * file and an unreadable one are indistinguishable from here, so this function refuses to claim
+ * either: it reports what it READ. The caller is told which paths it did not get and decides.
+ *
+ * Bounded by the same total-bytes ceiling, so one request cannot be used to pull a whole workspace
+ * into memory by naming every path.
+ */
+export async function collectNamedWorkspaceFiles(
+  source: Pick<WorkspaceFileSource, 'readFile'>,
+  workspaceId: string,
+  paths: readonly string[],
+): Promise<CollectedFiles> {
+  const files: Record<string, string> = {};
+  const skipped: string[] = [];
+
+  // SELECTION is sequential and name-based (identical to the whole-workspace collector), so the
+  // decision never depends on how fast a read came back. Only the reads are parallelised.
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of paths ?? []) {
+    if (typeof raw !== 'string' || !raw) continue;
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    if (candidates.length >= MAX_NAMED_FILES) { skipped.push(raw); continue; }
+    if (isExcludedPath(raw)) { skipped.push(raw); continue; }
+    if (isBinaryAsset(raw)) { skipped.push(raw); continue; }
+    candidates.push(raw);
+  }
+
+  const contents = new Map<string, string | null>();
+  await pool(candidates, READ_CONCURRENCY, async (path) => {
+    try {
+      contents.set(path, await source.readFile(workspaceId, path));
+    } catch {
+      contents.set(path, null); // could not read — a skip, never an invented empty file
+    }
+  });
+
+  let totalBytes = 0;
+  for (const path of candidates) {
+    const content = contents.get(path);
+    if (typeof content !== 'string') { skipped.push(path); continue; }
+    const bytes = Buffer.byteLength(content, 'utf8');
+    if (bytes > MAX_FILE_BYTES || looksBinary(content)) { skipped.push(path); continue; }
+    if (totalBytes + bytes > MAX_TOTAL_BYTES) { skipped.push(path); continue; }
+    totalBytes += bytes;
+    files[path] = content;
+  }
+
+  return { files, skipped };
+}
+
 /** What a sandbox LISTS, partitioned the way `collectWorkspaceFiles` would partition it — with zero reads. */
 export interface WorkspaceListing {
   /** Paths the collector would try to read (source text). */

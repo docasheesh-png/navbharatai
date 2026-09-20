@@ -1211,7 +1211,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   set yet: movies-now-playing source in `lib/liveDataSources.ts`, may be superseded by the admin's IMDb
   API once its host is known. Key-free live sources (weather/AQI/currency/PIN codes) need no env at all.
   ⚠️ Open licensing item recorded in PROGRESS.md 2026-08-25: the no-key weather source (Open-Meteo) is
-  licensed non-commercial — license or swap it before heavy real traffic. (`BRAVE_API_KEY` is now SET —
+  licensed non-commercial — license or swap it before heavy real traffic.
+  ✅ **THE AQI HALF IS CLOSED (2026-09-20, admin: "use karo!!") — `DATA_GOV_IN_API_KEY`.** Air quality
+  moved off that source to the **Central Pollution Control Board's** real-time feed on data.gov.in,
+  published under the **Government Open Data License – India**, which permits commercial use in terms.
+  A free key from data.gov.in's own registration is all it needs. Read by
+  `src/server/lib/cpcbAirQuality.ts`.
+  ⚠️ **UNSET ⇒ AQI questions fall through to web search, and NEVER back to the old source** — a
+  silent fallback would re-open the exposure with nothing on any screen saying so.
+  ⚠️ **IT IS ON ITS OWN GATE, NOT `LIVE_WEATHER_SOURCE`**, deliberately: that switch exists to pause
+  ONE provider's licence exposure, and pausing the problem must not also pause the fix. So
+  `LIVE_WEATHER_SOURCE=off` now stops the WEATHER only — AQI keeps working.
+  🔴 **`LIVE_WEATHER_SOURCE` NOW DEFAULTS TO *OFF*, AND IT IS AN ENABLE SWITCH (admin 2026-09-20:
+  "free me jo ho woh").** Only the explicit value **`on`** starts the restricted weather source;
+  unset, blank or mistyped leaves it silent — the safe direction for a legal exposure, and the
+  mirror image of the `AGENTV3_FEATURE_HEAL_PCT` trap where a bad value silently meant "everyone".
+  So a fresh deployment now runs **zero** restricted sources, where it used to run one.
+  ⚠️ **Nothing broke:** weather questions fall through to web search, which already answers them.
+  The honest fix is still a purchase — Open-Meteo's commercial plan (**$29/month**, verified on their
+  pricing page 2026-09-20) — and the day it is bought, **`LIVE_WEATHER_SOURCE=on`** turns it back on
+  with no deploy.
+  ⚠️ **A free replacement was looked for and NOT found, which is why the switch is the answer.**
+  MET Norway's forecast data is free and commercially licensed (CC BY 4.0) — but it needs latitude
+  and longitude, and every free GEOCODER checked is either the same restricted provider or
+  (Nominatim) explicitly discourages business use. Swapping one grey source for another grey source
+  is not a fix. **The panel's row was
+  reworded in the same change** so it no longer claims to power AQI — it is the one screen the admin
+  judges a legal exposure from, and overstating it there would be its own kind of dishonesty. (`BRAVE_API_KEY` is now SET —
   see the "Brave Search — the chat's grounding source" entry above, which is the canonical record.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),

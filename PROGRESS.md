@@ -74128,6 +74128,108 @@ UI calls it**, so the next session to find it does not read an unused export as 
 
 ---
 
+## 2026-09-20 — AQI moves to CPCB: half the licence exposure closed, and the answer got better
+
+**Admin, after reading the Licence Exposure panel and being shown the options:** *"use karo!!"* —
+approving the data.gov.in / CPCB route for air quality. They also reported the App Store's real
+size: **8 instant apps and 3 APKs.**
+
+### The exposure, and the half that is now closed
+
+Weather and AQI both ran on one provider's **no-key tier**, whose terms reserve it for
+**non-commercial** use while NavBharatAI charges money. AQI now comes from the **Central Pollution
+Control Board's** real-time feed on `data.gov.in`, published under the **Government Open Data
+License – India**, which states in terms that the data may be used *"for all lawful commercial and
+non-commercial purposes"*.
+
+🔑 **It is also a better answer, which is why it is not merely a licence swap.** The old source
+returned the **US AQI** — a different country's scale and method. An Indian user compares what we
+say against CPCB's number on the news and on their phone. We were quoting a scale nobody around
+them uses.
+
+### What shipped
+
+- **`src/server/lib/cpcbAirQuality.ts`** (new). CPCB's own method, not an approximation:
+  the index is the **maximum sub-index**, it needs **three pollutants with at least one
+  particulate**, and `"NA"` is a missing reading rather than zero (zero is *excellent* air). A
+  city's figure is the **worst real station, named**, never an average across stations — averaging
+  would produce a number that appears on no official page, which is the fabricated-figure this
+  codebase forbids everywhere else.
+- **Attribution is a licence condition**, not a courtesy: GODL-India requires it, so the block
+  credits CPCB by name. That does not conflict with the White-Label Law — that law hides which **AI
+  vendor** did the work; CPCB is a government data source we are obliged to credit.
+- 🔒 **Its own gate, not `LIVE_WEATHER_SOURCE`.** That switch exists to pause one provider's licence
+  exposure. Leaving AQI on it would mean **pausing the problem also pauses the fix**. So the weather
+  switch now stops the weather only.
+- 🔒 **No key ⇒ nothing, never a fallback to the old feed.** A fallback would silently re-open the
+  exposure this change closes, with nothing on any screen saying so.
+- No geocoding on this path any more — CPCB is keyed by city name, so one call to the restricted
+  host is simply gone rather than moved.
+
+### Honesty fixed in the same change (rule 5)
+
+- **The Licence Exposure panel's own row** said *"Weather and AQI"*. That row is the one place the
+  admin learns what a legal exposure covers — leaving it would have **overstated the risk on the
+  exact screen used to judge it**, and made the fixed half invisible. It now reads *"Live weather"*,
+  names the date AQI left, and carries the verified price of the real fix.
+- **`AppKnowledgeBase`** claimed AQI needed *"no key, no configuration"*, which this makes false.
+  Rewritten to say where the number comes from and what happens when the key is unset.
+
+### Two bugs my own tests caught before CI did
+
+1. **`cpcbCityQuery('NEW DELHI')` returned `'NEW DELHI'`.** The title-caser only lifted a lowercase
+   initial and never lowered the rest, so an all-caps place went verbatim into an **exact-match**
+   filter — zero rows, indistinguishable from "no station there".
+2. An assertion expected the city filter percent-encoded (`filters%5Bcity%5D`). data.gov.in
+   documents **literal** brackets; inventing an encoding against a parser this environment cannot
+   reach would have been a guess. The **test** was corrected to the documented form, not the code.
+
+### Tests
+
+`src/server/lib/cpcbAirQuality.test.ts` — 23 cases. Every CPCB rule is asserted against records
+shaped like the real feed, because **an AQI computed the wrong way still looks like an AQI** and no
+one reading a chat reply could tell. `licenceExposure.test.ts` gained the source-level guards.
+
+⚠️ **One assertion in `licenceExposure.test.ts` was replaced rather than updated**, and it was made
+**stronger**: it used to pin the dispatcher's ternary shape (`? [weatherBlock, aqiBlock, …]`) to
+prove the switch removed *both* restricted callers. That fact changed — there is only one now. It
+now asserts the restricted **host** is unreachable from the AQI path at all, which is what actually
+matters and which a future edit re-adding the old call would break even with the list looking right.
+
+### 🔴 STILL OPEN — the row is still RUNNING, and this must not be read as "done"
+
+- ~~**Weather** is still on the restricted tier.~~ ✅ **CLOSED LATER THE SAME DAY** (admin: *"free me
+  jo ho woh"*). `LIVE_WEATHER_SOURCE` now defaults to **OFF** and is an **enable** switch: only the
+  explicit `on` starts the restricted source, so unset/blank/mistyped leaves it silent. A fresh
+  deployment therefore runs **zero** restricted sources, where it used to run one. Nothing broke —
+  weather questions fall through to web search, which already answers them. The honest fix is still
+  a purchase (**$29/month**); the day it is bought, `LIVE_WEATHER_SOURCE=on` restores it with no
+  deploy.
+  ⚠️ **A free REPLACEMENT was looked for and not found, and that is why the switch is the answer
+  rather than a new provider.** MET Norway's forecast data is free and commercially licensed
+  (CC BY 4.0) — but it needs lat/lon, and every free **geocoder** checked is either the same
+  restricted provider or (Nominatim) explicitly *"discourages serious business usage"*. Trading one
+  grey source for another is not a fix.
+  🔒 Two related defects were fixed with it: `exposureState` **re-derived** the off-rule with its own
+  string comparison instead of asking `liveWeatherSourceEnabled` (two implementations of one rule —
+  exactly how a panel comes to say "off" while calls go out), and the admin card **built the switch
+  sentence itself**, always printing `set <KEY>=off`, which went false the moment the default
+  flipped. The sentence now lives on the row (`switchHint`).
+- **VirusTotal cannot be bought at this stage.** Premium is roughly **$20,000–$50,000/year**;
+  MetaDefender starts near **$500–1,000/month**. The realistic replacement is **ClamAV** run as a
+  separate process (never linked, so GPLv2 is not an issue), whose honest cost is far weaker Android
+  detection. What makes that defensible rather than a downgrade: **no app can reach `approved`
+  without the admin personally approving it** — the scan was always a pre-filter in front of a human,
+  never the only gate. Verified today: the scan sits in `ingestApkSubmission`, the **APK** path only,
+  so the 8 instant web apps do not depend on it at all. **Not started — the admin's decision.**
+
+### Honest limit
+
+`data.gov.in` is blocked by this environment's egress proxy, so **no call was made against the live
+endpoint**. The resource id, filters and field names come from its published documentation, and
+`subIndexOf` deliberately accepts **both** column names the resource has used (`avg_value` and
+`pollutant_avg`) because which is live today could not be verified here. **The first real question
+in the chat is this feature's first real evidence** — watch for an AQI answer appearing at all.
 ## 2026-09-20 — 🔴 THE FAILURE TABLE'S BIGGEST ROW WAS NOT A FAILURE CLASS, IT WAS A BLIND SPOT
 
 **The report (admin, with a screenshot of the admin panel's *BY FAILURE REASON — ACROSS EVERY APP

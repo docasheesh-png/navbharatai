@@ -109,7 +109,35 @@ export function decideGreenGuard(input: {
    * Optional and additive: without it every wording is exactly as before.
    */
   turnStartedAt?: number;
+  /**
+   * How many files THIS TURN wrote. REQUIRED, and required for exactly the reason `provenBroken` is.
+   *
+   * 🔴 `previewGreen === false` HAS THREE MEANINGS, AND THIS GUARD READ TWO (autopsy 586295b7,
+   * 2026-09-20). `provenBroken` already split *"we looked and it is broken"* from *"we could not
+   * look"*. Nobody split the third: **there was nothing to look at.** A build the user stopped after
+   * ten seconds — no model call, not one file written — took the "could not look" branch and told the
+   * user, in their own chat:
+   *
+   *     "⚠️ I made your change, but I could not open your app to confirm it works this time.
+   *      Your change is saved…"
+   *
+   * No change was made. Nothing was saved. The sentence is kind, careful, and false — and the same
+   * report's own summary said the opposite two lines away ("Nothing had been written yet").
+   *
+   * A turn that wrote nothing has no changes to keep, to lose, or to verify, so this guard has
+   * nothing to say about it. Required rather than optional so a future call site cannot quietly
+   * re-acquire the old behaviour by forgetting it — the typechecker asks the question instead.
+   */
+  filesWrittenThisTurn: number;
 }): GreenDecision {
+  // 🔴 AN ABSENT COUNT IS NOT A COUNT OF ZERO — and the first draft of this very fix got that wrong,
+  // which is the same mistake the fix exists to remove. A caller that does not state the number has
+  // told us nothing, so the WEAKER, older wording stands: claiming "nothing was written" on silence
+  // would be a stronger assertion than the sentence being replaced. Only a stated zero earns it.
+  // (The field is REQUIRED at the type level; this guards the JS callers TypeScript cannot reach.)
+  const wroteNothing = typeof input.filesWrittenThisTurn === 'number'
+    && Number.isFinite(input.filesWrittenThisTurn)
+    && input.filesWrittenThisTurn <= 0;
   const afterGreen = input.after?.green === true;
   const beforeGreen = input.before?.green === true;
   if (afterGreen) {
@@ -135,7 +163,11 @@ export function decideGreenGuard(input: {
       // dev server that stopped, a snapshot taken before the app painted). The good state stays saved.
       return {
         action: 'none',
-        reason: 'This turn\u2019s changes were kept: the app could not be opened to check them, and an unverified turn is never undone. The last known good version is still saved and untouched.',
+        reason: wroteNothing
+          // Nothing was written, so "your changes were kept" would be a claim about changes that do
+          // not exist — the exact sentence autopsy 586295b7 caught being told to a user.
+          ? 'Nothing was written this turn, so there was nothing to keep or undo. The last known good version is still saved and untouched.'
+          : 'This turn\u2019s changes were kept: the app could not be opened to check them, and an unverified turn is never undone. The last known good version is still saved and untouched.',
       };
     }
     const fromThisBuild = typeof input.turnStartedAt === 'number' && typeof input.before?.at === 'number' && input.before.at >= input.turnStartedAt;
@@ -241,6 +273,34 @@ export function greenGuardMessage(plan: RestorePlan): string {
  * change is in place, and we could not confirm it — and it names the safety net that still exists, so
  * "unverified" does not read as "at risk". No vendor or model name (the white-label law). PURE.
  */
+/**
+ * Should the user be told "I made your change, but I could not check it"?
+ *
+ * 🔒 THE THIRD MEANING, AS A FUNCTION — so the route cannot keep a private version of this rule.
+ * Before autopsy 586295b7 the route carried the whole condition inline as
+ * `} else if (hasSnapshot && !previewGreen) {`, which asks two of the three questions that matter
+ * and never the one that makes the sentence true: **did this turn write anything at all?**
+ *
+ * Saying nothing is the right outcome for a turn that produced nothing. The user already knows why —
+ * they stopped it, or the build failed and said so in its own words. Adding "I made your change" on
+ * top is not extra care; it is the engine claiming work it did not do.
+ *
+ * PURE.
+ */
+export function greenGuardShouldTellUnverified(input: {
+  hasSnapshot: boolean;
+  previewGreen: boolean;
+  filesWrittenThisTurn: number;
+}): boolean {
+  if (!input.hasSnapshot) return false;
+  if (input.previewGreen) return false;
+  // Same rule as `wroteNothing` above: silence is not a zero. A caller that did not state the count
+  // gets the pre-2026-09-20 behaviour, never a new silence justified by an absent measurement.
+  const n = input.filesWrittenThisTurn;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return true;
+  return n > 0;
+}
+
 export function greenGuardUnverifiedMessage(): string {
   return '\u26a0\ufe0f I made your change, but I could not open your app to confirm it works this time. Your change is saved, and so is the last version that ran correctly \u2014 nothing was lost. Ask me to open the preview and I\u2019ll check it.';
 }

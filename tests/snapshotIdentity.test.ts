@@ -47,7 +47,14 @@ describe('snapshotConfirmation — the copy is promoted only on a proven match',
   it('is stale when a later pass changed a file', () => {
     const v = snapshotConfirmation({ taken: { url, filesHash: 'aaaa' }, persistedHash: 'bbbb' });
     expect(v.action).toBe('stale');
-    expect(v.reason).toMatch(/changed a file/);
+    // ⚠️ THE WORDING MOVED ON 2026-09-20, THE VERDICT DID NOT (autopsy f97eb0ec). It used to assert
+    // "changed a file" — a claim the function could not actually support, because the two hashes are
+    // taken from different places and a file-SET mismatch looks identical to a late write. The
+    // sentence now says the copy does not match and, when it can, names which side holds what.
+    // Assert the VERDICT and the promise, not the prose.
+    expect(v.action).toBe('stale');
+    expect(v.reason).toMatch(/does not match/);
+    expect(v.reason).toMatch(/fallback for an expired machine/);
   });
 
   it('🔒 "we could not read the source" is not a match — it is stale', () => {
@@ -80,9 +87,20 @@ describe('wiring — the build records the identity, the final save confirms it,
 
   it('the copy is taken with the hash of the source that produced it, read from the same tree the build consumed', () => {
     const at = route.indexOf("code: 'PREVIEW_SNAPSHOT_SAVED'");
-    const block = route.slice(at - 1500, at);
-    expect(block).toContain("withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')");
-    expect(block).toContain('workspaceContentHash(c.files)');
+    // ⚠️ A FIXED WINDOW IS THE BRITTLE PART, not the facts. At 1500 chars this failed on 2026-09-20
+    // because the change being made ADDED COMMENTS above the line it was looking for — a test that
+    // fails when the code around it is explained better is measuring the wrong thing.
+    const block = route.slice(Math.max(0, at - 2600), at);
+    // Asserted as the FACTS it is about — the same tree, bounded, and hashed — rather than as one
+    // string, which a legitimate refactor moves (it did, on 2026-09-20).
+    expect(block).toContain('collectWorkspaceFiles(actuator, workspaceId)');
+    expect(block).toContain("'snapshot-identity'");
+    // The hash is taken over the COLLECTED tree. It used to read `workspaceContentHash(c.files)` in
+    // one expression; the collect and the hash were split on 2026-09-20 so the PATHS could travel
+    // with the copy as well (see filePaths). The fact asserted is unchanged: the thing hashed is what
+    // was just collected, and nothing else.
+    expect(block).toMatch(/const source = await withTimeout\(collectWorkspaceFiles/);
+    expect(block).toMatch(/workspaceContentHash\(source\)/);
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at, filesHash)');
   });
 
@@ -96,7 +114,11 @@ describe('wiring — the build records the identity, the final save confirms it,
     expect(route).toContain('let persisted: Record<string, string> = toSave;');
     const restore = route.indexOf('await saveWorkspaceFiles(workspaceId, snapshot);');
     expect(route.slice(restore, restore + 120)).toContain('persisted = snapshot;');
-    expect(route).toContain('snapshotConfirmation({ taken: snapshotTaken, persistedHash: workspaceContentHash(persisted) })');
+    // The claim is that the confirmation compares what was PERSISTED — not the exact call layout.
+    const call = route.slice(route.indexOf('snapshotConfirmation({'));
+    const args = call.slice(0, call.indexOf('});'));
+    expect(args).toContain('taken: snapshotTaken');
+    expect(args).toContain('persistedHash: workspaceContentHash(persisted)');
   });
 
   it('the restamp waits for the save it must outdate', () => {

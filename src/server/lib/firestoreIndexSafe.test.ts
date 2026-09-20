@@ -40,6 +40,27 @@ function tsFiles(dir: string, out: string[] = []): string[] {
 const CHAIN = /\.where\(\s*['"]([\w.]+)['"]\s*,\s*['"]==['"][^)]*\)\s*\n?\s*\.orderBy\(\s*['"]([\w.]+)['"]/g;
 
 /**
+ * The SECOND shape of the same class — found in production, 2026-09-20.
+ *
+ * `.orderBy(documentId(), 'desc')` filters on nothing and sorts on one field, so it looks like the
+ * legal shape the scan above deliberately lets through. It is not. Firestore's automatic indexes
+ * cover `__name__` ASCENDING; ordering by it DESCENDING as the only sort needs a composite index,
+ * and this project cannot deploy one. Two queries in `DiagnosticsStore` carried it — the second
+ * copied a comment from the first asserting that it needed no index — and `DIAGNOSTICS_READ_FAILED`
+ * repeated in the admin's server log for days while the whole-session build report silently fell
+ * back to a single turn.
+ *
+ * The guard above could not see it, because it looks for a `where`. That is the lesson worth
+ * keeping: this class is "a query that needs an index nobody can deploy", and it has more than one
+ * shape. A new shape belongs here, beside the first, not in a test of its own.
+ *
+ * A descending `__name__` AFTER another `orderBy` would be legal — and is also redundant, since
+ * Firestore appends `__name__` in the leading direction by itself. Nothing in this repo writes it,
+ * so the scan stays simple and flags the sort wherever it appears.
+ */
+const NAME_DESC = /\.orderBy\(\s*(?:[\w.]*FieldPath\.)?documentId\(\)\s*,\s*['"]desc['"]|\.orderBy\(\s*['"]__name__['"]\s*,\s*['"]desc['"]/g;
+
+/**
  * Strip comments before scanning.
  *
  * Every file that fixed this bug DESCRIBES the broken shape in a comment so the next reader knows
@@ -68,6 +89,30 @@ describe('composite-index queries cannot be reintroduced', () => {
       `instead — it filters in Firestore and sorts in memory, and takes no orderBy parameter.\n\n` +
       offenders.join('\n'),
     ).toEqual([]);
+  });
+
+  it('no server file sorts by document id DESCENDING — the shape that broke the build history', () => {
+    const offenders: string[] = [];
+    for (const file of tsFiles(SERVER_ROOT)) {
+      const src = codeOnly(readFileSync(file, 'utf8'));
+      for (const _ of src.matchAll(NAME_DESC)) {
+        offenders.push(file.replace(SERVER_ROOT, 'src/server'));
+      }
+    }
+    expect(
+      offenders,
+      `A descending \`__name__\` sort is NOT served by Firestore's automatic indexes — it needs a \n` +
+      `composite index this project has never been able to deploy, so the query THROWS every time. \n` +
+      `Read the refs in the default ascending order and pick the newest in memory instead (see \n` +
+      `newestHistoryRefs in src/server/AgentV3/DiagnosticsStore.ts).\n\n` +
+      offenders.join('\n'),
+    ).toEqual([]);
+  });
+
+  it('an ASCENDING document-id sort is not flagged — it is the built-in order', () => {
+    // Guards the guard, exactly as the case below it does for the first shape.
+    const legal = `col.where('status','==',s).orderBy(admin.firestore.FieldPath.documentId()).limit(n)`;
+    expect([...legal.matchAll(NAME_DESC)]).toEqual([]);
   });
 
   it('an indexes file may not exist unless firebase.json actually deploys it', () => {

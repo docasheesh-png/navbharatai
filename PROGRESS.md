@@ -73993,3 +73993,131 @@ than from a screenshot at every breakpoint.
 
 ⚠️ **This is a FRONTEND change**, so under bundled mode it reaches installed Android users only in a
 fresh `.aab` — not on the next merge.
+
+---
+
+## 2026-09-20 — 🔴 THE FAILURE TABLE'S BIGGEST ROW WAS NOT A FAILURE CLASS, IT WAS A BLIND SPOT
+
+**The report (admin, with a screenshot of the admin panel's *BY FAILURE REASON — ACROSS EVERY APP
+TYPE*):** *"yeh mail failure hai. navbharatai me. inko kaise kaise fix kar sakte hai! kya kya kar
+sakte ho aap jisse yeh failure ab wapas na aye?"*
+
+```
+Other (not yet in the known pattern list)   42  (29.2% of failures)   ← the biggest row, by 2×
+The release gate found evidence …           25  (17.4%)
+The run ended before it finished            16  (11.1%)
+… 11 more rows, 144 failures in all
+```
+
+**THREE ROOT CAUSES, and none of them is a build bug. All three are the panel failing to say what
+happened — which is why two fixes shipped straight at that top row in the preceding 72 hours could
+neither be judged nor credited.**
+
+### 1 · The top row told every reader to do the wrong work
+
+`classifyFailureReason` returns a mapped reason for EVERY `OUTCOME_*` code it knows, and
+`tests/failureNaming.test.ts` fails CI when a code exists without a label. **So a build reaching the
+end of that function with no code at all did not record why it ended.** That is a hole in the
+engine's record — not a gap in our vocabulary — and it was wearing the label *"not yet in the known
+pattern list"*, i.e. *go and write more regexes*. No regex that could ever be written would have
+helped, because those records say nothing to match.
+
+Both fixes aimed at this row were attacking exactly that hole — the empty-build verdict flip
+(2026-09-17, *"the ONLY verdict flip in the route that recorded none"*) and `abortOutcome.ts`
+(2026-09-18, seven abort causes that ended a build with no outcome). The panel could not show that
+either had worked, so the admin saw the same 29.2% two days later and reasonably asked again.
+
+**Fixed at the class:** `NO_OUTCOME_REASON` — *"The build never recorded WHY it ended (no outcome on
+the record)"* — split from `OTHER_REASON` on the MACHINE FACT (`return code ? OTHER_REASON :
+NO_OUTCOME_REASON`), never on a reading. `other` now means only what its label says: the engine said
+why and we have no word for it yet. Two rows, two different pieces of work.
+
+⚠️ **`no-cause-recorded` is deliberately still its own third bucket** — that one is the engine SAYING
+in prose that it does not know (*"no specific error was captured"*). The record being silent and the
+record admitting ignorance are different facts.
+
+### 2 · A number no fix could ever move
+
+Every row is a LIFETIME tally over the latest build of every project. A failure from three weeks ago
+counts as loudly as one from this morning and goes on counting for ever — so the panel is
+structurally incapable of showing that anything was fixed. **A verdict no evidence can change is the
+shape this repo keeps paying for** (`RELEASE_GATE` saying the typecheck did not run after two clean
+runs; `CLAIM_UNSUPPORTED` two seconds before `2 changed, 2 new`).
+
+**Fixed:** every `ReasonRow` carries `recentCount` — how many of its failures happened in the last
+7 days — and the row renders `42 (29.2% of failures) · none in 7d` in green, or `· 3 in last 7d` in
+amber. **A large total with none this week is a fixed bug, and nothing on that panel could previously
+have shown that.**
+
+🔒 **`null`, never `0`, when no window was given** — *"not measured"* and *"it stopped happening"* are
+the two answers this column exists to tell apart. An UNDATED record counts as neither recent nor old:
+counting it as recent would invent improvement, counting it as old would invent the opposite.
+🔒 The clock lives in the ROUTE (`sinceMsFor('7d')`, the same 7 days the All-Builds browser means);
+`buildFailureCategory.ts` stays pure and takes the boundary as data.
+🔒 It changes NOTHING about who is counted as failed — `verdictSplit`, `failed`, `ok` and the rate are
+asserted identical with and without a window.
+
+### 3 · "The run ended before it finished" (11.1%) was three endings wearing one label
+
+`OUTCOME_STOPPED` carried the wall-clock watchdog (a real timeout: the build ran out of MINUTES), a
+platform-composed stop, AND `abortCauseOf` returning `'unknown'` — an abort raised somewhere that
+never went through `abortBuild` at all. The third is a hole of the same shape as (1) and cannot be
+found while it is averaged in with a budget that was simply spent.
+
+**Fixed:** `OUTCOME_ABORTED_UNKNOWN`, its own code — because the classifier reads the CODE, so a
+distinction living only in prose is one no panel will ever show. Named in BOTH maps
+(`OUTCOME_REASONS` and `OUTCOME_TO_CATEGORY`), or an unmapped code falls straight back through to the
+text and the split buys nothing.
+
+🔎 **THE SIBLING THE EXISTING SUITE CAUGHT (rule 3, and it is the good kind of catch):**
+`PROCESS_ONLY_CODES` in `BuildDiagnostics.ts` excluded `OUTCOME_STOPPED` from `isAppFinding`, because
+*how a build ended is not a finding about the app*. Splitting the code out without listing the new
+one would have turned *"we do not know why the run ended"* into a build-breaking blocker counted
+against the user's app — the provider-error-as-app-blocker class (autopsy `4efab9d7`) through a new
+door. `tests/everyAbortCauseRecordsAnOutcome.test.ts` failed on it before it could reach `main`.
+
+### What this does NOT claim
+
+**Not one of these three fixes makes a single build succeed.** They make the failures legible, which
+is the precondition for fixing them and the reason the last two attempts could not be judged. The
+remaining rows are real engine work and are named honestly in the reply to the admin: the release
+gate (25), the reviewer (10), provider timeouts (9), tool calls (9). **The 42 cannot be worked on
+until the next reading of this panel says how many of them are still happening** — which is exactly
+what `recentCount` now answers, and why it shipped first.
+
+**Tests:** `tests/aFailureNobodyCanName.test.ts` — 15 cases, each **proven by reversion** (restoring
+`return OTHER_REASON`, making `recentCount` a bare number, and putting the untagged abort back on
+`OUTCOME_STOPPED` each fail it). Four existing assertions were repointed to their INTENT and none was
+weakened: "unnameable" is still asserted, now precisely.
+
+### 🔎 AND THE SAME ROOT CAUSE IS PROBABLY WEARING OTHER ROWS' NAMES — recorded, deliberately NOT acted on
+
+Reading the classifier against `deriveRootCause`'s fallback order turns up a consequence worth
+writing down before anyone re-derives it from the next screenshot.
+
+When a build records **no** `OUTCOME_*` code, `deriveRootCause` falls back to *"the most severe
+unresolved issue"* — whatever warning happened to be loudest. `abortOutcome.ts`'s own header names
+what that usually is: *"a provider fallback, a benched rung, a `read_file` on a path not yet
+written"*. The classifier then reads THAT sentence. If it matches nothing it becomes
+`no-outcome-recorded` (row 1 above) — **but if it happens to match a grounded pattern it is given
+that pattern's name instead**, as a fact.
+
+So on the admin's table, an unknown share of:
+
+```
+AI provider timed out / ran out of budget     9  (6.3%)
+A tool call failed                            9  (6.3%)
+Every AI provider failed                      2  (1.4%)
+```
+
+may be **the same bug as row 1**, wearing a more confident label — a recovered tool error that the
+build moved past, named as the reason the build ended. "No code" means the sentence is a fallback,
+and a fallback that matches a regex is still a fallback.
+
+⚠️ **This is NOT being fixed now, and the reason is this file's own rule.** Downgrading every
+pattern match on an uncoded record would throw away real information (a legacy record's `rootCause`
+often genuinely IS its cause), and nothing here can say how big the share is. `recentCount` is the
+instrument that settles it: **if `no-outcome-recorded` reads "none in 7d" on the next reading, this
+whole concern is historical** and the remaining provider/tool rows are real. If it does not, this is
+where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
+the protection until the measurement has produced a reading.*

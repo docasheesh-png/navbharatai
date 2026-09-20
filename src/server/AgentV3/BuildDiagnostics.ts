@@ -77,7 +77,11 @@ const PROCESS_ONLY_CODES = new Set([
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
   // The release gate is RED on `buildOk:false` regardless, so this changes no verdict — only the
   // "N build-breaking blocker(s)" count a stopped build used to print about itself.
-  'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT',
+  // ⚠️ `OUTCOME_ABORTED_UNKNOWN` was split OUT of `OUTCOME_STOPPED` on 2026-09-20 (an abort whose
+  // signal carried no cause, i.e. one that never went through `abortBuild`). It must be listed here
+  // too or the split silently turns "we do not know why the run ended" into a blocker counted
+  // against the user's app — `tests/everyAbortCauseRecordsAnOutcome.test.ts` caught exactly that.
+  'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT', 'OUTCOME_ABORTED_UNKNOWN',
 ]);
 
 /**

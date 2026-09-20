@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../src/server/AgentV3/abortOutcome';
 import { abortSummary, type AbortCause } from '../src/server/AgentV3/buildAbortCause';
-import { classifyFailureReason, OUTCOME_REASONS, OTHER_REASON } from '../src/lib/failureReason';
+import { classifyFailureReason, OUTCOME_REASONS, OTHER_REASON, NO_OUTCOME_REASON } from '../src/lib/failureReason';
 import { OUTCOME_TO_CATEGORY } from '../src/server/lib/BuildRetrospectiveEngine';
 import { categorizeBuildFailures, isUserStoppedBuild } from '../src/server/lib/buildFailureCategory';
 import { deriveRootCause, stoppedByUser, isAppFinding } from '../src/server/AgentV3/BuildDiagnostics';
@@ -37,10 +37,20 @@ const issue = (code: string, message: string, severity: 'info' | 'warning' | 'er
   ({ ts: 1, phase: 'build', severity, code, message, autoResolved }) as never;
 
 describe('THE BUG, measured: an aborted build with no outcome is unnameable', () => {
-  it('every abort sentence, on its own, classifies as "other"', () => {
+  // ⚠️ THE BUCKET WAS RENAMED ON 2026-09-20, AND THAT IS THIS TEST'S POINT SHARPENED, NOT SOFTENED.
+  // A reason with no `OUTCOME_*` code is now `no-outcome-recorded` — *the build never recorded why it
+  // ended* — instead of `other` — *not yet in the known pattern list*. Both mean "unnameable"; only
+  // the second one told the reader to go and write a regex, which for these sentences could never
+  // have worked. Asserting the precise key keeps the measurement exact: if either the classifier or
+  // the abort funnel regressed, this still fails.
+  const UNNAMEABLE = NO_OUTCOME_REASON.key;
+
+  it('every abort sentence, on its own, is unnameable — the engine recorded no cause', () => {
     for (const cause of ALL_CAUSES) for (const saved of [true, false]) {
       const text = abortSummary(cause, { minutes: 30, builtSomething: saved });
-      expect(classifyFailureReason(text).key, `${cause} saved=${saved}`).toBe(OTHER_REASON.key);
+      expect(classifyFailureReason(text).key, `${cause} saved=${saved}`).toBe(UNNAMEABLE);
+      // …and it is NOT the vocabulary bucket: no pattern could fix a record that says nothing.
+      expect(classifyFailureReason(text).key, `${cause} saved=${saved}`).not.toBe(OTHER_REASON.key);
     }
   });
 
@@ -51,7 +61,7 @@ describe('THE BUG, measured: an aborted build with no outcome is unnameable', ()
       ok: false,
       issues: [issue('PROVIDER_FALLBACK', 'Provider GLM failed — falling back to the next provider', 'warning')],
     });
-    expect(classifyFailureReason(rc).key).toBe(OTHER_REASON.key);
+    expect(classifyFailureReason(rc).key).toBe(NO_OUTCOME_REASON.key);
   });
 });
 
@@ -95,10 +105,15 @@ describe('the fix: every cause maps to exactly one outcome, exhaustively', () =>
     expect(stoppedByUser([issue(o!.code, o!.message, o!.severity)])).toBe(false);
   });
 
-  it('an abort with NO cause is honestly "stopped", never attributed', () => {
+  it('an abort with NO cause is honestly unattributed — and since 2026-09-20 has its OWN code', () => {
+    // The intent is unchanged: never attributed to anybody. What changed is that it no longer shares
+    // `OUTCOME_STOPPED` with the wall-clock watchdog — a build that ran out of its 30 minutes and an
+    // abort raised by something that never reached the funnel are different bugs, and one label for
+    // both made the second invisible on the admin's failure table.
     const o = abortOutcomeFor('unknown');
-    expect(o?.code).toBe('OUTCOME_STOPPED');
+    expect(o?.code).toBe('OUTCOME_ABORTED_UNKNOWN');
     expect(o?.message).toMatch(/no cause recorded/i);
+    expect(o?.message).not.toMatch(/by the user|you stopped/i);
   });
 
   it('no message names a vendor — the code is admin-only but the message reaches the report', () => {

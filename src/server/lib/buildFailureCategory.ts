@@ -56,6 +56,11 @@ export interface CategorizableBuild {
   appSeenRunning?: boolean | null;
   /** Did the USER stop this build? Read off the timeline by the store (`stoppedByUser`), never guessed. */
   userStopped?: boolean | null;
+  /**
+   * When this build's report was written (`AllDiagnosticsEntry.savedAt`). Carried ONLY so a reason row
+   * can say how many of its failures are RECENT — see `recentCount`. Never used to judge or filter.
+   */
+  savedAt?: number | null;
 }
 
 /**
@@ -86,6 +91,19 @@ export interface ReasonRow {
   count: number;
   /** Share of ALL FAILED builds this reason accounts for, 0–100, 1 dp. */
   sharePct: number;
+  /**
+   * 🔴 HOW MANY OF THESE HAPPENED RECENTLY — the number that says whether a fix WORKED.
+   *
+   * Every row of this panel is a LIFETIME tally over the latest build of every project, so a failure
+   * from three weeks ago counts exactly as loudly as one from this morning and goes on counting for
+   * ever. Two fixes were shipped straight at the panel's top row (the empty-build outcome on
+   * 2026-09-17, the seven unrecorded aborts on 2026-09-18) and NEITHER could move a number built
+   * that way — the admin looked at the same 29.2% two days later and reasonably asked how to make it
+   * stop. A verdict that no amount of evidence can change is the shape this repo keeps paying for.
+   *
+   * `null` when the caller gave no window — never 0, which would read as "it stopped happening".
+   */
+  recentCount: number | null;
   examples: ReasonExample[];
 }
 
@@ -173,6 +191,21 @@ export interface FailureCategoryReport {
   byReason: ReasonRow[];
   /** The three populations inside the headline rate — see `VerdictSplit`. */
   verdictSplit: VerdictSplit;
+  /**
+   * The oldest moment a failure counts as RECENT, echoed so the panel can state the window it is
+   * showing rather than implying one. `null` when the caller gave none — and then every row's
+   * `recentCount` is `null` too, so nothing can read as "zero recently".
+   */
+  recentSinceMs: number | null;
+}
+
+/** What a caller must supply for the recency column. Data, never a clock — this module stays pure. */
+export interface CategorizeOptions {
+  /**
+   * The oldest `savedAt` that counts as recent. The ROUTE computes it (it is the one place allowed a
+   * clock), so this module can be called twice with the same input and give the same answer for ever.
+   */
+  recentSinceMs?: number | null;
 }
 
 const MAX_EXAMPLES_PER_REASON = 3;
@@ -186,13 +219,27 @@ function ratePct(part: number, whole: number): number | null {
   return whole > 0 ? round1((part / whole) * 100) : null;
 }
 
+/**
+ * Is this build's report recent enough to count toward `recentCount`?
+ *
+ * ⚠️ A row with NO `savedAt` is not recent and is not old — it is unknown, and it is counted as
+ * neither. Treating an undated record as recent would invent improvement; treating it as old would
+ * invent the opposite. Only a real timestamp moves this number.
+ */
+function isRecent(b: CategorizableBuild, sinceMs: number | null): boolean {
+  if (sinceMs === null) return false;
+  const t = Number(b.savedAt);
+  return Number.isFinite(t) && t > 0 && t >= sinceMs;
+}
+
 /** Tally reasons across a set of already-failed builds, sorted by count desc. Pure, internal. */
-function tallyReasons(failedBuilds: readonly CategorizableBuild[]): ReasonRow[] {
-  const byKey = new Map<string, { label: string; count: number; examples: ReasonExample[] }>();
+function tallyReasons(failedBuilds: readonly CategorizableBuild[], recentSinceMs: number | null): ReasonRow[] {
+  const byKey = new Map<string, { label: string; count: number; recent: number; examples: ReasonExample[] }>();
   for (const b of failedBuilds) {
     const { key, label } = classifyFailureReason(b.rootCause, b.outcomeCode, b.outcomeSeverity);
-    const entry = byKey.get(key) ?? { label, count: 0, examples: [] };
+    const entry = byKey.get(key) ?? { label, count: 0, recent: 0, examples: [] };
     entry.count += 1;
+    if (isRecent(b, recentSinceMs)) entry.recent += 1;
     if (entry.examples.length < MAX_EXAMPLES_PER_REASON && b.rootCause) {
       const text = String(b.rootCause).trim();
       entry.examples.push({
@@ -204,7 +251,14 @@ function tallyReasons(failedBuilds: readonly CategorizableBuild[]): ReasonRow[] 
   }
   const total = failedBuilds.length;
   return [...byKey.entries()]
-    .map(([key, v]) => ({ key, label: v.label, count: v.count, sharePct: ratePct(v.count, total) ?? 0, examples: v.examples }))
+    .map(([key, v]) => ({
+      key,
+      label: v.label,
+      count: v.count,
+      sharePct: ratePct(v.count, total) ?? 0,
+      recentCount: recentSinceMs === null ? null : v.recent,
+      examples: v.examples,
+    }))
     .sort((a, b) => b.count - a.count);
 }
 
@@ -212,7 +266,13 @@ function tallyReasons(failedBuilds: readonly CategorizableBuild[]): ReasonRow[] 
  * Categorise a set of already-read build records into the two admin-panel tables: by app TYPE and by
  * failure REASON. Deterministic; never throws; empty input yields an honest all-zero report.
  */
-export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | null | undefined): FailureCategoryReport {
+export function categorizeBuildFailures(
+  builds: readonly CategorizableBuild[] | null | undefined,
+  opts: CategorizeOptions = {},
+): FailureCategoryReport {
+  const recentSinceMs = Number.isFinite(Number(opts.recentSinceMs)) && Number(opts.recentSinceMs) > 0
+    ? Number(opts.recentSinceMs)
+    : null;
   const rows = Array.isArray(builds) ? builds.filter((b) => b && typeof b.workspaceId === 'string') : [];
   // A build the user stopped is `ok:false` on the record — and it is not a failure. Set aside FIRST, so
   // it reaches neither the rate nor the reason table. Only an `ok:false` build can be one: a build the
@@ -239,7 +299,7 @@ export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | 
       failed: v.failed.length,
       succeeded: v.succeeded,
       failureRatePct: ratePct(v.failed.length, v.total),
-      topReasons: tallyReasons(v.failed).slice(0, 5),
+      topReasons: tallyReasons(v.failed, recentSinceMs).slice(0, 5),
     }))
     .sort((a, b) => b.failed - a.failed || b.total - a.total);
 
@@ -272,6 +332,7 @@ export function categorizeBuildFailures(builds: readonly CategorizableBuild[] | 
     verdictSplit,
     overallFailureRatePct: ratePct(failed.length, judged.length),
     byDomain,
-    byReason: tallyReasons(failed),
+    byReason: tallyReasons(failed, recentSinceMs),
+    recentSinceMs,
   };
 }

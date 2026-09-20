@@ -470,6 +470,28 @@ const MAX_SUMMARY = 200;
  * transcript. Every failure is returned as an honest is_error result (never a
  * fake success), so the model can see and recover from it.
  */
+/**
+ * The read ledger's entry.
+ *
+ * ⚠️ ONE TYPE, NAMED, BECAUSE TWO SESSIONS DISAGREED ABOUT IT (merged 2026-09-20). `main`'s
+ * `sharedReadLedger` / `shareReadLedger` (autopsy f97eb0ec — a SUB-AGENT's reads never reached the
+ * report) were written against `{ count; content }`, which was the ledger when they were written;
+ * this branch had already widened it with the two fields a read-loop STOP is decided by. Narrowing
+ * the signatures to match would have compiled on the parent and silently dropped `writeSeq` and
+ * `stalls` the moment a CHILD shared the map — re-opening the sub-agent blindness that half exists
+ * to close. Widening a structural type in one place and not its readers is how that returns, so the
+ * type is declared once and referenced.
+ */
+export type ReadLedgerEntry = {
+  count: number;
+  content: string;
+  /** `_writeSeq` as it stood when this path was last read — the no-progress comparison. */
+  writeSeq: number;
+  /** Consecutive reads of this path that were unchanged AND followed no write at all. */
+  stalls: number;
+};
+export type ReadLedger = Map<string, ReadLedgerEntry>;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -2152,14 +2174,7 @@ export class ToolDispatcher {
   /** How many STOP-level read-loop notices this build has issued. Monotonic; see `readLoopStops`. */
   private _readLoopStops = 0;
 
-  private _readLedger = new Map<string, {
-    count: number;
-    content: string;
-    /** `_writeSeq` as it stood when this path was last read — the no-progress comparison. */
-    writeSeq: number;
-    /** Consecutive reads of this path that were unchanged AND followed no write at all. */
-    stalls: number;
-  }>();
+  private _readLedger: ReadLedger = new Map();
 
   /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
   readLedgerCounts(): Map<string, number> {
@@ -2196,7 +2211,7 @@ export class ToolDispatcher {
    * trimmed must still be able to re-read a file. What was missing was never the suppression — it
    * was the COUNT reaching the one place a human reads.
    */
-  sharedReadLedger(): Map<string, { count: number; content: string }> {
+  sharedReadLedger(): ReadLedger {
     return this._readLedger;
   }
 
@@ -2207,7 +2222,7 @@ export class ToolDispatcher {
    * same shape as `shareWriteTypecheckStats`, which is the sibling of this bug that was fixed first
    * (#3134). Called once at spawn, before the child has read anything.
    */
-  shareReadLedger(ledger: Map<string, { count: number; content: string }>): void {
+  shareReadLedger(ledger: ReadLedger): void {
     this._readLedger = ledger;
   }
 

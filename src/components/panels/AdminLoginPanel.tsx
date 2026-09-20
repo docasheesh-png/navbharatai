@@ -9,6 +9,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Lock } from 'lucide-react';
 import { AdminDashboard } from '../AdminDashboard';
+import type { AdminFooterApi } from '../admin/adminFooterApi';
 
 export interface AdminLoginPanelProps {
   isAdmin: boolean;
@@ -25,6 +26,14 @@ export interface AdminLoginPanelProps {
   onTotpChange: (v: string) => void;
   /** True once the server has indicated MFA is required for this account. */
   mfaRequired: boolean;
+  /**
+   * Passed straight through to the dashboard (admin 2026-09-20): the shared bottom bar is showing
+   * the admin tabs, so the dashboard's own header strip stands down. Only forwarded — this panel
+   * makes no decision about it, because the boolean belongs to whoever renders the bar.
+   */
+  mobileFooter?: boolean;
+  /** Forwarded so the dashboard can publish its tab strip up to the one bottom bar. */
+  onFooterApi?: (api: AdminFooterApi | null) => void;
 }
 
 export function AdminLoginPanel({
@@ -40,6 +49,8 @@ export function AdminLoginPanel({
   adminTotp,
   onTotpChange,
   mfaRequired,
+  mobileFooter,
+  onFooterApi,
 }: AdminLoginPanelProps) {
   return (
     <div className="flex-1 bg-surface flex flex-col items-center justify-center p-6">
@@ -103,7 +114,7 @@ export function AdminLoginPanel({
           </form>
         </motion.div>
       ) : (
-        <AdminDashboard adminToken={adminToken} onLogout={onLogout} />
+        <AdminDashboard adminToken={adminToken} onLogout={onLogout} mobileFooter={mobileFooter} onFooterApi={onFooterApi} />
       )}
     </div>
   );

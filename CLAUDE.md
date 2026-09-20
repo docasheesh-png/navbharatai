@@ -2697,6 +2697,38 @@ the flag entries above promise.
   and admin-mandated; their composition was never decided. Raised to the admin — billing is not a
   session's call.
 
+- **🧭 IN THE ADMIN CONSOLE THE BOTTOM BAR *IS* THE TAB STRIP (admin 2026-09-20; no flag, no cost).**
+  *"jab admin panel open hota hai, to footer me yeh home|ai|preview|studio|more etc jo dikh rahe hai —
+  isko badalna hai!! is footer me MONITOR, USERS, ai engine, revenue … jo abhi header me hai, unko
+  rakho"*, and the same day: *"ham desktop me aise hi rahne do!"* On a phone the console had been
+  spending its ONE always-reachable row on five buttons that lead OUT of the console, while the nine
+  tabs that ARE the console sat in a scrolling strip up in the header.
+  📌 **It is the FOURTH branch of a pattern already there, not a new one.** `App.tsx` keeps ONE `<nav>`
+  and already swaps its contents per surface (Pro chat / the Mode surfaces / the default five); the
+  admin panel was falling into the third only because `isModeSurface` does not name it. The upward
+  channel existed too — `v3FooterApi` — so `src/components/admin/adminFooterApi.ts` is that same
+  channel for the console, and `select` **is** `setActiveTab`, never a second copy of the state.
+  🔒 **THE FOOTER NAMES NO TAB.** It renders `adminFooterApi.items` — the console's own `TABS` with its
+  own live badges — so a tab added to `TABS` appears in the footer by construction. A hardcoded list in
+  `App.tsx` would drift the first time a page was added and **nothing would fail**: the strip would
+  simply be missing it. `theAdminFooterIsTheTabStrip.test.ts` asserts those tab NAMES are absent from
+  `App.tsx`.
+  🔴 **THE ONE LINE THAT MADE IT POSSIBLE, AND THE ONE A LATER SESSION WILL WANT TO "TIDY":** that bar
+  carries a deliberate `touchAction: 'none'` (admin 2026-09-14 — a drag upward on it moved the whole
+  app and showed white space under it on iOS). **`none` forbids EVERY pan, horizontal included**, so a
+  swipable footer with `none` on it is a footer that cannot be swiped and the tabs past the screen edge
+  are unreachable by the exact gesture that was asked for. It is `adminStrip ? 'pan-x' : 'none'` —
+  horizontal only, so the 2026-09-14 bug stays closed everywhere. **Reversion-proven**; tightening it
+  back to `none` fails CI rather than silently killing the swipe.
+  ⚠️ **Desktop is untouched BY CONSTRUCTION, not by a second rule** — the bar is mobile-only, so
+  `adminMobileFooterActive` returns false there and the header strip stays. The strip stands down with
+  `hidden lg:flex` (AgentV3Panel's own idiom), so a wide screen inside a mobile session still has tabs
+  rather than none. Publishing `null` on unmount is what returns the bar to its ordinary items on
+  logout. The open tab is scrolled back into view on a tab CHANGE only, never on every render, so it
+  cannot fight a swipe in progress. New code, so it uses the theme tokens (`text-accent-text` /
+  `text-muted`) rather than copying the older branches' `text-indigo-400` / `#484f58` — those are
+  invisible or weak on Light, and the ratchet counts them.
+
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and
   nothing was PROVEN, because every runtime check needs a live preview and they all skip together. GREEN

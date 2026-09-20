@@ -660,6 +660,11 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       i-frames and fast-bullet collision, which a fresh implementation reliably gets wrong.',
     '    5. generate_game_vfx      — particles, audio and the ONE table that fires effect + sound +',
     '       shake together, which is what makes a hit feel like force.',
+    // The audio manager it emits can only LOAD a sound file, and the app has none — so every game
+    // shipped silent. A note is a frequency and an envelope; `generate_melody` synthesises both.
+    '    5b. generate_melody       — the SOUND ITSELF. generate_game_vfx only loads sound FILES, which',
+    '       the app does not have, so call this too and a game is never silent: synthesised music and',
+    '       cues (coin, success, level-up) from notes, no file, no dependency, no cost.',
     '    6. generate_game_shell    — LAST. Composes all of the above into something playable, with HUD,',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',

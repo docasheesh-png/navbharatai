@@ -74558,6 +74558,127 @@ prompt fails exactly the two prompt cases.
   the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
   the path this autopsy traced and is named here rather than bundled in.
 
+---
+
+## 2026-09-20 — A TUNE NEEDS NO SOUND FILE: NavBharatAI learns to read notes (sargam AND letters) and play them
+
+**The ask (admin, handing over a page of notation — the medieval English rota "Sumer is icumen in",
+12/8, one flat, a main voice over two staves marked Pes I and Pes II):** *"yeh music notes navbharatai
+ko sikhao! jab bhi need ho, use kiye jaye! dhun banane ke liye."*
+
+**Where the real gap was, and this repo had already WRITTEN IT DOWN rather than it needing to be
+found.** `GameVfxAudioGenerator` ships a careful Web Audio engine — buses, a voice cap, 3D panning,
+pitch variation, the unlock-on-gesture browsers require. Its only input is `load(name, url)`: a sound
+FILE. So `AppKnowledgeBase` recorded the consequence as an honest limit — *"SOUND FILES are yours to
+add — until you do, the game runs perfectly and simply stays quiet"*. Honest, and a dead end: a
+shopkeeper who asked for a game cannot produce an `.mp3`, so the app is silent for ever. And
+`MUSIC_AI` has been TEACHING notation and sargam this whole time to learners whose apps could not play
+a note of it.
+
+What closes that is not a sample library; it is SYNTHESIS. A note is a frequency and an envelope, the
+browser has an oscillator, and a tune is a list of notes with times. Nothing downloaded, nothing
+licensed, ₹0, works offline.
+
+**Shipped:** `src/server/lib/MelodyGenerator.ts` (pure builder, the established shape of the ~100
+generators beside it) + tool **`generate_melody`** (`ToolCatalog`, `ToolDispatcher`, and a pointer
+from the game plan in `systemPrompt` so a game build knows where its sound comes from). It emits
+`src/audio/notation.ts` (reader + a pure timeline), `src/audio/melody.ts` (the player) and
+`src/audio/tunes.ts` (the library). **No dependency.**
+
+🇮🇳 **IT READS SARGAM AS WELL AS LETTERS, and the sargam half is treated the way a teacher would
+insist on: RELATIVE to the tune's tonic.** `Sa` is whatever `tonic` says, so one line transposes to
+any singer's scale by changing one field — which is what sargam MEANS. `C4` is 261.6 Hz in every
+tune, as it must be. Treating `Sa` as a fixed C is the common western mistake and would have made
+every sargam tune play in C whatever scale the singer uses, with nothing failing.
+
+🔴 **TWO REAL DEFECTS, BOTH FOUND BY RUNNING IT RATHER THAN READING IT — which is the whole reason
+the test evaluates the EMITTED artifact instead of grepping it.**
+1. **A ground outlasted the melody it accompanies.** A 4-beat ground under the 18-beat round ran to
+   beat 20, so the ACCOMPANIMENT silently lengthened the tune — contradicting this module's own
+   stated rule, and leaving a ragged gap whenever that tune was looped. Fixed at the class: a `loop`
+   voice's notes are clamped to the span the play-once voices define, so "a ground can never extend a
+   tune" is true by construction. The final ground note is CLAMPED, not dropped — dropping it would
+   leave the last bar with no floor under it.
+2. **`D` and `G` are each BOTH a Western letter and a sargam short form (Dha, Ga), and sargam was
+   winning.** So `C D E F G A B` came out as C, **Dha**, E, F, **Ga**, A, B — a major scale with two
+   wrong notes in it, and nothing anywhere failed. Both notations are advertised in the tool
+   description and in the emitted docs, so both have to work. Resolved by the LINE, the way a human
+   reads it: `looksLikeSargam` finds a token that CANNOT be a letter (`S R M P N`, or any spelled-out
+   swara) and lets that settle the two ambiguous ones. A token on its OWN defaults to the letter.
+   A test asserts the collision really is only two tokens wide, so a third can never start being
+   decided silently.
+
+**What makes it sound right rather than nearly right** (each is what a hand-rolled attempt actually
+sounds like): notes are booked against the AUDIO clock a little ahead, never one `setTimeout` each
+(JS timers drift by tens of ms and a background tab clamps them to 1/s); every note ramps up and down
+over a few ms, or there is a CLICK on every single note; the ramps are LINEAR to zero because
+`exponentialRampToValueAtTime(0, t)` is illegal and throws; `unlock()` on a real gesture — THE reason
+an app has no sound; a voice is ramped down before it is stopped and disconnected on `onended`; the
+player sits at 0.25 because voices SUM.
+
+🔒 **A ROUND IS A FIRST-CLASS FEATURE, and that is what the admin's page actually teaches.** From the
+image, the structure is readable with certainty: it is a rota — one melody entered late by several
+voices over a two-voice ground (`Pes I` / `Pes II`). `entryBeats` is the canon entry and `loop: true`
+is the ground. `TUNES.round` is built from ONE triad (root/third/fifth) and a test PROVES it, because
+notes of a single triad are consonant in every combination — so the phrase harmonises with itself at
+ANY entry delay and the grounds cannot clash. That is a checkable property, not a matter of taste.
+
+🔴 **WHAT I DID NOT DO, AND WHY — rule 3, stated plainly rather than quietly shipped.** I did **not
+transcribe the photographed piece**. A melody written down from memory may simply be WRONG, and a
+wrong tune is the one defect here that a user can neither detect nor report: it plays, nothing errors,
+and they conclude our engine cannot make music. Every built-in is therefore either fixed by the theory
+itself (the shuddha scale, the first alankar, a major scale) or written for that file (the round, the
+six cues) — `tunes.ts` says so in its own header, and a test asserts that sentence is still there. The
+capability is what makes the piece playable: type its notes and it plays, in sargam or in letters.
+
+**Honesty fixed too (rule 5).** The game-audio bullet in `AppKnowledgeBase` no longer implies silence
+is the end of the road — it now says the limit is answered for MUSIC and CUES while a recorded sound
+(a real explosion, a human voice) is still the app's to supply. The new MUSIC & TUNES bullet is
+explicit that this is a clean synthesised instrument and not a recorded orchestra or a real singer.
+The builder VALIDATES its own tune library with the same reader the app uses, so an unreadable
+built-in cannot ship playing rests.
+
+**Sibling hunt (rule 3).** Searched the whole repo by filename and by three vocabularies before
+building: the only prior art is `MUSIC_AI` (a teacher chat — it discusses notation, plays nothing),
+`GameVfxAudioGenerator` (the sample loader above), and `sonicAudio.ts` (the isolated Nova Sonic voice
+route, unrelated). No open PR touched audio. The professional AIs reach this through
+`AppContextInjector.getRelevantContext(message, 'professional')` — verified in `professionals/engine.ts`,
+not assumed — which is keyed by KEYWORD, so the music words were added to the builder entry or a
+learner asking Music AI about sargam would never have been told an app can play it.
+
+**Tests:** `tests/aTuneNeedsNoSoundFile.test.ts` (65). It transpiles the EMITTED reader and RUNS it —
+the same reasoning `indiaAlmanacStarters.test.ts` already records for panchang times: a grep for
+`midiToFrequency` would pass just as happily over arithmetic returning nonsense, and it covers the
+artifact the user gets rather than a second copy living on our server. Anchored on numbers fixed by
+the theory (A4 = 440 Hz, C4 = 261.6 Hz, komal Ga +3, teevra Ma +6, Sa and Pa achal so `_Sa` is
+REFUSED). **Reversion-proven six ways** — removing the dialect rule fails 3, removing the ground
+clamp fails 1, the illegal exponential ramp fails 2, setting the gain straight to full fails 2,
+ignoring the lookahead horizon fails 1, and unregistering the tool fails the wiring lock.
+
+**AND THE PLAYER IS RUN TOO, against a fake AudioContext that records every booking.** Source
+assertions can only prove the file MENTIONS a lookahead scheduler; a player that booked every note at
+`currentTime`, or twice, or never advanced its cursor would satisfy all of them and play a chord or
+nothing. Nobody in CI can hear a tune, so the honest substitute is to count what it asked the hardware
+to do: four notes booked ONCE each at 0 / 0.5 / 1 / 1.5 s with frequencies 261.6 / 293.7 / 329.6 /
+349.2 Hz, only the notes inside the lookahead booked at `play()`, every oscillator stopped and
+released on `onended`, the envelope starting at 0 and ending at 0 with no exponential ramp anywhere,
+`loop` re-booking, `onEnd` firing exactly once, `stop()` booking nothing further, three voices of a
+chord all starting on the same sample, and a browser with no `AudioContext` returning null rather than
+throwing. ⚠️ One of these tests originally asserted only that an oscillator existed — no test at all,
+since a player that set the gain straight to full volume would have passed it. It was rewritten to
+read the automation it claims to check, and that version is reversion-proven.
+
+**OPEN, recorded not patched (rule 6):**
+- **The photographed rota is not in the library.** Its pitches were not transcribed, for the reason
+  above. Re-sending the image, or typing the notes in either notation, is all it takes — the engine
+  plays it and the round structure it needs already exists.
+- **Reading notation from a PHOTO is not built and was not promised.** Optical music recognition is a
+  hard problem the vision models are not reliable at; claiming it would be the fake-feature class.
+  The engine reads TEXT notes.
+- **No tune is routed into the game's audio buses yet.** `generate_melody` stands alone and the game
+  plan points at it, but `AudioManager` still only loads files — wiring the synthesiser into its
+  `music`/`sfx` buses is a separate change to a working file, and doing it in the same commit would
+  be scope creep on a path that currently works.
 ## 2026-09-20 — A doc's claim about a console is only as good as the last person who LOOKED
 
 **No behaviour changed. Three stale claims were corrected, and the third one had already cost the

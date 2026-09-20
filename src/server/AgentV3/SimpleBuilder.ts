@@ -33,7 +33,7 @@ import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
-import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, contractCallCanFinish, preambleBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
   path: string;
@@ -1037,9 +1037,17 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // the same millisecond, for two different-sounding reasons. The report shows the pair.
         // The branches carry different facts and both are worth keeping, so the choice moves INTO
         // the one place that can only fire once.
-        deps.log?.(contractCap > 0
-          ? '⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.'
-          : '⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
+        //
+        // 🔴 A THIRD REASON, AND IT IS THE COMMONEST (autopsy bb688add, 2026-09-20): the time left for
+        // this pass is less than the planning step it just watched cost. Such a call is cut off before
+        // it produces anything — 48 seconds and ₹1.17 for an empty string, and then the files are
+        // written with no contract and disagree anyway. Naming it separately matters because the other
+        // two sentences would send a reader to the budget SPLIT, and the split is not what was wrong.
+        deps.log?.(contractCap <= 0
+          ? '⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.'
+          : !contractCallCanFinish({ contractCapMs: contractCap, preambleCallMs: planCallMs })
+            ? '⏭️ Skipping the shared-contract pass — there is less time left for it than planning just took, so it would be cut off before producing anything. That time goes to writing your files.'
+            : '⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.');
       }
       // THE CONTRACT IS A FILE, NOT A PARAGRAPH — see `contractModule` for the build that proved it.
       // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the

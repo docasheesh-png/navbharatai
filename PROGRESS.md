@@ -73173,3 +73173,97 @@ zero model cost; PR 3 gives the builder a tool to raise and resolve rows itself,
 into the per-turn context — deliberately the per-turn message, not the cached prefix, or every build's
 prompt cache breaks. Extracting rows from the summary with a regex or an extra model pass was
 considered and **rejected**: fragile, and it would bill every build for it.
+
+## 2026-09-20 — AUTOPSY `bb688add`: a failed probe is not an answer, and a call the clock cannot carry is not started
+
+**The build:** a Hindi मंगल विवाह निश्चय पत्र (one page, no data entry), free tier, weak ladder. **16.4
+minutes, ₹177.98 charged to a FREE user** — 71% of the ₹250 welcome balance for a printable invitation
+card. It succeeded: release gate YELLOW, app rendered, `PROD_BUILD_OK`.
+
+### The five-bucket ledger
+
+| | count | |
+|---|---|---|
+| ✅ Self-heal | **3** | CSS import injected (`INTEGRITY_CSS_WIRED`), truncation continued (`FASTLANE_CONTINUED`), fast-lane → full-builder hand-off |
+| 🔀 Workaround | **1** | the hand-off itself: 3 repair attempts failed, the full builder rewrote the app from scratch |
+| ⏭️ Skipped | 2 | no user journey (no data-entry surface — correct), no tests |
+| ❌ Still broken | **4** | the four below |
+| 🥵 Struggle | **882 s to first render** — 14.7 minutes before the user's app existed on screen | |
+
+### One root cause, in two places: a thing we could not measure, written down as a measurement of zero
+
+**① The `tsconfig.json` probe could not be read, so the compiler was switched off for the whole build.**
+`ToolDispatcher` latched `catch { this._isTsProject = false; }` on the FIRST TypeScript write, and never
+asked again. Every later TypeScript write counted as "skipped", and the report said:
+
+> *"Write-time typecheck: no TypeScript source was written this build (22 write(s) skipped as not TypeScript)."*
+
+That build wrote **six** TypeScript files (`types/invitation.ts`, `data/invitation.ts`,
+`hooks/useInvitation.ts`, `components/Invitation.tsx`, `App.tsx`, `main.tsx`). The sentence is false, and
+the `skipped` counter could not have told the truth — it merged *"this write was a `.css` file"* with
+*"we judged the project non-TypeScript"*. **The cost was not the sentence.** Write-time typecheck exists
+(2026-09-17, autopsy e706e068) precisely to quote a file's own compiler errors back while the model still
+holds it. It stood down — and the build then ground **eleven `TS2339` errors** through three repair
+passes over five minutes, which is the exact struggle that feature was built to end.
+
+**Fixed:** a probe that THREW leaves the verdict `unknown` and is retried (`MAX_TSCONFIG_PROBES` = 3), so
+one sandbox hiccup cannot disable the compiler for a 16-minute build. Only an unmistakable not-found is
+an absence (`isMissingFileError`, precision-first: a false *absent* kills the feature, a false *unknown*
+costs two file reads) — and a dead sandbox saying *"no such file"* about `/home/user/workspace` is a
+missing MACHINE, not a missing tsconfig, so it is never a verdict. The two skip reasons are counted
+separately and the summary names which one happened.
+
+⚠️ **Honest limit (rule 6):** the report cannot say WHY that read failed — a transient sandbox error and a
+race with the scaffold look identical from here. That is itself part of the defect, and `probeFailures`
+is the field that will answer it on the next occurrence. The fix is correct for every cause.
+
+**② The shared-contract call was started against a clock that had already been measured as too short.**
+The arithmetic is exact to the millisecond and every number was known BEFORE the call:
+
+```
+preamble share    96,000ms   (240,000 × (1 − BUILD_PHASE_RESERVE))
+plan call         48,198ms   MEASURED, a real call on this build's own chain
+contract cap      47,802ms   (96,000 − 48,198)
+contract call     47,804ms   → cut off by its cap, returned NOTHING
+```
+
+🔑 **The assumption was hiding in a `Math.min`.** `canAffordSharedContract` modelled the contract's cost
+as `min(cap, measured)` — which treats a call that hits its cap as simply *cheaper*. It is not: it is
+**free of value and full of cost**. The report priced the loss afterwards (`UNBILLED_BARREN_WORK ₹1.17`)
+while nothing acted on it beforehand. With no contract, the files were generated in isolated calls and
+disagreed — which IS the eleven `TS2339` errors of ①.
+
+**Fixed:** `contractCallCanFinish` asks the one question `min` silently answered. No invented margin —
+the threshold is the measurement, the same "project from what the last real call cost" rule this module
+already uses twice, and the two preamble prompts are the same order of size by construction (2,968 vs
+3,069 chars). It can only ever SKIP a pass already declared optional. **On this build it returns 48
+seconds to file generation**, which is the difference between a lane that finishes (plan 48 + files 150 =
+198s of 240s) and the one that ran: 96 + 150 = 246s, over budget, hand-off.
+
+### ③ "This build's time budget ended" was the wrong clock, and it cost an autopsy
+
+The report's `LLM_CALL_BUDGET_ENDED` line fired **100 seconds into a build whose budget was 3,480 seconds**.
+`BUDGET_REACHED_MESSAGE` is ONE constant thrown for every deadline in the stack, and that record cannot
+tell which one produced it — so it must not name one. It now says *"stopped by one of our own clocks"*,
+which is the whole of what is known there and still carries the fact that matters: the provider did
+nothing wrong. **This closes the item CLAUDE.md records as open from autopsy 31dc61fd** (*"build budget
+reached at 105 s of a 1800 s build"*); ② is its prevention half.
+
+### ④ Recorded, not fixed (rule 6)
+
+- **`provider=unknown` beside a sibling line that says KIMI.** `fastLaneCallIdentity` returns `unknown`
+  when no provider *reported in*, and its docblock explains at length why guessing is worse — that
+  reasoning is right. But *which rung was ATTEMPTED* and *which provider DELIVERED* are different facts
+  and only the second reaches this record. Threading the attempted rung is a wider change than this
+  autopsy should make; named here so it is not re-discovered.
+- **The lean post-build review timed out producing nothing** — 45 s budget, 2 calls, 5 file reads,
+  `REVIEW_INCOMPLETE`, then told the user an 18-file invitation card was *"this large app"*. This is the
+  first real evidence `AGENTV3_GREEN_REVIEW_LEAN` (2026-09-18) has produced, and its own entry says to
+  watch exactly this. **Watch, do not tune yet** — one report is not a distribution.
+- **A truncation continuation wrote a corrupted file.** `FASTLANE_CONTINUED` resumed mid-declaration and
+  the emitted `src/components/Invitation.css` began `-size: 0.9rem;` — the tail of `font-size`. It was
+  overwritten later, so nothing shipped, but the continuation path can produce a file whose first line
+  is garbage.
+- **`PREVIEW_SNAPSHOT_STALE`** again (same 18 files, different content) — the post-build ordering defect
+  already open from 31dc61fd.
+- **₹177.98 to a free user for a one-page card.** Billing is not a session's call; raised to the admin.

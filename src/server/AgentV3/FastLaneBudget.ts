@@ -106,8 +106,46 @@ export function canFinishRemainingTiers(p: TierProgress): boolean {
  * both siblings above (project from a real measurement, so the decision improves automatically on a
  * fast provider). Bounded by the cap, because the call cannot outlive it.
  */
+/**
+ * CAN THE CONTRACT CALL ACTUALLY FINISH IN THE CAP IT WOULD BE GIVEN?
+ *
+ * 🔴 ROOT CAUSE (autopsy bb688add, 2026-09-20 — the Hindi wedding invitation). The arithmetic is exact
+ * to the millisecond, and every number in it was already known before the call was made:
+ *
+ *     preamble share     96,000ms   (240,000 × (1 − BUILD_PHASE_RESERVE))
+ *     plan call          48,198ms   MEASURED, a real call on this build's own chain
+ *     contract cap       47,800ms   (96,000 − 48,198, to the millisecond)
+ *     contract call      47,804ms   → cut off by its cap, returned NOTHING
+ *
+ * So the lane spent 48 seconds and ₹1.17 of tokens on a call whose own measured predecessor already
+ * said it would not fit — and the report's `UNBILLED_BARREN_WORK` line priced the loss afterwards
+ * while nothing acted on it beforehand. The files were then generated with NO shared contract, each
+ * in its own isolated call, and disagreed: **eleven `TS2339` errors**, three repair passes, five
+ * minutes, and a hand-off to the full builder. The build took 16.4 minutes.
+ *
+ * 🔑 THE ASSUMPTION WAS HIDING IN A `Math.min`. `canAffordSharedContract` modelled the contract's cost
+ * as `min(cap, measured)` — which treats a call that hits its cap as simply *cheaper*. It is not: it
+ * is **free of value and full of cost**. The cap bounds what we WAIT for, never what we PAY for or
+ * what we GET. This function asks the question that `min` silently answered.
+ *
+ * ⚠️ NO INVENTED MARGIN. The threshold is the measurement itself — the same "project from what the
+ * last real call cost" rule `canFinishRemainingTiers` and `canAffordSharedContract` already use, and
+ * the two preamble prompts are the same order of size by construction (bb688add: 2,968 vs 3,069
+ * chars). Adding a safety factor would be a guess where a measurement exists.
+ *
+ * 🔒 It can only ever SKIP a pass that is already declared optional; it can never start one that
+ * would not have started. No measurement ⇒ TRUE, because bailing on an absent signal is this
+ * module's own named mistake. Pure.
+ */
+export function contractCallCanFinish(p: { contractCapMs: number; preambleCallMs: number }): boolean {
+  if (!(p.preambleCallMs > 0)) return true;      // no measurement — never bail on an absent signal
+  return p.contractCapMs >= p.preambleCallMs;
+}
+
 export function canAffordSharedContract(p: PreambleProgress & { contractCapMs: number }): boolean {
   if (p.contractCapMs <= 0) return false;        // already skipped by the share — nothing to decide
+  // A call the clock cannot carry buys nothing and costs everything — see contractCallCanFinish.
+  if (!contractCallCanFinish(p)) return false;
   if (p.tiers <= 0) return true;
   if (!(p.preambleCallMs > 0)) return true;      // no measurement — never bail on an absent signal
   const expectedContractMs = Math.min(p.contractCapMs, p.preambleCallMs);

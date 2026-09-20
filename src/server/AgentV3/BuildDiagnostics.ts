@@ -1257,7 +1257,17 @@ export class BuildDiagnostics {
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_BUDGET_ENDED',
-        message: `A model call was stopped because this build's time budget ended, not because it failed (${rec.model ?? 'model'}).`,
+        // 🔴 "THIS BUILD'S TIME BUDGET" WAS THE WRONG CLOCK, AND IT COST AN AUTOPSY (bb688add,
+        // 2026-09-20). That line appeared 100 SECONDS into a build whose budget was 3,480 seconds, so
+        // every reader — the admin, and this session — starts by looking for why a 58-minute build ran
+        // out of time in a minute and a half. It never did. The clock that ended was the fast lane's
+        // own shared-contract slice (47,800ms, derived to the millisecond from the preamble share).
+        // `BUDGET_REACHED_MESSAGE` is one constant thrown for EVERY deadline in the stack, and this
+        // record cannot tell which one produced it — so it must not name one. "One of our own clocks"
+        // is the whole of what is known here, and it still carries the fact that matters: the provider
+        // did nothing wrong. (The same autopsy's prevention half is `contractCallCanFinish`, which
+        // stops the commonest such call being started at all.)
+        message: `A model call was stopped by one of our own clocks — a budget or step deadline ran out while it was still running, so it did not fail (${rec.model ?? 'model'}).`,
         autoResolved: true,
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
       });

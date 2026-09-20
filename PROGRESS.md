@@ -72121,3 +72121,72 @@ fact we store.
 
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
+
+---
+
+## 2026-09-20 — In the admin console, the bottom bar IS the tab strip
+
+Admin, with a screenshot of the admin panel on a phone: *"jab admin panel open hota hai, to footer me
+yeh home|ai|preview|studio|more etc jo dikh rahe hai. isko badalna hai!! is footer me MONITOR, USERS,
+ai engine, revenue … jo abhi header me hai, unko rakho … woh 5 hard button ki jagah left right
+swipable header hoga."* And, asked about the wide screen: *"ham desktop me aise hi rahne do!"*
+
+**What was wrong.** On a phone the admin console spent its ONE always-reachable row — the bottom bar —
+on five buttons that lead OUT of the console (Home / AI / Preview / Studio / More), while the nine tabs
+that *are* the console sat in a horizontally-scrolling strip up in the header. The thumb row was given
+to the navigation nobody inside the admin panel wants.
+
+### It is the fourth branch of a pattern already there
+
+`App.tsx` keeps ONE `<nav>` and already swaps its contents per surface: Pro chat (History / Pro Chat /
+Preview / Files / Code Studio / More), the Mode surfaces (History / AI / Mode / Settings), and the
+default five. **The admin panel was falling into that third branch only because `isModeSurface` does
+not name it** — which is why the screenshot looked the way it did. So this is a fourth branch, not a
+new concept.
+
+The upward channel existed too. `v3FooterApi` is how the Pro panel's own internals drive the shared
+bar; `src/components/admin/adminFooterApi.ts` is that same channel for the console. **`select` IS
+`setActiveTab`** — there is one piece of tab state in the whole feature, so the header and the footer
+cannot disagree about which page is open.
+
+### 🔒 The footer names no tab
+
+It renders `adminFooterApi.items` — the console's own `TABS`, with its own live badges — so a tab added
+to `TABS` appears in the footer **by construction**. A hardcoded list in `App.tsx` would drift the
+first time a page was added and **nothing would fail**: both strips would render and one would simply
+be missing a page. `theAdminFooterIsTheTabStrip.test.ts` therefore asserts that the tab names
+("AI Engines", "Build Reports", "User Reports", "APK Reports") do **not** appear in `App.tsx` at all.
+
+Badges came along as data, with their honesty intact: `formatBadge` returns null for anything
+unmeasured and the footer carries the null through, so a page whose number could not be read shows
+**no** counter rather than a `0` — which on a row like User Reports would read as *"I looked, there is
+no work here"*.
+
+### 🔴 The one line that made it possible
+
+That bar carries a deliberate `touchAction: 'none'`, from the admin's own 2026-09-14 report (a drag
+upward on it moved the whole app and revealed white space beneath on iOS). **`none` forbids EVERY pan,
+horizontal included** — so a swipable footer with `none` on it is a footer that cannot be swiped, and
+the tabs past the screen edge would have been unreachable by the exact gesture that was asked for.
+
+It is now `adminStrip ? 'pan-x' : 'none'`: horizontal pan permitted on this strip only, so the
+2026-09-14 bug stays closed everywhere including here. **Proven by reversion** — tightening it back to
+`none` fails CI rather than silently killing the swipe. This is the "a fix must never trade one problem
+for another" rule applied to a gesture rather than to a code path.
+
+### What is deliberately unchanged
+
+- **Desktop, by construction rather than by a second rule.** The bar is mobile-only, so
+  `adminMobileFooterActive` returns false there, the header strip stays and no footer appears.
+- The header strip stands down with `hidden lg:flex` (AgentV3Panel's own idiom for exactly this), so a
+  wide screen inside a mobile-footer session still has tabs rather than none.
+- Publishing `null` on unmount is what returns the bar to its ordinary items the moment the console is
+  left or the admin logs out.
+- The open tab scrolls itself back into view on a tab **change** only, never on every render, so it can
+  never fight a swipe the user is in the middle of.
+- New code, so it uses the theme tokens (`text-accent-text` / `text-muted`) instead of copying the
+  older branches' `text-indigo-400` and `#484f58` — those are weak or invisible on Light, and the
+  colour ratchet counts them. The older branches were left alone: sweeping them is the migration's job
+  and would be unrelated diff.
+- `AppKnowledgeBase` gained `admin-tab-navigation`, because where the tabs live now differs by device
+  and every other admin entry's path ("Admin Dashboard → Revenue") still names the same page.

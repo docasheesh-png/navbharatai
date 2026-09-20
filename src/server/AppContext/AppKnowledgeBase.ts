@@ -2821,6 +2821,20 @@ Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-serie
     keywords: ['monitor', 'monitoring', 'grafana', 'dashboard', 'live', 'observability', 'charts', 'graph', 'admin home', 'health', 'uptime', 'server logs', 'real time', 'nigrani', 'monitoring kaise', 'admin panel'],
   },
   {
+    id: 'admin-tab-navigation',
+    name: 'Admin panel navigation (where the tabs are)',
+    path: 'Admin Dashboard \u2014 on a phone the tabs are the BOTTOM bar; on a computer they are the row under the title',
+    description: `Where the admin console's nine pages live, which is different on a phone and on a computer (admin 2026-09-20).
+\u2022 ON A PHONE \u2014 the pages are the BOTTOM bar: Monitor, Users, AI Engines, Revenue, Build Reports, User Reports, APK Reports, Security, Settings. Nine do not fit a phone's width, so the bar SWIPES left and right, and the page you are on scrolls itself back into view whenever you switch. The app's ordinary bottom bar (Home / AI / Preview / Studio / More) is replaced while the admin panel is open and comes straight back when you leave it or log out.
+\u2022 WHY \u2014 the bottom row is the one a thumb can always reach, and inside the admin console the pages of the console are what you want there, not five buttons that lead out of it.
+\u2022 EACH PAGE CARRIES ITS OWN COUNTER when there is a real number behind it (for example active users over total, or unread reports), and a page whose number could not be measured shows NO counter rather than a zero \u2014 a 0 would read as "I looked, there is nothing", which is a different claim.
+\u2022 ON A COMPUTER \u2014 nothing changed: the tabs stay in the row under the title and there is no bottom bar.
+Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") still describes the same page \u2014 only where you tap to reach it differs by device.`,
+    howToUse: 'Admin login required. On a phone: open the Admin Dashboard and use the bottom bar \u2014 swipe it sideways to reach Revenue, Build Reports, Security and the rest. On a computer: use the tab row under the NAVBHARATAI ADMIN title.',
+    relatedFeatures: ['admin-monitor', 'admin-metrics', 'admin-revenue-purchases'],
+    keywords: ['admin tabs', 'admin navigation', 'admin footer', 'admin panel footer', 'bottom bar', 'admin bottom bar', 'swipe tabs', 'monitor users revenue tab', 'admin panel me tab kaha hai', 'footer', 'tab kaise badle', 'admin menu'],
+  },
+  {
     id: 'admin-ai-insights',
     name: 'AI Insights & NL Telemetry Query',
     path: 'Admin Dashboard → Monitor → Insights card (admin only)',

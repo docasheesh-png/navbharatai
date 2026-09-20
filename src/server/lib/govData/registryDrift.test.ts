@@ -44,6 +44,9 @@ const DATA_MODULES = [
   '../liveDataSources.ts',
   '../transitLive.ts',
   '../cpcbAirQuality.ts',
+  // The shared government-data client holds the portal host itself, so it is the most important
+  // file in this list: a second host added here would reach every dataset at once.
+  './client.ts',
 ];
 
 /**

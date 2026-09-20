@@ -162,7 +162,7 @@ async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date, env
   if (!AQI_SIGNAL.test(message)) return '';
   const place = extractPlace(message);
   if (!place) return ''; // no place named → the directive makes the model ask, honestly
-  const air = await fetchCityAirQuality(place, (url) => fetchJson(url, fetchImpl), env);
+  const air = await fetchCityAirQuality(place, fetchImpl, env);
   if (!air) return '';
   const lines = [
     `Place: ${air.city || place}`,

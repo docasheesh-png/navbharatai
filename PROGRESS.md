@@ -74299,3 +74299,63 @@ instrument that settles it: **if `no-outcome-recorded` reads "none in 7d" on the
 whole concern is historical** and the remaining provider/tool rows are real. If it does not, this is
 where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
 the protection until the measurement has produced a reading.*
+
+---
+
+## 2026-09-20 — the government-data ENGINE: one client, so the next dataset is a row not a code path
+
+**Admin: *"karo!!!"*** — option (a), the engine plus the registry.
+
+### What shipped
+
+- **`govData/client.ts`** — the ONE client every data.gov.in dataset is fetched through. Every
+  dataset on the portal answers at the same endpoint shape with the same account-level key, so one
+  client genuinely covers the catalogue; writing a client per dataset would have been the mistake
+  the forwarded plan's own "CRITICAL RULE" warns against.
+- 🔒 **It cannot reach a source nobody has checked.** The id resolves through `callableSources()`,
+  so an `unverified`, disabled or resource-id-less row is unreachable *here* — not behind a flag.
+- 🔒 **The registry's `filters` list is an ALLOWLIST.** A caller may only send parameters the row
+  declares, which stops arbitrary query parameters being appended to a government request and
+  bounds the cache key. An undeclared filter is dropped, not fatal — a caller's typo must not become
+  an outage.
+- 🔒 **No usable filter ⇒ no request.** An unbounded pull of a national dataset never happens.
+- **Nine named failures, not one silent nothing:** `not-callable`, `no-key`, `no-filter`,
+  `auth-rejected`, `rate-limited`, `not-found`, `http-error`, `unreadable`, `empty`, `timeout`. A
+  404 usually means the registry row is stale, a 401 means the key, a 429 means wait — collapsing
+  them into "it failed" leaves the reader with no next step. **No path fabricates a record.**
+- **Cache + in-flight coalescing copied from `braveSearch.ts` rather than reinvented**, including
+  its `settled` flag, which that module records as the fix for a real bug: an entry removed in a
+  detached `.finally()` lets a later caller coalesce onto an already-settled promise and receive a
+  result that was deliberately not cached. TTL comes from the registry row, so a live reading and a
+  census figure cannot share a window. **An empty or failed answer is never cached** — one blocked
+  minute must not become ten.
+- **The attribution rides with the data**, on success *and* on failure, so a caller cannot forget a
+  licence condition.
+- **CPCB was migrated onto it**, which is what keeps the engine from being an empty cathedral: the
+  dead-code guard had already caught the registry once for exactly that.
+
+### The design mistake my own tests caught
+
+I first migrated CPCB while keeping its old json-shaped parameter as **unused** — "to avoid widening
+the change". That silently disconnected **every injected fetch**, the route's as much as the tests',
+so the seam was dead rather than merely narrow. Three tests went red immediately. Fixed properly:
+the caller's `fetchImpl` is threaded through. **A parameter a function ignores is worse than one it
+does not take.**
+
+### Tests
+
+`client.test.ts` — **28 cases**, the forwarded plan's whole failure list (timeout, 401/403, 404,
+malformed JSON, empty, rate limit, cache hit, cache miss, missing API) plus the allowlist, the
+coalescing and the meter. `registryDrift.test.ts` now scans `client.ts` too — it holds the portal
+host, so a second host added there would reach every dataset at once.
+
+### 🔴 Still open
+
+- **The router** (which question → which sources) and **multi-source answers**. `liveDataContext` is
+  still FIRST-WINS, so *"UP aur Bihar compare karo"* cannot work yet; widening it changes behaviour
+  on all three chat surfaces and is its own step.
+- **No government dataset beyond CPCB AQI has a resource id**, and none was invented. The admin is
+  fetching ids + one sample response each, from a list mapped to NavBharatAI's own 73 Professionals
+  (mandi prices → Kisan AI first).
+- **Still not one live call.** data.gov.in remains egress-blocked from the build environment
+  (`403 CONNECT tunnel failed`, tested). Every shape here comes from published documentation.

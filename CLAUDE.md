@@ -1030,11 +1030,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   The admin was told and chose it deliberately (*"abhi free wali/low cost wali use karoge"*). Those
   credits WILL run out — "when", not "if" — and **how many builds they buy is genuinely unknown**:
   NVIDIA does not publish per-request credit cost, and Ultra is a large model. Do not estimate it.
-  Since 2026-09-19 the day it happens is VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report) instead
-  of appearing as a passing review, which is what made running on a trial acceptable at all.
-  🔴 **AND THAT FAIL-OPEN IS AN OPEN ROOT CAUSE, not a Nemotron problem** — `glm-5.3` has always had
-  it too. A judge that cannot run has approved nothing, and reporting it as a pass is the
-  honesty defect rule 5 forbids. Recorded in `PROGRESS.md`; it needs its own change.
+  ⚠️ **CORRECTED 2026-09-20 — THE SENTENCE HERE CLAIMED A VISIBILITY THAT DID NOT EXIST.** It read
+  *"Since 2026-09-19 the day it happens is VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report)"*.
+  **There has never been a `CHEAP_REVIEW_NOT_RUN` code anywhere in this repo** — a grep of `src/`
+  returns the doc line and nothing else. The day the credits ran out would have appeared as a *passing
+  review*, which is precisely what that sentence promised it would not. The lesson is this file's own:
+  **a doc's claim about the code must be re-grepped, never trusted** — and an aspirational sentence
+  written in the past tense is the most dangerous shape it can take.
+  ✅ **AND THE FAIL-OPEN IS NOW CLOSED (2026-09-20).** That entry recorded it as an open root cause and
+  said *"the honest fix is a THIRD outcome"* — which is exactly what shipped: `JudgeVerdict.reviewed`
+  plus `describeJudgeVerdict`, so a judge that could not run is recorded as **`NOT RUN`, at WARNING
+  severity, with its own explanation attached** — inside the existing `CHEAP_REVIEW` line, not as a new
+  code. It is not a Nemotron problem and never was: `glm-5.3`, Grok and Sonnet all had it. Build
+  behaviour is unchanged — a judge outage still never blocks a build; only the record stopped lying.
   `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
   role/tier gate — ⚠️ **unset means the judge and plan are OFF even with a key**; takes `off` as a HARD
   kill that removes the ladder rung too, `on` for every tier, or a comma list of tiers: `weak` / `free`,

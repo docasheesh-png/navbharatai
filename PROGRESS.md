@@ -74230,6 +74230,82 @@ endpoint**. The resource id, filters and field names come from its published doc
 `subIndexOf` deliberately accepts **both** column names the resource has used (`avg_value` and
 `pollutant_avg`) because which is live today could not be verified here. **The first real question
 in the chat is this feature's first real evidence** — watch for an AQI answer appearing at all.
+
+---
+
+## 2026-09-20 — the external data registry: drift made impossible, not merely documented
+
+**Admin** forwarded a ChatGPT plan for a "Government Data Intelligence Layer" over data.gov.in
+across 12 categories, then said: *"sabhi ke jo jo api chahiye … le lunga. batao, kon kon si api
+chahiye … aap kam suru karo."*
+
+### What the audit found, which is NOT what the plan assumed
+
+**The architecture the plan asks for is ~70% already built.** `liveSearchContext` → `liveDataContext`
+→ an ordered list of structured sources, reached from exactly three call sites (chat, professionals,
+agentv3). Detection is **deterministic regex**, not a model call — which is *better* than the plan's
+"AI/Intent Router", that would put an LLM call on every chat turn against the standing "kharcha kam
+se kam" instruction. Kept deterministic deliberately.
+
+🔴 **The real defect is DRIFT, and it was measurable.** `licenceExposure.ts` listed **two** restricted
+sources; the live-data layer calls **seven** external API hosts. **Three had never been examined by
+anybody**, and two of those carry licence conditions we were not meeting:
+
+- **`api.postalpincode.in`** — **not a government API at all** despite the name; a third-party mirror
+  with no published terms.
+- **`open.er-api.com`** — its open tier permits commercial use **only with attribution**, and forbids
+  redistribution. **We show no attribution.** Same class as the Open-Meteo exposure.
+- **`api.themoviedb.org`** — TMDB's terms require an attribution statement; never examined.
+
+Adding a thirteenth category to a list nobody can keep in sync would have made that worse. So the
+valuable thing here is not a dataset.
+
+### What shipped
+
+- **`govData/registry.ts`** — every external data source declared in one place with its host,
+  licence, commercial-use verdict, required attribution, coverage, cache window and verification
+  status.
+- 🔒 **`registryDrift.test.ts` fails CI when code calls a host the registry does not declare.**
+  **Reversion-proven**: an invented host added to the data layer was caught immediately, and the
+  restored tree is green. A source can never again be called without somebody writing down what its
+  licence permits.
+- 🔒 **"Do not fake an endpoint" is now a PROPERTY, not a promise.** `callableSources()` returns only
+  rows that are `verified`/`documented` **and** `enabled`; a data.gov.in row with no resource id is
+  unreachable because there is nothing to call. A test asserts it.
+- **`status` distinguishes `documented` from `verified`**, and the difference is honest: **not one
+  endpoint in this file was confirmed by calling it.** Every data.gov.in host answers
+  `403 CONNECT tunnel failed` through this environment's egress proxy — *tested, not assumed*. Rows
+  marked `documented` come from published documentation only.
+- **One key, whole catalogue**: data.gov.in issues an account-level key, so `DATA_GOV_IN_API_KEY`
+  covers every resource. Adding a dataset needs a **resource id and nothing else** — which is what
+  makes the registry the unit of growth instead of the code.
+
+### Two guards caught my own work before CI did
+
+1. **`typecheck:server` caught five rows missing `lastVerified`** — and the *frontend* typecheck
+   passed while it failed, which is exactly the gap `CLAUDE.md` warns the narrow gate leaves.
+2. 🔴 **The dead-code guard caught the registry itself as unreachable**, because nothing in
+   production imported it. That is correct and it is the second absolute rule biting: a registry no
+   code consults is "built but not really working". Fixed by making it **load-bearing** — the CPCB
+   attribution line now comes *from the registry* instead of being a second hardcoded copy in
+   `liveDataSources.ts`. A licence condition written in two places is one that goes stale in one of
+   them.
+
+### Gate
+
+typecheck ✓ · noUnusedImports ✓ · typecheck:server ✓ · vitest **1912 files, 27,399 passed, 0 FAIL** ·
+build ✓ · test:bundle ✓ · boot:check ✓ · deps:server-gate ✓
+
+### 🔴 Still open — deliberately not built
+
+- **Router, adapters and cache** are the next slice. The cache will reuse `braveSearch.ts`'s proven
+  in-process TTL + in-flight-coalesce pattern rather than inventing one.
+- **`liveDataContext` is FIRST-WINS** (`if (block) return block`), so the plan's multi-source example
+  ("UP aur Bihar compare karo population, literacy, employment") **cannot work today**. Real gap;
+  widening it changes behaviour on all three chat surfaces, so it is its own step.
+- **No government dataset beyond CPCB AQI has a resource id**, and none was invented. The admin is
+  fetching ids + one sample response each, from a list mapped to NavBharatAI's **own 73
+  Professionals** (mandi prices → Kisan AI first) rather than to the plan's generic 12 categories.
 ## 2026-09-20 — 🔴 THE FAILURE TABLE'S BIGGEST ROW WAS NOT A FAILURE CLASS, IT WAS A BLIND SPOT
 
 **The report (admin, with a screenshot of the admin panel's *BY FAILURE REASON — ACROSS EVERY APP
@@ -74356,6 +74432,65 @@ whole concern is historical** and the remaining provider/tool rows are real. If 
 where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
 the protection until the measurement has produced a reading.*
 
+---
+
+## 2026-09-20 — the government-data ENGINE: one client, so the next dataset is a row not a code path
+
+**Admin: *"karo!!!"*** — option (a), the engine plus the registry.
+
+### What shipped
+
+- **`govData/client.ts`** — the ONE client every data.gov.in dataset is fetched through. Every
+  dataset on the portal answers at the same endpoint shape with the same account-level key, so one
+  client genuinely covers the catalogue; writing a client per dataset would have been the mistake
+  the forwarded plan's own "CRITICAL RULE" warns against.
+- 🔒 **It cannot reach a source nobody has checked.** The id resolves through `callableSources()`,
+  so an `unverified`, disabled or resource-id-less row is unreachable *here* — not behind a flag.
+- 🔒 **The registry's `filters` list is an ALLOWLIST.** A caller may only send parameters the row
+  declares, which stops arbitrary query parameters being appended to a government request and
+  bounds the cache key. An undeclared filter is dropped, not fatal — a caller's typo must not become
+  an outage.
+- 🔒 **No usable filter ⇒ no request.** An unbounded pull of a national dataset never happens.
+- **Nine named failures, not one silent nothing:** `not-callable`, `no-key`, `no-filter`,
+  `auth-rejected`, `rate-limited`, `not-found`, `http-error`, `unreadable`, `empty`, `timeout`. A
+  404 usually means the registry row is stale, a 401 means the key, a 429 means wait — collapsing
+  them into "it failed" leaves the reader with no next step. **No path fabricates a record.**
+- **Cache + in-flight coalescing copied from `braveSearch.ts` rather than reinvented**, including
+  its `settled` flag, which that module records as the fix for a real bug: an entry removed in a
+  detached `.finally()` lets a later caller coalesce onto an already-settled promise and receive a
+  result that was deliberately not cached. TTL comes from the registry row, so a live reading and a
+  census figure cannot share a window. **An empty or failed answer is never cached** — one blocked
+  minute must not become ten.
+- **The attribution rides with the data**, on success *and* on failure, so a caller cannot forget a
+  licence condition.
+- **CPCB was migrated onto it**, which is what keeps the engine from being an empty cathedral: the
+  dead-code guard had already caught the registry once for exactly that.
+
+### The design mistake my own tests caught
+
+I first migrated CPCB while keeping its old json-shaped parameter as **unused** — "to avoid widening
+the change". That silently disconnected **every injected fetch**, the route's as much as the tests',
+so the seam was dead rather than merely narrow. Three tests went red immediately. Fixed properly:
+the caller's `fetchImpl` is threaded through. **A parameter a function ignores is worse than one it
+does not take.**
+
+### Tests
+
+`client.test.ts` — **28 cases**, the forwarded plan's whole failure list (timeout, 401/403, 404,
+malformed JSON, empty, rate limit, cache hit, cache miss, missing API) plus the allowlist, the
+coalescing and the meter. `registryDrift.test.ts` now scans `client.ts` too — it holds the portal
+host, so a second host added there would reach every dataset at once.
+
+### 🔴 Still open
+
+- **The router** (which question → which sources) and **multi-source answers**. `liveDataContext` is
+  still FIRST-WINS, so *"UP aur Bihar compare karo"* cannot work yet; widening it changes behaviour
+  on all three chat surfaces and is its own step.
+- **No government dataset beyond CPCB AQI has a resource id**, and none was invented. The admin is
+  fetching ids + one sample response each, from a list mapped to NavBharatAI's own 73 Professionals
+  (mandi prices → Kisan AI first).
+- **Still not one live call.** data.gov.in remains egress-blocked from the build environment
+  (`403 CONNECT tunnel failed`, tested). Every shape here comes from published documentation.
 ## 2026-09-20 — `bb688add`, the third half: a continuation ATE the file it was resuming
 
 Queued from the `bb688add` ledger as *"a truncation continuation wrote a corrupted file"*. It is not a
@@ -74478,3 +74613,499 @@ length-preserving but blanks a large region — including a live call ~line 738 
 on `server.ts` would fail on correct code, or pass on wrong code depending on which side of the
 blanked region it looks at. This suite uses a line check instead and says so. Whether other guards
 lean on that helper for large files is unchecked; it belongs to another change, not this one.
+---
+
+## 2026-09-20 — A TUNE NEEDS NO SOUND FILE: NavBharatAI learns to read notes (sargam AND letters) and play them
+
+**The ask (admin, handing over a page of notation — the medieval English rota "Sumer is icumen in",
+12/8, one flat, a main voice over two staves marked Pes I and Pes II):** *"yeh music notes navbharatai
+ko sikhao! jab bhi need ho, use kiye jaye! dhun banane ke liye."*
+
+**Where the real gap was, and this repo had already WRITTEN IT DOWN rather than it needing to be
+found.** `GameVfxAudioGenerator` ships a careful Web Audio engine — buses, a voice cap, 3D panning,
+pitch variation, the unlock-on-gesture browsers require. Its only input is `load(name, url)`: a sound
+FILE. So `AppKnowledgeBase` recorded the consequence as an honest limit — *"SOUND FILES are yours to
+add — until you do, the game runs perfectly and simply stays quiet"*. Honest, and a dead end: a
+shopkeeper who asked for a game cannot produce an `.mp3`, so the app is silent for ever. And
+`MUSIC_AI` has been TEACHING notation and sargam this whole time to learners whose apps could not play
+a note of it.
+
+What closes that is not a sample library; it is SYNTHESIS. A note is a frequency and an envelope, the
+browser has an oscillator, and a tune is a list of notes with times. Nothing downloaded, nothing
+licensed, ₹0, works offline.
+
+**Shipped:** `src/server/lib/MelodyGenerator.ts` (pure builder, the established shape of the ~100
+generators beside it) + tool **`generate_melody`** (`ToolCatalog`, `ToolDispatcher`, and a pointer
+from the game plan in `systemPrompt` so a game build knows where its sound comes from). It emits
+`src/audio/notation.ts` (reader + a pure timeline), `src/audio/melody.ts` (the player) and
+`src/audio/tunes.ts` (the library). **No dependency.**
+
+🇮🇳 **IT READS SARGAM AS WELL AS LETTERS, and the sargam half is treated the way a teacher would
+insist on: RELATIVE to the tune's tonic.** `Sa` is whatever `tonic` says, so one line transposes to
+any singer's scale by changing one field — which is what sargam MEANS. `C4` is 261.6 Hz in every
+tune, as it must be. Treating `Sa` as a fixed C is the common western mistake and would have made
+every sargam tune play in C whatever scale the singer uses, with nothing failing.
+
+🔴 **TWO REAL DEFECTS, BOTH FOUND BY RUNNING IT RATHER THAN READING IT — which is the whole reason
+the test evaluates the EMITTED artifact instead of grepping it.**
+1. **A ground outlasted the melody it accompanies.** A 4-beat ground under the 18-beat round ran to
+   beat 20, so the ACCOMPANIMENT silently lengthened the tune — contradicting this module's own
+   stated rule, and leaving a ragged gap whenever that tune was looped. Fixed at the class: a `loop`
+   voice's notes are clamped to the span the play-once voices define, so "a ground can never extend a
+   tune" is true by construction. The final ground note is CLAMPED, not dropped — dropping it would
+   leave the last bar with no floor under it.
+2. **`D` and `G` are each BOTH a Western letter and a sargam short form (Dha, Ga), and sargam was
+   winning.** So `C D E F G A B` came out as C, **Dha**, E, F, **Ga**, A, B — a major scale with two
+   wrong notes in it, and nothing anywhere failed. Both notations are advertised in the tool
+   description and in the emitted docs, so both have to work. Resolved by the LINE, the way a human
+   reads it: `looksLikeSargam` finds a token that CANNOT be a letter (`S R M P N`, or any spelled-out
+   swara) and lets that settle the two ambiguous ones. A token on its OWN defaults to the letter.
+   A test asserts the collision really is only two tokens wide, so a third can never start being
+   decided silently.
+
+**What makes it sound right rather than nearly right** (each is what a hand-rolled attempt actually
+sounds like): notes are booked against the AUDIO clock a little ahead, never one `setTimeout` each
+(JS timers drift by tens of ms and a background tab clamps them to 1/s); every note ramps up and down
+over a few ms, or there is a CLICK on every single note; the ramps are LINEAR to zero because
+`exponentialRampToValueAtTime(0, t)` is illegal and throws; `unlock()` on a real gesture — THE reason
+an app has no sound; a voice is ramped down before it is stopped and disconnected on `onended`; the
+player sits at 0.25 because voices SUM.
+
+🔒 **A ROUND IS A FIRST-CLASS FEATURE, and that is what the admin's page actually teaches.** From the
+image, the structure is readable with certainty: it is a rota — one melody entered late by several
+voices over a two-voice ground (`Pes I` / `Pes II`). `entryBeats` is the canon entry and `loop: true`
+is the ground. `TUNES.round` is built from ONE triad (root/third/fifth) and a test PROVES it, because
+notes of a single triad are consonant in every combination — so the phrase harmonises with itself at
+ANY entry delay and the grounds cannot clash. That is a checkable property, not a matter of taste.
+
+🔴 **WHAT I DID NOT DO, AND WHY — rule 3, stated plainly rather than quietly shipped.** I did **not
+transcribe the photographed piece**. A melody written down from memory may simply be WRONG, and a
+wrong tune is the one defect here that a user can neither detect nor report: it plays, nothing errors,
+and they conclude our engine cannot make music. Every built-in is therefore either fixed by the theory
+itself (the shuddha scale, the first alankar, a major scale) or written for that file (the round, the
+six cues) — `tunes.ts` says so in its own header, and a test asserts that sentence is still there. The
+capability is what makes the piece playable: type its notes and it plays, in sargam or in letters.
+
+**Honesty fixed too (rule 5).** The game-audio bullet in `AppKnowledgeBase` no longer implies silence
+is the end of the road — it now says the limit is answered for MUSIC and CUES while a recorded sound
+(a real explosion, a human voice) is still the app's to supply. The new MUSIC & TUNES bullet is
+explicit that this is a clean synthesised instrument and not a recorded orchestra or a real singer.
+The builder VALIDATES its own tune library with the same reader the app uses, so an unreadable
+built-in cannot ship playing rests.
+
+**Sibling hunt (rule 3).** Searched the whole repo by filename and by three vocabularies before
+building: the only prior art is `MUSIC_AI` (a teacher chat — it discusses notation, plays nothing),
+`GameVfxAudioGenerator` (the sample loader above), and `sonicAudio.ts` (the isolated Nova Sonic voice
+route, unrelated). No open PR touched audio. The professional AIs reach this through
+`AppContextInjector.getRelevantContext(message, 'professional')` — verified in `professionals/engine.ts`,
+not assumed — which is keyed by KEYWORD, so the music words were added to the builder entry or a
+learner asking Music AI about sargam would never have been told an app can play it.
+
+**Tests:** `tests/aTuneNeedsNoSoundFile.test.ts` (65). It transpiles the EMITTED reader and RUNS it —
+the same reasoning `indiaAlmanacStarters.test.ts` already records for panchang times: a grep for
+`midiToFrequency` would pass just as happily over arithmetic returning nonsense, and it covers the
+artifact the user gets rather than a second copy living on our server. Anchored on numbers fixed by
+the theory (A4 = 440 Hz, C4 = 261.6 Hz, komal Ga +3, teevra Ma +6, Sa and Pa achal so `_Sa` is
+REFUSED). **Reversion-proven six ways** — removing the dialect rule fails 3, removing the ground
+clamp fails 1, the illegal exponential ramp fails 2, setting the gain straight to full fails 2,
+ignoring the lookahead horizon fails 1, and unregistering the tool fails the wiring lock.
+
+**AND THE PLAYER IS RUN TOO, against a fake AudioContext that records every booking.** Source
+assertions can only prove the file MENTIONS a lookahead scheduler; a player that booked every note at
+`currentTime`, or twice, or never advanced its cursor would satisfy all of them and play a chord or
+nothing. Nobody in CI can hear a tune, so the honest substitute is to count what it asked the hardware
+to do: four notes booked ONCE each at 0 / 0.5 / 1 / 1.5 s with frequencies 261.6 / 293.7 / 329.6 /
+349.2 Hz, only the notes inside the lookahead booked at `play()`, every oscillator stopped and
+released on `onended`, the envelope starting at 0 and ending at 0 with no exponential ramp anywhere,
+`loop` re-booking, `onEnd` firing exactly once, `stop()` booking nothing further, three voices of a
+chord all starting on the same sample, and a browser with no `AudioContext` returning null rather than
+throwing. ⚠️ One of these tests originally asserted only that an oscillator existed — no test at all,
+since a player that set the gain straight to full volume would have passed it. It was rewritten to
+read the automation it claims to check, and that version is reversion-proven.
+
+**OPEN, recorded not patched (rule 6):**
+- **The photographed rota is not in the library.** Its pitches were not transcribed, for the reason
+  above. Re-sending the image, or typing the notes in either notation, is all it takes — the engine
+  plays it and the round structure it needs already exists.
+- **Reading notation from a PHOTO is not built and was not promised.** Optical music recognition is a
+  hard problem the vision models are not reliable at; claiming it would be the fake-feature class.
+  The engine reads TEXT notes.
+- **No tune is routed into the game's audio buses yet.** `generate_melody` stands alone and the game
+  plan points at it, but `AudioManager` still only loads files — wiring the synthesiser into its
+  `music`/`sfx` buses is a separate change to a working file, and doing it in the same commit would
+  be scope creep on a path that currently works.
+## 2026-09-20 — A doc's claim about a console is only as good as the last person who LOOKED
+
+**No behaviour changed. Three stale claims were corrected, and the third one had already cost the
+admin a wasted instruction.**
+
+The admin asked what was left to do. I read them the open items out of `CLAUDE.md` — including
+*"`AGENTV3_NEMOTRON` is set to `week`, which names no tier, so Nemotron's judge and plan are silently
+OFF; change it to `weak`"* — and presented it as a live fact about their deployment.
+
+**They opened Cloud Run and sent a screenshot: it already reads `weak`**, with `NEMOTRON_BASE_URL`
+pointing at the NVIDIA host. The judge and the plan were on the whole time.
+
+🔴 **The entry I was reading ENDS with the sentence "this must be verified in the console, not assumed
+from this entry."** I read the paragraph, skipped its own warning, and passed the claim on. That is the
+same shape this file already records twice — the idle-minutes default that said "NOT taken" eight days
+after it was taken, and the E2B rate whose derivation "could not fail" — and it is worse in one way:
+those were stale by drift, this one was stale *and carried its own warning label*.
+
+**What changed:**
+- `nemotron.ts` — the docblock stated the `week` report as fact. It now records what the console
+  actually showed, and adds the rule: **do not restate a config value in a comment; say what the code
+  DOES with it and leave the value to the console.**
+- `CLAUDE.md` — same correction on the ladder entry, keeping the incident rather than erasing it.
+- 🔒 **The GUARD (`nemotronConfigNote`) is untouched.** It was never built for that one typo: three
+  real instances of the class remain (a trailing space in `BRAVE_API_KEY`, an `=` in
+  `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`). **A protection built for a class is not
+  retired because one suspected instance turned out not to have happened** — deleting it would be
+  trading a real defence for a tidy story.
+
+**Two items closed on the admin's own queue in the same conversation, both recorded hand-to-hand the
+day they were said (the registry's rule), because neither has any signal the code can produce:**
+
+1. **The six DUPLICATE Cloud Run keys are DELETED** — admin, verbatim: *"maine delete kar diye hai,
+   10-12 din pahle hi"* (≈ 2026-09-08/10). This was the ONE row in that table with no self-verifying
+   check: a process sees a single value and cannot know a second row existed. The admin's word is the
+   only possible record, so it is now written down.
+2. **Android developer verification — package registration is DONE** (screenshot). Both rows read
+   `Registered`: `com.navbharat.ai` (the real `applicationId` — verified against
+   `android/app/build.gradle`, not assumed) and `com.navbharatai.app` (only the Java `namespace`, not a
+   distributed app). The 30 Sep 2026 removal deadline is therefore met for the app that ships.
+   ⚠️ Recorded narrowly: that screen shows PACKAGE REGISTRATION. Whether a separate identity section is
+   outstanding was not visible, and is not claimed either way.
+
+**Still open for the admin:** `DATA_GOV_IN_API_KEY` (free, from data.gov.in — without it the CPCB air
+quality path merged today answers nothing), the E2B rate tile on the Monitor, and naming a PR to merge.
+---
+
+## 2026-09-20 — Theme PR L: the inline-style tail, and a token that named nothing
+
+**Context.** PR C–K migrated the Tailwind *class* literals. The ratchet then stood at **991 literals
+across 108 files** — measured afterwards as **695 class and 296 inline** — and the codemod could not
+see an inline style at all. An inline style had never been covered by `theme-compat.css` either, so
+`color: 'rgba(255,255,255,0.4)'` was white-at-40% on Light exactly as on Dark — 1.1:1, one of the
+audit's 236 invisible nodes.
+
+**What shipped.**
+- `scripts/themeMigrate.mjs` gained an inline pass with one map per role (`INLINE_TEXT`,
+  `INLINE_LINE`, `INLINE_BG`, `INLINE_ACCENT_FILL`). The classification is **derived from the
+  existing class tables** wherever they already decided what a hex means, so `#8b949e` cannot mean
+  `--text-muted` as a class and something else inline.
+- **Inline literals 296 → 206**, across 15 files (37 exact, 57 readability fixes). The 695 CLASS
+  literals are untouched — a separate slice, for the reason below.
+
+⚠️ **A number I got wrong in my own first draft, corrected here rather than quietly.** This entry
+first said "991 → 297", which was the result of running BOTH passes over all 108 files — a change that
+failed the gate 12 ways. It also said the remaining tail was "almost all" inline, a generalisation made
+from reading the three heaviest files. The measured split is 695 class / 296 inline.
+
+**`exact` had to become a MEASUREMENT.** The first draft inherited `exact` from the class rows, where
+it means "the compat layer already remaps this literal". Inline styles have no compat layer, so that
+inheritance would have reported `#e6edf3 → var(--text-body)` as pixel-identical when Dark's
+`--text-body` is `#c9d1d9`. `DARK_VALUE` now holds each role's dark value, the kind is computed by
+comparison, and `tests/themeMigrate.test.ts` asserts every row of it against `index.css`'s own dark
+block — so a palette change that invalidates a row fails CI instead of silently repainting Dark.
+
+**🔴 The regression this pass produced, caught in its own diff.** The guard that protects a label on a
+fixed fill read the **line**. A style object is routinely written over several:
+
+```
+style={{
+  background: '#4f46e5',
+  color: 'white',
+}}
+```
+
+The `color` line carries no background, so the guard saw none and `white` became `--text-primary` —
+near-black, on an indigo fill, about 2.2:1. **The tool that removes invisible labels had created
+one.** Reverted before it left the branch; `styleObjectSpans` is the fix, a declaration's context is
+its OBJECT — and then its ELEMENT: `AuthComponent`'s Apple button sets its fill in `className`
+(`bg-black text-on-accent`) with a forced `color: '#ffffff'` beside it whose own comment says it is
+there to be unthemeable, and that one broke TRAP 3 on the next full run. **A fill is a fill whether it
+is written as a style or as a class.** `styleObjectSpans`, `elementAt` and `elementFixesItsLabel` are
+the fix; eight cases lock both halves, proven by reversion.
+
+**🔴 A trap in the token system, found because this pass fell into it.** `--color-on-accent` is
+declared inside `@theme inline`, and **`@theme inline` emits no custom property at all**: the utility
+(`text-on-accent`) gets the value baked in and no `--color-*` variable ever reaches the stylesheet.
+Verified against the built CSS rather than reasoned about — of `--color-surface`, `--color-ink`,
+`--color-well`, `--color-scrim`, `--color-on-accent`, the bundle contains **none**; `--text-muted`,
+`--surface-well`, `--scrim`, `--accent` are all present. So `style={{ color: 'var(--color-on-accent)' }}`
+resolves to nothing and the label falls back to the inherited `--text-body` — near-black on an indigo
+button, on Light. Nothing would fail: not tsc, not a test, not the ratchet, which counts literals and
+has no opinion about a var that does not exist.
+
+⚠️ **Correction, recorded rather than quietly fixed.** An earlier draft of this entry said the bug was
+"live in three shipped components". **It was not.** Those three references were the codemod's OWN
+output from a run that was then reverted; `git grep color-on-accent origin/main -- src` returns
+`src/index.css` and nothing else. The claim was written from a grep of my own working tree and would
+have shipped as a finding about the product. The real finding is narrower and still worth the guard:
+the trap is real, and the first thing to walk into it was the tool written that afternoon.
+
+Prevention shipped anyway: `--on-accent: #ffffff` is declared in all three palette blocks and
+`@theme inline` points `--color-on-accent` at it, so the utility and the raw var are one value.
+`tests/everyTokenAStyleUsesIsDeclared.test.ts` fails CI on any `var(--x)` in client code that nothing
+anywhere declares. It recognises the three ways this app really declares one — a CSS declaration, a
+style-object key, `setProperty` — because `--nbai-pane` is written by `splitPane.ts` and read by
+`AgentV3Panel.tsx`, and `--nb-font-scale` is set imperatively in `a11y.ts`; a narrower scan would have
+reported half the app as broken and been switched off within a week.
+
+**🔴 And the sweep ran straight into a suite that already governed inline colours.**
+`tests/inlineThemeColours.test.ts` has existed since 2026-08-16 with three traps, all of which this
+pass broke on its first full run (12 failures, 5 files): a library config is not a DOM style
+(ShellTerminal's xterm theme cannot read `var()`); the user's colours are not ours (MultiPageBuilder,
+DarkModeGenerator, WhitelabelBranding export colours into the USER'S app); and a label on a brand fill
+keeps its white. **I never looked for it** — safeguard #6's vocabulary failure, again: I searched the
+codemod and the ratchet and never ran `find tests -iname "*inline*"`. The four files are now named in
+`INLINE_SKIP` with the reason each was excluded, and a brand fill is treated as FIXED — theming it is
+not even an improvement, since white on Dark's `--accent` (#818cf8) is 3.0:1 against 5.6:1 on #4f46e5.
+
+**The class sweep is now a separate run (`--inline-only`).** The other failures came from passing all
+108 baseline files to the CLASS pass, migrating files earlier PRs had deliberately left and whose
+tests name their literals (`bg-emerald-500` for a status dot, `bg-white/10` for the exit dialog). The
+two sweeps touch different literals and collide with different pinned tests; mixing them makes the
+diff unreviewable and the failures indistinguishable.
+
+**Still open.** The remaining literals are deliberate leftovers, not misses: low-alpha washes
+(`background: 'rgba(255,255,255,0.05)'` — invisible on Light but not unreadable, and a wrong surface
+guess is a change a reader can see), brand tints, brand fills, the four excluded files, and every
+CLASS literal, which is its own later slice. Nothing is guessed; each is reported by the codemod and
+left.
+## 2026-09-20 — 🎵 THE LINE BREAKS THE MODEL WROTE, AND A NEWSPAPER SHAPE FOR LONG ANSWERS
+
+**Two asks in one message (admin, with a screenshot of a Hindi song in free chat):**
+*"gana likhwaya jaye, to jahan 2 line honi chahiye waha 1 line me hi dono line likh deta hai"* and
+*"jab koi question puche to response 3 part me aaye — headline, summary, phir pura answer… jaise
+newspaper me koi news hote hai"*, with the limit stated in the same breath: *"agar user bole short
+answer do, ya ai ka answer already short hi hai, to yeh system lagane ki jaruri nahi hai!!"*
+
+### 1 · The song bug was the RENDERER, and the model's own label proved it
+
+The screenshot showed a four-line mukhda as one long line, with `[Mukhda]` run into the lyrics beside
+it. `SONGCRAFT_DIRECTIVE` tells the model, in so many words, to *"Label each part on its own line"* —
+**so a label sitting INSIDE the lyric line is a break that was written and then discarded.** Only the
+renderer could have done that, and no prompt change could ever have fixed it.
+
+**The cause is CommonMark itself, which is why nothing looked broken.** A single newline inside a
+paragraph is a SOFT break and renders as a SPACE; `react-markdown` implements the spec exactly and
+correctly. Every song, poem, shayari, address and plain-line list in this app was being flattened.
+
+🔎 **AND NO SURFACE PASSED ANY PLUGIN AT ALL (rule 3).** Four `<ReactMarkdown>` call sites, four times
+zero `remarkPlugins` — the drifted-copy class in its cheapest form: nobody copied a mistake, everybody
+omitted the same thing.
+
+🔴 **THE SECOND, LARGER FIND — measured, not reasoned about.** Rendering a table through the real
+`react-markdown` before and after:
+
+```
+OLD table: <p>| City | Population |          ← users were shown literal pipe characters
+NEW table: <table><thead><tr><th>City</th>…  ← a real table
+```
+
+**Every markdown table the AI has ever produced in chat reached the user as a row of pipes.** And
+`AIChat.tsx` carries styled `table` / `thead` / `th` / `td` components plus a task-list `input`
+component — **none of which could ever once have fired**, because GFM is not CommonMark. They had been
+written, reviewed and shipped against a feature the renderer did not have.
+
+**Fixed:** ONE exported constant, `CHAT_MARKDOWN_PLUGINS` (`src/lib/chatMarkdown.ts`) = `remark-gfm` +
+`remark-breaks`, wired into all three chat surfaces. A source-level test fails when a chat surface
+renders without it, so a fifth panel cannot quietly reintroduce the bug.
+
+⚠️ **The honest trade, stated rather than discovered later:** `remark-breaks` makes EVERY newline a
+`<br>`, so a model that hard-wraps prose would show those wraps. That is the same trade GitHub
+comments and every chat product make — in a chat the author's newline is deliberate. **Deliberately
+NOT applied to `LegalDocPage`**, whose prose is wrapped in source files and which nobody reported.
+
+### 2 · The newspaper shape — a prompt rule, not a parser
+
+**Why not a parser, which was the obvious build:** a splitter can only CUT an answer written as one
+argument, so the "headline" would be its first sentence — usually a preamble, not the conclusion — and
+the "summary" a prefix of the body rather than something that stands alone. **The three parts have to
+be WRITTEN as three parts.** Asking costs one paragraph of prompt; parsing properly would cost a
+second model call, which the free tier cannot spend.
+
+🔒 **The output is ordinary markdown** — a bold line, a paragraph, then the body — so there is no
+marker to leak, no parse to fail, and no state to hold while the answer streams. If the model ignores
+the directive the user gets exactly today's answer. It also means the **most important line now
+arrives FIRST in the stream** instead of last.
+
+🔑 **THE TWO SKIP CONDITIONS LIVE IN DIFFERENT PLACES, AND NEITHER HALF IS OPTIONAL.** Only the CALLER
+can see what the user asked for; only the MODEL can see how long its own answer turned out. So
+`answerShapeFor` refuses on a short-answer request and on a request whose answer IS an artefact (song,
+poem, letter, translation, code — songs via the SHARED `isSongRequest`, never a second list), and the
+directive text refuses when the answer is naturally short.
+
+🔴 **THE PRECISION BUG MY OWN TEST CAUGHT, and it was in the justification as much as the code.** The
+first draft matched `chhota/chhote`, `छोटा`, `kam`, `जल्दी` and `thode` as bare tokens, with a comment
+arguing they "almost always qualify the ANSWER". The very first case disproved it: **"GST kya hota hai
+aur CHHOTE dukandar ko kaise register karna chahiye?"** — a long question about SMALL SHOPKEEPERS —
+read as a request for a short answer. `kam kharche me`, `jaldi kaise seekhein`, `thode paise se` are
+the same trap, and they are among the commonest words in Hindi. They now count only inside a PHRASE
+that can mean nothing else. **The asymmetry that makes over-matching cheap does not make it free.**
+
+⚠️ **FREE TIER ONLY**, because that is the surface the admin reported and asked to change. Widening it
+to Pro is one condition (`if (isFree)`), deliberately left for them to ask for.
+
+**Tests:** `tests/theLineBreaksTheModelWrote.test.ts` (10 cases, rendered through the REAL
+`react-markdown`, so the before/after is measured) and `tests/headlineThenGistThenTheWholeStory.test.ts`
+(13 cases). **Five reversions checked and each one bites:** dropping `remark-breaks`, dropping
+`remark-gfm`, unwiring one surface, dropping the `isFree` gate, dropping the caller-side short check.
+## 2026-09-20 — "DID THIS BUILD LEAVE A VERSION?" — a question the engine could not answer
+
+The admin opened the Time Machine minutes after #3190 merged, found nothing automatic, and pressed
+**"Save this version" by hand**: *"yeh to mujhe khud backup lena pada"*.
+
+The most likely explanation was timing — the merge landed at 15:01 UTC and the screenshot is 15:05,
+inside Cloud Run's own deploy window, so that build almost certainly ran on the previous code. **But
+"most likely" was the only answer available**, and that is the finding, not the timing.
+
+### The engine knew six answers and told nobody any of them
+
+`saveRestorePoint` computes a decision — build failed / no files / already saved / switched off / no
+workspace / saved — and **returned it to a `void` call site**. Nothing was recorded anywhere. So the
+only instrument for "did this build leave a version?" was a user opening a screen on a phone.
+
+That is the same shape as the bug #3190 fixed: a writer nobody could hear, whose silence looked
+exactly like success for two months. Fixing the writer without giving it a voice left the next
+failure to be found the same way — by the admin.
+
+### Two things underneath had to be fixed first, or the report would have lied
+
+**1. `BuildHistoryStore.save` returned `void` and swallowed everything — including `if (!db) return`,
+the case where Firestore is not configured at all.** So even a caller that wanted to be honest could
+only ever report an INTENTION. It returns a boolean now. The retention trim got its own `try` in the
+same change: past the `set` the version EXISTS, and reporting it unsaved because an unrelated delete
+failed is the opposite lie, equally bad.
+
+**2. The double-write claim was never released on failure.** The claim is taken BEFORE the write so
+the two settle paths cannot both save — correct, with one hole: a FAILED write left the key claimed,
+so the deadline finalizer, which exists precisely to rescue what the settle path could not finish,
+refused with `already-saved` and the user ended with **no version at all**. `forgetRestorePoint`
+releases it; nothing can be duplicated, because nothing was written.
+
+### The line itself
+
+`RESTORE_POINT`, recorded on **both** settle paths (Fix 67's rule, inherited), carrying one sentence
+per outcome from `describeRestorePoint` and a severity that matches the fact: a refusal we CHOSE is
+`info`, a failure is `warning`. Registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — a perfect app
+whose version write failed is still a perfect app.
+
+🔒 **It is AWAITED, briefly, and the comment that stood there said the opposite.** "Fire-and-forget"
+and "say what happened" cannot both be true: the report is persisted at the end of the build, so an
+answer arriving afterwards reaches nobody. Bounded by `RESTORE_POINT_CONFIRM_MS` (5 s) at the end of a
+build measured in minutes, and **a timeout is a third outcome — `unconfirmed`, never "saved" and never
+"failed"** — the same rule `JudgeVerdict.reviewed` already states: an instrument that could not read
+must not report a reading.
+
+### Two process failures in this change, both worth recording
+
+**A weak assertion, caught only by reversion — the third this session.** The case asserting "both
+settle paths record it" counted the `RESTORE_POINT` records and **passed with one call gutted**: a
+record fed by nothing, reporting a version that was never attempted. It counts the CALLS and the
+records now, and reverting one call fails it.
+
+**`git checkout <file>` destroyed uncommitted work for the third time in one session** — here, every
+edit to `restorePoint.ts`, wiped while undoing a reversion proof. The rule that follows is mechanical:
+**commit before running any reversion proof, and undo with `git restore --source=HEAD --worktree`**,
+never a bare `git checkout` on a file whose changes are not yet committed.
+## 2026-09-20 — BOTH STORE BUILDS FAILED ON A GREEN `main`, on two faults CI cannot see
+
+The admin asked for a fresh `.aab` and `.ipa`. Both were dispatched from `main` at `9ae1c0af` — a
+commit whose CI had gone green minutes earlier across typecheck, the unused-import gate, the server
+typecheck, **27,370 tests**, the Linux bundle build, the bundle budget, the boot check and the
+server-deps gate. **Both failed inside two minutes.**
+
+### The two faults
+
+**ANDROID — `:app:mergeReleaseResources` refused `android/app/src/main/res/values/nbai_colors.xml`:**
+*"The string `--` is not permitted within comments."* The comment named a CSS custom property the way
+CSS spells it, so it contained a literal double hyphen. That is illegal XML anywhere, in any file.
+**It was mine**, from the notification work in #3174, and it has blocked every Android build since
+that merge — silently, because nothing in this repo reads Android resource XML.
+
+**iOS — `npm run build` died at rollup:** *"HeaderBadges is not exported by headerBadges.ts"*.
+`HeaderBadges.tsx` (the component) and `headerBadges.ts` (its rules) sat in one directory differing
+only by case. Linux is case-SENSITIVE and has two modules; the macOS runner is case-INSENSITIVE and
+has one, so `import { HeaderBadges } from './HeaderBadges'` resolved to the rules file. The Linux gate
+could not reproduce it at any effort — **the same command passes there by construction.**
+
+### The root cause is neither fault
+
+**The two platforms that actually ship the app are built by MANUAL workflows, and nothing on the
+ordinary path speaks for them.** A fault reachable only by a run somebody triggers by hand is
+discovered on the day somebody needs a release — which is exactly when it costs the most. Both faults
+had been sitting on `main`: the XML one since #3174 merged, the case one since the badge strip landed.
+
+### The guard — `scripts/nativeShellGuard.mjs`, in CI, no SDK and no mac required
+
+Three exact rules over the repo as a fresh checkout would see it:
+- **Android XML comments** — no `--` inside one, and none left unclosed; plus a bare `&` that begins
+  no entity. Each is exactly what aapt refuses, so there are no false positives.
+- **Case-colliding paths** — two files that are one file on macOS/Windows.
+- **Case-ambiguous module names** — two modules in one directory whose names match once the extension
+  is removed.
+
+🔴 **The last rule exists because the second one DID NOT CATCH THE BUG.** The first version checked
+full paths only, was run against the real pair, and **passed** — `.tsx` and `.ts` are different paths
+on every platform. What collides is the SPECIFIER, not the file. Both rules are kept: one is about the
+filesystem, the other about resolution, and neither implies the other. The distinction is a test case.
+
+🔴 **And the guard reproduced the very class it hunts, on its first run: it printed
+`0 tracked files` and exited 0** — the `git ls-files` call had been written with `require` inside an
+ESM module, and the `catch` swallowed it. A check of zero files reported as a pass. It now **fails**
+when the list cannot be read or comes back empty, and the success line prints the count so a silent
+skip is visible. Caught because the number was printed; it would not have been caught by review.
+
+Measured before enforcing: that one pair was the only case-ambiguous module name in **4,049 tracked
+files**, and `nbai_colors.xml` the only malformed XML of 15 — so the rules are enforceable today
+rather than being a sweep of dozens of renames.
+
+Test-locked in `tests/theStoreBuildsCannotBreakSilently.test.ts` (16 cases), and **both rules proven
+against the two real faults**: restoring the `--` fails the guard, and `git mv`-ing the rules module
+back to `headerBadges.ts` fails it too.
+
+### What this does not do
+
+It does not compile an Android app or an iOS app. A fault that needs a real SDK — a Gradle plugin
+clash, a signing problem, a missing entitlement — is still found only by the store workflows. This
+guard covers the class that broke us: source that is fine on Linux and wrong on the machine that
+ships. Running the two workflows periodically rather than only on demand is the complete fix and is
+**not built here** — it burns a Play `versionCode` per run, which the admin's own standing rule
+reserves for when they ask.
+
+---
+
+## 2026-09-20 — `DATA_GOV_IN_API_KEY` PARKED: the key could not be obtained, and the item leaves the admin's queue
+
+The CPCB air-quality swap (earlier today) moved AQI off a non-commercially-licensed provider onto the
+Central Pollution Control Board's own feed on data.gov.in, under the Government Open Data License –
+India. It needs one free key. The admin was guided through the portal step by step: they registered,
+signed in, reached `Dashboard → MyAccount`, and **the portal's own account verification would not
+complete**. Verbatim: *"yeh nahi mil sakti — government website hai, nahi chal rahi, verification
+nahi ho raha hai"*.
+
+**Nothing is broken, and that is a property of the design rather than luck.** `cpcbAirQuality.ts`
+states it in its own header and the code does it: no key ⇒ the module returns null and the caller's
+web search answers the question — **never a silent fall back to the old non-commercial source**, which
+would have re-opened the very licence exposure the change closed, invisibly. So today's state is: AQI
+answered by web search, exactly as gold rates and showtimes already are, with zero exposure. The
+official-number upgrade is simply not switched on.
+
+**What is recorded, and why it is recorded rather than left to be re-discovered:** the registry entry
+now says PARKED and says *do not put this back on the admin's queue*. This is the same class as PR
+#3196, fresh from this morning — a session reads an open item out of `CLAUDE.md`, presents it as a
+live to-do, and spends the admin's time on something that is not actually theirs to do. There the
+value had already been set; here the instruction is impossible at the other end. Both cost the same
+thing, and both are prevented by writing down what was actually tried.
+
+**Re-open it only on new evidence**: the admin saying the portal worked, or a different AQI source
+whose licence genuinely covers a commercial product. That search must end in the LICENCE — the two
+obvious free candidates (waqi.info's free token, and the no-key provider AQI was just moved off) are
+both non-commercial tiers, and swapping one grey source for another is not a fix. The honest paid
+route remains what the weather half already documents.
+
+**Still open, unchanged:** `LIVE_WEATHER_SOURCE` defaults to off, so weather is web-searched too
+until Open-Meteo's commercial plan (~$29/month) is bought. One instruction, one value, no deploy.

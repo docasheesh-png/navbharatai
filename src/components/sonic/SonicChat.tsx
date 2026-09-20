@@ -345,7 +345,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
                 {voiceRunningCostLabel(billedSeconds)}
               </span>
             )}
-            {error && <p style={{ color: '#f87171', marginTop: 12, maxWidth: 340, textAlign: 'center', fontSize: 13 }}>⚠️ {error}</p>}
+            {error && <p style={{ color: 'var(--brand-danger-text)', marginTop: 12, maxWidth: 340, textAlign: 'center', fontSize: 13 }}>⚠️ {error}</p>}
 
             {/* Minimal live caption (last line) when the transcript panel is closed. */}
             {!showTranscript && lastLine && (
@@ -508,7 +508,7 @@ const voicePill: React.CSSProperties = {
   border: 'none', background: 'transparent', color: '#c4b5fd', cursor: 'pointer',
   fontSize: 13, fontWeight: 700, padding: '7px 16px', borderRadius: 999,
 };
-const voicePillOn: React.CSSProperties = { background: 'linear-gradient(135deg,#6d28d9,#7c3aed)', color: '#fff' };
+const voicePillOn: React.CSSProperties = { background: 'linear-gradient(135deg,#6d28d9,#7c3aed)', color: 'var(--text-primary)' };
 const boliRow: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8 };
 const boliSelect: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f3ff',
@@ -516,7 +516,7 @@ const boliSelect: React.CSSProperties = {
 };
 const micBtn: React.CSSProperties = {
   width: 64, height: 64, borderRadius: '50%', border: 'none', cursor: 'pointer',
-  color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center',
   boxShadow: '0 8px 30px rgba(124,58,237,0.5)',
 };
 const sideBtn: React.CSSProperties = {

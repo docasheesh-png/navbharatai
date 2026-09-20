@@ -471,7 +471,7 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
-import { saveRestorePoint } from '../AgentV3/restorePoint';
+import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity } from '../AgentV3/restorePoint';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
@@ -11750,19 +11750,35 @@ async function noteBuildOutcome(
         } catch { /* billing enrichment is best-effort — never blocks finalization */ }
       }
       // A VERSION THE USER CAN GO BACK TO (2026-09-20). Written on BOTH settle paths for the reason
-      // Fix 67 exists: a rule on only one of them is a rule a long build escapes. Fire-and-forget —
-      // a history write must never delay or fail a build that has already produced an app.
+      // Fix 67 exists: a rule on only one of them is a rule a long build escapes.
+      //
+      // ⚠️ AWAITED, BRIEFLY, AND THE COMMENT THAT STOOD HERE SAID THE OPPOSITE. It read
+      // "fire-and-forget — a history write must never delay or fail a build". The write still cannot
+      // fail a build (every error is swallowed inside), but it can no longer be unobservable: the
+      // report is persisted at the end of this function, so an answer arriving afterwards reaches
+      // nobody, and "did this build leave a version?" then has no answer but a user's screenshot.
+      // Bounded by RESTORE_POINT_CONFIRM_MS; a timeout is recorded as `unconfirmed`, never as either.
       if (ok) {
-        void saveRestorePoint({
-          ok: true,
-          workspaceId,
-          uid: userId,
-          prompt,
-          isEdit: intent === 'edit_existing',
-          tier: powerLevelReqEffective,
-          buildKey: `${workspaceId}_${billingCtx.buildStartedAt}`,
-          io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
-        }).catch(() => {});
+        try {
+          const rp = await saveRestorePointForReport({
+            ok: true,
+            workspaceId,
+            uid: userId,
+            prompt,
+            isEdit: intent === 'edit_existing',
+            tier: powerLevelReqEffective,
+            buildKey: `${workspaceId}_${billingCtx.buildStartedAt}`,
+            io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
+          });
+          buildDiagRef?.record({
+            phase: 'build',
+            severity: restorePointSeverity(rp),
+            code: 'RESTORE_POINT',
+            message: describeRestorePoint(rp),
+            detail: `saved=${rp.save} reason=${rp.reason || 'saved'} path=deadline-finalizer`,
+            autoResolved: rp.save,
+          });
+        } catch { /* a version write must never affect a finished build */ }
       }
       // STALE-SUCCESS SUMMARY ON THE TIMEOUT PATH (real report, 2026-09-14, an "EduTube" build):
       // the model had already emitted a `done` event mid-build ("Your app is live and ready …
@@ -20565,18 +20581,30 @@ async function noteBuildOutcome(
       // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every
       // app this engine has ever made. Written here AND in the deadline finalizer, keyed by the same
       // `${workspaceId}_${buildStartedAt}` the wallet debit uses, so a build leaves exactly one.
-      // Fire-and-forget: a history write must never delay or fail a build that produced an app.
+      // ⚠️ Awaited briefly so the REPORT can state the outcome — see the finalizer's copy of this
+      // block for why "fire-and-forget" and "say what happened" cannot both be true. It still cannot
+      // fail a build: every error inside is swallowed, and a slow store is recorded as `unconfirmed`.
       if (result.ok === true) {
-        void saveRestorePoint({
-          ok: true,
-          workspaceId,
-          uid: userId,
-          prompt,
-          isEdit: isEditMode,
-          tier: powerLevelReqEffective,
-          buildKey: `${workspaceId}_${buildStartedAt}`,
-          io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
-        }).catch(() => {});
+        try {
+          const rp = await saveRestorePointForReport({
+            ok: true,
+            workspaceId,
+            uid: userId,
+            prompt,
+            isEdit: isEditMode,
+            tier: powerLevelReqEffective,
+            buildKey: `${workspaceId}_${buildStartedAt}`,
+            io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
+          });
+          buildDiag.record({
+            phase: 'build',
+            severity: restorePointSeverity(rp),
+            code: 'RESTORE_POINT',
+            message: describeRestorePoint(rp),
+            detail: `saved=${rp.save} reason=${rp.reason || 'saved'} path=settle`,
+            autoResolved: rp.save,
+          });
+        } catch { /* a version write must never affect a finished build */ }
       }
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every

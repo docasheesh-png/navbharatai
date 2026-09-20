@@ -84,9 +84,16 @@ class BuildHistoryStore {
       tier?: string;
       ok: boolean;
     },
-  ): Promise<void> {
+  ): Promise<boolean> {
+    // 🔴 RETURNS WHETHER THE VERSION REALLY LANDED (2026-09-20). It used to return `void` and swallow
+    // everything — including `if (!db) return`, the case where Firestore is not configured at all. So
+    // every caller's only honest statement was "we asked", and a build report that said "a version was
+    // saved" was reporting an INTENTION as a fact. A writer that cannot tell anyone whether it wrote is
+    // how the Time Machine came to be empty for months with nothing failing anywhere.
+    //
+    // Still never throws: a history write must not be able to cost a user the app they just paid for.
     const db = this.getDb();
-    if (!db) return;
+    if (!db) return false;
     try {
       const col = this.versionsCol(db, sessionId);
       const id = `v_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -102,15 +109,22 @@ class BuildHistoryStore {
         files: capFiles(entry.files),
       };
       await col.doc(id).set(doc);
-      // Enforce MAX_VERSIONS_PER_WORKSPACE: drop the oldest if needed.
-      const all = await col.orderBy('createdAt', 'asc').get();
-      if (all.size > MAX_VERSIONS_PER_WORKSPACE) {
-        const toDelete = all.docs.slice(0, all.size - MAX_VERSIONS_PER_WORKSPACE);
-        const batch = db.batch();
-        toDelete.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-      }
+      // ⚠️ THE TRIM HAS ITS OWN try ON PURPOSE. Past this line the version EXISTS and is restorable;
+      // retention is housekeeping. Folding the two together would report a saved version as unsaved
+      // because an unrelated delete failed — the opposite lie from the one above, and just as bad.
+      try {
+        // Enforce MAX_VERSIONS_PER_WORKSPACE: drop the oldest if needed.
+        const all = await col.orderBy('createdAt', 'asc').get();
+        if (all.size > MAX_VERSIONS_PER_WORKSPACE) {
+          const toDelete = all.docs.slice(0, all.size - MAX_VERSIONS_PER_WORKSPACE);
+          const batch = db.batch();
+          toDelete.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch { /* the version is saved; trimming can wait for the next one */ }
+      return true;
     } catch { /* best-effort — never block the build */ }
+    return false;
   }
 
   /** List version metadata for a workspace, newest first. No file payloads. */

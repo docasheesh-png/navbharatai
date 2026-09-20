@@ -205,7 +205,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
       style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}
     >
       {/* Mode toggle: paste a single error, or scan a whole app */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+      <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0" style={{ borderColor: 'var(--border-soft)' }}>
         <button onClick={() => setMode('single')} className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium" style={modeBtn('single')}>
           <Wand2 className="w-3.5 h-3.5" /> Single Error
         </button>
@@ -225,12 +225,12 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
         {/* ── TOP SECTION (40%) ── */}
         <div
           className="flex flex-col border-b"
-          style={{ height: '40%', borderColor: 'rgba(255,255,255,0.1)' }}
+          style={{ height: '40%', borderColor: 'var(--border-soft)' }}
         >
           {/* Error type tabs */}
           <div
             className="flex items-center gap-0 border-b px-4 shrink-0"
-            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+            style={{ borderColor: 'var(--border-soft)' }}
           >
             {ERROR_TABS.map((tab) => (
               <button
@@ -329,7 +329,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
             {detectedType && (
               <span
                 className="px-2 py-0.5 rounded text-xs font-mono"
-                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}
+                style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--brand-danger-text)' }}
               >
                 {detectedType}
               </span>
@@ -377,7 +377,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <div className="flex items-center gap-2">
                 <TirangaLoader className="w-5 h-5" />
-                <span className="text-sm font-medium" style={{ color: '#818cf8' }}>
+                <span className="text-sm font-medium" style={{ color: 'var(--brand-accent-strong)' }}>
                   Analyzing error...
                 </span>
               </div>
@@ -437,12 +437,12 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   borderLeft: '3px solid #ef4444',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
-                  borderLeftColor: '#ef4444',
+                  borderLeftColor: 'var(--brand-danger-text)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Search className="w-4 h-4" style={{ color: '#ef4444' }} />
-                  <span className="text-sm font-semibold" style={{ color: '#fca5a5' }}>
+                  <Search className="w-4 h-4" style={{ color: 'var(--brand-danger-text)' }} />
+                  <span className="text-sm font-semibold" style={{ color: 'var(--brand-danger-text)' }}>
                     Root Cause
                   </span>
                 </div>
@@ -458,13 +458,13 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   background: 'var(--surface-card)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
-                  borderLeftColor: '#22c55e',
+                  borderLeftColor: 'var(--brand-success-text)',
                 }}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" style={{ color: '#22c55e' }} />
-                    <span className="text-sm font-semibold" style={{ color: '#86efac' }}>
+                    <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--brand-success-text)' }} />
+                    <span className="text-sm font-semibold" style={{ color: 'var(--brand-success-text)' }}>
                       Fix
                     </span>
                   </div>
@@ -479,7 +479,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                       }}
                     >
                       {copiedFix ? (
-                        <Check className="w-3 h-3" style={{ color: '#22c55e' }} />
+                        <Check className="w-3 h-3" style={{ color: 'var(--brand-success-text)' }} />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
@@ -506,7 +506,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   className="text-xs rounded p-3 overflow-x-auto"
                   style={{
                     background: 'var(--surface-base)',
-                    color: '#7ee787',
+                    color: 'var(--brand-success-text)',
                     border: '1px solid rgba(255,255,255,0.06)',
                     fontFamily: 'monospace',
                     whiteSpace: 'pre-wrap',
@@ -524,12 +524,12 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   background: 'var(--surface-card)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
-                  borderLeftColor: '#3b82f6',
+                  borderLeftColor: 'var(--brand-info-text)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Lightbulb className="w-4 h-4" style={{ color: '#3b82f6' }} />
-                  <span className="text-sm font-semibold" style={{ color: '#93c5fd' }}>
+                  <Lightbulb className="w-4 h-4" style={{ color: 'var(--brand-info-text)' }} />
+                  <span className="text-sm font-semibold" style={{ color: 'var(--brand-info-text)' }}>
                     Explanation
                   </span>
                 </div>
@@ -538,7 +538,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                     <li key={i} className="flex items-start gap-2 text-sm">
                       <span
                         className="mt-0.5 shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold"
-                        style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa' }}
+                        style={{ background: 'rgba(59,130,246,0.2)', color: 'var(--brand-info-text)' }}
                       >
                         {i + 1}
                       </span>
@@ -555,19 +555,19 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                   background: 'var(--surface-card)',
                   border: '1px solid rgba(255,255,255,0.07)',
                   borderLeftWidth: '3px',
-                  borderLeftColor: '#f59e0b',
+                  borderLeftColor: 'var(--brand-warn-text)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Shield className="w-4 h-4" style={{ color: '#f59e0b' }} />
-                  <span className="text-sm font-semibold" style={{ color: '#fcd34d' }}>
+                  <Shield className="w-4 h-4" style={{ color: 'var(--brand-warn-text)' }} />
+                  <span className="text-sm font-semibold" style={{ color: 'var(--brand-warn-text)' }}>
                     How to avoid this in future
                   </span>
                 </div>
                 <ul className="flex flex-col gap-1.5">
                   {result.prevention.map((tip, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="mt-1 shrink-0" style={{ color: '#f59e0b' }}>
+                      <span className="mt-1 shrink-0" style={{ color: 'var(--brand-warn-text)' }}>
                         •
                       </span>
                       <span style={{ color: 'var(--text-body)' }}>{tip}</span>
@@ -585,7 +585,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
         className="flex flex-col shrink-0 border-l"
         style={{
           width: historyOpen ? 240 : 36,
-          borderColor: 'rgba(255,255,255,0.1)',
+          borderColor: 'var(--border-soft)',
           background: 'var(--surface-card)',
           transition: 'width 0.2s ease',
           overflow: 'hidden',
@@ -595,7 +595,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
         <button
           onClick={() => setHistoryOpen((o) => !o)}
           className="flex items-center gap-2 px-2 py-3 border-b shrink-0"
-          style={{ borderColor: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)' }}
+          style={{ borderColor: 'var(--border-soft)', color: 'var(--text-muted)' }}
         >
           <History className="w-4 h-4 shrink-0" />
           {historyOpen && (
@@ -624,7 +624,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
                     className="text-xs px-1.5 py-0.5 rounded font-mono shrink-0"
                     style={{
                       background: 'rgba(239,68,68,0.15)',
-                      color: '#f87171',
+                      color: 'var(--brand-danger-text)',
                       fontSize: 10,
                     }}
                   >

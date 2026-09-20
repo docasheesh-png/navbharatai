@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Send, Bot } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import ReactMarkdown from 'react-markdown';
+import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { getAgentV3SessionId, getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 
@@ -135,7 +136,7 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
             >
               {m.role === 'agent' ? (
                 <div className="prose prose-invert prose-sm max-w-none [&_p]:my-1">
-                  <ReactMarkdown>{m.text}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={CHAT_MARKDOWN_PLUGINS}>{m.text}</ReactMarkdown>
                 </div>
               ) : (
                 m.text

@@ -2285,6 +2285,37 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_melody',
+      description:
+        'Make MUSIC and sound CUES with no sound file at all — synthesised in the browser from notes. '
+        + 'Call this whenever an app needs a tune, background music, a jingle, a chime, or a success / '
+        + 'error / coin / level-up cue, and whenever the user asks for a melody, a dhun, sargam, a '
+        + 'raga exercise, a music or riyaaz app, or a metronome-like practice tool. '
+        + 'IT IS ALSO THE ANSWER TO A SILENT GAME: generate_game_vfx can only LOAD a sound file, which '
+        + 'the app does not have, so use this for its music and its cues instead of leaving it quiet. '
+        + 'Emits src/audio: a notation reader, a player and a small tune library. '
+        + 'READS BOTH NOTATIONS in one line of text — Indian sargam (Sa Re Ga Ma Pa Dha Ni, komal as '
+        + '_Re, teevra as Ma#, RELATIVE to the tune\'s tonic so one line transposes to any key) and '
+        + 'Western letters (C D E F G A B, F#, Bb, C4 — absolute). Durations Sa*2 / Ga/2 / Sa*1.5, z a '
+        + 'rest, - a tie, [Sa Ga Pa] a chord, | a bar line. Several voices give a ROUND (entryBeats: '
+        + 'the same phrase entered late) over a repeating ground (loop: true). '
+        + 'Notes are booked against the audio clock a little ahead rather than one timer each, every '
+        + 'note is ramped so there is no click, and unlock() is wired to the first gesture — the three '
+        + 'things a hand-rolled attempt gets wrong. '
+        + 'Adds NO dependency, fetches nothing, costs nothing and works offline. A note it cannot read '
+        + 'becomes a rest and is reported, never guessed.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset: notation, melody, tunes. Default = all.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_game_vfx',
       description:
         'Add VFX + audio + the feedback that ties them together. Call generate_game_runtime first (this '
@@ -2297,7 +2328,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'trauma + hit-stop, so a hit reads as force instead of a state change. Author reactions in that '
         + 'table and keep gameplay emitting events only — never call particles or audio inline from '
         + 'gameplay code, or the reactions drift and half the game ends up feeling weaker. '
-        + 'Adds no dependency. Sound FILES are the app\'s to supply; a missing one plays silently and warns.',
+        + 'Adds no dependency. Sound FILES are the app\'s to supply; a missing one plays silently and warns — so for music and cues call generate_melody, which synthesises them and needs no file.',
       input_schema: {
         type: 'object',
         properties: {
@@ -3502,6 +3533,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_game_systems',
   'generate_game_shell',
   'generate_game_vfx',
+  'generate_melody',
   'generate_game_controller',
   'generate_game_3d',
   'object_spec',

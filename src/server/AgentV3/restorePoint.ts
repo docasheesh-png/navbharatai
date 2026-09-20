@@ -57,7 +57,20 @@ export function restorePointKey(workspaceId: string, uid: string | null | undefi
 export interface RestorePointDecision {
   save: boolean;
   /** Why not, for the build report. Empty when saving. */
-  reason: '' | 'not-ok' | 'no-workspace' | 'no-files' | 'already-saved' | 'disabled';
+  reason:
+    | ''
+    | 'not-ok'
+    | 'no-workspace'
+    | 'no-files'
+    | 'already-saved'
+    | 'disabled'
+    // The write was attempted and the store did not take it (no Firestore, or it threw). NOT the same
+    // fact as any refusal above: those mean "we chose not to", this means "we tried and failed".
+    | 'write-failed'
+    // We asked, and the answer did not come back inside the confirmation window. A version may well
+    // exist. Saying so is the only honest option — reporting either "saved" or "failed" would be a
+    // guess, and this module exists because a guess was reported as a fact.
+    | 'unconfirmed';
 }
 
 /** Every build that has already left a restore point, keyed per build so a retry cannot double-write. */
@@ -73,6 +86,19 @@ export function rememberRestorePoint(buildKey: string): void {
 
 export function restorePointAlreadySaved(buildKey: string): boolean {
   return savedForBuild.has(buildKey);
+}
+
+/**
+ * Release a claim whose write did not land.
+ *
+ * 🔒 The claim is taken BEFORE the write so two settle paths cannot both save. That is right, and it
+ * had one hole: a FAILED write left the key claimed, so the other settle path — the one that exists
+ * precisely to rescue a build the first path could not finish — would refuse with `already-saved` and
+ * the user would end with no version at all. Releasing on failure cannot duplicate anything, because
+ * nothing was written.
+ */
+export function forgetRestorePoint(buildKey: string): void {
+  savedForBuild.delete(buildKey);
 }
 
 /** TEST ONLY — the per-process memory above is deliberately module-scoped. */
@@ -120,6 +146,7 @@ export function restorePointMessage(prompt: string | null | undefined, fileCount
 
 export interface RestorePointIo {
   loadFiles: (workspaceId: string) => Promise<Record<string, string>>;
+  /** Resolves TRUE only when the version really landed — see BuildHistoryStore.save. */
   save: typeof buildHistoryStore.save;
 }
 
@@ -176,17 +203,99 @@ export async function saveRestorePoint(opts: {
 
   // Claimed BEFORE the write, so a settle that races its own finalizer writes once rather than twice.
   rememberRestorePoint(opts.buildKey);
+  let landed = false;
   try {
-    await io.save(key, {
+    landed = (await io.save(key, {
       commitMessage: restorePointMessage(opts.prompt, fileCount),
       fileCount,
       files: trimmed,
       isEdit: opts.isEdit === true,
       tier: opts.tier,
       ok: true,
-    });
+    })) === true;
   } catch {
-    /* best-effort by construction — the store swallows its own errors too */
+    landed = false;
+  }
+  if (!landed) {
+    // Nothing was written, so the claim must go: the OTHER settle path is the rescue, and a stale
+    // claim would turn a recoverable failure into a build with no version at all.
+    forgetRestorePoint(opts.buildKey);
+    return { save: false, reason: 'write-failed' };
   }
   return { save: true, reason: '' };
+}
+
+/** How long the build waits for the store to confirm before recording `unconfirmed` and moving on. */
+export const RESTORE_POINT_CONFIRM_MS = 5_000;
+
+/**
+ * One sentence for the build report. PURE.
+ *
+ * 🔴 WHY THE REPORT NEEDED THIS AT ALL (admin 2026-09-20, having pressed "Save this version" by hand
+ * and asked why the automatic one had not run): the writer knew six different answers and told NOBODY
+ * any of them. So the only way to find out whether a build had left a version was to open the Time
+ * Machine on a phone and look — which is how this module's own two-month-old bug survived. An engine
+ * that cannot say what it did is an engine whose next failure is found by a user.
+ */
+export function describeRestorePoint(decision: RestorePointDecision): string {
+  switch (decision.reason) {
+    case '':
+      return 'A version was saved — the user can go back to this build from the Time Machine.';
+    case 'not-ok':
+      return 'No version was saved: this turn did not produce a working app. A failed build must never become the version somebody goes back to.';
+    case 'no-files':
+      return 'No version was saved: no files could be read for this workspace, so there was nothing to snapshot.';
+    case 'no-workspace':
+      return 'No version was saved: this turn had no workspace to snapshot.';
+    case 'already-saved':
+      return 'No second version was saved: this build had already left one (the two settle paths share one key).';
+    case 'disabled':
+      return 'No version was saved: version saving is switched off (AGENTV3_RESTORE_POINTS=off).';
+    case 'write-failed':
+      return 'A version could NOT be saved — the history store did not accept the write. The user has no way back to this build.';
+    case 'unconfirmed':
+      return `A version was requested but not confirmed within ${Math.round(RESTORE_POINT_CONFIRM_MS / 1000)}s. It may or may not exist; the Time Machine is the authority.`;
+    default:
+      return 'No version was saved.';
+  }
+}
+
+/** Is this an outcome worth a human's attention? A refusal we CHOSE is not; a failure is. */
+export function restorePointSeverity(decision: RestorePointDecision): 'info' | 'warning' {
+  return decision.reason === 'write-failed'
+    || decision.reason === 'unconfirmed'
+    || decision.reason === 'no-files'
+    || decision.reason === 'no-workspace'
+    ? 'warning'
+    : 'info';
+}
+
+/**
+ * The same write, bounded, so the BUILD REPORT can state the outcome instead of guessing at it.
+ *
+ * 🔴 WHY IT IS AWAITED AT ALL, when the write itself is deliberately best-effort. Fire-and-forget and
+ * "say what happened" are incompatible: the report is assembled and persisted at the end of the build,
+ * so an answer that arrives afterwards reaches nobody. The wait is bounded by
+ * `RESTORE_POINT_CONFIRM_MS` and lands at the very end of a build measured in minutes.
+ *
+ * 🔒 A TIMEOUT IS NOT A FAILURE. The write may still land after we stop waiting, so the outcome is
+ * `unconfirmed` — a third answer, kept separate from both "saved" and "failed" for the same reason
+ * `JudgeVerdict.reviewed` exists: an instrument that could not read must not report a reading.
+ */
+export async function saveRestorePointForReport(
+  opts: Parameters<typeof saveRestorePoint>[0] & { confirmMs?: number },
+): Promise<RestorePointDecision> {
+  const ms = Math.max(0, opts.confirmMs ?? RESTORE_POINT_CONFIRM_MS);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const attempt = saveRestorePoint(opts).catch(() => ({ save: false, reason: 'write-failed' as const }));
+    const bounded = new Promise<RestorePointDecision>((resolve) => {
+      timer = setTimeout(() => resolve({ save: false, reason: 'unconfirmed' }), ms);
+    });
+    return await Promise.race([attempt, bounded]);
+  } catch {
+    return { save: false, reason: 'write-failed' };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

@@ -7,6 +7,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
+import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
@@ -693,6 +694,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
         <div className={cn("markdown-body prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-a:text-accent-text prose-a:no-underline hover:prose-a:underline", !isAI && "prose-p:text-ink")}>
           <ReactMarkdown
+            remarkPlugins={CHAT_MARKDOWN_PLUGINS}
             components={{
               a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
               // B10/B12: Code blocks with language header and copy button
@@ -774,7 +776,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
                 style={{
                   background: 'linear-gradient(135deg, #ea580c, #d97706)',
-                  color: 'white',
+                  color: 'var(--text-primary)',
                   animation: 'pulse 2s ease-in-out infinite',
                 }}
               >
@@ -797,7 +799,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               <button
                 onClick={() => onSendSuggestion('__CONFIRM_AUTO_BUILD__')}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'var(--text-primary)' }}
               >
                 <span>🚀</span>
                 Yes, Build
@@ -814,7 +816,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-amber-500/30"
               style={{
                 background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(217,119,6,0.15))',
-                color: '#fbbf24',
+                color: 'var(--brand-warn-strong)',
               }}
             >
               <span>🔨</span>
@@ -833,7 +835,7 @@ export const AIChat: React.FC<AIChatProps> = ({
             <button
               onClick={onPreviewClick}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-indigo-500/30"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'white' }}
+              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'var(--text-primary)' }}
             >
               <span>👁️</span>
               View Live Preview

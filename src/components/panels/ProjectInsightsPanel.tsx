@@ -341,7 +341,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
                 thickness={10}
                 slices={[
                   { value: Math.max(0, (slo.totalBuilds || 0) - (slo.totalViolations || 0)), color: '#10b981', label: 'Within SLO' },
-                  { value: slo.totalViolations || 0, color: '#ef4444', label: 'Over SLO' },
+                  { value: slo.totalViolations || 0, color: 'var(--brand-danger-text)', label: 'Over SLO' },
                 ]}
                 center={<span className="text-ink font-black text-sm">{Math.round((1 - (slo.overallViolationRate || 0)) * 100)}%</span>}
               />

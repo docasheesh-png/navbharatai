@@ -87,7 +87,7 @@ const options = {
     verifyPayment(response); // Server-side verification is required
   },
   prefill: { name: 'User Name', email: 'user@email.com' },
-  theme: { color: '#6366f1' }
+  theme: { color: 'var(--brand-accent-strong)' }
 };
 const rzp = new window.Razorpay(options);
 rzp.open();`, steps: ['Sign up at razorpay.com', 'Copy the test keys from the dashboard', 'Add the script tag: src="https://checkout.razorpay.com/v1/checkout.js"'] },

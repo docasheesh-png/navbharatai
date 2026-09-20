@@ -113,7 +113,7 @@ const COMPONENT_PREVIEWS = [
     name: 'Input',
     code: `<input type="text" className="input" placeholder="Type here..." />`,
     preview: (_: string) => (
-      <input type="text" placeholder="Type here..." style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '8px 12px', fontSize: 13, outline: 'none', width: '100%', maxWidth: 180 }} />
+      <input type="text" placeholder="Type here..." style={{ background: 'var(--surface-card)', border: '1px solid #334155', borderRadius: 6, color: 'var(--text-body)', padding: '8px 12px', fontSize: 13, outline: 'none', width: '100%', maxWidth: 180 }} />
     ),
   },
 ];
@@ -284,7 +284,7 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetSession, targetPath, saving, tokens, onCodeUpdate, reloadFiles]);
 
-  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: 'var(--text-body)', fontFamily: 'sans-serif' };
+  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--surface-card)', color: 'var(--text-body)', fontFamily: 'sans-serif' };
   const cardStyle: React.CSSProperties = { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px' };
   const monoStyle: React.CSSProperties = { fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
 
@@ -324,7 +324,7 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
                   onKeyDown={(e) => { if (e.key === 'Enter') void applyBrandPalette(); }}
                   placeholder="e.g. a calm, trustworthy clinic for families"
                   maxLength={300}
-                  style={{ flex: 1, background: '#0b0e14', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '6px 8px', color: 'var(--text-body)', fontSize: 12 }}
+                  style={{ flex: 1, background: 'var(--surface-base)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '6px 8px', color: 'var(--text-body)', fontSize: 12 }}
                 />
                 <button
                   onClick={() => void applyBrandPalette()}
@@ -429,9 +429,9 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
               {COMPONENT_PREVIEWS.map(comp => (
                 <div key={comp.name} style={{ ...cardStyle }}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text-muted)' }}>{comp.name}</div>
-                  <div style={{ background: '#0f172a', borderRadius: 6, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 80, marginBottom: 8 }}>
+                  <div style={{ background: 'var(--surface-card)', borderRadius: 6, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 80, marginBottom: 8 }}>
                     {previewMode === 'preview' ? comp.preview(primaryColor) : (
-                      <pre style={{ ...monoStyle, color: '#a5f3fc', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{comp.code}</pre>
+                      <pre style={{ ...monoStyle, color: 'var(--brand-info-text)', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{comp.code}</pre>
                     )}
                   </div>
                   <button onClick={() => copyText(comp.code, comp.name)} style={{ width: '100%', padding: '5px', borderRadius: 4, border: '1px solid #334155', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
@@ -450,7 +450,7 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Download size={14} color="#a855f7" /> CSS Variables
               </div>
-              <pre style={{ ...monoStyle, background: '#0f172a', borderRadius: 6, padding: '12px', color: '#a5f3fc', overflow: 'auto', maxHeight: 300, margin: 0 }}>
+              <pre style={{ ...monoStyle, background: 'var(--surface-card)', borderRadius: 6, padding: '12px', color: 'var(--brand-info-text)', overflow: 'auto', maxHeight: 300, margin: 0 }}>
                 {generateCSS()}
               </pre>
               <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
@@ -517,7 +517,7 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
             </div>
             <div style={{ ...cardStyle }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Tailwind Config</div>
-              <pre style={{ ...monoStyle, background: '#0f172a', borderRadius: 6, padding: '12px', color: '#a5f3fc', overflow: 'auto', maxHeight: 200, margin: 0 }}>{`// tailwind.config.js
+              <pre style={{ ...monoStyle, background: 'var(--surface-card)', borderRadius: 6, padding: '12px', color: 'var(--brand-info-text)', overflow: 'auto', maxHeight: 200, margin: 0 }}>{`// tailwind.config.js
 module.exports = {
   theme: {
     extend: {

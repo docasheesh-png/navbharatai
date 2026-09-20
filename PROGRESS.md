@@ -71653,3 +71653,68 @@ readiness no longer running it → 1 red · **the match loosened to a "Hello Wor
 ⚠️ **Not fixed here:** `READY_BEFORE_END` measured 701s "after ready" from that bogus point, so its
 number in past reports is polluted. From now on it cannot start from a scaffold — but the historical
 figures should not be trusted.
+
+---
+
+## 2026-09-20 — A Nemotron judge is not Sonnet (autopsy `31dc61fd` residue, and a safeguard-#6 failure of my own)
+
+**The defect.** `selectReviewJudge` returns `kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'`. The
+admin build report's label for that verdict was an inline ternary with **four** branches:
+
+```ts
+judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet'
+```
+
+A union member with no branch does not fail — it falls off the end. So **every Nemotron verdict was
+filed as "Sonnet review"**, naming an engine that had not run. Not hypothetical: the admin set
+`AGENTV3_NEMOTRON=weak` in Cloud Run on **2026-09-19**, so that line has been wrong in every Weak build
+report since.
+
+**Why it matters more than a cosmetic label.** This is the exact line an autopsy reads to decide which
+vendor to trust, tune or drop. A record that quietly attributes work to the wrong engine is worse than
+one that says "unknown", because nobody doubts it — and NVIDIA is on a trial key whose whole purpose is
+to be judged on its results.
+
+**The class, named so it is recognised again: a LABEL built as a chain of equality checks with a bare
+`else` is not exhaustive, and nothing tells you when it stops being right.** `tsc` cannot see the gap
+(every branch returns a string) and no behavioural test can either, because the wrong answer is a
+perfectly well-formed one. Only a `switch` with a `never` default turns "a new engine appeared" into a
+compile error — which is why the fix is `judgeEngineLabel()` in `BuildJudge.ts` and not a fifth ternary
+arm. ⚠️ The `never` guard fails **`npm run typecheck:server`**, not the frontend `tsc --noEmit` (which
+does not cover `src/server/`) — worth knowing before trusting a green frontend typecheck on this class.
+
+**Sibling hunt (rule 3):** the only other judge-kind label in the repo is `sda.ts:538`, a two-provider
+race in an admin-only console log — genuinely two providers, not this class. Recorded as an honest
+negative rather than left unsaid.
+
+🔒 **White-Label Law:** this is the ADMIN report's label only. The two narration lines beside it say
+"NavBharatAI's reviewer" (fixed 2026-09-14), and a test now holds that `reviewerName` may appear only on
+its own declaration and on `recordVerdict`. Naming Nemotron correctly to the admin is the fix; naming it
+to a user would be a new breach.
+
+**Tests** — `tests/aNemotronJudgeIsNotSonnet.test.ts` (8 cases), **reversion-proven four ways**: drop the
+`nemotron` branch → 1 red (and a server-typecheck error) · restore the route ternary → 2 red · drift the
+label's union from the route's → 1 red · swap the switch for a ternary chain that still answers
+correctly → 1 red.
+
+### 🔴 My own process failure, recorded because the rule exists for exactly this
+
+**PR #3154 was duplicated work, and safeguard #6 would have prevented it.** I built `reviewed?: boolean`
++ the three-outcome verdict record without listing the open PRs first — **#3143 was already in CI with
+the same fix** and merged while mine was still running. Only `judgeEngineLabel` was a genuine gap, so
+#3154 is closed and this PR carries that one piece.
+
+⚠️ The lesson is the one CLAUDE.md already states and I did not apply: with several sessions live,
+**`git log` is not the state of the work — open PRs are.** I listed them before starting this time.
+
+One small thing from #3154 was deliberately NOT carried over: it kept the judge's detail on a PASS as
+well as a failure, where `main`'s #3143 drops it (`v.pass ? '' : …`). A genuine pass almost always has
+empty findings, so the difference is nearly always nothing — not worth widening this PR to chase.
+
+### Still open from autopsy `31dc61fd`
+
+- **Item 4** — the reviewer can run on the same model family as the builder. Only the *label* is fixed
+  here; whether a judge should ever be the builder's own engine is untouched.
+- **Item 5** — the deterministic complexity scorer scored an app-build prompt **5** with taskType
+  `"chat"`.
+- **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.

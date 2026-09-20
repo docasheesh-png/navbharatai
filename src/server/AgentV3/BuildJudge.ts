@@ -172,3 +172,39 @@ export function judgeRepairPrompt(userRequest: string, findings: string[]): stri
     `Original request, for reference: ${userRequest.slice(0, 800)}`,
   ].join('\n');
 }
+
+/**
+ * The ADMIN-ONLY name of the engine that judged this build. Exhaustive by construction.
+ *
+ * 🔴 THE BUG. `selectReviewJudge` can return `kind: 'nemotron'`, and the report's label was an inline
+ * ternary with no branch for it:
+ *
+ *     judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet'
+ *
+ * So every Nemotron verdict was filed under **Sonnet** — an engine that had not run. It is not
+ * hypothetical: Nemotron went LIVE on the Weak tier on 2026-09-19 (`AGENTV3_NEMOTRON=weak`), so the
+ * judge line in every Weak build report since then has named the wrong provider.
+ *
+ * ⚠️ A record that quietly attributes work to the wrong engine is worse than one that says "unknown",
+ * because nobody doubts it — and this is the exact line an autopsy reads to decide which vendor to
+ * trust, tune or drop. #3143 made that line stop calling an un-run review a PASS; this makes it stop
+ * naming the wrong engine.
+ *
+ * The `never` check is the point: a future engine must be named HERE, where somebody has to think
+ * about it, instead of silently becoming whichever branch the ternary happened to end on.
+ *
+ * Never reaches a user (White-Label Law) — this is the admin report's label only.
+ */
+export function judgeEngineLabel(kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'): string {
+  switch (kind) {
+    case 'grok': return 'Grok';
+    case 'glm': return 'GLM';
+    case 'opus': return 'Opus';
+    case 'nemotron': return 'Nemotron';
+    case 'sonnet': return 'Sonnet';
+    default: {
+      const never: never = kind;
+      return String(never);
+    }
+  }
+}

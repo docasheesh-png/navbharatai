@@ -300,7 +300,7 @@ import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneG
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
-import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, type JudgeRunTurn } from '../AgentV3/BuildJudge';
+import { judgeBuild, judgeRepairPrompt, judgeEngineLabel, judgeActuallyRan, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
@@ -16029,7 +16029,10 @@ async function noteBuildOutcome(
             const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective);
             // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
-            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
+            // EXHAUSTIVE, via the shared label. The ternary this replaces had no `nemotron` branch and
+            // fell through to 'Sonnet', so every Nemotron verdict named an engine that had not run —
+            // and Nemotron has been LIVE on Weak since 2026-09-19. See judgeEngineLabel.
+            const reviewerName = judgeEngineLabel(judge.kind);
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: { pass: boolean; score: number; findings: string[]; reviewed?: boolean }, tag: string): void => {
               // 🔴 A REVIEW THAT DID NOT HAPPEN IS NEVER PRINTED AS "PASS" (2026-09-19).

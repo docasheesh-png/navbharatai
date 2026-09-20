@@ -51,6 +51,87 @@ const NEW_BUILD_SIGNALS: readonly string[] = [
 ];
 
 /**
+ * The `bana-` family of Hindi/Hinglish build ORDERS, as a shape rather than a word list.
+ *
+ * 🔴 THE DEFECT (autopsy `f152c1ab`, 2026-09-20). *"Mughe eak aisa app **bna kar do** jisme mai apna
+ * pdf file ko audio overview me bnaba saku"* — an unmistakable order for an app — classified as
+ * `new_build` at **LOW** confidence. `userAskedForAnAppToBeBuilt` requires HIGH, so it answered
+ * FALSE; `anAppWasOrderedButNotRecognised` is the AND of that and "signals matched nothing", so it
+ * answered FALSE too; and the request was filed as **`taskType: 'chat'`, `complexityScore: 5`** —
+ * the score of the word "hi" — for a build that then ran for 3.7 minutes and was abandoned by the
+ * user.
+ *
+ * ⚠️ **THE MISSPELLING IS NOT THE CAUSE, and chasing it would have fixed nothing.** Measured: the
+ * same sentence spelled perfectly — *"Mujhe ek aisa app **bana kar do** …"* — is ALSO `low`. So is
+ * *"ek app **bana ke do**"*, *"app **bana kar dijiye**"*, *"mujhe ek app **banaiye**"*.
+ *
+ * 🔑 THE CLASS: **`NEW_BUILD_SIGNALS` ENUMERATES SURFACE FORMS OF A VERB THAT HINDI SPLITS AND
+ * INFLECTS.** It holds `bana do`, `bana de`, `bana dena`, `bana doge`, `banao`, `banade`, `banwao` —
+ * every one a form with NOTHING between the stem and the auxiliary. Hindi routinely puts a light
+ * verb there (`bana **kar** do`, `bana **ke** do`) and swaps the auxiliary for a polite one
+ * (`dijiye`). A list cannot be complete against an inflecting language, in the same way this repo
+ * already records that `theme-compat.css`'s allowlist could never be complete against an
+ * open-ended set of class names. So this is a SHAPE: stem · optional light verb · giving auxiliary.
+ *
+ * 🔴 AND THE EVIDENCE WAS ALREADY IN THIS FILE. The comment at the `mat banana` rule below quotes a
+ * real user, verbatim: *"Tum mujhe as a app **bana kar do** … koi quiz app mat banana"*. The exact
+ * form that fails here is written into this module's own documentation as something a real person
+ * typed.
+ *
+ * 🔒 PRECISION-FIRST, and the asymmetry decides every judgement call. A MISS costs a mis-sized
+ * report and a cheap-engine start — recoverable. A FALSE POSITIVE turns a QUESTION into a
+ * HIGH-confidence build order, which this repo prices at 29 minutes and real money (autopsy
+ * 5abad374). So the stem list is explicit (`bana` / `bnaa` / `bna`, never bare `ban`) and the
+ * ambiguous forms are deliberately LEFT OUT: `banaya` / `banayi` are PAST ("maine ek app banaya"),
+ * `ban gaya` is a state, and `banaye` is a subjunctive that is as often a report as an order.
+ * Measured against 12 real orders and 12 controls before a line of this was wired: 12 matched,
+ * 12 rejected, zero false positives — `tests/anOrderInHindiIsStillAnOrder.test.ts`.
+ *
+ * ⚠️ It changes only the CONFIDENCE, never the intent: every sentence here already returned
+ * `new_build` (via the `app` noun in `BUILD_SIGNALS`), just at `low`. And the question rule is
+ * untouched — `doubt` is applied after this, so *"kya aap ek app bana kar doge?"* still loses HIGH.
+ */
+const BANA_STEM = '(?:banaa|bana|bnaa|bna)';
+const GIVING_AUX = '(?:do|de|den|dena|denaa|dijiye|dijiyega|dijie|doge|denge)';
+/** stem · optional `kar`/`ke` · giving auxiliary — "bana kar do", "bna ke de", "bana dijiye". */
+const BANA_SPLIT_ORDER = new RegExp(`\\b${BANA_STEM}\\s*(?:kar|ke)?\\s*${GIVING_AUX}\\b`);
+/** The one-word imperatives, including the causative ("banwao" — get it made). */
+const BANA_DIRECT_ORDER = /\b(?:banao|bnao|banado|bnado|banaiye|banwao|banvao|banwa\s*do|banva\s*do)\b/;
+
+/**
+ * The ONE reader of "does this message carry an explicit new-build order?" — the string list AND the
+ * `bana-` shape above, in that order.
+ *
+ * 🔒 Both call sites use this rather than `firstSignalWord(lower, NEW_BUILD_SIGNALS)` directly. Two
+ * places asking the same question from different sources is the drift this repo has paid for
+ * repeatedly (four stale comments about the GPT rung; `safeRelPath` in four copies). Returns the
+ * matched signal so the classifier can keep reporting WHICH word decided it.
+ */
+export function firstNewBuildOrder(lower: string): string | undefined {
+  const listed = firstSignalWord(lower, NEW_BUILD_SIGNALS);
+  if (listed) return listed;
+  /**
+   * 🔴 THE NEW SHAPE RECOGNISES AN ORDER **WITH AN OBJECT**, AND MUST STOP AT A BARE VERB.
+   *
+   * A message that is nothing but the verb — "Bnao", "banado" — is the object-less ask that #3039
+   * owns (`assessBuildInput` / `isBareActionWord`), whose correct answer is *"tell me what to
+   * make"*, NOT a build. The first draft of this function claimed those too and broke it: three
+   * suites went red (`objectlessBuildAsks`, `intentReaderCanSayUnclear` ×2), because raising "Bnao"
+   * to HIGH also stops the intention reader ever being consulted — so its fourth answer, "unclear",
+   * became unreachable.
+   *
+   * Recorded rather than quietly patched: it is exactly the trade the fourth absolute rule forbids,
+   * caught by the gate it exists for. Two words is the whole condition — every real order in the
+   * autopsy corpus carries an object, and a lone verb never does.
+   */
+  if (lower.trim().split(/\s+/).filter(Boolean).length < 2) return undefined;
+  const split = BANA_SPLIT_ORDER.exec(lower);
+  if (split) return split[0];
+  const direct = BANA_DIRECT_ORDER.exec(lower);
+  return direct ? direct[0] : undefined;
+}
+
+/**
  * Signals that clearly indicate MODIFYING something that already exists.
  * Triggers 'edit_existing' ONLY when no NEW_BUILD_SIGNAL is also present.
  */
@@ -592,7 +673,7 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
     // The original case is untouched: strip "build mat karna" out of "build mat karna, bas yeh
     // batao" and nothing buildable is left, so it keeps its HIGH.
     const withoutNegation = lower.replace(pattern, ' ');
-    const orderSurvives = !!firstSignalWord(withoutNegation, NEW_BUILD_SIGNALS)
+    const orderSurvives = !!firstNewBuildOrder(withoutNegation)
       || matchesSignal(withoutNegation, BUILD_SIGNALS);
     return { intent: 'chat', confidence: orderSurvives ? 'low' : 'high', signal: 'answer-only' };
   }
@@ -652,7 +733,7 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   // unmistakable; the cc8c9075 question was nine words. Length says nothing about clarity, and an
   // object-less order ("app banana") is already answered downstream by a clarifying question (#3039).
   const doubt = question || hasNegation(lower);
-  const nbSignal = firstSignalWord(lower, NEW_BUILD_SIGNALS);
+  const nbSignal = firstNewBuildOrder(lower);
   if (nbSignal) return { intent: 'new_build', confidence: doubt ? 'low' : 'high', signal: nbSignal };
   const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
   if (editSignal) return { intent: 'edit_existing', confidence: doubt ? 'low' : 'high', signal: editSignal };

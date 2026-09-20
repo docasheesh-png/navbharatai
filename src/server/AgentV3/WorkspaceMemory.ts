@@ -18,6 +18,7 @@
 // the v5.0 engine. A durable backend can swap the Map without changing callers.
 
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
+import { stripCodeComments } from './stripCodeComments';
 import { withoutPreviewBridge } from './previewBridge';
 import { bm25, type Bm25Doc } from './Bm25';
 
@@ -145,9 +146,23 @@ export function extractFacts(file: string, content: string): FileFacts {
   const depSet = new Set<string>();
   const routes = new Set<string>();
 
+  /**
+   * 🔴 CODE FACTS COME FROM CODE, NOT FROM COMMENTS (autopsy 31dc61fd, 2026-09-20).
+   *
+   * Every regex below used to run on the RAW source, so a commented-out import, a usage example in
+   * a docblock or a block-commented experiment entered the project graph as a REAL fact — and that
+   * graph is what `analyzeArchitecture` turns into `unresolvedImports` (a release-gate HARD
+   * BLOCKER) and what `collectDependencyIssues` turns into "missing dependency".
+   *
+   * It fired on every vite-react build: our own scaffold writes a line into `vite.config.ts` that
+   * mentions `import { useStore } from 'stores/useStore'` inside a comment, so every such app was
+   * reported as missing a package called `stores`. See `stripCodeComments` for the measurement.
+   */
+  const code = stripCodeComments(content);
+
   if (isCode(file)) {
     const symRe = /export\s+(?:default\s+)?(?:async\s+)?(function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g;
-    for (let m = symRe.exec(content); m; m = symRe.exec(content)) {
+    for (let m = symRe.exec(code); m; m = symRe.exec(code)) {
       const raw = m[1];
       const name = m[2];
       const kind: SymbolKind =
@@ -160,13 +175,13 @@ export function extractFacts(file: string, content: string): FileFacts {
     }
 
     const importRe = /import\s+[^;]*?from\s+['"]([^'"]+)['"]/g;
-    for (let m = importRe.exec(content); m; m = importRe.exec(content)) {
+    for (let m = importRe.exec(code); m; m = importRe.exec(code)) {
       imports.push(m[1]);
       const root = depRoot(m[1]);
       if (root) depSet.add(root);
     }
     const requireRe = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
-    for (let m = requireRe.exec(content); m; m = requireRe.exec(content)) {
+    for (let m = requireRe.exec(code); m; m = requireRe.exec(code)) {
       imports.push(m[1]);
       const root = depRoot(m[1]);
       if (root) depSet.add(root);
@@ -179,7 +194,7 @@ export function extractFacts(file: string, content: string): FileFacts {
       /\bpath:\s*['"]([^'"]+)['"]/g,
     ];
     for (const re of routePatterns) {
-      for (let m = re.exec(content); m; m = re.exec(content)) routes.add(m[1]);
+      for (let m = re.exec(code); m; m = re.exec(code)) routes.add(m[1]);
     }
   }
 
@@ -189,8 +204,12 @@ export function extractFacts(file: string, content: string): FileFacts {
     routes: [...routes],
     imports: [...new Set(imports)],
     dependencies: [...depSet],
-    references: isCode(file) ? extractReferences(content) : [],
+    references: isCode(file) ? extractReferences(code) : [],
     // Security scanning runs on ALL files (secrets live in config/.env too).
+    // 🔒 RAW `content`, NEVER the comment-stripped `code`, and this is load-bearing: a key pasted
+    // into a comment is a LEAKED key. Every other extractor above reads `code` because a
+    // commented-out import is not an import; this one must not, because a commented-out secret
+    // is still a secret.
     security: scanSecurity(file, content),
   };
 }

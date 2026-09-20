@@ -73670,3 +73670,55 @@ than from a screenshot at every breakpoint.
 
 ⚠️ **This is a FRONTEND change**, so under bundled mode it reaches installed Android users only in a
 fresh `.aab` — not on the next merge.
+## 2026-09-20 — "Versioning kam hi nahi kar raha hai": two version systems, and the screen read the dead one
+
+**Admin**, with a screenshot of Time Machine showing *"No saved versions yet"* under an app of 20 files.
+
+### It was not broken. It was never connected.
+
+| | Store | Written by | Read by | Can it restore days later? |
+|---|---|---|---|---|
+| **A** | `workspace_checkpoints_v3` — git commit **metadata** | every v5 build | the Pro panel's own History tab | **No.** `/api/agentv3/restore` checks the sha out **in the sandbox**; its own comment says it *"can offer a restore the sandbox can no longer perform"* |
+| **B** | `build_history/{sessionId}` — whole **file snapshots** | the LEGACY `/api/build` route, `workspaceEdit`, the manual Save button | **the Time Machine** | Yes — that is the point of it |
+
+`BuildHistoryStore`'s own docblock says *"Every build (ok: true) writes one entry here."* A grep of its
+importers returns exactly **two files**, and **neither is the v5 engine**. So the Time Machine has been
+empty for every app this engine has ever built, for every user — with nothing failing, nothing logged,
+and the screen blaming the user's app for having no versions. `AppKnowledgeBase` has meanwhile told
+every NavBharatAI AI that *"every build you make is automatically saved as a Restore point"*.
+
+**The instance was fixed in one lane and the sibling was never hunted** — this file's own class.
+
+### The writer (`src/server/AgentV3/restorePoint.ts`)
+
+ONE function, called from **both** settle paths (the normal settle and the Fix-67 deadline finalizer),
+keyed by the same `${workspaceId}_${buildStartedAt}` the wallet debit uses — so a build that settles
+twice leaves exactly one version. Fix 67 exists because those two paths drifted on billing once already.
+
+🔒 **The key is the whole bug in miniature.** `/api/versioning/apps` lists apps as workspaceId MINUS
+`agentv3-{uid}-`, and the Time Machine then asks `/api/build-history/:sessionId` with that bare id. A
+restore point written under the FULL workspace id would be invisible to the very screen it exists for,
+**and would look identical to writing nothing at all.**
+
+🔒 It copies the **durable file set**, not the turn's writes — restoring a three-file diff over a
+twenty-file app would produce a state that never existed. A failed build never leaves a version.
+Fire-and-forget throughout. `AGENTV3_RESTORE_POINTS=off` reverts with no deploy.
+
+### The screen (`CodeVersioning.tsx`) — three honesty defects in one panel
+
+1. The `<select>` **displayed** an app while `viewSession` was `''`, so `loadPoints('')` returned
+   immediately and nothing was ever requested. "No saved versions yet" was a claim about the user's app
+   when the truth was that no question had been asked. **This is the screenshot.**
+2. A failed read and an empty history produced the identical sentence. They are different facts and
+   only one is the app's fault; the empty state now says which.
+3. The fetch sent no Bearer token — the sibling of the bug recorded in the comment **three lines above
+   it**, where the same omission had already been found and fixed for `/api/versioning/apps`.
+
+### OPEN, stated rather than patched (rule 6)
+
+- **Two version systems still exist.** This makes B work; it does not merge A into it. A user's v5
+  History tab and their Time Machine will show overlapping-but-different timelines, and the honest fix
+  is one timeline from one endpoint. Not built here: it changes what Restore means on a cold sandbox,
+  which is a product decision.
+- **Apps built BEFORE this commit have no restore points and never will** — the snapshots were never
+  taken. Their first version appears on their next successful build. Nothing can recover the past.

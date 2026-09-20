@@ -73240,8 +73240,170 @@ into the per-turn context — deliberately the per-turn message, not the cached 
 prompt cache breaks. Extracting rows from the summary with a regex or an extra model pass was
 considered and **rejected**: fragile, and it would bill every build for it.
 
+## 2026-09-20 — AUTOPSY `bb688add`: a failed probe is not an answer, and a call the clock cannot carry is not started
+
+**The build:** a Hindi मंगल विवाह निश्चय पत्र (one page, no data entry), free tier, weak ladder. **16.4
+minutes, ₹177.98 charged to a FREE user** — 71% of the ₹250 welcome balance for a printable invitation
+card. It succeeded: release gate YELLOW, app rendered, `PROD_BUILD_OK`.
+
+### The five-bucket ledger
+
+| | count | |
+|---|---|---|
+| ✅ Self-heal | **3** | CSS import injected (`INTEGRITY_CSS_WIRED`), truncation continued (`FASTLANE_CONTINUED`), fast-lane → full-builder hand-off |
+| 🔀 Workaround | **1** | the hand-off itself: 3 repair attempts failed, the full builder rewrote the app from scratch |
+| ⏭️ Skipped | 2 | no user journey (no data-entry surface — correct), no tests |
+| ❌ Still broken | **4** | the four below |
+| 🥵 Struggle | **882 s to first render** — 14.7 minutes before the user's app existed on screen | |
+
+### One root cause, in two places: a thing we could not measure, written down as a measurement of zero
+
+**① The `tsconfig.json` probe could not be read, so the compiler was switched off for the whole build.**
+`ToolDispatcher` latched `catch { this._isTsProject = false; }` on the FIRST TypeScript write, and never
+asked again. Every later TypeScript write counted as "skipped", and the report said:
+
+> *"Write-time typecheck: no TypeScript source was written this build (22 write(s) skipped as not TypeScript)."*
+
+That build wrote **six** TypeScript files (`types/invitation.ts`, `data/invitation.ts`,
+`hooks/useInvitation.ts`, `components/Invitation.tsx`, `App.tsx`, `main.tsx`). The sentence is false, and
+the `skipped` counter could not have told the truth — it merged *"this write was a `.css` file"* with
+*"we judged the project non-TypeScript"*. **The cost was not the sentence.** Write-time typecheck exists
+(2026-09-17, autopsy e706e068) precisely to quote a file's own compiler errors back while the model still
+holds it. It stood down — and the build then ground **eleven `TS2339` errors** through three repair
+passes over five minutes, which is the exact struggle that feature was built to end.
+
+**Fixed:** a probe that THREW leaves the verdict `unknown` and is retried (`MAX_TSCONFIG_PROBES` = 3), so
+one sandbox hiccup cannot disable the compiler for a 16-minute build. Only an unmistakable not-found is
+an absence (`isMissingFileError`, precision-first: a false *absent* kills the feature, a false *unknown*
+costs two file reads) — and a dead sandbox saying *"no such file"* about `/home/user/workspace` is a
+missing MACHINE, not a missing tsconfig, so it is never a verdict. The two skip reasons are counted
+separately and the summary names which one happened.
+
+⚠️ **Honest limit (rule 6):** the report cannot say WHY that read failed — a transient sandbox error and a
+race with the scaffold look identical from here. That is itself part of the defect, and `probeFailures`
+is the field that will answer it on the next occurrence. The fix is correct for every cause.
+
+**② OPEN, NOT FIXED — and the gate is what stopped me shipping it (rule 6, safeguard #3).** The
+shared-contract call was started against a clock that had just been measured. The arithmetic is exact:
+
+```
+preamble share    96,000ms   (240,000 × (1 − BUILD_PHASE_RESERVE))
+plan call         48,198ms   MEASURED, a real call on this build's own chain
+contract cap      47,802ms   → 396ms SHORT of what the plan had just cost
+contract call     47,804ms   → hit its cap exactly, returned NOTHING (₹1.17, UNBILLED_BARREN_WORK)
+```
+
+With no contract, the files were generated in isolated calls and disagreed — which IS ①'s eleven
+`TS2339` errors. 🔑 The assumption hides in a `Math.min`: `canAffordSharedContract` models the cost as
+`min(cap, measured)`, which treats a call that hits its cap as *cheaper*, when it is **free of value and
+full of cost**.
+
+🔴 **I built the guard (`contractCallCanFinish`: refuse a preamble call whose cap is below the measured
+cost of the one before it), and the full suite refused it — correctly.** Two deliberately-written cases
+in `theOptionalPassMustNotDoomTheLane.test.ts` say *"the boundary is the budget itself, not a new
+invented number"* and *"no tiers to build ⇒ keep the contract"*, and my guard broke both. Re-reading the
+evidence, they are right and I was over-reaching: **one report cannot tell "the cap was 396ms too small"
+from "that call was stalled regardless"** — the record shows 0 input and 0 output tokens, which is the
+shape of a call that never got going, not of one that needed slightly longer. Changing the budget rule
+for every fast-lane build on n=1 is exactly the guess safeguard #3 forbids.
+
+**So the arithmetic is pinned as a test and the behaviour is untouched.** What settles it is the number:
+how often a contract call ends barren, and how its cap compared with the measured plan. Until several
+reports show the pattern, this stays open — the same discipline `POST_GREEN_WRITES` and `LADDER_DEPTH`
+were shipped under.
+
+### ③ "This build's time budget ended" was the wrong clock, and it cost an autopsy
+
+The report's `LLM_CALL_BUDGET_ENDED` line fired **100 seconds into a build whose budget was 3,480 seconds**.
+`BUDGET_REACHED_MESSAGE` is ONE constant thrown for every deadline in the stack, and that record cannot
+tell which one produced it — so it must not name one. It now says *"stopped by one of our own clocks"*,
+which is the whole of what is known there and still carries the fact that matters: the provider did
+nothing wrong. **This closes the item CLAUDE.md records as open from autopsy 31dc61fd** (*"build budget
+reached at 105 s of a 1800 s build"*); ② is its prevention half.
+
+### ④ Recorded, not fixed (rule 6)
+
+- **`provider=unknown` beside a sibling line that says KIMI.** `fastLaneCallIdentity` returns `unknown`
+  when no provider *reported in*, and its docblock explains at length why guessing is worse — that
+  reasoning is right. But *which rung was ATTEMPTED* and *which provider DELIVERED* are different facts
+  and only the second reaches this record. Threading the attempted rung is a wider change than this
+  autopsy should make; named here so it is not re-discovered.
+- **The lean post-build review timed out producing nothing** — 45 s budget, 2 calls, 5 file reads,
+  `REVIEW_INCOMPLETE`, then told the user an 18-file invitation card was *"this large app"*. This is the
+  first real evidence `AGENTV3_GREEN_REVIEW_LEAN` (2026-09-18) has produced, and its own entry says to
+  watch exactly this. **Watch, do not tune yet** — one report is not a distribution.
+- **A truncation continuation wrote a corrupted file.** `FASTLANE_CONTINUED` resumed mid-declaration and
+  the emitted `src/components/Invitation.css` began `-size: 0.9rem;` — the tail of `font-size`. It was
+  overwritten later, so nothing shipped, but the continuation path can produce a file whose first line
+  is garbage.
+- **`PREVIEW_SNAPSHOT_STALE`** again (same 18 files, different content) — the post-build ordering defect
+  already open from 31dc61fd.
+- **₹177.98 to a free user for a one-page card.** Billing is not a session's call; raised to the admin.
 ---
 
+## 2026-09-20 — The history popup is a LIST again, not a stack of cards
+
+Admin, with Claude's and ChatGPT's own sidebars screenshotted beside ours: *"navbharatai free, me jo
+history button hai, jisnpar click kar kar popup ata hai, history hai, isko popup ka ui badalna hai!!
+claude nad gpt jaisa karo!! open chat button kyu banaya hai. hatao isko!!"*
+
+**What was there.** Each row was a `p-6` card carrying: the title, a `CUI: <id>` chip, a mode chip, an
+App/Chat badge, a full `toLocaleString()` timestamp, the agent name, a big indigo **Open Chat** button
+and a kebab. Seven pieces of chrome to reach one conversation, and three or four rows to a phone screen
+out of 235 sessions.
+
+### 🔑 The move that makes a list possible is the GROUP HEADING, not minimalism
+
+Claude and ChatGPT show the title and nothing else, and the reason is structural rather than aesthetic:
+**the heading carries the time for every row beneath it**, so no row spends a line saying when it was.
+`src/components/history/historyGroups.ts` is that heading — pure, `now` passed in, headings
+`Ongoing / Today / Yesterday / Previous 7 days / Previous 30 days / Older`.
+
+- 🔒 **It never re-sorts.** `sortMergedRows` puts LIVE professional conversations on top and the
+  Firestore query is newest-first, so it walks the rows in the order it was handed and only buckets
+  them. A sort here would silently overrule that and **nothing would fail** — the live chat would just
+  stop being first.
+- ⚠️ **An unknown date is `Older`, never `Today`.** A row with no timestamp is not new; it is a row
+  whose date we do not know, and putting it at the top would place it above conversations that
+  genuinely are from today. Wrong toward "old" costs one scroll; wrong toward "today" is a claim
+  nothing supports.
+
+### What was removed, and why each is a removal rather than a restyle
+
+| Gone | Why |
+|---|---|
+| **The "Open Chat" button** | The row IS the button now. That is the only honest way to delete that control — a row you can see but not tap would be worse than the button it replaced. |
+| The `CUI:` chip | A support id on every row of a user's own history. It is **still searchable** (the box matches it, unchanged), so nothing became unfindable. |
+| The timestamp + agent line | The group heading says when. This is the single change that turns cards back into a list. |
+| The App/Chat and mode chips | The mode survives as a coloured dot **and inside the row's own `aria-label`** — quieter, not lost. An app session keeps one `</>` glyph, because opening one genuinely does something different. |
+| The idle "235 SESSIONS" | A number nobody came for, costing a row of the list it describes. While **searching** it is the answer, so it stays exactly there. |
+| `font-mono` on the search box | A monospace search field is the same "developer's sentence on a shopkeeper's phone" problem the live build strip had. |
+
+**Delete STAYS**, behind the quiet kebab, with its existing confirmation (now a compact inline row that
+still names what is about to go). Claude and ChatGPT both keep it; dropping a real capability to look
+like them would be a regression wearing a redesign. And a destructive action on a one-line row must not
+become a one-tap action.
+
+### Two things fixed on the way that were not asked for
+
+- **The popup titled itself twice.** The sheet's header says "Chat history" and the view underneath
+  printed "SESSION HISTORY" again — a quarter of a phone screen saying the same thing. `embedded` drops
+  the view's own heading and outer padding; the TAB keeps its heading, because it is a whole screen.
+- **The sheet was painted GitHub-dark** (`bg-[#0d1117]`, zinc borders, `bg-black/60`) — a black panel
+  over a white app on the Light theme. Now `bg-surface` / `border-line` / `bg-scrim`. Both
+  `HistoryView.tsx` and `HistoryPopup.tsx` left the colour baseline **entirely** (3 and 9 literals → 0),
+  which is the ratchet moving the only direction it may.
+
+### Scope, stated plainly
+
+`HistoryView` is rendered by exactly two callers — the History **tab** and this **popup**. So the row
+redesign lands on both, deliberately: two different row designs for one list would drift the moment
+either changed, which is the reason `HistoryPopup`'s own header already says it delegates rather than
+reimplements.
+
+Test-locked in `tests/theHistoryListLooksLikeAList.test.ts` (18): the grouping's local-day boundaries,
+the unknown-date refusal, order preservation, and source guards that the chrome really left — including
+that the blank-title fallback `sessionShape.test.ts` depends on survived the rewrite.
 ## 2026-09-20 — The wallet tiles come first and can be read; the budget console is gone at the root
 
 **THE ADMIN'S MESSAGE, three instructions and three screenshots.** *"sabse upar yeh tile … yeh tile
@@ -73519,6 +73681,87 @@ is too old" becomes a warning on the Monitor instead of an admin's question week
 here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
 asked.
 
+## 2026-09-20 — `bb688add`, the UPSTREAM half: a printed invitation was scored a complex app
+
+The autopsy above fixed what the build DID. This is why it went where it went — and it is the same
+class a third and fourth time: **a signal that learned one thing while the checks around it did not.**
+
+### 🔴 The word `विवाह` made a printed card a complex APP
+
+Traced to the score, reproduced verbatim from the real prompt:
+
+```
+namesBusinessDomain → domain `events`  →  taskType complex_app (base 58)
+                              + 10 long prompt (1,233 chars)
+                              = 68  → COMPLEX → past the cheap opener → KIMI
+```
+
+The `events` domain regex **deliberately reads Devanagari** — `शादी|विवाह|समारोह|मेला|कार्यक्रम`.
+Its two narrowing guards, `PAGE_DELIVERABLE_SIGNAL` and `SIMPLE_APP_SIGNAL`, are **pure ASCII**. So
+the promotion learned Hindi and the brakes did not: in Devanagari that predicate has run **unguarded
+since the day it shipped**. A guard that cannot read what its signal reads is not a guard.
+
+The cost, all downstream of that one verdict: the slower opening rung → ~48s preamble calls → a
+shared-contract call left 396ms short that returned nothing → eleven `TS2339` errors → three repair
+passes → hand-off → **16.4 minutes and ₹177.98 on the free tier, for a card**. And the same report
+told the builder the app was missing *ticket types, RSVP, QR check-in and payments*.
+
+**Fixed:** `DOCUMENT_DELIVERABLE_SIGNAL` — the same guard, in the script the domain regexes already
+read. Precision-first, because the asymmetry decides the list: wrong toward "document" costs one
+cheap opening call the ladder climbs out of; wrong toward "system" cost this build sixteen minutes
+with no recovery. So it names only things people ask to be PRINTED or SHOWN — invitation, card,
+certificate, biodata, notice, poster, menu, résumé — and never a word that could name an app (`ऐप`,
+`सिस्टम`, `पोर्टल`, `डैशबोर्ड` are deliberately absent). `पत्र` matches only in its document senses,
+never bare. A genuine Hindi hospital-system request is still promoted; a test pins that.
+
+### 🔴 An admitted unknown took the EXPENSIVE side
+
+`complexityRouting` correctly bought a second opinion (the scorer could not read the script). The call
+was unavailable. The fallback was the deterministic verdict — **COMPLEX** — so the module acted with
+full confidence on a score derived from evidence it admits it could not read.
+
+**It already states, twice, the rule it broke:** *"`simple` is the default on every doubt"* and *"a
+confident wrong answer is worse than an admitted unknown."* `fallbackVerdict` applies its own rule:
+when the signals could neither read nor match the request AND no second opinion answered, the routing
+verdict is `simple`. Wrong toward simple ⇒ the cheap rung is tried and the ladder climbs — that is
+what the ladder is for. Wrong toward complex ⇒ 13× the input price with no recovery path.
+
+🔒 **The SCORE is untouched** — `scriptNeutralFloor` still makes it honest for every other reader.
+Only the binary routing verdict falls back, and only where this module has said in writing it cannot
+tell. A borderline score that was read and understood still stands exactly as before.
+
+⚠️ **Left alone, deliberately:** `scriptNeutralFloor`'s `text.length > 800 || parts >= 6`. A long
+prompt is not a big app and a pasted document breaks that proxy hardest — but the floor exists so a
+Devanagari hospital app is not scored 5, and nobody has measured a better rule. The routing is made
+safe by the fallback instead. Pinned as a test, not changed on a guess.
+
+### 🔴 Our own clock was recorded as a provider failing
+
+The timeline opened with *"Provider KIMI failed"* and the tally read `providerFailures: { KIMI: 1 }`
+— for a call KIMI answered nothing wrong in; the lane's step deadline ended it. `turnDeadline.ts`
+went to some length so a budget error would never BENCH a provider, and its docblock states the other
+half in as many words: *"it must not INDICT anyone either."* It was still indicting one in the two
+places an admin reads. The event is still recorded at the same severity — it simply stops being an
+accusation.
+
+### 🔴 The cost line named a number that was not on the bill
+
+`SANDBOX_BILLING` said *"Sandbox 1310s ≈ $0.0603 … included in this build's real cost"*; the bill used
+**$0.045369 — 986 seconds**. Nothing was mis-billed: the bill caps held seconds at the build's own
+duration so idle time cannot be sold twice, and that cap is deliberate and right. What was wrong is
+that the one line used to judge E2B spend over-stated what reached the bill by **33%** — the same
+shape as the `E2B_USD_PER_HOUR` drift, a correct system with a wrong dashboard. Both facts are now
+printed when they differ, and the line reuses the ONE existing measurement rather than a second copy
+of the capping rule.
+
+### ⚠️ A false alarm I nearly reported, recorded because the next reader will hit it
+
+Probing `analyzeRequest(promptString)` returns `score 5, task=chat` for every prompt on earth: it takes
+`{ prompt }`, not a string. I had drafted the words "this is a regression since this morning" before
+checking. It was my probe. `analyzeRequest({ prompt })` reproduces the real build exactly — 68,
+`complex_app` — which is what made the trace above possible.
+
+Test-locked in `tests/aDocumentIsNotABigApp.test.ts` (19 cases), reversion-proven three ways.
 ---
 
 ## 2026-09-20 — 🚪 CLOSING THE DOOR CLOSES THE ROOMS: ✕-ing NavBharatAI Free left every professional after the first
@@ -73882,3 +74125,131 @@ reversion**: re-introducing the call makes it fail.
 
 `useAgentV3Build.ts` keeps `restore` — the endpoint is real — but its doc comment now states that **no
 UI calls it**, so the next session to find it does not read an unused export as a missing wire-up.
+
+---
+
+## 2026-09-20 — 🔴 THE FAILURE TABLE'S BIGGEST ROW WAS NOT A FAILURE CLASS, IT WAS A BLIND SPOT
+
+**The report (admin, with a screenshot of the admin panel's *BY FAILURE REASON — ACROSS EVERY APP
+TYPE*):** *"yeh mail failure hai. navbharatai me. inko kaise kaise fix kar sakte hai! kya kya kar
+sakte ho aap jisse yeh failure ab wapas na aye?"*
+
+```
+Other (not yet in the known pattern list)   42  (29.2% of failures)   ← the biggest row, by 2×
+The release gate found evidence …           25  (17.4%)
+The run ended before it finished            16  (11.1%)
+… 11 more rows, 144 failures in all
+```
+
+**THREE ROOT CAUSES, and none of them is a build bug. All three are the panel failing to say what
+happened — which is why two fixes shipped straight at that top row in the preceding 72 hours could
+neither be judged nor credited.**
+
+### 1 · The top row told every reader to do the wrong work
+
+`classifyFailureReason` returns a mapped reason for EVERY `OUTCOME_*` code it knows, and
+`tests/failureNaming.test.ts` fails CI when a code exists without a label. **So a build reaching the
+end of that function with no code at all did not record why it ended.** That is a hole in the
+engine's record — not a gap in our vocabulary — and it was wearing the label *"not yet in the known
+pattern list"*, i.e. *go and write more regexes*. No regex that could ever be written would have
+helped, because those records say nothing to match.
+
+Both fixes aimed at this row were attacking exactly that hole — the empty-build verdict flip
+(2026-09-17, *"the ONLY verdict flip in the route that recorded none"*) and `abortOutcome.ts`
+(2026-09-18, seven abort causes that ended a build with no outcome). The panel could not show that
+either had worked, so the admin saw the same 29.2% two days later and reasonably asked again.
+
+**Fixed at the class:** `NO_OUTCOME_REASON` — *"The build never recorded WHY it ended (no outcome on
+the record)"* — split from `OTHER_REASON` on the MACHINE FACT (`return code ? OTHER_REASON :
+NO_OUTCOME_REASON`), never on a reading. `other` now means only what its label says: the engine said
+why and we have no word for it yet. Two rows, two different pieces of work.
+
+⚠️ **`no-cause-recorded` is deliberately still its own third bucket** — that one is the engine SAYING
+in prose that it does not know (*"no specific error was captured"*). The record being silent and the
+record admitting ignorance are different facts.
+
+### 2 · A number no fix could ever move
+
+Every row is a LIFETIME tally over the latest build of every project. A failure from three weeks ago
+counts as loudly as one from this morning and goes on counting for ever — so the panel is
+structurally incapable of showing that anything was fixed. **A verdict no evidence can change is the
+shape this repo keeps paying for** (`RELEASE_GATE` saying the typecheck did not run after two clean
+runs; `CLAIM_UNSUPPORTED` two seconds before `2 changed, 2 new`).
+
+**Fixed:** every `ReasonRow` carries `recentCount` — how many of its failures happened in the last
+7 days — and the row renders `42 (29.2% of failures) · none in 7d` in green, or `· 3 in last 7d` in
+amber. **A large total with none this week is a fixed bug, and nothing on that panel could previously
+have shown that.**
+
+🔒 **`null`, never `0`, when no window was given** — *"not measured"* and *"it stopped happening"* are
+the two answers this column exists to tell apart. An UNDATED record counts as neither recent nor old:
+counting it as recent would invent improvement, counting it as old would invent the opposite.
+🔒 The clock lives in the ROUTE (`sinceMsFor('7d')`, the same 7 days the All-Builds browser means);
+`buildFailureCategory.ts` stays pure and takes the boundary as data.
+🔒 It changes NOTHING about who is counted as failed — `verdictSplit`, `failed`, `ok` and the rate are
+asserted identical with and without a window.
+
+### 3 · "The run ended before it finished" (11.1%) was three endings wearing one label
+
+`OUTCOME_STOPPED` carried the wall-clock watchdog (a real timeout: the build ran out of MINUTES), a
+platform-composed stop, AND `abortCauseOf` returning `'unknown'` — an abort raised somewhere that
+never went through `abortBuild` at all. The third is a hole of the same shape as (1) and cannot be
+found while it is averaged in with a budget that was simply spent.
+
+**Fixed:** `OUTCOME_ABORTED_UNKNOWN`, its own code — because the classifier reads the CODE, so a
+distinction living only in prose is one no panel will ever show. Named in BOTH maps
+(`OUTCOME_REASONS` and `OUTCOME_TO_CATEGORY`), or an unmapped code falls straight back through to the
+text and the split buys nothing.
+
+🔎 **THE SIBLING THE EXISTING SUITE CAUGHT (rule 3, and it is the good kind of catch):**
+`PROCESS_ONLY_CODES` in `BuildDiagnostics.ts` excluded `OUTCOME_STOPPED` from `isAppFinding`, because
+*how a build ended is not a finding about the app*. Splitting the code out without listing the new
+one would have turned *"we do not know why the run ended"* into a build-breaking blocker counted
+against the user's app — the provider-error-as-app-blocker class (autopsy `4efab9d7`) through a new
+door. `tests/everyAbortCauseRecordsAnOutcome.test.ts` failed on it before it could reach `main`.
+
+### What this does NOT claim
+
+**Not one of these three fixes makes a single build succeed.** They make the failures legible, which
+is the precondition for fixing them and the reason the last two attempts could not be judged. The
+remaining rows are real engine work and are named honestly in the reply to the admin: the release
+gate (25), the reviewer (10), provider timeouts (9), tool calls (9). **The 42 cannot be worked on
+until the next reading of this panel says how many of them are still happening** — which is exactly
+what `recentCount` now answers, and why it shipped first.
+
+**Tests:** `tests/aFailureNobodyCanName.test.ts` — 15 cases, each **proven by reversion** (restoring
+`return OTHER_REASON`, making `recentCount` a bare number, and putting the untagged abort back on
+`OUTCOME_STOPPED` each fail it). Four existing assertions were repointed to their INTENT and none was
+weakened: "unnameable" is still asserted, now precisely.
+
+### 🔎 AND THE SAME ROOT CAUSE IS PROBABLY WEARING OTHER ROWS' NAMES — recorded, deliberately NOT acted on
+
+Reading the classifier against `deriveRootCause`'s fallback order turns up a consequence worth
+writing down before anyone re-derives it from the next screenshot.
+
+When a build records **no** `OUTCOME_*` code, `deriveRootCause` falls back to *"the most severe
+unresolved issue"* — whatever warning happened to be loudest. `abortOutcome.ts`'s own header names
+what that usually is: *"a provider fallback, a benched rung, a `read_file` on a path not yet
+written"*. The classifier then reads THAT sentence. If it matches nothing it becomes
+`no-outcome-recorded` (row 1 above) — **but if it happens to match a grounded pattern it is given
+that pattern's name instead**, as a fact.
+
+So on the admin's table, an unknown share of:
+
+```
+AI provider timed out / ran out of budget     9  (6.3%)
+A tool call failed                            9  (6.3%)
+Every AI provider failed                      2  (1.4%)
+```
+
+may be **the same bug as row 1**, wearing a more confident label — a recovered tool error that the
+build moved past, named as the reason the build ended. "No code" means the sentence is a fallback,
+and a fallback that matches a regex is still a fallback.
+
+⚠️ **This is NOT being fixed now, and the reason is this file's own rule.** Downgrading every
+pattern match on an uncoded record would throw away real information (a legacy record's `rootCause`
+often genuinely IS its cause), and nothing here can say how big the share is. `recentCount` is the
+instrument that settles it: **if `no-outcome-recorded` reads "none in 7d" on the next reading, this
+whole concern is historical** and the remaining provider/tool rows are real. If it does not, this is
+where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
+the protection until the measurement has produced a reading.*

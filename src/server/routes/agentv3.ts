@@ -427,6 +427,7 @@ import {
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, collectNamedWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { liveFileSyncEnabled, requestedSyncPaths } from '../AgentV3/liveFileSync';
+import { isBudgetEndedError } from '../AgentV3/turnDeadline';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -12567,6 +12568,24 @@ async function noteBuildOutcome(
         });
       };
       const recordProviderFallback = (name: string, err: unknown): void => {
+        // 🔴 OUR OWN CLOCK IS NOT A PROVIDER FAILURE, AND THE REPORT SAID IT WAS (autopsy bb688add,
+        // 2026-09-20). That build's timeline opens with *"Provider KIMI failed"* and its tally reads
+        // `providerFailures: { KIMI: 1 }` — for a call KIMI answered nothing wrong in. The lane's own
+        // step deadline ended it. `turnDeadline.ts` went to some length so a budget error would never
+        // BENCH a provider, and its docblock says the other half in as many words: *"it must not
+        // INDICT anyone either."* This is that half. It was still indicting one here, in the two
+        // places an admin actually reads — the first timeline line and the per-provider tally.
+        //
+        // The event is still recorded, at the same severity: a build that ran out of clock mid-call
+        // is a real struggle and the timeline must show where. It simply stops being an accusation.
+        if (isBudgetEndedError(err)) {
+          buildDiag.record({
+            phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
+            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — moving to the next one`,
+            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+          });
+          return;
+        }
         // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
         // kitni baar") + the existing per-event timeline entry (carries the message).
         try { buildDiag.recordProviderFailure(name, err); } catch { /* diagnostics are best-effort */ }
@@ -21588,13 +21607,16 @@ async function noteBuildOutcome(
           ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null
           : null;
         buildDiagRef?.setSandboxSeconds(held);
+        // The seconds that actually reached the bill — capped at this build's own duration, so the
+        // line cannot state a figure the bill did not use (autopsy bb688add).
+        const billedSandboxSeconds = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt).measuredSeconds;
         // SAY WHETHER IT REACHED THE BILL, and why (admin 2026-08-11). Without this line the admin
         // cannot tell "we charged for the VM" from "we absorbed it" — and the difference is a config
         // flag plus a rate they alone can supply. ADMIN-ONLY: the user never sees an infrastructure
         // line item (White-Label Law §3).
         buildDiagRef?.record({
           phase: 'build', severity: 'info', code: 'SANDBOX_BILLING',
-          message: sandboxBillingNote(sandboxCost(held)),
+          message: sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds),
           autoResolved: true,
         });
       } catch { /* a cost measurement must never affect a build */ }

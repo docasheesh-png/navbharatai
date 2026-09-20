@@ -1,5 +1,13 @@
 // THE HEADER'S BADGE STRIP — the rules, with no surface attached (admin 2026-09-20).
 //
+// 🔴 THE FILENAME IS `headerBadgeRules`, NOT `headerBadges`, AND THAT IS NOT A STYLE CHOICE. It was
+// `headerBadges.ts` beside the component `HeaderBadges.tsx` — two paths differing ONLY by case. Linux
+// has two files there; macOS and Windows have one. So on the macOS runner that builds the iOS app,
+// `import { HeaderBadges } from './HeaderBadges'` resolved to THIS file, which exports no such symbol,
+// and every `.ipa` build died at `npm run build` — while Linux CI stayed green, because on Linux the
+// import was never ambiguous. Do not reintroduce a pair of paths that differ only in case;
+// `scripts/nativeShellGuard.mjs` fails CI if one appears.
+//
 // THE ASK, verbatim: *"aur ❓ ko hard core mat banana, future me ham yahi par ⁉️✔️❓ its use karenge,
 // alag alag kamo ke liye. abhi nahi, future me."*
 //

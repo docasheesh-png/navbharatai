@@ -44,6 +44,7 @@
 import { liveTransitContext } from './transitLive';
 import { liveWeatherSourceEnabled } from '../../lib/licenceExposure';
 import { fetchCityAirQuality, aqiCategory, cpcbAqiConfigured } from './cpcbAirQuality';
+import { attributionsFor } from './govData/registry';
 
 const SOURCE_TIMEOUT_MS = 5_000;
 
@@ -161,7 +162,7 @@ async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date, env
   if (!AQI_SIGNAL.test(message)) return '';
   const place = extractPlace(message);
   if (!place) return ''; // no place named → the directive makes the model ask, honestly
-  const air = await fetchCityAirQuality(place, (url) => fetchJson(url, fetchImpl), env);
+  const air = await fetchCityAirQuality(place, fetchImpl, env);
   if (!air) return '';
   const lines = [
     `Place: ${air.city || place}`,
@@ -174,8 +175,13 @@ async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date, env
   ];
   // GODL-India REQUIRES the source to be attributed, so this credit is a licence condition rather
   // than a nicety — do not drop it to shorten the block.
+  //
+  // 🔒 THE LINE COMES FROM THE REGISTRY, NOT FROM HERE. A licence condition written in two places
+  // is a licence condition that goes stale in one of them: the row in `govData/registry.ts` records
+  // what the licence obliges, and this is the code that obeys it. One owner, one string.
+  const credit = attributionsFor(['cpcb-aqi'])[0] ?? 'Source: Central Pollution Control Board (CPCB) via data.gov.in';
   return liveBlock('LIVE AIR QUALITY DATA', lines.join('\n'), now,
-    'Source: Central Pollution Control Board (CPCB) via data.gov.in. Full details at [CPCB](https://app.cpcbccr.com).');
+    `${credit}. Full details at [CPCB](https://app.cpcbccr.com).`);
 }
 
 // ── Currency ───────────────────────────────────────────────────────────────────────────────────────

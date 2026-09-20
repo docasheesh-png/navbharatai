@@ -74,6 +74,13 @@ jobs:
       - name: No unused imports (dead weight on the first-paint path)
         run: node scripts/noUnusedImports.mjs
 
+      # THE STORE BUILDS CANNOT BREAK SILENTLY (2026-09-20). Both the .aab and the .ipa workflows
+      # failed on a `main` this job had just passed: an illegal `--` inside an Android XML comment,
+      # and two modules whose names differ only by case (fine on Linux, one file on the macOS runner).
+      # Neither is visible to tsc, vitest or a Linux `npm run build`. Milliseconds, no SDK required.
+      - name: Native shell guard (Android XML + case-ambiguous module names)
+        run: npm run native:guard
+
       - name: Typecheck (server modules - strict guardrail)
         run: npm run typecheck:server
 

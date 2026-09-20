@@ -2069,8 +2069,11 @@ export class BuildDiagnostics {
     // Normalize recovered-on-success issues at SERIALIZATION time, so counts, issues[] and the derived
     // rootCause are all consistent even when a finalize path bypassed finish()'s back-fill. Idempotent.
     this.resolveRecoveredOnSuccess();
-    const errors = this.issues.filter((i) => i.severity === 'error').length;
-    const warnings = this.issues.filter((i) => i.severity === 'warning').length;
+    // NARRATION IS EXCLUDED FROM ALL THREE TALLIES — see NARRATION_CODES. A repeated sentence is not
+    // an error the build had, not a warning it raised, and not something it healed.
+    const counted = this.issues.filter((i) => !isNarrationEntry(i));
+    const errors = counted.filter((i) => i.severity === 'error').length;
+    const warnings = counted.filter((i) => i.severity === 'warning').length;
     // Observations are neither ours to have healed nor ours to still owe — they get their own bucket, so
     // the auto-resolved tally means "v5.0 genuinely fixed this" and nothing else (mitrify 2026-08-04).
     const observations = this.issues.filter((i) => i.observation === true).length;
@@ -2089,7 +2092,7 @@ export class BuildDiagnostics {
     // CODE rather than by a flag each call site sets, so a new fallback cannot forget to declare
     // itself into the honest bucket.
     const isWorkaround = (i: { code?: string }) => WORKAROUND_CODES.has(String(i.code ?? ''));
-    const autoResolved = this.issues.filter((i) =>
+    const autoResolved = counted.filter((i) =>
       i.autoResolved && i.observation !== true && i.severity !== 'info' && !isWorkaround(i)).length;
     const workarounds = this.issues.filter((i) => isWorkaround(i) && i.severity !== 'info').length;
     return {
@@ -2124,7 +2127,7 @@ export class BuildDiagnostics {
         warnings,
         autoResolved,
         ...(workarounds > 0 ? { workarounds } : {}),
-        unresolved: this.issues.filter((i) => !i.autoResolved && i.observation !== true).length,
+        unresolved: counted.filter((i) => !i.autoResolved && i.observation !== true).length,
         ...(observations > 0 ? { observations } : {}),
       },
       issues: [...this.issues],
@@ -2550,6 +2553,44 @@ const WORKAROUND_CODES = new Set([
 ]);
 
 /**
+ * 🔴 NARRATION IS NOT A FINDING — it is the engine REPEATING a sentence, never a measurement.
+ *
+ * ## The bug (autopsy 586295b7, 2026-09-20)
+ *
+ * A build the user stopped after 10 seconds — no model call, no file written, nothing healed —
+ * reported **3 errors and 2 self-heals**. Both "heals" and two of the three "errors" were the same
+ * two entries: `AGENT_NOTE` lines carrying NavBharatAI's OWN honest notices to the user,
+ *
+ *   "⚠️ I made your change, but I **could not** open your app to confirm it works this time."
+ *   "🧾 I **could not** confirm your app running here, so you have been charged…"
+ *
+ * classified `severity: 'error'` because they contain the failure verb "could not", and counted as
+ * heals because `recordNarration` sets `autoResolved: true` on every note it files (so a note is not
+ * counted as an unresolved defect either).
+ *
+ * ## Why the fix is here and not in the classifier
+ *
+ * The classifier above has been patched FIVE times to be cleverer about which sentences are problems
+ * — long prose, the project recap, benign compounds ("error boundary"), remediation intent, echoing
+ * the user's own words. Each patch was right and each left the category error untouched: **whoever
+ * said it, a repeated sentence is not a measurement of the build.** An `AGENT_STEP` is already `info`
+ * and therefore already excluded; an `AGENT_NOTE` is the same thing said in a louder voice.
+ *
+ * So narration stays on the timeline — where it is often the clearest human signal of what went
+ * wrong, and nothing is hidden — and stops moving the three numbers an autopsy actually reads.
+ *
+ * This is the FOURTH time this tally has been found counting something that is not a heal
+ * (heartbeats; import observations; provider fallbacks; now our own notices), and the third fix of
+ * the same shape: counted by CODE, so a new call site cannot forget to declare itself honestly.
+ */
+const NARRATION_CODES = new Set(['AGENT_NOTE', 'AGENT_STEP']);
+
+/** True when this entry is the engine repeating a sentence rather than reporting a measurement. PURE. */
+export function isNarrationEntry(i: { code?: string }): boolean {
+  return NARRATION_CODES.has(String(i.code ?? ''));
+}
+
+/**
  * Did THIS build fail because the engine could not answer, rather than because the app was hard?
  *
  * 🔴 WHY THIS IS A PREDICATE AND NOT A GUESS (admin report 2026-09-13). A free build produced zero
@@ -2740,18 +2781,50 @@ export function honestModelLabel(
  * counted as our unresolved failures or promoted to rootCause. On a real build/edit turn (where the map
  * IS the app we just wrote) nothing changes. PURE + tested.
  */
+/**
+ * WHY a finding is about code we did not write. `null` means we DID write it, so it is ours to own.
+ *
+ * 🔴 THE TRIGGER WAS TOO NARROW, AND THAT IS THE WHOLE BUG (autopsy 586295b7, 2026-09-20). The
+ * machinery below has existed since the mitrify autopsy and was keyed on ONE way of not having
+ * written the code: an import turn. A build the user STOPPED after ten seconds — zero files written —
+ * is another, and on that build an accessibility warning about the user's own `src/App.tsx` was
+ * filed as one of FOUR "unresolved problems". Not one of the four was a defect of that build.
+ *
+ * The honest question was never "is this an import turn?" It is **"did we write this code?"**, and an
+ * import is one answer out of several. Same shape as the other three findings in that autopsy: a fact
+ * with more cases than the single case the code tests for.
+ */
+export type UntouchedCodeReason = 'import' | 'no-writes';
+
+/**
+ * Record a finding about code THIS TURN did not write, honestly — see `UntouchedCodeReason`.
+ *
+ * `autoResolved: true` keeps it out of the "problems we still owe" bucket; `observation: true` keeps
+ * it out of the SELF-HEAL bucket too, so neither count lies about what v5.0 actually did. PURE.
+ */
+export function findingAboutUntouchedCode(
+  reason: UntouchedCodeReason | null,
+  message: string,
+): { autoResolved: boolean; observation?: boolean; message: string } {
+  if (!reason) return { autoResolved: false, message };
+  // The import caveat is specific and must NOT be attached to the other case: on a zero-write turn the
+  // file map is the real project, not a knowingly partial one, so claiming it "may not be accurate"
+  // would be a different untruth in the opposite direction.
+  const lead = reason === 'import'
+    ? '[observation about your existing code — nothing was changed]'
+    : '[observation about your existing code — this turn changed nothing]';
+  const caveat = reason === 'import'
+    ? ' (Noted from the files that were imported; if part of the repo was too large to import, this may not be accurate.)'
+    : '';
+  return { autoResolved: true, observation: true, message: `${lead} ${message}${caveat}` };
+}
+
+/** The import case, kept as its own name because that is how the mitrify autopsy's tests ask for it. */
 export function importTurnObservation(
   isImportTurn: boolean,
   message: string,
 ): { autoResolved: boolean; observation?: boolean; message: string } {
-  if (!isImportTurn) return { autoResolved: false, message };
-  return {
-    // `autoResolved: true` keeps it out of the "problems we still owe" bucket; `observation: true` keeps
-    // it out of the SELF-HEAL bucket too, so neither count lies about what v5.0 actually did.
-    autoResolved: true,
-    observation: true,
-    message: `[observation about your existing code — nothing was changed] ${message} (Noted from the files that were imported; if part of the repo was too large to import, this may not be accurate.)`,
-  };
+  return findingAboutUntouchedCode(isImportTurn ? 'import' : null, message);
 }
 
 /** What the user was actually PROMISED at t=0, kept so the ending can be measured against it. */

@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { repeatedReadSummary, repeatedReadNotice } from '../src/server/AgentV3/repeatedReads';
 import { noJourneyReason, NO_DATA_ENTRY_REASON } from '../src/server/AgentV3/journeyDerivation';
+import { snapshotConfirmation } from '../src/server/AgentV3/snapshotIdentity';
 
 /**
  * 🔬 AUTOPSY f97eb0ec (2026-09-20) — the falling-block game.
@@ -172,5 +173,112 @@ describe('🔴 a game is not told that it takes no user input', () => {
   it('🔒 an empty project is still "we could not find where to check"', () => {
     // Positive evidence of a UI is required — an absence of data entry is equally true of nothing.
     expect(noJourneyReason({})).not.toBe(NO_DATA_ENTRY_REASON);
+  });
+});
+
+describe('🔴 the shared-contract pass is skipped ONCE, not twice', () => {
+  const builder = read('src/server/AgentV3/SimpleBuilder.ts');
+
+  it('there is exactly one place that logs the skip', () => {
+    // The report shows BOTH sentences, in the same millisecond. `if (!contractAffordable)` logged one
+    // and the `else` of the run-it branch logged the other, and an unaffordable contract satisfies
+    // both — so the user was told twice, for two different-sounding reasons.
+    const skips = builder.split("⏭️ Skipping the shared-contract pass").length - 1;
+    expect(skips).toBe(2);              // the two REASONS survive…
+    const logs = builder.split("deps.log?.(contractCap > 0").length - 1;
+    expect(logs).toBe(1);               // …inside ONE call that can only fire once
+  });
+
+  it('the old always-true second branch is gone', () => {
+    expect(codeOnly(builder)).not.toContain('if (shareContract && contractCap > 0 && !contractAffordable)');
+  });
+});
+
+describe('🔴 a plan the fast lane paid for is handed over, not thrown away', () => {
+  const builder = codeOnly(read('src/server/AgentV3/SimpleBuilder.ts'));
+  const route = codeOnly(read('src/server/routes/agentv3.ts'));
+
+  it('the lane carries the planned PATHS, not only their count', () => {
+    // `plannedFiles` already existed and is a NUMBER for the ETA, so the list itself had no home —
+    // which is why 62s and 2,220 output tokens of planning were discarded on the bail.
+    expect(builder).toContain('let plannedPaths: string[] = []');
+    expect(builder).toContain('plannedPaths = manifest.map((f) => f.path)');
+    expect(builder).toContain('plannedPaths?: string[]');
+  });
+
+  it('the bail result carries it — the bail is the whole point', () => {
+    const at = builder.indexOf('salvagedPaths,\n      plannedFiles,');
+    expect(at).toBeGreaterThan(0);
+    expect(builder.slice(at, at + 120)).toContain('plannedPaths');
+  });
+
+  it('the route offers it to the full builder', () => {
+    expect(route).toContain('SIMPLE_BUILD_PLAN_HANDOFF');
+    expect(route).toContain('sb.plannedPaths?.length');
+  });
+
+  it('🔒 offered as a PLAN, never as work already done', () => {
+    // The salvage block above it says "CONTINUE — DO NOT START OVER" about files that EXIST. Saying
+    // that about files that do not is the confident-and-wrong instruction this codebase forbids.
+    const at = route.indexOf('SIMPLE_BUILD_PLAN_HANDOFF');
+    const block = route.slice(at, at + 1400);
+    expect(block).toContain('NOT written yet');
+    expect(block).not.toContain('DO NOT START OVER');
+    expect(block).not.toContain('YOUR OWN prior work');
+  });
+
+  it('🔒 only when nothing was salvaged — real files are the stronger signal', () => {
+    const at = route.indexOf('sb.plannedPaths?.length');
+    expect(route.slice(Math.max(0, at - 120), at)).toContain('!sb.salvagedPaths?.length');
+  });
+});
+
+describe('🔴 a stale copy names WHICH files differ', () => {
+  const taken = (filesHash: string, filePaths?: string[]) => ({ url: 'https://x.example/app', filesHash, filePaths });
+
+  it('says a CONTENT change when both sides hold the same files', () => {
+    const v = snapshotConfirmation({
+      taken: taken('aaa', ['src/App.tsx', 'index.html']),
+      persistedHash: 'bbb',
+      persistedPaths: ['index.html', 'src/App.tsx'],   // same set, any order
+    });
+    expect(v.action).toBe('stale');
+    expect(v.reason).toContain('same 2 file(s)');
+    expect(v.reason).toContain('CONTENT changed');
+  });
+
+  it('🔑 says FILE-SET MISMATCH when the two sides cover different files', () => {
+    // The suspicion the old sentence could not rule out: the copy's hash is taken over the SANDBOX
+    // tree and the confirmation's over the DURABLE set. One extra path on either side and the copy is
+    // stale on every build, for ever, looking exactly like a late write.
+    const v = snapshotConfirmation({
+      taken: taken('aaa', ['src/App.tsx', 'node_modules/.vite/x']),
+      persistedHash: 'bbb',
+      persistedPaths: ['src/App.tsx', '.env'],
+    });
+    expect(v.reason).toContain('DIFFERENT files');
+    expect(v.reason).toContain('node_modules/.vite/x');
+    expect(v.reason).toContain('.env');
+    expect(v.reason).toContain('not necessarily a late write');
+  });
+
+  it('🔒 stays silent about the difference when it cannot know it', () => {
+    // A copy from before paths were carried. Saying nothing is right; guessing would be worse than
+    // the sentence being replaced.
+    const v = snapshotConfirmation({ taken: taken('aaa'), persistedHash: 'bbb' });
+    expect(v.action).toBe('stale');
+    expect(v.reason).not.toContain('DIFFERENT files');
+    expect(v.reason).not.toContain('CONTENT changed');
+  });
+
+  it('🔒 a matching copy is still promoted — unchanged', () => {
+    const v = snapshotConfirmation({ taken: taken('same', ['a.ts']), persistedHash: 'same', persistedPaths: ['a.ts'] });
+    expect(v.action).toBe('restamp');
+  });
+
+  it('🔒 the hash still decides, never the paths', () => {
+    // Identical paths, different hashes ⇒ still stale. The paths only explain.
+    const v = snapshotConfirmation({ taken: taken('aaa', ['a.ts']), persistedHash: 'zzz', persistedPaths: ['a.ts'] });
+    expect(v.action).toBe('stale');
   });
 });

@@ -198,7 +198,9 @@ describe('wiring — the saved copy is raised by the route, cleared by every wri
     const block = routes.slice(at - 1500, at);
     expect(block).toContain('actuator.noteSnapshotCurrent?.(workspaceId, true)');
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at, filesHash)');
-    expect(block).toContain('snapshotTaken = { url, filesHash }');
+    // What the copy records, not how the object literal is spelled — it gained `filePaths` on
+    // 2026-09-20 so a mismatch can name which side holds what, and this assertion moved with it.
+    expect(block).toMatch(/snapshotTaken = \{ url, filesHash/);
   });
 
   it('🔒 the snapshot event is emitted at the FINAL durable save, only once the copy is proven current (snapshotIdentity.ts)', () => {
@@ -210,7 +212,10 @@ describe('wiring — the saved copy is raised by the route, cleared by every wri
     expect(at).toBeGreaterThan(-1);
     const block = routes.slice(at - 1400, at);
     expect(block).toContain('await finalSave;');
-    expect(block).toContain('snapshotConfirmation({ taken: snapshotTaken, persistedHash: workspaceContentHash(persisted) })');
+    const call = block.slice(block.indexOf('snapshotConfirmation({'));
+    const args = call.slice(0, call.indexOf('});'));
+    expect(args).toContain('taken: snapshotTaken');
+    expect(args).toContain('persistedHash: workspaceContentHash(persisted)');
     // The durable stamp and the event carry the SAME instant, so the door and the frame agree.
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, snapshotTaken.url, at, snapshotTaken.filesHash)');
     expect(block).toContain("events.emit({ type: 'snapshot', url: snapshotTaken.url, at, note: SNAPSHOT_IDLE_NOTE, ts: at })");

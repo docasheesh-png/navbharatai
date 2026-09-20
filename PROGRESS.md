@@ -72103,3 +72103,55 @@ another session** in PROGRESS.md 2026-09-19 — the reviewer rides the build cha
   builder re-planned from scratch. Handing the file list over is the obvious saving.
 - **Every completeness gate we own is form-shaped.** Journey, release gate and feature coverage all
   look for inputs; a game satisfies none of them, so a game's *behaviour* is never machine-verified.
+
+### 2026-09-20 (same autopsy, second pass) — the rest of f97eb0ec's ledger
+
+Admin: *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna level
+par theek karo."* Three more fixed, one examined and deliberately NOT "fixed", two recorded.
+
+**3. The shared-contract skip was announced TWICE, in the same millisecond.** `if (shareContract &&
+contractCap > 0 && !contractAffordable)` logged one sentence and the `else` of the run-it branch
+logged another — and an unaffordable contract satisfies **both**, so every such build told the user
+the pass was skipped twice for two different-sounding reasons. Both reasons are worth keeping (they
+are different facts: "no time for both" vs "no cap at all"), so the CHOICE moved inside the one branch
+that can fire once.
+
+**4. A plan the lane paid for is no longer thrown away.** The lane spent **62 s and 2,220 output
+tokens** planning five files, then the budget projection bailed before writing any — and the bail's
+own comment read *"there is nothing to salvage"*, which is true of FILES and false of the PLAN. The
+full builder then re-ran `ls` and re-read the scaffold it had just been told about. `plannedFiles`
+already existed but is a NUMBER for the ETA, so the list had no home: `plannedPaths` now carries it,
+and the route offers it to the full builder.
+🔒 **Offered as a PLAN, never as done work** — the salvage block beside it says *"CONTINUE — DO NOT
+START OVER … YOUR OWN prior work"* about files that EXIST. Saying that about files that do not is the
+confident-and-wrong instruction this codebase forbids, so the wording is deliberately different and a
+test asserts the difference. Only when nothing was salvaged; real files are the stronger signal.
+
+**5. `PREVIEW_SNAPSHOT_STALE` now names WHICH files differ.** It said *"a later pass changed a file"*
+and could not say which — while the two hashes come from **different places**: the copy's from the
+SANDBOX tree the production build just consumed, the confirmation's from the DURABLE set that was
+persisted. If those sets differ by one path the hashes can never match and the copy is stale on every
+build, looking identical to a real late write.
+⚠️ **The suspicion is NOT asserted — it is made settleable.** The paths travel with the copy for that
+build only (never persisted, never part of the identity — the HASH still decides), and the sentence
+now says either *"both sides hold the same N files, so a file's CONTENT changed"* or *"the two sides
+cover DIFFERENT files … so this is a file-set mismatch, not necessarily a late write"*. The next
+report answers the question instead of restating it.
+
+**EXAMINED AND DELIBERATELY NOT CHANGED — `REQUIREMENT_GAPS` with `autoResolved: true`.** My own
+ledger called this an honesty defect: 7 gaps recorded as handled while sound, saved progress, pause
+and an in-app tutorial were never built. Re-reading it, the finding claims only that the engine
+*"assumed sensible defaults"* — and the sensible default for "does it need sound?" is no sound, which
+is what shipped. It is `info` severity and cannot become a root cause. **Changing it would have been
+manufacturing a defect to have something to fix**, which the third absolute rule forbids in the same
+breath as flattery.
+
+**RECORDED, NOT BUILT:**
+- **`READY_BEFORE_END` (92 s after the app was judged done) is an INSTRUMENT, not a defect** — #3084
+  shipped it measurement-first on purpose, and CLAUDE.md says plainly not to build the protection
+  until the line has produced warnings on real builds. It worked; this is its data point.
+- **Every completeness gate we own is FORM-SHAPED.** Journey, release gate and feature coverage all
+  look for inputs, so a game satisfies none of them and its *behaviour* is never machine-verified.
+  That is why the prompt's one measurable requirement — *"1 block drop ho, 5 second me"* — was checked
+  by nothing. A real fix is a control-driven journey (press ←, assert the canvas changed), and it is a
+  product decision with its own cost, not a line in this autopsy.

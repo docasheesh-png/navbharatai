@@ -2536,6 +2536,30 @@ the flag entries above promise.
   typed (capped at 48 chars), because *"running a command"* would hide a real fact and a guessed
   description would state a false one. Full paths are unchanged in the Files tab, the diff and Code
   Studio. Test-locked in `tests/theStripSpeaksTheUsersLanguage.test.ts`.
+- **💯 HOW MUCH OF THE APP IS BUILT — a percentage that refuses to be a timer (added 2026-09-20; no
+  flag, no cost).** Admin: *"app kitne % ban gayi woh bhi likh kar aana chahiye … **100% done - tap on
+  preview!**"*. That last clause is the design, not decoration: **the preview IS the completion
+  criterion**, which is what this platform already believes everywhere that matters (`markAppRendered`
+  is the single producer of that proof, and the billing law turns on it — *"app bani = preview chala"*).
+  🔴 **WHAT IT REFUSES: a bar that crawls on elapsed time.** Every competitor ships one and it is a lie
+  by construction — it moves while nothing happens and is always near 90% when a build is about to
+  fail. `src/components/agentv3/buildProgress.ts` is pure and every point is a COUNT of things that
+  really happened: todos the engine marked `done`, the phase it declared, a preview URL it published,
+  a render it proved. Call it a thousand times with the same facts and it returns the same number.
+  🔒 **100% IS EARNED.** Only `done && ok && appRendered` reaches it. A build that finished but whose
+  render was never proven stops at the number it really reached and says *"finished, preview not
+  confirmed"* — saying "100% done — tap Preview" there is autopsy `697b38ee` in the other direction. A
+  RUNNING build is capped at 97 so that 100 keeps meaning something; a failed one reports where it got
+  to plus *"Your files are saved."*
+  ⚠️ **THE HONEST COST, recorded rather than discovered later: without a plan the number JUMPS**
+  (5 → 80 → 90 → 100) instead of gliding, because the in-between values do not exist. `basis` on the
+  result says which case a reading came from (`plan` / `milestone` / `none`) so a lumpy number is
+  distinguishable from a broken one. **Only `done` todos count** — half a point for `in_progress` is a
+  convention, not a measurement.
+  📌 It rides on the ONE live strip (`WorkingIndicator`) beside the elapsed clock, and the clock is
+  what keeps a paused number from reading as a hang — a clock is a measurement, a bar is a promise. The
+  floor is held per BUILD ID so it can never fall back mid-build nor seed the next build's first frame.
+  Test-locked in `tests/hundredPercentIsEarned.test.ts`.
 - **📏 `LADDER_DEPTH` — how far down its tier's ladder a build actually went (added 2026-09-20; no flag,
   always on, zero cost).** Admin: *"pehle yeh measure karo, kitni builds pehle rung par khatam hoti
   hai"*. **Nothing in this repo could answer it**, and the reason is worth recording: `deliveredVia`

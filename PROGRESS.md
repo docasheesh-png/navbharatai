@@ -70919,3 +70919,37 @@ an un-hydrated SPA shell.
   judge (a tools-free single call) are genuinely two different things, and only one obeys the rule.
 - **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
   `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.
+
+### 2026-09-20 (same day, follow-up) — "app kitne % ban gayi" — a percentage that refuses to be a timer
+
+Admin: *"app kitne % ban gayi woh bhi likh kar aana chahiye … 0% 10% 12% … 89% 98% **100% done - tap on
+preview!**"*
+
+**The last clause decided the design.** The preview is the completion criterion — which is what this
+platform already believes: `markAppRendered` is the single producer of that proof and the billing law
+turns on it (*"app bani = preview chala"*). So 100% is EARNED by a proven render, never announced by a
+build that merely finished.
+
+**What was refused:** a bar that crawls on elapsed time. It is a lie by construction — it moves while
+nothing happens, and it is always near 90% when a build is about to fail. `buildProgress.ts` is pure
+and every point is a count of real events (todos marked `done`, the declared phase, a published preview
+URL, a proven render). A test calls it twice with identical facts and asserts an identical number.
+
+**Three refusals locked by test:**
+
+1. **100 is earned** — `done && ok && appRendered` only. `ok` without a proven render reads *"finished,
+   preview not confirmed"*; a running build is capped at 97 so 100 keeps meaning something.
+2. **It only moves on evidence** — no interpolation, ever. Only `done` todos count; half a point for
+   `in_progress` is a convention, and this module is worth nothing the moment it holds conventions.
+3. **It never falls backwards** — the floor is held per BUILD ID, so a plan that grows mid-build cannot
+   make a user watch their app get less built, and the previous build's 100% cannot seed the next one.
+
+⚠️ **Honest cost, recorded now rather than found later:** with no plan the reading JUMPS (5 → 80 → 90 →
+100) instead of gliding. The in-between values do not exist. `basis` (`plan` / `milestone` / `none`)
+says which case produced a reading so a lumpy number is distinguishable from a broken one. The elapsed
+clock beside it is what keeps a paused number from reading as a hang — a clock is a measurement, a bar
+is a promise.
+
+⚠️ **Open:** how often a build actually carries todos is unmeasured, and that decides how often the
+number glides rather than jumps. The first real builds answer it — the same evidence `LADDER_DEPTH` is
+waiting on.

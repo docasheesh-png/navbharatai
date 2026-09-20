@@ -1303,7 +1303,26 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try {
         await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');
         salvagedPaths = salvage.map((f) => f.path);
-        deps.log?.(`⏱️ The fast lane ran out of time — handing its ${salvage.length} finished file(s) to the full builder to complete.`);
+        // 🔴 THIS LINE WAS THE LAST THING A USER SAW BEFORE PRESSING STOP (autopsy `f152c1ab`,
+        // 2026-09-20), 2.5 seconds later. It used to read:
+        //
+        //     "⏱️ The fast lane ran out of time — handing its 1 finished file(s) to the full
+        //      builder to complete."
+        //
+        // Three things wrong with it, and none is the wording alone:
+        //  1. IT NAMES OUR ARCHITECTURE. "The fast lane", "the full builder" — a user has no lanes.
+        //     The White-Label Law's own list of forbidden leakage is routing internals *"or any hint
+        //     that more than one vendor exists"*; the same argument covers our own internal engines.
+        //  2. IT READS AS A FAILURE WHEN NOTHING FAILED. A handoff is how this build CONTINUES, and
+        //     the files are already saved. "Ran out of time" describes a lane; the user hears it
+        //     about their app.
+        //  3. IT COUNTS THE FILES. "1 finished file(s)" after three and a half minutes is, to the
+        //     person waiting, a progress report — and a damning one — when it is really an internal
+        //     batch size. The plural-in-parentheses gives away that nobody expected a human to read it.
+        //
+        // What replaces it says the one thing that IS true and does matter: the work so far is kept
+        // and the build is still going.
+        deps.log?.('Still building your app — your work so far is saved and I am carrying on from it.');
       } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
     }
     return {
@@ -1492,13 +1511,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       // Circuit-breaker: the repair produced the identical compiler errors → zero progress, it's stuck.
       if (!verdict.ok && verdict.errors === promptingErrors) {
-        deps.log?.('The same build errors remain after a repair attempt — handing to the full builder to finish it.');
+        // Same rule as the salvage line above: the user has no "full builder" to hand anything to.
+        deps.log?.('Some build errors are still there after a repair — staying on it.');
         break;
       }
       promptingErrors = verdict.errors;
     }
     if (!verdict.ok) {
-      deps.log?.('The app still has build errors — handing to the full builder to finish it.');
+      deps.log?.('The app still has build errors — staying on it until it builds.');
       return {
         ok: false, filesWritten: files.length, reason: 'verify_failed',
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',

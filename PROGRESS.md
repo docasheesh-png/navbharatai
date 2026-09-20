@@ -72843,6 +72843,53 @@ breath as flattery.
   by nothing. A real fix is a control-driven journey (press ←, assert the canvas changed), and it is a
   product decision with its own cost, not a line in this autopsy.
 
+## 2026-09-20 — THE USER HAS NO LANES (autopsy f152c1ab, item 4 — and a correction to my own reading)
+
+### 🔴 FIRST, THE CORRECTION. I told the admin the "up to 27 min left" line was "very likely why the build was stopped". On investigation that is WRONG, twice over.
+
+**(a) The timing says otherwise.** That line fired at 119 s. The user stopped at 209 s — **2.5 seconds
+after** a different message:
+
+> *"⏱️ The fast lane ran out of time — handing its 1 finished file(s) to the full builder to complete."*
+
+**(b) The fix I was about to make would have re-opened a closed wound.** My proposal was to show the
+estimator's band (2.0–4.3 min) instead of the ceiling. `etaEvidence.ts`'s own header forbids exactly
+that, and records why: **the prompt-word heuristic is not imprecise, it is BACKWARDS** — "the shorter
+and more ambitious the request, the shorter its promise" — and it has already produced "~2–4 min"
+against real builds of 12, 26.6 and 26.6 minutes across **three** autopsies the admin read. *"The
+user's complaint was never the wait. It was the broken promise."*
+
+**And this report proves the band was wrong here too.** `etaAccuracy` says `withinBand: true`, which
+looks like the estimate working — it is an artifact of the user STOPPING EARLY. At that moment the
+lane's own arithmetic said 2 stages remained needing ~468 s, i.e. a real total near **11.5 minutes**
+against a band whose high end was 4.27. Showing that band would have been the fourth broken promise.
+
+**So `etaEvidence.ts` is left exactly as it is, deliberately** — the ceiling line stays, and this is
+recorded so the next reader does not re-propose what three autopsies already bought.
+
+### The real defect at that moment: an internal handoff was narrated as a failure
+
+Nothing had failed. A lane handoff is how the build CONTINUES, and the files were already saved.
+Three things were wrong with the sentence, and none of them is the wording alone:
+
+1. **It names our architecture.** "The fast lane", "the full builder" — a user has no lanes. The
+   White-Label Law forbids routing leakage *"or any hint that more than one vendor exists"*; the same
+   argument covers our OWN internal engines.
+2. **It reads as a failure when nothing failed.** "Ran out of time" describes a lane; the user hears
+   it about their app.
+3. **It counts the files.** "1 finished file(s)" after three and a half minutes is, to the person
+   waiting, a damning progress report — when it is really an internal batch size. The
+   plural-in-parentheses gives away that nobody expected a human to read it.
+
+It now says the two things that are true and matter: *"Still building your app — your work so far is
+saved and I am carrying on from it."* Two sibling lines that also said "handing to the full builder"
+were corrected in the same change (rule 3).
+
+🔒 **The ratchet, not just the wording:** `tests/theUserHasNoLanes.test.ts` reads the real source,
+extracts every string handed to the fast lane's user-facing `deps.log`, strips `${…}` interpolations
+(a variable name is not something a user reads — the first draft of the sweep flagged
+`"Building ${manifest.length} file(s)…"`, which shows a number and no word) and fails if internal
+vocabulary reappears. 4 cases, reversion-proven (old sentence back → 3 red).
 
 ### ⚠️ CORRECTION, same day — item 3 was fixed by ANOTHER SESSION concurrently, and mine was WITHDRAWN
 

@@ -875,7 +875,7 @@ export function registerNavStoreRoutes(app: Express): void {
         // their app is waiting for review.
         ...(safety.adultWithoutOptIn ? {
           adultNotice: 'This app looks like it contains adult content, so it is waiting for review before it can be listed. '
-            + 'Turn on Settings → General Settings → Adult content (18+) to publish 18+ apps normally — they are then shown only to viewers who have turned it on too.',
+            + 'Turn on Settings → Profile Settings → General → Adult content (18+) to publish 18+ apps normally — they are then shown only to viewers who have turned it on too.',
         } : {}),
         ...(resaleFloorPrice !== undefined && record.priceInr ? {
           priceInr: record.priceInr,

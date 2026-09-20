@@ -518,44 +518,46 @@ export function SettingsPanel({
                     user by NavBharatAI Pro, so they are not settings — see the honest note below. */}
                 {[
                   {
-                    title: 'Account',
+                    // PROFILE SETTINGS — ONE group where there were three (admin 2026-09-20, verbatim:
+                    // "account, your app, general settings teeno ko mila kar ek setting option bana do!
+                    // 'profile settings' … profile settings sabse upar!").
+                    //
+                    // WHY THE MERGE IS RIGHT AND NOT JUST SHORTER: each of the three carried exactly ONE
+                    // tile, so the screen spent three full section cards — three headings, three
+                    // descriptions, three borders — to offer three buttons. On a phone that is most of
+                    // the first screen, and the user has to read three labels to find out that each box
+                    // holds a single thing. One card with three tiles says the same in a third of the
+                    // height, and the three genuinely belong together: they are all about YOU and YOUR
+                    // copy of NavBharatAI, never about the app you built (that is App Settings, below).
+                    //
+                    // ⚠️ THE THREE TILES ROUTE THREE DIFFERENT WAYS, and that is why this group is not
+                    // a plain list. `nav` → setActiveView (a top-level VIEW), `tab` → toggleTab (a
+                    // workspace TAB), neither → setSettingsScreen (a Settings SUB-SCREEN). The mapper
+                    // below already branches per ITEM rather than per group, so merging changes where
+                    // the tiles sit and nothing about where they go.
+                    title: 'Profile Settings',
                     color: 'text-accent-text',
                     icon: User as any,
-                    desc: '',
+                    desc: 'You, your app as an Android file, and how NavBharatAI looks and behaves',
                     items: [
                       // Opens the SAME real profile page as the top-right avatar → Profile (view
                       // 'my_profile'). It used to point at a non-existent 'profile' view → blank page.
                       { id: 'my_profile', label: 'My Profile', icon: User as any, nav: true },
-                    ],
-                  },
-                  {
-                    // GET MY APP AS AN ANDROID FILE (admin 2026-08-04). The APK Builder already lived in
-                    // Other AI → Publish & Deploy, but a user who has just built an app is looking for it
-                    // HERE — in the "More" tab of the app they are standing in — not two screens away in a
-                    // tool directory. `tab: true` routes through the SAME toggleTab('apk') destination the
-                    // Other AI tile uses, so there is one APK Builder and no second copy to drift.
-                    title: 'Your App',
-                    color: 'text-success',
-                    icon: Smartphone as any,
-                    desc: 'Turn the app you built into a real Android file you can install',
-                    items: [
+                      // GET MY APP AS AN ANDROID FILE (admin 2026-08-04). The APK Builder already lived in
+                      // Other AI → Publish & Deploy, but a user who has just built an app is looking for it
+                      // HERE — in the "More" tab of the app they are standing in — not two screens away in a
+                      // tool directory. `tab: true` routes through the SAME toggleTab('apk') destination the
+                      // Other AI tile uses, so there is one APK Builder and no second copy to drift.
                       { id: 'apk', label: 'Download APK', icon: Smartphone as any, tab: true },
-                    ],
-                  },
-                  {
-                    // GENERAL SETTINGS — its own group (admin 2026-08-14). "General" used to be a single
-                    // tile INSIDE App Settings, which put two unrelated things in one box: App Settings
-                    // is about the app the USER BUILT (its domain, its database, its hosting), while
-                    // theme, view mode, font size and chat language are about how NAVBHARATAI ITSELF
-                    // looks and behaves. Above App Settings because it is reached far more often.
-                    title: 'General Settings',
-                    color: 'text-accent-text',
-                    icon: LayoutDashboard,
-                    desc: 'How NavBharatAI looks and behaves — view mode, theme, text size, language',
-                    items: [
                       // ⚠️ The id stays 'general'. It is a SCREEN id, not just a tile id, and other
                       // surfaces (and the knowledge base) navigate to it by name — renaming it would
                       // open a blank page from every one of them. The doorway moved; the room did not.
+                      //
+                      // It also stays OUT of App Settings (admin 2026-08-14, and still true): App Settings
+                      // is about the app the USER BUILT — its domain, its database, its hosting — while
+                      // theme, view mode, text size and chat language are about how NAVBHARATAI ITSELF
+                      // looks. The group it belongs to was renamed; the reason it is not an app setting
+                      // is unchanged.
                       { id: 'general', label: 'General', icon: LayoutDashboard },
                     ],
                   },

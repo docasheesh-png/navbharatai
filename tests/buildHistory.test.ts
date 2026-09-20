@@ -22,7 +22,11 @@ describe('buildHistoryStore (null-db path — test env)', () => {
       isEdit: false,
       tier: 'vfs',
       ok: true,
-    })).resolves.toBeUndefined();
+    // CHANGED 2026-09-20: `save` used to resolve `undefined` whether it had written or not — including
+    // this very case, a null db. It resolves FALSE now, which is the whole point: "we asked" and "it
+    // landed" are different facts, and a caller that cannot tell them apart can only report an
+    // intention as a fact. It still never throws, which is what this case was really guarding.
+    })).resolves.toBe(false);
   });
 
   it('list() returns empty array with null db', async () => {
@@ -46,7 +50,8 @@ describe('buildHistoryStore (null-db path — test env)', () => {
       files,
       isEdit: false,
       ok: true,
-    })).resolves.toBeUndefined();
+    // Same change as above: no db ⇒ nothing written ⇒ `false`, never a throw.
+    })).resolves.toBe(false);
   });
 
   it('list() with unknown sessionId returns empty array', async () => {

@@ -15,6 +15,13 @@ export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
   '/privacy': 'legal_privacy',
   '/terms': 'legal_terms',
   /**
+   * The refund policy needs a URL whose PAGE IS THE REFUND POLICY. The rules themselves are older
+   * than this route (Terms Section 4) — what a payment aggregator's onboarding asks for, and what
+   * India's payment-aggregator norms sit behind, is a separately addressable page, and "halfway
+   * down our Terms" is not an address anybody can check.
+   */
+  '/refund': 'legal_refund',
+  /**
    * The grievance page needs a PUBLIC url for the same reason the other two do, and one more: this
    * is the address a regulator, a Play reviewer or an angry user is given, and it must answer for a
    * checker that does not run JavaScript. Served with the officer's real details (see routes/legal).
@@ -41,6 +48,14 @@ export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
 export const DELETE_ACCOUNT_PATH = '/delete-account';
 
 /**
+ * Contact Us — required by payment-aggregator onboarding alongside the Terms and the Refund policy,
+ * and the one of the three NavBharatAI did not have at all. Its own module for the same reason the
+ * deletion page has one: it must be actionable in ten seconds, and the five-document registry is
+ * long-form by contract.
+ */
+export const CONTACT_PATH = '/contact';
+
+/**
  * Legacy / alternate spellings that must reach the same document.
  *
  * WHY THIS EXISTS: the Google Play listing has carried `https://www.navbharatai.com/privacy-policy`
@@ -60,10 +75,21 @@ export const LEGAL_PATH_ALIASES: Readonly<Record<string, string>> = {
   '/terms-of-service': '/terms',
   '/terms-and-conditions': '/terms',
   '/terms.html': '/terms',
+  // Every spelling a form, a reviewer or a customer actually types for the refund page. It has no
+  // long history of pasted links yet, so these exist to stop a near-miss becoming a dead link later.
+  '/refund-policy': '/refund',
+  '/refunds': '/refund',
+  '/cancellation-policy': '/refund',
+  '/refund-and-cancellation-policy': '/refund',
+  '/return-policy': '/refund',
   '/grievance-officer': '/grievance',
   '/grievance-redressal': '/grievance',
   '/grievances': '/grievance',
   '/complaint': '/grievance',
+  '/contact-us': CONTACT_PATH,
+  '/contactus': CONTACT_PATH,
+  '/support': CONTACT_PATH,
+  '/help': CONTACT_PATH,
   '/account-deletion': DELETE_ACCOUNT_PATH,
   '/delete_account': DELETE_ACCOUNT_PATH,
 };
@@ -72,5 +98,6 @@ export const LEGAL_PATH_ALIASES: Readonly<Record<string, string>> = {
 export const ALL_PUBLIC_LEGAL_PATHS: readonly string[] = [
   ...Object.keys(PUBLIC_LEGAL_ROUTES),
   DELETE_ACCOUNT_PATH,
+  CONTACT_PATH,
   ...Object.keys(LEGAL_PATH_ALIASES),
 ];

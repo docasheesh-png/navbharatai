@@ -30,7 +30,7 @@ By creating an account or using the Platform you accept these Terms and our Priv
 
 - NavBharatAI builds real, working software from your descriptions, previews it, stores it durably, and helps you ship it (hosting, domains, APK/AAB, the Nav App Store). We put unusual engineering effort into honesty: the Platform reports real success and real failure, and **a build that was supposed to produce an app and did not succeed is not charged**.
 - The Platform is provided "**as is**". We do not promise uninterrupted availability, that every build will be perfect, or that AI output will be correct. What we do promise is honest reporting and continuous repair.
-- We may add, change or retire features. If a change materially reduces something you paid for, Section 5 (refunds) applies to the unused part.
+- We may add, change or retire features. If a change materially reduces something you paid for, Section 4 (refunds) applies to the unused part.
 
 ## 3. Acceptable use
 
@@ -57,7 +57,7 @@ If you are using NavBharatAI as a business and need the processor terms, they ar
 - **Honest metering.** Usage is billed from real, measured consumption. Two standing consumer-protection rules are built into the Platform: a **failed build is never charged**, and where usage cannot be measured, **nothing is charged**.
 - **Gift/welcome tokens** (for example a sign-up bonus) are promotional, have no cash value, may expire on notice, and are consumed before purchased tokens.
 - **Purchases** are processed by Cashfree Payments. Prices are shown in ₹ (INR) inclusive of applicable taxes unless stated otherwise. If a payment succeeds but crediting is interrupted (for example you closed the app mid-UPI), the Platform automatically reconciles and credits it on your next sign-in — paid money is never silently lost.
-- **Refunds.** Purchased tokens that are **unused** are refundable within **7 days** of purchase on request to info@navbharatai.com (to the original payment method, within the processor's timelines). Tokens already consumed by delivered usage are not refundable — except that if a Platform defect consumed tokens without delivering what was promised, we will re-credit them; that is the deal in rule one of this section. Statutory rights under Indian consumer law are not limited by this paragraph.
+- **Refunds.** The full rules, including cancellation, timelines and what to do about a duplicate or unrecognised payment, are in our [Refund & Cancellation Policy](/refund). In short: purchased tokens that are **unused** are refundable within **7 days** of purchase on request to info@navbharatai.com (to the original payment method, within the processor's timelines). Tokens already consumed by delivered usage are not refundable — except that if a Platform defect consumed tokens without delivering what was promised, we will re-credit them; that is the deal in rule one of this section. Statutory rights under Indian consumer law are not limited by this paragraph.
 - **Plans** (for example the Custom Domain plan) renew as described at purchase, from your wallet, with advance reminders; a lapsed plan suspends only the plan's feature (your app and files are never deleted for a lapsed plan).
 - We may change pricing prospectively; changes never apply retroactively to tokens you already hold.
 

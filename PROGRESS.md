@@ -75110,6 +75110,98 @@ route remains what the weather half already documents.
 **Still open, unchanged:** `LIVE_WEATHER_SOURCE` defaults to off, so weather is web-searched too
 until Open-Meteo's commercial plan (~$29/month) is bought. One instruction, one value, no deploy.
 
+## 2026-09-20 — The refund policy had rules but no address (`/refund`)
+
+**Trigger (admin, with a screenshot):** Cashfree's merchant onboarding, *"Your Platform details —
+on verification, we found a few policies were missing in your website"*, asking for two URLs:
+**Terms and Conditions** and **Refund Policy**.
+
+- **Terms already had a URL** — `https://navbharatai.com/terms` (plus `/terms-and-conditions`,
+  which 301s to it). Nothing to build.
+- **The refund RULES already existed too** — Terms of Service **Section 4**, published since
+  2026-08-08: unused purchased credit refundable within 7 days, a failed build never charged,
+  unmeasured usage never charged. What did not exist was **a URL whose page IS the refund policy**,
+  and "halfway down our Terms" is not an address a reviewer, a form, or a non-JS crawler can accept.
+
+**Built:** `src/content/legal/refundPolicy.ts` (6.8k chars) served at **`/refund`**, server-rendered
+by the existing `registerLegalRoutes` path — same mechanism, same audience reasoning, as `/privacy`
+and `/terms`. Aliases `/refund-policy`, `/refunds`, `/cancellation-policy`,
+`/refund-and-cancellation-policy`, `/return-policy`. No Settings tile (a refund policy is found from
+the Terms, from Billing, or from a search engine — never by browsing a Settings grid), so the Terms
+Section 4 bullet now links to it, which is also the tested requirement for every untiled document.
+
+**Two decisions the Terms left open, written down as assumed defaults the admin can change** (the
+same pattern `termsOfService.ts` already uses for the 7-day window and the New Delhi courts):
+1. a purchase whose credit is **entirely unused** is refunded **in full, platform fee included** —
+   we absorb the gateway's charge rather than return a smaller number than the customer's statement
+   shows. A **partly** used purchase refunds the unused credit only.
+2. money reaches the original payment method **within 7 working days** of approval, plus whatever
+   the customer's own bank adds.
+
+**Found while reading the Terms to stay consistent with them:** the feature-change bullet cited
+*"Section 5 (refunds)"*. Refunds are Section **4**; Section 5 is app ownership. A published legal
+document sending a reader to the wrong section, on the exact subject they were looking for. Fixed,
+and the new test DERIVES the correct number from whichever `## N.` heading actually contains the
+Refunds bullet, so a future renumbering cannot quietly re-break it.
+
+**Also corrected in the same change:** my first draft of the new page and the AppKnowledgeBase entry
+said *"Nav App Store"*. The user-visible name has been **App Mart** since 2026-08-16 and
+`tests/appMart.test.ts` caught it. ⚠️ **Open, deliberately not swept:** the older legal documents
+(Privacy Policy ×5, DPA, Account deletion) still say "Nav App Store" — that guard's surface list does
+not cover `src/content/legal`, so the legal corpus is internally inconsistent about the store's name.
+Raised rather than fixed here, because an unrelated rename inside four published legal documents is
+its own change with its own review.
+
+**Gate (final state):** typecheck · typecheck:server · noUnusedImports · native:guard · build ·
+test:bundle · boot:check · deps:server-gate all green; `vitest run` **27,706 passed, 1 skipped, 0
+failed**. `tests/theRefundPolicyHasItsOwnUrl.test.ts` is reversion-proven twice — deleting the
+`/refund` route and restoring the wrong section number each turn it red.
+
+**Still the admin's to do, and neither is code:** paste the two URLs into Cashfree
+(`https://navbharatai.com/terms`, `https://navbharatai.com/refund` — the second only works once this
+merges and deploys), and whitelist `https://localhost` in the Cashfree dashboard so checkout works
+inside the Android WebView at all.
+
+## 2026-09-20 (same change) — the aggregator names THREE pages, and one did not exist
+
+The whitelisting dialog's own list: **Contact Us · Terms & Conditions · Refunds & Cancellations.**
+Checked each rather than assumed:
+
+| Page | Before |
+|---|---|
+| Terms & Conditions | ✅ `/terms` since 2026-09-02 |
+| Refunds & Cancellations | ⚠️ rules existed (Terms §4), **no URL** |
+| Contact Us | ❌ **did not exist at all** — verified by filename search AND content search; `ContactFormGenerator.ts` builds contact forms for USERS' apps, not our own page |
+
+So `/contact` was built too, in the same change — its own module beside `accountDeletion.ts` rather
+than in the five-document registry, for that file's own stated reason: a page whose job is to be
+acted on in ten seconds must not be padded to the registry's 4,000-character contract. Aliases
+`/contact-us`, `/contactus`, `/support`, `/help`.
+
+🔒 **The rule that shaped it: a contact page is where a fabricated detail does the most damage.**
+One address (`info@navbharatai.com`), a subject line per topic, response clocks taken from the SAME
+constants the Grievance page is built from (`ACK_HOURS`, `RESOLVE_DAYS`) rather than re-typed, and
+the postal address and telephone rendered **only when the deployment really publishes them** — the
+same `grievanceOfficer()` source the /grievance page uses, so the two pages a regulator reads side
+by side cannot disagree. Unconfigured it says plainly that we answer by email and run no telephone
+line, instead of showing an empty label. Reversion-proven: making it print a placeholder address
+turns the suite red.
+
+**Gate re-run on the final state:** typecheck · typecheck:server · noUnusedImports · native:guard ·
+build · test:bundle · boot:check · deps:server-gate all green; `vitest run` **27,710 passed, 1
+skipped, 0 failed**.
+
+### The app whitelisting the admin did — and the caveat that goes with it
+
+`com.navbharat.ai` now shows **Approved** in Cashfree's whitelisting list. ⚠️ **Whether that clears
+the `https://localhost is not enabled or approved` error is UNVERIFIED, and there is a specific
+reason to doubt it:** this app does not use Cashfree's native Android SDK. `paymentService.ts` loads
+their **JavaScript** SDK (`sdk.cashfree.com/js/v3/cashfree.js`) into the Capacitor WebView, and a JS
+SDK identifies itself by **page origin** — `https://localhost` — not by package name. Only a real
+₹1 top-up from the Android app settles it. If the same error returns, the options are a `https://localhost`
+origin entry, or the architecturally correct fix: open checkout in the system browser / Custom Tab
+with a return deep link instead of inside the WebView. Not started — recorded so the next session
+does not re-derive it.
 ---
 
 ## 2026-09-20 — 🍎 THE iPHONE COULD OPEN A CASHFREE CHECKOUT — the App Store blocker, found while guiding the submission

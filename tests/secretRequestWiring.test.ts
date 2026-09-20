@@ -115,8 +115,15 @@ describe('link 4 — the ask reaches the client', () => {
 
 describe('link 5 — the popup, with the minimise the admin asked for', () => {
   it('is rendered by the panel from pendingSecrets', () => {
-    expect(panel).toContain('{state.pendingSecrets && (');
-    expect(panel).toContain('<SecretRequestCard');
+    // 🔄 IT MOVED, IT DID NOT GO (2026-09-20). The card used to sit inline in the message stream and
+    // this asserted its `{state.pendingSecrets && (` guard there. It is now hoisted into
+    // `secretCardNode` and handed to the ❓ tray — the admin's "ab isko bahar rakh do", because a long
+    // narration buried it. Still exactly one card, still conditioned on `pendingSecrets`, still
+    // mounted; only its address changed. The assertions below check all three, so the link this test
+    // exists to protect is no weaker than it was.
+    expect(panel).toContain('const secretCardNode = state.pendingSecrets ? (');
+    expect(panel.match(/<SecretRequestCard/g)?.length).toBe(1);
+    expect(panel).toContain('secretCard={secretCardNode}');
   });
 
   it('MINIMISES rather than dismissing — the typing survives', () => {

@@ -70831,3 +70831,91 @@ REWRITTEN and the old assertion quoted in place so the change of behaviour is le
 - **This is a FRONTEND change as well as a server one**, so installed Android/iOS users keep the grey
   wall until a fresh `.aab`/`.ipa` — and per the standing instruction that happens only when the admin
   asks. The server half (not sending the bytes) reaches them immediately.
+## 2026-09-20 — 🔴 AUTOPSY `31dc61fd` (UPSC app): the platform's own browser had NEVER run
+
+**Branch `claude/the-platforms-own-browser-never-ran`.** 15.9 min · 70 model calls · 2.6M input tokens ·
+10 files · free user billed ₹299.37 · `RELEASE_GATE` YELLOW.
+
+### The finding
+
+`IN_BUILD_GREEN_UNCHECKED` fired **13 times across 912 seconds**, every one of them *"the capture came
+back WITHOUT a real browser"* — while **in the same sandbox the agent's own `screenshot` and
+`browser_action` tools succeeded**. The browser was there; the platform could not use it.
+
+**Root cause, read from code, not inferred from the report.** Playwright installs into
+`${TOOLS_DIR}/node_modules` (`npm install playwright --prefix`). **Node resolves `require()` by walking
+up from the SCRIPT'S OWN DIRECTORY, never from `cwd`.** `browseUrl` and `scanUiElements` wrote their
+generated script to **`/tmp`**, so `require('playwright')` searched `/tmp/node_modules` and
+`/node_modules`, never found it, exited non-zero, and fell back to curl — **100% of the time, in every
+build, since the day the script moved into a file.** Passing `cwd: TOOLS_DIR` does nothing: `cwd`
+governs relative paths, not module resolution.
+
+Every browser path that WORKS runs a script that lives in `TOOLS_DIR` (`screenshot.js`,
+`screenshot-cdp.js`, `daemon.js`, `browser-action.js`). The only two that failed were the only two
+written to `/tmp`.
+
+### 🔴 The previous fix is what introduced it — the "never trade one problem for another" case
+
+These bodies used to run as `node -e "…"`, which had a real shell-quoting bug (the URL's own double
+quotes closed the string). Moving the body into a FILE fixed the quoting — and **silently moved the
+module-resolution root from `cwd` (which `node -e` DOES use, and which was already `TOOLS_DIR`) to the
+file's directory, `/tmp`.** One bug traded for another, and the curl fallback hid the new one exactly
+as it had hidden the old one. That function's own comment records the first bug and says *"THE BROWSER
+PATH HAS NEVER RUN"* — it still had not, for a different reason.
+
+### Why the existing sweep could not see it
+
+`tests/…/sandboxBrowsersPath.test.ts` already asserted that **every browser invocation carries
+`PLAYWRIGHT_BROWSERS_PATH`**. Both broken scripts carried it correctly, so that sweep passed for weeks.
+The env var says where the **browser binary** is; it says nothing about where the **playwright module**
+is found. One class, two properties, and only one was pinned.
+
+### The fix
+
+ONE shared rule — `toolsScriptPath(prefix)` beside `TOOLS_DIR` — used by both call sites. The unique
+per-run filename is KEPT (it is why these left a fixed path originally: one un-writable fixed name
+breaks every later run in a long-lived sandbox). `TOOLS_DIR` is guaranteed to exist at both call sites,
+because each is reached only after `_kickoffPlaywright` resolved true.
+
+🔎 **Siblings hunted, and one honest negative recorded:** `downloadDistFiles` also generates a `/tmp`
+script and is **NOT** moved — it requires only `fs` and `path`, Node built-ins that resolve from
+anywhere. A sweep that dragged it along would be a change with no evidence behind it. The second
+actuator (`src/server/EngineerAI/actuators/E2BActuator.ts`) was checked and is clean: all four of its
+scripts already live in `TOOLS_DIR`. **The test found that one, not I** — my first matcher flagged it
+and reading it proved it innocent.
+
+Four new cases in the existing file (never a second copy), **reversion-proven three ways**: `browseUrl`
+back to `/tmp` → 1 red · `scanUiElements` back to `/tmp` → 1 red · the helper itself pointing at `/tmp`
+→ 1 red.
+
+### What this unblocks
+
+The in-build green guard (shipped 2026-09-18 and blind since), the render rescue, the journey check's
+browser, and honest `PREVIEW_UNVERIFIED` verdicts. Until now every one of those read a curl snapshot of
+an un-hydrated SPA shell.
+
+### Also found in this report, NOT fixed here — open items
+
+- **NVIDIA/Nemotron ran ZERO times.** The rung is keyed and correctly priced but is last-resort
+  insurance that was never reached (KIMI answered all 70 calls — correct behaviour). The **judge** and
+  **plan** roles are off because `AGENTV3_NEMOTRON` is unset, which is deliberate (*a provider key must
+  not be a feature switch*). By `nemotron.ts`'s own measurement the judge is **78% of a cheap build's
+  real provider cost**; Ultra does it at $0.50/MTok against glm-5.3's $1.40, with no tools exposed.
+  **Recommended to the admin: `AGENTV3_NEMOTRON=weak`.** One Cloud Run value, no deploy.
+- **A false "app is complete" at t=302s** while the workspace held only `<h1>Hello World</h1>`. The
+  architect disbelieved it and checked — a model rescuing a platform signal is a RED FLAG, not a
+  self-heal. `READY_BEFORE_END` then measured 701s "after ready" from that bogus point, so its number
+  is polluted too.
+- **The fast lane spent 177s to produce 1 file**, then computed that the remaining 2 stages needed
+  292s against a 240s budget. It had that arithmetic available BEFORE spending the 177s.
+- **`evaluate` reported "Nothing here was ever proven to RUN — no preview"** 324 seconds after
+  `PREVIEW_PUBLISHED`, and simultaneously "READY 100/100" with "Build confidence 35%". Third sighting
+  of the missing **EVIDENCE LEDGER** (open since autopsy 697b38ee).
+- **The user-facing summary shipped truncated mid-sentence**, with two empty placeholders, offering to
+  "fix" a finding whose own text says nothing is wrong.
+- **The reviewer ran on `kimi-k2.7-code` — the same model that wrote the app**, while
+  `selectReviewJudge`'s own comment states the rule: *"A judge must be a DIFFERENT model from the one
+  that wrote the app."* The post-build reviewer (a tool-using sub-agent on the build chain) and the
+  judge (a tools-free single call) are genuinely two different things, and only one obeys the rule.
+- **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
+  `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.

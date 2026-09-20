@@ -74679,6 +74679,132 @@ read the automation it claims to check, and that version is reversion-proven.
   plan points at it, but `AudioManager` still only loads files — wiring the synthesiser into its
   `music`/`sfx` buses is a separate change to a working file, and doing it in the same commit would
   be scope creep on a path that currently works.
+## 2026-09-20 — A doc's claim about a console is only as good as the last person who LOOKED
+
+**No behaviour changed. Three stale claims were corrected, and the third one had already cost the
+admin a wasted instruction.**
+
+The admin asked what was left to do. I read them the open items out of `CLAUDE.md` — including
+*"`AGENTV3_NEMOTRON` is set to `week`, which names no tier, so Nemotron's judge and plan are silently
+OFF; change it to `weak`"* — and presented it as a live fact about their deployment.
+
+**They opened Cloud Run and sent a screenshot: it already reads `weak`**, with `NEMOTRON_BASE_URL`
+pointing at the NVIDIA host. The judge and the plan were on the whole time.
+
+🔴 **The entry I was reading ENDS with the sentence "this must be verified in the console, not assumed
+from this entry."** I read the paragraph, skipped its own warning, and passed the claim on. That is the
+same shape this file already records twice — the idle-minutes default that said "NOT taken" eight days
+after it was taken, and the E2B rate whose derivation "could not fail" — and it is worse in one way:
+those were stale by drift, this one was stale *and carried its own warning label*.
+
+**What changed:**
+- `nemotron.ts` — the docblock stated the `week` report as fact. It now records what the console
+  actually showed, and adds the rule: **do not restate a config value in a comment; say what the code
+  DOES with it and leave the value to the console.**
+- `CLAUDE.md` — same correction on the ladder entry, keeping the incident rather than erasing it.
+- 🔒 **The GUARD (`nemotronConfigNote`) is untouched.** It was never built for that one typo: three
+  real instances of the class remain (a trailing space in `BRAVE_API_KEY`, an `=` in
+  `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`). **A protection built for a class is not
+  retired because one suspected instance turned out not to have happened** — deleting it would be
+  trading a real defence for a tidy story.
+
+**Two items closed on the admin's own queue in the same conversation, both recorded hand-to-hand the
+day they were said (the registry's rule), because neither has any signal the code can produce:**
+
+1. **The six DUPLICATE Cloud Run keys are DELETED** — admin, verbatim: *"maine delete kar diye hai,
+   10-12 din pahle hi"* (≈ 2026-09-08/10). This was the ONE row in that table with no self-verifying
+   check: a process sees a single value and cannot know a second row existed. The admin's word is the
+   only possible record, so it is now written down.
+2. **Android developer verification — package registration is DONE** (screenshot). Both rows read
+   `Registered`: `com.navbharat.ai` (the real `applicationId` — verified against
+   `android/app/build.gradle`, not assumed) and `com.navbharatai.app` (only the Java `namespace`, not a
+   distributed app). The 30 Sep 2026 removal deadline is therefore met for the app that ships.
+   ⚠️ Recorded narrowly: that screen shows PACKAGE REGISTRATION. Whether a separate identity section is
+   outstanding was not visible, and is not claimed either way.
+
+**Still open for the admin:** `DATA_GOV_IN_API_KEY` (free, from data.gov.in — without it the CPCB air
+quality path merged today answers nothing), the E2B rate tile on the Monitor, and naming a PR to merge.
+---
+
+## 2026-09-20 — 🎵 THE LINE BREAKS THE MODEL WROTE, AND A NEWSPAPER SHAPE FOR LONG ANSWERS
+
+**Two asks in one message (admin, with a screenshot of a Hindi song in free chat):**
+*"gana likhwaya jaye, to jahan 2 line honi chahiye waha 1 line me hi dono line likh deta hai"* and
+*"jab koi question puche to response 3 part me aaye — headline, summary, phir pura answer… jaise
+newspaper me koi news hote hai"*, with the limit stated in the same breath: *"agar user bole short
+answer do, ya ai ka answer already short hi hai, to yeh system lagane ki jaruri nahi hai!!"*
+
+### 1 · The song bug was the RENDERER, and the model's own label proved it
+
+The screenshot showed a four-line mukhda as one long line, with `[Mukhda]` run into the lyrics beside
+it. `SONGCRAFT_DIRECTIVE` tells the model, in so many words, to *"Label each part on its own line"* —
+**so a label sitting INSIDE the lyric line is a break that was written and then discarded.** Only the
+renderer could have done that, and no prompt change could ever have fixed it.
+
+**The cause is CommonMark itself, which is why nothing looked broken.** A single newline inside a
+paragraph is a SOFT break and renders as a SPACE; `react-markdown` implements the spec exactly and
+correctly. Every song, poem, shayari, address and plain-line list in this app was being flattened.
+
+🔎 **AND NO SURFACE PASSED ANY PLUGIN AT ALL (rule 3).** Four `<ReactMarkdown>` call sites, four times
+zero `remarkPlugins` — the drifted-copy class in its cheapest form: nobody copied a mistake, everybody
+omitted the same thing.
+
+🔴 **THE SECOND, LARGER FIND — measured, not reasoned about.** Rendering a table through the real
+`react-markdown` before and after:
+
+```
+OLD table: <p>| City | Population |          ← users were shown literal pipe characters
+NEW table: <table><thead><tr><th>City</th>…  ← a real table
+```
+
+**Every markdown table the AI has ever produced in chat reached the user as a row of pipes.** And
+`AIChat.tsx` carries styled `table` / `thead` / `th` / `td` components plus a task-list `input`
+component — **none of which could ever once have fired**, because GFM is not CommonMark. They had been
+written, reviewed and shipped against a feature the renderer did not have.
+
+**Fixed:** ONE exported constant, `CHAT_MARKDOWN_PLUGINS` (`src/lib/chatMarkdown.ts`) = `remark-gfm` +
+`remark-breaks`, wired into all three chat surfaces. A source-level test fails when a chat surface
+renders without it, so a fifth panel cannot quietly reintroduce the bug.
+
+⚠️ **The honest trade, stated rather than discovered later:** `remark-breaks` makes EVERY newline a
+`<br>`, so a model that hard-wraps prose would show those wraps. That is the same trade GitHub
+comments and every chat product make — in a chat the author's newline is deliberate. **Deliberately
+NOT applied to `LegalDocPage`**, whose prose is wrapped in source files and which nobody reported.
+
+### 2 · The newspaper shape — a prompt rule, not a parser
+
+**Why not a parser, which was the obvious build:** a splitter can only CUT an answer written as one
+argument, so the "headline" would be its first sentence — usually a preamble, not the conclusion — and
+the "summary" a prefix of the body rather than something that stands alone. **The three parts have to
+be WRITTEN as three parts.** Asking costs one paragraph of prompt; parsing properly would cost a
+second model call, which the free tier cannot spend.
+
+🔒 **The output is ordinary markdown** — a bold line, a paragraph, then the body — so there is no
+marker to leak, no parse to fail, and no state to hold while the answer streams. If the model ignores
+the directive the user gets exactly today's answer. It also means the **most important line now
+arrives FIRST in the stream** instead of last.
+
+🔑 **THE TWO SKIP CONDITIONS LIVE IN DIFFERENT PLACES, AND NEITHER HALF IS OPTIONAL.** Only the CALLER
+can see what the user asked for; only the MODEL can see how long its own answer turned out. So
+`answerShapeFor` refuses on a short-answer request and on a request whose answer IS an artefact (song,
+poem, letter, translation, code — songs via the SHARED `isSongRequest`, never a second list), and the
+directive text refuses when the answer is naturally short.
+
+🔴 **THE PRECISION BUG MY OWN TEST CAUGHT, and it was in the justification as much as the code.** The
+first draft matched `chhota/chhote`, `छोटा`, `kam`, `जल्दी` and `thode` as bare tokens, with a comment
+arguing they "almost always qualify the ANSWER". The very first case disproved it: **"GST kya hota hai
+aur CHHOTE dukandar ko kaise register karna chahiye?"** — a long question about SMALL SHOPKEEPERS —
+read as a request for a short answer. `kam kharche me`, `jaldi kaise seekhein`, `thode paise se` are
+the same trap, and they are among the commonest words in Hindi. They now count only inside a PHRASE
+that can mean nothing else. **The asymmetry that makes over-matching cheap does not make it free.**
+
+⚠️ **FREE TIER ONLY**, because that is the surface the admin reported and asked to change. Widening it
+to Pro is one condition (`if (isFree)`), deliberately left for them to ask for.
+
+**Tests:** `tests/theLineBreaksTheModelWrote.test.ts` (10 cases, rendered through the REAL
+`react-markdown`, so the before/after is measured) and `tests/headlineThenGistThenTheWholeStory.test.ts`
+(13 cases). **Five reversions checked and each one bites:** dropping `remark-breaks`, dropping
+`remark-gfm`, unwiring one surface, dropping the `isFree` gate, dropping the caller-side short check.
 ## 2026-09-20 — "DID THIS BUILD LEAVE A VERSION?" — a question the engine could not answer
 
 The admin opened the Time Machine minutes after #3190 merged, found nothing automatic, and pressed

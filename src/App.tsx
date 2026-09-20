@@ -3286,6 +3286,11 @@ export default function App() {
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}
               onNewChat={startNewChat}
+              // DESKTOP GETS THE SAME MODE PICKER (admin 2026-09-20). On mobile the bottom bar's Mode
+              // button opens it; that bar is not rendered on desktop, so the composer carries the
+              // button instead — gated on the SAME condition that renders the bar, so exactly one of
+              // the two exists on any screen, and both open the one `showModePicker` sheet below.
+              onOpenModePicker={showsGlobalMobileNav ? undefined : () => setShowModePicker(true)}
             />
           )}
 

@@ -41,6 +41,11 @@ export interface NBIChatPanelProps {
    * nothing behind it is the dead button this codebase keeps deleting.
    */
   onNewChat?: () => void;
+  /**
+   * Open the Mode picker from the composer (desktop). Absent ⇒ no button — App.tsx omits it while
+   * the mobile bottom bar, which already carries Mode, is on screen. See AIChat's prop of the same name.
+   */
+  onOpenModePicker?: () => void;
 }
 
 export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
@@ -73,6 +78,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   setPreferredLanguage,
   setMessages,
   onNewChat,
+  onOpenModePicker,
 }) => {
   const currentSession = sessions.find(s => s.id === currentSessionId);
 
@@ -141,6 +147,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           onShowLogin={() => setShowAuth(true)}
           mode={mode}
           onModeChange={setMode}
+          onOpenModePicker={onOpenModePicker}
           activeAgent={activeAgent}
           pendingGHEdit={pendingGHEdit}
           onConfirmPush={onConfirmPush}

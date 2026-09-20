@@ -64,10 +64,62 @@ async function currentVersionCode(): Promise<number | null> {
   }
 }
 
+/**
+ * The Android notification channel every NavBharatAI push is posted to.
+ *
+ * ⚠️ THIS STRING IS ALSO IN AndroidManifest.xml, as
+ * `com.google.firebase.messaging.default_notification_channel_id`, and the two must match exactly.
+ * They are two halves of one setting: the manifest tells Firebase which channel to post to, and this
+ * is the code that CREATES it. A manifest naming a channel nobody created is not an error — Android
+ * silently posts to its fallback "Miscellaneous" channel instead, which is the very thing this was
+ * added to fix. Pinned in both directions by tests/aNotificationLooksLikeOurApp.test.ts.
+ */
+export const NOTIFICATION_CHANNEL_ID = 'nbai_updates';
+
+/**
+ * Create the app's own notification channel (Android 8+; a no-op elsewhere).
+ *
+ * WHY IT MATTERS, beyond the name in Settings: a channel's importance is fixed at CREATION and the
+ * user owns it afterwards — Android deliberately refuses to let an app raise it later. So a channel
+ * that is first created at the default importance can never be upgraded to a heads-up banner, and
+ * "my notifications do not pop up" becomes unfixable for everyone who already installed the app.
+ * Importance 4 (High) is therefore the one value that must be right the first time.
+ *
+ * Visibility is Private (0) — Android's own default, and the right one here because a push can carry
+ * a wallet balance. The notification still appears on the lock screen; its text is withheld until the
+ * phone is unlocked.
+ *
+ * Idempotent by design: Android ignores a repeat create for an id that exists (it only refreshes the
+ * name and description), so calling this on every sign-in is safe and is what keeps the channel
+ * present after a user clears app data.
+ */
+async function ensureNotificationChannel(): Promise<void> {
+  if (nativePlatform() !== 'android') return;
+  try {
+    const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
+    await FirebaseMessaging.createChannel({
+      id: NOTIFICATION_CHANNEL_ID,
+      name: 'Updates',
+      description: 'Build results, wallet alerts and app updates from NavBharatAI.',
+      importance: 4,
+      visibility: 0,
+      vibration: true,
+      lights: true,
+    });
+  } catch {
+    /* best-effort — an older plugin or an OS that has no channels must never block registration */
+  }
+}
+
 export async function initPushNotifications(userId: string): Promise<void> {
   if (!isNativeApp() || !userId || registeredForUid === userId) return;
   try {
     const { FirebaseMessaging } = await import('@capacitor-firebase/messaging');
+
+    // BEFORE the permission prompt, deliberately. A channel that exists when the user first says yes
+    // is a channel their very first notification can use; created afterwards, the first push of the
+    // session would still land in the fallback channel.
+    await ensureNotificationChannel();
 
     let perm = await FirebaseMessaging.checkPermissions();
     if (perm.receive !== 'granted') perm = await FirebaseMessaging.requestPermissions();

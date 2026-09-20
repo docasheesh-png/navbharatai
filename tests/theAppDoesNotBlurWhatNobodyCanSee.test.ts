@@ -20,16 +20,24 @@ describe('the mobile bottom nav does not blur what nobody can see', () => {
   const app = readFileSync(join(__dirname, '..', 'src', 'App.tsx'), 'utf8');
   const nav = app.slice(app.indexOf('{showsGlobalMobileNav && ('), app.indexOf('{showsGlobalMobileNav && (') + 900);
 
+  // ⚠️ QUOTE-AGNOSTIC since 2026-09-20: the bar's className became a template literal when the admin
+  // console's swipable tab strip was added as a fourth branch (`${adminStrip ? … : 'justify-around'}`).
+  // The property under guard is unchanged — no blur, fully opaque — so the match was widened to the
+  // new shape rather than the assertion being relaxed.
+  const CLASS_HEAD = /<nav className=\{?[`"]([^`"]*)/;
+
   it('🔴 the always-visible nav carries no backdrop blur', () => {
-    expect(nav).toContain('<nav className="fixed bottom-0');
+    expect(nav).toMatch(/<nav className=\{?[`"]fixed bottom-0/);
     expect(nav).not.toMatch(/backdrop-blur/);
   });
 
   it('🔒 and it is OPAQUE — a translucent bar with no blur would ghost the moving content under it', () => {
     // Removing the blur but keeping `/95` would be the worse of both: still a per-frame blend, and now
     // unblurred content showing through. `bg-surface` is the same --surface-base colour, fully opaque.
-    expect(nav).toMatch(/<nav className="[^"]*\bbg-surface\b/);
-    expect(nav).not.toMatch(/<nav className="[^"]*bg-\[var\(--surface-base\)\]\/\d/);
+    const head = CLASS_HEAD.exec(nav);
+    expect(head).not.toBeNull();
+    expect(head![1]).toMatch(/\bbg-surface\b/);
+    expect(head![1]).not.toMatch(/bg-\[var\(--surface-base\)\]\/\d/);
   });
 });
 

@@ -72664,6 +72664,72 @@ protected-path filter, collapsing "named no paths" into "named paths, all reject
 panel's `running` guard — each failing exactly its own case and only that case.
 ---
 
+## 2026-09-20 — In the admin console, the bottom bar IS the tab strip
+
+Admin, with a screenshot of the admin panel on a phone: *"jab admin panel open hota hai, to footer me
+yeh home|ai|preview|studio|more etc jo dikh rahe hai. isko badalna hai!! is footer me MONITOR, USERS,
+ai engine, revenue … jo abhi header me hai, unko rakho … woh 5 hard button ki jagah left right
+swipable header hoga."* And, asked about the wide screen: *"ham desktop me aise hi rahne do!"*
+
+**What was wrong.** On a phone the admin console spent its ONE always-reachable row — the bottom bar —
+on five buttons that lead OUT of the console (Home / AI / Preview / Studio / More), while the nine tabs
+that *are* the console sat in a horizontally-scrolling strip up in the header. The thumb row was given
+to the navigation nobody inside the admin panel wants.
+
+### It is the fourth branch of a pattern already there
+
+`App.tsx` keeps ONE `<nav>` and already swaps its contents per surface: Pro chat (History / Pro Chat /
+Preview / Files / Code Studio / More), the Mode surfaces (History / AI / Mode / Settings), and the
+default five. **The admin panel was falling into that third branch only because `isModeSurface` does
+not name it** — which is why the screenshot looked the way it did. So this is a fourth branch, not a
+new concept.
+
+The upward channel existed too. `v3FooterApi` is how the Pro panel's own internals drive the shared
+bar; `src/components/admin/adminFooterApi.ts` is that same channel for the console. **`select` IS
+`setActiveTab`** — there is one piece of tab state in the whole feature, so the header and the footer
+cannot disagree about which page is open.
+
+### 🔒 The footer names no tab
+
+It renders `adminFooterApi.items` — the console's own `TABS`, with its own live badges — so a tab added
+to `TABS` appears in the footer **by construction**. A hardcoded list in `App.tsx` would drift the
+first time a page was added and **nothing would fail**: both strips would render and one would simply
+be missing a page. `theAdminFooterIsTheTabStrip.test.ts` therefore asserts that the tab names
+("AI Engines", "Build Reports", "User Reports", "APK Reports") do **not** appear in `App.tsx` at all.
+
+Badges came along as data, with their honesty intact: `formatBadge` returns null for anything
+unmeasured and the footer carries the null through, so a page whose number could not be read shows
+**no** counter rather than a `0` — which on a row like User Reports would read as *"I looked, there is
+no work here"*.
+
+### 🔴 The one line that made it possible
+
+That bar carries a deliberate `touchAction: 'none'`, from the admin's own 2026-09-14 report (a drag
+upward on it moved the whole app and revealed white space beneath on iOS). **`none` forbids EVERY pan,
+horizontal included** — so a swipable footer with `none` on it is a footer that cannot be swiped, and
+the tabs past the screen edge would have been unreachable by the exact gesture that was asked for.
+
+It is now `adminStrip ? 'pan-x' : 'none'`: horizontal pan permitted on this strip only, so the
+2026-09-14 bug stays closed everywhere including here. **Proven by reversion** — tightening it back to
+`none` fails CI rather than silently killing the swipe. This is the "a fix must never trade one problem
+for another" rule applied to a gesture rather than to a code path.
+
+### What is deliberately unchanged
+
+- **Desktop, by construction rather than by a second rule.** The bar is mobile-only, so
+  `adminMobileFooterActive` returns false there, the header strip stays and no footer appears.
+- The header strip stands down with `hidden lg:flex` (AgentV3Panel's own idiom for exactly this), so a
+  wide screen inside a mobile-footer session still has tabs rather than none.
+- Publishing `null` on unmount is what returns the bar to its ordinary items the moment the console is
+  left or the admin logs out.
+- The open tab scrolls itself back into view on a tab **change** only, never on every render, so it can
+  never fight a swipe the user is in the middle of.
+- New code, so it uses the theme tokens (`text-accent-text` / `text-muted`) instead of copying the
+  older branches' `text-indigo-400` and `#484f58` — those are weak or invisible on Light, and the
+  colour ratchet counts them. The older branches were left alone: sweeping them is the migration's job
+  and would be unrelated diff.
+- `AppKnowledgeBase` gained `admin-tab-navigation`, because where the tabs live now differs by device
+  and every other admin entry's path ("Admin Dashboard → Revenue") still names the same page.
 ## 2026-09-20 — The contract was written, but nobody told the model until it was too late (autopsy `31dc61fd`, items 2 + 3)
 
 Admin: *"sabhi problem theek honi chahiye hamesha ke liye."* These were the last two ❌ items in the
@@ -73217,28 +73283,34 @@ separately and the summary names which one happened.
 race with the scaffold look identical from here. That is itself part of the defect, and `probeFailures`
 is the field that will answer it on the next occurrence. The fix is correct for every cause.
 
-**② The shared-contract call was started against a clock that had already been measured as too short.**
-The arithmetic is exact to the millisecond and every number was known BEFORE the call:
+**② OPEN, NOT FIXED — and the gate is what stopped me shipping it (rule 6, safeguard #3).** The
+shared-contract call was started against a clock that had just been measured. The arithmetic is exact:
 
 ```
 preamble share    96,000ms   (240,000 × (1 − BUILD_PHASE_RESERVE))
 plan call         48,198ms   MEASURED, a real call on this build's own chain
-contract cap      47,802ms   (96,000 − 48,198)
-contract call     47,804ms   → cut off by its cap, returned NOTHING
+contract cap      47,802ms   → 396ms SHORT of what the plan had just cost
+contract call     47,804ms   → hit its cap exactly, returned NOTHING (₹1.17, UNBILLED_BARREN_WORK)
 ```
 
-🔑 **The assumption was hiding in a `Math.min`.** `canAffordSharedContract` modelled the contract's cost
-as `min(cap, measured)` — which treats a call that hits its cap as simply *cheaper*. It is not: it is
-**free of value and full of cost**. The report priced the loss afterwards (`UNBILLED_BARREN_WORK ₹1.17`)
-while nothing acted on it beforehand. With no contract, the files were generated in isolated calls and
-disagreed — which IS the eleven `TS2339` errors of ①.
+With no contract, the files were generated in isolated calls and disagreed — which IS ①'s eleven
+`TS2339` errors. 🔑 The assumption hides in a `Math.min`: `canAffordSharedContract` models the cost as
+`min(cap, measured)`, which treats a call that hits its cap as *cheaper*, when it is **free of value and
+full of cost**.
 
-**Fixed:** `contractCallCanFinish` asks the one question `min` silently answered. No invented margin —
-the threshold is the measurement, the same "project from what the last real call cost" rule this module
-already uses twice, and the two preamble prompts are the same order of size by construction (2,968 vs
-3,069 chars). It can only ever SKIP a pass already declared optional. **On this build it returns 48
-seconds to file generation**, which is the difference between a lane that finishes (plan 48 + files 150 =
-198s of 240s) and the one that ran: 96 + 150 = 246s, over budget, hand-off.
+🔴 **I built the guard (`contractCallCanFinish`: refuse a preamble call whose cap is below the measured
+cost of the one before it), and the full suite refused it — correctly.** Two deliberately-written cases
+in `theOptionalPassMustNotDoomTheLane.test.ts` say *"the boundary is the budget itself, not a new
+invented number"* and *"no tiers to build ⇒ keep the contract"*, and my guard broke both. Re-reading the
+evidence, they are right and I was over-reaching: **one report cannot tell "the cap was 396ms too small"
+from "that call was stalled regardless"** — the record shows 0 input and 0 output tokens, which is the
+shape of a call that never got going, not of one that needed slightly longer. Changing the budget rule
+for every fast-lane build on n=1 is exactly the guess safeguard #3 forbids.
+
+**So the arithmetic is pinned as a test and the behaviour is untouched.** What settles it is the number:
+how often a contract call ends barren, and how its cap compared with the measured plan. Until several
+reports show the pattern, this stays open — the same discipline `POST_GREEN_WRITES` and `LADDER_DEPTH`
+were shipped under.
 
 ### ③ "This build's time budget ended" was the wrong clock, and it cost an autopsy
 
@@ -73267,3 +73339,281 @@ reached at 105 s of a 1800 s build"*); ② is its prevention half.
 - **`PREVIEW_SNAPSHOT_STALE`** again (same 18 files, different content) — the post-build ordering defect
   already open from 31dc61fd.
 - **₹177.98 to a free user for a one-page card.** Billing is not a session's call; raised to the admin.
+---
+
+## 2026-09-20 — The wallet tiles come first and can be read; the budget console is gone at the root
+
+**THE ADMIN'S MESSAGE, three instructions and three screenshots.** *"sabse upar yeh tile … yeh tile
+sabse upar aani chahiye. aur inka colour aise ho ki user ke saaf dikhe, background oppsit colour me
+karo ya text me border banao, kuch bhi karo. bas clear hona chahiye!"* and, separately: *"note: yeh
+budget warning system kaam to karta nahi hai! isko jad se khatam karo! -ve balance bhi ho ja raha
+hai, user ka!!"*
+
+### 1. Why the tiles were unreadable, which is not "the colours were ugly"
+
+Every tile was written for a DARK-ONLY app: a `from-emerald-950/50` gradient into `to-card`, with
+**`text-on-accent` on top**. `text-on-accent` is WHITE by definition — it is the label colour for a
+SOLID brand fill — and the fill under it was the themed card, which on the Light theme is near-white.
+**White on near-white.** The 900/950 tints are the same shape: the theme rules already record that a
+dark tint is a Light defect because no theme can lighten a 950 shade.
+
+**The rule now holds in both directions:** a tile is EITHER a solid brand fill wearing
+`text-on-accent`, OR a themed surface wearing themed ink — never one in the other's clothes. Buy
+Tokens is the single solid fill (it is the only action); the two data tiles keep the card surface and
+earn their contrast from a 2px hue border and a solid icon chip.
+
+📐 **AND THE LAYOUT WAS HALF THE COMPLAINT.** Four tiles in `grid-cols-2` on a phone gave each about
+160px, which truncated the balance to **"89,894 tok…"** — the one number the screen exists to show.
+Now one per row on a phone, three across above it, no fixed height, no `truncate`.
+
+Placement: the tiles and the detail panel they switch moved above the daily-usage, plan and
+monthly-cost blocks — **together**, because a tile at the top whose panel is four sections lower
+appears to do nothing when tapped on a phone.
+
+### 2. 🔴 The budget console did not merely not work — it made a false promise
+
+Its own copy read *"Set your budget floor value. **At this limit the system automatically switches
+you to Free-version mode.**"*
+
+**Both numbers lived in `localStorage` and nowhere else** (`usePaymentEngine`: four `useState`s over
+`navbharat_reminder_limit` / `navbharat_budget_limit`). They were sent to no server. Grepped against
+the whole repo: **no build gate, no affordability check and no wallet debit reads either one.** The
+only thing the "floor" ever changed was a badge on that same screen. That is precisely the
+"built but not really working" state the second absolute rule forbids, so it is deleted rather than
+repaired — state, props, tile, detail tab and the `'budget'` member of `BillingDetailTab`.
+
+⚠️ **The two stored keys are deliberately NOT cleared from anyone's browser**: nobody asked for their
+data to be deleted, and an orphaned key costs nothing once no code reads it.
+
+### 3. 🔴 THE NEGATIVE BALANCE IS A SEPARATE FACT, AND CONFLATING THE TWO WOULD HAVE BEEN THE REAL MISTAKE
+
+Removing this console **cannot** have made overdraft worse, because it never bounded anything. What
+actually bounds it is `WALLET_OVERDRAFT_FLOOR_INR` (`walletFloor.ts`, **₹50** by default), applied
+**inside every debit** — server-side, unreachable from any screen, and untouched here. A build is
+already refused at a balance of zero; the floor exists for the build that was legitimately allowed to
+start and then cost more than the balance held. So a user CAN sit at up to −₹50, by design, and that
+number is the admin's to change (one Cloud Run value), not this screen's.
+
+The Profile page's own monthly budget (`budgetLimitInr`) is a different, server-stored thing and is
+untouched — it is honestly advisory (`/api/profile/cost-alerts`) and never claimed to gate anything.
+
+**Also removed with the tab**, and said plainly rather than left for someone to notice: a "Still
+having issues? Try Open in New Tab" button that lived inside the deleted console and did
+`window.open(location.href)`.
+
+**Gate:** 14 tests in `tests/theWalletTilesAreReadable.test.ts`, reversion-proven three ways — white
+ink put back on a card tile, the localStorage limit re-added, and the false sentence re-introduced
+each turn one test red. The theme colour baseline was regenerated (the file's literal count fell).
+## 2026-09-20 — 🔴 THE INDEX NOBODY CAN DEPLOY: the admin's server log was reporting one of OUR queries, not a missing click
+
+**Trigger:** the admin pasted the Server-logs panel from the admin panel and asked, verbatim,
+*"dekh ke batao — koi problem hai?"*
+
+**Three things in that capture, and only one of them was a defect.**
+
+1. **`DIAGNOSTICS_READ_FAILED` — WARN, 8 rows across 3 days** (18 Sep 19:41 → 20 Sep 13:10), every
+   one carrying the identical `9 FAILED_PRECONDITION: The query requires an index` with the
+   Firestore create-index link. **This is the defect, and it was ours.**
+2. **`BLOCKED_SCAN` — WARN, ~18 rows.** `/.env`, `/.env.prod`, `/config.php`, `/wp-admin/install.php`
+   … and notably **`/.env.openai` and `/.env.anthropic`**. Internet background noise from
+   credential-hunting bots, and every one **BLOCKED** — the guard doing exactly its job. Not a
+   defect. Recorded because the two AI-key paths say what today's bots are shopping for.
+3. **`AGENTV3_BUILD_BLOCKED_NO_CREDITS` — WARN ×2** (18 Sep 20:54, 19 Sep 20:03). Real users refused
+   a build at a ₹0 balance. Not a code defect — it is the seam this repo already named on 2026-09-20:
+   the flat welcome gift was retired on 2026-09-17 and `REFERRAL_REWARDS` was never set, so accounts
+   opened in the gap received ₹0. The ₹250 backfill (`WELCOME_BACKFILL`, default ON) is the answer
+   and it now exists; these two rows are what it is for.
+
+### The root cause of (1), and why the 2026-09-17 fix did not end it
+
+On 2026-09-17 the same warning was root-caused as a **truncation** bug: two independent
+`slice(0, 300)` calls were cutting the create-index URL mid-token, so *"the fix was in the part we
+cut off"*. That fix was right and shipped. It made the remedy **reachable**. It never asked what the
+index was **for** — and the entry closed with *"⚠️ This does not fix the missing index."*
+
+Decoding the link (base64 → the Firestore Admin `Index` proto) answers it in one line:
+
+```
+projects/gen-lang-client-0866594388/databases/(default)/collectionGroups/history/indexes/_
+queryScope = COLLECTION        fields = [ __name__ DESCENDING ]
+```
+
+Not a nested field. Not a collection-group query. That is exactly `.orderBy(documentId(), 'desc')`.
+
+🔑 **Firestore's automatic indexes cover `__name__` ASCENDING. A DESCENDING `__name__` sort as the
+only order is not covered** — it needs a composite index. And `firestoreIndexSafe.ts` already records,
+in its own header, why this project can never answer that with an index: nothing here deploys one,
+and `.firebaserc` names the **Hosting** project (`navbharatai-3395f`) while Firestore lives in
+`gen-lang-client-0866594388`. So the query could only ever fail. **It did, on every call, for as long
+as it existed.**
+
+**Two call sites carried it, and the second inherited the belief from the first in a comment:**
+- `listDiagnosticsHistoryInner` — the workspace build history.
+- `listRecentBuildReports` (shipped **2026-09-18**, commit `10a71a76`), whose docblock read
+  *"It orders by `documentId()`, exactly as `listDiagnosticsHistory` does, so it needs NO Firestore
+  index."* Copied reasoning, copied failure.
+
+### What it cost — and why nothing lied about it
+
+Both readers are honest about a read that failed, which is the 2026-08-27 `ok: false` work paying
+off: nothing reported a confident wrong number. What they did instead was **degrade silently to a
+lesser answer**:
+
+- The **whole-session build report** (`scope=session`, the stitch the admin uses when submitting a
+  report) could never reach the history, so it fell back to the single latest turn — which is why
+  every report submitted since has been one build rather than a session.
+- The admin **build-cost window** fell back to `source: 'latest-per-workspace'`. The feature shipped
+  on 2026-09-18 to show *one row per BUILD* had therefore **never once run successfully**.
+
+### The fix (PR "the index nobody can deploy")
+
+- **One shared reader, `newestHistoryRefs`** — reads the history document **refs** in the default
+  **ascending** `__name__` order (always built-in, never an index error) via `.select()` (references
+  only, the cheapest read Firestore has), picks the newest in memory, then fetches only those whole.
+  Both call sites go through it, so a third cannot inherit the belief.
+- **`newestFirstHistoryIds` is PURE and exported**, so the ordering the whole fix turns on is tested
+  without Firestore. Ids are compared **numerically** (a legacy id of a different length does not
+  sort right lexicographically), and an unrecognised id sorts **last and is never dropped**.
+- ⚠️ **The ascending scan is deliberately unbounded.** A Firestore `.limit(n)` on an ascending scan
+  keeps the **oldest** n — the exact opposite of what every caller wants. History is a per-workspace
+  archive of settled builds (tens of documents), so the honest cost of correctness is paid there
+  rather than in a cap that silently drops the newest build.
+- **Both false comments corrected**, in place, naming why the claim was wrong.
+
+### 🔒 The 50/50 half — the guard existed and could not see this shape
+
+`src/server/lib/firestoreIndexSafe.test.ts` is this repo's own CI answer to *"a query needing an
+index nobody can deploy"*. It scans every server file for `.where(A,'==',…).orderBy(B)` and has
+stopped that shape returning since the store's first publish. It is **deliberately narrow** — and
+narrow around a `where`, so a bare `.orderBy(documentId(),'desc')` was structurally invisible to it.
+
+**The class is "a query that needs an index nobody can deploy", and it has more than one shape.** The
+scan now fails on the second shape too, in any server file including ones written later, with the
+remedy named in the failure message. Its own guard-the-guard case asserts that an **ascending**
+document-id sort (legal, used on purpose in `DeploymentStore`) is not flagged.
+
+Test-locked in `tests/theIndexNobodyCanDeploy.test.ts` (+ the widened class scan) and **proven by
+reversion**: restoring the old query shape turns three cases red across both suites.
+
+### What is NOT claimed here
+
+Creating the index in the Firestore console would also have stopped the error, and the link in the
+log does exactly that. It is not the fix: it leaves a query in the code that fails for anyone
+without that console, in any new project, and the day someone deletes the index it returns. The link
+is now redundant rather than pending.
+
+### 🔴 The sharpest part: a TEST asserted the defect and called it a guarantee
+
+`tests/theWindowWasWorkspacesNotBuilds.test.ts` shipped with the 2026-09-18 feature and carried a
+case titled *"⚠️ it orders by documentId, so it needs no Firestore index that nobody creates"*. It
+proved that by asserting the source contained `admin.firestore.FieldPath.documentId()`.
+
+**That is a claim about a SHAPE, presented as a guarantee about BEHAVIOUR — and the behaviour was the
+exact opposite.** The test passed for two days while the query it blessed threw on every call.
+
+A source assertion can only pin what the code **says**. When what is at stake is what a third party
+(here, Firestore) will **accept**, the assertion has to name the property that actually makes it
+safe. The case is rewritten in place rather than deleted, with that reasoning attached, because the
+wrong version is the evidence.
+## 2026-09-20 — "Notifications nahi aa rahe": the feature was built, shipped to nobody, and could not be diagnosed
+
+**Admin, verbatim:** *"jaise app notifications ate hai hamare mobile me woh notifications abhi
+navbharatai me nahi aa rahe hai. isko on karwane ke liye aur kya karna chahiye — ek dam native app
+jaise notification mobile me dikhe!"*
+
+**The instinct to resist, and the reason safeguard #6 exists.** The obvious reading is "push
+notifications were never built" — which is what the 2026-07-26 entry says about the *previous* time
+this was asked. Searched by FILENAME first, then by package: `@capacitor-firebase/messaging` is
+INSTALLED, `src/lib/pushNotifications.ts` is wired into `App.tsx:1261` on sign-in,
+`android/app/google-services.json` is present and names the right project and package,
+`android/build.gradle` carries the google-services plugin, `routes/push.ts` is mounted at
+`server.ts:718`, and `PushNotificationService.sendPushToUser` is a real firebase-admin sender called
+from three places. **The whole chain exists and has since 2026-08-25.**
+
+### The root cause, established rather than assumed
+
+`android-aab.yml` stamps `versionCode = run number`. Asked the Actions API for every run's head SHA
+and asked git whether the commit that introduced the plugin (`f71e101e`) is an ANCESTOR of each:
+
+| run | head | carries push? |
+|---|---|---|
+| **91** (`cc236f0f`, 12:10 on 2026-08-25) — the first production release, and the value `ANDROID_LATEST_VERSION_CODE` still holds | no | **NO** |
+| 92–95 | no | NO |
+| **96** (`7065c7dd`, 2026-08-26) | yes | **YES** |
+
+The plugin merged at 21:18 that day and run #91 was built at 12:10 the same day, **so the dates alone
+say the opposite of the truth** — which is exactly why this was checked by ancestry.
+
+**The app people have installed contains no notification code at all.** It never asks permission,
+never obtains an FCM token, never calls `/api/push`. Nothing the server does can reach it, and
+nothing the server can see says so.
+
+### The missing subsystem (step 2): nothing could tell four different failures apart
+
+`sendPushToUser` is fire-and-forget and silent **by design** — a push must never fail a build — and
+it returned `void`. So an app too old to receive, an empty device registry, a Cloud Messaging API
+that was never enabled, and a service account without permission all produced the identical outcome:
+nothing arrives, nothing errors, nothing logged. The silence is right for the callers; the
+information was being **thrown away rather than not existing**.
+
+- **`src/server/lib/pushPreflight.ts`** — the loud half, in the shape `hostingPreflight.ts` and
+  `referralPreflight.ts` already established. It probes the REAL send path with the REAL credential
+  and a token Google cannot decode, so the answer can only be a refusal and the diagnosis is WHICH
+  one. 🔒 **"Invalid argument" is the GOOD answer** and is reported `ok`: it means we authenticated,
+  the project was right, Cloud Messaging was reached, and only the fake token was refused. Reporting
+  it as a failure would send the admin to fix a setup that already works. A send that SUCCEEDS is
+  reported `unknown`, not `ok` — a check that cannot fail proves nothing (the E2B-rate lesson).
+- **`sendPushToUser` now returns `PushSendResult`.** Every existing caller ignores it; no behaviour
+  changed.
+- **`GET /api/admin/push/preflight` + `POST /api/admin/push/test`** and a **Notifications card** on
+  admin → Reports. The test sends a real notification to a real account — the only thing that proves
+  the chain — and the card never claims the second half: Firebase accepting a message is not a phone
+  showing one.
+
+### The 50/50 half — why a notification would not have LOOKED native either
+
+Three Firebase presentation settings had never been set, each failing in a way nothing reports:
+no `default_notification_icon` (Android renders the full-colour launcher icon as a featureless
+**white square**), no `default_notification_color`, no `default_notification_channel_id` (every
+message lands in Android's fallback **"Miscellaneous"** channel — the single clearest tell in
+Settings → Notifications that an app did not set this up).
+
+- `@drawable/ic_stat_nbai` at five densities, **derived** from the app's own `ic_launcher_monochrome`
+  by `scripts/notificationIcon.mjs` (crop the adaptive-icon safe zone, box-filter the alpha) — the
+  app's own mark, not new artwork. Verified numerically: it is a silhouette (93% transparent) filling
+  ~90% of its slot.
+- The channel is created at **importance 4 (High)**. Android fixes a channel's importance at creation
+  and refuses to let an app raise it later, so shipping the default once would make "my notifications
+  do not pop up" **permanently unfixable** for everyone who had already installed the app. That is the
+  one value that must be right the first time.
+- ⚠️ The channel id exists twice — named in the manifest, CREATED in the client — and a manifest
+  naming a channel nobody created is **not an error**: Android falls back to Miscellaneous again. Both
+  directions are pinned by `tests/aNotificationLooksLikeOurApp.test.ts`.
+
+### OPEN ROOT CAUSES (rule 6) — stated, not patched
+
+1. **🔴 ADMIN: only a fresh Play release makes any of this reach a phone.** Build 96 or later. Per
+   CLAUDE.md a store build is made **only when the admin asks**, so none was triggered. After it is
+   downloadable, set `ANDROID_LATEST_VERSION_CODE` to that run number — after, never before.
+2. **🔴 ADMIN: the Firebase Cloud Messaging API and the service-account role cannot be checked from a
+   session.** The new preflight is what turns each into a named next action.
+3. **iOS cannot work at all today.** `ios/App/App/GoogleService-Info.plist` is not in this repository
+   and no APNs key has ever been uploaded to Firebase. Listed as manual work in the report rather
+   than left silent.
+4. **`AppKnowledgeBase.ts` has no notifications entry, and deliberately still does not.** Adding one
+   now would have every NavBharatAI AI promise a capability today's installed app does not have —
+   the fake-success the second absolute rule forbids. It is owed the moment a release carrying push
+   is live on Play.
+5. **Only three things ever send a notification** (build finished, low balance, update broadcast).
+   Whether that is the right set is a product question for the admin, not a defect.
+
+### Proactive layer (step 6)
+
+The lever here is not more notification kinds — it is that **a feature can be complete, merged, green
+and shipped to nobody for four weeks with nothing anywhere saying so**. Push is the second case this
+month (Play Billing and Play Integrity have the same shape, and each grew its own hand-written
+"release N and earlier do not have it" constant). The real fix is one place that knows which run
+first carried each native capability and compares it with the live release — so "the app on the phone
+is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
+here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
+asked.

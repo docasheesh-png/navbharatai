@@ -9,12 +9,7 @@ import {
   shouldTypecheckWrite,
   MAX_TSCONFIG_PROBES,
 } from '../src/server/AgentV3/writeTimeTypecheck';
-import {
-  contractCallCanFinish,
-  canAffordSharedContract,
-  preambleCapMs,
-  BUILD_PHASE_RESERVE,
-} from '../src/server/AgentV3/FastLaneBudget';
+import { preambleCapMs, BUILD_PHASE_RESERVE } from '../src/server/AgentV3/FastLaneBudget';
 
 /**
  * AUTOPSY bb688add (2026-09-20) — the Hindi wedding invitation, 16.4 minutes, ₹177.98 on the FREE tier.
@@ -102,46 +97,6 @@ describe('the report must not claim "no TypeScript was written" when TypeScript 
   });
 });
 
-describe('a call the clock cannot carry is not started', () => {
-  // The build's own numbers, to the millisecond.
-  const PLAN_CALL_MS = 48_198;
-  const LANE_MS = 240_000;
-
-  it('🔴 reproduces bb688add: the cap is derived to the millisecond, and it is too small', () => {
-    const cap = preambleCapMs(LANE_MS, PLAN_CALL_MS, 90_000);
-    expect(cap).toBe(Math.round(LANE_MS * (1 - BUILD_PHASE_RESERVE)) - PLAN_CALL_MS);
-    expect(cap).toBeLessThan(PLAN_CALL_MS);            // 47,802 < 48,198
-    expect(contractCallCanFinish({ contractCapMs: cap, preambleCallMs: PLAN_CALL_MS })).toBe(false);
-  });
-
-  it('and canAffordSharedContract now refuses it, where it used to say yes', () => {
-    const cap = preambleCapMs(LANE_MS, PLAN_CALL_MS, 90_000);
-    // 2 tiers at the plan's latency fit comfortably in what is left — which is exactly why the old
-    // tier-projection rule said "affordable" and the pass ran anyway.
-    expect(canAffordSharedContract({
-      preambleCallMs: PLAN_CALL_MS, tiers: 2, elapsedMs: PLAN_CALL_MS, overallMs: LANE_MS, contractCapMs: cap,
-    })).toBe(false);
-  });
-
-  it('a fast planner still gets its contract — this can only ever SKIP, never start one more', () => {
-    const cap = preambleCapMs(LANE_MS, 20_000, 90_000);
-    expect(contractCallCanFinish({ contractCapMs: cap, preambleCallMs: 20_000 })).toBe(true);
-    expect(canAffordSharedContract({
-      preambleCallMs: 20_000, tiers: 2, elapsedMs: 20_000, overallMs: LANE_MS, contractCapMs: cap,
-    })).toBe(true);
-  });
-
-  it('no measurement ⇒ it runs — never bail on an absent signal', () => {
-    expect(contractCallCanFinish({ contractCapMs: 10_000, preambleCallMs: 0 })).toBe(true);
-    expect(contractCallCanFinish({ contractCapMs: 10_000, preambleCallMs: -1 })).toBe(true);
-  });
-
-  it('an exactly-equal cap is allowed — the threshold is the measurement, with no invented margin', () => {
-    expect(contractCallCanFinish({ contractCapMs: 48_198, preambleCallMs: 48_198 })).toBe(true);
-    expect(contractCallCanFinish({ contractCapMs: 48_197, preambleCallMs: 48_198 })).toBe(false);
-  });
-});
-
 describe('the wiring — proven from the source, because no behavioural test in this repo reaches it', () => {
   const dispatcher = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
   const builder = readFileSync('src/server/AgentV3/SimpleBuilder.ts', 'utf8');
@@ -158,9 +113,20 @@ describe('the wiring — proven from the source, because no behavioural test in 
     expect(dispatcher).toContain('s.skippedNoTsconfig += tsPaths.length');
   });
 
-  it('the fast lane names the third skip reason instead of blaming the budget split', () => {
-    expect(builder).toContain('contractCallCanFinish({ contractCapMs: contractCap, preambleCallMs: planCallMs })');
-    expect(builder).toContain('it would be cut off before producing anything');
+  // 🔎 THE OPEN ONE, kept as arithmetic rather than a behaviour change (rule 6, safeguard #3).
+  //
+  // The contract cap is derived to the millisecond and was 396ms short of what the plan call had just
+  // measured. But ONE report cannot tell "the cap was marginally too small" from "that call was
+  // stalled regardless" — the record shows 0 input and 0 output tokens, the shape of a call that never
+  // got going. A guard was built and the suite refused it: `theOptionalPassMustNotDoomTheLane.test.ts`
+  // carries two deliberate cases saying the boundary must stay the budget itself. They are right.
+  // So the arithmetic is pinned and the behaviour is untouched until several reports settle it.
+  it('the cap was short by 396ms, and nothing acts on that yet', () => {
+    const PLAN_CALL_MS = 48_198;
+    const cap = preambleCapMs(240_000, PLAN_CALL_MS, 90_000);
+    expect(cap).toBe(Math.round(240_000 * (1 - BUILD_PHASE_RESERVE)) - PLAN_CALL_MS);
+    expect(PLAN_CALL_MS - cap).toBe(396);
+    expect(builder).not.toContain('contractCallCanFinish'); // not wired — see PROGRESS.md
   });
 
   it('🔴 the report no longer says "this build\'s time budget ended" about a step deadline', () => {

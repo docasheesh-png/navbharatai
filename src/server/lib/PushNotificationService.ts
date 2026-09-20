@@ -57,17 +57,47 @@ export function deadTokensFrom(tokens: string[], responses: SendResponseLike[]):
 }
 
 /**
+ * What one send actually did.
+ *
+ * 🔴 WHY THIS EXISTS (2026-09-20). This function used to return `void`, and that was not merely
+ * uninformative — it is the reason "notifications nahi aa rahe" could not be diagnosed at all. Every
+ * way a send can fail (no admin SDK, no registered device, a disabled Cloud Messaging API, a service
+ * account without permission) produced the SAME `undefined`, swallowed by the same `catch`, with
+ * nothing logged. The silence is right for the CALLERS — a push must never fail a build — but the
+ * information was being thrown away rather than not existing.
+ *
+ * Every existing caller ignores this value, so nothing about their behaviour changed. It exists for
+ * the admin's test-send button, which needs to say what happened.
+ */
+export interface PushSendResult {
+  /** How many registered devices the send targeted. Zero is the commonest real failure. */
+  tokens: number;
+  sent: number;
+  failed: number;
+  /** Tokens FCM reported as permanently dead and which were removed from the registry. */
+  pruned: number;
+  /** Why nothing was sent, when nothing was. Empty on a send that reached FCM. */
+  reason: '' | 'no-user' | 'no-messaging' | 'no-devices' | 'error';
+  /** The raw failure, for the admin's screen only — never shown to an end user. */
+  error?: string;
+}
+
+const NOTHING = (reason: PushSendResult['reason']): PushSendResult => ({ tokens: 0, sent: 0, failed: 0, pruned: 0, reason });
+
+/**
  * Send a push notification to every device registered for a user. Best-effort and silent by design
  * (the caller is always a fire-and-forget hook off a real event — a build finishing, a balance going
  * low — never something the request path should wait on or fail because of).
+ *
+ * It still never throws. It now RETURNS what happened, which the fire-and-forget callers ignore.
  */
-export async function sendPushToUser(uid: string | null, payload: PushPayload): Promise<void> {
-  if (!uid) return;
+export async function sendPushToUser(uid: string | null, payload: PushPayload): Promise<PushSendResult> {
+  if (!uid) return NOTHING('no-user');
   try {
     const messaging = getMessaging();
-    if (!messaging) return;
+    if (!messaging) return NOTHING('no-messaging');
     const tokens = await deviceTokenStore.listTokensForUser(uid);
-    if (!tokens.length) return;
+    if (!tokens.length) return NOTHING('no-devices');
 
     const result = await messaging.sendEachForMulticast({
       tokens: tokens.map((t) => t.token),
@@ -81,8 +111,16 @@ export async function sendPushToUser(uid: string | null, payload: PushPayload): 
     // keep paying the round-trip for a device that will never receive anything again.
     const dead = deadTokensFrom(tokens.map((t) => t.token), result.responses);
     if (dead.length) await deviceTokenStore.removeTokens(uid, dead);
-  } catch {
+    return {
+      tokens: tokens.length,
+      sent: result.successCount,
+      failed: result.failureCount,
+      pruned: dead.length,
+      reason: '',
+    };
+  } catch (err) {
     /* best-effort — a push failure never propagates to the caller */
+    return { ...NOTHING('error'), error: err instanceof Error ? err.message : String(err) };
   }
 }
 

@@ -308,8 +308,37 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
     system:
       'You are the Researcher. Investigate the codebase (and the chosen frameworks) ' +
       'to find the best approach before code is written, and report concrete ' +
-      'recommendations with reasons. Read-only.',
-    tools: READONLY_TOOLS,
+      'recommendations with reasons. You can look things up on the web with ' +
+      'web_search when the answer is not in the code. Read-only — you never write files.',
+    /**
+     * 🔴 THE RESEARCHER COULD NOT RESEARCH (autopsy 31dc61fd, 2026-09-20).
+     *
+     * This role advertises `best approach`, `framework choice` and `search`, and was handed
+     * `READONLY_TOOLS` — `read_file`, `grep`, `glob`, `recall`, `evaluate`. Every one of those reads
+     * the CURRENT WORKSPACE. So an agent whose whole job is "find the best approach before code is
+     * written" could only look at code that did not exist yet.
+     *
+     * What that cost, verbatim from the report: the architect spawned this agent to study two
+     * competitor apps, and it spent a model call and 13 seconds replying *"I don't have a
+     * web-browsing or screenshot tool available in this environment (no `browser_action`, `http`, or
+     * live-URL access)"*. The architect then did it itself with six `browser_action` calls, which the
+     * loop-detector flagged (*"a repeated step that isn't making progress"*) — and the very next
+     * thing it did was declare the app complete with an EMPTY workspace.
+     *
+     * 🔑 A SUB-AGENT MUST BE ABLE TO DO THE JOB ITS CAPABILITIES ADVERTISE. Spawning one that can
+     * only report its own incapacity is a model call bought to learn nothing, and the fault is in
+     * the registry, not in the architect that believed it.
+     *
+     * 💸 `web_search` is the CHEAPEST tool that closes it, deliberately over `browser_action`: it is
+     * read-only, it costs nothing when unused, and this repo's own search policy routes a
+     * `reference` lookup to DuckDuckGo first, so the ordinary case is ₹0. A browser would give the
+     * sub-agent a sandbox and a real page load for a question that is usually answerable from a
+     * search result.
+     *
+     * ⚠️ Added HERE, not to `READONLY_TOOLS`, and that is the point: `accessibility` and `reviewer`
+     * share that constant and neither should acquire a web budget as a side effect of this fix.
+     */
+    tools: [...READONLY_TOOLS, 'web_search'],
     capabilities: ['research', 'investigate', 'best approach', 'framework choice', 'search'],
   },
 

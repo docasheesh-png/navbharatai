@@ -92,7 +92,7 @@ RUN mkdir -p /home/user/.e-tools \
 # `test -d` assertion fails the build loudly if the install produced nothing; diagnostics
 # print to the build log. No error suppression, no retries.
 RUN mkdir -p /home/user/.warm/vite-react \
-  && echo ewogICJuYW1lIjogInByb2plY3QiLAogICJ2ZXJzaW9uIjogIjAuMS4wIiwKICAicHJpdmF0ZSI6IHRydWUsCiAgInNjcmlwdHMiOiB7CiAgICAiZGV2IjogInZpdGUiLAogICAgImJ1aWxkIjogInRzYyAmJiB2aXRlIGJ1aWxkIiwKICAgICJwcmV2aWV3IjogInZpdGUgcHJldmlldyIKICB9LAogICJkZXBlbmRlbmNpZXMiOiB7CiAgICAicmVhY3QiOiAiXjE4LjMuMSIsCiAgICAicmVhY3QtZG9tIjogIl4xOC4zLjEiCiAgfSwKICAiZGV2RGVwZW5kZW5jaWVzIjogewogICAgIkB2aXRlanMvcGx1Z2luLXJlYWN0IjogIl40LjMuMSIsCiAgICAidHlwZXNjcmlwdCI6ICJeNS41LjMiLAogICAgInZpdGUiOiAiXjUuNC4xIgogIH0KfQo= | base64 -d > /home/user/.warm/vite-react/package.json \
+  && echo ewogICJuYW1lIjogInByb2plY3QiLAogICJ2ZXJzaW9uIjogIjAuMS4wIiwKICAicHJpdmF0ZSI6IHRydWUsCiAgInNjcmlwdHMiOiB7CiAgICAiZGV2IjogInZpdGUiLAogICAgImJ1aWxkIjogInRzYyAmJiB2aXRlIGJ1aWxkIiwKICAgICJwcmV2aWV3IjogInZpdGUgcHJldmlldyIKICB9LAogICJkZXBlbmRlbmNpZXMiOiB7CiAgICAicmVhY3QiOiAiXjE4LjMuMSIsCiAgICAicmVhY3QtZG9tIjogIl4xOC4zLjEiCiAgfSwKICAiZGV2RGVwZW5kZW5jaWVzIjogewogICAgIkB2aXRlanMvcGx1Z2luLXJlYWN0IjogIl41LjIuMCIsCiAgICAidHlwZXNjcmlwdCI6ICJeNS41LjMiLAogICAgInZpdGUiOiAiXjguMy4wIgogIH0KfQo= | base64 -d > /home/user/.warm/vite-react/package.json \
   && echo === warm vite-react: environment === && node -v && npm -v && df -h \
   && echo === warm vite-react: generated package.json === && cat /home/user/.warm/vite-react/package.json \
   && echo === warm vite-react: npm install === \

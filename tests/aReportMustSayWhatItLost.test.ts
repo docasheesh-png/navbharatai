@@ -48,7 +48,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   trimChannel, dropChannel, mergeTruncation, readCompleteness, completenessLine, truncationNote,
-  COMPLETE, type ChannelTruncation,
+  channelWasTruncated, COMPLETE, type ChannelTruncation,
 } from '../src/server/AgentV3/reportTruncation';
 import { trimReportForStorage, dropHeavyChannelsForStorage, compactReportForRecord, STORED_LLM_CALLS_MAX } from '../src/server/AgentV3/DiagnosticsStore';
 import type { BuildDiagnosticsReport } from '../src/server/AgentV3/BuildDiagnostics';
@@ -137,6 +137,28 @@ describe('🔒 three answers, never two — a legacy report is UNKNOWN', () => {
     expect(completenessLine(undefined)).toContain('not recorded');
     expect(completenessLine(undefined)).not.toContain('whole record');
     expect(completenessLine(COMPLETE)).toBe('');
+  });
+});
+
+describe('🔴 "complete" is an ANSWER, not an absence — the bug my own fix had first', () => {
+  // The first draft of the cost-ledger wiring read only `channels.llmCalls`, found nothing on a
+  // COMPLETE report, and fell through to the legacy length guess — which then marked a build that
+  // genuinely made exactly 40 calls as a lower bound and threw a correct measurement out of the
+  // admin's sample. A complete report STATES that nothing was lost.
+  it('a complete report answers "no" for every channel', () => {
+    expect(channelWasTruncated(COMPLETE, 'llmCalls')).toBe(false);
+    expect(channelWasTruncated(COMPLETE, 'commands')).toBe(false);
+  });
+
+  it('a truncated report answers per channel, not as a whole', () => {
+    const t = mergeTruncation(COMPLETE, { llmCalls: { kept: 40, total: 312 } });
+    expect(channelWasTruncated(t, 'llmCalls')).toBe(true);
+    expect(channelWasTruncated(t, 'commands')).toBe(false);   // this one survived whole
+  });
+
+  it('🔒 a legacy report answers UNDEFINED — never false, so a caller keeps its own fallback', () => {
+    // `false` here would silently start treating old, genuinely truncated logs as complete.
+    expect(channelWasTruncated(undefined, 'llmCalls')).toBeUndefined();
   });
 });
 

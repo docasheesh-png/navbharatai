@@ -70803,6 +70803,33 @@ Each of these fails exactly the case it should, and only that case: the recorder
 save path drops by hand again; the merge forgets the earliest total; a legacy report is reported as
 complete; the panel chip is removed.
 
+### Two cousins fixed in the same change (rule 3 — hunt the siblings)
+
+**The cost ledger was forced into a GUESS by the missing field, and the guess had a real false
+positive.** `realCostFromCalls` marked a log as a lower bound when `calls.length >= 40` — so a build
+that genuinely made exactly forty calls had its correct cost dropped from the admin's measured
+sample and its margin shown as null. It reads the report's own statement now, keeping the length
+heuristic only for legacy records (the margin-safe direction).
+
+🔴 **And my own fix had this exact bug inside it, caught by my own new test:** the first draft read
+only `channels.llmCalls`, found nothing on a COMPLETE report, and fell through to the guess.
+`complete: true` is a positive statement that nothing was lost, not an absence — so
+`channelWasTruncated` returns the same three answers `readCompleteness` does, and `undefined` (legacy)
+never collapses to `false`.
+
+**Two neighbouring tests were anchored on POSITIONS and had to be re-anchored** — the third and
+fourth instance of that class this month. `adminReportParts` scanned a fixed `slice(rowAt, rowAt +
+6200)` window and reported "Mark fixed" missing from a header where it was present and correct, once
+a chip was added inside the row; it is bounded by the row's own closing `Close</button>` now.
+`buildCostLedger` asserted the literal string `lastN(report.llmCalls, …)`; it asserts the shared
+CONSTANT, which is what it was ever about.
+
+⚠️ **And one of MY OWN new assertions was the same mistake**, found by the gate rather than by me: it
+checked that `'Part of this report was dropped'` appeared *somewhere in* a 5,000-line file, and passed
+while the panel was genuinely broken — a bad edit had pasted those words into an unrelated `useState`
+declaration two hundred lines away. It asserts the chip's own ternary now. A substring search over a
+whole file is not a test of the thing it names.
+
 ### Still open (rule 6) — this fixed the honesty, not the ceiling
 
 The caps themselves are unchanged and still lose real forensic detail; what changed is that the loss

@@ -182,6 +182,30 @@ export function readCompleteness(t: ReportTruncation | undefined): 'complete' | 
   return t.complete ? 'complete' : 'truncated';
 }
 
+/**
+ * Did THIS channel lose entries? Three answers, like `readCompleteness` — and for the same reason.
+ *
+ * 🔴 `complete: true` IS AN ANSWER, and forgetting that was a real bug in the first draft of this
+ * module's own consumer: the cost ledger read only `channels.llmCalls`, found nothing on a complete
+ * report, and fell through to the legacy length guess — which then marked a build that genuinely
+ * made exactly 40 calls as a lower bound and threw a correct measurement out of the admin's sample.
+ * A complete report states that nothing was lost; the absence of a channel entry there is the
+ * statement, not silence.
+ *
+ * `undefined` means only "this report cannot say" — a legacy record. A caller must then fall back to
+ * whatever heuristic it had before, never to `false`.
+ */
+export function channelWasTruncated(
+  t: ReportTruncation | undefined,
+  channel: TruncatableChannel,
+): boolean | undefined {
+  const state = readCompleteness(t);
+  if (state === 'unknown') return undefined;
+  if (state === 'complete') return false;
+  const fact = t?.channels?.[channel];
+  return fact ? fact.kept < fact.total : false;
+}
+
 /** One line for any surface that shows a report. Empty string when there is nothing to say. */
 export function completenessLine(t: ReportTruncation | undefined): string {
   switch (readCompleteness(t)) {

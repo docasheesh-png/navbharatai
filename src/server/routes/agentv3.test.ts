@@ -2319,7 +2319,14 @@ describe('import/survey turn — every file-mutating pass is gated on !isImportT
 
   it('integrity FINDINGS are still recorded on an import turn (advisory, never hidden)', () => {
     // Honesty half of the fix: we gate the WRITES, never the reporting.
-    expect(SRC).toContain('const obs = (message: string) => importTurnObservation(isImportTurn, message);');
+    // ⚠️ ASSERTED ON THE BEHAVIOUR, NOT THE SPELLING (2026-09-20). This read
+    // `importTurnObservation(isImportTurn, message)` verbatim and failed the day autopsy 586295b7
+    // widened the trigger — an import is one way of not having written the code under analysis, and
+    // a zero-write turn is another. What this test is about is that findings on such a turn are
+    // marked as observations rather than as our defects, and that is what it checks now.
+    expect(SRC).toContain('const obs = (message: string) => findingAboutUntouchedCode(untouchedReason, message);');
+    expect(SRC).toContain("const untouchedReason: UntouchedCodeReason | null = isImportTurn");
+    expect(SRC).toContain("? 'import'");
     expect(SRC).toContain("code: 'INTEGRITY_UNUSED_DEP', ...obs(");
     expect(SRC).toContain("code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(");
   });

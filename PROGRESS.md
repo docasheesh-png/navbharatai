@@ -71996,3 +71996,223 @@ removed → 1 red · length preservation dropped → 2 red.
    money: the reviewer read "35% (Low)" and went hunting.
 3. **`PREVIEW_SNAPSHOT_STALE`** — the snapshot was taken, then a post-build pass wrote three more test
    files, invalidating it. An ordering defect.
+## 2026-09-20 — A BUILD THAT DID NOTHING TOLD THE USER IT HAD MADE THEIR CHANGE (autopsy 586295b7)
+
+**Admin:** *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna
+level par theek karo!!"*
+
+### What the report showed
+
+The user typed *"Add pagination or infinite scroll to the main list"* and pressed Stop. The build
+lasted **10.5 seconds**. Three independent facts in that one report say nothing happened:
+`writtenFiles.size === 0` (the zero-bill branch it took requires it), `LADDER_DEPTH matched=0`, and
+`realCostUsd: 0` with no `llmCalls` at all. `UPSELL_SUPPRESSED` says it in words — *"no engine was
+ever asked to build anything"*.
+
+The user was nonetheless told, in their own chat:
+
+> ⚠️ *"I made your change, but I could not open your app to confirm it works this time. Your change is saved…"*
+> 🧾 *"I could not confirm your app running here, so you have been charged only what this build actually cost to run…"*
+
+**No change was made. They were charged ₹0.** And the same report's `summary` said the opposite two
+lines away — *"Nothing had been written yet, so nothing was lost."*
+
+### The five-bucket ledger, honestly
+
+| | count | |
+|---|---|---|
+| ✅ Self-heal | **0** — the report claimed **2** | both counted entries were our own user notices, not heals |
+| 🔀 Workaround | 0 | nothing ran |
+| ⏭️ Skipped | 5 runtime checks | **legitimate** — the user stopped it, and the release gate said so plainly |
+| ❌ Still broken | **4** | the four doors below |
+| 🥵 Struggle | 0 in the engine | but `GRAPH_RESTORED_STUBS`: 7 of 13 files are cold-resume placeholders — a real handicap on an edit build, recorded as an open item |
+
+Of the four entries counted `unresolved`, **not one was a defect of this build**.
+
+### One root cause, four doors — a fact with more cases than the code tests for
+
+| # | The code asked | The honest question | What it cost |
+|---|---|---|---|
+| 1 | `hasSnapshot && !previewGreen` | did this turn **write anything**? | *"I made your change"* |
+| 2 | is the bill waived? | is the bill **final**? | *"you have been charged"* on a ₹0 build |
+| 3 | is this line `severity: error`? | is this a **measurement** or a repeated sentence? | 3 errors, 2 self-heals, on a build that had neither |
+| 4 | is this an **import** turn? | **did we write this code?** | a warning about the user's own untouched file counted as "unresolved" |
+
+🔑 **Door 1 is the THIRD meaning of a distinction this repo had already drawn once.** `provenBroken`
+exists precisely because `green: false` meant both *"we looked and it is broken"* and *"we could not
+look"*. Nobody split the third: **there was nothing to look at.** `filesWrittenThisTurn` is now a
+REQUIRED field on `decideGreenGuard` — required for exactly the reason `provenBroken` is, so a future
+call site cannot quietly re-acquire the old behaviour; the typechecker asks the question instead. The
+route's private `} else if (hasSnapshot && !previewGreen) {` is replaced by
+`greenGuardShouldTellUnverified`, so the rule has one home.
+
+🔑 **Door 2 was never specific to a stopped build.** The waiver's sentence was emitted where the bill
+is still provisional, and **four** later rules can zero it — `writtenFiles.size === 0`, the
+unrendered-preview rule, the cancelled/failed-build rule, and the onboarding credit. On a FAILED build
+it is worse than false, it is contradictory: this sentence and *"🛡️ This build did not fully succeed,
+so it is FREE"* are both emitted, seconds apart, about the same build. The waiver's ARITHMETIC stays
+where it is (it runs before the zeroing rules on purpose, and can only ever reduce); only the SENTENCE
+moves, to the one point where what the user pays is settled — and it is held, not dropped, so a user
+who really is billed the waived amount still gets the explanation they are owed.
+
+🔑 **Door 3 is the FOURTH time this tally has counted something that is not a heal** — heartbeats,
+import observations, provider fallbacks, and now NavBharatAI's own honest notices, classified `error`
+because they contain the words "could not". The narration classifier has been patched FIVE times to be
+cleverer about which sentences are problems (long prose, the project recap, benign compounds,
+remediation intent, echoing the user's words). Each patch was right and each left the category error
+untouched: **whoever said it, a repeated sentence is not a measurement of the build.** `AGENT_STEP` is
+already `info` and therefore already excluded; `AGENT_NOTE` is the same thing said in a louder voice.
+Narration stays on the timeline — where it is often the clearest human signal — and stops moving the
+four numbers an autopsy reads.
+
+🔑 **Door 4: the machinery existed and the trigger was one case wide.** `importTurnObservation` has
+marked "this is the user's pre-existing code" since the mitrify autopsy, keyed on `isImportTurn`. An
+import is one way of not having written the code; a zero-write turn is another. `findingAboutUntouchedCode`
+asks the real question, and the import caveat ("part of the repo may have been too large to import")
+is deliberately NOT attached to the other case — on a zero-write turn the file map is the real project,
+so borrowing that caveat would be a different untruth in the opposite direction.
+
+### ⚠️ The fix reproduced the bug inside itself, and the gate caught it
+
+The first draft read `Number(input.filesWrittenThisTurn) > 0`, so a caller that said **nothing** got
+the new silence and the new *"nothing was written this turn"* wording. That is a STRONGER claim than
+the sentence being replaced, justified by an absent measurement — **the exact class this autopsy
+exists to remove, reproduced inside its own fix.** It failed two existing GreenGuard cases whose
+calls predate the new field. Only a STATED zero now earns the new behaviour; silence keeps the older,
+weaker wording, and the field stays REQUIRED at the type level so the runtime guard only ever covers
+callers TypeScript cannot reach. Locked as its own case.
+
+A neighbouring test also had to be re-anchored: `agentv3.test.ts` asserted the literal spelling
+`importTurnObservation(isImportTurn, message)` rather than the behaviour it is about. Third instance
+this month of a test bound to a position or a spelling instead of a thing.
+
+### Verified by reversion, four ways
+
+Each door fails exactly its own case and only that case: the guard stops asking about writes; the
+billing notice is emitted at the old place; narration is counted again; the untouched-code trigger
+narrows back to imports.
+
+### Recorded, not fixed (rule 6)
+
+- **`RELEASE_GATE` counts as an `error` even though it is a SUMMARY of other findings.** With door 3
+  fixed the reported build drops from 3 errors to 1, and that 1 is the gate's own RED verdict. The gate
+  is honest about a stopped build (*"you stopped this build before it could be finished or checked"*)
+  and `stoppedByUser` is its own predicate, so this is arguable rather than wrong — but a summary that
+  counts alongside the things it summarises is double-counting. Left alone rather than widened silently.
+- **`GRAPH_RESTORED_STUBS`: 7 of 13 files carried placeholder facts from a cold resume**, contributing
+  nothing to recall, the architecture analysis or the readiness score — on an EDIT build, which is
+  exactly where project recall matters most.
+- **ETA accuracy is measured against a build the user STOPPED** (promised 2.9 min, actual 0.2 min,
+  recorded as `withinBand: false`). Nothing was shown to the user, so no harm reached them, but a
+  cancelled build is not evidence about the estimator and should not train it.
+## 2026-09-20 — The ₹250 welcome backfill, and the gap that made it necessary
+
+**Admin, verbatim:** *"woh sare user jinko welcome bonus nahi mila hai, unko sabhi ki 250₹ ke welcome
+bonus dene hai! admin penal me kuch der ke liye aisi vyabasta kar do! jab new app playstore par live
+hogi tab han, apna refral code wala system start kar denge."*
+
+### 🔴 The gap was real, and it was the seam between two correct decisions
+
+- `giftPolicy.ts` → `flatWelcomeGiftAllowed()` returns a **hardcoded `false`** since **2026-09-17**, by
+  the admin's own ruling (*"nahi welcome bonus ₹500 band karna hai"*). `weeklyTopUpAllowed()` likewise.
+- The referral ladder that was designed to pay **instead** is gated on `REFERRAL_REWARDS`, which **was
+  never set**.
+- Net: **since 2026-09-17 a new account has received ₹0**, from a product whose own first-run design
+  states that *"₹250 is what funds a COMPLETE first app"* (`giftPlan.ts`).
+
+Neither decision was wrong on its own. The gap is the seam between them, and nothing in the code could
+see it, because each module's guard was locally correct.
+
+⚠️ **A wrong turn worth recording:** mid-audit I concluded from `welcomeGiftExclusion.ts` that CLAUDE.md
+was wrong and the flat gift was still live — `flatWelcomeGiftSuppressed()` really does return `false`
+while `REFERRAL_REWARDS` is unset. It is a **different, older guard at a different height**. The
+unconditional one is `flatWelcomeGiftAllowed()` in `giftPolicy.ts`, applied at `routes/wallet.ts`. Two
+similarly-named predicates, only one of which decides. CLAUDE.md was right; I checked further before
+saying so.
+
+### What shipped — a BACKFILL, not a policy change
+
+The signup path is **untouched**: a new account still receives nothing, because the ladder is still the
+plan and it starts when the Play Store build is live (the admin's own sequencing, above).
+
+- **`src/server/lib/welcomeBackfill.ts`** (pure) — `decideBackfill`, `backfillTokens`,
+  `backfillMarkerId`, the tally.
+- **`GET /api/admin/welcome-backfill`** — counts and totals, **writes nothing** (test-locked).
+- **`POST /api/admin/welcome-backfill/run`** — refuses without `confirm: true`; pays at most 200
+  accounts per press, returns `remaining`.
+- **`WelcomeBackfillCard`** on the admin dashboard, beside Referral cost.
+
+### 🔒 Never pay the same person twice — three signals, any one refuses
+
+"Who has not had a welcome bonus?" has no single authoritative answer in this data, because the grant
+has been written three ways over the project's life. So the decision reads all three and refuses on any:
+
+1. the durable marker `payment_transactions/welcome_<uid>` (written in-transaction since 2026-07-12);
+2. the wallet ledger row, via the existing `walletReceivedWelcome` (`accountMerge.ts`) — **found by
+   filename search, not rebuilt**;
+3. `freeGiftedTokens`, the lifetime gift total.
+
+Plus its **own** marker `welcome_backfill_<uid>`, checked **first** — before any wallet reasoning — so a
+paid account reads as paid even if its wallet has since changed. Written in the **same transaction** as
+the credit; split across two writes is exactly how a retry pays twice.
+
+⚠️ **Residual risk, stated rather than hidden:** none of the three is complete alone — the marker
+post-dates 2026-07-12, the ledger is bounded, `freeGiftedTokens` is newer than the oldest wallets. A
+pre-2026-07 wallet with 500+ ledger entries and no gift total could in principle read as never-gifted.
+That is why the preview exists and why the POST needs an explicit confirmation: the spend is agreed
+against real counts, not against a comment.
+
+### Money discipline
+
+Credits go through **`mirroredCreditPatch`** — the one legal wallet writer (money audit 2026-09-12) —
+inside a transaction that re-reads both markers as preconditions, with the ledger row appended through
+`ledgerPatch`. **`capSelfGift` still applies**: an account that has had nothing has ₹400 of room so the
+full ₹250 lands, but this credit counts toward the admin's own ₹400 lifetime ceiling — so a later
+referral ladder tops the same account to ₹400, not ₹650. **That is the admin's standing ruling being
+respected, and it is flagged to them rather than silently overridden.**
+
+⚠️ **`WELCOME_BACKFILL` defaults to ON** — deliberately the opposite of most money flags here, because
+the admin asked for the button today and a button that needs a Cloud Run key first is a dead button
+(second absolute rule). `off` is the instant stop; the real protections are once-per-account, the cap,
+and the required confirmation.
+
+**Test-locked and REVERSION-PROVEN five ways** in `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`
+(25 cases): dropping the ledger signal fails 2, the gift-total signal 1, the marker signal 1, moving the
+own-marker check after the wallet check 1, and replacing `mirroredCreditPatch` with a direct balance
+write 1.
+
+### 📌 Standing decision recorded so nobody re-asks or acts early
+
+**The referral code system starts when the new app is LIVE on the Play Store** — not before. Do not set
+`REFERRAL_REWARDS` until then.
+
+### 2026-09-20 (same day, second instruction) — the backfill is narrowed to the GAP
+
+The admin answered both open questions, and the second one improved the design:
+
+**1. The ₹400 ceiling is the instruction, not an inheritance** — *"400 se jyada nahi jana chahiye,
+kaise bhi jaye, maximum ₹400!!! bas"*. No change needed; `capSelfGift` was already applied.
+⚠️ **But the reversion check found the claim was half true.** Removing `capSelfGift` from
+`decideBackfill` broke NO test — that call is unreachable, because the `freeGiftedTokens > 0` signal
+returns first. The ceiling is really enforced by the clamp inside `backfillTokens`, and removing THAT
+fails a test immediately. Both facts were established by reversion, and the code comment now says so
+rather than implying a protection no test can reach.
+
+**2. Only accounts opened in the GAP** — *"old walo ka 00 nahi hoga, ya + me kuch hoga ya -ve ne. aap
+new user kar do, jinko bonus nhi mila"*. This is a better discriminator than anything the module had:
+an account predating the retirement was GIVEN its bonus and has been living with it, while one opened
+inside the gap was handed nothing. So the question stops being *"does this wallet LOOK ungifted?"* (a
+guess from three partial signals) and becomes *"was it opened while the platform gave nothing?"* — a
+fact we store.
+
+- `RETIREMENT_ISO = 2026-09-17T00:00:00.000Z`, `backfillSince()` (env `WELCOME_BACKFILL_SINCE`, falls
+  back to the retirement date — never to "no cutoff"), `openedInGap()`; new reason `too-old`.
+- The age check runs BEFORE every wallet heuristic, so the rule is categorical rather than incidental.
+- **A wallet with no `createdAt` reads as OLD.** Only `buildInitialWallet` creates a wallet and it has
+  always stamped that field (verified — there is no second creator), so a missing one means a document
+  older than the stamp.
+- 🔒 **This RETIRES the residual risk recorded above.** The pre-2026-07 wallet whose welcome row had
+  rolled off its bounded ledger is now excluded by DATE, before that reasoning is reached.
+
+Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
+unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.

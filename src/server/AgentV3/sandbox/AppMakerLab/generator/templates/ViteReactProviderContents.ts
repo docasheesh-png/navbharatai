@@ -40,9 +40,32 @@ export const packageJson = JSON.stringify({
     // fix. This is. Proven by installing exactly these two and watching the same scaffold build clean.
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    // 🔴 VITE 8 / PLUGIN-REACT 5 — a SECURITY pin, not a version-chase (autopsy 31dc61fd, 2026-09-20).
+    //
+    // `^5.4.1` resolves to 5.4.21, the LAST 5.4.x, and it still carries advisories — so
+    // `npm audit fix` (compatible-only, which is what AGENTV3_AUDIT_FIX runs) could NEVER clear
+    // them. Every vite-react app we generated shipped them. MEASURED on this exact scaffold:
+    //
+    //     before: 2 vulnerabilities (1 high, 1 moderate)   ← vite path traversal, esbuild dev server
+    //     after : 0 vulnerabilities
+    //
+    // ⚠️ AND THEY ARE NOT MERELY COSMETIC HERE. They are dev-server flaws — path traversal in
+    // optimized-deps `.map` files and a `server.fs.deny` bypass — and NavBharatAI publishes the vite
+    // DEV SERVER on a public preview host. A dev-server path traversal on a publicly reachable port
+    // is exposure of the sandbox filesystem, not a lint.
+    //
+    // 🔒 PROVEN, NOT ASSUMED, before it was written: this scaffold was emitted to disk verbatim and
+    // built on the new pins — `npm run build` clean (and faster, 947ms → 444ms), `npm run dev` boots
+    // and serves HTTP 200 with #root and the module script, and `vite-tsconfig-paths@5.1.4` (exact-
+    // pinned above, load-bearing) still resolves. Node in the sandbox image is `node:22-bookworm`,
+    // which satisfies vite 8's `^20.19.0 || >=22.12.0`.
+    //
+    // ⚠️ Vite 8 supports tsconfig paths natively (`resolve.tsconfigPaths: true`) and says so in a
+    // startup notice. The plugin is DELIBERATELY kept: dropping it is a second change with its own
+    // risk, and this one is about the advisories. Follow-up, not scope creep.
+    "@vitejs/plugin-react": "^5.2.0",
     "typescript": "^5.5.3",
-    "vite": "^5.4.1",
+    "vite": "^8.3.0",
     "vite-tsconfig-paths": "5.1.4"
   }
 }, null, 2);

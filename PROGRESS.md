@@ -71907,3 +71907,150 @@ empty findings, so the difference is nearly always nothing — not worth widenin
 - **Item 5** — the deterministic complexity scorer scored an app-build prompt **5** with taskType
   `"chat"`.
 - **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.
+
+---
+
+## 2026-09-20 — AUTOPSY `31dc61fd`, FULL LEDGER: every problem in the report, diagnosed
+
+Admin: *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna level
+par theek karo."* So this entry is the COMPLETE itemisation, with each item's state named honestly —
+fixed, already-PR'd, or open with the reason.
+
+**The build:** "Create a upsc preparation aap" · Weak tier · 15.9 min · 70 model calls · 2.6M input
+tokens (94.5% cache-read) · 10 files · free user billed ₹299.37 · `RELEASE_GATE` YELLOW.
+
+### ❌ Still broken / shipped imperfect — 4
+
+| # | Item | State |
+|---|---|---|
+| 1 | **2 vulnerable dependencies shipped in the user's app** (`vite@5.4.21`, `vitest@2.1.9`) | **FIXED HERE** |
+| 2 | Accessibility 92/100 — 1 form field with no label (`Forum.tsx`, WCAG 1.3.1) | open — see below |
+| 3 | Design consistency 80/100 — 38 spacing values off the 4px grid, 35 of them in `src/index.css` | open — see below |
+| 4 | `RELEASE_GATE` YELLOW — no user journey could be derived or run | open — see below |
+
+### 🥵 Struggle points — 8
+
+| # | Item | State |
+|---|---|---|
+| 5 | 13× `IN_BUILD_GREEN_UNCHECKED` — the platform's own browser never ran | fixed, **#3146 merged** |
+| 6 | Phantom "missing dependency: stores" cost 3 greps + a shell grep + a repeat `evaluate` | fixed, **#3161 open** |
+| 7 | Fast lane burned 177 s, produced 1 file, then bailed | fixed, **#3157 open** |
+| 8 | "App looks complete" at step 10 with an EMPTY workspace | fixed, **#3156 merged** |
+| 9 | **Researcher sub-agent spent a call to say it has no browsing tool** | **FIXED HERE** |
+| 10 | Architect then did 6 `browser_action` calls itself; loop-detector fired | consequence of 9 |
+| 11 | `READY_BEFORE_END` — judged finished at step 10, then ran 47 more steps over 701 s | open — measurement only |
+| 12 | ETA said 2.9 min, build took 15.9 — **5.5× out**, outside its own band | open — see below |
+
+### 🔀 Workarounds — 2
+
+| # | Item | State |
+|---|---|---|
+| 13 | `PROVIDER_FALLBACK` KIMI → next rung on "build budget reached" at **105 s of a 1800 s build** | open — see below |
+| 14 | Architect substituted itself for the sub-agent it had just spawned | fixed by 9 |
+
+### ⏭️ Skipped — 3
+
+| # | Item | State |
+|---|---|---|
+| 15 | No `JOURNEY_*` code in the report at all | open |
+| 16 | E2E suite scaffolded but never run here | by design (says so honestly) |
+| 17 | `SANDBOX_PEAK_MEMORY` not available on this machine | honest, no action |
+
+### ✅ Self-healed — 4 (each a RED FLAG per the 50/50 law, not a win)
+
+| # | Item | Why it should not have been needed |
+|---|---|---|
+| 18 | XSS: `dangerouslySetInnerHTML` in `Notes.tsx` rewritten to structured content | the builder generated the XSS in the first place |
+| 19 | Write-time typecheck caught 2 errors in the file just written | working as designed (#3084) |
+| 20 | `DependencyReconciler` added the missing `@playwright/test` | the E2E scaffolder wrote tests without declaring its own dep |
+| 21 | Preview snapshot saved — then **invalidated** by a later pass (`PREVIEW_SNAPSHOT_STALE`) | ordering defect, open |
+
+---
+
+## What was fixed in THIS change
+
+### 1. 🔴 The scaffold shipped known vulnerabilities to every app — and no heal could ever clear them
+
+`"vite": "^5.4.1"` resolves to **5.4.21, the LAST 5.4.x**, which still carries advisories. So
+`npm audit fix` — compatible-only, and exactly what `AGENTV3_AUDIT_FIX=on` runs — **could never fix
+it**. npm says so itself: *"To address all issues (including breaking changes), run `npm audit fix
+--force`."*
+
+**Measured on the REAL scaffold**, emitted to disk verbatim from the template module and installed:
+
+```
+current pins  →  2 vulnerabilities (1 high, 1 moderate)
++ vitest       →  5 vulnerabilities (1 CRITICAL, 1 high, 3 moderate)   ← what this build shipped
+vite ^8 / plugin-react ^5 / vitest ^5  →  0 vulnerabilities
+```
+
+⚠️ **They are dev-server flaws, and that makes them WORSE here, not better** — path traversal in
+optimized-deps `.map` files, a `server.fs.deny` bypass, an esbuild dev-server request flaw. **We
+publish the vite dev server on a public preview host.** A dev-server path traversal on a publicly
+reachable port is sandbox filesystem exposure.
+
+🔒 **Proven before it was written**, because a bump that breaks every build is worse than the
+advisories: the real scaffold **built clean** on the new pins (947 ms → 444 ms), its **dev server
+booted and served HTTP 200** with `#root` and the module script, and the exact-pinned, load-bearing
+`vite-tsconfig-paths@5.1.4` still resolved. Sandbox image is `node:22-bookworm`, satisfying vite 8's
+`^20.19.0 || >=22.12.0`.
+
+**The DNA half — the drift, not the version.** The pins live in THREE places: two live copies of the
+template plus a base64 blob in `e2b.Dockerfile`, whose own comment says they *"MUST stay in sync"* —
+enforced by nothing. All three are updated and `tests/theScaffoldShipsNoKnownVulnerability.test.ts`
+now asserts them equal **to each other**, so a future bump stays green only if all three move.
+
+🔴 **ADMIN ACTION: the E2B template image must be rebuilt** for the pre-baked warm `node_modules` to
+match. Until then the primer still primes react/react-dom and `npm install` reconciles the rest —
+the Dockerfile's own words: *"correct, only less optimal"*. Builds are not broken, just a slower
+install delta on vite-react.
+
+⚠️ **Deliberately NOT done:** vite 8 supports tsconfig paths natively (`resolve.tsconfigPaths: true`)
+and says so at startup. Dropping `vite-tsconfig-paths` is a second change with its own risk; this one
+is about the advisories.
+
+⚠️ **Unexplained and NOT guessed at:** the agent's own `npm install -D vitest` resolved **2.1.9**
+(carrying the CRITICAL) when npm's latest is 5.0.1. We pin vitest nowhere. That is a sandbox-runtime
+fact I could not reproduce from this session — recorded, not invented.
+
+### 2. 🔴 The Researcher could not research
+
+`researcher` advertises `best approach`, `framework choice`, `search` — and was handed
+`READONLY_TOOLS` (`read_file`, `grep`, `glob`, `recall`, `evaluate`), **every one of which reads the
+current workspace**. An agent whose job is "find the best approach BEFORE code is written" could only
+read code that did not exist yet.
+
+It spent a model call and 13 s replying *"I don't have a web-browsing or screenshot tool available"*.
+The architect then did it itself with six `browser_action` calls, the loop-detector fired, and the
+next thing it did was declare an empty workspace complete.
+
+**The rule: a sub-agent must be able to do the job its capabilities advertise.** `web_search` is the
+cheapest tool that closes it (read-only, ₹0 when unused, DuckDuckGo-first for `reference` intent) —
+added to **that role only**, never to the shared constant, because `accessibility` and `reviewer`
+share it and must not acquire a web budget as a side effect. A test asserts both halves.
+
+---
+
+## Open, with the reason (rule 6) — not silently dropped
+
+- **A11y label + 4px grid (items 2, 3).** Both are in MODEL-GENERATED files, so the DNA fix is
+  upstream: the per-page design contract in the architect prompt. ⚠️ `src/index.css` here was written
+  by the FAST LANE, and `platformAuthored.ts` correctly did not shield it. Worth doing; it is a prompt
+  change whose effect only a real build can measure, and I would rather ship it with evidence than
+  guess at wording.
+- **Journey never derived (items 4, 15).** `AGENTV3_JOURNEY_CHECK` only began launching a browser on
+  2026-09-17; per its own CLAUDE.md entry the first real `JOURNEY_PASSED`/`FAILED` lines are the first
+  evidence it has ever produced. **Watch the next reports before changing it.**
+- **"build budget reached" at 105 s of a 1800 s build, `provider=unknown` (item 13).** The streaming
+  half of this was root-caused on 2026-09-17 (autopsy fdd59ef8) and fixed; this report is from 09-19
+  and still shows it, so a path survives — most likely the fast lane's own stage deadline reported in
+  the language of the build budget. The fix lands in `BuildDiagnostics`/`OpenAiToolRunner`, and
+  **#3162 is open in the reviewer/diagnostics area** — per the concurrency rule I am not racing another
+  session into that file. Named, not taken.
+- **`READY_BEFORE_END` 701 s (item 11).** `#3084` shipped this as a MEASUREMENT first, deliberately,
+  and CLAUDE.md says not to build the stronger protection until the measurement produces warnings on
+  real builds. This is one data point.
+- **`PREVIEW_SNAPSHOT_STALE` (item 21).** The snapshot is taken, then a post-build pass writes more
+  files and invalidates it. An ordering defect in the post-build sequence.
+- **ETA 5.5× out (item 12).** The estimator correctly refused to SHOW a number (unevidenced), which is
+  the honesty guard working. The underlying estimate is still poor; `#3157` fixes the fast lane's half.

@@ -16,7 +16,9 @@
       our notifications did not read as ours — the first half being that there was no small icon at all
       and Android fell back to rendering the launcher icon as a white square.
 
-      #4f46e5 is the app's own light-theme `--accent` (src/index.css), chosen over the dark-theme
+      #4f46e5 is the app's own light-theme accent token (the CSS custom property named "accent" in
+      src/index.css — written out in words here because a literal double-hyphen is ILLEGAL inside an
+      XML comment and fails `:app:mergeReleaseResources`), chosen over the dark-theme
       #818cf8 because the notification shade is a system surface we do not control: the darker indigo
       holds its contrast on a light shade, and the lighter one does not.
     -->

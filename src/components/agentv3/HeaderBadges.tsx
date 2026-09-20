@@ -1,6 +1,6 @@
-// THE HEADER'S BADGE STRIP — the surface (admin 2026-09-20). Rules live in `headerBadges.ts`.
+// THE HEADER'S BADGE STRIP — the surface (admin 2026-09-20). Rules live in `headerBadgeRules.ts`.
 
-import { visibleBadges, badgeCountLabel, type BadgeTone, type HeaderBadge } from './headerBadges';
+import { visibleBadges, badgeCountLabel, type BadgeTone, type HeaderBadge } from './headerBadgeRules';
 
 /**
  * Tone → classes. Tokens only, so every theme repaints it; the brand hues that survive are the ones

@@ -73242,6 +73242,69 @@ considered and **rejected**: fragile, and it would bill every build for it.
 
 ---
 
+## 2026-09-20 — The wallet tiles come first and can be read; the budget console is gone at the root
+
+**THE ADMIN'S MESSAGE, three instructions and three screenshots.** *"sabse upar yeh tile … yeh tile
+sabse upar aani chahiye. aur inka colour aise ho ki user ke saaf dikhe, background oppsit colour me
+karo ya text me border banao, kuch bhi karo. bas clear hona chahiye!"* and, separately: *"note: yeh
+budget warning system kaam to karta nahi hai! isko jad se khatam karo! -ve balance bhi ho ja raha
+hai, user ka!!"*
+
+### 1. Why the tiles were unreadable, which is not "the colours were ugly"
+
+Every tile was written for a DARK-ONLY app: a `from-emerald-950/50` gradient into `to-card`, with
+**`text-on-accent` on top**. `text-on-accent` is WHITE by definition — it is the label colour for a
+SOLID brand fill — and the fill under it was the themed card, which on the Light theme is near-white.
+**White on near-white.** The 900/950 tints are the same shape: the theme rules already record that a
+dark tint is a Light defect because no theme can lighten a 950 shade.
+
+**The rule now holds in both directions:** a tile is EITHER a solid brand fill wearing
+`text-on-accent`, OR a themed surface wearing themed ink — never one in the other's clothes. Buy
+Tokens is the single solid fill (it is the only action); the two data tiles keep the card surface and
+earn their contrast from a 2px hue border and a solid icon chip.
+
+📐 **AND THE LAYOUT WAS HALF THE COMPLAINT.** Four tiles in `grid-cols-2` on a phone gave each about
+160px, which truncated the balance to **"89,894 tok…"** — the one number the screen exists to show.
+Now one per row on a phone, three across above it, no fixed height, no `truncate`.
+
+Placement: the tiles and the detail panel they switch moved above the daily-usage, plan and
+monthly-cost blocks — **together**, because a tile at the top whose panel is four sections lower
+appears to do nothing when tapped on a phone.
+
+### 2. 🔴 The budget console did not merely not work — it made a false promise
+
+Its own copy read *"Set your budget floor value. **At this limit the system automatically switches
+you to Free-version mode.**"*
+
+**Both numbers lived in `localStorage` and nowhere else** (`usePaymentEngine`: four `useState`s over
+`navbharat_reminder_limit` / `navbharat_budget_limit`). They were sent to no server. Grepped against
+the whole repo: **no build gate, no affordability check and no wallet debit reads either one.** The
+only thing the "floor" ever changed was a badge on that same screen. That is precisely the
+"built but not really working" state the second absolute rule forbids, so it is deleted rather than
+repaired — state, props, tile, detail tab and the `'budget'` member of `BillingDetailTab`.
+
+⚠️ **The two stored keys are deliberately NOT cleared from anyone's browser**: nobody asked for their
+data to be deleted, and an orphaned key costs nothing once no code reads it.
+
+### 3. 🔴 THE NEGATIVE BALANCE IS A SEPARATE FACT, AND CONFLATING THE TWO WOULD HAVE BEEN THE REAL MISTAKE
+
+Removing this console **cannot** have made overdraft worse, because it never bounded anything. What
+actually bounds it is `WALLET_OVERDRAFT_FLOOR_INR` (`walletFloor.ts`, **₹50** by default), applied
+**inside every debit** — server-side, unreachable from any screen, and untouched here. A build is
+already refused at a balance of zero; the floor exists for the build that was legitimately allowed to
+start and then cost more than the balance held. So a user CAN sit at up to −₹50, by design, and that
+number is the admin's to change (one Cloud Run value), not this screen's.
+
+The Profile page's own monthly budget (`budgetLimitInr`) is a different, server-stored thing and is
+untouched — it is honestly advisory (`/api/profile/cost-alerts`) and never claimed to gate anything.
+
+**Also removed with the tab**, and said plainly rather than left for someone to notice: a "Still
+having issues? Try Open in New Tab" button that lived inside the deleted console and did
+`window.open(location.href)`.
+
+**Gate:** 14 tests in `tests/theWalletTilesAreReadable.test.ts`, reversion-proven three ways — white
+ink put back on a card tile, the localStorage limit re-added, and the false sentence re-introduced
+each turn one test red. The theme colour baseline was regenerated (the file's literal count fell).
 ## 2026-09-20 — 🔴 THE INDEX NOBODY CAN DEPLOY: the admin's server log was reporting one of OUR queries, not a missing click
 
 **Trigger:** the admin pasted the Server-logs panel from the admin panel and asked, verbatim,

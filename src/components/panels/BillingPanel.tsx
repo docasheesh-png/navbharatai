@@ -17,14 +17,14 @@ import type { ReferralProgress } from '../../hooks/useReferralProgress';
 import { AppLockGate } from '../AppLockGate';
 import {
   Wallet, Zap, RefreshCw, AlertCircle, Sparkles, Gift, CreditCard,
-  Activity, CheckCircle2, ShieldCheck, ExternalLink,
+  Activity, CheckCircle2,
 } from 'lucide-react';
 
 import { packBreakdown, type PurchaseRail, type StoreConfig } from '../../lib/storePurchase';
 import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
 import { aiSpendSummary, formatInr } from '../../lib/aiSpendSummary';
 
-type BillingDetailTab = 'purchase' | 'gift' | 'use' | 'remaining' | 'budget';
+type BillingDetailTab = 'purchase' | 'gift' | 'use' | 'remaining';
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface BillingPanelProps {
@@ -35,9 +35,6 @@ export interface BillingPanelProps {
   billingTransactions: any[];
   billingLogs: any[];
   activeBillingDetailTab: BillingDetailTab;
-  reminderLimit: number;
-  budgetLimit: number;
-  dismissedReminderWarning: boolean;
   couponCodeInput: string;
   isRedeemingCoupon: boolean;
   couponError: string | null;
@@ -62,16 +59,9 @@ export interface BillingPanelProps {
   buyingProductId?: string | null;
   storePurchaseNotice?: string | null;
   onBuyStorePack?: (productId: string) => void;
-  tempReminderLimit: string;
-  tempBudgetLimit: string;
-  limitError: string | null;
-  limitSuccess: string | null;
   onShowAuth: () => void;
   onFetchWallet: () => void;
   onSetActiveBillingDetailTab: (tab: BillingDetailTab) => void;
-  onSetReminderLimit: (v: number) => void;
-  onSetBudgetLimit: (v: number) => void;
-  onSetDismissedReminderWarning: (v: boolean) => void;
   onSetCouponCodeInput: (v: string) => void;
   /** The referral state for this account — see useReferralProgress. Empty off Android. */
   referral: ReferralProgress;
@@ -79,10 +69,6 @@ export interface BillingPanelProps {
   onRedeemPromoCoupon: (code: string) => void;
   onSetBuyAmountInput: (v: string) => void;
   onCreateBillingOrder: (amount: number) => void;
-  onSetTempReminderLimit: (v: string) => void;
-  onSetTempBudgetLimit: (v: string) => void;
-  onSetLimitError: (v: string | null) => void;
-  onSetLimitSuccess: (v: string | null) => void;
   onToast: (message: string, type?: ToastType) => void;
   /** Phase 4.2 — current month's AI cost accumulated from Pro builds. */
   monthlyAiCost?: { totalBuilds: number; totalCostUsd: number; month: string } | null;
@@ -92,18 +78,15 @@ export function BillingPanel(props: BillingPanelProps) {
   const {
     user, wallet, loadingWallet, dailyUsage,
     billingTransactions, billingLogs, activeBillingDetailTab,
-    reminderLimit, budgetLimit, dismissedReminderWarning, couponCodeInput,
+    couponCodeInput,
     isRedeemingCoupon, couponError, couponSuccess,
-    buyAmountInput, isRecharging, tempReminderLimit, tempBudgetLimit,
+    buyAmountInput, isRecharging,
     platformFeePct = DEFAULT_PLATFORM_FEE_PCT,
     storeRail = 'web-gateway', storeConfig = null, buyingProductId = null,
     storePurchaseNotice = null, onBuyStorePack,
-    limitError, limitSuccess,
-    onShowAuth, onFetchWallet, onSetActiveBillingDetailTab, onSetReminderLimit,
-    onSetBudgetLimit, onSetDismissedReminderWarning, onSetCouponCodeInput,
+    onShowAuth, onFetchWallet, onSetActiveBillingDetailTab, onSetCouponCodeInput,
     onRedeemPromoCoupon, onSetBuyAmountInput, referral, onRefreshReferral,
-    onCreateBillingOrder, onSetTempReminderLimit, onSetTempBudgetLimit,
-    onSetLimitError, onSetLimitSuccess, onToast,
+    onCreateBillingOrder, onToast,
   } = props;
   const { monthlyAiCost } = props;
 
@@ -160,107 +143,6 @@ export function BillingPanel(props: BillingPanelProps) {
             </div>
           </div>
 
-          {/* 11.3 — Daily Usage Stats. The third tile here used to print a "My Referral Code"
-              invented in localStorage (`NB-XXXXXX`), which the Promo tab then contradicted with a
-              second, different invented code. Both are gone — see the DETAILED TAB 2 note below. */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-card border border-line rounded-2xl p-5 space-y-2">
-              <p className="text-[9px] font-black text-faint uppercase tracking-widest">Today's Messages</p>
-              <p className="text-3xl font-black text-ink">{dailyUsage.date === new Date().toDateString() ? dailyUsage.count : 0}</p>
-              <p className="text-[10px] text-success">Unlimited for registered users ✓</p>
-            </div>
-            <div className="bg-card border border-line rounded-2xl p-5 space-y-2">
-              <p className="text-[9px] font-black text-faint uppercase tracking-widest">Today's Builds</p>
-              <p className="text-3xl font-black text-ink">{dailyUsage.date === new Date().toDateString() ? dailyUsage.builds : 0}</p>
-              <p className="text-[10px] text-accent-text">Preview builds today</p>
-            </div>
-          </div>
-
-          {/* Plans (admin 2026-08-06): the whole account story in one card — Hosting plan (₹99
-              Custom Domain, bought from THIS wallet), Database (free, user's own account), Coding
-              (pay-per-use). Self-contained: talks to the ownership-checked wallet routes itself. */}
-          {/* 🔒 APP LOCK — "Subscription & plans" (admin 2026-09-13). This card IS the subscription surface:
-              buying a plan spends the wallet, and the auto-renew switch decides whether it is charged
-              again. Default OFF, so a user who never ticked it sees the card exactly as before. */}
-          <AppLockGate
-            userId={user.uid}
-            area="subscription"
-            embedded
-            render={() => <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />}
-          />
-
-          {/* Phase 4.2 — This Month's AI Cost card */}
-          {monthlyAiCost !== undefined && (
-            <div className="bg-card border border-indigo-500/20 rounded-2xl p-5 flex items-center justify-between gap-4">
-              <div className="space-y-1">
-                <p className="text-[9px] font-black text-faint uppercase tracking-widest">This Month's AI Cost</p>
-                <p className="text-2xl font-black text-accent-text font-mono">
-                  ${(monthlyAiCost?.totalCostUsd ?? 0).toFixed(4)}
-                </p>
-                <p className="text-[10px] text-muted">{monthlyAiCost?.totalBuilds ?? 0} Pro builds · {monthlyAiCost?.month ?? new Date().toISOString().slice(0, 7)}</p>
-              </div>
-              <Activity className="w-8 h-8 text-accent-text shrink-0" />
-            </div>
-          )}
-
-          {/* Autonomous Warning Alert Popup (Reminder Limit Trigger) */}
-          {wallet && wallet.remaining_balance <= reminderLimit && !dismissedReminderWarning && (
-            <div className="fixed inset-0 bg-scrim flex items-center justify-center p-4 z-50 animate-fade-in backdrop-blur-sm">
-              <div className="w-full max-w-md bg-card border border-red-500/30 rounded-[2.5rem] p-8 space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.25)] text-left relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-on-accent"></div>
-
-                <div className="flex items-center gap-4">
-                  <div className="p-4 bg-red-500/10 rounded-2xl border border-red-500/20 text-danger">
-                    <AlertCircle className="w-7 h-7 animate-bounce" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-black text-ink uppercase tracking-tight">Limit Reached! ⚠️</h3>
-                    <p className="text-[10px] text-muted font-black uppercase tracking-widest font-mono">Autonomous Budget SRE Warning</p>
-                  </div>
-                </div>
-
-                <p className="text-xs text-muted leading-relaxed font-semibold">
-                  Warning! You have reached your reminder limit set at <span className="text-ink font-mono font-black">₹{reminderLimit.toFixed(2)}</span>. Your active token wallet balance is now <span className="text-danger font-mono font-black animate-pulse">₹{(wallet?.remaining_balance || 10.00).toFixed(4)}</span>.
-                </p>
-
-                <div className="space-y-4 bg-well border border-line p-5 rounded-2xl">
-                  <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Adjust Warning Threshold Limit</span>
-                  <div className="flex items-center gap-3 bg-surface border border-line rounded-xl px-4 py-3 focus-within:border-indigo-500 transition-colors">
-                    <input
-                      type="number"
-                      value={reminderLimit === 0 ? '' : reminderLimit}
-                      placeholder="Enter limit value in Rupees"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        onSetReminderLimit(val);
-                      }}
-                      className="w-full bg-transparent text-sm font-mono font-bold text-ink focus:outline-none"
-                    />
-                    <span className="text-xs text-muted font-bold font-mono">₹</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-4 pt-2">
-                  <button
-                    onClick={() => onSetDismissedReminderWarning(true)}
-                    className="flex-1 py-4 bg-raised border border-line hover:bg-raised-hover text-muted hover:text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
-                  >
-                    Dismiss Warning
-                  </button>
-                  <button
-                    onClick={() => {
-                      onSetActiveBillingDetailTab('budget');
-                      onSetDismissedReminderWarning(true);
-                    }}
-                    className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-red-600/20 transition-all hover:scale-105 active:scale-95"
-                  >
-                    Modify Limits
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* THE FREE GIFT LADDER, made visible (2026-07-28). It used to grant silently: credit
               appeared, a ledger row was written that nothing rendered, and no screen said how much was
               left or when the next one arrived. Placed ABOVE the balance cards because it explains the
@@ -276,144 +158,125 @@ export function BillingPanel(props: BillingPanelProps) {
             onClaimed={onFetchWallet}
           />
 
-          {/* iOS / iPhone App Icons Styled Clickable Cards Panel */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          {/*
+            THE THREE WALLET TILES — first thing on the page, and READABLE (admin 2026-09-20:
+            "yeh tile sabse upar aani chahiye … background opposite colour me karo ya text me border
+            banao, kuch bhi karo. bas clear hona chahiye!").
 
-            {/* CARD 1: AVAILABLE CREDIT */}
-            <div
-              data-tour="billing"
-              onClick={() => onSetActiveBillingDetailTab('remaining')}
-              className={cn(
-                "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                activeBillingDetailTab === 'remaining'
-                  ? "bg-gradient-to-br from-indigo-950/80 to-card border-indigo-505 shadow-[0_0_25px_rgba(99,102,241,0.15)] ring-2 ring-indigo-500 text-on-accent"
-                  : "bg-card border-line hover:border-indigo-500/40 hover:bg-raised"
-              )}
-            >
-              <div className="absolute -top-12 -right-12 w-28 h-28 bg-indigo-500/10 rounded-full blur-2xl group-hover:bg-indigo-500/20 transition-all duration-300"></div>
-              <div className="flex justify-between items-start">
-                <div className={cn(
-                  "p-3 rounded-2xl border transition-all duration-300",
-                  activeBillingDetailTab === 'remaining'
-                    ? "bg-indigo-500/20 border-indigo-400/30 text-accent-text"
-                    : "bg-raised border-line text-muted group-hover:text-accent-text group-hover:bg-indigo-500/10"
-                )}>
-                  <Wallet className="w-5 h-5" />
-                </div>
-                <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-indigo-500/10 text-accent-text px-2 py-0.5 rounded border border-indigo-500/20">
-                  ACTIVE TOKENS
-                </span>
-              </div>
-              <div>
-                {/* Billing Phase 2 — token-first: tokens are the wallet's primary unit; ₹ is secondary. */}
-                <p className="text-[10px] text-muted font-extrabold uppercase tracking-widest text-muted">Token Balance</p>
-                <h2 className="text-2xl font-black text-ink tracking-tight mt-1.5 font-mono truncate">
-                  {(wallet?.tokenBalance ?? 0).toLocaleString()} <span className="text-sm font-bold text-muted">tokens</span>
-                </h2>
-                <div className="text-[9px] text-warn font-mono font-bold mt-1 uppercase flex items-center gap-1">
-                  <span>≈ ₹{(wallet?.remaining_balance ?? 0).toFixed(2)} value</span>
-                </div>
-              </div>
-            </div>
+            🔴 WHY THEY WERE UNREADABLE, because the cause is not "the colours were ugly". Every tile
+            was written for a DARK-ONLY app: a `from-emerald-950/50` gradient with `text-on-accent`
+            (white) on top. `text-on-accent` is white by definition — it is the label colour for a
+            SOLID brand fill — and the fill under it here is `to-card`, which on the Light theme is
+            near-white. White on near-white. The same 900/950 tints are what the theme rules already
+            name as a Light defect: the theme cannot lighten a 950 shade.
 
-            {/* CARD 2: PROMOCODE */}
-            <div
-              onClick={() => onSetActiveBillingDetailTab('gift')}
-              className={cn(
-                "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                activeBillingDetailTab === 'gift'
-                  ? "bg-gradient-to-br from-amber-950/40 to-card border-amber-500 shadow-[0_0_25px_rgba(245,158,11,0.15)] ring-2 ring-amber-500 text-on-accent"
-                  : "bg-card border-line hover:border-amber-500/40 hover:bg-raised"
-              )}
-            >
-              <div className="absolute -top-12 -right-12 w-28 h-28 bg-amber-500/5 rounded-full blur-2xl group-hover:bg-amber-500/10 transition-all duration-300"></div>
-              <div className="flex justify-between items-start">
-                <div className={cn(
-                  "p-3 rounded-2xl border transition-all duration-300",
-                  activeBillingDetailTab === 'gift'
-                    ? "bg-amber-500/20 border-amber-400/30 text-warn"
-                    : "bg-raised border-line text-muted group-hover:text-warn group-hover:bg-amber-500/10"
-                )}>
-                  <Gift className="w-5 h-5" />
-                </div>
-                <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-amber-500/10 text-warn px-2 py-0.5 rounded border border-amber-500/20">
-                  PROMO CODE
-                </span>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted font-extrabold uppercase tracking-widest text-muted">Promocode</p>
-                <h2 className="text-2xl font-black text-ink tracking-tight mt-1.5 font-mono truncate">
-                  ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
-                </h2>
-              </div>
-            </div>
+            So the rule applied here, in both directions: a tile is EITHER a solid brand fill with
+            `text-on-accent`, OR a themed surface with themed ink — never one wearing the other's
+            label colour. Buy Tokens is the solid one because it is the only action; the two data
+            tiles keep the card surface and earn their contrast from a 2px hue border and a solid
+            icon chip, so all three stay distinguishable at a glance without any of them shouting.
 
-            {/* CARD 3: BUY TOKENS — promoted to first position (order-first) and always emerald-highlighted
-                so the primary recharge CTA visibly stands out from the muted cards (admin request). */}
+            📐 AND THE LAYOUT WAS HALF THE PROBLEM: four tiles in `grid-cols-2` on a phone gave each
+            one ~160px, which truncated the balance to "89,894 tok…" — the one number the screen
+            exists to show. One per row on a phone, three across from `sm`, and no fixed height, so
+            nothing is ever cut.
+          */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+            {/* TILE 1 — BUY TOKENS. The only action, so the only solid fill. `order-first` keeps it
+                leading on every breakpoint whatever the source order. */}
             <div
+              role="button"
+              tabIndex={0}
               onClick={() => onSetActiveBillingDetailTab('purchase')}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSetActiveBillingDetailTab('purchase'); } }}
               className={cn(
-                "order-first relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border-2 group select-none shadow-[0_0_30px_rgba(16,185,129,0.28)]",
-                activeBillingDetailTab === 'purchase'
-                  ? "bg-gradient-to-br from-emerald-900/60 to-card border-emerald-400 ring-2 ring-emerald-500 text-on-accent"
-                  : "bg-gradient-to-br from-emerald-950/50 to-card border-emerald-500/70 hover:border-emerald-400 hover:shadow-[0_0_42px_rgba(16,185,129,0.42)] text-on-accent"
+                "order-first relative rounded-3xl p-5 min-h-[8.5rem] flex flex-col justify-between cursor-pointer select-none transition-all",
+                "bg-emerald-700 hover:bg-emerald-600 text-on-accent",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
+                activeBillingDetailTab === 'purchase' && "ring-2 ring-emerald-300"
               )}
             >
-              <div className="absolute -top-12 -right-12 w-28 h-28 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-all duration-300"></div>
-              <div className="flex justify-between items-start">
-                <div className="p-3 rounded-2xl border transition-all duration-300 bg-emerald-500/20 border-emerald-400/30 text-success">
+              <div className="flex justify-between items-start gap-2">
+                <div className="p-2.5 rounded-xl bg-emerald-800 text-on-accent">
                   <CreditCard className="w-5 h-5" />
                 </div>
-                <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-emerald-500/20 text-success px-2 py-0.5 rounded border border-emerald-400/40">
-                  ⚡ RECHARGE
+                <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-800 text-on-accent px-2 py-1 rounded-lg">
+                  Recharge
                 </span>
               </div>
-              <div>
-                <p className="text-[10px] text-success font-extrabold uppercase tracking-widest">Buy Tokens</p>
-                <h2 className="text-lg font-black text-ink tracking-tight mt-1.5 font-mono">
-                  100 Tokens/₹
-                </h2>
+              <div className="mt-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-on-accent opacity-90">Buy tokens</p>
+                <p className="text-2xl font-black tracking-tight mt-1 text-on-accent">
+                  100 <span className="text-sm font-bold">tokens / ₹</span>
+                </p>
               </div>
             </div>
 
-            {/* CARD 4: BUDGET & LIMITS */}
+            {/* TILE 2 — TOKEN BALANCE. */}
             <div
-              onClick={() => onSetActiveBillingDetailTab('budget')}
+              data-tour="billing"
+              role="button"
+              tabIndex={0}
+              onClick={() => onSetActiveBillingDetailTab('remaining')}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSetActiveBillingDetailTab('remaining'); } }}
               className={cn(
-                "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                activeBillingDetailTab === 'budget'
-                  ? "bg-gradient-to-br from-violet-950/40 to-card border-violet-500 shadow-[0_0_25px_rgba(139,92,246,0.15)] ring-2 ring-violet-500 text-on-accent"
-                  : "bg-card border-line hover:border-violet-500/40 hover:bg-raised"
+                "relative rounded-3xl p-5 min-h-[8.5rem] flex flex-col justify-between cursor-pointer select-none transition-all",
+                "bg-card border-2 border-indigo-500 hover:bg-raised",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+                activeBillingDetailTab === 'remaining' && "ring-2 ring-indigo-500"
               )}
             >
-              <div className="absolute -top-12 -right-12 w-28 h-28 bg-violet-500/5 rounded-full blur-2xl group-hover:bg-violet-500/10 transition-all duration-300"></div>
-              <div className="flex justify-between items-start">
-                <div className={cn(
-                  "p-3 rounded-2xl border transition-all duration-300",
-                  activeBillingDetailTab === 'budget'
-                    ? "bg-violet-500/20 border-violet-400/30 text-accent-text"
-                    : "bg-raised border-line text-muted group-hover:text-accent-text group-hover:bg-violet-500/10"
-                )}>
-                  <Activity className="w-5 h-5" />
+              <div className="flex justify-between items-start gap-2">
+                <div className="p-2.5 rounded-xl bg-indigo-600 text-on-accent">
+                  <Wallet className="w-5 h-5" />
                 </div>
-                <span className={cn(
-                  "text-[8px] font-black font-mono tracking-widest uppercase px-2 py-0.5 rounded border",
-                  wallet && wallet.remaining_balance <= budgetLimit
-                    ? "bg-red-500/10 text-danger border-red-500/20 animate-pulse"
-                    : "bg-violet-500/10 text-accent-text border-violet-500/20"
-                )}>
-                  {wallet && wallet.remaining_balance <= budgetLimit ? 'FREE MODE ⚠️' : 'LIMIT ACTIVE'}
+                <span className="text-[9px] font-black uppercase tracking-widest bg-indigo-600 text-on-accent px-2 py-1 rounded-lg">
+                  Active
                 </span>
               </div>
-              <div>
-                <p className="text-[10px] text-muted font-extrabold uppercase tracking-widest text-muted">Budget</p>
-                <h2 className="text-[11px] font-black text-ink tracking-tight mt-1.5 font-mono flex flex-wrap gap-1 leading-relaxed">
-                  <span>Rem: ₹{reminderLimit}</span>
-                  <span className="opacity-40">|</span>
-                  <span>Bud: ₹{budgetLimit}</span>
-                </h2>
+              <div className="mt-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted">Token balance</p>
+                {/* No `truncate`: this is the number the page exists to show, and a full-width tile
+                    has room for it. Cutting it was the original complaint. */}
+                <p className="text-2xl font-black text-ink tracking-tight mt-1 break-words">
+                  {(wallet?.tokenBalance ?? 0).toLocaleString()} <span className="text-sm font-bold text-muted">tokens</span>
+                </p>
+                <p className="text-[11px] font-bold text-body mt-0.5">
+                  ≈ ₹{(wallet?.remaining_balance ?? 0).toFixed(2)}
+                </p>
               </div>
             </div>
+
+            {/* TILE 3 — PROMOCODE. */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => onSetActiveBillingDetailTab('gift')}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSetActiveBillingDetailTab('gift'); } }}
+              className={cn(
+                "relative rounded-3xl p-5 min-h-[8.5rem] flex flex-col justify-between cursor-pointer select-none transition-all",
+                "bg-card border-2 border-amber-500 hover:bg-raised",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500",
+                activeBillingDetailTab === 'gift' && "ring-2 ring-amber-500"
+              )}
+            >
+              <div className="flex justify-between items-start gap-2">
+                <div className="p-2.5 rounded-xl bg-amber-600 text-on-accent">
+                  <Gift className="w-5 h-5" />
+                </div>
+                <span className="text-[9px] font-black uppercase tracking-widest bg-amber-600 text-on-accent px-2 py-1 rounded-lg">
+                  Promo
+                </span>
+              </div>
+              <div className="mt-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted">Promocode credit</p>
+                <p className="text-2xl font-black text-ink tracking-tight mt-1 break-words">
+                  ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
           </div>
 
           {/* Integrated Sub-Panel Details Module */}
@@ -430,10 +293,7 @@ export function BillingPanel(props: BillingPanelProps) {
                     <h3 className="text-lg font-black text-ink uppercase tracking-tight mt-2">Active Multi-Model Resource Pool</h3>
                   </div>
                   <button
-                    onClick={() => {
-                      onFetchWallet();
-                      onSetDismissedReminderWarning(false);
-                    }}
+                    onClick={onFetchWallet}
                     disabled={loadingWallet}
                     className="flex items-center gap-2 px-5 py-2.5 bg-raised border border-line hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-ink transition-all active:scale-95"
                   >
@@ -882,156 +742,67 @@ export function BillingPanel(props: BillingPanelProps) {
               )} />
             )}
 
-            {/* DETAILED TAB 4: BUDGET & REMINDER SRE */}
-            {activeBillingDetailTab === 'budget' && (
-              <div className="space-y-6 animate-in fade-in duration-300">
-                <div className="border-b border-line pb-4">
-                  <span className="text-[10px] bg-violet-500/10 border border-violet-500/20 text-accent-text px-3 py-1.5 rounded-xl font-black uppercase tracking-wider font-mono">
-                    Autonomous SRE Controls
-                  </span>
-                  <h3 className="text-xl font-black text-ink uppercase tracking-tight mt-3">Safety & Threshold Limits console</h3>
-                </div>
+            {/* ⛔ THE BUDGET & REMINDER CONSOLE WAS REMOVED HERE (admin 2026-09-20: "yeh budget
+                warning system kaam to karta nahi hai — isko jad se khatam karo").
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-                  <div className="space-y-6 bg-well border border-line p-6 rounded-[2rem]">
+                It was not merely unused, it made a FALSE PROMISE: "at this limit the system
+                automatically switches you to Free-version mode". Both numbers lived in
+                `localStorage` alone (`usePaymentEngine`), reached no server, and were read by no
+                build gate, no affordability check and no debit — so the only thing the floor ever
+                changed was a badge on this same screen. A control that states an outcome and
+                produces none is exactly the "built but not really working" state the second
+                absolute rule forbids.
 
-                    {/* REMINDER SETTING */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-black text-ink uppercase tracking-widest font-mono">a. Reminder warning limit</h4>
-                      <p className="text-xs text-muted">When your credit falls below this limit, you'll see a ⚠️ popup warning. You can change the reminder threshold in settings.</p>
-                      <div className="flex items-center gap-3 bg-surface border border-line rounded-xl px-4 py-3 focus-within:border-violet-500 transition-all">
-                        <input
-                          type="text"
-                          value={tempReminderLimit}
-                          placeholder="Enter warning limit in Rupees"
-                          onChange={(e) => onSetTempReminderLimit(e.target.value)}
-                          className="w-full bg-transparent text-ink font-mono font-bold text-sm focus:outline-none"
-                        />
-                        <span className="text-xs text-muted font-bold font-mono">₹</span>
-                      </div>
-                    </div>
-
-                    {/* BUDGET FLOOR SETTING */}
-                    <div className="space-y-3 pt-4 border-t border-line">
-                      <h4 className="text-xs font-black text-ink uppercase tracking-widest font-mono">b. Last hard budget limit</h4>
-                      <p className="text-xs text-muted">Set your budget floor value. At this limit the system automatically switches you to Free-version mode.</p>
-                      <div className="flex items-center gap-3 bg-surface border border-line rounded-xl px-4 py-3 focus-within:border-violet-500 transition-all">
-                        <input
-                          type="text"
-                          value={tempBudgetLimit}
-                          placeholder="Enter budget limit in Rupees"
-                          onChange={(e) => onSetTempBudgetLimit(e.target.value)}
-                          className="w-full bg-transparent text-ink font-mono font-bold text-sm focus:outline-none"
-                        />
-                        <span className="text-xs text-muted font-bold font-mono">₹</span>
-                      </div>
-                    </div>
-
-                    {/* ACTION SET BUTTON */}
-                    <div className="pt-4 border-t border-line flex flex-col gap-3">
-                      {limitError && (
-                        <div className="text-xs bg-red-500/10 border border-red-500/20 text-danger p-3.5 rounded-xl font-bold font-mono">
-                          ⚠️ {limitError}
-                        </div>
-                      )}
-                      {limitSuccess && (
-                        <div className="text-xs bg-emerald-500/10 border border-emerald-500/20 text-success p-3.5 rounded-xl font-bold font-mono">
-                          ✅ {limitSuccess}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => {
-                          onSetLimitError(null);
-                          onSetLimitSuccess(null);
-                          const rLimit = parseFloat(tempReminderLimit);
-                          const bLimit = parseFloat(tempBudgetLimit);
-                          const available = wallet?.remaining_balance || 10.0;
-
-                          if (isNaN(rLimit) || rLimit < 0) {
-                            onSetLimitError("Please enter a valid Reminder Warning Limit (>= 0).");
-                            return;
-                          }
-                          if (isNaN(bLimit) || bLimit < 0) {
-                            onSetLimitError("Please enter a valid Hard Budget Limit (>= 0).");
-                            return;
-                          }
-
-                          // Rule 2a: always warning limit < hard budget limit
-                          if (rLimit >= bLimit) {
-                            onSetLimitError("Warning limit must be strictly LESS than the hard budget limit (Warning Limit < Hard Budget Limit)!");
-                            return;
-                          }
-
-                          // Rule 2b: always last hard budget limit < total available credit
-                          if (bLimit >= available) {
-                            onSetLimitError(`Hard budget limit (₹${bLimit.toFixed(2)}) must be strictly LESS than your total available credit (₹${available.toFixed(4)})! Please recharge or lower the limit.`);
-                            return;
-                          }
-
-                          onSetReminderLimit(rLimit);
-                          onSetBudgetLimit(bLimit);
-                          onSetLimitSuccess("Success: Threshold limits successfully configured and applied!");
-
-                          setTimeout(() => {
-                            onSetLimitSuccess(null);
-                          }, 4000);
-                        }}
-                        className="w-full py-3 bg-violet-600 hover:bg-violet-500 hover:border-violet-400 border border-violet-700 rounded-xl text-xs font-black uppercase tracking-widest text-on-accent transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-violet-900/20"
-                      >
-                        Set Limits & Save Controls
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Active SRE system status card */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black text-ink uppercase tracking-wider font-mono">System Compliance & VIP Status</h4>
-                    <div className={cn(
-                      "p-6 rounded-[2rem] border relative overflow-hidden transition-all duration-300",
-                      wallet && wallet.remaining_balance <= budgetLimit
-                        ? "border-red-500/20 bg-red-500/5 text-danger"
-                        : "border-emerald-500/20 bg-emerald-500/5 text-success"
-                    )}>
-                      <div className="flex items-center gap-3">
-                        {wallet && wallet.remaining_balance <= budgetLimit ? (
-                          <div className="p-3 bg-red-500/10 rounded-2xl border border-red-500/20 text-danger">
-                            <AlertCircle className="w-5 h-5 animate-pulse" />
-                          </div>
-                        ) : (
-                          <div className="p-3 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 text-success">
-                            <ShieldCheck className="w-5 h-5" />
-                          </div>
-                        )}
-                        <div>
-                          <span className="text-[10px] text-muted font-black uppercase tracking-widest font-mono block">Compliance Status</span>
-                          <span className="text-sm font-black uppercase">
-                            {wallet && wallet.remaining_balance <= budgetLimit ? 'Free version enabled mode' : 'Premium VIP Active'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-muted leading-relaxed mt-4 font-semibold">
-                        {wallet && wallet.remaining_balance <= budgetLimit
-                          ? "Alert: Your active credit has reached your budget limit. Premium high-compute models are paused, and NavBharat AI Free core engine is running for basic queries only."
-                          : `Compliance: Perfect working conditions. Remaining credit exceeds budget limits. Safe computing threshold remains above the set ${budgetLimit} INR constraint.`
-                        }
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-line">
-                  <button
-                    onClick={() => window.open(window.location.href, '_blank')}
-                    className="w-full py-3 bg-indigo-600/10 hover:bg-indigo-600 text-accent-text hover:text-on-accent rounded-xl text-[9px] font-black uppercase tracking-widest transition-all gap-2 flex items-center justify-center"
-                  >
-                    Still having issues? Try Open in New Tab
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            )}
+                ⚠️ WHAT ACTUALLY BOUNDS A NEGATIVE BALANCE, so nobody looks for it here again:
+                `WALLET_OVERDRAFT_FLOOR_INR` (`src/server/lib/walletFloor.ts`, ₹50 by default),
+                applied INSIDE every debit. That is server-side, real, and untouched by this
+                removal — removing a control that enforced nothing cannot have made overdraft
+                worse. */}
           </div>
+
+          {/* 11.3 — Daily Usage Stats. The third tile here used to print a "My Referral Code"
+              invented in localStorage (`NB-XXXXXX`), which the Promo tab then contradicted with a
+              second, different invented code. Both are gone — see the DETAILED TAB 2 note below. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-card border border-line rounded-2xl p-5 space-y-2">
+              <p className="text-[9px] font-black text-faint uppercase tracking-widest">Today's Messages</p>
+              <p className="text-3xl font-black text-ink">{dailyUsage.date === new Date().toDateString() ? dailyUsage.count : 0}</p>
+              <p className="text-[10px] text-success">Unlimited for registered users ✓</p>
+            </div>
+            <div className="bg-card border border-line rounded-2xl p-5 space-y-2">
+              <p className="text-[9px] font-black text-faint uppercase tracking-widest">Today's Builds</p>
+              <p className="text-3xl font-black text-ink">{dailyUsage.date === new Date().toDateString() ? dailyUsage.builds : 0}</p>
+              <p className="text-[10px] text-accent-text">Preview builds today</p>
+            </div>
+          </div>
+
+          {/* Plans (admin 2026-08-06): the whole account story in one card — Hosting plan (₹99
+              Custom Domain, bought from THIS wallet), Database (free, user's own account), Coding
+              (pay-per-use). Self-contained: talks to the ownership-checked wallet routes itself. */}
+          {/* 🔒 APP LOCK — "Subscription & plans" (admin 2026-09-13). This card IS the subscription surface:
+              buying a plan spends the wallet, and the auto-renew switch decides whether it is charged
+              again. Default OFF, so a user who never ticked it sees the card exactly as before. */}
+          <AppLockGate
+            userId={user.uid}
+            area="subscription"
+            embedded
+            render={() => <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />}
+          />
+
+          {/* Phase 4.2 — This Month's AI Cost card */}
+          {monthlyAiCost !== undefined && (
+            <div className="bg-card border border-indigo-500/20 rounded-2xl p-5 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-faint uppercase tracking-widest">This Month's AI Cost</p>
+                <p className="text-2xl font-black text-accent-text font-mono">
+                  ${(monthlyAiCost?.totalCostUsd ?? 0).toFixed(4)}
+                </p>
+                <p className="text-[10px] text-muted">{monthlyAiCost?.totalBuilds ?? 0} Pro builds · {monthlyAiCost?.month ?? new Date().toISOString().slice(0, 7)}</p>
+              </div>
+              <Activity className="w-8 h-8 text-accent-text shrink-0" />
+            </div>
+          )}
+
         </div>
       )}
     </div>

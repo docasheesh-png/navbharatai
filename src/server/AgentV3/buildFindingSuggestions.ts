@@ -114,6 +114,8 @@ const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
+  // Our reviewer produced no verdict — nothing the user can act on, and never a mark against their app.
+  'CHEAP_REVIEW_NOT_RUN',
   'BUILD_ORDER_READ_AS_EDIT', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',
   'PREVIEW_SERVER_RESTARTED',
   // "₹X of engine work produced nothing and was not billed" is our own accounting, not something

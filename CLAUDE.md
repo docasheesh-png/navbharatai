@@ -1013,8 +1013,29 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
-- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19; ⚠️ NOT live — no key
-  yet).** `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
+- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19).** ✅ **LIVE: the admin
+  SET `NEMOTRON_API_KEY` and `AGENTV3_NEMOTRON=weak` in Cloud Run on 2026-09-19**, the same day it
+  merged — so the WEAK tier's judge and plan are the first Nemotron calls this platform has ever made,
+  and Normal/Strong are untouched until that flag names them.
+  ✅ **THE HOST IS SET: `NEMOTRON_BASE_URL = https://integrate.api.nvidia.com/v1`** (admin, 2026-09-19,
+  same day). The key was bought at **`build.nvidia.com`** — NVIDIA's OWN endpoint, not OpenRouter — so
+  the code default (`https://openrouter.ai/api/v1`) was wrong for it and the judge was silently off for
+  the hour between the key being set and this value being added. The model ids need NO override:
+  NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b` too, which is already the code default.
+  ⚠️ **FOR WHOEVER CHANGES HOST LATER:** Together AI is `https://api.together.xyz/v1`, OpenRouter is
+  the unset default. A wrong host does not error anywhere the operator can see — the judge call throws
+  and is swallowed — so **verify POSITIVELY by finding `NEMOTRON` in a Weak build's per-call log,
+  never by the absence of an error.**
+  💳 **IT IS A TRIAL POOL, NOT A PLAN — 1,000 free credits (5,000 with a business email), 40 req/min.**
+  The admin was told and chose it deliberately (*"abhi free wali/low cost wali use karoge"*). Those
+  credits WILL run out — "when", not "if" — and **how many builds they buy is genuinely unknown**:
+  NVIDIA does not publish per-request credit cost, and Ultra is a large model. Do not estimate it.
+  Since 2026-09-19 the day it happens is VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report) instead
+  of appearing as a passing review, which is what made running on a trial acceptable at all.
+  🔴 **AND THAT FAIL-OPEN IS AN OPEN ROOT CAUSE, not a Nemotron problem** — `glm-5.3` has always had
+  it too. A judge that cannot run has approved nothing, and reporting it as a pass is the
+  honesty defect rule 5 forbids. Recorded in `PROGRESS.md`; it needs its own change.
+  `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
   role/tier gate — ⚠️ **unset means the judge and plan are OFF even with a key**; takes `off` as a HARD
   kill that removes the ladder rung too, `on` for every tier, or a comma list of tiers: `weak` / `free`,
   `normal` / `economy`, `strong` / `premium`), `NEMOTRON_BASE_URL` (default OpenRouter),

@@ -70794,6 +70794,141 @@ The class only exists for an app whose UI is written in an Indic script — the 
 for and the one Lovable / Bolt / v0 / Cursor have no reason to check. A user who asked for a Bengali app
 and got a word that reads as nonsense does not file a bug; they leave.
 
+---
+
+## 2026-09-19 — a review that did not happen is not a PASS
+
+The admin put the NVIDIA **trial** key on the Weak judge and, told plainly that credits would one day
+run out, chose it anyway: *"par aap abhi free wali/low cost wali use karoge."* Their call. What that
+makes urgent is the honesty of the judge's own failure reporting, so that is what shipped.
+
+### ⚠️ FIRST, A CORRECTION TO WHAT I TOLD THE ADMIN AN HOUR EARLIER
+
+I reported that `judgeBuild`'s catch returns `{ pass: true, score: 100 }`, and that exhausted credits
+would therefore pass every build silently. **Both halves were wrong**, and the correction matters
+because it changes what to watch for:
+
+- The **throw** path — no key, wrong host, exhausted credits, a 404 on a mis-typed id — already
+  returned `score: 0` with a plain explanation. It was honest.
+- The path that was NOT honest is the **unreadable reply**: `parseJudgeVerdict` returned
+  **`{ pass: true, findings: [], score: 100 }`** — a perfect score, no findings, indistinguishable
+  from a genuinely flawless app.
+
+I had read the two `catch` blocks as one. The real defect is narrower and sharper than the one I
+described, and it is the one a brand-new vendor is most likely to trip.
+
+### 🔑 Why the unreadable reply got more dangerous the same day
+
+The judge is now allowed to be a **reasoning** model (Nemotron Ultra). That class is far likelier to
+wrap its JSON in prose — or emit reasoning and no JSON at all — than the `glm-5.3` this parser was
+written against. A judge that says nothing readable must not score 100.
+
+### What changed, and the one thing that deliberately did NOT
+
+- `reviewDidNotHappen(why)` is **one function** for both not-run paths, so they cannot drift into
+  telling the user different stories — which is exactly what they had already done.
+- `JudgeVerdict.reviewed?: boolean` makes it machine-readable. **Absent ⇒ true**, so an older caller
+  keeps today's meaning.
+- An **empty project** deliberately keeps `reviewed: true`: we DID look, there was nothing to look at.
+  That is a finding about the app, not about our instrument — the opposite of the other two.
+- The report records **`CHEAP_REVIEW_NOT_RUN`** at `warning`, **showing the reason**. It was printing
+  `CHEAP_REVIEW: PASS (score 0)` and *dropping the findings on a pass* (`v.pass ? '' : …`), so the
+  judge's own honest explanation was thrown away at the one place a human looks. A separate CODE, not
+  a reworded message: `CHEAP_REVIEW` is what somebody greps to ask "what did the reviewer say?", and a
+  run where it said nothing must not answer that with a number. Registered in `PROCESS_ONLY_CODES` and
+  `NEVER_SUGGEST` — our instrument, never a mark against the user's app.
+
+🔒 **`pass` STAYS TRUE, and that is the whole reason this was shippable now.** `pass` is the CONTROL
+signal — `nextReviewAction` reads it to spend a repair and then Claude — so flipping it on an
+unreachable judge would escalate **every** build to Claude for the length of a provider outage: a fix
+trading one problem for a dearer one. Control flow untouched; reporting truthful. That split is what
+the fifth absolute rule asks for.
+
+### Still open, and now visible rather than silent
+
+The Weak judge runs on a **trial** key (1,000 free credits, 5,000 with a business email, 40 req/min).
+Those credits will run out — "when", not "if". This change does not prevent that; it makes the day it
+happens appear in the build report as `CHEAP_REVIEW_NOT_RUN` instead of as a passing review. The
+durable fix is a paid plan, which is the admin's decision and is recorded as theirs.
+
+### Evidence
+
+`tests/aReviewThatDidNotHappenIsNotAPass.test.ts` — **19 cases**: six unreadable-reply shapes (empty,
+null, undefined, prose, reasoning-only, malformed JSON) all scoring 0 with an honest finding and still
+not blocking; a real pass and a real fail untouched; the pre-existing "fail with no findings is
+unactionable" rule untouched; four exhausted-trial error shapes; the empty-project carve-out; the
+control-flow lock (`nextReviewAction` unchanged); the absent-flag default; the distinct code at warning
+severity showing the reason; the process-only/never-suggest registration; and white-label cleanliness
+of the wording.
+
+**Proven by reversion, three ways** — each reverted, run, restored: the unreadable reply back to score
+100 (6 cases fail); the report printing PASS again (1 case); `reviewed` defaulting to false instead of
+true (5 cases, i.e. the old-caller guarantee is real).
+## 2026-09-19 — Nemotron is LIVE on Weak, and the fail-open judge is now an open root cause
+
+The admin set **`NEMOTRON_API_KEY`** and **`AGENTV3_NEMOTRON=weak`** in Cloud Run the same day PR #3141
+merged. Recorded here hand-to-hand per the env registry's own rule. So the Weak tier's judge and plan
+are the first Nemotron calls this platform has ever made; Normal and Strong are untouched until that
+flag names them, and Strong's PLAN can never be taken at all (`PLAN_FORBIDDEN_TIERS`).
+
+### ✅ CORRECTED THE SAME DAY: the host WAS NVIDIA's own, and it is now set
+
+The admin sent a screenshot of **`build.nvidia.com`** — so the key is NVIDIA's own endpoint, and the
+OpenRouter default this code ships with was wrong for it. They then set
+**`NEMOTRON_BASE_URL = https://integrate.api.nvidia.com/v1`**, recorded here hand-to-hand.
+
+**So the judge was silently off for about an hour** — between the key landing and the host being
+corrected — and that hour is exactly the failure mode described below. Nothing reported it; the only
+reason it was caught is that the host was asked about rather than assumed. The model ids needed no
+override: NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b`, the same as the code default.
+
+⚠️ **AND THE ADMIN'S WORRY IS WORTH RECORDING, because it came from my own unclear writing.** They
+read the trial-credits caveat as *"the key is useless, where should I buy a real one?"* It was neither:
+the key was fine and NVIDIA genuinely is the cheap option they had seen advertised — the only caveat
+was that a trial pool is finite. A caveat stated without its scope reads as a rejection.
+
+### The failure mode that hour demonstrated
+
+`NEMOTRON_BASE_URL` was left unset, so the OpenRouter default is in force. That is right for an
+OpenRouter key and WRONG for one bought at `build.nvidia.com` (which needs
+`https://integrate.api.nvidia.com/v1`) or Together AI (`https://api.together.xyz/v1`).
+
+**Why that is worth a PROGRESS entry rather than a shrug:** with the wrong host the judge call throws,
+and `judgeBuild` catches it and returns `{ pass: true, findings: [], score: 100 }`. So a mis-set host
+does not produce an error anywhere — it **switches the quality gate off and passes every build.**
+Verification therefore has to be positive: find `NEMOTRON` in a Weak build's per-call log. The absence
+of an error proves nothing.
+
+### 🔴 OPEN ROOT CAUSE (rule 6) — a judge that could not RUN is reported as a PASS
+
+Found while answering *"cloud run me kya dalu?"*, by reading the judge's failure path rather than
+assuming it. `BuildJudge.ts` has two of these:
+
+```
+line  60:  } catch { /* fall through to the safe default */ }
+line  62:  return { pass: true, findings: [], score: 100 };
+line 101:  } catch {   // "A judge that could not RUN has not approved anything either"
+```
+
+The comment at 101 states the correct principle and the code does the opposite of it: an unreachable
+judge, a revoked key, a 404 on a mis-typed model id and a genuinely clean app all produce the identical
+`pass: true, score: 100`.
+
+**This is NOT introduced by Nemotron — `glm-5.3` has had it all along**, and it is the exact shape the
+fifth absolute rule names: *"if the bug produced a wrong verdict (fake success …), fixing the code is
+not enough — fix the reporting so the system tells the truth about that state forever after."* A build
+whose judge never ran is not a judged build.
+
+⚠️ **Deliberately NOT fixed in the same change as the key being recorded.** The honest fix is a third
+outcome — "the judge could not run" as distinct from pass and fail — and every reader of that verdict
+(the escalation loop, the release gate, the build report, the user's summary) has to be taught what to
+do with it. Changing `pass: true` to `pass: false` on its own would make an outage escalate every build
+to Claude, which is a fix trading one problem for a dearer one. It needs its own change and its own
+gate run.
+
+**What makes it urgent now rather than theoretical:** until today the judge was one vendor whose key
+has been set for months. From today it is a vendor whose key was set an hour ago, whose host may be
+wrong, and against which not one call had ever been made.
 ## 2026-09-20 — The Free chat's Mode picker reaches the desktop (branch `claude/vigilant-feynman-9aobjz`)
 
 **Admin:** *"In NavBharatAI Free the mode-selection option is visible on mobile but missing from the desktop
@@ -70950,6 +71085,120 @@ REWRITTEN and the old assertion quoted in place so the change of behaviour is le
 - **This is a FRONTEND change as well as a server one**, so installed Android/iOS users keep the grey
   wall until a fresh `.aab`/`.ipa` — and per the standing instruction that happens only when the admin
   asks. The server half (not sending the bytes) reaches them immediately.
+## 2026-09-20 — A REPORT MUST SAY WHAT IT NO LONGER CONTAINS (the autopsy's own instrument was lying)
+
+**Admin:** *"pahle autopsy ko fix karo, yeh problem wapas na aye. kisi bhi other apps bannae me."*
+
+### The bug
+
+A build report was capped TWICE on its way to the admin panel, and **neither cap left a trace**:
+
+| channel | the build records | the recorder kept | Firestore kept |
+|---|---|---|---|
+| `llmCalls` | unbounded | 300 | **40** |
+| `commands` | unbounded | 300 | **40** |
+| `issues` | unbounded | 2000 *(declared)* | 500 |
+| `errors` | unbounded | 200 | 50 |
+
+So a build that made 312 model calls was stored with 40 of them and no statement anywhere that 272
+were gone. A reader — the admin, or Claude performing the autopsy the fifth absolute rule makes
+mandatory — opens it, counts forty, and says "this build made forty calls". The number is false and
+nothing in the document can contradict it. Past the 900 KB emergency threshold the channels were
+removed ENTIRELY, and `llmCalls: undefined` then read exactly like a build that never called a model.
+
+🔴 **The fifth absolute rule's own Step 1 opens: *"Read the WHOLE report end to end — never a
+truncated tail."* The storage layer was quietly making that impossible.** The instrument every
+autopsy depends on was the thing that could not be trusted.
+
+🔑 **AN ABSENT MEASUREMENT IS NOT A MEASUREMENT OF ZERO.** This repo has now paid for that exact
+confusion three times: `liveTokens` printing `0 in · 0 out` for an unsettled build (autopsy
+`f04421ef`, misread by the person who wrote the renderer); `JOURNEY_PASSED` recorded on a run that
+launched no browser (2026-09-17); and this. The first two were fixed where they were found. This one
+is fixed as a CLASS.
+
+### Why a patch at the store would have been a WRONG fix
+
+**The bug was two layers deep, and the upper layer was worse.** `recordCommand` / `recordLlmCall` /
+`recordFullError` discarded past their caps with **no counter at all**, so the true total was not
+merely unreported — it was *unknowable*. Counting only at the store would have produced a confident
+"40 of 300" for a build that really made 500. The count had to start where the entries arrive.
+
+**And the last-resort drop existed in FOUR identical copies** — `saveDiagnostics`,
+`saveDiagnosticsHistory` and their two per-user siblings each carried their own
+`{ ...stored, commands: undefined, llmCalls: undefined, issues: slice(-200) }`. A fix written at one
+would have been forgotten at the fourth: the drifted-copy class this repo has already paid for with
+`safeRelPath` (four copies) and the zombie-write lane (fixed in one of two lanes, failing a
+28-minute build two months later). Here it would have been worse than a drift — three of four paths
+would have kept lying about the same build.
+
+### The fix (`reportTruncation.ts`, pure)
+
+**Trimming and declaring are now ONE operation.** `trimChannel` returns the loss *with* the list, so
+a caller cannot take the shorter list without the fact; `dropChannel` records the count it destroys.
+The four emergency copies are one exported function, `dropHeavyChannelsForStorage`, and a test
+asserts no save path still drops a channel by hand — so a fifth save path added later must reach for
+the function or fail CI.
+
+🔑 **The merge rule is the correctness of the whole thing.** A report is trimmed repeatedly and each
+pass sees only what the last one left, so a naive second pass records `kept: 0, total: 40` and
+destroys the one number that mattered. `mergeTruncation` keeps the **earliest total** and the
+**latest kept**: recorder 300-of-500 → storage 40 → emergency 0 ends as **`0 of 500`**, not `0 of 40`.
+
+🔒 **THREE ANSWERS, NEVER TWO.** `complete: true` is written even when nothing was lost. Without it,
+"no field" would mean both *"nothing was lost"* and *"this report predates the check"* — the very
+ambiguity being removed. A legacy report reads **`unknown`** and the panel says *"Completeness not
+recorded"*, never *"complete"*. Those are different claims and only one of them is verified.
+
+**The deliberate drops are declared too.** `compactReportForRecord` omits the forensic channels on
+purpose (they live in `workspace_diagnostics_v3`), but a reader holding only that copy could not tell
+"omitted by design" from "the build made none". It now says how many it dropped and, via
+`fullerCopy`, where the whole record is.
+
+**The admin can SEE it** — a field nobody reads is half a fix. The report panel shows a red chip
+*"⚠ Part of this report was dropped"* with the sentence (*"kept 40 of 312 model calls…"*), or a
+grey *"Completeness not recorded"* for a legacy report, and nothing at all when the report is whole.
+
+### Verified by reversion, five ways
+
+Each of these fails exactly the case it should, and only that case: the recorder stops counting; one
+save path drops by hand again; the merge forgets the earliest total; a legacy report is reported as
+complete; the panel chip is removed.
+
+### Two cousins fixed in the same change (rule 3 — hunt the siblings)
+
+**The cost ledger was forced into a GUESS by the missing field, and the guess had a real false
+positive.** `realCostFromCalls` marked a log as a lower bound when `calls.length >= 40` — so a build
+that genuinely made exactly forty calls had its correct cost dropped from the admin's measured
+sample and its margin shown as null. It reads the report's own statement now, keeping the length
+heuristic only for legacy records (the margin-safe direction).
+
+🔴 **And my own fix had this exact bug inside it, caught by my own new test:** the first draft read
+only `channels.llmCalls`, found nothing on a COMPLETE report, and fell through to the guess.
+`complete: true` is a positive statement that nothing was lost, not an absence — so
+`channelWasTruncated` returns the same three answers `readCompleteness` does, and `undefined` (legacy)
+never collapses to `false`.
+
+**Two neighbouring tests were anchored on POSITIONS and had to be re-anchored** — the third and
+fourth instance of that class this month. `adminReportParts` scanned a fixed `slice(rowAt, rowAt +
+6200)` window and reported "Mark fixed" missing from a header where it was present and correct, once
+a chip was added inside the row; it is bounded by the row's own closing `Close</button>` now.
+`buildCostLedger` asserted the literal string `lastN(report.llmCalls, …)`; it asserts the shared
+CONSTANT, which is what it was ever about.
+
+⚠️ **And one of MY OWN new assertions was the same mistake**, found by the gate rather than by me: it
+checked that `'Part of this report was dropped'` appeared *somewhere in* a 5,000-line file, and passed
+while the panel was genuinely broken — a bad edit had pasted those words into an unrelated `useState`
+declaration two hundred lines away. It asserts the chip's own ternary now. A substring search over a
+whole file is not a test of the thing it names.
+
+### Still open (rule 6) — this fixed the honesty, not the ceiling
+
+The caps themselves are unchanged and still lose real forensic detail; what changed is that the loss
+is now *stated* instead of silent. Whether 40 stored model calls is the right number is a separate
+question, and the honest answer needs the field shipped here first: **watch how often real reports
+carry `truncation.complete: false`, and which channel dominates.** Raising a cap before that number
+exists would be guessing at the 900 KB ceiling. The fuller cure is the human-readable report layer
+(bug B of the 2026-09-20 audit), which can summarise a channel instead of storing it whole.
 ## 2026-09-20 — 🔴 AUTOPSY `31dc61fd` (UPSC app): the platform's own browser had NEVER run
 
 **Branch `claude/the-platforms-own-browser-never-ran`.** 15.9 min · 70 model calls · 2.6M input tokens ·
@@ -71072,8 +71321,134 @@ is a promise.
 ⚠️ **Open:** how often a build actually carries todos is unmeasured, and that decides how often the
 number glides rather than jumps. The first real builds answer it — the same evidence `LADDER_DEPTH` is
 waiting on.
+## 2026-09-20 — THE SIBLING HUNT BEHIND #3151: 37 VIEWS AUDITED, ONE MORE WAS CLIPPING (PR #3152)
+
+#3151 fixed App Mart's scrolling. Rule 3 says the root cause almost always lives in more than one
+place, so the class was stated and then hunted rather than assumed unique.
+
+**THE CLASS:** `ViewPanels.tsx` renders **all 37** of its views inside
+`<div className="flex-1 h-full overflow-hidden">`. That box has a definite height, it is
+`display: block` (so `flex-1` on a child does nothing — `flex-1` styles a flex CHILD, it does not
+make an element a flex CONTAINER), and it **clips**. It therefore hands scrolling DOWNWARD: every
+view must bound its own height and own its own scroller, or its content past the fold is cut off
+with no scrollbar anywhere.
+
+**THE AUDIT — all 37 checked, by hand where the detector could not be trusted:**
+- **2** views are scrolled by the wrapper itself (`domain`, `sharereview` — their wrappers carry
+  `overflow-y-auto` / `overflow-auto`), so bounding is the wrapper's job. Correct.
+- **34** bound themselves correctly with `h-full` or `height: '100%'`. The convention is solid — which
+  is why App Mart's break (introduced the day before by the pull-to-refresh wrapper) stood out at all.
+- **1 was genuinely broken: `DarkModeGenerator`.** Its root carried **`minHeight: '100%'`** — a FLOOR,
+  not a ceiling — and there is **no vertical `overflow` anywhere in the file** (every `overflow` in it
+  is `hidden` on a card, or `overflowX` on a code block). The box grew with its content, so it was
+  never taller than itself, nothing could scroll, and the wrapper cut off the rest.
+
+**MEASURED, not reasoned about** (Chromium, the real chain reproduced class-for-class, 390px and
+1440px, 40 cards):
+
+| | scroller vs content | can scroll | scrollTop reached | last card reachable |
+|---|---|---|---|---|
+| before | 4317 vs 4317 *(identical)* | **false** | **0** | **false** — y≈4231 in a 757px viewport |
+| after | 701 vs 4317 | true | 3616 | true |
+
+No second scrollbar and no horizontal overflow in either, at both widths.
+
+**Fixed:** `height: '100%'` + `overflowY: 'auto'` + `overscrollBehavior: 'contain'` — exactly what the
+other 34 do, with the overscroll matching the three views that already scroll (VoiceToApp, APKBuilder,
+NavAppStore). One consumer, inside the clipping wrapper, so the blast radius is that one screen.
+
+⚠️ **A STATIC SWEEP OVER ALL 37 WAS WRITTEN AND THROWN AWAY, and that is worth recording rather than
+hiding.** Across 37 heterogeneous components — Tailwind roots, inline `style` objects, a style const
+declared elsewhere, helper components defined both before and after the export — every variant of the
+detector produced false results in BOTH directions: one pass cleared `DarkModeGenerator` (the real
+defect) and another flagged `APITester` and `ProjectInsightsPanel`, which are correct. **A guard that
+cannot be trusted in either direction is worse than no guard** — it teaches people to edit the test.
+So `tests/everyViewOwnsItsScroll.test.ts` locks what was actually measured (the wrapper's premise, and
+this one root), and the CLASS is recorded here, where a reader meets it. Reversion-proven: restoring
+`minHeight` fails 2 of the 6 cases.
+
+⚠️ **Honest limit, same as #3151:** vitest runs in `node`, so no test in this repo can measure a
+scrollbar. The browser run above is the evidence; the test is the contract.
 ---
 
+## 2026-09-20 — App Lock: ONE ACCOUNT'S UNLOCK IS NOT ANOTHER'S (audit + root-cause fix)
+
+**The ask** was a per-OPTION PIN unlock: *"unlocking one option unlocks all options"*, to be fixed by
+replacing a global `isUnlocked` boolean with per-option state and an option-scoped `verifyPin(optionId,
+pin)`.
+
+🔴 **THAT BUG DOES NOT EXIST IN THIS APP, and it is recorded here so nobody re-opens it from the same
+spec.** The audit read the whole surface — `src/lib/appLock.ts`, `src/lib/appLockAreas.ts`,
+`src/components/AppLockGate.tsx`, `src/components/settings/AppLockSettings.tsx`,
+`src/server/lib/vaultPin.ts`, `vaultTicket.ts`, `appLockEnforce.ts`, `appLockStore.ts` — and found:
+
+- There is **no global `isUnlocked` boolean, no `unlockAll()`, and no per-option PIN.** There is ONE
+  PIN and ONE short-lived server-signed ticket.
+- One unlock opening every locked area is the **documented, deliberate design**, stated as load-bearing
+  decision #1 in `appLock.ts` (*"If each gate held its own ticket… that would be friction buying
+  nothing"*) and stated **to the user on screen**: *"One unlock opens every locked screen for five
+  minutes."*
+- The server ticket payload is `${uid}|${method}|${exp}` (`vaultTicket.ts`) — **no area, by
+  construction.** Per-option scoping would have to be built server-side, not corrected client-side.
+
+**Why it was not built anyway (external-suggestion rule + rule 3):** there is ONE secret. Scoping a
+single shared PIN per option buys no security — an attacker who knows the PIN has every area regardless
+— while charging a user who locked three screens three PIN entries per five minutes. The admin's own
+instruction shaping this feature was *"bas PIN banao … simple rahne do"*.
+
+### But the audit found TWO REAL defects on the same invariant — the per-USER axis, not per-option
+
+Both **measured with a probe against the live module** before a line was changed:
+
+- **(1) The status cache was keyed by nothing.** `appLockStatus('userA')` cached `{hasPin:false}`; then
+  `appLockStatus('userB')` — really `{hasPin:true, areas:['settings','billing','code_studio']}` —
+  returned **A's answer and never asked the server**. Every gate then read `shouldGate(area, statusA)`
+  ⇒ false, so **B's locked screens rendered with no PIN.**
+- **(2) The ticket was not bound to the account that earned it.** After `unlockWithPin('userA', …)`,
+  `currentUnlock()` returned A's live ticket while B was signed in, and `unlockHeaders()` put
+  `x-vault-unlock: <A's ticket>` on B's requests.
+
+⚠️ **HONEST SCOPE:** the server binds a ticket to a uid (`verifyUnlockTicket(ticket, uid, …)`), so A's
+ticket could never decrypt B's API keys or authorise B's recharge — **the money and vault paths held.**
+What leaked was the client-side screen lock and the lock configuration shown, which is the whole of the
+protection for five of the seven areas.
+
+🔎 **WHY IT SURVIVED: the protection was ACCIDENTAL.** `performSignOut` reloads the page as its last
+step, and a reload wipes module state. `resetAppLock()` said in its own docstring *"Called on SIGN-OUT"*
+and was **called from nowhere** — an unfulfilled contract nothing could fail on. Exactly one sign-out
+skips the reload: `signInAgain()` in `AppLockGate.tsx`, the no-email account's raw `signOut(auth)`.
+
+### The fix — at the class, not the instance (rule 4 step 2)
+
+Adding `resetAppLock()` to that one sign-out would have fixed the instance and left the class: the next
+path that changes the user without a reload re-opens it, silently, with every test green. So the state
+now **records whose it is**, and the boundary lives in the three readers:
+
+- `UnlockState` carries `userId`; `currentUnlock(forUserId?)` returns null across accounts.
+- The status cache carries `statusUserId`; `cachedAppLockStatus(forUserId?)` returns null across accounts.
+- **`appLockStatus(userId)` hard-resets on a user change** — before serving a cache, before joining an
+  in-flight promise, before the request — and it is the one point every gate, row and screen already
+  passes through. A user switch *mid-request* cannot install the left account's answer either.
+- `signInAgain()` calls `resetAppLock()` before `signOut(auth)` (belt and braces on top).
+- One predicate, `sameAccount`, so "the same user" cannot come to mean two things in two places.
+
+⚠️ **This does NOT reverse the documented fail-open-on-network-error trade.** That answers *"we could
+not reach the server — what now?"* and still renders. This answers *"the state I hold belongs to
+somebody else — is it an answer about this user?"*, which it is not. Unknown ⇒ locked applies here,
+where nothing is traded away: the gate simply asks about the user actually signed in. A caller that
+names no user keeps its old behaviour exactly, so the money routes are untouched.
+
+**Test-locked and REVERSION-PROVEN in all three halves** in `tests/oneAccountsUnlockIsNotAnothers.test.ts`
+(12 cases): un-keying the cache fails 6, un-binding the ticket fails 2, dropping the sign-out reset
+fails 1. `tests/secretVaultDoor.test.ts`'s ticket assertion was **repointed, not deleted** — the rule it
+guards got stricter, not different.
+
+🔴 **OPEN ROOT CAUSE (rule 6) — for the admin, not to be built unilaterally.** A ticket authorises
+**money spending and key decryption regardless of which screen the PIN was typed at**: unlocking
+Settings silently authorises a wallet recharge for five minutes. That IS `unlock(X) → access(Y)` on the
+axis that matters, and it is the one part of the original request worth taking seriously. Narrowing it
+means putting the area on the server-signed ticket and touching the money routes and the vault —
+safeguard #3 territory, and it partly reverses the admin's "one simple PIN". Recorded, not shipped.
 ## 2026-09-20 — A clean review must not read as a complaint (autopsy 31dc61fd, item 1 of 6)
 
 **Branch `claude/a-clean-review-must-not-read-as-a-complaint`.** What a real user saw, verbatim from
@@ -71119,3 +71494,66 @@ Under a heading that invites *"reply fix these"*, that reads as the engine break
 report and a **precision lock** of four real findings phrased with "no". **Reversion-proven four
 ways**: the clean-bill rule removed → 6 red · the whitespace collapse removed → 1 red · the hard slice
 restored → 1 red · **the rule widened to bare `^no` → 4 red** (it swallows real findings).
+
+---
+
+## 2026-09-20 — An untouched scaffold is not a finished app (autopsy 31dc61fd, item 2 of 6)
+
+**Branch `claude/an-untouched-scaffold-is-not-a-finished-app`.** Five minutes into the UPSC build the
+platform told the model, in its own words:
+
+```
+[BUILD CHECKPOINT] An automatic check of the whole project says the app is complete and healthy
+— 100/100, no blockers. If everything the user asked for is present, STOP HERE.
+```
+
+and narrated **"✅ The app looks complete — wrapping up."** The workspace at that moment, from the
+build's own `cat src/App.tsx`:
+
+```
+function App() { return (<div><h1>Hello World</h1></div>); }
+```
+
+The model **disbelieved us**, ran `find src -type f`, wrote *"The workspace still only has the scaffold
+— I need to build the actual UPSC app"*, and went on to build it. **A model rescuing a platform signal
+is a red flag, not a self-heal** (the 50/50 law): the next model may simply obey and hand over a Hello
+World.
+
+### Why the score was 100 — and why that is not a bug in the scorer
+
+Readiness measures **code health**: unresolved imports, security findings, a missing entry point. A
+pristine scaffold has none of those. It is healthy. It is also empty.
+
+🔎 **This is EXACTLY the class `BuildJudge.ts` already names**, in a fix made on 2026-08-06 for the
+JUDGE: *"AN EMPTY WORKSPACE IS NOT A PERFECT ONE … every analyser here treats 'no files' as 'nothing
+wrong' … for the JUDGE, whose whole output is a quality VERDICT, it is a false success of the worst
+kind: the emptier the app, the better it scored."* **The judge was fixed. The readiness gate — which
+feeds the done signal — was never hunted.** Sibling closed (rule 3).
+
+⚠️ **And a file COUNT would not have caught it.** `producingToolUses` and `hasExistingFiles` both said
+"yes, something was built": the fast lane had salvaged a real 893-line `src/index.css` before dying.
+One real file plus an untouched entry point is not an app — so the question is about the **entry**, not
+the count.
+
+### The fix
+
+`stillTheStarterApp.ts` (new, pure) asks one narrow question and `assessBuildReadiness` adds the answer
+as a **BLOCKER**. Routed through `blockers` deliberately: `appIsDone` already refuses any report
+carrying one, so the done signal, the weak checkpoint and every other reader inherit it at once rather
+than each learning the same fact separately and drifting.
+
+- **Exact match on the seeded template**, whitespace-insensitive — never a heuristic like "contains
+  Hello World", which a real app may legitimately. The comparison imports the SAME `appTsx` the
+  scaffold seeds, so the two cannot drift.
+- **Fails OPEN**: an entry we cannot read leaves the report untouched. *"We could not look"* is not
+  *"the app is a scaffold"*, and inventing a blocker from an unreadable file would fail real builds on
+  our own trouble.
+
+`tests/anUntouchedScaffoldIsNotAFinishedApp.test.ts` — 16 cases with a **precision lock** (a real app,
+an app that greets the world, the template plus one import, the template with its heading changed).
+**Reversion-proven four ways**: the blocker never produced → 1 red · downgraded to a warning → 1 red ·
+readiness no longer running it → 1 red · **the match loosened to a "Hello World" heuristic → 2 red**.
+
+⚠️ **Not fixed here:** `READY_BEFORE_END` measured 701s "after ready" from that bogus point, so its
+number in past reports is polluted. From now on it cannot start from a scaffold — but the historical
+figures should not be trusted.

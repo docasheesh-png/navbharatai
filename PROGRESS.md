@@ -71048,6 +71048,84 @@ an un-hydrated SPA shell.
 
 ---
 
+## 2026-09-20 — App Lock: ONE ACCOUNT'S UNLOCK IS NOT ANOTHER'S (audit + root-cause fix)
+
+**The ask** was a per-OPTION PIN unlock: *"unlocking one option unlocks all options"*, to be fixed by
+replacing a global `isUnlocked` boolean with per-option state and an option-scoped `verifyPin(optionId,
+pin)`.
+
+🔴 **THAT BUG DOES NOT EXIST IN THIS APP, and it is recorded here so nobody re-opens it from the same
+spec.** The audit read the whole surface — `src/lib/appLock.ts`, `src/lib/appLockAreas.ts`,
+`src/components/AppLockGate.tsx`, `src/components/settings/AppLockSettings.tsx`,
+`src/server/lib/vaultPin.ts`, `vaultTicket.ts`, `appLockEnforce.ts`, `appLockStore.ts` — and found:
+
+- There is **no global `isUnlocked` boolean, no `unlockAll()`, and no per-option PIN.** There is ONE
+  PIN and ONE short-lived server-signed ticket.
+- One unlock opening every locked area is the **documented, deliberate design**, stated as load-bearing
+  decision #1 in `appLock.ts` (*"If each gate held its own ticket… that would be friction buying
+  nothing"*) and stated **to the user on screen**: *"One unlock opens every locked screen for five
+  minutes."*
+- The server ticket payload is `${uid}|${method}|${exp}` (`vaultTicket.ts`) — **no area, by
+  construction.** Per-option scoping would have to be built server-side, not corrected client-side.
+
+**Why it was not built anyway (external-suggestion rule + rule 3):** there is ONE secret. Scoping a
+single shared PIN per option buys no security — an attacker who knows the PIN has every area regardless
+— while charging a user who locked three screens three PIN entries per five minutes. The admin's own
+instruction shaping this feature was *"bas PIN banao … simple rahne do"*.
+
+### But the audit found TWO REAL defects on the same invariant — the per-USER axis, not per-option
+
+Both **measured with a probe against the live module** before a line was changed:
+
+- **(1) The status cache was keyed by nothing.** `appLockStatus('userA')` cached `{hasPin:false}`; then
+  `appLockStatus('userB')` — really `{hasPin:true, areas:['settings','billing','code_studio']}` —
+  returned **A's answer and never asked the server**. Every gate then read `shouldGate(area, statusA)`
+  ⇒ false, so **B's locked screens rendered with no PIN.**
+- **(2) The ticket was not bound to the account that earned it.** After `unlockWithPin('userA', …)`,
+  `currentUnlock()` returned A's live ticket while B was signed in, and `unlockHeaders()` put
+  `x-vault-unlock: <A's ticket>` on B's requests.
+
+⚠️ **HONEST SCOPE:** the server binds a ticket to a uid (`verifyUnlockTicket(ticket, uid, …)`), so A's
+ticket could never decrypt B's API keys or authorise B's recharge — **the money and vault paths held.**
+What leaked was the client-side screen lock and the lock configuration shown, which is the whole of the
+protection for five of the seven areas.
+
+🔎 **WHY IT SURVIVED: the protection was ACCIDENTAL.** `performSignOut` reloads the page as its last
+step, and a reload wipes module state. `resetAppLock()` said in its own docstring *"Called on SIGN-OUT"*
+and was **called from nowhere** — an unfulfilled contract nothing could fail on. Exactly one sign-out
+skips the reload: `signInAgain()` in `AppLockGate.tsx`, the no-email account's raw `signOut(auth)`.
+
+### The fix — at the class, not the instance (rule 4 step 2)
+
+Adding `resetAppLock()` to that one sign-out would have fixed the instance and left the class: the next
+path that changes the user without a reload re-opens it, silently, with every test green. So the state
+now **records whose it is**, and the boundary lives in the three readers:
+
+- `UnlockState` carries `userId`; `currentUnlock(forUserId?)` returns null across accounts.
+- The status cache carries `statusUserId`; `cachedAppLockStatus(forUserId?)` returns null across accounts.
+- **`appLockStatus(userId)` hard-resets on a user change** — before serving a cache, before joining an
+  in-flight promise, before the request — and it is the one point every gate, row and screen already
+  passes through. A user switch *mid-request* cannot install the left account's answer either.
+- `signInAgain()` calls `resetAppLock()` before `signOut(auth)` (belt and braces on top).
+- One predicate, `sameAccount`, so "the same user" cannot come to mean two things in two places.
+
+⚠️ **This does NOT reverse the documented fail-open-on-network-error trade.** That answers *"we could
+not reach the server — what now?"* and still renders. This answers *"the state I hold belongs to
+somebody else — is it an answer about this user?"*, which it is not. Unknown ⇒ locked applies here,
+where nothing is traded away: the gate simply asks about the user actually signed in. A caller that
+names no user keeps its old behaviour exactly, so the money routes are untouched.
+
+**Test-locked and REVERSION-PROVEN in all three halves** in `tests/oneAccountsUnlockIsNotAnothers.test.ts`
+(12 cases): un-keying the cache fails 6, un-binding the ticket fails 2, dropping the sign-out reset
+fails 1. `tests/secretVaultDoor.test.ts`'s ticket assertion was **repointed, not deleted** — the rule it
+guards got stricter, not different.
+
+🔴 **OPEN ROOT CAUSE (rule 6) — for the admin, not to be built unilaterally.** A ticket authorises
+**money spending and key decryption regardless of which screen the PIN was typed at**: unlocking
+Settings silently authorises a wallet recharge for five minutes. That IS `unlock(X) → access(Y)` on the
+axis that matters, and it is the one part of the original request worth taking seriously. Narrowing it
+means putting the area on the server-signed ticket and touching the money routes and the vault —
+safeguard #3 territory, and it partly reverses the admin's "one simple PIN". Recorded, not shipped.
 ## 2026-09-20 — A clean review must not read as a complaint (autopsy 31dc61fd, item 1 of 6)
 
 **Branch `claude/a-clean-review-must-not-read-as-a-complaint`.** What a real user saw, verbatim from

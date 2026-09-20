@@ -1026,6 +1026,27 @@ the code (it is actually read somewhere) on 2026-07-11.
   the unset default. A wrong host does not error anywhere the operator can see — the judge call throws
   and is swallowed — so **verify POSITIVELY by finding `NEMOTRON` in a Weak build's per-call log,
   never by the absence of an error.**
+  🔴 **THE MODEL ID IS AN OPEN CONTRADICTION INSIDE THIS REPO, AND IT IS THE FIRST THING TO CHECK IF
+  NEMOTRON "DOES NOT WORK" (admin 2026-09-20: *"nvidia nahi chal rah hai … kya problem hai? kaha?"*).**
+  The line above says NVIDIA spells the ids the same as OpenRouter, so no override is needed.
+  **`nemotron.ts`'s own docblock says the opposite, in as many words:** *"a Nemotron id is spelled
+  DIFFERENTLY by each host that serves it (OpenRouter and Together use the `nvidia/…` form, **Bedrock
+  and NVIDIA's own endpoint do not**)"*. Both cannot be true, and the key was bought at
+  `build.nvidia.com` — NVIDIA's own endpoint. If the code's comment is the right one, every judge and
+  plan call is a **404 on a model name**, silently. ⚠️ **Nobody has verified it against the live
+  endpoint**: a Claude session cannot (outbound to `integrate.api.nvidia.com` is refused by the
+  execution environment's egress policy — tried 2026-09-20, `connect_rejected`), and the admin's
+  console is the only place that can. **`NEMOTRON_ULTRA_MODEL` / `NEMOTRON_SUPER_MODEL` are the
+  no-deploy correction** the moment NVIDIA's own model list gives the real spelling.
+  ⚠️ **AND THE SECOND CANDIDATE COSTS CREDITS WHILE LOOKING IDENTICAL:** Nemotron 3 is a REASONING
+  model and the judge is called with `maxTokens: 1500`. This repo has already been bitten twice by
+  exactly that (`glm-5.3`, `kimi-k2.7-code` — both in `MEASURED_ALWAYS_REASONS`): the thinking
+  consumes the whole output allowance and the content comes back EMPTY. A 404 spends nothing; an
+  empty answer spends the call. **NVIDIA's own usage dashboard separates the two in one glance** —
+  requests arriving and succeeding ⇒ the empty-answer case; arriving and erroring ⇒ the id or the
+  key; none arriving ⇒ our own gating.
+  ✅ **WHAT WAS FIXED 2026-09-20 (PR after this note): the platform can now SAY which.** Until then it
+  structurally could not — see the judge-chain entry below.
   💳 **IT IS A TRIAL POOL, NOT A PLAN — 1,000 free credits (5,000 with a business email), 40 req/min.**
   The admin was told and chose it deliberately (*"abhi free wali/low cost wali use karoge"*). Those
   credits WILL run out — "when", not "if" — and **how many builds they buy is genuinely unknown**:
@@ -2599,6 +2620,46 @@ the flag entries above promise.
   `tests/theCeilingWasNeverThePublishes.test.ts`. **What to watch:** the Publish load tile should stop
   rising as builds complete.
 
+- **⚖️ THE JUDGE'S FALL-THROUGH WAS GUARDING THE WRONG STATEMENT (autopsy 2026-09-20; no flag, on by
+  construction).** Admin: *"nvidia nahi chal rah hai. jabki woh free hai. dekho kya problem hai.
+  kaha?"* — and the honest answer was that **nothing in this platform could say where.**
+  🔴 **TWO DEFECTS, both verified by reading the code rather than from a report.** (1) `selectReviewJudge`
+  wrapped `new OpenAI({…})` in a `try`, with a comment promising *"a Nemotron outage, a revoked key —
+  each simply lands on the judge that is running in production today."* **Constructing an SDK client
+  makes no network call**, so it does not throw for a wrong key, a wrong model id, a wrong host, an
+  exhausted plan, a 404, a 401 or a timeout. Every one of those happens inside the returned `runTurn`,
+  **outside that `try`** — so they reached `judgeBuild`'s catch, which records NOT REVIEWED and stops.
+  The review never fell back; **the build silently lost its quality gate**, on every build of that tier.
+  (2) That catch then **discarded the error object entirely**, so a bad key, a bad model id, a timeout
+  and an empty reply all produced ONE identical sentence naming neither the engine nor the cause.
+  🔑 **THE STATUS CODE IS THE DIAGNOSIS, which is why throwing it away was the expensive half:**
+  401/403 is the key, 404 is the model id or the host, a timeout is the network or the plan. The
+  report now carries it (`judgeFailureReason`), admin-only, one bounded line.
+  🔒 **The fix is a CHAIN AROUND THE CALL** (`src/server/AgentV3/judgeChain.ts`, pure): a candidate is
+  (kind, modelId, runTurn), and the composed runner walks them at CALL time. **The order is exactly
+  today's** — Nemotron → GLM (never on `power`) → Grok → Sonnet last — so no engine becomes reachable
+  that was not reachable before; only WHEN the fall-through happens changed. Weak's protection against
+  a Sonnet judge is still `noClaudeZone`, refusing at call time; under the chain that refusal is
+  RECORDED instead of invisible.
+  ⚠️ **AN EMPTY ANSWER IS THAT RUNG FAILING, NOT A VERDICT** — and this is why a wider `try` would not
+  have been enough. A reasoning model can spend its whole output allowance thinking and return empty
+  content (`glm-5.3` and `kimi-k2.7-code` are both in `MEASURED_ALWAYS_REASONS` for exactly this).
+  The old path handed that empty string to `parseJudgeVerdict` and recorded *"the reviewer's answer
+  could not be read"* — a sentence about our parser, for a rung that never wrote a character.
+  ⚠️ **Each engine is asked for ITS OWN model id.** `judgeBuild` passes one; without the chain owning
+  it, the second candidate would be asked for the FIRST one's model at a host that has never heard of
+  it — a fallback that cannot succeed.
+  ⚠️ **The engine is named AFTER the call** (`chain.servedBy() ?? judge.kind`): with a real
+  fall-through, printing the PLANNED name would re-create the defect `judgeEngineLabel` was written to
+  fix — a report crediting work to an engine that did not do it.
+  🔒 **It still never blocks a build**: when every candidate fails the chain re-throws, so `judgeBuild`
+  produces the same honest NOT REVIEWED verdict as before. Cost is at most one extra call per FAILED
+  rung, and zero on the ordinary path (test-locked). Test-locked and **reversion-proven three ways** in
+  `tests/theJudgeFallsThroughWhereItFails.test.ts` (16 cases), including a SOURCE-level guard — `tsc`
+  and `vitest` cannot see that a try/catch guards the wrong statement, which is exactly how this
+  survived.
+  **What to watch:** the `CHEAP_REVIEW` / `CHEAP_REVIEW_NOT_RUN` detail on the next Weak build. It now
+  names each engine that failed and its status code — that line is what answers "kaha?".
 - **🧹 `AGENTV3_STREAM_THINKING` — the model's REASONING no longer reaches the chat (added 2026-09-20).
   ⚠️ NOT set, and the code default is OFF**; `on` restores the pre-2026-09-20 behaviour exactly with no
   deploy. Read by `src/server/AgentV3/thinkingStream.ts`; gates BOTH emit sites — `AgentRunner`'s

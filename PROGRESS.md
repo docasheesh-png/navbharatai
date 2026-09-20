@@ -75054,3 +75054,85 @@ route remains what the weather half already documents.
 
 **Still open, unchanged:** `LIVE_WEATHER_SOURCE` defaults to off, so weather is web-searched too
 until Open-Meteo's commercial plan (~$29/month) is bought. One instruction, one value, no deploy.
+
+---
+
+## 2026-09-20 — "nvidia nahi chal raha, kaha problem hai?" — the platform could not say, and that was the defect
+
+The admin reported that Nemotron was not working and asked the one question the system should have been
+able to answer by itself: **where**. Investigating it found that nothing in this platform could — and
+two real defects on the judge path, both read out of the code rather than inferred from a report.
+
+### Defect 1 — the fall-through was guarding the wrong statement
+
+`selectReviewJudge` built each judge like this:
+
+```
+try { const client = new OpenAI({ apiKey, baseURL, … }); … return { runTurn, … }; }
+catch { /* fall through to the GLM / Grok / Claude judge below */ }
+```
+
+with a comment underneath stating, in writing: *"A Nemotron outage, a revoked key, an unconstructable
+client — each simply lands on the judge that is running in production today."*
+
+**Only the third is true.** Constructing an SDK client is local object creation — it contacts nothing,
+so it does not throw for a wrong key, a wrong model id, a wrong base URL, an exhausted plan, a 404, a
+401 or a timeout. All of those happen later, inside the returned `runTurn`, which the `try` does not
+cover. They landed in `judgeBuild`'s own catch, which records NOT REVIEWED and returns. So the review
+did not fall back to the judge running in production; **the build lost its quality gate entirely**, and
+on the Weak tier — where Nemotron has been the judge since 2026-09-19 — that would have been every
+build, silently.
+
+### Defect 2 — the reason was thrown away, which is why "kaha?" had no answer
+
+`judgeBuild`'s catch discarded the error object. A wrong key (401), a wrong model id (404), a timeout
+and an empty reply all produced the identical sentence, naming neither the engine nor the cause. **The
+status code is the diagnosis** — 401/403 is the key, 404 is the model id or the host, a timeout is the
+network or the plan — and it was being deleted at the exact moment it mattered.
+
+### The fix: a chain around the CALL, not around the construction
+
+`src/server/AgentV3/judgeChain.ts` (pure, DI, no I/O). A candidate is `(kind, modelId, runTurn)`; the
+composed runner walks them at call time, records each attempt with its reason, and returns the first
+real answer.
+
+- **The order is exactly today's** — Nemotron → GLM (never on `power`) → Grok → Sonnet last. No engine
+  became reachable that was not reachable before; only *when* the fall-through happens changed. That is
+  what keeps this a repair rather than a routing change needing admin sign-off.
+- **An EMPTY answer is that rung failing, not a verdict.** A reasoning model can spend its whole output
+  allowance thinking and return empty content — `glm-5.3` and `kimi-k2.7-code` are both in
+  `MEASURED_ALWAYS_REASONS` for precisely this, and the judge is called with `maxTokens: 1500`. The old
+  path handed that empty string to `parseJudgeVerdict`, which recorded *"the reviewer's answer could not
+  be read"*: a sentence about our parser, for a rung that never wrote a character.
+- **Each engine is asked for its own model id.** `judgeBuild` passes one; without the chain owning it,
+  the second candidate would be asked for the first one's model at a host that has never heard of it.
+- **The engine is named after the call.** With a real fall-through, printing the planned name would
+  re-create the defect `judgeEngineLabel` was written to fix.
+- **It still never blocks a build.** When every candidate fails the chain re-throws, so `judgeBuild`
+  produces the same honest NOT REVIEWED verdict as before. Cost on the ordinary path is unchanged; at
+  most one extra call per failed rung.
+
+Test-locked in `tests/theJudgeFallsThroughWhereItFails.test.ts` (16 cases) and **reversion-proven three
+ways**, one of them at SOURCE level — `tsc` and `vitest` cannot see that a try/catch guards the wrong
+statement, which is exactly how this survived review and shipped.
+
+### OPEN root cause (rule 6) — which of three causes is the live one is NOT decided here
+
+Why the Nemotron call fails is still unproven, and this entry deliberately does not guess:
+
+1. **The model id.** `CLAUDE.md` says NVIDIA spells the ids the same as OpenRouter and no override is
+   needed. **`nemotron.ts`'s own docblock says the opposite** — *"Bedrock and NVIDIA's own endpoint do
+   not"* use the `nvidia/…` form — and the key was bought at `build.nvidia.com`. Both cannot be true;
+   if the code's comment is right, every judge and plan call is a 404 on a model name.
+2. **The 1,500-token ceiling on a reasoning model** — the empty-answer case above. It spends credits
+   while looking identical to a failure.
+3. The key or host being rejected (401/403).
+
+**A Claude session cannot settle it:** outbound to `integrate.api.nvidia.com` is refused by this
+execution environment's egress policy (tried, `connect_rejected`). The admin's NVIDIA usage dashboard
+separates all three in one glance — requests arriving and succeeding ⇒ (2); arriving and erroring ⇒ (1)
+or (3); none arriving ⇒ our own gating. **And after this change the build report answers it too**: the
+`CHEAP_REVIEW` / `CHEAP_REVIEW_NOT_RUN` detail now names each engine that failed and its status code.
+
+That is the 50/50 law applied: the reported symptom is repaired, and the condition that made the
+symptom undiagnosable — an error path that deleted its own evidence — is gone.

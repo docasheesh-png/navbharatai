@@ -128,8 +128,19 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     // The helper was renamed on 2026-08-22 (`…Usd` → `…Detail`) when it began returning the SECONDS as
     // well, so the user-facing "Live preview: 4 min — ₹8" line and the bill come from one measurement.
     // The invariant is unchanged: both paths, same helper, same build start.
+    //
+    // ⚠️ RE-ANCHORED 2026-09-20 (autopsy bb688add). This asserted the call COUNT was exactly 2, which
+    // is a guard on how many readers exist rather than on the invariant — and the invariant is that
+    // every reader uses the SAME helper and the SAME build start. A third reader was added that day,
+    // the SANDBOX_BILLING report line, for precisely this reason: it had been printing the VM's held
+    // seconds while the bill used the capped ones, over-stating what reached the bill by 33%. The
+    // helper's own docblock already calls that "one measurement, three views of it".
     const hits = route.match(/billableSandboxDetail\(actuator, workspaceId, /g) || [];
-    expect(hits.length).toBe(2);
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    // Every call site passes the same two arguments — so no reader can quietly measure from a
+    // different start, and none re-derives the capping rule for itself. One definition, N readers.
+    expect(route.match(/billableSandboxDetail\(/g) || []).toHaveLength(hits.length + 1); // +1 = the definition
+    expect(route.match(/Math\.min\(seconds, buildSeconds\)/g) || []).toHaveLength(1);
   });
 
   it('BOTH paths pass the build start, so neither can bill idle preview time', () => {
@@ -197,6 +208,9 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
 
   it('the report says whether it reached the bill', () => {
     expect(route).toContain("code: 'SANDBOX_BILLING'");
-    expect(route).toContain('sandboxBillingNote(sandboxCost(held))');
+    // ⚠️ ANCHORED ON THE FACT, NOT THE ARGUMENT LIST. What this case is about is that the line states
+    // what reached the BILL — so it must be handed the billed seconds, not only the held ones.
+    expect(route).toContain('sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds)');
+    expect(route).toContain('const billedSandboxSeconds = billableSandboxDetail(');
   });
 });

@@ -76,6 +76,7 @@ import { qualityNote } from './writeTimeQualityCheck';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
+  shouldProbeTsconfig, tsProjectSettled, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
 } from './writeTimeTypecheck';
@@ -2230,8 +2231,12 @@ export class ToolDispatcher {
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
   private readonly _writeTypecheckQueue = new WriteTypecheckQueue<import('./EndgameRepair').TscError[] | null>();
   private _writeTypecheckStats: WriteTypecheckStats = emptyWriteTypecheckStats();
-  /** `null` until the first TS write probes for a tsconfig — a JS project is never compiled. */
-  private _isTsProject: boolean | null = null;
+  /**
+   * Is this a TypeScript project? `unknown` until a probe answers — and a probe that THREW leaves it
+   * unknown rather than answering 'no' (autopsy bb688add, 2026-09-20: see MAX_TSCONFIG_PROBES).
+   */
+  private _tsProject: TsProjectVerdict = 'unknown';
+  private _tsProbeAttempts = 0;
 
   /** The write-time typecheck's own numbers, for the build report (`WRITE_TIME_TYPECHECK`). */
   writeTypecheckStats(): WriteTypecheckStats {
@@ -2282,13 +2287,29 @@ export class ToolDispatcher {
       if (!writeTypecheckEnabled()) return '';
       const paths = Object.keys(sources);
       const tsPaths = paths.filter(shouldTypecheckWrite);
-      if (tsPaths.length === 0) { s.skipped += paths.length; return ''; }
+      if (tsPaths.length === 0) { s.skipped += paths.length; s.skippedNotTs += paths.length; return ''; }
       if (s.disabledReason) { s.skipped += tsPaths.length; return ''; }
-      if (this._isTsProject === null) {
-        try { await this.actuator.readFile(this.workspaceId, 'tsconfig.json'); this._isTsProject = true; }
-        catch { this._isTsProject = false; }
+      // A FAILED READ IS NOT A VERDICT. It stays 'unknown' and is retried on the next TypeScript write,
+      // so one sandbox hiccup cannot switch the compiler off for a sixteen-minute build — which is what
+      // bb688add's report shows, and why its eleven TS2339 errors were only met five minutes later.
+      if (shouldProbeTsconfig(this._tsProject, this._tsProbeAttempts)) {
+        this._tsProbeAttempts += 1;
+        try { await this.actuator.readFile(this.workspaceId, 'tsconfig.json'); this._tsProject = 'yes'; }
+        catch (err) {
+          // A file that is genuinely ABSENT is a real 'no' and must not be re-probed on every write; a
+          // read that failed for any OTHER reason is unknown and gets its retries.
+          s.probeFailures += 1;
+          if (isMissingFileError(err)) this._tsProject = 'no';
+        }
       }
-      if (!this._isTsProject) { s.skipped += tsPaths.length; return ''; }
+      if (this._tsProject !== 'yes') {
+        s.skipped += tsPaths.length;
+        // Only counted as a PROJECT skip once the question is settled — while it is still being retried
+        // the write is skipped, but calling that "the project is not TypeScript" would be the same
+        // overstatement this autopsy is about.
+        if (tsProjectSettled(this._tsProject, this._tsProbeAttempts)) s.skippedNoTsconfig += tsPaths.length;
+        return '';
+      }
       const errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();

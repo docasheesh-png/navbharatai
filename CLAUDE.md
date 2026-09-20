@@ -2755,6 +2755,31 @@ the flag entries above promise.
   `text-muted`) rather than copying the older branches' `text-indigo-400` / `#484f58` — those are
   invisible or weak on Light, and the ratchet counts them.
 
+- **📜 THE HISTORY LIST IS A LIST, AND THE GROUP HEADING IS WHAT MAKES THAT POSSIBLE (admin 2026-09-20;
+  no flag, no cost).** *"isko popup ka ui badalna hai!! claude nad gpt jaisa karo!! open chat button
+  kyu banaya hai. hatao isko!!"* Each row had been a `p-6` card carrying a title, a `CUI:` id, a mode
+  chip, an App/Chat badge, a full timestamp, the agent name AND a big **Open Chat** button — seven
+  pieces of chrome to reach one conversation, three or four rows to a phone screen out of 235.
+  🔑 **The change that turns cards back into a list is structural, not aesthetic: the HEADING carries
+  the time for every row beneath it**, so no row spends a line on its own date. That is what Claude and
+  ChatGPT actually do. `src/components/history/historyGroups.ts` is pure (`now` passed in), headings
+  `Ongoing / Today / Yesterday / Previous 7 days / Previous 30 days / Older`.
+  🔒 **IT NEVER RE-SORTS.** `sortMergedRows` puts LIVE professional conversations on top and the
+  Firestore query is newest-first, so it buckets in the order it was handed. A sort here would overrule
+  that and **nothing would fail** — the live chat would just stop being first.
+  ⚠️ **An unknown date is `Older`, never `Today`** — a row with no timestamp is not new, it is a row
+  whose date we do not know, and the top of the list is a claim nothing supports.
+  ⚠️ **The row IS the button now**, which is the only honest way to delete that control; the `CUI` chip
+  went but the id is **still searchable**, so nothing became unfindable. **DELETE STAYS** behind the
+  quiet kebab with its confirmation — Claude and ChatGPT both keep it, and dropping a real capability to
+  look like them would be a regression wearing a redesign.
+  📌 **`HistoryView` has exactly two callers — the History TAB and this POPUP — so the redesign lands
+  on both, deliberately.** Two row designs for one list would drift the moment either changed, which is
+  why `HistoryPopup` already delegates rather than reimplements. `embedded` is what stops the sheet
+  titling itself twice ("Chat history" over "SESSION HISTORY"); the tab keeps its heading because it is
+  a whole screen. Both files also left the COLOUR baseline entirely (the sheet was `bg-[#0d1117]` — a
+  black panel over a white app on Light). Test-locked in `tests/theHistoryListLooksLikeAList.test.ts`.
+
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and
   nothing was PROVEN, because every runtime check needs a live preview and they all skip together. GREEN

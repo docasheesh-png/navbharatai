@@ -73240,6 +73240,105 @@ into the per-turn context — deliberately the per-turn message, not the cached 
 prompt cache breaks. Extracting rows from the summary with a regex or an extra model pass was
 considered and **rejected**: fragile, and it would bill every build for it.
 
+## 2026-09-20 — AUTOPSY `bb688add`: a failed probe is not an answer, and a call the clock cannot carry is not started
+
+**The build:** a Hindi मंगल विवाह निश्चय पत्र (one page, no data entry), free tier, weak ladder. **16.4
+minutes, ₹177.98 charged to a FREE user** — 71% of the ₹250 welcome balance for a printable invitation
+card. It succeeded: release gate YELLOW, app rendered, `PROD_BUILD_OK`.
+
+### The five-bucket ledger
+
+| | count | |
+|---|---|---|
+| ✅ Self-heal | **3** | CSS import injected (`INTEGRITY_CSS_WIRED`), truncation continued (`FASTLANE_CONTINUED`), fast-lane → full-builder hand-off |
+| 🔀 Workaround | **1** | the hand-off itself: 3 repair attempts failed, the full builder rewrote the app from scratch |
+| ⏭️ Skipped | 2 | no user journey (no data-entry surface — correct), no tests |
+| ❌ Still broken | **4** | the four below |
+| 🥵 Struggle | **882 s to first render** — 14.7 minutes before the user's app existed on screen | |
+
+### One root cause, in two places: a thing we could not measure, written down as a measurement of zero
+
+**① The `tsconfig.json` probe could not be read, so the compiler was switched off for the whole build.**
+`ToolDispatcher` latched `catch { this._isTsProject = false; }` on the FIRST TypeScript write, and never
+asked again. Every later TypeScript write counted as "skipped", and the report said:
+
+> *"Write-time typecheck: no TypeScript source was written this build (22 write(s) skipped as not TypeScript)."*
+
+That build wrote **six** TypeScript files (`types/invitation.ts`, `data/invitation.ts`,
+`hooks/useInvitation.ts`, `components/Invitation.tsx`, `App.tsx`, `main.tsx`). The sentence is false, and
+the `skipped` counter could not have told the truth — it merged *"this write was a `.css` file"* with
+*"we judged the project non-TypeScript"*. **The cost was not the sentence.** Write-time typecheck exists
+(2026-09-17, autopsy e706e068) precisely to quote a file's own compiler errors back while the model still
+holds it. It stood down — and the build then ground **eleven `TS2339` errors** through three repair
+passes over five minutes, which is the exact struggle that feature was built to end.
+
+**Fixed:** a probe that THREW leaves the verdict `unknown` and is retried (`MAX_TSCONFIG_PROBES` = 3), so
+one sandbox hiccup cannot disable the compiler for a 16-minute build. Only an unmistakable not-found is
+an absence (`isMissingFileError`, precision-first: a false *absent* kills the feature, a false *unknown*
+costs two file reads) — and a dead sandbox saying *"no such file"* about `/home/user/workspace` is a
+missing MACHINE, not a missing tsconfig, so it is never a verdict. The two skip reasons are counted
+separately and the summary names which one happened.
+
+⚠️ **Honest limit (rule 6):** the report cannot say WHY that read failed — a transient sandbox error and a
+race with the scaffold look identical from here. That is itself part of the defect, and `probeFailures`
+is the field that will answer it on the next occurrence. The fix is correct for every cause.
+
+**② OPEN, NOT FIXED — and the gate is what stopped me shipping it (rule 6, safeguard #3).** The
+shared-contract call was started against a clock that had just been measured. The arithmetic is exact:
+
+```
+preamble share    96,000ms   (240,000 × (1 − BUILD_PHASE_RESERVE))
+plan call         48,198ms   MEASURED, a real call on this build's own chain
+contract cap      47,802ms   → 396ms SHORT of what the plan had just cost
+contract call     47,804ms   → hit its cap exactly, returned NOTHING (₹1.17, UNBILLED_BARREN_WORK)
+```
+
+With no contract, the files were generated in isolated calls and disagreed — which IS ①'s eleven
+`TS2339` errors. 🔑 The assumption hides in a `Math.min`: `canAffordSharedContract` models the cost as
+`min(cap, measured)`, which treats a call that hits its cap as *cheaper*, when it is **free of value and
+full of cost**.
+
+🔴 **I built the guard (`contractCallCanFinish`: refuse a preamble call whose cap is below the measured
+cost of the one before it), and the full suite refused it — correctly.** Two deliberately-written cases
+in `theOptionalPassMustNotDoomTheLane.test.ts` say *"the boundary is the budget itself, not a new
+invented number"* and *"no tiers to build ⇒ keep the contract"*, and my guard broke both. Re-reading the
+evidence, they are right and I was over-reaching: **one report cannot tell "the cap was 396ms too small"
+from "that call was stalled regardless"** — the record shows 0 input and 0 output tokens, which is the
+shape of a call that never got going, not of one that needed slightly longer. Changing the budget rule
+for every fast-lane build on n=1 is exactly the guess safeguard #3 forbids.
+
+**So the arithmetic is pinned as a test and the behaviour is untouched.** What settles it is the number:
+how often a contract call ends barren, and how its cap compared with the measured plan. Until several
+reports show the pattern, this stays open — the same discipline `POST_GREEN_WRITES` and `LADDER_DEPTH`
+were shipped under.
+
+### ③ "This build's time budget ended" was the wrong clock, and it cost an autopsy
+
+The report's `LLM_CALL_BUDGET_ENDED` line fired **100 seconds into a build whose budget was 3,480 seconds**.
+`BUDGET_REACHED_MESSAGE` is ONE constant thrown for every deadline in the stack, and that record cannot
+tell which one produced it — so it must not name one. It now says *"stopped by one of our own clocks"*,
+which is the whole of what is known there and still carries the fact that matters: the provider did
+nothing wrong. **This closes the item CLAUDE.md records as open from autopsy 31dc61fd** (*"build budget
+reached at 105 s of a 1800 s build"*); ② is its prevention half.
+
+### ④ Recorded, not fixed (rule 6)
+
+- **`provider=unknown` beside a sibling line that says KIMI.** `fastLaneCallIdentity` returns `unknown`
+  when no provider *reported in*, and its docblock explains at length why guessing is worse — that
+  reasoning is right. But *which rung was ATTEMPTED* and *which provider DELIVERED* are different facts
+  and only the second reaches this record. Threading the attempted rung is a wider change than this
+  autopsy should make; named here so it is not re-discovered.
+- **The lean post-build review timed out producing nothing** — 45 s budget, 2 calls, 5 file reads,
+  `REVIEW_INCOMPLETE`, then told the user an 18-file invitation card was *"this large app"*. This is the
+  first real evidence `AGENTV3_GREEN_REVIEW_LEAN` (2026-09-18) has produced, and its own entry says to
+  watch exactly this. **Watch, do not tune yet** — one report is not a distribution.
+- **A truncation continuation wrote a corrupted file.** `FASTLANE_CONTINUED` resumed mid-declaration and
+  the emitted `src/components/Invitation.css` began `-size: 0.9rem;` — the tail of `font-size`. It was
+  overwritten later, so nothing shipped, but the continuation path can produce a file whose first line
+  is garbage.
+- **`PREVIEW_SNAPSHOT_STALE`** again (same 18 files, different content) — the post-build ordering defect
+  already open from 31dc61fd.
+- **₹177.98 to a free user for a one-page card.** Billing is not a session's call; raised to the admin.
 ---
 
 ## 2026-09-20 — The history popup is a LIST again, not a stack of cards
@@ -73582,6 +73681,87 @@ is too old" becomes a warning on the Monitor instead of an admin's question week
 here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
 asked.
 
+## 2026-09-20 — `bb688add`, the UPSTREAM half: a printed invitation was scored a complex app
+
+The autopsy above fixed what the build DID. This is why it went where it went — and it is the same
+class a third and fourth time: **a signal that learned one thing while the checks around it did not.**
+
+### 🔴 The word `विवाह` made a printed card a complex APP
+
+Traced to the score, reproduced verbatim from the real prompt:
+
+```
+namesBusinessDomain → domain `events`  →  taskType complex_app (base 58)
+                              + 10 long prompt (1,233 chars)
+                              = 68  → COMPLEX → past the cheap opener → KIMI
+```
+
+The `events` domain regex **deliberately reads Devanagari** — `शादी|विवाह|समारोह|मेला|कार्यक्रम`.
+Its two narrowing guards, `PAGE_DELIVERABLE_SIGNAL` and `SIMPLE_APP_SIGNAL`, are **pure ASCII**. So
+the promotion learned Hindi and the brakes did not: in Devanagari that predicate has run **unguarded
+since the day it shipped**. A guard that cannot read what its signal reads is not a guard.
+
+The cost, all downstream of that one verdict: the slower opening rung → ~48s preamble calls → a
+shared-contract call left 396ms short that returned nothing → eleven `TS2339` errors → three repair
+passes → hand-off → **16.4 minutes and ₹177.98 on the free tier, for a card**. And the same report
+told the builder the app was missing *ticket types, RSVP, QR check-in and payments*.
+
+**Fixed:** `DOCUMENT_DELIVERABLE_SIGNAL` — the same guard, in the script the domain regexes already
+read. Precision-first, because the asymmetry decides the list: wrong toward "document" costs one
+cheap opening call the ladder climbs out of; wrong toward "system" cost this build sixteen minutes
+with no recovery. So it names only things people ask to be PRINTED or SHOWN — invitation, card,
+certificate, biodata, notice, poster, menu, résumé — and never a word that could name an app (`ऐप`,
+`सिस्टम`, `पोर्टल`, `डैशबोर्ड` are deliberately absent). `पत्र` matches only in its document senses,
+never bare. A genuine Hindi hospital-system request is still promoted; a test pins that.
+
+### 🔴 An admitted unknown took the EXPENSIVE side
+
+`complexityRouting` correctly bought a second opinion (the scorer could not read the script). The call
+was unavailable. The fallback was the deterministic verdict — **COMPLEX** — so the module acted with
+full confidence on a score derived from evidence it admits it could not read.
+
+**It already states, twice, the rule it broke:** *"`simple` is the default on every doubt"* and *"a
+confident wrong answer is worse than an admitted unknown."* `fallbackVerdict` applies its own rule:
+when the signals could neither read nor match the request AND no second opinion answered, the routing
+verdict is `simple`. Wrong toward simple ⇒ the cheap rung is tried and the ladder climbs — that is
+what the ladder is for. Wrong toward complex ⇒ 13× the input price with no recovery path.
+
+🔒 **The SCORE is untouched** — `scriptNeutralFloor` still makes it honest for every other reader.
+Only the binary routing verdict falls back, and only where this module has said in writing it cannot
+tell. A borderline score that was read and understood still stands exactly as before.
+
+⚠️ **Left alone, deliberately:** `scriptNeutralFloor`'s `text.length > 800 || parts >= 6`. A long
+prompt is not a big app and a pasted document breaks that proxy hardest — but the floor exists so a
+Devanagari hospital app is not scored 5, and nobody has measured a better rule. The routing is made
+safe by the fallback instead. Pinned as a test, not changed on a guess.
+
+### 🔴 Our own clock was recorded as a provider failing
+
+The timeline opened with *"Provider KIMI failed"* and the tally read `providerFailures: { KIMI: 1 }`
+— for a call KIMI answered nothing wrong in; the lane's step deadline ended it. `turnDeadline.ts`
+went to some length so a budget error would never BENCH a provider, and its docblock states the other
+half in as many words: *"it must not INDICT anyone either."* It was still indicting one in the two
+places an admin reads. The event is still recorded at the same severity — it simply stops being an
+accusation.
+
+### 🔴 The cost line named a number that was not on the bill
+
+`SANDBOX_BILLING` said *"Sandbox 1310s ≈ $0.0603 … included in this build's real cost"*; the bill used
+**$0.045369 — 986 seconds**. Nothing was mis-billed: the bill caps held seconds at the build's own
+duration so idle time cannot be sold twice, and that cap is deliberate and right. What was wrong is
+that the one line used to judge E2B spend over-stated what reached the bill by **33%** — the same
+shape as the `E2B_USD_PER_HOUR` drift, a correct system with a wrong dashboard. Both facts are now
+printed when they differ, and the line reuses the ONE existing measurement rather than a second copy
+of the capping rule.
+
+### ⚠️ A false alarm I nearly reported, recorded because the next reader will hit it
+
+Probing `analyzeRequest(promptString)` returns `score 5, task=chat` for every prompt on earth: it takes
+`{ prompt }`, not a string. I had drafted the words "this is a regression since this morning" before
+checking. It was my probe. `analyzeRequest({ prompt })` reproduces the real build exactly — 68,
+`complex_app` — which is what made the trace above possible.
+
+Test-locked in `tests/aDocumentIsNotABigApp.test.ts` (19 cases), reversion-proven three ways.
 ---
 
 ## 2026-09-20 — 🚪 CLOSING THE DOOR CLOSES THE ROOMS: ✕-ing NavBharatAI Free left every professional after the first

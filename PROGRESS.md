@@ -70843,6 +70843,120 @@ and the sheet's desktop rendering are asserted from the source and the existing 
 a screenshot. The composer's control-row arithmetic test (`chatComposerAlignment.test.ts`) still passes.
 ---
 
+## 2026-09-20 — A REPORT MUST SAY WHAT IT NO LONGER CONTAINS (the autopsy's own instrument was lying)
+
+**Admin:** *"pahle autopsy ko fix karo, yeh problem wapas na aye. kisi bhi other apps bannae me."*
+
+### The bug
+
+A build report was capped TWICE on its way to the admin panel, and **neither cap left a trace**:
+
+| channel | the build records | the recorder kept | Firestore kept |
+|---|---|---|---|
+| `llmCalls` | unbounded | 300 | **40** |
+| `commands` | unbounded | 300 | **40** |
+| `issues` | unbounded | 2000 *(declared)* | 500 |
+| `errors` | unbounded | 200 | 50 |
+
+So a build that made 312 model calls was stored with 40 of them and no statement anywhere that 272
+were gone. A reader — the admin, or Claude performing the autopsy the fifth absolute rule makes
+mandatory — opens it, counts forty, and says "this build made forty calls". The number is false and
+nothing in the document can contradict it. Past the 900 KB emergency threshold the channels were
+removed ENTIRELY, and `llmCalls: undefined` then read exactly like a build that never called a model.
+
+🔴 **The fifth absolute rule's own Step 1 opens: *"Read the WHOLE report end to end — never a
+truncated tail."* The storage layer was quietly making that impossible.** The instrument every
+autopsy depends on was the thing that could not be trusted.
+
+🔑 **AN ABSENT MEASUREMENT IS NOT A MEASUREMENT OF ZERO.** This repo has now paid for that exact
+confusion three times: `liveTokens` printing `0 in · 0 out` for an unsettled build (autopsy
+`f04421ef`, misread by the person who wrote the renderer); `JOURNEY_PASSED` recorded on a run that
+launched no browser (2026-09-17); and this. The first two were fixed where they were found. This one
+is fixed as a CLASS.
+
+### Why a patch at the store would have been a WRONG fix
+
+**The bug was two layers deep, and the upper layer was worse.** `recordCommand` / `recordLlmCall` /
+`recordFullError` discarded past their caps with **no counter at all**, so the true total was not
+merely unreported — it was *unknowable*. Counting only at the store would have produced a confident
+"40 of 300" for a build that really made 500. The count had to start where the entries arrive.
+
+**And the last-resort drop existed in FOUR identical copies** — `saveDiagnostics`,
+`saveDiagnosticsHistory` and their two per-user siblings each carried their own
+`{ ...stored, commands: undefined, llmCalls: undefined, issues: slice(-200) }`. A fix written at one
+would have been forgotten at the fourth: the drifted-copy class this repo has already paid for with
+`safeRelPath` (four copies) and the zombie-write lane (fixed in one of two lanes, failing a
+28-minute build two months later). Here it would have been worse than a drift — three of four paths
+would have kept lying about the same build.
+
+### The fix (`reportTruncation.ts`, pure)
+
+**Trimming and declaring are now ONE operation.** `trimChannel` returns the loss *with* the list, so
+a caller cannot take the shorter list without the fact; `dropChannel` records the count it destroys.
+The four emergency copies are one exported function, `dropHeavyChannelsForStorage`, and a test
+asserts no save path still drops a channel by hand — so a fifth save path added later must reach for
+the function or fail CI.
+
+🔑 **The merge rule is the correctness of the whole thing.** A report is trimmed repeatedly and each
+pass sees only what the last one left, so a naive second pass records `kept: 0, total: 40` and
+destroys the one number that mattered. `mergeTruncation` keeps the **earliest total** and the
+**latest kept**: recorder 300-of-500 → storage 40 → emergency 0 ends as **`0 of 500`**, not `0 of 40`.
+
+🔒 **THREE ANSWERS, NEVER TWO.** `complete: true` is written even when nothing was lost. Without it,
+"no field" would mean both *"nothing was lost"* and *"this report predates the check"* — the very
+ambiguity being removed. A legacy report reads **`unknown`** and the panel says *"Completeness not
+recorded"*, never *"complete"*. Those are different claims and only one of them is verified.
+
+**The deliberate drops are declared too.** `compactReportForRecord` omits the forensic channels on
+purpose (they live in `workspace_diagnostics_v3`), but a reader holding only that copy could not tell
+"omitted by design" from "the build made none". It now says how many it dropped and, via
+`fullerCopy`, where the whole record is.
+
+**The admin can SEE it** — a field nobody reads is half a fix. The report panel shows a red chip
+*"⚠ Part of this report was dropped"* with the sentence (*"kept 40 of 312 model calls…"*), or a
+grey *"Completeness not recorded"* for a legacy report, and nothing at all when the report is whole.
+
+### Verified by reversion, five ways
+
+Each of these fails exactly the case it should, and only that case: the recorder stops counting; one
+save path drops by hand again; the merge forgets the earliest total; a legacy report is reported as
+complete; the panel chip is removed.
+
+### Two cousins fixed in the same change (rule 3 — hunt the siblings)
+
+**The cost ledger was forced into a GUESS by the missing field, and the guess had a real false
+positive.** `realCostFromCalls` marked a log as a lower bound when `calls.length >= 40` — so a build
+that genuinely made exactly forty calls had its correct cost dropped from the admin's measured
+sample and its margin shown as null. It reads the report's own statement now, keeping the length
+heuristic only for legacy records (the margin-safe direction).
+
+🔴 **And my own fix had this exact bug inside it, caught by my own new test:** the first draft read
+only `channels.llmCalls`, found nothing on a COMPLETE report, and fell through to the guess.
+`complete: true` is a positive statement that nothing was lost, not an absence — so
+`channelWasTruncated` returns the same three answers `readCompleteness` does, and `undefined` (legacy)
+never collapses to `false`.
+
+**Two neighbouring tests were anchored on POSITIONS and had to be re-anchored** — the third and
+fourth instance of that class this month. `adminReportParts` scanned a fixed `slice(rowAt, rowAt +
+6200)` window and reported "Mark fixed" missing from a header where it was present and correct, once
+a chip was added inside the row; it is bounded by the row's own closing `Close</button>` now.
+`buildCostLedger` asserted the literal string `lastN(report.llmCalls, …)`; it asserts the shared
+CONSTANT, which is what it was ever about.
+
+⚠️ **And one of MY OWN new assertions was the same mistake**, found by the gate rather than by me: it
+checked that `'Part of this report was dropped'` appeared *somewhere in* a 5,000-line file, and passed
+while the panel was genuinely broken — a bad edit had pasted those words into an unrelated `useState`
+declaration two hundred lines away. It asserts the chip's own ternary now. A substring search over a
+whole file is not a test of the thing it names.
+
+### Still open (rule 6) — this fixed the honesty, not the ceiling
+
+The caps themselves are unchanged and still lose real forensic detail; what changed is that the loss
+is now *stated* instead of silent. Whether 40 stored model calls is the right number is a separate
+question, and the honest answer needs the field shipped here first: **watch how often real reports
+carry `truncation.complete: false`, and which channel dominates.** Raising a cap before that number
+exists would be guessing at the 900 KB ceiling. The fuller cure is the human-readable report layer
+(bug B of the 2026-09-20 audit), which can summarise a channel instead of storing it whole.
 ## 2026-09-20 — 🔴 AUTOPSY `31dc61fd` (UPSC app): the platform's own browser had NEVER run
 
 **Branch `claude/the-platforms-own-browser-never-ran`.** 15.9 min · 70 model calls · 2.6M input tokens ·

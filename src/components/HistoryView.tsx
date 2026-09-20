@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { motion } from 'motion/react';
-import { MessageSquare, Clock, ShieldCheck, LogIn, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope } from 'lucide-react';
+import { MessageSquare, Clock, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Skeleton, SkeletonList } from './ui/Skeleton';
-import { Briefcase } from 'lucide-react';
 import { readProfessionalHistory } from './professionals/ProfessionalHistoryView';
 import { browserStore, resumeArchived, deleteArchived } from '../lib/professionalChatStore';
 import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from '../lib/freeHistoryMerge';
 import { shapeSessions, messagesOf } from '../lib/sessionShape';
 import { readHistoryIndex, buildHistoryIndex, writeHistoryIndex } from '../lib/historyIndex';
+import { groupSessionsByRecency } from './history/historyGroups';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
@@ -49,6 +48,7 @@ export const HistoryView = ({
   lockFilter,
   includeProfessionals,
   onOpenProfessional,
+  embedded,
 }: {
   user: any;
   onRestoreSession?: (uci: string) => void;
@@ -68,6 +68,13 @@ export const HistoryView = ({
   includeProfessionals?: boolean;
   /** Open a professional's chat (the row's conversation was already resumed if it was archived). */
   onOpenProfessional?: (viewId: string) => void;
+  /**
+   * Rendered INSIDE something that already has a title (the Free chat's history popup), so this view
+   * drops its own big heading and its outer padding (admin 2026-09-20). A popup titled "Chat history"
+   * with "SESSION HISTORY" printed again underneath it spends a quarter of a phone screen saying the
+   * same thing twice. The TAB keeps its heading — it is a whole screen and needs one.
+   */
+  embedded?: boolean;
 }) => {
   // LOCAL-FIRST (admin 2026-08-31: "history load hone me bahut time lagta hai"). The list used to
   // wait for Firestore's first snapshot before rendering anything — and that snapshot is expensive
@@ -192,6 +199,127 @@ export const HistoryView = ({
     return result;
   }, [sessions, filterMode, searchQuery, includeProfessionals, effectiveFilter, profItems]);
 
+  /**
+   * ONE ROW = ONE TAPPABLE LINE. The whole line opens the conversation; the kebab is the only other
+   * target on it. Kept as a local function rather than a component so it closes over the same state
+   * the old inline map did (`confirmDeleteId`, `openDropdownId`) — extracting a component would mean
+   * threading five props and a second set of handlers for no gain.
+   */
+  const renderRow = (session: any) => {
+    const isConfirming = confirmDeleteId === session.id;
+    const sessionIsApp = isAppSession(session);
+    // A professional pseudo-row (unified FREE history) — lives in localStorage, not Firestore.
+    const prof = (session as Partial<ProfessionalPseudoSession>).profViewId ? (session as ProfessionalPseudoSession) : null;
+    // B25: fallback to first-message excerpt when title is blank.
+    const title = session.title && session.title !== 'New Conversation'
+      ? session.title
+      : messagesOf(session).find((m) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation';
+    // THE MODE, AS A DOT. It used to be a bordered chip with a word in it, on a row that already had
+    // three other chips. The colour carries it for a sighted user and `aria-label` carries it for
+    // everyone else, so the information survives at a tenth of the width.
+    const mode = prof ? { label: prof.profName, dot: 'bg-teal-500' }
+      : isSdaSession(session) ? { label: 'Doctor AI', dot: 'bg-rose-500' }
+      : isProSession(session) ? { label: 'Pro', dot: 'bg-violet-500' }
+      : { label: 'Free', dot: 'bg-amber-500' };
+    const openRow = () => {
+      if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
+      // An archived conversation is genuinely RESUMED (same rule as Professional History) so
+      // opening it continues that exact conversation rather than starting a fresh one.
+      const store = browserStore();
+      if (store && prof.profEndedAt) resumeArchived(store, prof.profViewId, prof.profEndedAt);
+      onOpenProfessional?.(prof.profViewId);
+    };
+    const deleteRow = () => {
+      if (!prof) { onDeleteSession && onDeleteSession(session.id); return; }
+      const store = browserStore();
+      if (store && prof.profEndedAt) {
+        deleteArchived(store, prof.profViewId, prof.profEndedAt);
+        setProfItems(readProfessionalHistory());
+      }
+    };
+
+    // THE CONFIRMATION IS INLINE AND COMPACT, and it still names what is about to go. A destructive
+    // action on a one-line row must not become a one-tap action.
+    if (isConfirming) {
+      return (
+        <div
+          key={session.id}
+          role="listitem"
+          className="flex items-center gap-2 mx-1 my-0.5 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/25"
+        >
+          <Trash2 className="w-3.5 h-3.5 shrink-0 text-danger" />
+          <span className="min-w-0 flex-1 truncate text-[11px] text-danger">
+            Delete “{title}”? This cannot be undone.
+          </span>
+          <button
+            onClick={() => { deleteRow(); setConfirmDeleteId(null); }}
+            className="shrink-0 px-2.5 py-1 rounded-lg bg-red-600 text-on-accent text-[10px] font-black uppercase tracking-wider active:scale-95"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setConfirmDeleteId(null)}
+            className="shrink-0 px-2.5 py-1 rounded-lg bg-raised border border-line text-ink text-[10px] font-black uppercase tracking-wider active:scale-95"
+          >
+            Cancel
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div key={session.id} role="listitem" className="relative flex items-center gap-0.5 mx-1">
+        <button
+          type="button"
+          onClick={openRow}
+          // The accessible name carries everything the chips used to say out loud.
+          aria-label={`${title} — ${mode.label}${sessionIsApp ? ' — app' : ''}`}
+          title={title}
+          className="min-w-0 flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-raised active:bg-raised-hover touch-manipulation"
+        >
+          <span aria-hidden="true" className={cn('w-1.5 h-1.5 rounded-full shrink-0', mode.dot)} />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-body">{title}</span>
+          {prof?.profLive && (
+            <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-success">Live</span>
+          )}
+          {/* One glyph, because opening an app session genuinely does something else. */}
+          {sessionIsApp && <Code2 aria-hidden="true" className="w-3 h-3 shrink-0 text-faint" />}
+        </button>
+
+        {!(prof && prof.profLive) && (
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setOpenDropdownId(openDropdownId === session.id ? null : session.id)}
+              aria-label={`Options for ${title}`}
+              className={cn(
+                'p-2 rounded-xl transition-colors touch-manipulation',
+                openDropdownId === session.id ? 'bg-raised text-ink' : 'text-faint hover:text-ink hover:bg-raised'
+              )}
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {openDropdownId === session.id && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setOpenDropdownId(null)} />
+                <div className="absolute right-0 mt-1 w-44 bg-raised border border-line rounded-xl shadow-2xl z-50 py-1 overflow-hidden">
+                  <button
+                    onClick={() => { setOpenDropdownId(null); setConfirmDeleteId(session.id); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] font-bold text-danger hover:bg-red-500/10 transition-colors text-left"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex flex-col bg-surface h-full overflow-hidden p-6">
@@ -202,12 +330,14 @@ export const HistoryView = ({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-surface h-full overflow-hidden p-6">
-      {/* Header */}
+    <div className={cn('flex-1 flex flex-col bg-surface h-full overflow-hidden', embedded ? 'px-3 pt-3 pb-0' : 'p-6')}>
+      {/* Header — dropped when something above already carries the title (see `embedded`). */}
+      {!embedded && (
       <h2 className="text-3xl font-black text-ink italic tracking-tighter uppercase flex items-center gap-3 mb-5">
         <MessageSquare className="w-8 h-8 text-accent-text" />
         Session History
       </h2>
+      )}
 
       {/* Filter + Search bar. When the view is LOCKED to a scope (e.g. Free → History), the filter tabs
           are hidden entirely so the user only ever sees that scope's sessions — just the search remains. */}
@@ -264,7 +394,7 @@ export const HistoryView = ({
             placeholder="Search by title, CUI, or message..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full bg-card border border-line rounded-xl pl-8 pr-8 py-2 text-[11px] text-ink placeholder-faint outline-none focus:border-indigo-500/50 transition-colors font-mono"
+            className="w-full bg-card border border-line rounded-xl pl-8 pr-8 py-2 text-[12px] text-ink placeholder-faint outline-none focus:border-indigo-500/50 transition-colors"
           />
           {searchQuery && (
             <button
@@ -277,11 +407,15 @@ export const HistoryView = ({
         </div>
       </div>
 
-      {/* Count indicator */}
-      <div className="text-[9px] font-black uppercase tracking-widest text-faint mb-3">
-        {filteredSessions.length} session{filteredSessions.length !== 1 ? 's' : ''}
-        {searchQuery ? ` matching "${searchQuery}"` : ''}
-      </div>
+      {/* THE COUNT ONLY ANSWERS A QUESTION SOMEBODY ASKED (admin 2026-09-20). "235 SESSIONS" above an
+          idle list is a number nobody came for, and on a phone it costs a row of the list it is
+          describing — neither Claude's sidebar nor ChatGPT's prints one. While SEARCHING it is the
+          answer ("did my search find anything?"), so it stays exactly there. */}
+      {searchQuery.trim() !== '' && (
+        <div className="text-[9px] font-black uppercase tracking-widest text-faint mb-3">
+          {filteredSessions.length} result{filteredSessions.length !== 1 ? 's' : ''} for "{searchQuery}"
+        </div>
+      )}
 
       {/* HONEST CAVEAT WHILE THE LIST IS STILL THE CACHED ONE (admin 2026-08-31).
           The instant first paint comes from a local index that holds titles and dates but NO message
@@ -298,8 +432,25 @@ export const HistoryView = ({
         </div>
       )}
 
-      {/* Session list */}
-      <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar" role="list" aria-label="Session history">
+      {/* ── THE LIST (admin 2026-09-20: "claude and gpt jaisa karo … open chat button … hatao isko") ──
+          One tappable line per conversation, grouped by when it happened. What was removed, and why
+          each removal is a removal rather than a restyle:
+
+            • **The "Open Chat" button.** The row IS the button now, which is how every list on a phone
+              works and the only honest way to delete that control — a row you can see but not tap
+              would be worse than the button it replaced.
+            • **The `CUI:` id.** A support identifier on every row of a user's own history. It is still
+              SEARCHABLE (the box above matches it, unchanged), so nothing became unfindable.
+            • **The full timestamp and the agent line.** The group heading says when; a row repeating it
+              cost a whole line each. This is the single change that turns cards back into a list.
+            • **The App/Chat and mode chips.** The mode survives as a coloured dot and, for a screen
+              reader, inside the row's own label — quieter, not lost. An app session keeps one glyph,
+              because opening one genuinely does something different.
+
+          Delete STAYS, behind the quiet kebab, with its existing confirmation. Claude and ChatGPT both
+          keep it; dropping a real capability to look like them would be a regression wearing a
+          redesign. */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar" role="list" aria-label="Session history">
         {filteredSessions.length === 0 ? (
           /* F18: helpful empty state with CTA */
           <div className="flex flex-col items-center justify-center py-20 gap-6">
@@ -326,163 +477,15 @@ export const HistoryView = ({
             )}
           </div>
         ) : (
-          filteredSessions.map((session) => {
-            const isConfirming = confirmDeleteId === session.id;
-            const sessionIsApp = isAppSession(session);
-            // A professional pseudo-row (unified FREE history) — lives in localStorage, not Firestore.
-            const prof = (session as Partial<ProfessionalPseudoSession>).profViewId ? (session as ProfessionalPseudoSession) : null;
-            // The per-row MODE tag of the unified list — the "tag ke sath" half of the request.
-            const modeTag = !includeProfessionals ? null
-              : prof ? { label: prof.profName, cls: 'bg-teal-500/10 text-success border-teal-500/25', Icon: Briefcase }
-              : isSdaSession(session) ? { label: 'Doctor AI', cls: 'bg-rose-500/10 text-danger border-rose-500/25', Icon: Stethoscope }
-              : { label: 'Free', cls: 'bg-amber-500/10 text-warn border-amber-500/25', Icon: Zap };
-            const openRow = () => {
-              if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
-              // An archived conversation is genuinely RESUMED (same rule as Professional History) so
-              // opening it continues that exact conversation rather than starting a fresh one.
-              const store = browserStore();
-              if (store && prof.profEndedAt) resumeArchived(store, prof.profViewId, prof.profEndedAt);
-              onOpenProfessional?.(prof.profViewId);
-            };
-            const deleteRow = () => {
-              if (!prof) { onDeleteSession && onDeleteSession(session.id); return; }
-              const store = browserStore();
-              if (store && prof.profEndedAt) {
-                deleteArchived(store, prof.profViewId, prof.profEndedAt);
-                setProfItems(readProfessionalHistory());
-              }
-            };
-            return (
-              <motion.div
-                key={session.id}
-                layout
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className={cn(
-                  "border rounded-2xl p-6 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative",
-                  isConfirming
-                    ? "bg-red-500/10 border-red-500/30 shadow-lg shadow-red-500/5 animate-pulse"
-                    : "bg-card border-line hover:border-indigo-500/30"
-                )}
-              >
-                {isConfirming ? (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full gap-4">
-                    <div className="space-y-1">
-                      <h4 className="font-bold text-danger text-sm flex items-center gap-2">
-                        <Trash2 className="w-4 h-4 text-danger" />
-                        Delete this session permanently?
-                      </h4>
-                      <p className="text-xs text-muted">
-                        All messages and context for <span className="font-mono text-danger">{(session as Partial<ProfessionalPseudoSession>).profName ?? `CUI: ${session.uci || session.id}`}</span> will be deleted. This cannot be undone.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto">
-                      <button
-                        onClick={() => {
-                          deleteRow();
-                          setConfirmDeleteId(null);
-                        }}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-500 text-on-accent font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-md hover:shadow-red-500/20"
-                      >
-                        Yes, Delete
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteId(null)}
-                        className="px-4 py-2 bg-raised hover:bg-raised-hover text-ink font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer border border-line"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* B25: fallback to first-message excerpt when title is blank */}
-                        <h3 className="font-bold text-ink text-base leading-snug">
-                          {session.title && session.title !== 'New Conversation'
-                            ? session.title
-                            : messagesOf(session).find((m) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation'}
-                        </h3>
-                        {!prof && (
-                        <span className="inline-flex items-center px-2 py-0.5 bg-indigo-500/10 text-accent-text border border-indigo-500/25 rounded-md font-mono text-[10px] tracking-normal lowercase">
-                          CUI: {session.uci || session.id}
-                        </span>
-                        )}
-                        {modeTag && (
-                          <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border', modeTag.cls)}>
-                            <modeTag.Icon className="w-2.5 h-2.5" /> {modeTag.label}
-                          </span>
-                        )}
-                        {/* App / Chat badge */}
-                        <span className={cn(
-                          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border",
-                          sessionIsApp
-                            ? "bg-emerald-500/10 text-success border-emerald-500/25"
-                            : "bg-indigo-500/10 text-accent-text border-indigo-500/20"
-                        )}>
-                          {sessionIsApp ? <><Code2 className="w-2.5 h-2.5" /> App</> : <><MessageSquare className="w-2.5 h-2.5" /> Chat</>}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-muted font-bold uppercase tracking-widest">
-                        <span className="flex items-center gap-1.5"><Clock className="w-3 h-3 animate-pulse" /> {prof?.profLive ? 'Ongoing' : new Date(session.lastUpdated).toLocaleString()}</span>
-                        <span className="flex items-center gap-1.5"><ShieldCheck className="w-3 h-3 text-success" /> {prof ? prof.profName : (session.current_agent || 'navbharatai')}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 shrink-0 self-start sm:self-auto z-10">
-                      <button
-                        onClick={openRow}
-                        className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-on-accent font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 shrink-0 cursor-pointer"
-                      >
-                        Open Chat
-                        <LogIn className="w-3.5 h-3.5" />
-                      </button>
-
-                      {!(prof && prof.profLive) && (
-                      <div className="relative">
-                        <button
-                          onClick={() => setOpenDropdownId(openDropdownId === session.id ? null : session.id)}
-                          className={cn(
-                            "p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-center",
-                            openDropdownId === session.id
-                              ? "bg-indigo-600 border-indigo-500 text-on-accent"
-                              : "bg-raised hover:bg-raised-hover border-line text-muted hover:text-ink"
-                          )}
-                          title="Options"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-
-                        {openDropdownId === session.id && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-40 bg-well"
-                              onClick={() => setOpenDropdownId(null)}
-                            />
-                            <div className="absolute right-0 mt-2 w-48 bg-[#1f242c] border border-line rounded-xl shadow-2xl z-50 py-1.5 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 text-on-accent">
-                              <button
-                                onClick={() => {
-                                  setOpenDropdownId(null);
-                                  setConfirmDeleteId(session.id);
-                                }}
-                                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                Delete Session
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </motion.div>
-            );
-          })
+          groupSessionsByRecency(filteredSessions, Date.now()).map((group) => (
+            <div key={group.label} className="mb-4 last:mb-0">
+              {/* The heading that lets every row beneath it drop its own date. */}
+              <div className="px-3 pb-1 pt-1 text-[10px] font-black uppercase tracking-widest text-faint">
+                {group.label}
+              </div>
+              {group.rows.map((session) => renderRow(session))}
+            </div>
+          ))
         )}
       </div>
     </div>

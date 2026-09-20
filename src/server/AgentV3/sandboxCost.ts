@@ -109,8 +109,27 @@ export function sandboxBillableUsd(
   return cost.usd;
 }
 
-/** Why the sandbox cost is or is not on this bill — for the admin report, never the user's. */
-export function sandboxBillingNote(cost: SandboxCostRecord | null, env: NodeJS.ProcessEnv = process.env): string {
+/**
+ * Why the sandbox cost is or is not on this bill — for the admin report, never the user's.
+ *
+ * 🔴 IT NAMED A NUMBER THAT WAS NOT ON THE BILL (autopsy bb688add, 2026-09-20). That report says
+ * *"Sandbox 1310s ≈ $0.0603 … included in this build's real cost before markup"*, and
+ * `billing.sandboxCostUsd` on the same report is **$0.045369** — 986 seconds, not 1,310. Nothing was
+ * mis-billed: the bill caps the VM's HELD seconds at the build's own duration, deliberately, so idle
+ * time between builds cannot be sold twice (see `sandboxBillableSeconds`). What was wrong is that the
+ * one line an admin reads to judge E2B spend over-stated what reached the bill by **33%** — the same
+ * shape as the `E2B_USD_PER_HOUR` drift CLAUDE.md records, where a correct system kept a wrong
+ * dashboard.
+ *
+ * `billedSeconds` is what actually reached the bill. Both facts are printed when they differ, because
+ * they answer different questions — *what did the VM cost us?* and *what did this build pay for?* —
+ * and collapsing them is what produced a confident, itemised, wrong number.
+ */
+export function sandboxBillingNote(
+  cost: SandboxCostRecord | null,
+  env: NodeJS.ProcessEnv = process.env,
+  billedSeconds?: number | null,
+): string {
   if (!cost || !(cost.usd > 0)) return 'Sandbox time: not measured on this build.';
   const on = String(env.AGENTV3_BILL_SANDBOX || '').trim().toLowerCase() === 'on';
   const rate = Number(env.E2B_USD_PER_HOUR);
@@ -120,7 +139,15 @@ export function sandboxBillingNote(cost: SandboxCostRecord | null, env: NodeJS.P
     return `Sandbox ${cost.seconds}s — NOT billed: E2B_USD_PER_HOUR is unset, so the only available rate is a placeholder. `
       + 'Set the real rate from your E2B plan to start charging for it.';
   }
-  const base = `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} at $${rate}/hr — included in this build's real cost before markup.`;
+  // Only a SMALLER stated figure is a cap — a larger or absent one is not a fact about this bill, and
+  // inventing the difference would be the error this argument exists to remove.
+  const billed = Number(billedSeconds);
+  const capped = Number.isFinite(billed) && billed >= 0 && billed < cost.seconds;
+  const base = capped
+    ? `Sandbox ${cost.seconds}s held ≈ $${cost.usd.toFixed(4)} at $${rate}/hr; `
+      + `${Math.round(billed)}s of it reached this build's real cost before markup `
+      + `(≈ $${sandboxCost(billed)!.usd.toFixed(4)}) — the rest is idle time between builds, which is never billed twice.`
+    : `Sandbox ${cost.seconds}s ≈ $${cost.usd.toFixed(4)} at $${rate}/hr — included in this build's real cost before markup.`;
   // A configured rate that contradicts the machine it prices is the one failure this line cannot show
   // on its own: it would read as a confident, itemised, wrong number. See sandboxRate.ts.
   const mismatch = rateMismatchNote(env);

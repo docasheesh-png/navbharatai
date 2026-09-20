@@ -153,20 +153,111 @@ export interface WriteTypecheckStats {
   timeouts: number;
   /** Writes of TS files that were NOT checked, and why the check stood down (if it did). */
   skipped: number;
+  /**
+   * 🔴 THE TWO REASONS A WRITE IS SKIPPED ARE DIFFERENT FACTS, AND MERGING THEM PRINTED A FALSE
+   * SENTENCE (autopsy bb688add, 2026-09-20).
+   *
+   * That build wrote `src/types/invitation.ts`, `src/data/invitation.ts`, `src/hooks/useInvitation.ts`,
+   * `src/components/Invitation.tsx`, `src/App.tsx` and `src/main.tsx` — and its report read
+   * *"no TypeScript source was written this build (22 write(s) skipped as not TypeScript)"*. Six
+   * TypeScript files is not none. The counter could not tell "this write was a `.css` file" from
+   * "we judged the project non-TypeScript", so the summary asserted the first about a build where
+   * the second had happened — and the reader is sent looking for a project that has no TypeScript
+   * in it, which is the one thing that was certainly not true.
+   *
+   * The cost was not the sentence. It was that the check which exists to catch exactly that build's
+   * eleven `TS2339` errors AT WRITE TIME stood down, and the build ground them through three repair
+   * passes over five minutes instead.
+   */
+  skippedNotTs: number;
+  /** Writes of REAL TypeScript that were skipped because the project was judged non-TypeScript. */
+  skippedNoTsconfig: number;
+  /**
+   * How many times the `tsconfig.json` probe THREW rather than answering.
+   *
+   * Recorded because a throw and a genuine absence are different facts (`probeFailures > 0` with
+   * `skippedNoTsconfig > 0` is the shape of a check that disabled itself on a read error), and
+   * because this report is the only place that distinction can ever be seen.
+   */
+  probeFailures: number;
   disabledReason: string | null;
 }
 
 export function emptyWriteTypecheckStats(): WriteTypecheckStats {
-  return { runs: 0, cleanRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0, skipped: 0, disabledReason: null };
+  return {
+    runs: 0, cleanRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
+    skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0, disabledReason: null,
+  };
+}
+
+/**
+ * How many times a FAILED `tsconfig.json` probe is retried before the project is accepted as non-TS.
+ *
+ * 🔑 A PROBE THAT THREW IS NOT AN ANSWER. The old code latched `_isTsProject = false` inside the
+ * `catch`, so ONE unreadable read — a sandbox hiccup, a timeout, a file written a moment later —
+ * switched the check off for the whole build, silently and permanently. That is this repo's oldest
+ * class, applied to a compiler: *"we could not look"* recorded as *"there is nothing there"*.
+ *
+ * Three is deliberate rather than infinite: a project that genuinely has no `tsconfig.json` must not
+ * pay a failed read on every single write for the rest of the build.
+ */
+export const MAX_TSCONFIG_PROBES = 3;
+
+/** The three answers a `tsconfig.json` probe can give. `unknown` is the one the old code could not express. */
+export type TsProjectVerdict = 'yes' | 'no' | 'unknown';
+
+/**
+ * Should the probe be attempted (again)?
+ *
+ * `unknown` means a previous attempt threw: retry while attempts remain, then accept 'no' so a real
+ * JS project is not re-probed for ever. Pure.
+ */
+export function shouldProbeTsconfig(verdict: TsProjectVerdict, attempts: number): boolean {
+  if (verdict === 'yes' || verdict === 'no') return false;
+  return attempts < MAX_TSCONFIG_PROBES;
+}
+
+/**
+ * Did this read fail because the file is genuinely ABSENT, rather than because we could not look?
+ *
+ * ⚠️ PRECISION-FIRST, AND THE ASYMMETRY IS THE WHOLE POINT. A false "absent" is the bug this autopsy
+ * is about — it switches the compiler off for the rest of the build. A false "could not look" costs
+ * at most `MAX_TSCONFIG_PROBES - 1` extra file reads on a project that really has no TypeScript in
+ * it. So only the unmistakable not-found shapes count, and every other failure (a timeout, a dead
+ * sandbox, a network error, an empty message) stays unknown and is retried. Pure.
+ */
+export function isMissingFileError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  // A DEAD SANDBOX CAN SAY "no such file or directory" ABOUT THE WHOLE WORKSPACE — this repo records
+  // exactly that string (`[not_found] lstat /home/user/workspace: no such file or directory`). That is
+  // not a missing tsconfig, it is a missing machine, and treating it as an answer would be the same
+  // mistake one level up. A message naming the workspace root is never a verdict about one file.
+  if (m.includes('/home/user/workspace:') || m.includes('workspace: no such file')) return false;
+  return m.includes('enoent') || m.includes('no such file') || m.includes('not_found') || m.includes('not found');
+}
+
+/** After `MAX_TSCONFIG_PROBES` failed reads, an unknown is finally treated as "not a TypeScript project". Pure. */
+export function tsProjectSettled(verdict: TsProjectVerdict, attempts: number): boolean {
+  return verdict !== 'unknown' || attempts >= MAX_TSCONFIG_PROBES;
 }
 
 /** The admin-only report line. Says plainly when the check never ran and why. Pure. */
 export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean): string {
   if (!enabled) return 'Write-time typecheck: OFF (AGENTV3_WRITE_TYPECHECK=off) — the first compile is whenever the model asks for one.';
   if (s.runs === 0) {
-    return s.disabledReason
-      ? `Write-time typecheck: never ran — ${s.disabledReason}.`
-      : `Write-time typecheck: no TypeScript source was written this build (${s.skipped} write(s) skipped as not TypeScript).`;
+    if (s.disabledReason) return `Write-time typecheck: never ran — ${s.disabledReason}.`;
+    // THE SKIPPED WRITES ARE REPORTED BY REASON, because the reasons mean opposite things to whoever
+    // reads this next. TypeScript that was written and not checked is a DEFECT in this check; a build
+    // of `.css` and `.html` files is this check correctly having nothing to do.
+    if (s.skippedNoTsconfig > 0) {
+      const why = s.probeFailures > 0
+        ? `the tsconfig.json probe could not be read (${s.probeFailures} failed attempt(s))`
+        : 'no tsconfig.json was found';
+      return `Write-time typecheck: never ran although ${s.skippedNoTsconfig} TypeScript write(s) happened — ${why}, so the project was treated as non-TypeScript.`;
+    }
+    return `Write-time typecheck: no TypeScript source was written this build (${s.skippedNotTs || s.skipped} write(s) skipped as not TypeScript).`;
   }
   const avg = Math.round(s.elapsedMs / s.runs / 100) / 10;
   return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `

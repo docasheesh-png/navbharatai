@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, Paperclip, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
+import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DoseCalculator } from './DoseCalculator';
 import { loadVials } from '../../lib/vialMemory';
@@ -31,6 +31,8 @@ import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { AttachMenu } from '../AttachMenu';
+import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
@@ -76,8 +78,14 @@ interface SDAChatProps {
 
 const ACCEPTED_TYPES = 'image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.txt,.csv,.json,.md,.docx,.xlsx,.xls,.pptx,.zip';
 const MAX_FILE_MB = 10;
-const BASE_HEIGHT = 44;
-const MAX_HEIGHT = BASE_HEIGHT * 5; // 5x max grow
+/**
+ * The composer's grow ceiling, in px — the SAME 128 every other chat composer uses (`max-h-32`).
+ *
+ * It used to be `BASE_HEIGHT * 5` off a 44px minimum height, which is where this box's mismatch with
+ * the 36px controls beside it came from. The resting height is now the browser's own one-line height
+ * for `rows={1}`, exactly as in `ProfessionalChat`.
+ */
+const MAX_HEIGHT = 128;
 
 const WELCOME: SDAMessage = {
   id: 'welcome',
@@ -317,7 +325,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   // Gates the Firestore autosave effect until the cross-device fetch (below) has
   // finished — otherwise a stale local case could overwrite a newer one mid-fetch.
   const hydratedRef = useRef(false);
@@ -538,10 +545,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const autoResize = (el: HTMLTextAreaElement) => {
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
-  };
+  /**
+   * The composer's grow/reset, from the SHARED helper (rule 2 — centralize a drifted copy).
+   *
+   * This file carried its own three-line `autoResize`, byte-for-byte the body of `autoGrow`, written
+   * before `lib/autoGrowTextarea.ts` existed. Two copies of a sizing rule is how one composer ends up
+   * behaving differently from every other — which is the defect this whole change is fixing.
+   */
+  const autoResize = (el: HTMLTextAreaElement) => autoGrow(el, MAX_HEIGHT);
 
   // ── Voice Input ──────────────────────────────────────────────────────────
 
@@ -617,13 +628,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
       img.src = url;
     });
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  /**
+   * Accept ONE picked file, whichever door it came through.
+   *
+   * It used to take the change EVENT of this screen's own hidden `<input type="file">`, which is why
+   * the camera was never offered here: that input opened the file browser directly. The shared
+   * `AttachMenu` (camera / gallery / file) hands over a `FileList`, so the logic now takes a `File`
+   * and `handleFiles` adapts. A doctor photographing an X-ray or an ECG strip is the single most
+   * likely attachment on this screen, and it was the one option the paperclip did not have.
+   */
+  const handleFiles = (files: FileList | null) => { const f = files?.[0]; if (f) void acceptFile(f); };
+
+  const acceptFile = async (file: File) => {
     // Images get downscaled (so the 10MB cap rarely matters); docs are capped raw
     if (!file.type.startsWith('image/') && file.size > MAX_FILE_MB * 1024 * 1024) {
       alert(`File too large. Max ${MAX_FILE_MB}MB allowed for documents.`);
-      e.target.value = '';
       return;
     }
     if (file.type.startsWith('image/') && file.type !== 'image/svg+xml') {
@@ -639,7 +658,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
       };
       reader.readAsDataURL(file);
     }
-    e.target.value = '';
   };
 
   /**
@@ -704,7 +722,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
     const base = baseTranscript ?? messages;
 
     setInput('');
-    if (inputRef.current) inputRef.current.style.height = `${BASE_HEIGHT}px`;
+    if (inputRef.current) resetGrow(inputRef.current);
     setSuggestPDF(false);
 
     const fileForMsg = attachedFile;
@@ -1285,78 +1303,90 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
             </div>
           )}
 
+          {/*
+            ONE COMPOSER, EVERYWHERE (admin 2026-09-20, with a screenshot of this row beside the
+            Mentor/Career Coach row: "SDA ka input box bhi baki ai ke jaise karna hai … other
+            professionals ke jaise hi karo").
+
+            What was different, and why it read as a different product: the paperclip and the
+            dictation mic sat INSIDE the text box, so the writing area started a third of the way
+            across and a two-word placeholder wrapped onto two lines on a phone; the text was
+            `text-[12px]` against every other composer's `text-sm`; and the box was pinned to a
+            44px minimum while the buttons beside it were 40px, so nothing lined up. Every control
+            is now its own `w-9 h-9 rounded-xl` box on the row, the text box is the row's only
+            growing element, and the classes are the ones `ProfessionalChat` uses — so the two
+            screens are the same screen with a different persona in it.
+
+            Kept deliberately: the DICTATION mic (speech → text, which the professionals do not
+            have) and the `Volume2` icon on the voice button. Two mic glyphs side by side would be
+            two different features wearing one icon — the distinction predates this change and the
+            layout is what the admin asked to align, not the meaning.
+          */}
           <div className="flex items-end gap-2">
-            {/* Input box */}
-            <div className="flex-1 bg-card border border-emerald-900/40 focus-within:border-emerald-600/60 rounded-xl transition-all">
-              <div className="flex items-end px-3 py-2.5 gap-2">
-                {/* Attach button */}
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading}
-                  title="Upload lab report, X-ray, ECG, or any medical document"
-                  className="text-faint hover:text-success transition-colors pb-0.5 shrink-0 disabled:opacity-40"
-                >
-                  <Paperclip className="w-4 h-4" />
-                </button>
-                <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileSelect} className="hidden" />
+            <AttachMenu
+              onFiles={handleFiles}
+              fileAccept={ACCEPTED_TYPES}
+              multiple={false}
+              disabled={loading}
+              badge={attachedFile ? 1 : undefined}
+              title="Attach a lab report, X-ray, ECG or any medical document"
+              buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover disabled:opacity-40 border border-line text-body flex items-center justify-center"
+            />
 
-                {/* Dictation mic — speech → TEXT into the box (you still read + Send). Renders only where
-                    the Web Speech API exists; absent on iOS/iPadOS WKWebView (no dead button). */}
-                {voiceSupported && (
-                  <button
-                    onClick={() => toggleVoice(input)}
-                    disabled={loading}
-                    title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
-                    className={cn(
-                      "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
-                      isListening ? "text-danger animate-pulse" : "text-faint hover:text-info"
-                    )}
-                  >
-                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => { setInput(e.target.value); autoResize(e.target); }}
+              onKeyDown={(e) => {
+                // Doctor AI previously had NO keyboard send at all — every message needed a tap on
+                // the button, which on a desktop consult is the slowest possible way to work. Same
+                // shared rule as every other AI now, IME-safe and honouring the toggle.
+                if (enterShouldSend({
+                  key: e.key,
+                  shiftKey: e.shiftKey,
+                  sendOnEnter,
+                  hasContent: !!input.trim() || !!attachedFile,
+                  isBusy: loading,
+                  isComposing: (e.nativeEvent as any)?.isComposing,
+                })) {
+                  e.preventDefault();
+                  void handleSend();
+                  dismissKeyboardOnMobile(inputRef.current);
+                }
+              }}
+              placeholder={attachedFile ? 'Add a note about this document…' : 'Type your answer…'}
+              rows={1}
+              className="flex-1 resize-none bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-emerald-600/60 max-h-32"
+              disabled={loading}
+            />
+
+            {/* Dictation mic — speech → TEXT into the box (you still read + Send). Renders only where
+                the Web Speech API exists; absent on iOS/iPadOS WKWebView (no dead button). */}
+            {voiceSupported && (
+              <button
+                onClick={() => toggleVoice(input)}
+                disabled={loading}
+                title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
+                className={cn(
+                  'w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 disabled:opacity-40 transition-colors',
+                  isListening
+                    ? 'bg-red-500/15 border-red-500/40 text-danger animate-pulse'
+                    : 'bg-raised hover:bg-raised-hover border-line text-body',
                 )}
+              >
+                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+            )}
 
-                {/* Text input */}
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={e => { setInput(e.target.value); autoResize(e.target); }}
-                  onKeyDown={(e) => {
-                    // Doctor AI previously had NO keyboard send at all — every message needed a tap on
-                    // the button, which on a desktop consult is the slowest possible way to work. Same
-                    // shared rule as every other AI now, IME-safe and honouring the toggle.
-                    if (enterShouldSend({
-                      key: e.key,
-                      shiftKey: e.shiftKey,
-                      sendOnEnter,
-                      hasContent: !!input.trim() || !!attachedFile,
-                      isBusy: loading,
-                      isComposing: (e.nativeEvent as any)?.isComposing,
-                    })) {
-                      e.preventDefault();
-                      void handleSend();
-                      dismissKeyboardOnMobile(inputRef.current);
-                    }
-                  }}
-                  placeholder={attachedFile ? "Add a note about this document (optional)..." : "Type your answer or clinical finding..."}
-                  rows={1}
-                  className="flex-1 bg-transparent resize-none outline-none text-[12px] text-ink placeholder-faint leading-relaxed overflow-y-auto custom-scrollbar"
-                  style={{ minHeight: `${BASE_HEIGHT}px`, maxHeight: `${MAX_HEIGHT}px` }}
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            {/* Talk to SDA by VOICE — a PROMINENT, unmistakable voice button beside Send (was a dim inline
-                icon that was easy to miss). A full spoken back-and-forth with the doctor persona (distinct
-                from the dictation mic, which only turns speech → text). Renders nothing unless voice is
-                enabled + the user is signed in. getHistory continues THIS case in voice (clinical markers
-                stripped so nothing is read aloud). */}
+            {/* Talk to SDA by VOICE — a full spoken back-and-forth with the doctor persona (distinct
+                from the dictation mic, which only turns speech → text). Renders nothing unless voice
+                is enabled + the user is signed in. getHistory continues THIS case in voice (clinical
+                markers stripped so nothing is read aloud). */}
             <ProfessionalVoiceButton
               professionalId="sda"
               title="Talk to SDA by voice — start a live spoken consult"
-              icon={<Volume2 className="w-5 h-5" />}
-              className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-success hover:text-success active:scale-95 transition-all shrink-0 shadow-lg shadow-emerald-900/30"
+              icon={<Volume2 className="w-4 h-4" />}
+              className="w-9 h-9 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-success flex items-center justify-center shrink-0"
               getHistory={() =>
                 messages
                   .filter((m) => m.text && m.text.trim())
@@ -1379,17 +1409,17 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
               <button
                 onClick={stop}
                 title="Stop"
-                className="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-500 active:scale-95 rounded-xl transition-all shrink-0 shadow-lg shadow-red-900/40 text-on-accent"
+                className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent flex items-center justify-center shrink-0"
               >
-                <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px] text-ink">■</span>
+                <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
               </button>
             ) : (
               <button
                 onClick={() => { handleSend(); dismissKeyboardOnMobile(inputRef.current); }}
                 disabled={!input.trim() && !attachedFile}
-                className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40 text-on-accent"
+                className="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent flex items-center justify-center shrink-0"
               >
-                <Send className="w-4 h-4 text-ink" />
+                <Send className="w-4 h-4" />
               </button>
             )}
           </div>

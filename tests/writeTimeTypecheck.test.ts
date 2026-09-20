@@ -167,7 +167,10 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
     const helper = dispatcher.slice(dispatcher.indexOf('private async writeTypecheckNote('), dispatcher.indexOf('async dispatch(call: ToolUse'));
     expect(helper).toContain("this.onCommand?.({ command, exitCode: null");
     expect(helper).toContain("this.actuator.readFile(this.workspaceId, 'tsconfig.json')");
-    expect(helper).toContain('if (!this._isTsProject)');
+    // ⚠️ ANCHORED ON THE GUARD, NOT ITS SPELLING. A compile only ever runs once the project has been
+    // ANSWERED as TypeScript — an unknown (a probe that threw) is retried, never compiled and never
+    // latched as a 'no'. See aFailedProbeIsNotAnAnswer.test.ts for why that distinction exists.
+    expect(helper).toContain("this._tsProject !== 'yes'");
     // A check that could not run says nothing.
     expect(helper).toContain('if (errors === null) return \'\';');
   });

@@ -56,7 +56,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "@zip.js/zip.js": "^2.8.34",
     "axios": "^1.18.1",
-    "cashfree-pg": "^6.0.4",
+    "cashfree-pg": "^6.0.6",
     "clsx": "^2.1.1",
     "compression": "^1.8.1",
     "dockerode": "^5.0.1",

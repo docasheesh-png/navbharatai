@@ -71467,3 +71467,29 @@ readiness no longer running it → 1 red · **the match loosened to a "Hello Wor
 ⚠️ **Not fixed here:** `READY_BEFORE_END` measured 701s "after ready" from that bogus point, so its
 number in past reports is polluted. From now on it cannot start from a scaffold — but the historical
 figures should not be trusted.
+
+---
+
+## 2026-09-20 — The fail-open judge is CLOSED, and a doc claim it rested on was false
+
+`PROGRESS.md`'s 2026-09-19 entry recorded the fail-open judge as an **open root cause** and said
+plainly *"Deliberately not fixed here. The honest fix is a THIRD outcome."* **That is what
+`claude/a-judge-that-never-ran-did-not-pass` builds** — `JudgeVerdict.reviewed` + `describeJudgeVerdict`
+give exactly that third outcome (`NOT RUN`, at warning severity, with the judge's own explanation
+attached). Two sessions found the same defect independently, one recorded it and one fixed it; the
+record is updated here so `main` does not carry a doc calling closed work open.
+
+🔴 **And that entry's companion sentence in `CLAUDE.md` was FALSE when written.** It said the day the
+Nemotron trial credits run out is *"VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report)"*. **No such
+code has ever existed** — `grep -rn CHEAP_REVIEW_NOT_RUN src/` returns nothing. So the stated
+justification for running the judge on a trial pool (*"which is what made running on a trial acceptable
+at all"*) rested on a report line that was never built. It is true **now**, through `NOT RUN` inside
+the existing `CHEAP_REVIEW` code — but it was not true then, and an aspirational sentence written in
+the past tense is the most dangerous shape a doc claim can take.
+
+✅ **CLOSED for the admin, and my own advice was wrong:** I told them to check whether
+`NEMOTRON_ULTRA_MODEL` / `NEMOTRON_SUPER_MODEL` needed setting, reasoning from `nemotron.ts`'s docblock
+(*"Bedrock and NVIDIA's own endpoint do not use the `nvidia/…` form"*). The other session verified
+against the real account: **NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b` too, so the code
+defaults are already correct and no override is needed.** The docblock's claim about that host is what
+misled me — a module comment is not a measurement either.

@@ -33,12 +33,12 @@ const NODE_WIDTH = 160;
 const NODE_HEIGHT = 60;
 
 const nodeConfig: Record<NodeType, { label: string; color: string; border: string; bg: string; icon: React.ReactNode; desc: string }> = {
-  start:     { label: 'Start',       color: '#22c55e', border: 'border-green-500',  bg: 'bg-green-500/20',  icon: <Play size={14} />,        desc: 'Entry point' },
-  message:   { label: 'Message',     color: '#3b82f6', border: 'border-blue-500',   bg: 'bg-blue-500/20',   icon: <MessageSquare size={14}/>, desc: 'Send text' },
+  start:     { label: 'Start',       color: 'var(--brand-success-text)', border: 'border-green-500',  bg: 'bg-green-500/20',  icon: <Play size={14} />,        desc: 'Entry point' },
+  message:   { label: 'Message',     color: 'var(--brand-info-text)', border: 'border-blue-500',   bg: 'bg-blue-500/20',   icon: <MessageSquare size={14}/>, desc: 'Send text' },
   menu:      { label: 'Button Menu', color: '#a855f7', border: 'border-purple-500', bg: 'bg-purple-500/20', icon: <ChevronRight size={14}/>,  desc: 'Show options' },
   condition: { label: 'Condition',   color: '#eab308', border: 'border-yellow-500', bg: 'bg-yellow-500/20', icon: <GitBranch size={14}/>,     desc: 'If/else branch' },
   api:       { label: 'API Call',    color: '#f97316', border: 'border-orange-500', bg: 'bg-orange-500/20', icon: <Globe size={14}/>,         desc: 'Fetch external data' },
-  end:       { label: 'End',         color: '#ef4444', border: 'border-red-500',    bg: 'bg-red-500/20',    icon: <StopCircle size={14}/>,    desc: 'Conversation end' },
+  end:       { label: 'End',         color: 'var(--brand-danger-text)', border: 'border-red-500',    bg: 'bg-red-500/20',    icon: <StopCircle size={14}/>,    desc: 'Conversation end' },
 };
 
 const defaultNodes: BotNode[] = [

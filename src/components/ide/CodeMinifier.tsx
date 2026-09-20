@@ -312,7 +312,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-card)' }}>
       <div
         className="flex items-center gap-2 px-3 py-2.5 border-b text-xs font-semibold text-muted shrink-0"
-        style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+        style={{ borderColor: 'var(--border-soft)' }}
       >
         <FolderOpen size={13} className="text-accent-text" />
         Your apps
@@ -335,7 +335,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
                 <button
                   onClick={() => openApp(a.sessionId)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 text-left border-b hover:bg-raised transition-colors"
-                  style={{ borderColor: 'rgba(255,255,255,0.05)' }}
+                  style={{ borderColor: 'var(--border-soft)' }}
                 >
                   {open ? <ChevronDown size={13} className="text-accent-text shrink-0" /> : <ChevronRight size={13} className="text-faint shrink-0" />}
                   <span className="flex-1 min-w-0">
@@ -388,7 +388,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
       {/* ── Header ── */}
       <div
         className="flex items-center gap-2 px-3 py-2.5 border-b shrink-0"
-        style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'var(--surface-card)' }}
+        style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
       >
         <button
           onClick={() => setBrowserOpen((v) => !v)}
@@ -407,7 +407,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
         {browserOpen && (
           <div
             className="shrink-0 border-r overflow-hidden w-56 sm:w-64"
-            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+            style={{ borderColor: 'var(--border-soft)' }}
           >
             {browser}
           </div>
@@ -417,11 +417,11 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
           {/* Source */}
           <div
             className="flex flex-col flex-1 overflow-hidden border-b md:border-b-0 md:border-r"
-            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+            style={{ borderColor: 'var(--border-soft)' }}
           >
             <div
               className="flex items-center gap-2 px-3 py-2 border-b text-xs shrink-0"
-              style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
+              style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
             >
               <span className="font-medium text-body truncate">{sourceName}</span>
               {selectedPath ? (
@@ -464,7 +464,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
           <div className="flex flex-col flex-1 overflow-hidden">
             <div
               className="flex items-center gap-2 px-3 py-2 border-b text-xs shrink-0"
-              style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
+              style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
             >
               <span className="font-medium text-body">Optimised</span>
               <div className="flex-1" />
@@ -493,7 +493,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
             {outputCode && (
               <div
                 className="px-3 py-2.5 border-b shrink-0"
-                style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--surface-card)' }}
+                style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
               >
                 <button
                   onClick={() => void handleApply()}
@@ -525,7 +525,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
               <div
                 className={`px-3 py-2 text-xs border-b shrink-0 leading-snug ${applyFailed ? 'text-warn' : 'text-success'}`}
                 style={{
-                  borderColor: 'rgba(255,255,255,0.08)',
+                  borderColor: 'var(--border-soft)',
                   background: applyFailed ? 'rgba(245,158,11,0.08)' : 'rgba(63,185,80,0.08)',
                 }}
               >
@@ -555,7 +555,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
       {/* ── The action bar: one obvious thing to press ── */}
       <div
         className="shrink-0 border-t px-3 py-3"
-        style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'var(--surface-card)' }}
+        style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
       >
         {problem && (
           <p className="mb-2 flex items-start gap-1.5 text-xs text-warn leading-snug">

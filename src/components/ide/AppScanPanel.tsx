@@ -279,9 +279,9 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
   return (
     <div className="flex flex-col h-full w-full overflow-hidden" style={{ background: 'var(--surface-base)', color: 'var(--text-body)' }}>
       {/* Source picker */}
-      <div className="shrink-0 border-b px-4 py-3" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+      <div className="shrink-0 border-b px-4 py-3" style={{ borderColor: 'var(--border-soft)' }}>
         <div className="flex items-center gap-2 mb-3">
-          <FileSearch className="w-4 h-4" style={{ color: '#818cf8' }} />
+          <FileSearch className="w-4 h-4" style={{ color: 'var(--brand-accent-strong)' }} />
           <span className="text-sm font-semibold">Scan a whole app for problems</span>
           <button
             onClick={loadSources}
@@ -336,7 +336,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
             {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSearch className="w-3.5 h-3.5" />}
             {running ? 'Scanning…' : 'Scan for problems'}
           </button>
-          {sourcesError && <span className="text-xs" style={{ color: '#f87171' }}>{sourcesError}</span>}
+          {sourcesError && <span className="text-xs" style={{ color: 'var(--brand-danger-text)' }}>{sourcesError}</span>}
         </div>
       </div>
 
@@ -345,7 +345,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
         {/* Running / progress */}
         {running && (
           <div className="flex flex-col gap-2 mb-4">
-            <div className="flex items-center gap-2 text-sm" style={{ color: '#818cf8' }}>
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--brand-accent-strong)' }}>
               <Loader2 className="w-4 h-4 animate-spin" /> {phase || 'Scanning…'}
             </div>
             {progress && (
@@ -360,7 +360,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
         {/* Error */}
         {runError && (
           <div className="rounded-lg border px-4 py-3 text-sm flex items-start gap-2 mb-4"
-            style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
+            style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', color: 'var(--brand-danger-text)' }}>
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> <span>{runError}</span>
           </div>
         )}
@@ -398,7 +398,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
           <button
             onClick={() => onAutoFixInV5(activeSource.workspaceId!, buildFixPrompt(findings, summary.health))}
             className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold w-full justify-center"
-            style={{ background: 'linear-gradient(90deg,#4f46e5,#7c3aed)', color: 'white' }}
+            style={{ background: 'linear-gradient(90deg,#4f46e5,#7c3aed)', color: 'var(--text-primary)' }}
             title="Opens this app in NavBharatAI Pro with the fixes ready to apply"
           >
             <Wrench className="w-4 h-4" /> Auto-fix these in NavBharatAI Pro
@@ -423,14 +423,14 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
 
         {/* Honest notes (degraded deep pass, budget skips, etc.) */}
         {notes.map((n, i) => (
-          <div key={i} className="text-xs mb-2 flex items-start gap-1.5" style={{ color: '#fcd34d' }}>
+          <div key={i} className="text-xs mb-2 flex items-start gap-1.5" style={{ color: 'var(--brand-warn-text)' }}>
             <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> <span>{n}</span>
           </div>
         ))}
 
         {/* Findings list */}
         {summary && findings.length === 0 && !runError && (
-          <div className="flex flex-col items-center justify-center gap-2 py-10" style={{ color: '#22c55e' }}>
+          <div className="flex flex-col items-center justify-center gap-2 py-10" style={{ color: 'var(--brand-success-text)' }}>
             <CheckCircle2 className="w-10 h-10" />
             <p className="text-sm">No problems found — {summary.filesStaticScanned} files scanned clean.</p>
           </div>
@@ -450,7 +450,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
                     <span className="font-mono truncate">{f.file}{f.line ? `:${f.line}` : ''}</span>
                     <span className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.05)' }}>{f.category}</span>
                     {f.source !== 'ai' && (
-                      <span className="flex items-center gap-0.5" style={{ color: '#22c55e' }} title="Deterministic — verified, not AI-guessed">
+                      <span className="flex items-center gap-0.5" style={{ color: 'var(--brand-success-text)' }} title="Deterministic — verified, not AI-guessed">
                         <ShieldCheck className="w-3 h-3" /> Verified
                       </span>
                     )}
@@ -460,8 +460,8 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
               {open && (
                 <div className="px-3 pb-3 pl-8 flex flex-col gap-2">
                   {f.suggestion && (
-                    <div className="rounded p-2 text-xs" style={{ background: 'var(--surface-base)', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      <span style={{ color: '#86efac', fontWeight: 600 }}>Suggested fix: </span>{f.suggestion}
+                    <div className="rounded p-2 text-xs" style={{ background: 'var(--surface-base)', color: 'var(--brand-success-text)', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      <span style={{ color: 'var(--brand-success-text)', fontWeight: 600 }}>Suggested fix: </span>{f.suggestion}
                     </div>
                   )}
                   {/* Deep-dive investigation */}
@@ -471,32 +471,32 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
                       const r = dd.result;
                       return (
                         <div className="rounded p-2.5 text-xs flex flex-col gap-2" style={{ background: 'var(--surface-base)', border: '1px solid rgba(59,130,246,0.25)' }}>
-                          {r.rootCause && <div><span style={{ color: '#93c5fd', fontWeight: 600 }}>Root cause: </span><span style={{ color: 'var(--text-body)' }}>{r.rootCause}</span></div>}
+                          {r.rootCause && <div><span style={{ color: 'var(--brand-info-text)', fontWeight: 600 }}>Root cause: </span><span style={{ color: 'var(--text-body)' }}>{r.rootCause}</span></div>}
                           {r.fix && (
-                            <pre className="rounded p-2 overflow-x-auto" style={{ background: 'var(--surface-card)', color: '#7ee787', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.fix}</pre>
+                            <pre className="rounded p-2 overflow-x-auto" style={{ background: 'var(--surface-card)', color: 'var(--brand-success-text)', border: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.fix}</pre>
                           )}
                           {r.explanation.length > 0 && (
                             <ol className="flex flex-col gap-1 list-none">
                               {r.explanation.map((s, k) => (
-                                <li key={k} className="flex items-start gap-1.5"><span style={{ color: '#60a5fa' }}>{k + 1}.</span><span style={{ color: 'var(--text-body)' }}>{s}</span></li>
+                                <li key={k} className="flex items-start gap-1.5"><span style={{ color: 'var(--brand-info-text)' }}>{k + 1}.</span><span style={{ color: 'var(--text-body)' }}>{s}</span></li>
                               ))}
                             </ol>
                           )}
                           {r.prevention.length > 0 && (
                             <div style={{ color: 'var(--text-muted)' }}>
-                              <span style={{ color: '#fcd34d', fontWeight: 600 }}>Prevent it: </span>{r.prevention.join(' ')}
+                              <span style={{ color: 'var(--brand-warn-text)', fontWeight: 600 }}>Prevent it: </span>{r.prevention.join(' ')}
                             </div>
                           )}
                         </div>
                       );
                     }
-                    if (dd?.error) return <div className="text-xs" style={{ color: '#f87171' }}>{dd.error}</div>;
+                    if (dd?.error) return <div className="text-xs" style={{ color: 'var(--brand-danger-text)' }}>{dd.error}</div>;
                     return (
                       <button
                         onClick={() => investigate(i, f)}
                         disabled={dd?.loading}
                         className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium"
-                        style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.3)', opacity: dd?.loading ? 0.6 : 1 }}
+                        style={{ background: 'rgba(59,130,246,0.15)', color: 'var(--brand-info-text)', border: '1px solid rgba(59,130,246,0.3)', opacity: dd?.loading ? 0.6 : 1 }}
                       >
                         {dd?.loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                         {dd?.loading ? 'Investigating…' : 'Investigate & fix'}

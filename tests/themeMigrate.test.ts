@@ -8,7 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR, fixedFill, inlineFillKind, hasOwnOpaqueBackground } from '../scripts/themeMigrate.mjs';
+import { mapToken, migrate, enclosingSpan, fillContext, SOLID_FILL, TOKEN_VAR, fixedFill, inlineFillKind, hasOwnOpaqueBackground,
+  DARK_VALUE, INLINE_TEXT, INLINE_LINE, INLINE_BG, INLINE_ACCENT_FILL, inlineColourToken, inlineBackgroundKind, normaliseColour, styleObjectSpans, inlineSkipReason, inlineOnlyRun, elementAt, elementFixesItsLabel } from '../scripts/themeMigrate.mjs';
 import { literalsIn, maskEmbeddedSources } from '../scripts/themeColourBaseline.mjs';
 
 const compat = readFileSync(resolve(__dirname, '../src/styles/theme-compat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
@@ -496,5 +497,260 @@ describe('🔒 a hover to the surface it already has is not a hover (PR #3095\'s
     expect(migrate('"hover:bg-white/10 active:bg-white/10"').out).toBe('"hover:bg-raised active:bg-raised"');
     // And a press to a DIFFERENT surface is already honest feedback.
     expect(migrate('"bg-well active:bg-white/5"').out).toBe('"bg-well active:bg-raised"');
+  });
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════════
+ * INLINE STYLE COLOURS — `style={{ color: '#818cf8' }}`
+ *
+ * The class table had a compat layer to be identical to; an inline style has nothing. So the proof
+ * here is different in kind: every `exact` row must BE the dark palette's own value, read out of
+ * index.css itself. That is what makes "Dark is unchanged, Light is repaired" a fact rather than a
+ * hope — and it is why `exact` is computed from DARK_VALUE instead of inherited from the class rows,
+ * where "exact" means something else entirely.
+ * ════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+const indexCss = readFileSync(resolve(__dirname, '../src/index.css'), 'utf8');
+
+/** The `:root, html[data-theme="dark"]` block's own declarations. */
+function darkPalette(): Map<string, string> {
+  const start = indexCss.indexOf('html[data-theme="dark"]');
+  expect(start, 'the dark palette block is no longer spelled html[data-theme="dark"]').toBeGreaterThan(0);
+  const open = indexCss.indexOf('{', start);
+  const close = indexCss.indexOf('}', open);
+  const body = indexCss.slice(open + 1, close).replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const out = new Map<string, string>();
+  for (const m of body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out.set(m[1], m[2].trim());
+  return out;
+}
+
+describe('🔒 every EXACT inline row IS the dark palette value — proved against index.css', () => {
+  const dark = darkPalette();
+
+  it('parsed the dark block (a canary, so a scan that matched nothing cannot pass for ever)', () => {
+    expect(dark.size).toBeGreaterThan(15);
+    expect(dark.get('--text-primary')).toBe('#ffffff');
+    expect(dark.get('--surface-card')).toBe('#161b22');
+  });
+
+  it('DARK_VALUE agrees with index.css on every role it names', () => {
+    for (const [varName, value] of Object.entries(DARK_VALUE)) {
+      expect(dark.get(varName), `${varName} is not declared in the dark block`).toBeTruthy();
+      expect(normaliseColour(dark.get(varName)!), varName).toBe(normaliseColour(value));
+    }
+  });
+
+  it('a row whose literal equals its role value is EXACT, and Dark cannot move', () => {
+    for (const [value, varName] of Object.entries(INLINE_TEXT)) {
+      const r = inlineColourToken('color', value)!;
+      expect(r.varName).toBe(varName);
+      const same = normaliseColour(dark.get(varName) ?? '\u0000') === normaliseColour(value);
+      expect(r.kind, `${value} → ${varName}`).toBe(same ? 'exact' : 'fix');
+    }
+  });
+
+  it('the roles the old dark UI wrote by hand map back to themselves', () => {
+    expect(inlineColourToken('color', '#818cf8')).toEqual({ varName: '--brand-accent-strong', kind: 'exact' });
+    expect(inlineColourToken('color', '#f87171')).toEqual({ varName: '--brand-danger-text', kind: 'exact' });
+    expect(inlineColourToken('color', 'white')).toEqual({ varName: '--text-primary', kind: 'exact' });
+    expect(inlineColourToken('color', '#FFF')).toEqual({ varName: '--text-primary', kind: 'exact' });
+    expect(inlineColourToken('borderColor', 'rgba(255, 255, 255, 0.1)')).toEqual({ varName: '--border-soft', kind: 'exact' });
+    expect(inlineColourToken('background', '#161b22')).toEqual({ varName: '--surface-card', kind: 'exact' });
+    expect(inlineColourToken('background', '#4f46e5'), 'a brand fill is never themed').toBeNull();
+  });
+});
+
+describe('the white-alpha ladder — the invisible-text defect itself', () => {
+  it('each band lands on the role that opacity was imitating', () => {
+    expect(inlineColourToken('color', 'rgba(255,255,255,0.9)')!.varName).toBe('--text-primary');
+    expect(inlineColourToken('color', 'rgba(255,255,255,0.65)')!.varName).toBe('--text-body');
+    expect(inlineColourToken('color', 'rgba(255,255,255,0.5)')!.varName).toBe('--text-muted');
+    expect(inlineColourToken('color', 'rgba(255,255,255,0.4)')!.varName).toBe('--text-muted');
+    expect(inlineColourToken('color', 'rgba(255,255,255,0.3)')!.varName).toBe('--text-faint');
+    expect(inlineColourToken('color', 'rgba(255,255,255,0.2)')!.varName).toBe('--text-faint');
+  });
+
+  it('every band is a FIX — none of them is a palette value, so Dark shifts on purpose', () => {
+    for (const a of ['0.9', '0.65', '0.5', '0.4', '0.3', '0.2']) {
+      expect(inlineColourToken('color', `rgba(255,255,255,${a})`)!.kind).toBe('fix');
+    }
+  });
+
+  it('spacing and case do not make two colours out of one', () => {
+    expect(normaliseColour('rgba(255, 255, 255, 0.1)')).toBe('rgba(255,255,255,0.1)');
+    expect(normaliseColour('#ABC')).toBe('#aabbcc');
+    expect(normaliseColour('  White ')).toBe('#ffffff');
+  });
+});
+
+describe('a brand-coloured rule is not a divider', () => {
+  it('borderLeftColor takes the meaning colour, not --border-soft', () => {
+    expect(inlineColourToken('borderLeftColor', '#ef4444')!.varName).toBe('--brand-danger-text');
+    expect(inlineColourToken('borderLeftColor', '#22c55e')!.varName).toBe('--brand-success-text');
+  });
+  it('a neutral rule still takes the divider', () => {
+    expect(inlineColourToken('borderColor', 'rgba(255,255,255,0.08)')!.varName).toBe('--border-soft');
+    expect(inlineColourToken('borderColor', '#30363d')!.varName).toBe('--border-soft');
+  });
+});
+
+describe('what the inline pass deliberately LEAVES — nothing is guessed', () => {
+  it('a low-alpha wash background is not a surface', () => {
+    expect(inlineColourToken('background', 'rgba(255,255,255,0.05)')).toBeNull();
+    expect(inlineColourToken('background', 'rgba(239,68,68,0.15)')).toBeNull();
+  });
+  it('an unknown hex is left exactly as written', () => {
+    expect(inlineColourToken('color', '#123456')).toBeNull();
+    expect(inlineColourToken('background', '#1a0a0a')).toBeNull();
+  });
+  it('a value that already follows the theme is not rewritten', () => {
+    expect(inlineColourToken('color', 'var(--text-muted)')).toBeNull();
+  });
+  it('a property that is not a colour role is not touched', () => {
+    expect(inlineColourToken('boxShadow', '#000000')).toBeNull();
+  });
+});
+
+describe('text on a FIXED inline fill stays as the author wrote it', () => {
+  it('inlineBackgroundKind separates a fixed fill, a wash and a themed surface', () => {
+    // A BRAND fill is FIXED, not themed — TRAP 3 of tests/inlineThemeColours.test.ts (2026-08-16).
+    expect(inlineBackgroundKind("style={{ background: '#4f46e5', color: 'white' }}")).toBe('fixed');
+    expect(inlineBackgroundKind("style={{ background: '#1877f2' }}")).toBe('fixed');
+    expect(inlineBackgroundKind("style={{ background: 'rgba(255,255,255,0.05)' }}")).toBe('wash');
+    expect(inlineBackgroundKind("style={{ background: '#161b22' }}")).toBe('themed');
+    expect(inlineBackgroundKind("style={{ background: user.brandColor }}")).toBe('fixed');
+    expect(inlineBackgroundKind("style={{ background: 'var(--surface-card)' }}")).toBe('none');
+    expect(inlineBackgroundKind('<div className="p-2">')).toBe('none');
+  });
+
+  it('a white label on somebody else\'s brand fill is left, and reported', () => {
+    const src = `<b style={{ background: '#1877f2', color: 'white' }}>Go</b>`;
+    const { out, left } = migrate(src);
+    expect(out).toContain("color: 'white'");
+    expect(Object.keys(left).join(' ')).toContain('fixed inline fill');
+  });
+
+  /* 🔴 THE REGRESSION THIS PASS ACTUALLY PRODUCED, caught in its own diff before it left the branch.
+   * The guard read the LINE; a style object is routinely written over several, so `color: 'white'`
+   * saw no background and became `--text-primary` — near-black, on an indigo fill, about 2.2:1. The
+   * tool removing invisible labels had created one. These four cases are the lock. */
+  it('🔒 a MULTI-LINE style object is ONE context — the label on a brand fill survives', () => {
+    const src = [
+      '<button style={{',
+      "  background: '#4f46e5',",
+      "  color: 'white',",
+      '}}>Go</button>',
+    ].join('\n');
+    const { out } = migrate(src);
+    expect(out).toBe(src);                       // the fill stays, and so does its label
+    expect(out).not.toContain('--text-primary'); // the regression: near-black on indigo, ~2.2:1
+  });
+
+  it('🔒 a MULTI-LINE style object on a fixed foreign fill leaves its label alone', () => {
+    const src = ['<b style={{', "  background: '#1877f2',", "  color: 'white',", '}}>x</b>'].join('\n');
+    expect(migrate(src).out).toContain("color: 'white'");
+  });
+
+  it('every label on a brand fill is left, whatever colour it is', () => {
+    const src = ['<b style={{', "  background: '#818cf8',", "  color: '#8b949e',", '}}>x</b>'].join('\n');
+    expect(migrate(src).out).toContain("color: '#8b949e'");
+  });
+
+  it('styleObjectSpans finds the whole object, braces and all', () => {
+    const src = "a style={{ color: '#fff', pad: { x: 1 } }} b";
+    const [[from, to]] = styleObjectSpans(src);
+    expect(src.slice(from, to)).toBe("style={{ color: '#fff', pad: { x: 1 } }}");
+  });
+
+  it('a label on a WASH is themed — the wash is not a background', () => {
+    const src = `<b style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)' }}>x</b>`;
+    expect(migrate(src).out).toContain("color: 'var(--text-muted)'");
+  });
+});
+
+describe('the inline pass in migrate()', () => {
+  it('rewrites the declaration and keeps the quote style', () => {
+    const src = `<i style={{ color: "#8b949e", borderColor: 'rgba(255,255,255,0.1)' }} />`;
+    const { out, exact } = migrate(src);
+    expect(out).toContain('color: "var(--text-muted)"');
+    expect(out).toContain("borderColor: 'var(--border-soft)'");
+    expect(exact).toBeGreaterThanOrEqual(2);
+  });
+
+  it('🔒 embedded source is never rewritten — it is somebody else\'s app', () => {
+    const src = 'const tpl = `<div class="card" style="color: #8b949e">hi</div>`;';
+    expect(migrate(src).out).toBe(src);
+  });
+
+  it('🔒 the pass really fires — a canary against a regex that matches nothing', () => {
+    const { changed } = migrate(`<p style={{ color: '#c9d1d9' }}>t</p>`);
+    expect(Object.keys(changed).join(' ')).toContain('var(--text-body)');
+  });
+
+  it('the census stops counting a declaration once it is a var()', () => {
+    const before = `<p style={{ color: '#c9d1d9' }}>t</p>`;
+    expect(literalsIn(before).length).toBe(1);
+    expect(literalsIn(migrate(before).out).length).toBe(0);
+  });
+});
+
+
+describe('🔒 the two traps an earlier sweep already paid for — named, not pattern-matched', () => {
+  it('a library config and the user\'s own app are skipped by NAME', () => {
+    expect(inlineSkipReason('src/components/ide/ShellTerminal.tsx')).toContain('xterm');
+    expect(inlineSkipReason('src/components/ide/MultiPageBuilder.tsx')).toContain("USER'S app");
+    expect(inlineSkipReason('src/components/ide/DarkModeGenerator.tsx')).toBeTruthy();
+    expect(inlineSkipReason('src/components/ide/WhitelabelBranding.tsx')).toBeTruthy();
+    expect(inlineSkipReason('src/components/ide/AIDebugger.tsx')).toBeNull();
+  });
+});
+
+describe('inlineOnlyRun — the class literals are not touched', () => {
+  it('rewrites the inline style and leaves every className alone', () => {
+    const src = `<i className="bg-white/10 text-gray-400" style={{ color: '#8b949e' }} />`;
+    const { out } = inlineOnlyRun(src);
+    expect(out).toContain('className="bg-white/10 text-gray-400"');
+    expect(out).toContain("color: 'var(--text-muted)'");
+  });
+
+  it('🔒 and migrate() still DOES touch them — so the split is real, not a no-op', () => {
+    const src = `<i className="bg-white/10 text-gray-400" style={{ color: '#8b949e' }} />`;
+    expect(migrate(src).out).not.toContain('bg-white/10');
+  });
+});
+
+
+describe('🔒 a fill is a fill whether it is a style or a CLASS', () => {
+  /* The second half of the same regression. `styleObjectSpans` fixed "the background is on another
+   * LINE"; this is "the background is not inline at all". AuthComponent's Apple button carries
+   * `className="… bg-black … text-on-accent"` beside an inline `color: '#ffffff'` whose own comment
+   * says it exists to be unthemeable — and the pass themed it, breaking TRAP 3. */
+  it('elementAt returns the opening tag a declaration sits in', () => {
+    const src = `x <button style={{ color: '#fff' }} className="bg-black">y</button>`;
+    expect(elementAt(src, src.indexOf("'#fff'"))).toContain('className="bg-black"');
+    expect(elementAt(src, src.indexOf("'#fff'"))).not.toContain('</button>');
+  });
+
+  it('an element that fixes its own label is recognised', () => {
+    expect(elementFixesItsLabel('<b className="bg-black">')).toBe(true);
+    expect(elementFixesItsLabel('<b className="bg-indigo-600">')).toBe(true);
+    expect(elementFixesItsLabel('<b className="bg-raised text-on-accent">')).toBe(true);
+    expect(elementFixesItsLabel('<b className="bg-card text-muted">')).toBe(false);
+  });
+
+  it('🔒 a forced white label beside a CLASS fill is left exactly as written', () => {
+    const src = [
+      '<button',
+      "  style={{ color: '#ffffff' }}",
+      '  className="w-full py-4 bg-black text-on-accent border border-line"',
+      '>Sign in</button>',
+    ].join('\n');
+    expect(inlineOnlyRun(src).out).toBe(src);
+  });
+
+  it('and a label on an ordinary themed surface is still migrated', () => {
+    const src = `<b className="bg-card" style={{ color: '#8b949e' }}>x</b>`;
+    expect(inlineOnlyRun(src).out).toContain("color: 'var(--text-muted)'");
   });
 });

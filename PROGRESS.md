@@ -73242,6 +73242,69 @@ considered and **rejected**: fragile, and it would bill every build for it.
 
 ---
 
+## 2026-09-20 — The history popup is a LIST again, not a stack of cards
+
+Admin, with Claude's and ChatGPT's own sidebars screenshotted beside ours: *"navbharatai free, me jo
+history button hai, jisnpar click kar kar popup ata hai, history hai, isko popup ka ui badalna hai!!
+claude nad gpt jaisa karo!! open chat button kyu banaya hai. hatao isko!!"*
+
+**What was there.** Each row was a `p-6` card carrying: the title, a `CUI: <id>` chip, a mode chip, an
+App/Chat badge, a full `toLocaleString()` timestamp, the agent name, a big indigo **Open Chat** button
+and a kebab. Seven pieces of chrome to reach one conversation, and three or four rows to a phone screen
+out of 235 sessions.
+
+### 🔑 The move that makes a list possible is the GROUP HEADING, not minimalism
+
+Claude and ChatGPT show the title and nothing else, and the reason is structural rather than aesthetic:
+**the heading carries the time for every row beneath it**, so no row spends a line saying when it was.
+`src/components/history/historyGroups.ts` is that heading — pure, `now` passed in, headings
+`Ongoing / Today / Yesterday / Previous 7 days / Previous 30 days / Older`.
+
+- 🔒 **It never re-sorts.** `sortMergedRows` puts LIVE professional conversations on top and the
+  Firestore query is newest-first, so it walks the rows in the order it was handed and only buckets
+  them. A sort here would silently overrule that and **nothing would fail** — the live chat would just
+  stop being first.
+- ⚠️ **An unknown date is `Older`, never `Today`.** A row with no timestamp is not new; it is a row
+  whose date we do not know, and putting it at the top would place it above conversations that
+  genuinely are from today. Wrong toward "old" costs one scroll; wrong toward "today" is a claim
+  nothing supports.
+
+### What was removed, and why each is a removal rather than a restyle
+
+| Gone | Why |
+|---|---|
+| **The "Open Chat" button** | The row IS the button now. That is the only honest way to delete that control — a row you can see but not tap would be worse than the button it replaced. |
+| The `CUI:` chip | A support id on every row of a user's own history. It is **still searchable** (the box matches it, unchanged), so nothing became unfindable. |
+| The timestamp + agent line | The group heading says when. This is the single change that turns cards back into a list. |
+| The App/Chat and mode chips | The mode survives as a coloured dot **and inside the row's own `aria-label`** — quieter, not lost. An app session keeps one `</>` glyph, because opening one genuinely does something different. |
+| The idle "235 SESSIONS" | A number nobody came for, costing a row of the list it describes. While **searching** it is the answer, so it stays exactly there. |
+| `font-mono` on the search box | A monospace search field is the same "developer's sentence on a shopkeeper's phone" problem the live build strip had. |
+
+**Delete STAYS**, behind the quiet kebab, with its existing confirmation (now a compact inline row that
+still names what is about to go). Claude and ChatGPT both keep it; dropping a real capability to look
+like them would be a regression wearing a redesign. And a destructive action on a one-line row must not
+become a one-tap action.
+
+### Two things fixed on the way that were not asked for
+
+- **The popup titled itself twice.** The sheet's header says "Chat history" and the view underneath
+  printed "SESSION HISTORY" again — a quarter of a phone screen saying the same thing. `embedded` drops
+  the view's own heading and outer padding; the TAB keeps its heading, because it is a whole screen.
+- **The sheet was painted GitHub-dark** (`bg-[#0d1117]`, zinc borders, `bg-black/60`) — a black panel
+  over a white app on the Light theme. Now `bg-surface` / `border-line` / `bg-scrim`. Both
+  `HistoryView.tsx` and `HistoryPopup.tsx` left the colour baseline **entirely** (3 and 9 literals → 0),
+  which is the ratchet moving the only direction it may.
+
+### Scope, stated plainly
+
+`HistoryView` is rendered by exactly two callers — the History **tab** and this **popup**. So the row
+redesign lands on both, deliberately: two different row designs for one list would drift the moment
+either changed, which is the reason `HistoryPopup`'s own header already says it delegates rather than
+reimplements.
+
+Test-locked in `tests/theHistoryListLooksLikeAList.test.ts` (18): the grouping's local-day boundaries,
+the unknown-date refusal, order preservation, and source guards that the chrome really left — including
+that the blank-title fallback `sessionShape.test.ts` depends on survived the rewrite.
 ## 2026-09-20 — The wallet tiles come first and can be read; the budget console is gone at the root
 
 **THE ADMIN'S MESSAGE, three instructions and three screenshots.** *"sabse upar yeh tile … yeh tile

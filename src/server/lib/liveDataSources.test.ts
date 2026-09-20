@@ -46,10 +46,28 @@ describe('detectCurrency / detectPincode — pure shapes', () => {
 });
 
 describe('liveDataContext — weather', () => {
-  it('answers a placed weather question with real forecast numbers', async () => {
+  // 🔴 THE RESTRICTED WEATHER SOURCE IS OFF BY DEFAULT SINCE 2026-09-20, so every case below has
+  // to ask for it explicitly. The fixtures changed; not one assertion did.
+  const WEATHER_ON = { LIVE_WEATHER_SOURCE: 'on' } as unknown as NodeJS.ProcessEnv;
+
+  it('🔒 with nothing configured the restricted host is never touched, and the answer is \'\'', async () => {
+    let touched = false;
     const out = await liveDataContext('kanpur me barish hogi kya', {
       now: NOW,
       env: {} as NodeJS.ProcessEnv,
+      fetchImpl: (async (url: string) => {
+        if (String(url).includes('open-meteo')) touched = true;
+        return { ok: false, json: async () => ({}) } as unknown as Response;
+      }) as unknown as typeof fetch,
+    });
+    expect(out).toBe('');
+    expect(touched).toBe(false);
+  });
+
+  it('answers a placed weather question with real forecast numbers', async () => {
+    const out = await liveDataContext('kanpur me barish hogi kya', {
+      now: NOW,
+      env: WEATHER_ON,
       fetchImpl: routedFetch({
         'geocoding-api': GEO,
         'api.open-meteo.com/v1/forecast': {
@@ -70,7 +88,7 @@ describe('liveDataContext — weather', () => {
   it("no place named ⇒ '' with NO network — the directive makes the model ask the city", async () => {
     let called = false;
     const out = await liveDataContext('aaj barish hogi kya', {
-      env: {} as NodeJS.ProcessEnv,
+      env: WEATHER_ON,
       fetchImpl: (async () => { called = true; return new Response('{}'); }) as unknown as typeof fetch,
     });
     expect(out).toBe('');
@@ -79,27 +97,68 @@ describe('liveDataContext — weather', () => {
 
   it("an unknown place or a dead forecast API ⇒ '' — search answers instead", async () => {
     expect(await liveDataContext('xyzzyplace me barish hogi kya', {
-      env: {} as NodeJS.ProcessEnv, fetchImpl: routedFetch({ 'geocoding-api': { results: [] } }),
+      env: WEATHER_ON, fetchImpl: routedFetch({ 'geocoding-api': { results: [] } }),
     })).toBe('');
     expect(await liveDataContext('kanpur me barish hogi kya', {
-      env: {} as NodeJS.ProcessEnv, fetchImpl: routedFetch({ 'geocoding-api': GEO }),
+      env: WEATHER_ON, fetchImpl: routedFetch({ 'geocoding-api': GEO }),
     })).toBe('');
   });
 });
 
-describe('liveDataContext — air quality', () => {
+describe('liveDataContext — air quality (CPCB, from 2026-09-20)', () => {
+  // ⚠️ THIS TEST WAS REWRITTEN, NOT DELETED. It used to drive the old no-key provider and assert a
+  // **US AQI** of 196. That source was replaced because its licence does not cover a commercial
+  // product — and because an Indian user compares our number against CPCB's, not a US scale. The
+  // intent is unchanged (a placed AQI question is answered from real current readings); the source,
+  // the scale and the gate are what moved. The two cases after it did not exist before and are the
+  // ones that keep the licence fix honest.
+  const KEY = { DATA_GOV_IN_API_KEY: 'test-key' } as unknown as NodeJS.ProcessEnv;
+  const CPCB = {
+    records: [
+      { city: 'Delhi', station: 'Anand Vihar', pollutant_id: 'PM2.5', avg_value: '196', last_update: '20-09-2026 18:00:00' },
+      { city: 'Delhi', station: 'Anand Vihar', pollutant_id: 'PM10', avg_value: '142', last_update: '20-09-2026 18:00:00' },
+      { city: 'Delhi', station: 'Anand Vihar', pollutant_id: 'NO2', avg_value: '38', last_update: '20-09-2026 18:00:00' },
+    ],
+  };
+
   it('answers a placed AQI question from real current readings', async () => {
     const out = await liveDataContext('delhi ki air quality kaisi hai aaj', {
       now: NOW,
-      env: {} as NodeJS.ProcessEnv,
-      fetchImpl: routedFetch({
-        'geocoding-api': { results: [{ name: 'Delhi', country: 'India', latitude: 28.6, longitude: 77.2 }] },
-        'air-quality-api': { current: { pm2_5: 142.5, pm10: 210, us_aqi: 196 } },
-      }),
+      env: KEY,
+      fetchImpl: routedFetch({ 'api.data.gov.in': CPCB }),
     });
     expect(out).toContain('LIVE AIR QUALITY DATA');
-    expect(out).toContain('196');
-    expect(out).toContain('PM2.5: 142.5');
+    expect(out).toContain('196');                 // the maximum sub-index — CPCB's own method
+    expect(out).toContain('Moderate');            // CPCB's own band for 196 (101–200), not ours
+    expect(out).toContain('PM2.5');               // the dominant pollutant
+    expect(out).toContain('Anand Vihar');         // a REAL named station, not an average
+    // GODL-India requires the source to be credited — a licence condition, not decoration.
+    expect(out).toContain('Central Pollution Control Board');
+  });
+
+  it('🔒 no key ⇒ NOTHING — never a quiet fall back to the source it replaced', async () => {
+    // A fallback would re-open the licence exposure this change closes, invisibly. '' hands the
+    // question to the caller's web search, exactly as gold rates and showtimes already are.
+    let touchedOldHost = false;
+    const out = await liveDataContext('delhi ki air quality kaisi hai aaj', {
+      now: NOW,
+      env: {} as NodeJS.ProcessEnv,
+      fetchImpl: (async (url: string) => {
+        if (String(url).includes('open-meteo')) touchedOldHost = true;
+        return { ok: false, json: async () => ({}) } as unknown as Response;
+      }) as unknown as typeof fetch,
+    });
+    expect(out).toBe('');
+    expect(touchedOldHost).toBe(false);
+  });
+
+  it('🔒 the WEATHER kill switch does not silence it — pausing the problem must not pause the fix', async () => {
+    const out = await liveDataContext('delhi ki air quality kaisi hai aaj', {
+      now: NOW,
+      env: { ...KEY, LIVE_WEATHER_SOURCE: 'off' } as unknown as NodeJS.ProcessEnv,
+      fetchImpl: routedFetch({ 'api.data.gov.in': CPCB }),
+    });
+    expect(out).toContain('LIVE AIR QUALITY DATA');
   });
 });
 

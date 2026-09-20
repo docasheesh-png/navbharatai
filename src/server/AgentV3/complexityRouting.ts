@@ -163,6 +163,44 @@ export function complexityPrompt(userPrompt: string): string {
 }
 
 /**
+ * PURE. Which way an ADMITTED UNKNOWN falls when no second opinion answered.
+ *
+ * 🔴 ROOT CAUSE (autopsy bb688add, 2026-09-20 — a one-page Hindi मंगल विवाह निश्चय पत्र, 16.4 minutes,
+ * ₹177.98 on the FREE tier). The prompt is Devanagari, so `signalsCouldNotRead` was true and this
+ * module correctly bought a second opinion. The call was unavailable. The fallback was the
+ * deterministic verdict — **COMPLEX, score 68** — so the build skipped the cheap flash opener, every
+ * preamble call cost ~48s on the slower rung, the shared-contract call was left 396ms short of what
+ * the plan had just measured, it returned nothing, the files were written with no contract and
+ * disagreed: eleven `TS2339` errors, three repair passes, a hand-off, 16.4 minutes.
+ *
+ * Where did 68 come from on a printable invitation card? `scriptNeutralFloor`: `text.length > 800`.
+ * **A long PROMPT is not a big APP** — and a pasted DOCUMENT is the shape that breaks that proxy
+ * hardest. An invitation, a biodata, a certificate, a legal notice: long, full of newlines and
+ * commas separating FACTS rather than features, and all of them one page. That is not an edge case
+ * in India; it is one of the commonest things anyone asks this product for.
+ *
+ * 🔑 THIS MODULE ALREADY STATES THE RULE IT BROKE, twice, in its own words: *"`simple` is the default
+ * on every doubt"* and *"a confident wrong answer is worse than an admitted unknown"*. On a request
+ * it could neither read nor ask about, it produced a confident `complex` — the most expensive verdict
+ * available — from evidence it admits it could not read.
+ *
+ * ⚠️ THE ASYMMETRY IS THE WHOLE JUSTIFICATION, and it runs the other way from the borderline case.
+ * Wrong toward `simple`: the cheap rung is tried, and if the app really is big it fails and the
+ * ladder climbs — **that is what the ladder is for**, and the cost is one cheap call. Wrong toward
+ * `complex`: 13× the input price with no recovery path, plus (on this build) a starved preamble.
+ * A guess has to EARN the expensive side; an unknown never can.
+ *
+ * 🔒 THE SCORE IS NOT TOUCHED. `scriptNeutralFloor` exists so the reported score is honest rather
+ * than a 5, and every other reader of `analyzeRequest` still sees it. Only the binary ROUTING verdict
+ * falls back to the module's own default, and only in the one case where this module has said in
+ * writing that it cannot tell. A borderline score — read, understood, merely near the line — still
+ * stands exactly as before.
+ */
+export function fallbackVerdict(deterministic: ComplexityVerdict, couldNotTell: boolean): ComplexityVerdict {
+  return couldNotTell ? 'simple' : deterministic;
+}
+
+/**
  * Decide, spending a model call ONLY on a genuinely borderline request.
  *
  * 🔒 IT CANNOT BREAK OR DELAY A BUILD. The call is raced against `timeoutMs`, every failure path is
@@ -189,12 +227,20 @@ export async function decideComplexity(
     : unmatched
       ? 'the scorer recognised nothing in this request'
       : `score ${score} is borderline`;
+  // An admitted unknown falls to `simple` — see fallbackVerdict for why the asymmetry runs that way.
+  const couldNotTell = unread || unmatched;
+  const unknownFallback = fallbackVerdict(deterministic, couldNotTell);
+  const standsOrNot = (how: string) => couldNotTell
+    ? `${why}; ${how}. The ${score} score came from evidence the scorer could not read, so it does not `
+      + `decide the routing: this build opens on the cheap rung and the ladder climbs if it has to.`
+    : `${why}; ${how}, so the score stands`;
   if (!needsSecondOpinion(score, input?.prompt) || !llmCall) {
     return {
       ...base,
+      verdict: unknownFallback,
       source: 'deterministic',
-      reason: unread || unmatched
-        ? `${why}, and no second opinion was available, so the ${score} score stands`
+      reason: couldNotTell
+        ? standsOrNot('no second opinion was available')
         : `score ${score} is ${deterministic === 'complex' ? 'above' : 'at or below'} the ${COMPLEX_SCORE_LINE} line`,
     };
   }
@@ -207,11 +253,11 @@ export async function decideComplexity(
     ]);
     const parsed = parseComplexityAnswer(answer);
     if (!parsed) {
-      return { ...base, source: 'model-unavailable', reason: `${why}; the second opinion did not answer, so the score stands` };
+      return { ...base, verdict: unknownFallback, source: 'model-unavailable', reason: standsOrNot('the second opinion did not answer') };
     }
     return { verdict: parsed, score, source: 'model', reason: `${why}; a second opinion read it as ${parsed}` };
   } catch {
-    return { ...base, source: 'model-unavailable', reason: `${why}; the second opinion was unavailable, so the score stands` };
+    return { ...base, verdict: unknownFallback, source: 'model-unavailable', reason: standsOrNot('the second opinion was unavailable') };
   }
 }
 

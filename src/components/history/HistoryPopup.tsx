@@ -62,7 +62,7 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
     // it still covers the whole screen rather than stopping at the reserved strip.
     <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-end sm:items-center sm:justify-center">
       <div
-        className="absolute inset-0 bg-black/60 cursor-pointer touch-manipulation"
+        className="absolute inset-0 bg-scrim cursor-pointer touch-manipulation"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -77,21 +77,21 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
         // on a short phone (these sheets are bottom-anchored, so an overflow is cut off the top).
         style={{ '--nb-sheet-cap': '80dvh' } as React.CSSProperties}
         className={
-          'relative w-full sm:max-w-2xl bg-[#0d1117] border border-zinc-800 shadow-2xl outline-none '
+          'relative w-full sm:max-w-2xl bg-surface border border-line shadow-2xl outline-none '
           // A bottom sheet on a phone (thumb reach) and a centred dialog on a wider screen. The height
           // is capped so the popup always reads as something laid OVER the chat rather than a new
           // screen, and the list inside scrolls instead of the page behind it.
           + 'rounded-t-2xl sm:rounded-2xl nb-sheet-partial flex flex-col'
         }
       >
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800 shrink-0">
-          <HistoryIcon className="w-4 h-4 text-indigo-400 shrink-0" />
-          <span className="text-sm font-semibold text-zinc-200 truncate min-w-0">Chat history</span>
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-line shrink-0">
+          <HistoryIcon className="w-4 h-4 text-accent-text shrink-0" />
+          <span className="text-sm font-semibold text-ink truncate min-w-0">Chat history</span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close history"
-            className="ml-auto p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 shrink-0 touch-manipulation"
+            className="ml-auto p-1.5 rounded-lg text-muted hover:text-ink hover:bg-raised shrink-0 touch-manipulation"
           >
             <X className="w-4 h-4" />
           </button>
@@ -106,6 +106,10 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
             initialFilter="free"
             lockFilter
             includeProfessionals
+            /* This sheet already says "Chat history" in its own header, so the view drops its second
+               heading and its outer padding — a popup that titles itself twice spends a quarter of a
+               phone screen doing it (admin 2026-09-20). */
+            embedded
             onOpenProfessional={closeAfter(onOpenProfessional)}
           />
         </div>

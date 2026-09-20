@@ -42,6 +42,7 @@ import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Buil
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
+import { HISTORY_TAB_NOTE } from './versionHelp';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
@@ -132,7 +133,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, errorBeforeBuildStarted, start, respond, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -955,15 +956,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [restoreNote, setRestoreNote] = useState<string>('');
   // Phase G2 — live working-tree git status (wired into the sync body). null until first load.
   const [gitStatus, setGitStatus] = useState<import('../../hooks/useAgentV3Build').GitStatus | null>(null);
-  const handleRestoreCheckpoint = async (sha: string) => {
-    setRestoreNote('Restoring…');
-    // The SERVER decides the wording: it is the only side that knows whether the history is gone, the
-    // workspace is cold, or git simply refused. This used to print one guess for all of them — and the
-    // guess ("continue a build to make its history live again") was wrong for the most common case,
-    // which was the request landing on a different Cloud Run instance.
-    const { ok, message } = await restore(sha);
-    setRestoreNote(`${ok ? '✅' : '⚠️'} ${message}`);
-  };
+  // 🔴 `handleRestoreCheckpoint` WAS DELETED HERE, not merely unhooked (admin 2026-09-20). A dead
+  // handler beside a removed button is how the button comes back: the next person to open this file
+  // finds a ready-made restore and a list to hang it on, and the whole decision is silently undone.
+  // The durable way back is Time Machine — named above the list, in versionHelp.ts.
   /** Which checkpoint is currently being opened — the button says so rather than looking dead. */
   const [previewingSha, setPreviewingSha] = useState<string>('');
   /**
@@ -5901,6 +5897,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       {restoreMsg && <span className="text-[11px] text-muted">{restoreMsg}</span>}
                     </div>
                   )}
+                  <p className="mb-2 text-[11px] leading-relaxed text-muted">{HISTORY_TAB_NOTE}</p>
                   {gitStatus && (
                     <div className="mb-2 flex items-center gap-2 text-[11px] px-2 py-1 rounded bg-raised border border-line">
                       <GitBranch className="w-3.5 h-3.5 text-faint shrink-0" />
@@ -6024,9 +6021,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               >
                                 <Eye className="w-3 h-3" /> {previewingSha === c.sha ? 'Opening…' : 'Preview'}
                               </button>
-                              <button onClick={() => handleRestoreCheckpoint(c.sha)} className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-raised hover:bg-raised-hover text-muted shrink-0" title="Restore to this checkpoint">
-                                <RotateCcw className="w-3 h-3" /> Restore
-                              </button>
+                              {/* 🔴 THE PER-CHECKPOINT RESTORE WAS REMOVED HERE (admin 2026-09-20:
+                                  "system A ko hata do agar safe ho to. B hi lagao"). These checkpoints
+                                  are git commits INSIDE THE SANDBOX, which pauses after minutes and is
+                                  rebuilt from durable files — `/api/agentv3/restore` says so in its own
+                                  comment. A restore that works this minute and not tomorrow is worse
+                                  than none, because it is only ever pressed on the day it matters.
+                                  Preview and Compare stay: they are what only git can do, and neither
+                                  claims to bring anything back. The durable way back is named above the
+                                  list (versionHelp.ts) — removing the control without naming its
+                                  replacement would have been the worse half of this change. */}
                             </>
                           )}
                         </li>

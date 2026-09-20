@@ -97,7 +97,12 @@ describe('the report stops accusing a provider and stops blocking the app', () =
     expect(codes).toContain('LLM_CALL_BUDGET_ENDED');
     expect(codes).not.toContain('LLM_CALL_FAILED');
     const issue = d.report().issues.find((i) => i.code === 'LLM_CALL_BUDGET_ENDED')!;
-    expect(issue.message).toMatch(/time budget ended, not because it failed/);
+    // ⚠️ ANCHORED ON THE FACT, NOT THE PHRASE (autopsy bb688add, 2026-09-20). This used to assert the
+    // words "this build's time budget ended", which named a clock this record cannot identify — the
+    // same constant is thrown for the build budget, a lane's step cap and a runner's own bound. What
+    // the case is about is that the call is reported as STOPPED and not as FAILED.
+    expect(issue.message).toMatch(/did not fail|not because it failed/);
+    expect(issue.severity).toBe('info');
     expect(issue.autoResolved).toBe(true);
   });
 

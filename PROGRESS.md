@@ -73722,3 +73722,65 @@ Fire-and-forget throughout. `AGENTV3_RESTORE_POINTS=off` reverts with no deploy.
   which is a product decision.
 - **Apps built BEFORE this commit have no restore points and never will** — the snapshots were never
   taken. Their first version appears on their next successful build. Nothing can recover the past.
+
+---
+
+## 2026-09-20 — One way back, and everyone knows where it is
+
+**Admin, two instructions together:** *"system A ko hata do agar safe ho to. B hi lagao"* and
+*"par sabhi ko pata hona chahiye. galti hone par backup/revers kaise liya jaye!!"*
+
+### The verdict that had to be given first: A is not one thing
+
+Asked to remove "system A", I mapped every dependency before touching anything, and the honest answer
+was that a full removal is **not** safe. A is two separable things:
+
+| | What it is | Who depends on it |
+|---|---|---|
+| **A1** | git commits inside the sandbox | 🔴 **Engineer AI's own undo** (`EngineerAgentLoop` checkpoints before every edit and every patch), **Preview** (an old version RUNNING, via `git worktree` on the SAME sandbox — costs no extra VM, and B cannot do it at any price), **Compare** |
+| **A2** | the Pro panel's checkpoint list **with a Restore button** | nothing but the user's eye |
+
+**The complaint was A2; the danger was A1.** So A2's restore went and A1 stayed — and the admin
+accepted that before a line was changed.
+
+### What was removed
+
+The per-checkpoint Restore. `/api/agentv3/restore` says in its own comment that it *"can offer a
+restore the sandbox can no longer perform"* — the sandbox pauses after minutes and is rebuilt from
+durable files, taking that git history with it. **A button that works this minute and not tomorrow is
+worse than no button, because it is only ever pressed on the day it matters.**
+
+`handleRestoreCheckpoint` was **deleted, not unhooked**, and `restore` was dropped from the panel's
+destructure: a dead handler beside a removed button is how the button comes back — the next reader
+finds a ready-made restore and a list to hang it on, and the decision is silently undone. The panel
+now contains zero references to the sandbox restore.
+
+### The half that was not optional
+
+Removing the control alone would have moved the way back from a screen the user is already on to a
+tool three menus deep — **satisfying the first instruction by making the second one worse.** So the
+History tab carries one line, above the list, stating the difference and the exact path: these are the
+steps inside this session; the versions you can go back to live in **Time Machine (Other AI → AI Tools
+→ Versioning)**, saved permanently, restorable from any device. It names no number of days, because
+the limit is a COUNT (`versionRetention.ts`).
+
+`AppKnowledgeBase` needed **no change**, and was left alone because #3186 held that file: its
+Versioning entry already carries the words a panicking user actually types — *"galti ho gayi"*,
+*"app kharab ho gaya"*, *"wapas lao"*, *"undo karo"* — and its description became TRUE with this PR's
+writer rather than needing a rewrite.
+
+### A weak assertion caught by its own reversion proof
+
+The test asserting Preview survived checked for the function NAME, which passes while the button that
+calls it is gutted — the definition survives alone. Removing only the `onClick` left the suite green.
+It asserts the CALL SITE now. **This is the second time in one session that a source-level assertion
+proved to be testing nothing until it was reverted against** (the first was a cap assertion whose
+fixture happened to sit exactly on the cap).
+
+### OPEN (rule 6)
+
+- **Two version systems still exist.** One timeline from one endpoint is the complete fix; it changes
+  what Restore means on a cold sandbox, which is a product decision, not a session's.
+- **Time Machine is still three menus deep.** A button that opens it for the current app would close
+  this properly — `AppKnowledgeBase` even carries `nav: { view: 'versioning' }` for it. Not built here:
+  it needs `App.tsx`, which another session is live in.

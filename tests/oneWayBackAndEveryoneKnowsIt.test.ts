@@ -42,10 +42,13 @@ describe('the sandbox restore is gone from the panel', () => {
   });
 
   it('but PREVIEW and COMPARE stay — only git can do them, and neither claims to bring anything back', () => {
-    expect(panel).toContain('handlePreviewCheckpoint');
+    // ⚠️ THE CALL SITE, NOT THE DEFINITION. Asserting the function NAME passes while the button that
+    // calls it is gutted — the definition survives on its own. Proven: removing only the onClick left
+    // this test green until it was written this way.
+    expect(panel).toContain('handlePreviewCheckpoint(c.sha)');
     expect(panel).toContain('Compare two versions');
     // Naming a version stays too: a list of identical auto-messages is what made it unusable before.
-    expect(panel).toContain('beginLabelEdit');
+    expect(panel).toContain('beginLabelEdit(c.sha,');
   });
 
   it('and the DURABLE whole-project restore is untouched — it reads the saved files, not the sandbox', () => {

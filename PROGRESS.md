@@ -73993,6 +73993,138 @@ than from a screenshot at every breakpoint.
 
 ⚠️ **This is a FRONTEND change**, so under bundled mode it reaches installed Android users only in a
 fresh `.aab` — not on the next merge.
+## 2026-09-20 — "Versioning kam hi nahi kar raha hai": two version systems, and the screen read the dead one
+
+**Admin**, with a screenshot of Time Machine showing *"No saved versions yet"* under an app of 20 files.
+
+### It was not broken. It was never connected.
+
+| | Store | Written by | Read by | Can it restore days later? |
+|---|---|---|---|---|
+| **A** | `workspace_checkpoints_v3` — git commit **metadata** | every v5 build | the Pro panel's own History tab | **No.** `/api/agentv3/restore` checks the sha out **in the sandbox**; its own comment says it *"can offer a restore the sandbox can no longer perform"* |
+| **B** | `build_history/{sessionId}` — whole **file snapshots** | the LEGACY `/api/build` route, `workspaceEdit`, the manual Save button | **the Time Machine** | Yes — that is the point of it |
+
+`BuildHistoryStore`'s own docblock says *"Every build (ok: true) writes one entry here."* A grep of its
+importers returns exactly **two files**, and **neither is the v5 engine**. So the Time Machine has been
+empty for every app this engine has ever built, for every user — with nothing failing, nothing logged,
+and the screen blaming the user's app for having no versions. `AppKnowledgeBase` has meanwhile told
+every NavBharatAI AI that *"every build you make is automatically saved as a Restore point"*.
+
+**The instance was fixed in one lane and the sibling was never hunted** — this file's own class.
+
+### The writer (`src/server/AgentV3/restorePoint.ts`)
+
+ONE function, called from **both** settle paths (the normal settle and the Fix-67 deadline finalizer),
+keyed by the same `${workspaceId}_${buildStartedAt}` the wallet debit uses — so a build that settles
+twice leaves exactly one version. Fix 67 exists because those two paths drifted on billing once already.
+
+🔒 **The key is the whole bug in miniature.** `/api/versioning/apps` lists apps as workspaceId MINUS
+`agentv3-{uid}-`, and the Time Machine then asks `/api/build-history/:sessionId` with that bare id. A
+restore point written under the FULL workspace id would be invisible to the very screen it exists for,
+**and would look identical to writing nothing at all.**
+
+🔒 It copies the **durable file set**, not the turn's writes — restoring a three-file diff over a
+twenty-file app would produce a state that never existed. A failed build never leaves a version.
+Fire-and-forget throughout. `AGENTV3_RESTORE_POINTS=off` reverts with no deploy.
+
+### The screen (`CodeVersioning.tsx`) — three honesty defects in one panel
+
+1. The `<select>` **displayed** an app while `viewSession` was `''`, so `loadPoints('')` returned
+   immediately and nothing was ever requested. "No saved versions yet" was a claim about the user's app
+   when the truth was that no question had been asked. **This is the screenshot.**
+2. A failed read and an empty history produced the identical sentence. They are different facts and
+   only one is the app's fault; the empty state now says which.
+3. The fetch sent no Bearer token — the sibling of the bug recorded in the comment **three lines above
+   it**, where the same omission had already been found and fixed for `/api/versioning/apps`.
+
+### OPEN, stated rather than patched (rule 6)
+
+- **Two version systems still exist.** This makes B work; it does not merge A into it. A user's v5
+  History tab and their Time Machine will show overlapping-but-different timelines, and the honest fix
+  is one timeline from one endpoint. Not built here: it changes what Restore means on a cold sandbox,
+  which is a product decision.
+- **Apps built BEFORE this commit have no restore points and never will** — the snapshots were never
+  taken. Their first version appears on their next successful build. Nothing can recover the past.
+
+---
+
+## 2026-09-20 — One way back, and everyone knows where it is
+
+**Admin, two instructions together:** *"system A ko hata do agar safe ho to. B hi lagao"* and
+*"par sabhi ko pata hona chahiye. galti hone par backup/revers kaise liya jaye!!"*
+
+### The verdict that had to be given first: A is not one thing
+
+Asked to remove "system A", I mapped every dependency before touching anything, and the honest answer
+was that a full removal is **not** safe. A is two separable things:
+
+| | What it is | Who depends on it |
+|---|---|---|
+| **A1** | git commits inside the sandbox | 🔴 **Engineer AI's own undo** (`EngineerAgentLoop` checkpoints before every edit and every patch), **Preview** (an old version RUNNING, via `git worktree` on the SAME sandbox — costs no extra VM, and B cannot do it at any price), **Compare** |
+| **A2** | the Pro panel's checkpoint list **with a Restore button** | nothing but the user's eye |
+
+**The complaint was A2; the danger was A1.** So A2's restore went and A1 stayed — and the admin
+accepted that before a line was changed.
+
+### What was removed
+
+The per-checkpoint Restore. `/api/agentv3/restore` says in its own comment that it *"can offer a
+restore the sandbox can no longer perform"* — the sandbox pauses after minutes and is rebuilt from
+durable files, taking that git history with it. **A button that works this minute and not tomorrow is
+worse than no button, because it is only ever pressed on the day it matters.**
+
+`handleRestoreCheckpoint` was **deleted, not unhooked**, and `restore` was dropped from the panel's
+destructure: a dead handler beside a removed button is how the button comes back — the next reader
+finds a ready-made restore and a list to hang it on, and the decision is silently undone. The panel
+now contains zero references to the sandbox restore.
+
+### The half that was not optional
+
+Removing the control alone would have moved the way back from a screen the user is already on to a
+tool three menus deep — **satisfying the first instruction by making the second one worse.** So the
+History tab carries one line, above the list, stating the difference and the exact path: these are the
+steps inside this session; the versions you can go back to live in **Time Machine (Other AI → AI Tools
+→ Versioning)**, saved permanently, restorable from any device. It names no number of days, because
+the limit is a COUNT (`versionRetention.ts`).
+
+`AppKnowledgeBase` needed **no change**, and was left alone because #3186 held that file: its
+Versioning entry already carries the words a panicking user actually types — *"galti ho gayi"*,
+*"app kharab ho gaya"*, *"wapas lao"*, *"undo karo"* — and its description became TRUE with this PR's
+writer rather than needing a rewrite.
+
+### A weak assertion caught by its own reversion proof
+
+The test asserting Preview survived checked for the function NAME, which passes while the button that
+calls it is gutted — the definition survives alone. Removing only the `onClick` left the suite green.
+It asserts the CALL SITE now. **This is the second time in one session that a source-level assertion
+proved to be testing nothing until it was reverted against** (the first was a cap assertion whose
+fixture happened to sit exactly on the cap).
+
+### OPEN (rule 6)
+
+- **Two version systems still exist.** One timeline from one endpoint is the complete fix; it changes
+  what Restore means on a cold sandbox, which is a product decision, not a session's.
+- **Time Machine is still three menus deep.** A button that opens it for the current app would close
+  this properly — `AppKnowledgeBase` even carries `nav: { view: 'versioning' }` for it. Not built here:
+  it needs `App.tsx`, which another session is live in.
+
+### The removal was caught by the suite that guarded the removed feature
+
+`tests/restoreCheckpoint.test.ts` — written in July for the instance-affinity bug — asserted that the
+History tab CALLS `restore(sha)`. Removing the button therefore turned that suite red, and it went red
+only in the FULL run at the end: the targeted suites for this change were all green. That is safeguard
+#5's "run the gate LAST, on the final state" earning its place, on a change where every file I had
+touched looked clean.
+
+The fix was not to delete the file. Its six server cases (`restoreSessionDetailed`'s four reasons, the
+malformed-sha refusal, the no-sandbox case) and its three route cases test the half that is UNCHANGED —
+the endpoint still works and is still reachable. Only the UI case's premise was superseded, so that one
+case now asserts the opposite fact (no `await restore(sha)` in the panel, `HISTORY_TAB_NOTE` present)
+and says in its own comment why the assertion flipped and which test owns the screen now. **Proven by
+reversion**: re-introducing the call makes it fail.
+
+`useAgentV3Build.ts` keeps `restore` — the endpoint is real — but its doc comment now states that **no
+UI calls it**, so the next session to find it does not read an unused export as a missing wire-up.
 
 ---
 

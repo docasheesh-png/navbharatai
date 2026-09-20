@@ -55,9 +55,15 @@ export interface UseAgentV3Build {
   start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
-  /** Restore the workspace to a checkpoint commit (History → restore). */
-  /** Restore a checkpoint. `message` is the SERVER's sentence — it is the only side that knows why a
-   *  restore did not happen, and those reasons are not interchangeable. */
+  /** Restore the workspace to a checkpoint commit. `message` is the SERVER's sentence — it is the
+   *  only side that knows why a restore did not happen, and those reasons are not interchangeable.
+   *  ⚠️ NO UI CALLS THIS SINCE 2026-09-20 (admin: "system A ko hata do … B hi lagao"). The History
+   *  tab's per-checkpoint Restore button was removed because these checkpoints are git commits
+   *  inside the SANDBOX, which pauses after minutes and is rebuilt from durable files — so the
+   *  button worked today and not tomorrow. The durable way back is Time Machine (build_history),
+   *  named above the History list in versionHelp.ts. The endpoint and this wrapper are kept because
+   *  the server path is real and still tested (tests/restoreCheckpoint.test.ts); do NOT re-wire a
+   *  user-facing button to it without reading that test and the comment in AgentV3Panel.tsx. */
   restore: (sha: string) => Promise<{ ok: boolean; message: string }>;
   /** Open a checkpoint in its own preview, leaving the current workspace untouched. */
   previewVersion: (sha: string) => Promise<{ ok: boolean; url?: string; message: string }>;

@@ -73617,3 +73617,85 @@ first carried each native capability and compares it with the live release — s
 is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
 here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
 asked.
+
+## 2026-09-20 — `bb688add`, the UPSTREAM half: a printed invitation was scored a complex app
+
+The autopsy above fixed what the build DID. This is why it went where it went — and it is the same
+class a third and fourth time: **a signal that learned one thing while the checks around it did not.**
+
+### 🔴 The word `विवाह` made a printed card a complex APP
+
+Traced to the score, reproduced verbatim from the real prompt:
+
+```
+namesBusinessDomain → domain `events`  →  taskType complex_app (base 58)
+                              + 10 long prompt (1,233 chars)
+                              = 68  → COMPLEX → past the cheap opener → KIMI
+```
+
+The `events` domain regex **deliberately reads Devanagari** — `शादी|विवाह|समारोह|मेला|कार्यक्रम`.
+Its two narrowing guards, `PAGE_DELIVERABLE_SIGNAL` and `SIMPLE_APP_SIGNAL`, are **pure ASCII**. So
+the promotion learned Hindi and the brakes did not: in Devanagari that predicate has run **unguarded
+since the day it shipped**. A guard that cannot read what its signal reads is not a guard.
+
+The cost, all downstream of that one verdict: the slower opening rung → ~48s preamble calls → a
+shared-contract call left 396ms short that returned nothing → eleven `TS2339` errors → three repair
+passes → hand-off → **16.4 minutes and ₹177.98 on the free tier, for a card**. And the same report
+told the builder the app was missing *ticket types, RSVP, QR check-in and payments*.
+
+**Fixed:** `DOCUMENT_DELIVERABLE_SIGNAL` — the same guard, in the script the domain regexes already
+read. Precision-first, because the asymmetry decides the list: wrong toward "document" costs one
+cheap opening call the ladder climbs out of; wrong toward "system" cost this build sixteen minutes
+with no recovery. So it names only things people ask to be PRINTED or SHOWN — invitation, card,
+certificate, biodata, notice, poster, menu, résumé — and never a word that could name an app (`ऐप`,
+`सिस्टम`, `पोर्टल`, `डैशबोर्ड` are deliberately absent). `पत्र` matches only in its document senses,
+never bare. A genuine Hindi hospital-system request is still promoted; a test pins that.
+
+### 🔴 An admitted unknown took the EXPENSIVE side
+
+`complexityRouting` correctly bought a second opinion (the scorer could not read the script). The call
+was unavailable. The fallback was the deterministic verdict — **COMPLEX** — so the module acted with
+full confidence on a score derived from evidence it admits it could not read.
+
+**It already states, twice, the rule it broke:** *"`simple` is the default on every doubt"* and *"a
+confident wrong answer is worse than an admitted unknown."* `fallbackVerdict` applies its own rule:
+when the signals could neither read nor match the request AND no second opinion answered, the routing
+verdict is `simple`. Wrong toward simple ⇒ the cheap rung is tried and the ladder climbs — that is
+what the ladder is for. Wrong toward complex ⇒ 13× the input price with no recovery path.
+
+🔒 **The SCORE is untouched** — `scriptNeutralFloor` still makes it honest for every other reader.
+Only the binary routing verdict falls back, and only where this module has said in writing it cannot
+tell. A borderline score that was read and understood still stands exactly as before.
+
+⚠️ **Left alone, deliberately:** `scriptNeutralFloor`'s `text.length > 800 || parts >= 6`. A long
+prompt is not a big app and a pasted document breaks that proxy hardest — but the floor exists so a
+Devanagari hospital app is not scored 5, and nobody has measured a better rule. The routing is made
+safe by the fallback instead. Pinned as a test, not changed on a guess.
+
+### 🔴 Our own clock was recorded as a provider failing
+
+The timeline opened with *"Provider KIMI failed"* and the tally read `providerFailures: { KIMI: 1 }`
+— for a call KIMI answered nothing wrong in; the lane's step deadline ended it. `turnDeadline.ts`
+went to some length so a budget error would never BENCH a provider, and its docblock states the other
+half in as many words: *"it must not INDICT anyone either."* It was still indicting one in the two
+places an admin reads. The event is still recorded at the same severity — it simply stops being an
+accusation.
+
+### 🔴 The cost line named a number that was not on the bill
+
+`SANDBOX_BILLING` said *"Sandbox 1310s ≈ $0.0603 … included in this build's real cost"*; the bill used
+**$0.045369 — 986 seconds**. Nothing was mis-billed: the bill caps held seconds at the build's own
+duration so idle time cannot be sold twice, and that cap is deliberate and right. What was wrong is
+that the one line used to judge E2B spend over-stated what reached the bill by **33%** — the same
+shape as the `E2B_USD_PER_HOUR` drift, a correct system with a wrong dashboard. Both facts are now
+printed when they differ, and the line reuses the ONE existing measurement rather than a second copy
+of the capping rule.
+
+### ⚠️ A false alarm I nearly reported, recorded because the next reader will hit it
+
+Probing `analyzeRequest(promptString)` returns `score 5, task=chat` for every prompt on earth: it takes
+`{ prompt }`, not a string. I had drafted the words "this is a regression since this morning" before
+checking. It was my probe. `analyzeRequest({ prompt })` reproduces the real build exactly — 68,
+`complex_app` — which is what made the trace above possible.
+
+Test-locked in `tests/aDocumentIsNotABigApp.test.ts` (19 cases), reversion-proven three ways.

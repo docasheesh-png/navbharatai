@@ -70,7 +70,7 @@ function App() {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
           />
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
             {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
           </select>
           <button className="primary" onClick={add}>Add</button>
@@ -86,7 +86,7 @@ function App() {
               {f}
             </button>
           ))}
-          <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ marginLeft: 'auto' }}>
+          <select aria-label="Filter by category" value={catFilter} onChange={(e) => setCatFilter(e.target.value)} style={{ marginLeft: 'auto' }}>
             {['All', ...CATEGORIES].map((c) => <option key={c}>{c}</option>)}
           </select>
         </div>
@@ -96,7 +96,7 @@ function App() {
         <ul className="stack" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {visible.map((t) => (
             <li key={t.id} className="row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
-              <input type="checkbox" checked={t.done} onChange={() => toggle(t.id)} style={{ width: 18, height: 18 }} />
+              <input type="checkbox" aria-label="Mark task done" checked={t.done} onChange={() => toggle(t.id)} style={{ width: 18, height: 18 }} />
               {editingId === t.id ? (
                 <input
                   autoFocus

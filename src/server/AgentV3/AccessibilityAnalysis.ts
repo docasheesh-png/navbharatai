@@ -29,6 +29,11 @@ const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.gi
 
 const SNIPPET_MAX = 120;
 
+/** How many times a pattern occurs in a string. PURE. */
+function countOccurrences(s: string, re: RegExp): number {
+  return (s.match(re) ?? []).length;
+}
+
 /** Does a tag's attribute text contain a given boolean/any-value attribute? */
 function hasAttr(tag: string, attr: string): boolean {
   // matches `attr=`, `attr =`, or a bare boolean `attr` followed by space/>/end.
@@ -43,6 +48,68 @@ function hasAttr(tag: string, attr: string): boolean {
 function tagName(tag: string): string {
   const m = /^<\s*([a-zA-Z][\w-]*)/.exec(tag);
   return m ? m[1].toLowerCase() : '';
+}
+
+/**
+ * Is this an HTML ELEMENT, as opposed to somebody's React component? PURE.
+ *
+ * 🔴 WHY IT MATTERS (build c847b523, 2026-09-20): `tagName` lowercases, so `<Select label="Category"
+ * …/>` — a component with a real, working `label` prop — was judged by the rules for the HTML
+ * `<select>` and reported as an accessibility DEFECT. Eleven of the thirty-nine "unlabelled controls"
+ * across our own golden scaffolds were this, and the same false finding lands on any user whose app
+ * has a design system. `<Dialog.Root>` was worse: the name regex stops at the dot, so it was judged
+ * as the HTML `<dialog>`.
+ *
+ * JSX makes this decidable rather than heuristic: a lowercase name is an HTML element and a
+ * capitalised or dotted one is a component — that is the language's own rule, not a guess. We cannot
+ * know a component's accessibility contract, so we say nothing about it. Reporting a defect we cannot
+ * establish is the dishonesty the fifth absolute rule forbids, and it lands on code the user wrote.
+ */
+function isHtmlElement(tag: string): boolean {
+  const m = /^<\s*([a-zA-Z][\w.-]*)/.exec(tag);
+  if (!m) return false;
+  const raw = m[1];
+  return raw[0] === raw[0].toLowerCase() && !raw.includes('.');
+}
+
+/**
+ * Every self-contained opening/void tag on ONE line, with where it started. PURE.
+ *
+ * 🔴 WHY THIS IS A SCANNER AND NOT A REGEX. It used to be `/<\s*[a-zA-Z][\w-]*\b[^<>]*?\/?>/g`, and
+ * `[^<>]` cannot contain a `>` — but an ARROW FUNCTION does:
+ *
+ *     <select value={gst} onChange={(e) => setGst(...)} aria-label="GST slab">
+ *
+ * the match ended at the `>` of `=>`, so `aria-label` was never in the string `hasAttr` was asked
+ * about, and a correctly-labelled control was reported as unlabelled. **Every attribute written after
+ * the first handler was invisible to every rule in this file** — alt, id, title, lang, href, scope.
+ * That is not a form-label bug; it is a whole-analyzer bug that happened to be found through one.
+ *
+ * So: track brace depth and quotes, and end the tag only at a `>` that is genuinely outside `{…}`.
+ * A tag that does not close on its own line is still skipped, exactly as before — an incomplete
+ * attribute set must never produce a "missing attribute" finding.
+ */
+function tagsOnLine(line: string): Array<{ tag: string; index: number }> {
+  const out: Array<{ tag: string; index: number }> = [];
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] !== '<') continue;
+    if (!/[a-zA-Z]/.test(line[i + 1] ?? '')) continue; // `</div>` and stray `<` are not opening tags
+    let depth = 0;
+    let quote: string | null = null;
+    let closed = -1;
+    for (let j = i + 1; j < line.length; j++) {
+      const c = line[j];
+      if (quote) { if (c === quote) quote = null; continue; }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+      if (c === '{') { depth++; continue; }
+      if (c === '}') { if (depth > 0) depth--; continue; }
+      if (depth > 0) continue;        // a `>` in here belongs to an arrow, not to the tag
+      if (c === '<') break;           // a new tag opened: this one never closed on this line
+      if (c === '>') { closed = j; break; }
+    }
+    if (closed >= 0) { out.push({ tag: line.slice(i, closed + 1), index: i }); i = closed; }
+  }
+  return out;
 }
 
 /** Form controls that need an accessible name. */
@@ -78,19 +145,33 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
   if (!FRONTEND_EXT.test(file) || SKIP_PATH.test(file)) return [];
   const issues: AccessibilityIssue[] = [];
   const lines = content.split('\n');
-  // Match each self-contained opening/void tag on the line (must close on the
-  // same line so the attribute set is complete — avoids false positives).
-  const tagRe = /<\s*[a-zA-Z][\w-]*\b[^<>]*?\/?>/g;
+
+  // HOW MANY `<label>` ARE OPEN FROM EARLIER LINES (build c847b523, 2026-09-20). The wrapping-label
+  // check below used to look only at the text BEFORE the control ON ITS OWN LINE, so the commonest
+  // React form shape in the world —
+  //
+  //     <label>
+  //       <input type="checkbox" … />
+  //       Uppercase letters (A-Z)
+  //     </label>
+  //
+  // — was reported as an unlabelled control. It is labelled, by the label's own text. Carrying the
+  // depth across lines costs one counter and removes a whole family of false findings.
+  let labelDepth = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length > 4000) continue; // skip minified/huge lines
-    let m: RegExpExecArray | null;
-    tagRe.lastIndex = 0;
-    while ((m = tagRe.exec(line)) !== null) {
-      const tag = m[0];
+    const openedBefore = labelDepth;
+    // Update the carry for the NEXT line before the per-tag work, so a control on this line is judged
+    // by what was open when the line STARTED plus what opens to its left (checked per-tag below).
+    labelDepth = Math.max(0, labelDepth + countOccurrences(line, /<\s*label\b/gi) - countOccurrences(line, /<\s*\/\s*label\s*>/gi));
+
+    for (const { tag, index } of tagsOnLine(line)) {
       const name = tagName(tag);
       if (!name) continue;
+      // A React component is not an HTML element and we do not know its contract — see isHtmlElement.
+      if (!isHtmlElement(tag)) continue;
       const push = (kind: string, severity: AccessibilitySeverity) =>
         issues.push({ file, line: i + 1, kind, severity, snippet: trimSnippet(line) });
 
@@ -182,10 +263,12 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       // A control WRAPPED by a <label> on this line (e.g. `<label>Email <input/></label>`, a very
       // common React form pattern) IS labelled by the label's text — flagging it as unlabeled is a
       // false positive. Detect the enclosing label: an unclosed `<label …>` opens before the control.
-      const beforeTag = line.slice(0, m.index);
+      const beforeTag = line.slice(0, index);
       const insideWrappingLabel =
-        beforeTag.lastIndexOf('<label') !== -1 &&
-        beforeTag.lastIndexOf('<label') > beforeTag.lastIndexOf('</label');
+        openedBefore > 0 || (
+          beforeTag.lastIndexOf('<label') !== -1 &&
+          beforeTag.lastIndexOf('<label') > beforeTag.lastIndexOf('</label')
+        );
       if (
         LABELLED_CONTROLS.has(name) &&
         !insideWrappingLabel &&

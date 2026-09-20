@@ -268,3 +268,77 @@ describe('accessibilitySummary', () => {
     expect(accessibilitySummary(many)).toContain('…and 5 more.');
   });
 });
+
+/**
+ * AUTOPSY c847b523 (2026-09-20) — the analyzer was the defect.
+ *
+ * The report carried 39 `control-unlabeled` findings against NavBharatAI's OWN golden scaffolds —
+ * hand-written, CI-proven starter apps. Twenty of them were false, and the three causes below are
+ * why. Each one also silently disabled OTHER rules in this file, so these are not form-label tests:
+ * they are the whole analyzer's honesty.
+ *
+ * 🔒 The fifth absolute rule's honesty half applies to a gate as much as to a build report. A finding
+ * we cannot establish must not be reported, because the user reads it as a defect in code they wrote.
+ */
+describe('🔒 a finding must be about something that is really there', () => {
+  it('🔴 sees every attribute after an ARROW FUNCTION — the one that broke everything', () => {
+    // `[^<>]*` cannot cross the `>` of `=>`, so the tag string stopped mid-attribute and `aria-label`
+    // was never seen. A correctly-labelled control was reported as unlabelled.
+    const code = '<select value={gst} onChange={(e) => setGst(e.target.value)} aria-label="GST slab"></select>';
+    expect(scanAccessibility('src/Bill.tsx', code).some((x) => x.kind === 'control-unlabeled')).toBe(false);
+  });
+
+  it('🔴 and the same blindness hid alt, id, title and href — not just labels', () => {
+    const img = '<img src={src} onLoad={(e) => ready(e)} alt="Invoice preview" />';
+    expect(scanAccessibility('src/P.tsx', img).some((x) => x.kind === 'img-missing-alt')).toBe(false);
+    const a = '<a onClick={(e) => go(e)} href="/bills">Bills</a>';
+    expect(scanAccessibility('src/P.tsx', a).some((x) => x.kind === 'anchor-no-href')).toBe(false);
+  });
+
+  it('still refuses to judge a tag that does not close on its own line', () => {
+    // An incomplete attribute set must never produce a "missing attribute" finding.
+    expect(scanAccessibility('src/P.tsx', '<input\n  aria-label="Name"\n/>')).toEqual([]);
+  });
+
+  it('🔴 says nothing about a React COMPONENT, whose contract it cannot know', () => {
+    // `tagName` lowercases, so `<Select label="Category">` was judged by the rules for HTML <select>.
+    // A capitalised or dotted name is a component — JSX's own rule, not a heuristic.
+    expect(scanAccessibility('src/P.tsx', '<Select value={c} onChange={(e) => set(e)} label="Category" />')).toEqual([]);
+    expect(scanAccessibility('src/P.tsx', '<Dialog.Root open={o} />')).toEqual([]);
+    expect(scanAccessibility('src/P.tsx', '<Form.Input name="phone" />')).toEqual([]);
+  });
+
+  it('but still judges the real HTML element beside it', () => {
+    const code = '<Select label="Category" /><select value={x} onChange={(e) => set(e)}></select>';
+    expect(scanAccessibility('src/P.tsx', code).filter((x) => x.kind === 'control-unlabeled')).toHaveLength(1);
+  });
+
+  it('🔴 counts a <label> that WRAPS a control across several lines', () => {
+    // The commonest React form shape there is. It was reported unlabelled because the check only ever
+    // looked at the text before the control on its OWN line.
+    const code = [
+      '<label className="row">',
+      '  <input type="checkbox" checked={upper} onChange={(e) => setUpper(e.target.checked)} />',
+      '  Uppercase letters (A-Z)',
+      '</label>',
+    ].join('\n');
+    expect(scanAccessibility('src/P.tsx', code).some((x) => x.kind === 'control-unlabeled')).toBe(false);
+  });
+
+  it('and the carry CLOSES — a control after </label> is judged on its own merits again', () => {
+    const code = [
+      '<label>',
+      '  <input type="checkbox" checked={a} />',
+      '</label>',
+      '<input type="text" value={b} />',
+    ].join('\n');
+    expect(scanAccessibility('src/P.tsx', code).filter((x) => x.kind === 'control-unlabeled')).toHaveLength(1);
+  });
+
+  it('a sibling <label> with no htmlFor is NOT a label, and that finding is real', () => {
+    // Kept explicit so nobody "fixes" the three bugs above by making the check permissive instead.
+    // This markup genuinely gives a screen reader nothing to announce.
+    const code = '<div className="field">\n  <label>Value</label>\n  <input type="number" value={v} />\n</div>';
+    expect(scanAccessibility('src/P.tsx', code).some((x) => x.kind === 'control-unlabeled')).toBe(true);
+  });
+});

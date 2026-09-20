@@ -202,8 +202,8 @@ function App() {
           ))}
         </div>
         <div className="row" style={{ flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <input style={{ flex: 1, minWidth: 140 }} value={name} placeholder="New item name" onChange={(e) => setName(e.target.value)} />
-          <input style={{ width: 110 }} value={price} placeholder="Price" inputMode="decimal" onChange={(e) => setPrice(e.target.value)} />
+          <input aria-label="New item name" style={{ flex: 1, minWidth: 140 }} value={name} placeholder="New item name" onChange={(e) => setName(e.target.value)} />
+          <input aria-label="Price" style={{ width: 110 }} value={price} placeholder="Price" inputMode="decimal" onChange={(e) => setPrice(e.target.value)} />
           <select value={gst} onChange={(e) => setGst(Number(e.target.value))} aria-label="GST slab">
             {SLABS.map((s) => <option key={s} value={s}>{s}% GST</option>)}
           </select>
@@ -1168,13 +1168,13 @@ export default function App() {
       <div className="card stack" style={{ marginBottom: 16 }}>
         <strong>Naya mehmaan jodein (add a guest)</strong>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-          <input placeholder="Naam (name)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ flex: '2 1 180px' }} />
-          <input placeholder="Phone" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} style={{ flex: '1 1 130px' }} />
-          <select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value })} style={{ flex: '1 1 130px' }}>
+          <input aria-label="Naam (name)" placeholder="Naam (name)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ flex: '2 1 180px' }} />
+          <input aria-label="Phone" placeholder="Phone" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} style={{ flex: '1 1 130px' }} />
+          <select aria-label="Kis taraf se (side)" value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value })} style={{ flex: '1 1 130px' }}>
             <option value="bride">Ladki ki taraf (bride)</option>
             <option value="groom">Ladke ki taraf (groom)</option>
           </select>
-          <input type="number" min={0} placeholder="Saath aane wale" value={form.extra} onChange={(e) => setForm({ ...form, extra: e.target.value })} style={{ flex: '1 1 110px' }} />
+          <input type="number" aria-label="Saath aane wale (extra guests)" min={0} placeholder="Saath aane wale" value={form.extra} onChange={(e) => setForm({ ...form, extra: e.target.value })} style={{ flex: '1 1 110px' }} />
         </div>
         <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
           {EVENTS.map((ev) => (
@@ -1189,17 +1189,17 @@ export default function App() {
 
       <div className="card stack">
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-          <input placeholder="Naam ya phone se dhoondein (search)" value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: '2 1 200px' }} />
-          <select value={side} onChange={(e) => setSide(e.target.value)} style={{ flex: '1 1 130px' }}>
+          <input aria-label="Naam ya phone se dhoondein (search)" placeholder="Naam ya phone se dhoondein (search)" value={query} onChange={(e) => setQuery(e.target.value)} style={{ flex: '2 1 200px' }} />
+          <select aria-label="Taraf se chhaantein (filter by side)" value={side} onChange={(e) => setSide(e.target.value)} style={{ flex: '1 1 130px' }}>
             <option value="all">Dono taraf (both sides)</option>
             <option value="bride">Ladki ki taraf</option>
             <option value="groom">Ladke ki taraf</option>
           </select>
-          <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} style={{ flex: '1 1 140px' }}>
+          <select aria-label="Function se chhaantein (filter by event)" value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} style={{ flex: '1 1 140px' }}>
             <option value="all">Sabhi function (all events)</option>
             {EVENTS.map((ev) => <option key={ev.id} value={ev.id}>{ev.label}</option>)}
           </select>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ flex: '1 1 150px' }}>
+          <select aria-label="RSVP se chhaantein (filter by RSVP)" value={status} onChange={(e) => setStatus(e.target.value)} style={{ flex: '1 1 150px' }}>
             <option value="all">Sabhi RSVP</option>
             <option value="coming">Aa rahe hain</option>
             <option value="pending">Jawab nahi aaya</option>
@@ -1227,7 +1227,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                    <select value={g.rsvp} onChange={(e) => setRsvp(g.id, e.target.value as Rsvp)}>
+                    <select aria-label="RSVP badlein (change RSVP)" value={g.rsvp} onChange={(e) => setRsvp(g.id, e.target.value as Rsvp)}>
                       <option value="invited">Nimantran bheja</option>
                       <option value="pending">Jawab nahi aaya</option>
                       <option value="coming">Aa rahe hain</option>

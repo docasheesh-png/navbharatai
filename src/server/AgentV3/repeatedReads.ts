@@ -38,14 +38,53 @@ export interface ReadRecord {
 }
 
 /**
+ * HOW MANY NO-PROGRESS READS OF ONE PATH BEFORE THE ADVICE BECOMES A STOP.
+ *
+ * 🔴 AUTOPSY c847b523 (2026-09-20): nine reads of `src/App.tsx`, ZERO writes, and the user pressed
+ * Stop at 108 seconds. The nudge below fired on reads two through nine and was word-for-word
+ * identical every time, so the build's own evidence that it was looping was the one thing that never
+ * escalated. Advice repeated unchanged is not a defence; it is wallpaper.
+ *
+ * 🔑 WHAT MAKES THE ESCALATION MECHANICAL RATHER THAN A LOUDER NAG: `stalledReads` counts only reads
+ * where the file was unchanged AND NOT ONE FILE ANYWHERE IN THE PROJECT HAD BEEN WRITTEN since the
+ * previous read of this path. That is a provable no-progress step — the model is in exactly the state
+ * it was in before, by construction. A re-read after an edit resets the streak to zero and never sees
+ * this message, which is the distinction this module was written to protect: re-reading a file you
+ * just changed is correct behaviour and must never be discouraged.
+ *
+ * Three is the threshold because two is ordinary (a model checking itself once) and the streak only
+ * advances on steps that demonstrably bought nothing.
+ *
+ * ⚠️ AND THE CONTENT IS STILL RETURNED IN FULL — see the header. The escalation changes what we SAY,
+ * never what we withhold. Refusing the read would be the one intervention that can strand a model
+ * whose context has been trimmed, which is a worse failure than the loop.
+ */
+export const READ_LOOP_LIMIT = 3;
+
+/**
  * The line to put in front of a re-read of an unchanged file, or '' when there is nothing to say.
  *
  * Silent on the first read and on a file that genuinely changed — a re-read after an edit is correct
  * behaviour and must never be discouraged, which is the difference between this and a nag.
  */
-export function repeatedReadNotice(path: string, count: number, unchanged: boolean): string {
+export function repeatedReadNotice(
+  path: string,
+  count: number,
+  unchanged: boolean,
+  stalledReads = 0,
+): string {
   if (!unchanged || count < 2) return '';
   const times = count === 2 ? 'the second time' : `the ${count}${ordinalSuffix(count)} time`;
+  if (stalledReads >= READ_LOOP_LIMIT) {
+    return (
+      `[STOP — this is the ${count}${ordinalSuffix(count)} read of ${path}, and NOTHING IN THIS `
+      + `PROJECT HAS CHANGED since the first one: no file has been written, and this file is `
+      + `byte-for-byte what you already have. The full content follows, but reading it again cannot `
+      + `tell you anything new. Do not read this path again. Your next action must be one of: write `
+      + `the change, write a different file, or say plainly what is blocking you — an honest "I am `
+      + `stuck because X" is a better answer than another read.]\n`
+    );
+  }
   return (
     `[NOTE — you have now read ${path} ${times} in this build, and it has NOT changed since your `
     + 'first read. The full content follows, but you already have it. Re-reading a file you have not '

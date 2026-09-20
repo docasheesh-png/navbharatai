@@ -86,8 +86,24 @@ describe('the wiring — the half that rots', () => {
   it('the ledger compares CONTENT, so "unchanged" can never be a false positive', () => {
     // Held rather than hashed: the bodies are already in memory on the way past, and a truncated hash
     // could collide into a wrong "you already have this".
-    expect(disp).toContain('private _readLedger = new Map<string, { count: number; content: string }>();');
+    // ⚠️ THE DECLARATION MOVED AT THE 2026-09-20 MERGE, AND THE INVARIANT DID NOT. `main`'s
+    // `shareReadLedger` (autopsy f97eb0ec — a SUB-AGENT's reads never reached the report) takes this
+    // map as a PARAMETER, and it was written against `{ count; content }`, the entry as it stood
+    // before the loop breaker widened it. Two structural copies of one type is how `writeSeq` and
+    // `stalls` get silently dropped the moment a child shares the map, so the entry is now named
+    // once and both readers point at it. Every other assertion in this case is unchanged, and the
+    // two below are NEW — they are what stops the narrow copy coming back.
+    expect(disp).toContain('export type ReadLedgerEntry = {');
+    expect(disp).toContain('private _readLedger: ReadLedger = new Map();');
+    expect(disp).toContain('sharedReadLedger(): ReadLedger {');
+    expect(disp).toContain('shareReadLedger(ledger: ReadLedger): void {');
+    expect(disp).toContain('content: string;');
     expect(disp).toContain('const unchanged = prior !== undefined && prior.content === full;');
+    // Since the loop breaker (autopsy c847b523) the entry also carries the two facts that make a
+    // no-progress read provable: the write count at the time of the read, and the streak of reads
+    // that followed no write at all.
+    expect(disp).toContain('writeSeq: number;');
+    expect(disp).toContain('stalls: number;');
   });
 
   it('the content is ALWAYS returned in full — both on a whole read and a ranged one', () => {

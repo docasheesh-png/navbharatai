@@ -70441,3 +70441,75 @@ times** — restoring the bare `catch {}` fails 1, restoring the branch asymmetr
 `autoResolved: true` fails 2. Two cases in `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts` were
 **rewritten, not deleted**, recording in place that the single `inconclusive` kind was withdrawn and
 keeping the half that still holds ("not rendered yet" is never confused with "could not tell").
+
+## 2026-09-20 — APP MART STOPPED SCROLLING BECAUSE A WRAPPER JOINED THE HEIGHT CHAIN (PR #3146)
+
+Admin report: vertical scrolling is broken inside App Mart — all four tabs (Browse / Publish / My apps /
+Review), not one page.
+
+**ROOT CAUSE, and it is a one-day-old regression, not an old bug.** Commit `843d0ab0` (pull to refresh,
+2026-09-19) wrapped App Mart's scroll container:
+
+```
+-  <div className="h-full overflow-y-auto overscroll-contain …" style={{ WebkitOverflowScrolling:'touch' }}>
++  <PullToRefresh className="h-full overflow-y-auto overscroll-contain …">
+```
+
+`PullToRefresh` renders its own box around the scroller, and that box carried `flex-1 min-h-0` — correct
+for a FLEX-COLUMN parent, and **inert in a BLOCK one**. App Mart's parent is exactly the second kind:
+`<div className="flex-1 h-full overflow-hidden">` in `ViewPanels.tsx`, which is `display: block`
+(`flex-1` styles a flex CHILD; it does not make the element a flex container). So:
+
+| element | before 843d0ab0 | after |
+|---|---|---|
+| ViewPanels box | definite height, `overflow-hidden` | unchanged |
+| PullToRefresh wrapper | *did not exist* | **`height: auto`** — `flex-1` does nothing in a block parent |
+| the scroll container | `h-full` of a definite height ⇒ bounded ⇒ scrolled | `h-full` = `100%` of `auto` = **`auto`** |
+
+A scroll container as tall as its own content can never overflow, so `overflow-y-auto` had nothing to
+scroll — and the ViewPanels box's `overflow-hidden` then clipped everything below the fold. **No error,
+no failing test:** `tsc` and `vitest` cannot see a height chain, and the gesture logic that WAS tested
+(`lib/pullToRefresh.ts`) is pure and stayed correct throughout.
+
+🔎 **A SECOND CONSEQUENCE, code-verified rather than guessed:** `canStartPull` arms the pull only at
+`scrollTop <= 0`. With the container permanently unscrollable its `scrollTop` was permanently 0, so the
+gesture could arm from ANYWHERE in the list — the exact conflict that module's own design note says it
+avoids. The fix restores its precondition.
+
+**MEASURED IN A REAL BROWSER (Chromium, the chain reproduced class-for-class from App.tsx → ViewPanels →
+PullToRefresh), 4 viewports × 20 and 60 cards:**
+
+| | scroller client vs content | can scroll | scrollTop reached | last item reachable |
+|---|---|---|---|---|
+| **before** | 6317 vs 6317 (identical) | **false** | **0** | **false** — last item at y≈6251 in a 580–937px viewport |
+| **after** | 524–881 vs 6317 | true | 5436–5793 | true |
+
+`globalCanScroll: false` in BOTH ⇒ no second scrollbar appears; `horizontalOverflow: false` in BOTH ⇒ no
+horizontal scrolling introduced. ⚠️ Honest nuance: keyboard focus reached the last control even in the
+BROKEN layout — `focus()` can scroll an `overflow:hidden` box programmatically. So keyboard users had a
+partial escape; pointer and touch users had none.
+
+**THE 50/50 HALF — why it was possible at all.** A wrapper that inserts a box into the height chain made
+the caller's `h-full` resolve against itself, while its own docblock says *"this component owns the
+scroll container"*. Both halves are now closed: the wrapper fills its parent in EITHER layout context
+(`h-full` for a block parent, `flex-1 min-h-0` for a flex one), and the scroller is bounded **by
+construction** (`min-h-0 flex-1` added by the component), so a future caller that forgets `h-full` cannot
+re-enter the broken branch.
+
+**Also fixed, and the admin asked for it:** the four tabs share ONE scroll container, so a deep offset in
+Browse opened Publish halfway down its form. `scrollToTopKey` (new optional prop, fires only on a CHANGE,
+never on mount) resets it. No new scroll container was introduced — the screen still has exactly one.
+
+**Scope:** `PullToRefresh` has exactly ONE consumer in the whole tree (asserted by grep in the test, not
+in prose), and **no stylesheet was touched**, so no other page can be affected.
+
+**Tests:** `tests/appMartMustScroll.test.ts` (9 cases) renders the component with `react-dom/server` and
+asserts the classes it really emits — reversion-proven three times (drop `h-full` → 1 fails; drop the
+scroller's own fill → 2 fail; unwire `scrollToTopKey` → 1 fails). ⚠️ Stated plainly: vitest runs in
+`node`, so no test in this repo can measure a scrollbar — the test locks the CONTRACT and the browser run
+above is what proves the pixels.
+
+⚠️ **One thing deliberately NOT restored:** `843d0ab0` also dropped `WebkitOverflowScrolling: 'touch'`.
+It is a no-op on every iOS this app supports (deprecated since iOS 13; Capacitor 8 requires newer), so
+putting it back would be cargo cult rather than a fix. Recorded because the removal was a silent side
+effect of that commit, not a decision anybody made.

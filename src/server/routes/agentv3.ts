@@ -293,7 +293,7 @@ import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
-import { shouldContinue, continuationPrompt, joinContinuation, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
+import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
@@ -15621,6 +15621,14 @@ async function noteBuildOutcome(
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
               break;
+            }
+            // HONESTY (rule 5): when the model re-opened the cut file's own header and carried on
+            // inside it, the two halves are WELDED rather than the second replacing the first — say
+            // so, because a silent weld and a silent replace used to look identical in the report and
+            // only one of them kept the file (build bb688add).
+            const rejoined = resumedFilePath(text, next.text);
+            if (rejoined) {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUATION_REJOINED', message: `A continuation re-opened ${rejoined} and carried on inside it — the two halves were joined, so the part already written was kept instead of being replaced by the remainder.`, autoResolved: true });
             }
             text = joinContinuation(text, next.text);
             stopReason = next.stopReason;

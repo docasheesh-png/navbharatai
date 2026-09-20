@@ -73584,6 +73584,81 @@ asked.
 
 ---
 
+## 2026-09-20 — 🗣️ ONE COMPOSER, EVERYWHERE: the doctor typed into a different box from everyone else
+
+**Trigger:** the admin sent two phone screenshots side by side — Mentor / Career Coach and Senior
+Doctor Assistant — and said, verbatim: *"yeh 2 chat ui hai … mujhe SDA ka input box bhi baki ai ke
+jaisa karna hai. isko badal ke, other professionals ke jaise hi karo!!"*
+
+### What was actually different
+
+The two screens already agreed about everything except the one row a doctor types into:
+
+| | Professionals (Mentor) | SDA, before |
+|---|---|---|
+| attach | its own `w-9 h-9` bordered button on the row | a bare paperclip **inside** the text box |
+| dictation mic | — | a second glyph **inside** the text box |
+| text size | `text-sm` | `text-[12px]` |
+| resting height | the browser's own one line (`rows={1}`) | pinned at a **44px** minimum, against 40px buttons |
+| placeholder | `Ask <name>…` | *"Type your answer or clinical finding..."* — **two lines on a phone** |
+
+Two controls inside the box is what made it read as a different product: the writing area starts a
+third of the way across, so a normal placeholder wraps, so the box is tall, so nothing on the row
+lines up with anything else on the row.
+
+### The fix
+
+Every control is now its own `w-9 h-9 rounded-xl` button on the row, and the text box is the row's
+only growing element, carrying the **same classes `ProfessionalChat` uses**. The two screens are the
+same screen with a different persona in it.
+
+Three things were fixed along the way that were not cosmetic:
+
+1. **The camera was never offered here.** The paperclip opened the file browser directly. SDA now
+   uses the shared **`AttachMenu`** (camera / gallery / file) like every other surface — and
+   photographing an X-ray or an ECG strip is the single likeliest attachment on this screen, which
+   is the exact miss `AttachMenu` was written for. `handleFileSelect(event)` became
+   `acceptFile(file)` + a `handleFiles` adapter; the hidden `<input type="file">` and its ref are gone.
+2. **A drifted copy of the sizing rule (rule 2).** `SDAChat` carried its own three-line `autoResize`,
+   byte-for-byte the body of `autoGrow` in `lib/autoGrowTextarea.ts`, written before that helper
+   existed. It now calls the shared one, and send calls `resetGrow` instead of assigning a hardcoded
+   44px. **Two copies of a sizing rule is how one composer ends up behaving differently from every
+   other** — which is this whole report.
+3. **`BASE_HEIGHT` is gone.** The 44px floor it set is where the row's misalignment came from; the
+   cap it derived is now the plain `128` (`max-h-32`) every other composer uses.
+
+### Kept on purpose, each with a reason
+
+- **The emerald accent** (focus ring, voice button, send). The persona's identity, which the rest of
+  this screen carries and which the admin did not ask to remove. The SHAPE is what was asked for.
+- **The dictation mic** — speech → text, a control the professionals do not have. It moves out of
+  the box like everything else; its existence is not a deviation from the shape.
+- **The `Volume2` icon on the voice button.** Two mic glyphs side by side would be two different
+  features wearing one icon; the distinction predates this change.
+
+### 🔒 The 50/50 half — nothing had ever held the composers to one shape
+
+The instance is one screen's markup. The CONDITION is that **every chat screen in this repo
+hand-rolls its composer**, which is the same reason `lib/autoGrowTextarea.ts` had to be written at
+all: two composers had shipped `rows={1}` with a max-height and **no grow logic**, so the box stayed
+one line for ever.
+
+`tests/oneComposerEverywhere.test.ts` does not assert a list of classes it was handed — it **DERIVES**
+the professionals' composer from their own source and requires the doctor's to carry every class of
+it, with the accent-coloured focus ring the one permitted difference. Restyle `ProfessionalChat` and
+the test asks for `SDAChat` in the same breath. It also pins the row's one button size, the shared
+attach menu, the absence of a private sizing rule, and a placeholder short enough for one phone line.
+
+Test-locked and **proven by reversion**: restoring the transparent-slot textarea and the old
+placeholder turns **four of seven cases red**.
+
+**Sibling hunt (rule 3):** one other file matches `bg-transparent resize-none` —
+`ide/ImageStudioPro.tsx`. Checked and deliberately NOT changed: it is an image-generation prompt bar,
+not a chat composer, and pulling it into this contract would be widening the shape rather than
+enforcing it. Recorded so the next reader does not re-derive the check.
+
+`AppKnowledgeBase.ts` updated in the same commit — the attach button now offering **Take a photo** is
+a real new capability on this screen, and an AI that cannot see it cannot tell a doctor about it.
 ## 2026-09-20 — Settings: three one-tile groups became ONE, "Profile Settings", at the top
 
 **Admin, with a screenshot of the Settings home on a phone (verbatim):** *"setting ke andar account,

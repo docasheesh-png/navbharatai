@@ -1108,18 +1108,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '500'), 10) || 500, 1), 500);
       const dateFilter = parseDateFilter(req.query.date);
       const all = await listAllDiagnostics(limit, sinceMsFor(dateFilter));
+      /**
+       * 🔴 THE RECENCY WINDOW — how many of each reason's failures happened THIS WEEK (admin,
+       * 2026-09-20). Every row here is a lifetime tally over the latest build of every project, so a
+       * failure from three weeks ago counts for ever and no fix can ever move the number. Reusing
+       * `sinceMsFor('7d')` rather than a second date constant keeps the panel's "recent" identical to
+       * the one the All-Builds browser already means by 7 days.
+       */
       const report = categorizeBuildFailures(all.map((b) => ({
         workspaceId: b.workspaceId, ok: b.ok ?? null, prompt: b.prompt, rootCause: b.rootCause,
         // The build's OWN verdict code beats our reading of its prose — see buildFailureCategory.ts.
         outcomeCode: b.outcomeCode, outcomeSeverity: b.outcomeSeverity, appSeenRunning: b.appSeenRunning,
-        userStopped: b.userStopped,
-      })));
+        userStopped: b.userStopped, savedAt: b.savedAt,
+      })), { recentSinceMs: sinceMsFor('7d') });
       res.json({
         ...report,
         window: limit,
         reportsRead: all.length,
         capped: all.length >= limit,
-        sampleNote: 'Each row is the LATEST build of one project (workspace), not every build ever run — the current state of everything on the platform, not a full history. A count at the fetch limit is a lower bound: narrow the date range to look further back.',
+        recentWindowDays: 7,
+        sampleNote: 'Each row is the LATEST build of one project (workspace), not every build ever run — the current state of everything on the platform, not a full history. A count at the fetch limit is a lower bound: narrow the date range to look further back. Every count is a LIFETIME total, so "in the last 7 days" beside a row is the part of it that is still happening.',
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to categorise build failures.' });

@@ -4797,7 +4797,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                         <p className="text-[11px] text-success leading-snug"><span className="text-faint">The real fix:</span> {row.honestFix}</p>
                         <p className="text-[11px] text-muted leading-snug"><span className="text-faint">If switched off:</span> {row.whenOff}</p>
                         <p className="text-[10px] text-faint font-mono">
-                          {row.killSwitch ? `Switch: set ${row.killSwitch}=off in Cloud Run` : `Switch: remove ${row.requires ?? 'its key'} — publishing then blocks, by design`}
+                          {/* The row owns this sentence. The component used to build it and always
+                              said "set <KEY>=off", which went FALSE the day a source's default
+                              flipped to off and `on` became the word that matters — telling an admin
+                              to type the wrong value into a legal control is worse than saying
+                              nothing. See `switchHint` in licenceExposure.ts. */}
+                          {row.switchHint}
                         </p>
                       </div>
                     ))}

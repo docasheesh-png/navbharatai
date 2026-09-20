@@ -16,6 +16,7 @@
  */
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { MAX_SAVED_VERSIONS } from '../../lib/versionRetention';
 
 export interface VersionEntry {
   id: string;
@@ -32,7 +33,11 @@ export interface VersionEntry {
 
 export type VersionMeta = Omit<VersionEntry, 'files'>;
 
-const MAX_VERSIONS_PER_WORKSPACE = 50;
+// THE CAP LIVES IN src/lib/versionRetention.ts, not here — the Time Machine PRINTS this number to the
+// user ("your newest 50 versions are kept"), and a screen that states another module's constant is how
+// a promise goes stale with nothing failing. One value, imported by the store that enforces it and the
+// panel that promises it; `tests/theLimitOnScreenIsTheLimitEnforced.test.ts` holds them together.
+const MAX_VERSIONS_PER_WORKSPACE = MAX_SAVED_VERSIONS;
 const MAX_VERSION_BYTES = 900_000; // 900KB — safely under Firestore 1MB doc limit
 
 /** Truncate files payload to fit Firestore doc size limit. */

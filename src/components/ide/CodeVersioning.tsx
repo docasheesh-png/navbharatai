@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Clock, RotateCcw, Save, Check, X, Loader2, History, ChevronDown, FolderOpen } from 'lucide-react';
 import { filesHaveRealContent } from '../../lib/workspaceSource';
 import { authedHeaders } from '../../lib/authHeaders';
+import { retentionNote } from '../../lib/versionRetention';
 // Code Versioning — "Time Machine" (admin 2026-07-24): a simple, mobile-first way for a NON-technical
 // user to go back to an earlier version of their app. It reads the DURABLE, cross-device build-history
 // (every build is auto-saved as a restore point). A dropdown at the top lets a user with more than one
@@ -44,6 +45,7 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
   const [viewSession, setViewSession] = useState<string>(sessionId || '');
   const [points, setPoints] = useState<RestorePoint[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -56,6 +58,15 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
 
   // Keep the view in sync if the current app changes underneath us (e.g. after switching apps).
   useEffect(() => { if (sessionId) setViewSession(sessionId); }, [sessionId]);
+
+  // 🔴 THE SELECT SHOWED ONE APP AND THE LIST ASKED ABOUT NONE (2026-09-20). With no app open,
+  // `viewSession` stayed empty while the browser rendered the first <option> — so the screen named an
+  // app of 20 files and, underneath it, "No saved versions yet". That sentence is a claim about the
+  // user's app; the truth was that no request had been made. Selecting the first app makes what is
+  // DISPLAYED and what is QUERIED the same thing by construction.
+  useEffect(() => {
+    if (!viewSession && apps.length > 0) setViewSession(apps[0].sessionId);
+  }, [apps, viewSession]);
 
   // Load the user's apps for the dropdown.
   useEffect(() => {
@@ -78,11 +89,21 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
     if (!sid) { setPoints([]); return; }
     setLoading(true);
     try {
-      const res = await fetch(`/api/build-history/${encodeURIComponent(sid)}`);
+      // SIBLING OF THE BUG RECORDED ABOVE (rule 3): `/api/versioning/apps` was fixed to send the
+      // Bearer token and this call, three lines away, was never hunted. The GET route is a capability
+      // (the session id is unguessable) so it does not require one today — which is exactly why the
+      // omission was invisible, and exactly why it is sent now rather than left to become the next
+      // silent empty list.
+      const res = await fetch(`/api/build-history/${encodeURIComponent(sid)}`, { headers: await authedHeaders() });
       const data = await res.json().catch(() => null);
-      setPoints(res.ok && data && Array.isArray(data.versions) ? (data.versions as RestorePoint[]) : []);
+      if (!res.ok) { setPoints([]); setLoadFailed(true); return; }
+      setLoadFailed(false);
+      setPoints(data && Array.isArray(data.versions) ? (data.versions as RestorePoint[]) : []);
     } catch {
+      // "We could not read your versions" and "you have none" are different facts, and only one of
+      // them is the user's app's fault. The empty state says which.
       setPoints([]);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -240,8 +261,12 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
         ) : points.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-14 text-center px-6">
             <History className="w-9 h-9 text-faint" />
-            <p className="text-sm text-faint">No saved versions yet</p>
-            <p className="text-xs text-faint">Each build is saved here automatically — your first one will show up as a version to restore.</p>
+            <p className="text-sm text-faint">{loadFailed ? 'Could not load your versions' : 'No saved versions yet'}</p>
+            <p className="text-xs text-faint">
+              {loadFailed
+                ? 'Your versions are safe — we just could not read them right now. Please try again in a moment.'
+                : 'Each build is saved here automatically — your first one will show up as a version to restore.'}
+            </p>
           </div>
         ) : (
           <div className="relative">
@@ -290,6 +315,13 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
                 );
               })}
             </div>
+            {/*
+              HOW FAR BACK CAN I GO? (admin 2026-09-20: "likh kar aana chahiye ki --din tak reverse kar
+              sakte hai"). The limit is real and it is a COUNT, not days — `retentionNote` derives the
+              sentence from the SAME constant the store enforces, so this line cannot promise a number
+              nothing keeps.
+            */}
+            <p className="mt-4 px-0.5 text-[10px] leading-relaxed text-faint">{retentionNote(points.length)}</p>
           </div>
         )}
       </div>

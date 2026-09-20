@@ -1,6 +1,14 @@
 /**
  * SETTINGS, REGROUPED — and the two controls that were only pretending to be settings.
  *
+ * ⚠️ RENAMED 2026-09-20, AND EVERY ASSERTION BELOW SURVIVED THE RENAME. The group this file
+ * was written to guard was called "General Settings"; it is now the THIRD TILE of a single group
+ * called "Profile Settings" (admin: "account, your app, general settings teeno ko mila kar ek
+ * setting option bana do"). What this file actually protects is unchanged and still true:
+ * General is NOT an App Settings tile, its group sits ABOVE App Settings, and the screen id is
+ * still 'general'. Only the name of the box it sits in moved — see
+ * tests/profileSettingsIsOneGroup.test.ts for the merge's own lock.
+ *
  * ADMIN REQUEST 2026-08-14: give "General" its own group, with View Mode inside it. Two things were
  * wrong with where they sat, and they are worth naming because the fix is not cosmetic:
  *
@@ -28,15 +36,18 @@ const kb = readFileSync(join(__dirname, '..', 'src/server/AppContext/AppKnowledg
 /** Comments describe what was removed on purpose; only real code counts. */
 const code = panel.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
-describe('the new General Settings group', () => {
+describe('the group that carries the General screen', () => {
   it('exists as its own group, with the General screen inside it', () => {
-    expect(code).toContain("title: 'General Settings'");
-    const at = code.indexOf("title: 'General Settings'");
-    expect(code.slice(at, at + 600)).toContain("{ id: 'general'");
+    expect(code).toContain("title: 'Profile Settings'");
+    // Bounded by the NEXT group rather than by a byte count: the group grew comments when the
+    // three boxes merged, and a fixed-width slice would have started passing for the wrong reason.
+    const at = code.indexOf("title: 'Profile Settings'");
+    const group = code.slice(at, code.indexOf("title: 'App Settings'", at));
+    expect(group).toContain("{ id: 'general'");
   });
 
   it('🔒 sits ABOVE App Settings — it is reached far more often', () => {
-    expect(code.indexOf("title: 'General Settings'")).toBeLessThan(code.indexOf("title: 'App Settings'"));
+    expect(code.indexOf("title: 'Profile Settings'")).toBeLessThan(code.indexOf("title: 'App Settings'"));
   });
 
   it('🔒 App Settings no longer carries a General tile — one doorway, not two', () => {
@@ -61,7 +72,7 @@ describe('View Mode moved inside', () => {
   it('🔒 is no longer a loose card on the Settings home', () => {
     // It used to render BEFORE the group list, belonging to nothing.
     const viewModeAt = code.indexOf('View Mode');
-    const groupsAt = code.indexOf("title: 'Account'");
+    const groupsAt = code.indexOf("title: 'Profile Settings'");
     expect(viewModeAt).toBeGreaterThan(groupsAt);
   });
 
@@ -107,7 +118,9 @@ describe('🔒 the knowledge base was updated with the move', () => {
   });
 
   it('the new path is stated', () => {
-    expect(kb).toContain('Settings → General Settings → General');
+    // Renamed with the group on 2026-09-20. The point of the assertion is unchanged: the KB must
+    // name a REAL doorway to the General screen, and "App Settings → General" is not one.
+    expect(kb).toContain('Settings → Profile Settings → General');
   });
 
   it('🔒 the KB no longer advertises either removed control', () => {

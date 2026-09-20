@@ -73,7 +73,7 @@ export function AppHealthMonitor() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isLive, refresh]);
 
-  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a', color: 'var(--text-body)', fontFamily: 'sans-serif' };
+  const containerStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--surface-card)', color: 'var(--text-body)', fontFamily: 'sans-serif' };
   const cardStyle: React.CSSProperties = { background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '14px 16px' };
 
   const operational = !!health && health.status === 'ok' && health.ready;
@@ -115,7 +115,7 @@ export function AppHealthMonitor() {
         {/* Real platform liveness signal */}
         {error ? (
           <div style={{ ...cardStyle, borderLeft: '3px solid #ef4444' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f87171', fontWeight: 600, fontSize: 13 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--brand-danger-text)', fontWeight: 600, fontSize: 13 }}>
               <AlertTriangle size={16} /> Health endpoint unreachable
             </div>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>{error}</p>

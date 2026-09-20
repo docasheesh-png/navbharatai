@@ -40,7 +40,7 @@
   /* Text on a SOLID accent/success/danger fill. Every theme's accents are saturated mid-tones, so
      white is the readable choice on all of them — a token rather than `text-white` so the ratchet
      can tell "white by design" from "white because the app was dark". */
-  --color-on-accent: #ffffff;
+  --color-on-accent: var(--on-accent);
   /* An inset well inside a card (the old bg-black/20–40 on dark) and the modal scrim (bg-black/60+),
      which stays dark on every theme because it dims what is behind it. */
   --color-well: var(--surface-well);
@@ -259,6 +259,11 @@ button, [role='button'], nav, header, footer {
     --brand-warn-strong: #fbbf24;
     --brand-danger-text: #f87171;
     --brand-info-text: #7dd3fc;
+    /* Text on a SOLID accent / success / danger fill. White on every theme, and DECLARED here rather
+       than only in `@theme inline` — `@theme inline` emits no custom property at all, so the
+       `var(--on-accent)` three components were already using resolved to nothing and the label
+       fell back to inherited `--text-body`: near-black on an indigo button, on Light. */
+    --on-accent: #ffffff;
   }
   html[data-theme="light"] {
     --surface-base: #f8fafc;
@@ -291,6 +296,7 @@ button, [role='button'], nav, header, footer {
     --brand-warn-strong: #92400e;
     --brand-danger-text: #b91c1c;
     --brand-info-text: #0369a1;
+    --on-accent: #ffffff;        /* white on every theme — see the dark block */
   }
   html[data-theme="contrast"] {
     /* HIGH CONTRAST (the third of three themes since 2026-09-18): every surface black, every text
@@ -320,6 +326,7 @@ button, [role='button'], nav, header, footer {
     --brand-warn-strong: #ffc233;
     --brand-danger-text: #ff8585;
     --brand-info-text: #6ee0ff;
+    --on-accent: #ffffff;        /* white on every theme — see the dark block */
   }
 
   /* Theme-picker swatches (Settings → General → Theme). A swatch shows what a theme LOOKS like, so

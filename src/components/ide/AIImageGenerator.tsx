@@ -55,11 +55,11 @@ const IMAGE_TYPES = [
 ];
 
 const COLOR_HINTS = [
-  { color: '#6366f1', label: 'Indigo' },
+  { color: 'var(--brand-accent-strong)', label: 'Indigo' },
   { color: '#10b981', label: 'Emerald' },
-  { color: '#f59e0b', label: 'Amber' },
-  { color: '#ef4444', label: 'Red' },
-  { color: '#3b82f6', label: 'Blue' },
+  { color: 'var(--brand-warn-text)', label: 'Amber' },
+  { color: 'var(--brand-danger-text)', label: 'Red' },
+  { color: 'var(--brand-info-text)', label: 'Blue' },
   { color: '#8b5cf6', label: 'Purple' },
 ];
 

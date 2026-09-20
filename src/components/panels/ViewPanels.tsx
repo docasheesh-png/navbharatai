@@ -335,14 +335,14 @@ export function ViewPanels({
             if (conflicted.length === 0) return null;
             return (
               <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b text-xs"
-                style={{ background: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.3)', color: '#fcd34d' }}>
+                style={{ background: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.3)', color: 'var(--brand-warn-text)' }}>
                 <span className="flex-1 min-w-0">
                   ⚠ {conflicted.length} file{conflicted.length > 1 ? 's have' : ' has'} unresolved merge conflicts
                   {' '}(<span className="font-mono">{conflicted.slice(0, 2).join(', ')}{conflicted.length > 2 ? `, +${conflicted.length - 2}` : ''}</span>).
                 </span>
                 <button onClick={() => toggleTab('diff')}
                   className="shrink-0 px-2.5 py-1 rounded font-semibold"
-                  style={{ background: 'rgba(245,158,11,0.25)', color: '#fde68a' }}>
+                  style={{ background: 'rgba(245,158,11,0.25)', color: 'var(--brand-warn-text)' }}>
                   Resolve
                 </button>
               </div>

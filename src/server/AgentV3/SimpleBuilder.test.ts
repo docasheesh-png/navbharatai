@@ -225,7 +225,12 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
       generate: async (_s: string, user: string) => {
         if (user.includes('Plan the file list')) {
           await new Promise((res) => setTimeout(res, 380));
-          return 'src/types.ts :: shared types\nsrc/utils.ts :: helpers\nsrc/index.css :: styles';
+          // ⚠️ All three must stay FOUNDATION-tier (see the SINGLE-TIER note above). `src/index.css`
+          // used to be the third and became tier 2 on 2026-09-20 (a stylesheet is generated last now),
+          // which turned this into a two-stage lane and made `canFinishAfterPreamble` bail — testing the
+          // doomed-lane guard instead of the contract cap. Swapped for another real tier-0 file; the
+          // property under test is unchanged.
+          return 'src/types.ts :: shared types\nsrc/utils.ts :: helpers\nsrc/constants.ts :: shared constants';
         }
         if (user.includes('Design the shared contract')) {
           await new Promise((res) => setTimeout(res, 300));
@@ -786,7 +791,6 @@ describe('generationTier (LENS B — leaves before consumers)', () => {
     expect(generationTier('src/useTimer.ts')).toBe(0);
     expect(generationTier('src/context/AuthContext.tsx')).toBe(0);
     expect(generationTier('src/store/cart.ts')).toBe(0);
-    expect(generationTier('src/styles/App.css')).toBe(0);
     expect(generationTier('src/constants.ts')).toBe(0);
   });
   it('classifies the shell/entry/pages as tier 2 (generated last)', () => {
@@ -799,6 +803,15 @@ describe('generationTier (LENS B — leaves before consumers)', () => {
   it('classifies ordinary components as tier 1', () => {
     expect(generationTier('src/components/MediaPlayer.tsx')).toBe(1);
     expect(generationTier('src/components/UrlInput.tsx')).toBe(1);
+  });
+
+  // ⚠️ MOVED DELIBERATELY, 2026-09-20 (autopsy f152c1ab): a stylesheet used to be tier 0 and is now
+  // generated LAST. It exports nothing a later file imports, and what it really needs — the class
+  // names the components chose — does not exist until those components are written. See the rule's
+  // own docblock in SimpleBuilder.ts for the build this cost.
+  it('a stylesheet is generated last, not first', () => {
+    expect(generationTier('src/styles/App.css')).toBe(2);
+    expect(generationTier('src/App.css')).toBe(2);
   });
 });
 

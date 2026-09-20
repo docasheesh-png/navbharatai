@@ -295,17 +295,22 @@ export function FailureCategoryCard({ adminToken }: { adminToken: string }): Rea
                       className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left"
                     >
                       <span className="min-w-0 flex-1 truncate text-[11px] font-bold text-ink">{r.label}</span>
-                      <span className="shrink-0 text-right font-mono text-[11px] text-warn">
-                        {r.count} <span className="text-muted">({r.sharePct}% of failures)</span>
-                        {/*
-                          THE COLUMN THAT SAYS WHETHER A FIX WORKED. The big number is a lifetime
-                          total over every project's latest build, so it can only ever go up; this
-                          is the part of it that is still happening. Zero recently, on a row with a
-                          large total, is a bug that was fixed — and nothing else on this panel
-                          could ever have shown that.
-                        */}
+                      {/*
+                        THE COLUMN THAT SAYS WHETHER A FIX WORKED. The big number is a lifetime total
+                        over every project's latest build, so it can only ever go up; the badge is the
+                        part of it still happening. Zero recently, on a row with a large total, is a
+                        bug that was fixed — and nothing else on this panel could ever show that.
+
+                        ⚠️ STACKED, NOT INLINE. This panel is read on a phone, where these labels are
+                        ALREADY truncated ("Other (not yet in the kno…") — the screenshot that
+                        prompted this work is one. A badge beside the count would take its width
+                        straight out of the label, so the row would say less than it does today. In a
+                        column the right-hand side stays the width it already was.
+                      */}
+                      <span className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[11px] text-warn">
+                        <span>{r.count} <span className="text-muted">({r.sharePct}% of failures)</span></span>
                         {typeof r.recentCount === 'number' && (
-                          <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-bold ${r.recentCount > 0 ? 'bg-amber-500/10 text-warn' : 'bg-emerald-500/10 text-success'}`}>
+                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${r.recentCount > 0 ? 'bg-amber-500/10 text-warn' : 'bg-emerald-500/10 text-success'}`}>
                             {r.recentCount > 0
                               ? `${r.recentCount} in last ${recentDays}d`
                               : `none in ${recentDays}d`}

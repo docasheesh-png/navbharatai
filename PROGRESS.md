@@ -72325,6 +72325,40 @@ fact we store.
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
 
+## 2026-09-20 — THE FRUIT IS NOT A BUILD ORDER (autopsy f152c1ab, open item 1 — now closed)
+
+`'banana'` — the Hindi gerund "to make" — sat in `NEW_BUILD_SIGNALS` **and** `BUILD_SIGNALS` as a
+bare word. It is a perfect homograph of the English fruit. Measured on `main` before this change:
+
+| prompt | verdict |
+|---|---|
+| `banana bread recipe batao` | new_build · **HIGH** · signal `banana` |
+| `banana milkshake kaise banta hai` | new_build · **HIGH** · signal `banana` |
+
+**Somebody asking for a recipe got an app built.** It is the failure the 2026-09-13 "read the mood
+first" rule exists to prevent, and worse than the case that rule was written for: **HIGH confidence
+means the LLM intention-reader is never consulted at all**, so nothing downstream could correct it.
+Found by a CONTROL in the corpus of the previous fix — no user had to pay for this one first.
+
+⚠️ **Deleting the word was not the fix, which is why it needed a gate and not a grep.**
+`"mujhe ek app banana hai"`, the object-less `"app banana"` (named in this file's own comments as the
+case #3039 answers downstream) and a bare `"banana hai"` are all real orders, all HIGH, and all
+depend on this word. Removing it would have silently demoted every one — the trade the fourth
+absolute rule forbids.
+
+🔑 **THE CLASS, and it is the `bana-` shape's twin seen from the other side: a flat word list cannot
+carry a word whose meaning depends on the sentence around it.** So the signal is CONDITIONAL
+(`bananaMeansBuild`): it counts when the message names something buildable (`mentionsBuildNoun`), or
+when the gerund is completed into a statement of intent (`banana hai` / `tha` / `chahta hoon`). The
+fruit is followed by a FOOD, never by `hai`.
+
+**After:** every fruit sentence answers as **chat**; every real order is still `new_build · HIGH`,
+including the pair that proves the rule is about the sentence rather than the word —
+`"banana bread wala app banana hai"` → build.
+
+Test-locked in `tests/theFruitIsNotABuildOrder.test.ts` (7 cases), reversion-proven (bare `banana`
+back in the list → 2 red). The TRIPWIRE left in `anOrderInHindiIsStillAnOrder.test.ts` fired and was
+answered deliberately, exactly as it was written to be.
 ## 2026-09-20 — A STYLESHEET CANNOT BE THE WHOLE APP (autopsy f152c1ab, item 3)
 
 `generationTier` returned **0** for `*.css` — the FOUNDATION wave, generated before everything else.

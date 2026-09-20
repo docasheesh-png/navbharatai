@@ -74558,6 +74558,51 @@ prompt fails exactly the two prompt cases.
   the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
   the path this autopsy traced and is named here rather than bundled in.
 
+## 2026-09-20 — A doc's claim about a console is only as good as the last person who LOOKED
+
+**No behaviour changed. Three stale claims were corrected, and the third one had already cost the
+admin a wasted instruction.**
+
+The admin asked what was left to do. I read them the open items out of `CLAUDE.md` — including
+*"`AGENTV3_NEMOTRON` is set to `week`, which names no tier, so Nemotron's judge and plan are silently
+OFF; change it to `weak`"* — and presented it as a live fact about their deployment.
+
+**They opened Cloud Run and sent a screenshot: it already reads `weak`**, with `NEMOTRON_BASE_URL`
+pointing at the NVIDIA host. The judge and the plan were on the whole time.
+
+🔴 **The entry I was reading ENDS with the sentence "this must be verified in the console, not assumed
+from this entry."** I read the paragraph, skipped its own warning, and passed the claim on. That is the
+same shape this file already records twice — the idle-minutes default that said "NOT taken" eight days
+after it was taken, and the E2B rate whose derivation "could not fail" — and it is worse in one way:
+those were stale by drift, this one was stale *and carried its own warning label*.
+
+**What changed:**
+- `nemotron.ts` — the docblock stated the `week` report as fact. It now records what the console
+  actually showed, and adds the rule: **do not restate a config value in a comment; say what the code
+  DOES with it and leave the value to the console.**
+- `CLAUDE.md` — same correction on the ladder entry, keeping the incident rather than erasing it.
+- 🔒 **The GUARD (`nemotronConfigNote`) is untouched.** It was never built for that one typo: three
+  real instances of the class remain (a trailing space in `BRAVE_API_KEY`, an `=` in
+  `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`). **A protection built for a class is not
+  retired because one suspected instance turned out not to have happened** — deleting it would be
+  trading a real defence for a tidy story.
+
+**Two items closed on the admin's own queue in the same conversation, both recorded hand-to-hand the
+day they were said (the registry's rule), because neither has any signal the code can produce:**
+
+1. **The six DUPLICATE Cloud Run keys are DELETED** — admin, verbatim: *"maine delete kar diye hai,
+   10-12 din pahle hi"* (≈ 2026-09-08/10). This was the ONE row in that table with no self-verifying
+   check: a process sees a single value and cannot know a second row existed. The admin's word is the
+   only possible record, so it is now written down.
+2. **Android developer verification — package registration is DONE** (screenshot). Both rows read
+   `Registered`: `com.navbharat.ai` (the real `applicationId` — verified against
+   `android/app/build.gradle`, not assumed) and `com.navbharatai.app` (only the Java `namespace`, not a
+   distributed app). The 30 Sep 2026 removal deadline is therefore met for the app that ships.
+   ⚠️ Recorded narrowly: that screen shows PACKAGE REGISTRATION. Whether a separate identity section is
+   outstanding was not visible, and is not claimed either way.
+
+**Still open for the admin:** `DATA_GOV_IN_API_KEY` (free, from data.gov.in — without it the CPCB air
+quality path merged today answers nothing), the E2B rate tile on the Monitor, and naming a PR to merge.
 ---
 
 ## 2026-09-20 — Theme PR L: the inline-style tail, and a token that named nothing

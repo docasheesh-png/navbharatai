@@ -73581,3 +73581,80 @@ first carried each native capability and compares it with the live release — s
 is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
 here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
 asked.
+
+---
+
+## 2026-09-20 — Settings: three one-tile groups became ONE, "Profile Settings", at the top
+
+**Admin, with a screenshot of the Settings home on a phone (verbatim):** *"setting ke andar account,
+your app, general settings teeno ko mila kar ek setting option bana do! 'profile settings' — aur
+profile settings ke andar sabhi teeno tile add kar do! profile, apk download, general … profile
+settings sabse upar!"*
+
+### What was wrong, and it is not "too many headings"
+
+Each of the three groups carried **exactly one tile**. So the Settings home spent three whole
+section cards — three uppercase headings, two descriptions, three borders — to offer three buttons,
+and on a phone that filled the first screen before a single App Setting came into view. The reader
+had to parse three labels to discover that each box held one thing.
+
+The three also belong together by a line the screen already draws: **Account / Your App / General
+Settings are all about YOU and YOUR copy of NavBharatAI** (your profile, your app's installable
+file, how the app looks), while **App Settings below is about THE APP YOU BUILT** (its domain, its
+database, its hosting). That is the distinction the 2026-08-14 regroup established; this change
+keeps it and stops subdividing the near side of it.
+
+### What shipped
+
+- `SettingsPanel.tsx` — one group, `title: 'Profile Settings'`, first on the screen, three tiles:
+  **My Profile**, **Download APK**, **General**. The user identity card (avatar, name, email) still
+  renders above it: that is who you are, not an option you can open.
+- 🔒 **The risk this change carries, and the reason its test file exists: the three tiles ROUTE
+  THREE DIFFERENT WAYS.** `nav: true` → `setActiveView` (a top-level VIEW), `tab: true` →
+  `toggleTab` (a workspace TAB), neither → `setSettingsScreen` (a Settings SUB-SCREEN). Merging
+  three groups into one is exactly the edit that quietly drops a flag — and a dropped flag fails no
+  typecheck and breaks no render. The tile simply stops working, or opens a blank Settings page
+  with a heading and nothing under it, which is the `'modules'` / `'admin'` bug class this repo has
+  already paid for twice. The mapper already branched per ITEM rather than per group, so the merge
+  changes where the tiles sit and nothing about where they go — and each flag is now asserted by
+  its own tile.
+- **Knowledge base**: 21 path strings rewritten across `AppKnowledgeBase.ts`, plus the Settings hub
+  entry's own description of its groups, and `profile settings` added to the keywords of the three
+  entries that now live inside it. An AI that still answered *"Settings → Your App → Download APK"*
+  would be describing a box the user cannot find.
+- **One user-facing string outside the KB**: the App Mart adult-content notice
+  (`routes/navStore.ts`) tells a creator whose app is waiting for review which switch to turn on. A
+  stale path there is a person hunting for a box that no longer exists, so it moved too.
+
+### Tests
+
+`tests/profileSettingsIsOneGroup.test.ts` (12 cases), **reversion-proven four ways**: dropping
+`nav: true`, dropping `tab: true`, removing the General tile, and restoring a stale KB path each
+turn one red; the restored tree is green.
+
+`tests/settingsGeneralGroup.test.ts` was **updated, not weakened** — every assertion it made is
+still true and still asserted (General is not an App Settings tile, its group sits above App
+Settings, the screen id is still `'general'`, View Mode is not a loose card). Only the name of the
+box moved, and its header now records the rename so nobody reads the old naming as current. One
+assertion was made *stronger* on the way past: the "General is inside this group" check used a
+fixed 600-byte slice, which the merge's added comments would have pushed the tile out of — it now
+bounds the group by the next group's title, so it can never start passing for the wrong reason.
+
+⚠️ **A SECOND guard named the old group and I did not hunt it before running the gate**:
+`tests/websiteHub.test.ts` asserts that General left App Settings *for a named group rather than an
+invented catch-all*, and it named that group by its title. The full suite caught it (1 failed /
+27,316 passed) — which is the gate doing its job, and also the cost of grepping for the group names
+in `src/` and reading only one of the two test files the same grep listed. Updated with the same
+intent: the group is now named `'Profile Settings'`, and the comment records why.
+
+### Gate
+
+typecheck ✓ · noUnusedImports ✓ · typecheck:server ✓ · vitest (full suite) ✓ · build ✓ ·
+test:bundle ✓ · boot:check ✓ · deps:server-gate ✓
+
+⚠️ **Honest limit:** no browser was driven. The layout reasoning is from the existing group renderer
+(`grid-cols-2`, so three tiles are 2 + 1, the same shape App Settings already uses with six) rather
+than from a screenshot at every breakpoint.
+
+⚠️ **This is a FRONTEND change**, so under bundled mode it reaches installed Android users only in a
+fresh `.aab` — not on the next merge.

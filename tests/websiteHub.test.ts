@@ -51,8 +51,11 @@ describe('App Settings — Your Website hub', () => {
     const block = src.slice(start, src.indexOf("title: 'Legal & Trust'", start));
     expect(block).toContain("id: 'logs'");
     expect(block).not.toContain("id: 'general'");
-    // It went to a named group of its own, not into some invented catch-all.
-    expect(src).toContain("title: 'General Settings'");
+    // It went to a NAMED group, not into some invented catch-all. That group was called "General
+    // Settings" until 2026-09-20, when it merged with Account and Your App into one "Profile
+    // Settings" card (each of the three carried a single tile). The assertion's point is unchanged:
+    // General has a real home OUTSIDE App Settings, and it is not a made-up bucket.
+    expect(src).toContain("title: 'Profile Settings'");
     expect(src).not.toContain("title: 'Build & Debug'");
   });
 

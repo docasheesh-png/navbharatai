@@ -36,10 +36,28 @@ describe('the dist reader never goes through a shell', () => {
     // Found by this same investigation: both interpolated JSON.stringify(url) into a double-quoted
     // node -e. browseUrl's failure was invisible because it silently fell back to `source: 'curl'` —
     // the platform's own PREVIEW_UNVERIFIED, "fetched without running its JavaScript".
-    expect(src).toContain('const browsePath = `/tmp/nb_browse_${Date.now().toString(36)}'); // unique per call
+    //
+    // ⚠️ UPDATED 2026-09-20, and the RULE in this case's own name is unchanged: the script goes to a
+    // FILE rather than into a shell string. What changed is WHICH file.
+    //
+    // 🔴 This used to assert the literal `/tmp/nb_browse_…` path — STRICTER than the rule it encodes,
+    // and the stricter half turned out to be pinning a SECOND bug in place. Playwright installs into
+    // TOOLS_DIR, and Node resolves `require()` from the SCRIPT'S OWN DIRECTORY, never from `cwd`, so a
+    // body written to /tmp could never find it: `browseUrl` failed 100% of the time and fell back to
+    // curl, exactly as it had under the quoting bug this case was written for. Report 31dc61fd shows
+    // thirteen consecutive failures in one build. Moving the body into a file fixed the quoting and
+    // moved the resolution root from `cwd` (which `node -e` does use, and which was already TOOLS_DIR)
+    // to `/tmp` — one problem traded for another.
+    //
+    // So this now pins the rule and NOT the address: a file, written through the one shared helper.
+    // Where that helper points is `sandboxBrowsersPath.test.ts`'s business, and it is reversion-proven
+    // there — never restated here, or the two copies drift and only one of them is right.
+    expect(src).toContain("const browsePath = toolsScriptPath('browse')");
     expect(src).toContain('await sandbox.files.write(browsePath, playwrightBody)');
-    expect(src).toContain('const shotPath = `/tmp/nb_shot_${Date.now().toString(36)}'); // unique per call
+    expect(src).toContain("const shotPath = toolsScriptPath('shot')");
     expect(src).toContain('await sandbox.files.write(shotPath, shotBody)');
+    // The unique-per-call property is the reason these left a fixed path at all — it must survive.
+    expect(src).toMatch(/function toolsScriptPath[\s\S]{0,240}Math\.random\(\)/);
   });
 
   it('writes the script to a file and runs THAT', () => {

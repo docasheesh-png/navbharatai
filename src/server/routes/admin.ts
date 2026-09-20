@@ -18,6 +18,8 @@ import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummar
 import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
 import { runReferralPreflight } from '../lib/referralPreflight';
+import { runPushPreflight } from '../lib/pushPreflight';
+import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -2839,6 +2841,71 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    * Google with the real credential and the real package, and every refusal names its next step.
    * Read-only — the probe sends a token Google cannot decode, so nothing is ever paid by it.
    */
+  // PUSH NOTIFICATIONS — WHY IS NOTHING ARRIVING?
+  //
+  // The whole chain (plugin -> permission -> token -> registry -> firebase-admin -> FCM -> phone)
+  // fails silently at every link by design: `sendPushToUser` is fire-and-forget so a push can never
+  // fail a build. These two routes are the loud half. The check reads; the test SENDS, and is the only
+  // thing that proves the chain end to end.
+  app.get('/api/admin/push/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      res.json(await runPushPreflight());
+    } catch (e) {
+      // A checker that 500s tells the admin nothing. Report the failure AS a failed check.
+      res.json({
+        verdict: 'incomplete',
+        checks: [{
+          id: 'preflight', label: 'Notification setup check', state: 'unknown',
+          detail: e instanceof Error ? e.message : String(e),
+          remedy: 'Re-run the check.',
+        }],
+        nextAction: 'Re-run the check.',
+        manual: [],
+      });
+    }
+  });
+
+  // Send a REAL notification to one account's registered devices. Defaults to the admin's own
+  // address, because the only honest end-to-end test of a notification is seeing one arrive.
+  app.post('/api/admin/push/test', verifyAdminToken, async (req: Request, res: Response) => {
+    const email = String((req.body || {}).email || '').trim().toLowerCase() || adminEmailList()[0] || '';
+    if (!email) { res.status(400).json({ error: 'No address to send to.' }); return; }
+    try {
+      const admin = await import('firebase-admin');
+      if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
+      let uid: string;
+      try {
+        uid = (await admin.auth().getUserByEmail(email)).uid;
+      } catch {
+        res.json({ ok: false, email, reason: 'no-account', detail: `No NavBharatAI account is registered to ${email}.` });
+        return;
+      }
+      const result = await sendPushToUser(uid, {
+        title: 'NavBharatAI test',
+        body: 'Notifications are working on this device.',
+        data: { kind: 'setup_test' },
+      });
+      // An honest verdict: reaching FCM is not the same as a phone lighting up, and only the person
+      // holding the phone can confirm the second half.
+      res.json({
+        ok: result.reason === '' && result.sent > 0,
+        email,
+        ...result,
+        detail: result.reason === 'no-devices'
+          ? 'That account has no device registered for notifications yet.'
+          : result.reason === 'no-messaging'
+            ? 'The Firebase admin SDK could not start on this server.'
+            : result.reason === 'error'
+              ? (result.error || 'Firebase refused the send.')
+              : result.sent > 0
+                ? `Accepted by Firebase for ${result.sent} of ${result.tokens} device(s). Check the phone.`
+                : `Firebase rejected all ${result.tokens} device(s).`,
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get('/api/admin/referral/preflight', verifyAdminToken, async (_req: Request, res: Response) => {
     try {
       res.json(await runReferralPreflight());

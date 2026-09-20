@@ -73173,3 +73173,108 @@ zero model cost; PR 3 gives the builder a tool to raise and resolve rows itself,
 into the per-turn context — deliberately the per-turn message, not the cached prefix, or every build's
 prompt cache breaks. Extracting rows from the summary with a regex or an extra model pass was
 considered and **rejected**: fragile, and it would bill every build for it.
+
+---
+
+## 2026-09-20 — "Notifications nahi aa rahe": the feature was built, shipped to nobody, and could not be diagnosed
+
+**Admin, verbatim:** *"jaise app notifications ate hai hamare mobile me woh notifications abhi
+navbharatai me nahi aa rahe hai. isko on karwane ke liye aur kya karna chahiye — ek dam native app
+jaise notification mobile me dikhe!"*
+
+**The instinct to resist, and the reason safeguard #6 exists.** The obvious reading is "push
+notifications were never built" — which is what the 2026-07-26 entry says about the *previous* time
+this was asked. Searched by FILENAME first, then by package: `@capacitor-firebase/messaging` is
+INSTALLED, `src/lib/pushNotifications.ts` is wired into `App.tsx:1261` on sign-in,
+`android/app/google-services.json` is present and names the right project and package,
+`android/build.gradle` carries the google-services plugin, `routes/push.ts` is mounted at
+`server.ts:718`, and `PushNotificationService.sendPushToUser` is a real firebase-admin sender called
+from three places. **The whole chain exists and has since 2026-08-25.**
+
+### The root cause, established rather than assumed
+
+`android-aab.yml` stamps `versionCode = run number`. Asked the Actions API for every run's head SHA
+and asked git whether the commit that introduced the plugin (`f71e101e`) is an ANCESTOR of each:
+
+| run | head | carries push? |
+|---|---|---|
+| **91** (`cc236f0f`, 12:10 on 2026-08-25) — the first production release, and the value `ANDROID_LATEST_VERSION_CODE` still holds | no | **NO** |
+| 92–95 | no | NO |
+| **96** (`7065c7dd`, 2026-08-26) | yes | **YES** |
+
+The plugin merged at 21:18 that day and run #91 was built at 12:10 the same day, **so the dates alone
+say the opposite of the truth** — which is exactly why this was checked by ancestry.
+
+**The app people have installed contains no notification code at all.** It never asks permission,
+never obtains an FCM token, never calls `/api/push`. Nothing the server does can reach it, and
+nothing the server can see says so.
+
+### The missing subsystem (step 2): nothing could tell four different failures apart
+
+`sendPushToUser` is fire-and-forget and silent **by design** — a push must never fail a build — and
+it returned `void`. So an app too old to receive, an empty device registry, a Cloud Messaging API
+that was never enabled, and a service account without permission all produced the identical outcome:
+nothing arrives, nothing errors, nothing logged. The silence is right for the callers; the
+information was being **thrown away rather than not existing**.
+
+- **`src/server/lib/pushPreflight.ts`** — the loud half, in the shape `hostingPreflight.ts` and
+  `referralPreflight.ts` already established. It probes the REAL send path with the REAL credential
+  and a token Google cannot decode, so the answer can only be a refusal and the diagnosis is WHICH
+  one. 🔒 **"Invalid argument" is the GOOD answer** and is reported `ok`: it means we authenticated,
+  the project was right, Cloud Messaging was reached, and only the fake token was refused. Reporting
+  it as a failure would send the admin to fix a setup that already works. A send that SUCCEEDS is
+  reported `unknown`, not `ok` — a check that cannot fail proves nothing (the E2B-rate lesson).
+- **`sendPushToUser` now returns `PushSendResult`.** Every existing caller ignores it; no behaviour
+  changed.
+- **`GET /api/admin/push/preflight` + `POST /api/admin/push/test`** and a **Notifications card** on
+  admin → Reports. The test sends a real notification to a real account — the only thing that proves
+  the chain — and the card never claims the second half: Firebase accepting a message is not a phone
+  showing one.
+
+### The 50/50 half — why a notification would not have LOOKED native either
+
+Three Firebase presentation settings had never been set, each failing in a way nothing reports:
+no `default_notification_icon` (Android renders the full-colour launcher icon as a featureless
+**white square**), no `default_notification_color`, no `default_notification_channel_id` (every
+message lands in Android's fallback **"Miscellaneous"** channel — the single clearest tell in
+Settings → Notifications that an app did not set this up).
+
+- `@drawable/ic_stat_nbai` at five densities, **derived** from the app's own `ic_launcher_monochrome`
+  by `scripts/notificationIcon.mjs` (crop the adaptive-icon safe zone, box-filter the alpha) — the
+  app's own mark, not new artwork. Verified numerically: it is a silhouette (93% transparent) filling
+  ~90% of its slot.
+- The channel is created at **importance 4 (High)**. Android fixes a channel's importance at creation
+  and refuses to let an app raise it later, so shipping the default once would make "my notifications
+  do not pop up" **permanently unfixable** for everyone who had already installed the app. That is the
+  one value that must be right the first time.
+- ⚠️ The channel id exists twice — named in the manifest, CREATED in the client — and a manifest
+  naming a channel nobody created is **not an error**: Android falls back to Miscellaneous again. Both
+  directions are pinned by `tests/aNotificationLooksLikeOurApp.test.ts`.
+
+### OPEN ROOT CAUSES (rule 6) — stated, not patched
+
+1. **🔴 ADMIN: only a fresh Play release makes any of this reach a phone.** Build 96 or later. Per
+   CLAUDE.md a store build is made **only when the admin asks**, so none was triggered. After it is
+   downloadable, set `ANDROID_LATEST_VERSION_CODE` to that run number — after, never before.
+2. **🔴 ADMIN: the Firebase Cloud Messaging API and the service-account role cannot be checked from a
+   session.** The new preflight is what turns each into a named next action.
+3. **iOS cannot work at all today.** `ios/App/App/GoogleService-Info.plist` is not in this repository
+   and no APNs key has ever been uploaded to Firebase. Listed as manual work in the report rather
+   than left silent.
+4. **`AppKnowledgeBase.ts` has no notifications entry, and deliberately still does not.** Adding one
+   now would have every NavBharatAI AI promise a capability today's installed app does not have —
+   the fake-success the second absolute rule forbids. It is owed the moment a release carrying push
+   is live on Play.
+5. **Only three things ever send a notification** (build finished, low balance, update broadcast).
+   Whether that is the right set is a product question for the admin, not a defect.
+
+### Proactive layer (step 6)
+
+The lever here is not more notification kinds — it is that **a feature can be complete, merged, green
+and shipped to nobody for four weeks with nothing anywhere saying so**. Push is the second case this
+month (Play Billing and Play Integrity have the same shape, and each grew its own hand-written
+"release N and earlier do not have it" constant). The real fix is one place that knows which run
+first carried each native capability and compares it with the live release — so "the app on the phone
+is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
+here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
+asked.

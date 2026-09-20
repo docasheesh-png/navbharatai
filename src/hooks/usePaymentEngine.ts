@@ -98,35 +98,22 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [couponSuccess, setCouponSuccess] = useState<string | null>(null);
 
 
-  // iOS-style card balance states & limits
-  const [reminderLimit, setReminderLimit] = useState<number>(() => {
-    const cached = localStorage.getItem('navbharat_reminder_limit');
-    return cached ? parseFloat(cached) : 10.00;
-  });
-  const [budgetLimit, setBudgetLimit] = useState<number>(() => {
-    const cached = localStorage.getItem('navbharat_budget_limit');
-    return cached ? parseFloat(cached) : 2.00;
-  });
-  const [tempReminderLimit, setTempReminderLimit] = useState<string>(() => {
-    const cached = localStorage.getItem('navbharat_reminder_limit');
-    return cached ? parseFloat(cached).toString() : '10';
-  });
-  const [tempBudgetLimit, setTempBudgetLimit] = useState<string>(() => {
-    const cached = localStorage.getItem('navbharat_budget_limit');
-    return cached ? parseFloat(cached).toString() : '2';
-  });
-  const [limitError, setLimitError] = useState<string | null>(null);
-  const [limitSuccess, setLimitSuccess] = useState<string | null>(null);
-  const [dismissedReminderWarning, setDismissedReminderWarning] = useState<boolean>(false);
+  /*
+   * ⛔ THE REMINDER / BUDGET LIMITS ARE GONE (admin 2026-09-20: "yeh budget warning system kaam to
+   * karta nahi hai — isko jad se khatam karo").
+   *
+   * They were four `useState`s over two `localStorage` keys, and that was the whole system: nothing
+   * here ever reached a server, so no build gate, no affordability check and no wallet debit could
+   * read them. The console that set them nonetheless told the user "at this limit the system
+   * automatically switches you to Free-version mode" — a promise nothing in the codebase kept.
+   *
+   * The two stored keys are deliberately NOT deleted from anyone's browser: nobody asked for their
+   * data to be cleared, and an orphaned key costs nothing now that no code reads it.
+   *
+   * ⚠️ The real bound on a negative balance is `WALLET_OVERDRAFT_FLOOR_INR` (server-side, inside
+   * every debit). It is untouched — see the note in BillingPanel.
+   */
   const [buyAmountInput, setBuyAmountInput] = useState<string>('500');
-
-  useEffect(() => {
-    localStorage.setItem('navbharat_reminder_limit', reminderLimit.toString());
-  }, [reminderLimit]);
-
-  useEffect(() => {
-    localStorage.setItem('navbharat_budget_limit', budgetLimit.toString());
-  }, [budgetLimit]);
 
   const fetchWallet = async () => {
     if (!user) return;
@@ -555,13 +542,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
     // limits + referral
-    reminderLimit, setReminderLimit,
-    budgetLimit, setBudgetLimit,
-    tempReminderLimit, setTempReminderLimit,
-    tempBudgetLimit, setTempBudgetLimit,
-    limitError, setLimitError,
-    limitSuccess, setLimitSuccess,
-    dismissedReminderWarning, setDismissedReminderWarning,
     buyAmountInput, setBuyAmountInput,
     // actions
     fetchWallet,

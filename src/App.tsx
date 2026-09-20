@@ -290,13 +290,6 @@ export default function App() {
     isRedeemingCoupon, setIsRedeemingCoupon,
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
-    reminderLimit, setReminderLimit,
-    budgetLimit, setBudgetLimit,
-    tempReminderLimit, setTempReminderLimit,
-    tempBudgetLimit, setTempBudgetLimit,
-    limitError, setLimitError,
-    limitSuccess, setLimitSuccess,
-    dismissedReminderWarning, setDismissedReminderWarning,
     buyAmountInput, setBuyAmountInput,
     fetchWallet,
     createBillingOrder,
@@ -3912,9 +3905,6 @@ export default function App() {
               billingTransactions={billingTransactions}
               billingLogs={billingLogs}
               activeBillingDetailTab={activeBillingDetailTab}
-              reminderLimit={reminderLimit}
-              budgetLimit={budgetLimit}
-              dismissedReminderWarning={dismissedReminderWarning}
               couponCodeInput={couponCodeInput}
               isRedeemingCoupon={isRedeemingCoupon}
               couponError={couponError}
@@ -3927,26 +3917,15 @@ export default function App() {
               buyingProductId={buyingProductId}
               storePurchaseNotice={storePurchaseNotice}
               onBuyStorePack={(id) => { void buyStorePack(id); }}
-              tempReminderLimit={tempReminderLimit}
-              tempBudgetLimit={tempBudgetLimit}
-              limitError={limitError}
-              limitSuccess={limitSuccess}
               onShowAuth={() => setShowAuth(true)}
               onFetchWallet={fetchWallet}
               onSetActiveBillingDetailTab={setActiveBillingDetailTab}
-              onSetReminderLimit={setReminderLimit}
-              onSetBudgetLimit={setBudgetLimit}
-              onSetDismissedReminderWarning={setDismissedReminderWarning}
               onSetCouponCodeInput={setCouponCodeInput}
               onRedeemPromoCoupon={redeemPromoCoupon}
               referral={referralProgress}
               onRefreshReferral={referralProgress.refresh}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
-              onSetTempReminderLimit={setTempReminderLimit}
-              onSetTempBudgetLimit={setTempBudgetLimit}
-              onSetLimitError={setLimitError}
-              onSetLimitSuccess={setLimitSuccess}
               onToast={addToast}
               monthlyAiCost={monthlyAiCost}
             />

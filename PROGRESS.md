@@ -73784,3 +73784,21 @@ fixture happened to sit exactly on the cap).
 - **Time Machine is still three menus deep.** A button that opens it for the current app would close
   this properly — `AppKnowledgeBase` even carries `nav: { view: 'versioning' }` for it. Not built here:
   it needs `App.tsx`, which another session is live in.
+
+### The removal was caught by the suite that guarded the removed feature
+
+`tests/restoreCheckpoint.test.ts` — written in July for the instance-affinity bug — asserted that the
+History tab CALLS `restore(sha)`. Removing the button therefore turned that suite red, and it went red
+only in the FULL run at the end: the targeted suites for this change were all green. That is safeguard
+#5's "run the gate LAST, on the final state" earning its place, on a change where every file I had
+touched looked clean.
+
+The fix was not to delete the file. Its six server cases (`restoreSessionDetailed`'s four reasons, the
+malformed-sha refusal, the no-sandbox case) and its three route cases test the half that is UNCHANGED —
+the endpoint still works and is still reachable. Only the UI case's premise was superseded, so that one
+case now asserts the opposite fact (no `await restore(sha)` in the panel, `HISTORY_TAB_NOTE` present)
+and says in its own comment why the assertion flipped and which test owns the screen now. **Proven by
+reversion**: re-introducing the call makes it fail.
+
+`useAgentV3Build.ts` keeps `restore` — the endpoint is real — but its doc comment now states that **no
+UI calls it**, so the next session to find it does not read an unused export as a missing wire-up.

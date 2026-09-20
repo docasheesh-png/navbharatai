@@ -70884,3 +70884,51 @@ an un-hydrated SPA shell.
   judge (a tools-free single call) are genuinely two different things, and only one obeys the rule.
 - **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
   `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.
+
+---
+
+## 2026-09-20 — A clean review must not read as a complaint (autopsy 31dc61fd, item 1 of 6)
+
+**Branch `claude/a-clean-review-must-not-read-as-a-complaint`.** What a real user saw, verbatim from
+the build report:
+
+```
+I also noticed one thing I could improve if you want
+(I left your working app exactly as it is, rather than changing it without asking):
+  1. No  or  issues were found. The app structure, imports, accessibility, security, and
+     privacy checks all pass. The historical `write-typecheck` errors in the two
+Want me to? Just reply "fix these" …
+```
+
+**Three defects compounding in one sentence**, and the first is the root of the second:
+
+1. **A clean bill of health was classified as a finding.** The reviewer wrote *"No [CRITICAL] or
+   [WARNING] issues were found"*. `parseReviewOutput` decides severity with
+   `lower.includes('[critical]')` — which **treats a MENTION of the tag as the tag**, so a sentence
+   saying nothing is wrong became a critical finding.
+2. **The tag-stripper left two holes.** `.replace(/\[(critical|warning|suggestion)\]/gi, '')` is
+   global, so both brackets vanished wherever they sat: `No  or  issues were found`.
+3. **`title.slice(0, 160)` cut it dead mid-phrase** — exactly 160 characters, ending *"…errors in the
+   two "*, with no ellipsis to say it had been shortened.
+
+Under a heading that invites *"reply fix these"*, that reads as the engine breaking.
+
+### The fixes, each at its own root
+
+- **`NO_FINDINGS_RE`** sits beside the two guards that already handle this class — a section HEADER is
+  not a finding (`SECTION_LABEL_RE`), a finding the reviewer discharged is not a finding
+  (`SELF_DISMISSED_RE`) — rather than in a fourth place downstream. ⚠️ **Conservative by
+  construction**, because the opposite error is silent and worse: it matches only the "nothing was
+  FOUND" shape (a noun of finding, then found/detected/identified), so *"No error handling on the save
+  button"* survives as the real finding it is, while *"No accessibility issues were found"* goes.
+- **The hole is closed where it appears** (`[ \t]{2,}` → one space) rather than by making the strip
+  positional: a reviewer writes `1. [CRITICAL] foo` as often as `[CRITICAL] foo`, and a leading-only
+  strip would leave the tag visible in the first case.
+- **`shortTitle`** cuts at a WORD boundary and always marks the cut with `…`. The full text is never
+  lost — `detail` carries it, and the card renders that. A single enormous word (a URL, a stack frame)
+  is still cut, so "no break found" cannot become a way past the limit.
+
+`tests/aCleanReviewMustNotReadAsAComplaint.test.ts` — 17 cases, including the exact sentence from the
+report and a **precision lock** of four real findings phrased with "no". **Reversion-proven four
+ways**: the clean-bill rule removed → 6 red · the whitespace collapse removed → 1 red · the hard slice
+restored → 1 red · **the rule widened to bare `^no` → 4 red** (it swallows real findings).

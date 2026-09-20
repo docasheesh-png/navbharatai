@@ -58,19 +58,22 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
       ts: 1,
     });
     expect(s.agents.frontend.active).toBe(true);
-    expect(s.agents.frontend.lastAction).toBe('writing src/App.tsx');
+    // The PATH is deliberately not in the label any more (admin 2026-09-20) — see toolLabels.ts.
+    // It was `writing src/App.tsx`; the full path still lives in the Files tab and the diff.
+    expect(s.agents.frontend.lastAction).toBe('writing the app');
 
     s = agentV3Reducer(s, { type: 'tool_result', agent: 'frontend', callId: 'c1', ok: true, summary: 'done', ts: 2 });
     expect(s.agents.frontend.active).toBe(false);
     // The action label is retained for context.
-    expect(s.agents.frontend.lastAction).toBe('writing src/App.tsx');
+    expect(s.agents.frontend.lastAction).toBe('writing the app');
   });
 
   it('builds the live activity feed: tool_call (in-flight) → tool_result (completed)', () => {
     let s = initialAgentV3State();
     s = agentV3Reducer(s, { type: 'tool_call', agent: 'frontend', tool: 'bash', input: { command: 'npm install' }, callId: 'c1', ts: 1 });
     expect(s.activity).toHaveLength(1);
-    expect(s.activity[0]).toMatchObject({ id: 'c1', kind: 'tool', text: 'running: npm install', active: true });
+    // Was `running: npm install` — a command is now named by what it DOES when we recognise it.
+    expect(s.activity[0]).toMatchObject({ id: 'c1', kind: 'tool', text: 'installing packages', active: true });
 
     s = agentV3Reducer(s, { type: 'tool_result', agent: 'frontend', callId: 'c1', ok: true, summary: 'ok', ts: 2 });
     expect(s.activity[0].active).toBe(false);
@@ -92,7 +95,7 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     ];
     const s = reduceAll(initialAgentV3State(), events);
     expect(s.activity.map((a) => a.kind)).toEqual(['agent', 'file', 'preview']);
-    expect(s.activity[1].text).toBe('created src/App.tsx');
+    expect(s.activity[1].text).toBe('created the app'); // was `created src/App.tsx`
     expect(s.activity[2].text).toBe('preview published');
   });
 
@@ -316,23 +319,51 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.narration[0].streaming).toBe(false);
   });
 
-  it('keeps thinking deltas as a separate line from text deltas with the same id', () => {
+  // ⚠️ REWRITTEN 2026-09-20, and the old assertion is quoted here so the change of behaviour is legible
+  // rather than looking like a weakened test. It read:
+  //
+  //     it('keeps thinking deltas as a SEPARATE LINE from text deltas with the same id')
+  //
+  // …and that separate line is exactly what the admin saw filling a phone screen in grey italics
+  // ("light/gray reply — bakwaas, yeh nahi chahiye"). The reasoning channel no longer becomes a chat
+  // line at all. This is a deliberate product decision, not a test bent to fit broken code: the
+  // sibling assertion below proves the TEXT channel still behaves exactly as it did.
+  it('a thinking delta never becomes a chat line, but still shows the agent as working', () => {
     let s = initialAgentV3State();
     s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'thinking', delta: 'Let me', ts: 1 });
     s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'thinking', delta: ' think', ts: 2 });
-    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'Done', ts: 3 });
-    expect(s.narration).toHaveLength(2);
-    expect(s.narration[0].kind).toBe('thinking');
-    expect(s.narration[0].text).toBe('Let me think');
-    expect(s.narration[1].kind).toBe('text');
-    expect(s.narration[1].text).toBe('Done');
+    expect(s.narration).toHaveLength(0);
+    // The agent card still knows it is alive — removing the wall must not make the build look frozen.
+    expect(s.agents.architect?.active).toBe(true);
 
-    // Finalizing the text turn leaves the thinking line untouched and does not dupe.
+    s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'Done', ts: 3 });
+    expect(s.narration).toHaveLength(1);
+    expect(s.narration[0].kind).toBe('text');
+    expect(s.narration[0].text).toBe('Done');
+
+    // …and the text turn finalizes in place exactly as before, with no thinking line to dupe past.
     s = agentV3Reducer(s, { type: 'narration', agent: 'architect', text: 'Done', ts: 4, id: 't1' });
-    expect(s.narration).toHaveLength(2);
-    expect(s.narration[1].text).toBe('Done');
-    expect(s.narration[1].streaming).toBe(false);
-    expect(s.narration[0].text).toBe('Let me think');
+    expect(s.narration).toHaveLength(1);
+    expect(s.narration[0].text).toBe('Done');
+    expect(s.narration[0].streaming).toBe(false);
+  });
+
+  // 🔴 A LINE STUCK `streaming` CAN NEVER FOLD — the renderer sends a streaming line through the
+  // typewriter and skips `FoldableMessage` entirely. A turn that threw, or a build the user stopped,
+  // leaves its line streaming for ever, so it is the one reply no length limit can ever collapse.
+  it('settles every still-streaming line when the build ends', () => {
+    for (const terminal of [
+      { type: 'done', ok: true, summary: 's', ts: 9 },
+      { type: 'result', ok: true, summary: 's', ts: 9 },
+      { type: 'error', message: 'boom', ts: 9 },
+    ] as const) {
+      let s = initialAgentV3State();
+      s = agentV3Reducer(s, { type: 'stream_delta', agent: 'architect', id: 't1', kind: 'text', delta: 'half a rep', ts: 1 });
+      expect(s.narration[0].streaming).toBe(true);
+      s = agentV3Reducer(s, terminal as never);
+      expect(s.narration[0].streaming).toBe(false);
+      expect(s.narration[0].text).toBe('half a rep'); // the text itself is never touched
+    }
   });
 
   it('backward compatible: a narration with no id pushes a new line as before', () => {

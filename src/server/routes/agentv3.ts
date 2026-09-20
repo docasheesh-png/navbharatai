@@ -38,6 +38,8 @@ import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
+import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
@@ -15508,8 +15510,14 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
-              onThinking: (delta: string) =>
-                events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
+              // The SIBLING of AgentRunner's own reasoning emit — gated by the same one switch, so the
+              // two lanes cannot drift into showing the user different things (thinkingStream.ts).
+              ...(streamThinkingToChat()
+                ? {
+                    onThinking: (delta: string) =>
+                      events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
+                  }
+                : {}),
             });
           } catch (err) {
             const failedAs = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
@@ -20746,6 +20754,30 @@ async function noteBuildOutcome(
       // Fire-and-forget on purpose: an observation must never delay a user's finished build.
       void recordEngineUse(providerTurns);
 
+      // HOW DEEP DID THIS BUILD GO DOWN ITS LADDER? (admin 2026-09-20 — "pehle yeh measure karo,
+      // kitni builds pehle rung par khatam hoti hai"). Neither `deliveredVia` nor `escalations` could
+      // answer it: the first names a VENDOR, and on Weak/Normal the vendor GLM holds rung 1 AND rung 3;
+      // the second counts TIER escalations, which is 0 for every ordinary fall inside one tier.
+      //
+      // It matters beyond curiosity. The lead rung `glm-4.7-flashx` is sent `thinking: disabled`; the
+      // rungs below it reason unconditionally and expose no switch. So the share of builds that leave
+      // rung 1 IS the size of the model-reasoning problem — and of the cost gap between the cheapest
+      // rung and the rest. Pure computation over the ledger we already hold; no call, no I/O.
+      const ladderDepth = ladderDepthUsed(
+        providerLedger.entries(),
+        tierLadder(powerLevelReqEffective).rungs,
+      );
+      try {
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'LADDER_DEPTH',
+          message: describeLadderDepth(ladderDepth),
+          detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
@@ -20772,6 +20804,9 @@ async function noteBuildOutcome(
           // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
           escalationCohort: escalationCohort(workspaceId),
           escalations: escalationsCount,
+          // …and how far down the RUNGS it went inside that tier (a different question — see above).
+          // Omitted rather than zeroed when it could not be attributed: `0` would read as a real depth.
+          ...(ladderDepth.depth != null ? { ladderDepth: ladderDepth.depth } : {}),
           // Billing Phase 3 — per-provider token attribution (reconciled to the billed total) + loss
           // accounting. A LOSS = real tokens spent (buildUsage>0) but the build was zeroed (empty /
           // unrendered preview / free onboarding) → NavBharatAI ate the Sonnet-equivalent cost.

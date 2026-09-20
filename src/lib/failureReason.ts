@@ -52,6 +52,30 @@ export const OTHER_REASON: FailureReason = Object.freeze({
   label: 'Other (not yet in the known pattern list)',
 });
 
+/**
+ * 🔴 THE BUCKET THAT WAS HIDING AN ENGINE BUG BEHIND A VOCABULARY ONE (admin, 2026-09-20 — the
+ * failure table read *"Other (not yet in the known pattern list)"* at **29.2% of every failure**,
+ * the biggest row by a factor of two, and the admin asked how to make it never come back).
+ *
+ * "Not yet in the known pattern list" says: *add more words and this shrinks*. For a build that
+ * recorded an `OUTCOME_*` code that is true. For a build that recorded NONE it is false, and the two
+ * had been sharing one bucket — so the top row of the panel pointed every reader at the wrong work.
+ *
+ * 🔑 THE DISTINCTION IS A MACHINE FACT, not a reading. `classifyFailureReason` returns a mapped
+ * reason for EVERY code it knows, and `tests/failureNaming.test.ts` fails CI when a code exists
+ * without a label — so a build that reaches the end of this function with **no code at all** did not
+ * record why it ended. That is not a gap in our words; it is a gap in the engine's record, and it is
+ * the exact hole `abortOutcome.ts` (2026-09-18) and the empty-build flip (2026-09-17) were each
+ * built to close one part of. Naming it separately is what lets anyone see whether they worked.
+ *
+ * ⚠️ IT IS NOT "we do not know why the app broke" — `no-cause-recorded` below is that, and it is the
+ * engine SAYING so in its own prose. This one is the record being silent.
+ */
+export const NO_OUTCOME_REASON: FailureReason = Object.freeze({
+  key: 'no-outcome-recorded',
+  label: 'The build never recorded WHY it ended (no outcome on the record)',
+});
+
 export const NO_ROOT_CAUSE_REASON: FailureReason = Object.freeze({
   key: 'no-root-cause',
   label: 'No root cause was recorded',
@@ -105,6 +129,12 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
   OUTCOME_DEPLOY_DRAIN: { key: 'deploy-drain', label: 'Interrupted by a NavBharatAI deploy (resumes on its own)' },
   OUTCOME_SUPERSEDED: { key: 'superseded', label: 'Replaced by a newer build on the same project' },
   OUTCOME_REAPED: { key: 'reaped', label: 'Stopped reporting and was cleaned up by the reaper' },
+  /**
+   * Split out of `OUTCOME_STOPPED` on 2026-09-20: an abort whose signal carried no cause, i.e. one
+   * raised somewhere that never went through `abortBuild`. A wall-clock timeout and an untagged
+   * abort are different bugs with different fixes, and one label for both hides the second.
+   */
+  OUTCOME_ABORTED_UNKNOWN: { key: 'aborted-unknown', label: 'Aborted by something that never said why (not the wall clock, not the user)' },
 };
 
 /**
@@ -280,5 +310,14 @@ export function classifyFailureReason(
   if (!text) return NO_ROOT_CAUSE_REASON;
   if (textIsAdvisoryCap(text)) return ADVISORY_CAP_REASON;
   for (const p of REASON_PATTERNS) if (p.test.test(text)) return { key: p.key, label: p.label };
-  return OTHER_REASON;
+  /**
+   * 🔴 TWO DIFFERENT PROBLEMS, AND THEY NEEDED DIFFERENT NAMES. Reaching here with a CODE in hand
+   * means the engine said why it ended and our list has no word for it — a vocabulary gap, fixed by
+   * adding a pattern. Reaching here with NO code means the engine never said, and no pattern that
+   * could ever be written would change that — the fix is upstream, at whichever ending path records
+   * nothing. Filing both as "Other (not yet in the known pattern list)" made the second one look
+   * like the first, which is how the panel's biggest row stayed unfixed while two separate fixes
+   * were shipped AT it.
+   */
+  return code ? OTHER_REASON : NO_OUTCOME_REASON;
 }

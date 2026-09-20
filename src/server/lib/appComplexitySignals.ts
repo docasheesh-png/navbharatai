@@ -27,6 +27,36 @@ export const PAGE_DELIVERABLE_SIGNAL =
   /\b(landing page|portfolio (page|site|website)|single page|one[- ]pager?\b|one[- ]page (site|website|app)|simple website|coming[- ]soon page|splash page)\b/i;
 
 /**
+ * A DOCUMENT somebody wants rendered — not a system to build. Pure.
+ *
+ * 🔴 ROOT CAUSE (autopsy bb688add, 2026-09-20). A printed Hindi मंगल विवाह निश्चय पत्र — one page, no
+ * data entry, no accounts — was scored a **complex app (58 → 68)** and routed past the cheap opening
+ * rung onto the slower engine. The whole build followed from it: ~48s preamble calls, a shared-contract
+ * call left 396ms short that returned nothing, eleven `TS2339` errors, three repair passes, a hand-off.
+ * **16.4 minutes and ₹177.98 on the free tier, for a card.** The same report told the builder the app
+ * was missing *ticket types, RSVP, QR check-in and payments*.
+ *
+ * 🔑 THE EXACT MECHANISM, AND IT IS THIS REPO'S OWN RECURRING SHAPE. `namesBusinessDomain` promotes a
+ * prompt whose DOMAIN regex matched, and the `events` domain deliberately reads Devanagari —
+ * `शादी|विवाह|समारोह|मेला|कार्यक्रम`. Its two narrowing guards, `PAGE_DELIVERABLE_SIGNAL` and
+ * `SIMPLE_APP_SIGNAL`, are **pure ASCII**. So the promotion learned Hindi and the brakes did not:
+ * in Devanagari that predicate has been running *unguarded* since the day it shipped. A guard that
+ * cannot read what its signal reads is not a guard.
+ *
+ * ⚠️ PRECISION-FIRST, AND THE ASYMMETRY DECIDES THE LIST. Wrong toward "document" costs one cheap
+ * opening call the ladder climbs out of; wrong toward "system" cost this build sixteen minutes with no
+ * recovery path. So these are the words that name a thing people ask to be PRINTED or SHOWN —
+ * invitation, card, letter, certificate, biodata, notice, poster, menu, resume — and never a word that
+ * could name an app (`ऐप`, `सिस्टम`, `पोर्टल`, `डैशबोर्ड` are deliberately absent).
+ *
+ * 🔒 `पत्र` is matched only in its document senses (`निश्चय पत्र`, `निमंत्रण पत्र`, `प्रमाण पत्र`,
+ * `पत्रिका`), never bare: bare `पत्र` also means a leaf and appears inside unrelated compounds, and a
+ * guard that fires on an accident is how a real hospital system gets demoted.
+ */
+export const DOCUMENT_DELIVERABLE_SIGNAL =
+  /निमंत्रण|आमंत्रण|निश्चय\s*पत्र|निमंत्रण\s*पत्र|प्रमाण\s*पत्र|प्रमाणपत्र|पत्रिका|बायोडाटा|बायो\s*डाटा|कार्ड|सूचना\s*पत्र|पोस्टर|मेन्यू|मेनू|रेज्यूमे|बधाई\s*पत्र|शुभकामना/i;
+
+/**
  * Pure DOMAIN/THEME words: they name what an app is ABOUT, not what must be BUILT. Only used to
  * discount a theme word on a page-scoped deliverable; scope words (auth, database, backend, payment,
  * checkout, real-time, …) are never discounted. /g is safe here — used only in String.replace.
@@ -90,6 +120,8 @@ export const SIMPLE_APP_SIGNAL =
 export function namesBusinessDomain(prompt: string): boolean {
   const p = String(prompt || '');
   if (PAGE_DELIVERABLE_SIGNAL.test(p)) return false;
+  // The same guard, in the script the domain regexes already read — see DOCUMENT_DELIVERABLE_SIGNAL.
+  if (DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
   if (SIMPLE_APP_SIGNAL.test(p)) return false;
   return analyzeRequirementGaps(p).domain !== GENERAL_DOMAIN;
 }

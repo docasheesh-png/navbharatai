@@ -72,6 +72,9 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   OUTCOME_DEPLOY_DRAIN: { category: 'network', hint: 'A NavBharatAI deploy drained this build; it resumes on its own. An infrastructure event, not the app or the prompt.' },
   OUTCOME_SUPERSEDED: { category: 'incomplete', hint: 'A newer build on the same project took over this one\'s lock — the later build is the one to read.' },
   OUTCOME_REAPED: { category: 'timeout', hint: 'The build stopped reporting and the zombie reaper cleaned it up — an engine condition; retry.' },
+  // Split out of OUTCOME_STOPPED on 2026-09-20 — an abort raised somewhere that never went through
+  // `abortBuild`, so its signal carried no cause. An engine condition; nothing in the app caused it.
+  OUTCOME_ABORTED_UNKNOWN: { category: 'incomplete', hint: 'Something aborted the build without recording why — it did not come through the abort funnel. An engine condition, not the app or the prompt; retry.' },
 };
 
 /**

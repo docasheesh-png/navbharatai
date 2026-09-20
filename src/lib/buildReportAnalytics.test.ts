@@ -33,14 +33,19 @@ describe('summarizeFailurePatterns — data-driven failure signal', () => {
     expect(s.patterns[0].count).toBe(3);
   });
 
-  it('an unknown cause is a STABLE "Other" whose raw sentence rides in the sample (nothing dropped)', () => {
+  it('an unknown cause is a STABLE bucket whose raw sentence rides in the sample (nothing dropped)', () => {
+    // ⚠️ THE BUCKET WAS SPLIT ON 2026-09-20 AND THIS TEST'S POINT IS UNCHANGED: two novel sentences
+    // collapse into ONE stable row, and neither sentence ever becomes the row's LABEL — that was the
+    // "Top failure patterns" bug (every novel sentence its own 25%). WHICH stable row depends on a
+    // machine fact: these carry no `OUTCOME_*` code, so the engine never recorded why they ended,
+    // and saying that is truer than "not yet in the known pattern list" — no pattern could help.
     const s = summarizeFailurePatterns([
       r(false, 'Weird novel failure #42 in "SomeModule.tsx" at 03:00'),
       r(false, 'Weird novel failure #99 in "OtherModule.tsx" at 04:00'),
     ]);
     expect(s.totalFailed).toBe(2);
     expect(s.patterns[0].count).toBe(2);
-    expect(s.patterns[0].key).toBe('other');
+    expect(s.patterns[0].key).toBe('no-outcome-recorded');
     expect(s.patterns[0].label).not.toContain('Weird novel failure');
     expect(s.patterns[0].sample).toContain('Weird novel failure #42');
   });

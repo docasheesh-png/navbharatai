@@ -183,7 +183,11 @@ describe('the journey reason describes the search that actually happened', () =>
     // file deriveJourneys looks at and noJourneyReason did not. One candidate list now serves both.
     const game = { 'src/App.tsx': '<canvas /><div>Score</div>' };
     expect(journeyCandidates(game)).toEqual(['src/App.tsx']);
-    expect(noJourneyReason(game)).toContain('no form');
+    // ⚠️ ASSERTED DIRECTLY NOW, not through a proxy. This read `toContain('no form')`, which happened
+    // to be how the old wording proved the point — so when the game wording changed on 2026-09-20
+    // (autopsy f97eb0ec) this failed while the property in its own title was still perfectly true.
+    // The title is the claim; assert the title.
+    expect(noJourneyReason(game)).not.toContain('no page components');
   });
 
   it('a project with genuinely no pages still says so', () => {

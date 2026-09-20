@@ -849,6 +849,14 @@ export interface SimpleBuildResult {
    */
   salvagedPaths?: string[];
   /**
+   * The file list the lane PLANNED, whether or not it wrote any of them.
+   *
+   * Separate from `salvagedPaths`, which is finished work now in the workspace. This is only a plan —
+   * so the caller offers it to the full builder as a starting point, never as something already done.
+   * Empty when the lane failed before planning.
+   */
+  plannedPaths?: string[];
+  /**
    * FALSE when the verify gate was wired but could not EXECUTE (sandbox infra failure) — the app
    * shipped UNVERIFIED, so the caller must NOT skip its own downstream gates. True = tsc really ran
    * and passed; undefined = verify was not wired at all.
@@ -913,6 +921,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // on the failure path the closure's locals are gone before the caller can ask. See
   // `SimpleBuildResult.plannedFiles` for what the caller does with it.
   let plannedFiles = 0;
+  /**
+   * The manifest's PATHS — what `plannedFiles` counts, kept so an aborted lane can hand them over.
+   *
+   * 🔴 WHY (autopsy f97eb0ec, 2026-09-20): the lane spent 62 seconds and 2,220 output tokens planning
+   * five files, then the budget projection bailed BEFORE writing any of them — and the full builder
+   * started from nothing, re-running `ls` and re-reading the scaffold it had just been told about.
+   * The bail's own comment read *"there is nothing to salvage"*, which was true of FILES and false of
+   * the PLAN. `plannedFiles` already existed and is only a count, so the list itself had no home.
+   */
+  let plannedPaths: string[] = [];
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -960,6 +978,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // case the one-shot lane exists for, and it must still be able to see that number. Counted AFTER
       // the filter, because that is the number of files this build will actually write.
       plannedFiles = manifest.length;
+      plannedPaths = manifest.map((f) => f.path);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
@@ -992,9 +1011,6 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         overallMs,
         contractCapMs: contractCap,
       });
-      if (shareContract && contractCap > 0 && !contractAffordable) {
-        deps.log?.('⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.');
-      }
       // MEASURED, INCLUDING WHEN IT IS KILLED. A contract call that ran to its cap and was cut off is
       // the strongest evidence this chain is slow, and it used to be discarded — see PreambleProgress.
       let contractCallMs = 0;
@@ -1015,7 +1031,15 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
         contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
       } else if (shareContract) {
-        deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
+        // 🔴 ONE SKIP, ONE SENTENCE (autopsy f97eb0ec, 2026-09-20). This used to be TWO logs: an
+        // `if (!contractAffordable)` above and this `else`, and they are not exclusive — an
+        // unaffordable contract satisfied both, so the user was told the pass was skipped twice, in
+        // the same millisecond, for two different-sounding reasons. The report shows the pair.
+        // The branches carry different facts and both are worth keeping, so the choice moves INTO
+        // the one place that can only fire once.
+        deps.log?.(contractCap > 0
+          ? '⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.'
+          : '⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
       // THE CONTRACT IS A FILE, NOT A PARAGRAPH — see `contractModule` for the build that proved it.
       // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the
@@ -1292,6 +1316,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       outcome: 'BUILD_FAILED',
       salvagedPaths,
       plannedFiles,
+      plannedPaths,
     };
   }
 

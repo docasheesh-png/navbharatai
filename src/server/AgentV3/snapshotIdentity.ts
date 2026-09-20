@@ -42,6 +42,21 @@ export function workspaceContentHash(files: Record<string, string> | null | unde
 export interface SnapshotTaken {
   url: string;
   filesHash: string | null;
+  /**
+   * The PATHS the hash was computed over, kept only for this build's confirmation.
+   *
+   * 🔴 WHY (autopsy f97eb0ec, 2026-09-20): a mismatch was reported as "a later pass changed a file"
+   * and could not say WHICH — so the one number that would settle the commonest suspicion was
+   * missing. The two hashes are taken from different places: the copy's from the SANDBOX tree the
+   * production build just consumed, the confirmation's from the DURABLE set that was persisted. If
+   * those two sets differ by a single path, the hashes can never match and the copy is stale on
+   * every build — which looks identical, in the report, to a real late write.
+   *
+   * ⚠️ NOT PERSISTED and not part of the identity — the HASH is still what decides. This only lets
+   * the sentence name the difference, so the next report distinguishes a set mismatch (ours) from a
+   * genuine content change (the app's).
+   */
+  filePaths?: string[];
 }
 
 export type SnapshotConfirmation =
@@ -55,7 +70,30 @@ export type SnapshotConfirmation =
  * Every branch that is not a proven match answers NOT current. An unreadable source at copy time is
  * not proof ("we did not check" must never round up to "it matches"), and neither is a missing copy.
  */
-export function snapshotConfirmation(i: { taken: SnapshotTaken | null | undefined; persistedHash: string }): SnapshotConfirmation {
+/**
+ * Name the difference between the two file sets, when both are known.
+ *
+ * The point is DIAGNOSIS, not blame: "the same 11 files, so a file's content changed" and "the copy
+ * was taken over 2 path(s) that were not saved" are different bugs with different owners, and the
+ * old sentence asserted the first while the second was never ruled out.
+ */
+function staleDetail(takenPaths: string[] | undefined, persistedPaths: string[] | undefined): string {
+  if (!takenPaths || !persistedPaths) return '';
+  const taken = new Set(takenPaths);
+  const saved = new Set(persistedPaths);
+  const onlyInCopy = takenPaths.filter((p) => !saved.has(p));
+  const onlyInSave = persistedPaths.filter((p) => !taken.has(p));
+  if (onlyInCopy.length === 0 && onlyInSave.length === 0) {
+    return ` Both sides hold the same ${taken.size} file(s), so a file's CONTENT changed between them.`;
+  }
+  const bits: string[] = [];
+  // Named, bounded — a report line is read by a person, and forty paths is not a sentence.
+  if (onlyInCopy.length) bits.push(`${onlyInCopy.length} in the copy that were not saved (${onlyInCopy.slice(0, 5).join(', ')})`);
+  if (onlyInSave.length) bits.push(`${onlyInSave.length} saved that the copy never held (${onlyInSave.slice(0, 5).join(', ')})`);
+  return ` The two sides cover DIFFERENT files — ${bits.join('; ')} — so this is a file-set mismatch, not necessarily a late write.`;
+}
+
+export function snapshotConfirmation(i: { taken: SnapshotTaken | null | undefined; persistedHash: string; persistedPaths?: string[] }): SnapshotConfirmation {
   if (!i?.taken || typeof i.taken.url !== 'string' || !/^https?:\/\//i.test(i.taken.url)) {
     return { action: 'none', reason: 'No copy was taken this build.' };
   }
@@ -63,7 +101,7 @@ export function snapshotConfirmation(i: { taken: SnapshotTaken | null | undefine
     return { action: 'stale', reason: 'A copy was taken, but its source could not be read at the time, so it cannot be proven to match the app that was saved. It stays a fallback for an expired machine only.' };
   }
   if (i.taken.filesHash !== i.persistedHash) {
-    return { action: 'stale', reason: 'A later pass changed a file after the copy was taken, so the copy is not this app. It stays a fallback for an expired machine only; the next build takes a fresh one.' };
+    return { action: 'stale', reason: `The copy does not match what was saved, so it is not this app. It stays a fallback for an expired machine only; the next build takes a fresh one.${staleDetail(i.taken.filePaths, i.persistedPaths)}` };
   }
   return { action: 'restamp', reason: 'The saved copy was built from exactly the files that were persisted — it is this app, and the preview can show it in place of a running machine.' };
 }

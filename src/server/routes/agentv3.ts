@@ -192,7 +192,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -229,7 +229,7 @@ import {
   getShell,
   MAX_SHELLS_PER_WORKSPACE,
 } from '../AgentV3/ShellSessions';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, findingAboutUntouchedCode, type UntouchedCodeReason, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
 import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
@@ -13681,6 +13681,9 @@ async function noteBuildOutcome(
         // reads (autopsy 3ce8459b, 2026-09-19). A thunk for the same forward-reference reason as the
         // two lines above: `dispatcher` is constructed BELOW, with this very object as an argument.
         writeTypecheckStats: () => dispatcherForSubAgents?.sharedWriteTypecheckStats(),
+        // And its file READS — so the repeated-read finding covers the reviewer and every other
+        // sub-agent, not just the architect (autopsy f97eb0ec).
+        readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -15890,6 +15893,30 @@ async function noteBuildOutcome(
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }
+        // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,
+        // 2026-09-20). The lane can bail AFTER planning and BEFORE writing: its budget projection
+        // says the remaining stages will not fit, and the bail's own comment reads "there is nothing
+        // to salvage" — true of FILES, false of the PLAN. On that build 62 seconds and 2,220 output
+        // tokens produced a five-file manifest, and the full builder then re-ran `ls` and re-read the
+        // scaffold it had just been told about.
+        //
+        // ⚠️ OFFERED AS A PLAN, NEVER AS DONE WORK — which is the whole difference from the salvage
+        // block above. Those files EXIST in the workspace; these do not, and telling the builder to
+        // "continue from" files that are not there is precisely the confident-and-wrong instruction
+        // this codebase forbids. So it is a starting point it may change, and it is only offered when
+        // nothing was salvaged (salvaged work is the stronger signal and already carries its own).
+        if (!sb.ok && !sb.salvagedPaths?.length && sb.plannedPaths?.length) {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_PLAN_HANDOFF',
+            message: `Fast lane planned ${sb.plannedPaths.length} file(s) before it stopped — the plan was handed to the full builder instead of being thrown away.`,
+            autoResolved: true, detail: sb.plannedPaths.join(', '),
+          });
+          buildPrompt =
+            `[A PLAN ALREADY EXISTS — these files are NOT written yet] A faster lane planned THIS app's file list before it ran out of time. ` +
+            `Nothing below has been created; this is a starting point, not prior work:\n${sb.plannedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            `Use it so you do not spend the budget re-deciding the same structure. You may add, merge or rename a file where the app genuinely needs it — ` +
+            `the plan is a head start, not a contract.\n\n---\n\n${buildPrompt}`;
+        }
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
@@ -16915,7 +16942,16 @@ async function noteBuildOutcome(
         // ADVISORY notes so they can never be counted as OUR unresolved defects or become the build's
         // rootCause — which is exactly what made a successful survey report "14 unresolved problems" with
         // an unused-dependency hint as its headline cause. Unchanged on a real build/edit turn.
-        const obs = (message: string) => importTurnObservation(isImportTurn, message);
+        // 🔴 …AND A TURN THAT WROTE NOTHING IS THE SAME SITUATION (autopsy 586295b7, 2026-09-20).
+        // An import turn is one way of not having written the code under analysis; a build the user
+        // stopped, or one that produced nothing, is another. That build filed an accessibility warning
+        // about the user's own untouched `src/App.tsx` as one of four "unresolved problems" — and not
+        // one of the four was a defect of the build. The question is "did we write this?", never "how
+        // did this turn begin?".
+        const untouchedReason: UntouchedCodeReason | null = isImportTurn
+          ? 'import'
+          : (writtenFiles.size === 0 ? 'no-writes' : null);
+        const obs = (message: string) => findingAboutUntouchedCode(untouchedReason, message);
         // MISSING SPA FALLBACK (ROADMAP #1 Phase 4.1) — the "Cannot GET /customer/home" class. Until now
         // this was only ever noticed AFTER the fact, by the preview verifier, as a symptom with no named
         // cause; the report said the preview did not render and the autopsy had to guess why. This names
@@ -18730,10 +18766,13 @@ async function noteBuildOutcome(
                     // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
                     // consumed — nothing writes between the two. The final durable save compares this
                     // with what it persists; a copy whose source could not be read is never promoted.
-                    const filesHash = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                      .then((c) => workspaceContentHash(c.files)).catch(() => null);
+                    const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
+                      .then((c) => c.files as Record<string, string>).catch(() => null);
+                    const filesHash = source ? workspaceContentHash(source) : null;
                     await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                    snapshotTaken = { url, filesHash };
+                    // The paths travel with the copy for THIS build only, so a mismatch can say which
+                    // side holds what — see staleDetail. The hash is still what decides.
+                    snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
                     // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                     // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                     // lets the frame move to the real build output the moment the build settles,
@@ -20231,6 +20270,9 @@ async function noteBuildOutcome(
                 provenBroken: previewProvenBroken,
                 // Carried so the recorded reason cannot claim more than the build itself reported.
                 ready: !buildDiag.hasUnresolvedReadinessBlocker(),
+                // THE THIRD MEANING OF "not green" — see the field's own docblock. A turn that wrote
+                // nothing has no changes to keep, lose or verify, and the guard must not say it does.
+                filesWrittenThisTurn: writtenFiles.size,
               });
               buildDiag.record({
                 phase: 'build', severity: 'info', code: `GREEN_GUARD_${decision.action.toUpperCase()}`,
@@ -20273,7 +20315,7 @@ async function noteBuildOutcome(
                   removed: plan.remove.length,
                   fromThisBuild: snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt),
                 };
-              } else if (hasSnapshot && !previewGreen) {
+              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
                 // quieter one; the change is theirs, it stayed, and we could not confirm it.
@@ -20296,7 +20338,11 @@ async function noteBuildOutcome(
           // stays what it always was — a fallback for an expired machine.
           if (snapshotTaken) {
             await finalSave;
-            const verdict = snapshotConfirmation({ taken: snapshotTaken, persistedHash: workspaceContentHash(persisted) });
+            const verdict = snapshotConfirmation({
+              taken: snapshotTaken,
+              persistedHash: workspaceContentHash(persisted),
+              persistedPaths: Object.keys(persisted ?? {}),
+            });
             if (verdict.action === 'restamp') {
               const at = Date.now();
               await sandboxStore.saveSnapshot(workspaceId, snapshotTaken.url, at, snapshotTaken.filesHash).catch(() => {});
@@ -20482,15 +20528,33 @@ async function noteBuildOutcome(
         expectsArtifacts,
         enabled: markupNeedsPreview(),
       });
+      /**
+       * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).
+       *
+       * This message used to be emitted HERE, and FOUR later rules can still change the bill —
+       * `writtenFiles.size === 0`, the unrendered-preview rule, the cancelled/failed-build rule and
+       * the onboarding credit. Every one of them sets the bill to ZERO. So on the reported build the
+       * user was told
+       *
+       *     "🧾 …you have been charged only what this build actually cost to run"
+       *
+       * and was then charged nothing at all. On a FAILED build it is worse than false, it is
+       * contradictory: this sentence and "🛡️ This build did not fully succeed, so it is FREE" are
+       * both emitted, seconds apart, about the same build.
+       *
+       * The waiver's ARITHMETIC must stay here — it runs before the zeroing rules on purpose, so they
+       * still take precedence and it can only ever reduce. Only the SENTENCE moves, to the one point
+       * where what the user pays is settled. Held, not dropped: a user who really is billed the
+       * waived amount still gets the explanation they are owed.
+       */
+      let waivedMarkupNotice: string | null = null;
       if (!markupDecision.markupApplied) {
         effectiveBilledUsd = markupDecision.billedUsd;
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
           message: markupDecision.reason, autoResolved: true,
         });
-        if (markupDecision.userMessage) {
-          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${markupDecision.userMessage}`, ts: Date.now() });
-        }
+        if (markupDecision.userMessage) waivedMarkupNotice = markupDecision.userMessage;
       }
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
@@ -20708,6 +20772,13 @@ async function noteBuildOutcome(
           zeroBillReason = 'free onboarding build (new-user welcome credit)';
           events.emit({ type: 'narration', agent: 'architect', text: '🎁 This build is on us — welcome to NavBharatAI Pro!', ts: Date.now() });
         }
+      }
+
+      // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
+      // waiver's explanation be true, and only if the waived amount is still what the user pays:
+      // a later rule that zeroed the bill has already said why in its own words.
+      if (waivedMarkupNotice && effectiveBilledUsd > 0 && effectiveBilledUsd === markupDecision.billedUsd) {
+        events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${waivedMarkupNotice}`, ts: Date.now() });
       }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the

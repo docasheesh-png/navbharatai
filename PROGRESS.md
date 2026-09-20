@@ -70796,6 +70796,60 @@ and got a word that reads as nonsense does not file a bug; they leave.
 
 ---
 
+## 2026-09-20 — The danda is a full stop, not a comma (a fix MEASURED and then NOT shipped)
+
+Closing out autopsy `3ce8459b`. Two of its four ❌ items were fixed and merged (#3134, #3138). **The
+other two were not defects, and both of my "still open" notes were wrong** — recorded plainly, because
+a wrong open item costs the next session the same investigation:
+
+- **`startTier: "gemini"`** — already fixed on **2026-09-17** by another session (autopsy `2b0a3ed5`):
+  the band keeps its telemetry key and gains `startBandLabel`, and the report prints the label. The
+  report I autopsied *carried the new field*. I listed it as open twice without re-grepping — exactly
+  the failure CLAUDE.md records about a "STILL OPEN" note being a claim with a date on it.
+- **"the scorer is blind to Bengali"** — it is not. `signalsCouldNotRead` fires correctly, sets
+  `ambiguous: true`, and that is what bought the LLM second opinion that read the real build as
+  COMPLEX. Designed behaviour with a working escape hatch, not a gap.
+  ⚠️ My first probe appeared to prove otherwise (`unreadable: false`, score 5). **That was my own
+  miscall**: `analyzeRequest` takes ONE object (`{ prompt }`) and I passed the string positionally, so
+  it analysed an empty prompt. Caught by re-measuring before reporting.
+
+### The thing that looked like a real India-first bug, and the measurement that killed it
+
+Both list counters split on `,` `;` `\n` `·` `•` and know the romanized `aur` / `tatha` — and **neither
+knows the danda `।`**, which Hindi, Bengali, Marathi and Nepali actually type. Ten other files in this
+repo know that character, so its absence reads like an omission. Measured on one 8-feature school-ERP
+request:
+
+| | `countEnumeratedFeatures` | `enumeratedParts` |
+|---|---|---|
+| English, commas | 8 | 8 |
+| **Hindi, dandas** | **0** | **1** |
+| **Bengali, dandas** | **0** | **1** |
+
+That looks decisive. **The control is what decided it:**
+
+| | features | parts |
+|---|---|---|
+| Hindi, **commas** | **8** | 8 |
+| Bengali, **commas** | **8** | 7 |
+| English prose, 6 sentences | 0 | **1** |
+| Hindi prose, 6 dandas | 0 | **1** |
+
+1. **Indic script is not the blind spot** — a comma-separated Indic list already counts correctly, and
+   the comma is what these scripts use for lists.
+2. **The danda is the Indic FULL STOP.** Admitting it would score six sentences of Hindi PROSE as six
+   features while identical English prose scores one, because the English full stop is deliberately not
+   a separator here either. A penalty aimed at exactly the users it would be "for".
+
+🔴 **So the fix was NOT shipped**, and that is the deliverable. It would have traded a narrow problem
+(someone who writes their list with dandas is under-counted) for a wider one — and
+`countEnumeratedFeatures` gates Software Project Mode and the mega-roadmap, both of which spend a real
+planner call, so a false 8 is charged to somebody describing their shop in six sentences.
+
+**What shipped instead:** the measurement, recorded at BOTH separator sites — where the change would be
+made, not only in a doc nobody editing a regex reads — and `tests/theDandaIsAFullStopNotAComma.test.ts`
+(4 cases) locking the parity as a COMPARISON rather than two constants, so a drift in either direction
+fails. Reversion-proven both ways: adding `।` to either counter turns two cases red.
 ## 2026-09-19 — 🔎 THE SIBLING: the word does not always fall into LATIN
 
 The same-day follow-up to the `জungle` autopsy (3ce8459b) above, under rule 3 (hunt the siblings before

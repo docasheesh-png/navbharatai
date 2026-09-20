@@ -1,3 +1,4 @@
+import { plainCommand, plainFileName } from './toolLabels';
 import type { ActivityEntry, AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
@@ -79,6 +80,23 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
 
     case 'stream_delta': {
       const kind = event.kind ?? 'text';
+      // 🔴 THE MODEL'S REASONING IS NOT A CHAT MESSAGE (admin 2026-09-20: "light/gray reply — bakwaas,
+      // yeh nahi chahiye"). Two screenshots showed a phone filled top to bottom with the architect's
+      // private working notes, in grey italics, above an unfinished billing app.
+      //
+      // ⚠️ AND THE EXISTING GUARD COULD NOT REACH IT BY CONSTRUCTION, which is why the fix belongs
+      // here and not in a longer fold threshold: `FoldableMessage` collapses any reply over 700
+      // characters, but the renderer skips it entirely while a line is `streaming`, and a thinking
+      // line never stops streaming — only `kind: 'text'` is finalized by the `narration` event below.
+      // So no length limit, present or future, would ever have applied to this channel.
+      //
+      // The agent card is still TOUCHED (outside this branch), so "the architect is working" stays
+      // live; the elapsed-clock heartbeat and every tool event are untouched. The server stopped
+      // SENDING these deltas the same day (thinkingStream.ts) — this is the second net, because a
+      // bundled Android shell can be an old client talking to a new server, or the reverse.
+      if (kind === 'thinking') {
+        return { ...state, agents: touchAgent(state.agents, event.agent, event.delta, true, event.ts) };
+      }
       // Find the LAST live line for this turn id + kind and append the delta.
       let foundIdx = -1;
       for (let i = state.narration.length - 1; i >= 0; i--) {
@@ -198,7 +216,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return {
         ...state,
         files: applyFileChange(state.files, event.change),
-        activity: pushActivity(state.activity, { id: `f-${event.ts}-${event.change.path}`, ts: event.ts, kind: 'file', text: `${verb} ${event.change.path}`, agent: event.agent, ok: true }),
+        activity: pushActivity(state.activity, { id: `f-${event.ts}-${event.change.path}`, ts: event.ts, kind: 'file', text: `${verb} ${plainFileName(event.change.path)}`, agent: event.agent, ok: true }),
       };
     }
 
@@ -278,30 +296,57 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       };
 
     case 'done':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined, pendingSecrets: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, narration: settled(state.narration), pendingPermission: undefined, pendingSecrets: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'result':
       // T1-health-card: the successful build terminates with `result` (not `done`), so surface the
       // build-health verdict from here too — otherwise <BuildHealthCard/> only ever showed on failure.
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, costBreakdown: event.costBreakdown, budgetReached: event.budgetReached === true, resumable: event.resumable === true, appRendered: event.appRendered === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, filesWritten: typeof event.filesWritten === 'number' ? event.filesWritten : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.buildId ? { buildId: event.buildId } : {}), ...(event.promptHash ? { promptHash: event.promptHash } : {}), ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, narration: settled(state.narration), billedUsd: event.billedUsd, billedInr: event.billedInr, costBreakdown: event.costBreakdown, budgetReached: event.budgetReached === true, resumable: event.resumable === true, appRendered: event.appRendered === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, filesWritten: typeof event.filesWritten === 'number' ? event.filesWritten : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.buildId ? { buildId: event.buildId } : {}), ...(event.promptHash ? { promptHash: event.promptHash } : {}), ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'error':
       // A crashed build now carries its diagnostics report (server attaches it) — keep it so the
       // failure card / "Build report" renders and the user can see WHAT went wrong, not a bare error.
-      return { ...state, done: true, ok: false, error: event.message, errorCode: event.code, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
+      return { ...state, done: true, ok: false, error: event.message, errorCode: event.code, narration: settled(state.narration), pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
 
     default:
       return state;
   }
 }
 
+/**
+ * A finished build has nothing still streaming. PURE.
+ *
+ * 🔴 WHY IT IS NOT COSMETIC: the renderer branches on `streaming` — a streaming line goes through the
+ * typewriter and a settled one through `FoldableMessage`. So a line that never receives its final
+ * `narration` event (a turn that threw, a stream cut mid-flight, a build stopped by the user) stays
+ * marked streaming for ever, and is therefore the ONE kind of reply that can never be collapsed,
+ * however long it is. Exactly the shape of the grey-thinking wall, in the channel the user does read.
+ *
+ * Returns the SAME array when nothing was streaming, so a finished build's state is not needlessly
+ * re-created (and React does not re-render the whole thread on every terminal event).
+ */
+function settled(lines: NarrationLine[]): NarrationLine[] {
+  if (!lines.some((l) => l.streaming)) return lines;
+  return lines.map((l) => (l.streaming ? { ...l, streaming: false } : l));
+}
+
 export function reduceAll(state: AgentV3ClientState, events: AgentV3WireEvent[]): AgentV3ClientState {
   return events.reduce(agentV3Reducer, state);
 }
 
+/**
+ * What the live strip says about one tool call.
+ *
+ * ⚠️ The file PATH is deliberately not shown (admin 2026-09-20). `writing
+ * src/components/InvoiceForm.tsx` is a developer's sentence, and this strip is the only window the
+ * person who asked for the app has onto the build. `plainFileName` drops the directories and spaces a
+ * component name out; it never invents one (toolLabels.ts). The full paths are still exactly where a
+ * developer looks for them — the Files tab, the diff, and Code Studio.
+ */
 function describeToolCall(tool: string, input: unknown): string {
   const arg = (input ?? {}) as Record<string, unknown>;
-  const path = typeof arg.path === 'string' ? arg.path : undefined;
+  const rawPath = typeof arg.path === 'string' ? arg.path : undefined;
+  const path = rawPath ? plainFileName(rawPath) : undefined;
   switch (tool) {
     case 'write_file':
       return path ? `writing ${path}` : 'writing a file';
@@ -310,7 +355,7 @@ function describeToolCall(tool: string, input: unknown): string {
     case 'read_file':
       return path ? `reading ${path}` : 'reading a file';
     case 'bash':
-      return typeof arg.command === 'string' ? `running: ${arg.command}` : 'running a command';
+      return typeof arg.command === 'string' ? plainCommand(arg.command) : 'running a command';
     case 'grep':
       return typeof arg.pattern === 'string' ? `searching "${arg.pattern}"` : 'searching';
     case 'glob':

@@ -25,6 +25,7 @@ import { abortCauseOf, abortSummary } from './buildAbortCause';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
+import { streamThinkingToChat } from './thinkingStream';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -673,8 +674,16 @@ export class AgentRunner {
             effort,
             onText: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
-            onThinking: (delta) =>
-              events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
+            // The reasoning channel reaches the user's chat ONLY when it is switched on — default off
+            // since 2026-09-20 (thinkingStream.ts explains what that does and, more importantly, what
+            // it does not: the tokens are spent either way, and the blank-screen heartbeat below is
+            // untouched). Not emitting also keeps the bytes off a phone's connection.
+            ...(streamThinkingToChat()
+              ? {
+                  onThinking: (delta: string) =>
+                    events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
+                }
+              : {}),
           });
           // 🔴 THE SCREEN GOES BLANK EXACTLY HERE (autopsy 2b0a3ed5). Everything the user sees comes
           // from events, and between sending this call and receiving its answer there are none — so a

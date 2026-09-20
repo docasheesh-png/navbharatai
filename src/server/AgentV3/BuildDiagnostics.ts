@@ -41,6 +41,9 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  */
 const PROCESS_ONLY_CODES = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
+  // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
+  // routing, never about the user's app.
+  'LADDER_DEPTH',
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
   // What we chose not to charge for is an accounting fact about OUR engine (unbilledTurns.ts).

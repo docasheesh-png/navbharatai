@@ -55,6 +55,17 @@ export interface CostTelemetryEntry {
   /** How many tier escalations this build actually performed (0 = the first tier delivered). */
   escalations?: number;
   /**
+   * How deep down its tier's LADDER this build went: 1 = the lead rung delivered the whole thing,
+   * 2 = it fell one rung, and so on (see ladderDepth.ts). Absent when no delivered slice could be
+   * attributed to a rung — never guessed.
+   *
+   * ⚠️ NOT the same measurement as `escalations` or `deliveredVia`, and that is the whole point.
+   * `escalations` counts TIER escalations (a re-run on a higher tier), which is 0 for every ordinary
+   * fall inside one tier; `deliveredVia` names the VENDOR, and on Weak/Normal the vendor GLM holds
+   * rung 1 AND rung 3, so it cannot tell the two apart.
+   */
+  ladderDepth?: number;
+  /**
    * Billing Phase 3 — per-provider TOKEN attribution for this build (reconciled to the billed total,
    * so the aux-call remainder is under 'other'). Powers the admin usage-report's per-provider tokens,
    * real-cost baseline, and achieved-margin columns. Absent on lanes that don't attribute.
@@ -104,6 +115,13 @@ export interface DailyCostTelemetryDoc {
   byEscalationCohort?: Record<string, TelemetryBreakdown>;
   /** T1-escalation-on — builds where the ladder actually climbed at least one tier. */
   escalatedBuilds?: number;
+  /**
+   * How many of today's builds finished on rung 1, rung 2, … of their tier's ladder, keyed by the
+   * depth as a string ('1', '2', …) plus 'unknown'. The one number that says how often a build
+   * leaves the lead rung — and therefore how much of the engine's cost and of the model reasoning
+   * the user sees comes from the rungs below it.
+   */
+  byLadderDepth?: Record<string, TelemetryBreakdown>;
   /** Billing Phase 3 — per-provider token totals across the day (admin usage-report source). */
   byProviderUsage?: Record<string, ProviderUsageBreakdown>;
   /** Billing Phase 3 — builds zeroed after spending real tokens (a loss NavBharatAI absorbed). */
@@ -188,6 +206,16 @@ export function foldCostTelemetry(
   const byEscalationCohort = { ...(doc.byEscalationCohort ?? {}) };
   byEscalationCohort[cohortKey] = addToBreakdown(byEscalationCohort[cohortKey] ?? emptyBreakdown(), entry);
 
+  // How deep this build went down its ladder. `?? {}` tolerates day docs written before this field
+  // existed (same migration pattern as the two folds above), and a build whose depth could not be
+  // attributed lands under 'unknown' rather than being dropped — a silently missing build would make
+  // the rung-1 share look better than it is, which is the one direction this number must not lie in.
+  const depthKey = Number.isFinite(entry.ladderDepth) && (entry.ladderDepth as number) > 0
+    ? String(entry.ladderDepth)
+    : 'unknown';
+  const byLadderDepth = { ...(doc.byLadderDepth ?? {}) };
+  byLadderDepth[depthKey] = addToBreakdown(byLadderDepth[depthKey] ?? emptyBreakdown(), entry);
+
   // Billing Phase 3 — fold this build's per-provider token attribution into the day's totals.
   // `?? {}` tolerates day docs written before this field existed (same migration pattern as above).
   const byProviderUsage = { ...(doc.byProviderUsage ?? {}) };
@@ -214,6 +242,7 @@ export function foldCostTelemetry(
     byDeliveredVia,
     byEscalationCohort,
     escalatedBuilds: (doc.escalatedBuilds ?? 0) + ((entry.escalations ?? 0) > 0 ? 1 : 0),
+    byLadderDepth,
     byProviderUsage,
     lossBuilds: (doc.lossBuilds ?? 0) + (entry.wasLoss ? 1 : 0),
     lossRealCostUsd: round6((doc.lossRealCostUsd ?? 0) + (entry.wasLoss ? (entry.lossRealCostUsd ?? 0) : 0)),

@@ -74355,3 +74355,70 @@ instrument that settles it: **if `no-outcome-recorded` reads "none in 7d" on the
 whole concern is historical** and the remaining provider/tool rows are real. If it does not, this is
 where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
 the protection until the measurement has produced a reading.*
+
+## 2026-09-20 — `bb688add`, the third half: a continuation ATE the file it was resuming
+
+Queued from the `bb688add` ledger as *"a truncation continuation wrote a corrupted file"*. It is not a
+cosmetic defect and it is not confined to that build: **the fast lane could silently delete the whole
+head of a file it had already written and paid for.**
+
+**Reproduced before a line was changed**, against the real helpers (`joinContinuation` +
+`parseFileBlocks`), from the exact shape the report shows:
+
+```
+first call      …  .invite .date { font        ← ceiling fell inside `font-size`
+continuation    <<<FILE src/components/Invitation.css>>>
+                -size: 0.9rem; }               ← the same header again, then only the REMAINDER
+parsed file     "-size: 0.9rem; }\n.invite .venue { … }"   ← every rule above it GONE
+```
+
+**THE MECHANISM.** `parseFileBlocks` de-dupes by path **LAST-wins** (right, and deliberately so — a
+model correcting itself must be able to replace a file). `continuationPrompt` asks the model to resume
+*"in the same `<<<FILE path>>>` … `<<<ENDFILE>>>` format"* and never says *don't re-open the block you
+were cut off inside*. So a model that re-opens it emits the remainder under a fresh header, and
+last-wins resolves the finished head away. `joinContinuation`'s own docblock enumerated exactly two
+ways a model resumes — mid-content with no header (fuse) and the whole file again (last-wins) — and
+this is the third. **A `.tsx` in that state is caught by the syntax gate; a `.css`, `.json` or `.html`
+is not, so it ships.** In this build it was overwritten later and nothing reached the user; nothing in
+the design made that the outcome.
+
+**THE 50/50 LAW, both halves.**
+- **Why it arose at all (upstream):** the prompt invited the repeated header. It now NAMES the file
+  that was cut off and forbids re-writing its header, and the no-open-file wording forbids it too.
+- **If it still happens (defence):** `resumedFilePath` recognises the case and `joinContinuation`
+  drops the duplicate header so the two bodies weld at the exact cut character.
+
+**The discriminator is the file's own first line, not a guess about intent.** A restart begins where
+the partial began; a remainder begins deep inside the file. Both directions of `startsWith` are
+checked, because the cut can land inside the first line — then the partial's first line is a prefix of
+the restart's. A partial body under 8 characters is treated as a restart: there is nothing worth
+preserving and nothing to compare.
+
+⚠️ **Why the doubt leans toward WELDING, stated because both directions can be wrong.** Misreading a
+restart as a remainder duplicates the partial head — a broken first declaration a CSS parser skips and
+a parse error the syntax gate catches in a `.tsx`. Misreading a remainder as a restart deletes the
+whole head with nothing downstream able to tell. **One degrades, the other destroys.**
+
+**Honesty (rule 5):** `FASTLANE_CONTINUATION_REJOINED` (info) names the file when a weld happens — a
+silent weld and a silent replace used to look identical in the report and only one of them kept the
+file.
+
+**Sibling hunt (rule 3).** `joinContinuation` has exactly ONE call site, so the pure fix covers the
+whole surface. The agentic loop's own truncation guard is a different path (tool calls, not text
+markers) and was not touched.
+
+**Tests:** `tests/aContinuationMustNotEatTheFileItResumes.test.ts` (21). **Reversion-proven in both
+halves** — reverting the join fails exactly the three defect cases and nothing else; reverting the
+prompt fails exactly the two prompt cases.
+
+**OPEN, recorded not patched (rule 6):**
+- **A file the continuation ABANDONS is still shipped half-written.** When `previous` ends with an
+  unterminated `<<<FILE p>>>` and the continuation opens a DIFFERENT file, `parseFileBlocks` closes
+  `p` at the next header and the drop-guard never sees it — `unterminatedTailPath` only reads the LAST
+  header. The fix is not obvious: a model that merely FORGOT an `<<<ENDFILE>>>` looks identical, and
+  dropping that file would lose a complete one. No report shows it yet; precision cannot be
+  established from zero evidence.
+- **The agentic loop's truncation guard parses JS/TS only.** `findSyntaxErrors` skips `.css`, `.json`
+  and `.html` by design (esbuild has no opinion on them), so a truncated non-JS file written through
+  the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
+  the path this autopsy traced and is named here rather than bundled in.

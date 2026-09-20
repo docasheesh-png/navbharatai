@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2, Layers } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -276,6 +276,17 @@ interface AIChatProps {
   activeIntent?: string;
   mode?: AgentMode;
   onModeChange?: (mode: AgentMode) => void;
+  /**
+   * Open the Free chat's Mode picker (the SAME sheet the mobile bottom bar's Mode button opens —
+   * admin 2026-09-20: "mode selector desktop par bhi chahiye, input ke left me").
+   *
+   * Present ⇒ a "Mode" button renders at the LEFT of the message box, in the exact slot the Pro
+   * composer already gives its own mode dropdown. Absent ⇒ nothing renders, which is how the mobile
+   * layout stays byte-identical: there the bottom bar already carries Mode, and App.tsx passes this
+   * only when that bar is not on screen. The state and the picker live in App.tsx — this component
+   * only asks for it to open, so desktop and mobile can never hold two different "current modes".
+   */
+  onOpenModePicker?: () => void;
   pendingGHEdit?: any;
   onConfirmPush?: () => void;
   isPushing?: boolean;
@@ -330,6 +341,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   activeIntent = 'social',
   mode = 'planning',
   onModeChange,
+  onOpenModePicker,
   pendingGHEdit,
   onConfirmPush,
   isPushing,
@@ -362,6 +374,12 @@ export const AIChat: React.FC<AIChatProps> = ({
   onGuiderApprove,
   onGuiderSend,
 }) => {
+  /**
+   * The Free chat's Mode button shows only when the host asked for it AND the slot is not already
+   * taken by Pro's own mode dropdown — the two controls share one position on purpose and must never
+   * both render.
+   */
+  const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');
   const { buildSteps } = useBuild();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
@@ -1662,6 +1680,27 @@ export const AIChat: React.FC<AIChatProps> = ({
               ) : null}
             />
 
+            {/* THE FREE CHAT'S MODE BUTTON, ON DESKTOP (admin 2026-09-20: "sirf desktop 'Mode' button add
+                karna hai … na inputbox, na search button, kuch nahi"). It sits OUTSIDE the message box, to
+                its left — [ Mode ▾ ] [ message box ] — and the box itself is untouched: when the button is
+                hidden (mobile, where the bottom bar carries Mode) this wrapper is `contents`, i.e. it has
+                no box of its own and the layout is byte-for-byte what it was. It holds no mode; it asks
+                App.tsx to open the ONE picker sheet the bottom bar opens. */}
+            <div className={showFreeModeButton ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}>
+            {showFreeModeButton && (
+              <button
+                type="button"
+                onClick={onOpenModePicker}
+                aria-label="Choose AI mode"
+                aria-haspopup="dialog"
+                title="Choose AI mode — NavBharatAI FREE, Image Generator AI or any expert"
+                className="h-12 shrink-0 flex items-center gap-1.5 px-3 rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg)] text-[11px] font-bold text-muted hover:text-ink hover:border-indigo-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Mode
+                <ChevronDown className="w-3 h-3 text-faint" />
+              </button>
+            )}
             <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
                   {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}
@@ -1833,6 +1872,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                   </div>
                   </div>{/* end inner flex row */}
             </div>{/* end rounded input container */}
+            </div>{/* end mode-button + input row (contents when the button is hidden) */}
         </div>
       </div>
     </div>

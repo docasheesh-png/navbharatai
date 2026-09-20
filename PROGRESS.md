@@ -70721,3 +70721,51 @@ which is what the "working app or free" billing rules gate on.
 The class only exists for an app whose UI is written in an Indic script — the case NavBharatAI is built
 for and the one Lovable / Bolt / v0 / Cursor have no reason to check. A user who asked for a Bengali app
 and got a word that reads as nonsense does not file a bug; they leave.
+
+## 2026-09-20 — The Free chat's Mode picker reaches the desktop (branch `claude/vigilant-feynman-9aobjz`)
+
+**Admin:** *"In NavBharatAI Free the mode-selection option is visible on mobile but missing from the desktop
+UI … place it immediately to the LEFT of the chat input box … do NOT create a new mode-selection system;
+one shared mode state."*
+
+### Where the mobile selector was, and why desktop had none
+
+The "Mode" button is the third item of the **global mobile bottom bar** in `App.tsx` (History / AI / Mode /
+Settings, `isModeSurface`), and that bar renders only when `showsGlobalMobileNav` is true —
+`effectiveDeviceMode === 'mobile'`. Its button does one thing: `setShowModePicker(true)`, which mounts
+`ModePickerSheet` (`src/components/chat/ModePickerSheet.tsx`, rows from `modePicker.ts`) whose `onPick`
+handler in `App.tsx` navigates (recent row → resume; FREE → `startNewChat`; image → `imagegen`; Doctor AI →
+`startFreshCase`; a professional → `endProfessionalChat` then `toggleTab`). On desktop the bar does not exist,
+so nothing in the whole UI could call `setShowModePicker`. There was never a second state — there was no
+door.
+
+### The change — a second DOOR to the same state, never a second state
+
+⚠️ **Placement corrected mid-change on the admin's word** (*"sirf desktop 'Mode' button add karna hai …
+na inputbox, na search button, kuch nahi"*): the first draft put the button INSIDE the message box in
+Pro's dropdown slot and widened the textarea's inset. That touches the box. It now sits **outside** it.
+
+- **`AIChat.tsx`** — new optional prop `onOpenModePicker`. When present (and Pro's own `ModeSelector` is
+  not in play), a **"Mode" button** renders immediately to the LEFT of the message box — `[ Mode ▾ ]
+  [ message box ]` — as a 48 px pill with the box's own border and background, the mobile bar's icon
+  (`Layers`), the word "Mode" and a chevron; `aria-label="Choose AI mode"`, `aria-haspopup="dialog"`,
+  keyboard-focusable with a visible focus ring. The two sit in a wrapper that is a two-column grid while
+  the button shows and **`display: contents` while it does not** — no box of its own, so on mobile (and on
+  Pro) the layout is byte-for-byte what it was. **The message box, its textarea classes, the send row and
+  the search/toolbar are not touched.** The button holds no mode; it calls the prop.
+- **`NBIChatPanel.tsx`** forwards the prop to `AIChat`, nothing else.
+- **`App.tsx`** passes `onOpenModePicker={showsGlobalMobileNav ? undefined : () => setShowModePicker(true)}`
+  — gated on the SAME boolean that renders the bar, so exactly one of the two Mode buttons exists on any
+  screen and **mobile is byte-identical** (the prop is absent there). Same `showModePicker`, same sheet,
+  same `onPick` — the sheet is already `sm:max-w-md sm:rounded-2xl`, so on desktop it is a centred card.
+- **AppKnowledgeBase** `free_chat`: the Mode picker's two locations, plus keywords.
+
+Test-locked in `tests/freeChatModeOnDesktop.test.ts` (9 cases) and **proven by reversion** — deleting the
+one App.tsx prop line fails 2 of them. It asserts: one `showModePicker` state and one sheet mount; the
+composer door calls the same setter the bar does; the prop is gated on `showsGlobalMobileNav`; the button is
+a real accessible control placed before the box with the box's classes unchanged; no `useState`/sheet in
+NBIChatPanel or AIChat.
+
+**Honest limit:** no browser was driven here — the placement, widths (pl-24 = 96 px against a ~90 px button)
+and the sheet's desktop rendering are asserted from the source and the existing composer geometry, not from
+a screenshot. The composer's control-row arithmetic test (`chatComposerAlignment.test.ts`) still passes.

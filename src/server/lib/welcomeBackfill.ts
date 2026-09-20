@@ -36,13 +36,39 @@
 // "never gifted". That is why the admin route previews before it pays and reports the counts: the
 // decision to spend is made against real numbers, not against this comment.
 //
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 NARROWED TO THE GAP, ON THE ADMIN'S OWN SIGNAL (2026-09-20, second instruction):
+//
+//     *"old walo ka 00 nahi hoga, ya + me kuch hoga ya -ve ne. aap new user kar do, jinko bonus nhi
+//      mila"*
+//
+// They are right, and it is a better discriminator than anything this module had. An account that
+// predates the retirement was GIVEN its bonus and has been living with it: it holds something, or it
+// has spent into overdraft. An account created inside the gap was handed nothing and has had nothing
+// to spend. So the question stops being "does this wallet LOOK ungifted?" — a guess assembled from
+// three partial signals — and becomes "was this wallet opened during the window when the platform
+// gave nothing?", which is a FACT we store.
+//
+// 🔒 AND IT RETIRES THE RESIDUAL RISK THIS MODULE USED TO CARRY. The worry was a pre-2026-07 wallet
+// whose welcome row had rolled off its bounded ledger reading as never-gifted. Such a wallet is now
+// excluded by its DATE, before any of that reasoning is reached. The three signals below stay as the
+// inner net; the cutoff is what makes them sufficient rather than merely careful.
+//
+// ⚠️ A WALLET WITH NO `createdAt` IS TREATED AS OLD. Only `buildInitialWallet` creates a wallet and it
+// has always stamped that field, so a missing one means a document older than the stamp — exactly the
+// population the admin put out of scope. Unknown ⇒ excluded is also the safe direction: the cost of
+// skipping someone is a message from them, and the cost of including them wrongly is money paid twice.
+//
 // 🔒 THE ₹400 LIFETIME CEILING STILL APPLIES, and deliberately so. `capSelfGift` is the admin's own
 // standing ruling — *"mera (admin) ek user ke liye maximum = ₹475. isse 1 paisa jyada nahi"* — and a
 // backfill that ignored it would be this session quietly overriding a rule the admin set three days
 // earlier. An account that has had nothing has ₹400 of room, so the full ₹250 lands; what the cap
 // changes is only the LATER case, where the referral ladder tops the same account up to ₹400 rather
-// than to ₹650. If the admin wants ₹250 on top of the ladder instead, that is one constant here and a
-// decision for them to make knowingly.
+// than to ₹650.
+//
+// ✅ CONFIRMED BY THE ADMIN (2026-09-20): *"400 se jyada nahi jana chahiye, kaise bhi jaye, maximum
+// ₹400!!! bas"* — so the ceiling is not merely inherited here, it IS the instruction. `capSelfGift`
+// is applied to every grant and no env value can lift it.
 //
 // PURE — inputs in, decision out. The caller owns Firestore, the transaction and the marker write.
 
@@ -87,12 +113,45 @@ export function backfillEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag((env.WELCOME_BACKFILL || '').trim().toLowerCase()) !== false;
 }
 
+/**
+ * The retirement date — the moment the platform stopped gifting, and so the moment the gap opened.
+ *
+ * `giftPolicy.ts` records the ruling that made `flatWelcomeGiftAllowed()` return `false` on
+ * 2026-09-17; every wallet opened from then until this backfill runs was handed nothing.
+ */
+export const RETIREMENT_ISO = '2026-09-17T00:00:00.000Z';
+
+/**
+ * Only wallets created at or after this instant are in scope.
+ *
+ * An unreadable `WELCOME_BACKFILL_SINCE` falls back to the retirement date rather than to "no cutoff"
+ * — a date that cannot be parsed must never widen the sweep to every account ever created.
+ */
+export function backfillSince(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = String(env.WELCOME_BACKFILL_SINCE ?? '').trim();
+  const t = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(t) ? t : Date.parse(RETIREMENT_ISO);
+}
+
+/**
+ * Was this wallet opened inside the gap?
+ *
+ * A missing or unparseable `createdAt` reads as OLD — see the header. Exported so the admin's counts
+ * and the grant transaction ask one question rather than two similar ones.
+ */
+export function openedInGap(wallet: Record<string, unknown> | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  const created = Date.parse(String(wallet?.createdAt ?? ''));
+  if (!Number.isFinite(created)) return false;
+  return created >= backfillSince(env);
+}
+
 export type BackfillReason =
   | 'owed'                // never gifted, and there is room — pay
   | 'already-backfilled'  // this sweep has already paid this account
   | 'already-welcomed'    // the account had a welcome gift by one of the three signals
   | 'no-room'             // at or above the ₹400 lifetime self-gift ceiling
   | 'no-wallet'           // no wallet doc — nothing to credit, and we never create one here
+  | 'too-old'             // opened before the retirement, so it was gifted under the old plan
   | 'disabled';           // WELCOME_BACKFILL=off
 
 export interface BackfillDecision {
@@ -126,15 +185,26 @@ export function decideBackfill(input: BackfillInput): BackfillDecision {
   // has since been altered, and this marker is the only signal written by this feature itself.
   if (input.backfillMarker) return { tokens: 0, reason: 'already-backfilled' };
   if (!input.wallet) return { tokens: 0, reason: 'no-wallet' };
+  // THE ADMIN'S OWN RULE, and it comes before every heuristic below: an account that predates the
+  // retirement was gifted under the old plan and is out of scope, whatever its wallet looks like now.
+  if (!openedInGap(input.wallet, env)) return { tokens: 0, reason: 'too-old' };
 
   // The three independent "has this person already been gifted?" signals. ANY of them refuses.
+  // An INNER net now rather than the whole defence: the cutoff above has already removed every
+  // account old enough for these signals to be incomplete about.
   if (input.welcomeMarker) return { tokens: 0, reason: 'already-welcomed' };
   if (walletReceivedWelcome(input.wallet)) return { tokens: 0, reason: 'already-welcomed' };
   if (num(input.wallet.freeGiftedTokens) > 0) return { tokens: 0, reason: 'already-welcomed' };
 
-  // Defence in depth rather than arithmetic: reaching here means `freeGiftedTokens` is 0, so the cap
-  // cannot bite today. It stays because it is the admin's ceiling, and a later edit that relaxes the
-  // signal above must not silently also relax the ceiling.
+  // ⚠️ THE CEILING IS REALLY ENFORCED IN `backfillTokens`, NOT HERE — said plainly, because a comment
+  // that implies otherwise would be claiming a protection no test can reach. Reaching this line means
+  // `freeGiftedTokens` is 0 (the signal above already returned otherwise), so this `capSelfGift` call
+  // is UNREACHABLE defence in depth today: deleting it breaks no test, while deleting the clamp inside
+  // `backfillTokens` breaks one immediately. Both were checked by reversion rather than assumed.
+  //
+  // It stays anyway, and the reason is specific: a later edit that relaxes the `freeGiftedTokens`
+  // signal would make this line live, and the admin's *"kaise bhi jaye, maximum ₹400!!!"* must already
+  // be standing there when it does.
   const tokens = capSelfGift(backfillTokens(env), input.wallet.freeGiftedTokens);
   return tokens > 0 ? { tokens, reason: 'owed' } : { tokens: 0, reason: 'no-room' };
 }
@@ -158,10 +228,11 @@ export interface BackfillTally {
   alreadyBackfilled: number;
   noRoom: number;
   noWallet: number;
+  tooOld: number;
 }
 
 export function emptyTally(): BackfillTally {
-  return { scanned: 0, owed: 0, owedTokens: 0, alreadyWelcomed: 0, alreadyBackfilled: 0, noRoom: 0, noWallet: 0 };
+  return { scanned: 0, owed: 0, owedTokens: 0, alreadyWelcomed: 0, alreadyBackfilled: 0, noRoom: 0, noWallet: 0, tooOld: 0 };
 }
 
 /** Fold one decision into the running tally. Pure, so the admin's counts are unit-tested. */
@@ -176,6 +247,7 @@ export function tally(t: BackfillTally, d: BackfillDecision): BackfillTally {
     case 'already-backfilled': next.alreadyBackfilled += 1; break;
     case 'no-room': next.noRoom += 1; break;
     case 'no-wallet': next.noWallet += 1; break;
+    case 'too-old': next.tooOld += 1; break;
     case 'disabled': break;
   }
   return next;

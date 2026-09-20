@@ -71932,3 +71932,34 @@ write 1.
 
 **The referral code system starts when the new app is LIVE on the Play Store** — not before. Do not set
 `REFERRAL_REWARDS` until then.
+
+### 2026-09-20 (same day, second instruction) — the backfill is narrowed to the GAP
+
+The admin answered both open questions, and the second one improved the design:
+
+**1. The ₹400 ceiling is the instruction, not an inheritance** — *"400 se jyada nahi jana chahiye,
+kaise bhi jaye, maximum ₹400!!! bas"*. No change needed; `capSelfGift` was already applied.
+⚠️ **But the reversion check found the claim was half true.** Removing `capSelfGift` from
+`decideBackfill` broke NO test — that call is unreachable, because the `freeGiftedTokens > 0` signal
+returns first. The ceiling is really enforced by the clamp inside `backfillTokens`, and removing THAT
+fails a test immediately. Both facts were established by reversion, and the code comment now says so
+rather than implying a protection no test can reach.
+
+**2. Only accounts opened in the GAP** — *"old walo ka 00 nahi hoga, ya + me kuch hoga ya -ve ne. aap
+new user kar do, jinko bonus nhi mila"*. This is a better discriminator than anything the module had:
+an account predating the retirement was GIVEN its bonus and has been living with it, while one opened
+inside the gap was handed nothing. So the question stops being *"does this wallet LOOK ungifted?"* (a
+guess from three partial signals) and becomes *"was it opened while the platform gave nothing?"* — a
+fact we store.
+
+- `RETIREMENT_ISO = 2026-09-17T00:00:00.000Z`, `backfillSince()` (env `WELCOME_BACKFILL_SINCE`, falls
+  back to the retirement date — never to "no cutoff"), `openedInGap()`; new reason `too-old`.
+- The age check runs BEFORE every wallet heuristic, so the rule is categorical rather than incidental.
+- **A wallet with no `createdAt` reads as OLD.** Only `buildInitialWallet` creates a wallet and it has
+  always stamped that field (verified — there is no second creator), so a missing one means a document
+  older than the stamp.
+- 🔒 **This RETIRES the residual risk recorded above.** The pre-2026-07 wallet whose welcome row had
+  rolled off its bounded ledger is now excluded by DATE, before that reasoning is reached.
+
+Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
+unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.

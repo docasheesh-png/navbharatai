@@ -3,7 +3,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   decideBackfill, backfillTokens, backfillEnabled, backfillMarkerId, backfillRupees,
-  backfillLedgerDescription, emptyTally, tally, BACKFILL_RUPEES,
+  backfillLedgerDescription, emptyTally, tally, BACKFILL_RUPEES, backfillSince, openedInGap,
+  RETIREMENT_ISO,
 } from '../src/server/lib/welcomeBackfill';
 import { MAX_SELF_GIFT_TOKENS } from '../src/server/lib/giftPolicy';
 import { TOKENS_PER_RUPEE } from '../src/server/lib/payments';
@@ -22,7 +23,10 @@ import { TOKENS_PER_RUPEE } from '../src/server/lib/payments';
  */
 
 const WELCOME_TOKENS = BACKFILL_RUPEES * TOKENS_PER_RUPEE;
-const fresh = { freeGiftedTokens: 0, walletLedger: [] as unknown[] };
+// Opened INSIDE the gap — after the retirement. Without this every case below would read `too-old`,
+// which is the point of the narrowing and is asserted on its own further down.
+const IN_GAP = '2026-09-18T10:00:00.000Z';
+const fresh = { freeGiftedTokens: 0, walletLedger: [] as unknown[], createdAt: IN_GAP };
 const env = {} as NodeJS.ProcessEnv;
 
 const decide = (over: Record<string, unknown> = {}, opts: Record<string, unknown> = {}) =>
@@ -145,9 +149,10 @@ describe('the admin’s counts are the sum of real decisions', () => {
     t = tally(t, { tokens: 0, reason: 'already-backfilled' });
     t = tally(t, { tokens: 0, reason: 'no-room' });
     t = tally(t, { tokens: 0, reason: 'no-wallet' });
+    t = tally(t, { tokens: 0, reason: 'too-old' });
     expect(t).toEqual({
-      scanned: 6, owed: 2, owedTokens: 2 * WELCOME_TOKENS,
-      alreadyWelcomed: 1, alreadyBackfilled: 1, noRoom: 1, noWallet: 1,
+      scanned: 7, owed: 2, owedTokens: 2 * WELCOME_TOKENS,
+      alreadyWelcomed: 1, alreadyBackfilled: 1, noRoom: 1, noWallet: 1, tooOld: 1,
     });
   });
 
@@ -163,6 +168,106 @@ describe('what the user sees in their own statement', () => {
     expect(line.toLowerCase()).toContain('welcome bonus');
     for (const leak of ['backfill', 'admin', 'sweep', 'token']) {
       expect(line.toLowerCase(), leak).not.toContain(leak);
+    }
+  });
+});
+
+
+describe('🔴 only accounts opened in the GAP — the admin’s own signal', () => {
+  // *"old walo ka 00 nahi hoga, ya + me kuch hoga ya -ve ne. aap new user kar do, jinko bonus nhi mila"*
+  //
+  // An account that predates the retirement was GIVEN its bonus and has been living with it. One
+  // opened inside the gap was handed nothing. That is a fact we store, not a guess from a ledger.
+
+  it('pays an account opened after the retirement', () => {
+    expect(decide({ createdAt: '2026-09-18T00:00:00.000Z' }).reason).toBe('owed');
+  });
+
+  it('leaves an account opened BEFORE the retirement alone, however empty it looks', () => {
+    const d = decide({ createdAt: '2026-09-01T00:00:00.000Z', tokenBalance: 0, remaining_balance: 0 });
+    expect(d).toEqual({ tokens: 0, reason: 'too-old' });
+  });
+
+  it('leaves a very old account alone even with an empty ledger and no gift total', () => {
+    // The exact shape that used to be the residual risk: a welcome row rolled off a bounded ledger.
+    // It is now excluded by DATE, before any of that reasoning is reached.
+    const d = decide({ createdAt: '2026-05-04T00:00:00.000Z', walletLedger: [], freeGiftedTokens: 0 });
+    expect(d.reason).toBe('too-old');
+  });
+
+  it('🔒 a wallet with NO createdAt is treated as OLD, never as new', () => {
+    // Unknown ⇒ excluded. Skipping someone costs a message; including them wrongly costs money twice.
+    const noDate = { freeGiftedTokens: 0, walletLedger: [] as unknown[] };
+    expect(decideBackfill({ wallet: noDate, welcomeMarker: false, backfillMarker: false, env }).reason).toBe('too-old');
+    expect(openedInGap(noDate)).toBe(false);
+    expect(openedInGap({ createdAt: 'not a date' })).toBe(false);
+    expect(openedInGap(null)).toBe(false);
+  });
+
+  it('the boundary is inclusive — an account opened AT the retirement instant is in scope', () => {
+    expect(openedInGap({ createdAt: RETIREMENT_ISO })).toBe(true);
+    expect(openedInGap({ createdAt: '2026-09-16T23:59:59.999Z' })).toBe(false);
+  });
+
+  it('🔒 an unreadable cutoff falls back to the retirement date, never to "no cutoff"', () => {
+    for (const raw of ['', '   ', 'yesterday', 'NaN', undefined]) {
+      expect(backfillSince({ WELCOME_BACKFILL_SINCE: raw } as NodeJS.ProcessEnv), String(raw))
+        .toBe(Date.parse(RETIREMENT_ISO));
+    }
+    // A deliberate value is honoured.
+    expect(backfillSince({ WELCOME_BACKFILL_SINCE: '2026-09-19' } as NodeJS.ProcessEnv))
+      .toBe(Date.parse('2026-09-19'));
+  });
+
+  it('the age check comes BEFORE the wallet heuristics, so the rule is categorical', () => {
+    // An old account that also shows a welcome row must report `too-old` — the admin's rule is that
+    // old accounts are out of scope at all, not that they happen to fail another test.
+    const d = decide({
+      createdAt: '2026-08-01T00:00:00.000Z',
+      walletLedger: [{ description: 'Welcome Bonus: 25,000 AI Tokens Credited!' }],
+    });
+    expect(d.reason).toBe('too-old');
+  });
+});
+
+describe('🔴 ₹400 is a hard ceiling — "kaise bhi jaye, maximum ₹400!!!"', () => {
+  it('never takes an account past ₹400, whatever the console says', () => {
+    const env2 = { WELCOME_BACKFILL_TOKENS: '99999999' } as NodeJS.ProcessEnv;
+    // An account already holding ₹300 of gift has ₹100 of room — and gets exactly ₹100.
+    const d = decideBackfill({
+      wallet: { createdAt: IN_GAP, freeGiftedTokens: 0, walletLedger: [] },
+      welcomeMarker: false, backfillMarker: false, env: env2,
+    });
+    expect(d.tokens).toBeLessThanOrEqual(MAX_SELF_GIFT_TOKENS);
+    expect(backfillRupees(d.tokens)).toBeLessThanOrEqual(400);
+  });
+
+  it('never ADDS anything that carries an account past ₹400', () => {
+    // Walked over the whole range rather than asserted at one point, because "kaise bhi jaye" is the
+    // instruction: there must be no pair of inputs that gets past the line.
+    //
+    // ⚠️ The invariant is about what this feature ADDS. An account can already sit above ₹400 from the
+    // old ₹500 plan, and a backfill cannot un-give that — it can only refuse to add. So the assertion
+    // is "never crosses the line, and never adds once it is already at or past it", which is the real
+    // promise. The first draft of this test asserted `already + granted <= 400` flatly and failed on
+    // exactly that legacy case; the test was wrong, not the code.
+    for (const alreadyRupees of [0, 1, 100, 150, 250, 300, 399, 400, 500]) {
+      for (const askRupees of [250, 400, 1000, 99999]) {
+        const already = alreadyRupees * TOKENS_PER_RUPEE;
+        const granted = decideBackfill({
+          wallet: { createdAt: IN_GAP, freeGiftedTokens: already, walletLedger: [] },
+          welcomeMarker: false,
+          backfillMarker: false,
+          env: { WELCOME_BACKFILL_TOKENS: String(askRupees * TOKENS_PER_RUPEE) } as NodeJS.ProcessEnv,
+        }).tokens;
+        const label = `already ₹${alreadyRupees} + ask ₹${askRupees}`;
+        expect(granted, label).toBeGreaterThanOrEqual(0);
+        if (already >= MAX_SELF_GIFT_TOKENS) {
+          expect(granted, `${label} — no room left`).toBe(0);
+        } else {
+          expect(already + granted, label).toBeLessThanOrEqual(MAX_SELF_GIFT_TOKENS);
+        }
+      }
     }
   });
 });

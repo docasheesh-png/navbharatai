@@ -37,6 +37,7 @@ interface Preview {
   alreadyBackfilled?: number;
   noRoom?: number;
   noWallet?: number;
+  tooOld?: number;
 }
 
 interface RunResult {
@@ -103,8 +104,9 @@ export function WelcomeBackfillCard({ adminToken }: { adminToken: string }): Rea
         <div className="min-w-0">
           <h3 className="text-sm font-bold text-ink">Welcome bonus backfill</h3>
           <p className="text-[11px] leading-snug text-muted">
-            Credits {inr(data?.grantRupees ?? 250)} to every account that has never received a welcome
-            bonus. Each account is paid once, and pressing again only reaches the ones still waiting.
+            Credits {inr(data?.grantRupees ?? 250)} to every account opened after the welcome gift was
+            retired and handed nothing. Older accounts were gifted under the old plan and are left
+            alone. Each account is paid once, and pressing again only reaches the ones still waiting.
           </p>
         </div>
       </div>
@@ -132,7 +134,7 @@ export function WelcomeBackfillCard({ adminToken }: { adminToken: string }): Rea
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Stat label="Waiting" value={String(owed)} strong />
           <Stat label="To credit" value={inr(data.owedRupees)} strong />
-          <Stat label="Already had one" value={String(Number(data.alreadyWelcomed) || 0)} />
+          <Stat label="Older, left alone" value={String(Number(data.tooOld) || 0)} />
           <Stat label="Accounts scanned" value={String(Number(data.scanned) || 0)} />
         </div>
       )}
@@ -169,7 +171,8 @@ export function WelcomeBackfillCard({ adminToken }: { adminToken: string }): Rea
 
       <p className="text-[10px] leading-snug text-faint">
         This does not change what a NEW signup receives — that stays with the referral steps. An account
-        can be gifted at most ₹400 in its lifetime, so this credit counts toward that ceiling.
+        can be gifted at most ₹400 in its whole lifetime and this credit counts toward that ceiling, so
+        nothing here can ever take an account past ₹400.
       </p>
     </div>
   );

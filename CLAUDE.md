@@ -1688,6 +1688,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   COMPLETE first app"*. Nothing could detect it: each module's guard was locally right.
   ⚠️ **THE SIGNUP PATH IS UNTOUCHED.** This is a backfill, not a re-opening of the flat gift — a new
   account still receives nothing, because the ladder is still the plan.
+  🎯 **SCOPE: ONLY ACCOUNTS OPENED IN THE GAP** (admin's own signal, same day: *"old walo ka 00 nahi
+  hoga, ya + me kuch hoga ya -ve ne. aap new user kar do, jinko bonus nhi mila"*). `RETIREMENT_ISO`
+  = 2026-09-17; `WELCOME_BACKFILL_SINCE` overrides it and an unreadable value falls back to that date,
+  never to "no cutoff". A wallet with **no `createdAt` reads as OLD** (only `buildInitialWallet`
+  creates a wallet and it always stamps that field). This is what RETIRES the residual risk below —
+  an old wallet whose welcome row rolled off its bounded ledger is excluded by DATE, not by guesswork.
+  ⚠️ **₹400 is the instruction, not an inheritance** (*"kaise bhi jaye, maximum ₹400!!!"*) — and the
+  ceiling is really enforced by the clamp inside `backfillTokens`; the `capSelfGift` call in
+  `decideBackfill` is unreachable defence in depth, proven by reversion, and the code says so.
   🔒 **NEVER PAYS TWICE — four signals, any one refuses:** its OWN marker
   `payment_transactions/welcome_backfill_<uid>` (checked FIRST, before any wallet reasoning, and
   written in the SAME transaction as the credit), the durable `welcome_<uid>` marker, the wallet

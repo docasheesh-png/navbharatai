@@ -13,7 +13,7 @@ import { useToast, ToastContainer } from './components/Toast';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
-import { shouldRecordOpener } from './lib/tabParenting';
+import { parentForOpen } from './lib/tabParenting';
 import { historySurfaceFor, historyFilterFor } from './lib/historySurface';
 import { HistoryPopup } from './components/history/HistoryPopup';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
@@ -1425,9 +1425,13 @@ export default function App() {
       // "who opened this?" left a professional opened from NavBharatAI Free with no parent, so ✕-ing
       // Free orphaned it (admin 2026-08-25); asking only "was it opened from Free?" would have made
       // Settings a child of Free and closed it too.
-      if (shouldRecordOpener(view as string, activeView as string)) {
-        setTabOpeners(prev => ({ ...prev, [view]: activeView }));
-      }
+      // `parentForOpen` resolves the DOOR, not the room beside it: a professional opened from inside
+      // another professional inherits the tab both were entered through (2026-09-20). Without that,
+      // ✕-closing Free left the second one behind — and ✕-closing the first would have taken it down.
+      setTabOpeners(prev => {
+        const parent = parentForOpen(view as string, activeView as string, prev as Record<string, string | undefined>);
+        return parent ? { ...prev, [view]: parent as ViewType } : prev;
+      });
     }
 
     if (pushToHistory && activeView !== view) {

@@ -204,7 +204,7 @@ export function ViewPanels({
     <>
       {activeView === 'studio' && (
         /* 🔒 APP LOCK — Code Studio (admin 2026-09-13). Default OFF: the gate renders its children
-           untouched unless the user ticked this area in Settings → General Settings → App Lock, so a
+           untouched unless the user ticked this area in Settings → Profile Settings → General → App Lock, so a
            user who never switched it on sees exactly the screen they saw before.
 
            Wrapping (rather than overlaying, as the Pro builder needs) is right here: CodeStudio already

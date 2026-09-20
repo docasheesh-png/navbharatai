@@ -66,7 +66,16 @@ describe('the rule is wired (locked)', () => {
   const app = readFileSync(resolve(__dirname, '../App.tsx'), 'utf8');
 
   it('App.tsx asks the shared rule instead of an inline allowlist', () => {
-    expect(app).toContain('shouldRecordOpener(view as string, activeView as string)');
+    // ⚠️ UPDATED 2026-09-20, and the reason matters more than the line. This asserted the name
+    // `shouldRecordOpener(view as string, activeView as string)` — the name of the shared rule ON THE
+    // DAY IT WAS WRITTEN. App.tsx now asks `parentForOpen`, which calls that rule as its first
+    // statement and then resolves WHICH tab to record; the wiring was never lost, only renamed, and
+    // the test went red on a change that strengthened the very thing it guards.
+    //
+    // So it now asserts the PROPERTY, not one spelling: the decision comes from this module, and the
+    // inline allowlist it replaced has not crept back.
+    expect(app).toContain("from './lib/tabParenting'");
+    expect(app).toMatch(/(shouldRecordOpener|parentForOpen)\(view as string, activeView as string/);
     expect(app).not.toContain("if ((activeView === 'settings' || activeView === 'professionals' || activeView === 'other_ai') && view !== activeView)");
   });
 });

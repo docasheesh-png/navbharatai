@@ -73699,3 +73699,234 @@ checking. It was my probe. `analyzeRequest({ prompt })` reproduces the real buil
 `complex_app` — which is what made the trace above possible.
 
 Test-locked in `tests/aDocumentIsNotABigApp.test.ts` (19 cases), reversion-proven three ways.
+---
+
+## 2026-09-20 — 🚪 CLOSING THE DOOR CLOSES THE ROOMS: ✕-ing NavBharatAI Free left every professional after the first
+
+**Trigger (admin, verbatim):** *"navbharatai free, me koi professional open ho, aur user header se
+'navbharatai free' ki window x(close)/band kar de! to navbharatai ke sare professional bhi band ho
+jane chahiye! (abhi nahi ho rahe hai!)"*
+
+**The word that names the defect is `sare` — ALL of them.** Closing Free took the FIRST professional
+with it and left every one after that on screen. It was reproduced against the real modules before a
+line was changed:
+
+```
+Free → Mentor → Teacher, then ✕ Free
+closing: [ 'nbi_chat', 'mentor_ai' ]        ← teacher_ai survives
+```
+
+### Two things were wrong at once, and either one alone hides the other
+
+1. **`openers` is a TREE and `computeTabClose` read one level of it.** It could answer *"who are my
+   children?"* and nothing deeper.
+2. **The tree had depth it should never have had.** The Mode sheet opens from INSIDE a professional,
+   so picking Teacher while Mentor was on screen recorded `teacher_ai → mentor_ai` — one
+   professional as another's PARENT. `nbi_chat → mentor_ai → teacher_ai`, and the one-level walk
+   stopped at Mentor. The deeper a user went, the more was left behind.
+
+### ⚠️ Fixing either alone trades one bug for another
+
+- **Subtree close alone** ⇒ ✕-closing **Mentor** would take Teacher down with it. The user never
+  entered Teacher *through* Mentor; they are siblings behind one door. That is a new bug, not a fix.
+- **Re-parenting alone** ⇒ every genuine nesting elsewhere (Settings → an option → its own option)
+  stays orphaned, because the walk is still one level deep.
+
+So both shipped together, in the two pure modules that already own the question:
+
+- **`tabClose.ts`** — `computeTabClose` now closes the whole DESCENDANT subtree, breadth-first, with
+  a `seen` set. ⚠️ That guard is not decoration: a tab can be closed and reopened from what used to
+  be its own child, so `openers` can genuinely hold a cycle, and an unguarded walk would hang the
+  header.
+- **`tabParenting.ts`** — new `parentForOpen(view, activeView, openers)` resolves **the door, not the
+  room beside it**: it walks up from `activeView` until it reaches a non-child surface and records
+  THAT. Free → Mentor → Teacher now parents *both* to Free, so no chain exists to walk. It returns
+  **`undefined`** rather than falling back to the sibling when no real door is reachable — *a child
+  surface may never be recorded as a parent*, which is the invariant that makes chains, and the
+  cycles a chain can grow into, impossible by construction rather than by care.
+
+`App.tsx`'s `toggleTab` now asks `parentForOpen` instead of writing `activeView` directly.
+
+### What it fixes beyond the tab strip
+
+`closeTab` already runs its per-tab teardown for **every** tab in `closing` — so a professional that
+now closes as a child of Free also gets `endProfessionalChat`, which **archives** the transcript into
+Professional History rather than leaving it live to restore itself on the next open. Doctor AI is
+covered too: `sda_chat` is `PROFESSIONALS_IMPLEMENTED_ELSEWHERE`, so `childSurfaceIds()` already
+includes it and its own `startFreshCase` branch runs.
+
+### Verification
+
+`tests/closingTheDoorClosesTheRooms.test.ts` replays `toggleTab`'s real opener bookkeeping rather
+than hand-writing a convenient map, so the cases describe what the app actually records. It pins the
+admin's own flow, the depth-3 Settings nesting, companions at depth, cycle termination, and the three
+things that must NOT become children whoever opened them (Settings from inside Free, the v5.0
+builder, and any professional as another's parent).
+
+**Proven by reversion, each half separately** — which is also the proof that neither is redundant:
+
+| reverted | result |
+|---|---|
+| the subtree close | **2 red** — `sare` fails again |
+| the parent resolution | **4 red**, including *"✕-closing ONE professional closes only that one"* — the new bug the subtree close would have introduced on its own |
+
+### ⚠️ One existing lock went red, and it is worth recording why
+
+`src/lib/tabParenting.test.ts` asserted that `App.tsx` contains
+`shouldRecordOpener(view as string, activeView as string)` — the NAME of the shared rule on the day
+it was written. `App.tsx` now asks `parentForOpen`, which calls that same rule as its first statement
+and then resolves *which* tab to record. **The wiring was never lost, only renamed — so the lock went
+red on a change that strengthened the very thing it guards.**
+
+Same shape as the 2026-09-20 Firestore-index autopsy's sharpest finding: a source assertion can only
+pin what the code SAYS. It now asserts the PROPERTY — the decision comes from `lib/tabParenting`, and
+the inline allowlist it replaced has not crept back — instead of one spelling of it.
+## 2026-09-20 — 🗣️ ONE COMPOSER, EVERYWHERE: the doctor typed into a different box from everyone else
+
+**Trigger:** the admin sent two phone screenshots side by side — Mentor / Career Coach and Senior
+Doctor Assistant — and said, verbatim: *"yeh 2 chat ui hai … mujhe SDA ka input box bhi baki ai ke
+jaisa karna hai. isko badal ke, other professionals ke jaise hi karo!!"*
+
+### What was actually different
+
+The two screens already agreed about everything except the one row a doctor types into:
+
+| | Professionals (Mentor) | SDA, before |
+|---|---|---|
+| attach | its own `w-9 h-9` bordered button on the row | a bare paperclip **inside** the text box |
+| dictation mic | — | a second glyph **inside** the text box |
+| text size | `text-sm` | `text-[12px]` |
+| resting height | the browser's own one line (`rows={1}`) | pinned at a **44px** minimum, against 40px buttons |
+| placeholder | `Ask <name>…` | *"Type your answer or clinical finding..."* — **two lines on a phone** |
+
+Two controls inside the box is what made it read as a different product: the writing area starts a
+third of the way across, so a normal placeholder wraps, so the box is tall, so nothing on the row
+lines up with anything else on the row.
+
+### The fix
+
+Every control is now its own `w-9 h-9 rounded-xl` button on the row, and the text box is the row's
+only growing element, carrying the **same classes `ProfessionalChat` uses**. The two screens are the
+same screen with a different persona in it.
+
+Three things were fixed along the way that were not cosmetic:
+
+1. **The camera was never offered here.** The paperclip opened the file browser directly. SDA now
+   uses the shared **`AttachMenu`** (camera / gallery / file) like every other surface — and
+   photographing an X-ray or an ECG strip is the single likeliest attachment on this screen, which
+   is the exact miss `AttachMenu` was written for. `handleFileSelect(event)` became
+   `acceptFile(file)` + a `handleFiles` adapter; the hidden `<input type="file">` and its ref are gone.
+2. **A drifted copy of the sizing rule (rule 2).** `SDAChat` carried its own three-line `autoResize`,
+   byte-for-byte the body of `autoGrow` in `lib/autoGrowTextarea.ts`, written before that helper
+   existed. It now calls the shared one, and send calls `resetGrow` instead of assigning a hardcoded
+   44px. **Two copies of a sizing rule is how one composer ends up behaving differently from every
+   other** — which is this whole report.
+3. **`BASE_HEIGHT` is gone.** The 44px floor it set is where the row's misalignment came from; the
+   cap it derived is now the plain `128` (`max-h-32`) every other composer uses.
+
+### Kept on purpose, each with a reason
+
+- **The emerald accent** (focus ring, voice button, send). The persona's identity, which the rest of
+  this screen carries and which the admin did not ask to remove. The SHAPE is what was asked for.
+- **The dictation mic** — speech → text, a control the professionals do not have. It moves out of
+  the box like everything else; its existence is not a deviation from the shape.
+- **The `Volume2` icon on the voice button.** Two mic glyphs side by side would be two different
+  features wearing one icon; the distinction predates this change.
+
+### 🔒 The 50/50 half — nothing had ever held the composers to one shape
+
+The instance is one screen's markup. The CONDITION is that **every chat screen in this repo
+hand-rolls its composer**, which is the same reason `lib/autoGrowTextarea.ts` had to be written at
+all: two composers had shipped `rows={1}` with a max-height and **no grow logic**, so the box stayed
+one line for ever.
+
+`tests/oneComposerEverywhere.test.ts` does not assert a list of classes it was handed — it **DERIVES**
+the professionals' composer from their own source and requires the doctor's to carry every class of
+it, with the accent-coloured focus ring the one permitted difference. Restyle `ProfessionalChat` and
+the test asks for `SDAChat` in the same breath. It also pins the row's one button size, the shared
+attach menu, the absence of a private sizing rule, and a placeholder short enough for one phone line.
+
+Test-locked and **proven by reversion**: restoring the transparent-slot textarea and the old
+placeholder turns **four of seven cases red**.
+
+**Sibling hunt (rule 3):** one other file matches `bg-transparent resize-none` —
+`ide/ImageStudioPro.tsx`. Checked and deliberately NOT changed: it is an image-generation prompt bar,
+not a chat composer, and pulling it into this contract would be widening the shape rather than
+enforcing it. Recorded so the next reader does not re-derive the check.
+
+`AppKnowledgeBase.ts` updated in the same commit — the attach button now offering **Take a photo** is
+a real new capability on this screen, and an AI that cannot see it cannot tell a doctor about it.
+## 2026-09-20 — Settings: three one-tile groups became ONE, "Profile Settings", at the top
+
+**Admin, with a screenshot of the Settings home on a phone (verbatim):** *"setting ke andar account,
+your app, general settings teeno ko mila kar ek setting option bana do! 'profile settings' — aur
+profile settings ke andar sabhi teeno tile add kar do! profile, apk download, general … profile
+settings sabse upar!"*
+
+### What was wrong, and it is not "too many headings"
+
+Each of the three groups carried **exactly one tile**. So the Settings home spent three whole
+section cards — three uppercase headings, two descriptions, three borders — to offer three buttons,
+and on a phone that filled the first screen before a single App Setting came into view. The reader
+had to parse three labels to discover that each box held one thing.
+
+The three also belong together by a line the screen already draws: **Account / Your App / General
+Settings are all about YOU and YOUR copy of NavBharatAI** (your profile, your app's installable
+file, how the app looks), while **App Settings below is about THE APP YOU BUILT** (its domain, its
+database, its hosting). That is the distinction the 2026-08-14 regroup established; this change
+keeps it and stops subdividing the near side of it.
+
+### What shipped
+
+- `SettingsPanel.tsx` — one group, `title: 'Profile Settings'`, first on the screen, three tiles:
+  **My Profile**, **Download APK**, **General**. The user identity card (avatar, name, email) still
+  renders above it: that is who you are, not an option you can open.
+- 🔒 **The risk this change carries, and the reason its test file exists: the three tiles ROUTE
+  THREE DIFFERENT WAYS.** `nav: true` → `setActiveView` (a top-level VIEW), `tab: true` →
+  `toggleTab` (a workspace TAB), neither → `setSettingsScreen` (a Settings SUB-SCREEN). Merging
+  three groups into one is exactly the edit that quietly drops a flag — and a dropped flag fails no
+  typecheck and breaks no render. The tile simply stops working, or opens a blank Settings page
+  with a heading and nothing under it, which is the `'modules'` / `'admin'` bug class this repo has
+  already paid for twice. The mapper already branched per ITEM rather than per group, so the merge
+  changes where the tiles sit and nothing about where they go — and each flag is now asserted by
+  its own tile.
+- **Knowledge base**: 21 path strings rewritten across `AppKnowledgeBase.ts`, plus the Settings hub
+  entry's own description of its groups, and `profile settings` added to the keywords of the three
+  entries that now live inside it. An AI that still answered *"Settings → Your App → Download APK"*
+  would be describing a box the user cannot find.
+- **One user-facing string outside the KB**: the App Mart adult-content notice
+  (`routes/navStore.ts`) tells a creator whose app is waiting for review which switch to turn on. A
+  stale path there is a person hunting for a box that no longer exists, so it moved too.
+
+### Tests
+
+`tests/profileSettingsIsOneGroup.test.ts` (12 cases), **reversion-proven four ways**: dropping
+`nav: true`, dropping `tab: true`, removing the General tile, and restoring a stale KB path each
+turn one red; the restored tree is green.
+
+`tests/settingsGeneralGroup.test.ts` was **updated, not weakened** — every assertion it made is
+still true and still asserted (General is not an App Settings tile, its group sits above App
+Settings, the screen id is still `'general'`, View Mode is not a loose card). Only the name of the
+box moved, and its header now records the rename so nobody reads the old naming as current. One
+assertion was made *stronger* on the way past: the "General is inside this group" check used a
+fixed 600-byte slice, which the merge's added comments would have pushed the tile out of — it now
+bounds the group by the next group's title, so it can never start passing for the wrong reason.
+
+⚠️ **A SECOND guard named the old group and I did not hunt it before running the gate**:
+`tests/websiteHub.test.ts` asserts that General left App Settings *for a named group rather than an
+invented catch-all*, and it named that group by its title. The full suite caught it (1 failed /
+27,316 passed) — which is the gate doing its job, and also the cost of grepping for the group names
+in `src/` and reading only one of the two test files the same grep listed. Updated with the same
+intent: the group is now named `'Profile Settings'`, and the comment records why.
+
+### Gate
+
+typecheck ✓ · noUnusedImports ✓ · typecheck:server ✓ · vitest (full suite) ✓ · build ✓ ·
+test:bundle ✓ · boot:check ✓ · deps:server-gate ✓
+
+⚠️ **Honest limit:** no browser was driven. The layout reasoning is from the existing group renderer
+(`grid-cols-2`, so three tiles are 2 + 1, the same shape App Settings already uses with six) rather
+than from a screenshot at every breakpoint.
+
+⚠️ **This is a FRONTEND change**, so under bundled mode it reaches installed Android users only in a
+fresh `.aab` — not on the next merge.

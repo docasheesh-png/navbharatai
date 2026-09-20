@@ -470,6 +470,7 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
+import { saveRestorePoint } from '../AgentV3/restorePoint';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
@@ -11747,6 +11748,21 @@ async function noteBuildOutcome(
           }
         } catch { /* billing enrichment is best-effort — never blocks finalization */ }
       }
+      // A VERSION THE USER CAN GO BACK TO (2026-09-20). Written on BOTH settle paths for the reason
+      // Fix 67 exists: a rule on only one of them is a rule a long build escapes. Fire-and-forget —
+      // a history write must never delay or fail a build that has already produced an app.
+      if (ok) {
+        void saveRestorePoint({
+          ok: true,
+          workspaceId,
+          uid: userId,
+          prompt,
+          isEdit: intent === 'edit_existing',
+          tier: powerLevelReqEffective,
+          buildKey: `${workspaceId}_${billingCtx.buildStartedAt}`,
+          io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
+        }).catch(() => {});
+      }
       // STALE-SUCCESS SUMMARY ON THE TIMEOUT PATH (real report, 2026-09-14, an "EduTube" build):
       // the model had already emitted a `done` event mid-build ("Your app is live and ready …
       // zero TypeScript errors") minutes before the watchdog fired — `BuildDiagnostics.ingestEvent`
@@ -20518,6 +20534,23 @@ async function noteBuildOutcome(
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
+      // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every
+      // app this engine has ever made. Written here AND in the deadline finalizer, keyed by the same
+      // `${workspaceId}_${buildStartedAt}` the wallet debit uses, so a build leaves exactly one.
+      // Fire-and-forget: a history write must never delay or fail a build that produced an app.
+      if (result.ok === true) {
+        void saveRestorePoint({
+          ok: true,
+          workspaceId,
+          uid: userId,
+          prompt,
+          isEdit: isEditMode,
+          tier: powerLevelReqEffective,
+          buildKey: `${workspaceId}_${buildStartedAt}`,
+          io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
+        }).catch(() => {});
+      }
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
       // Pro build. Uses the reconciled per-provider tokens, so the cost graph and the bill agree.

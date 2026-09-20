@@ -70812,3 +70812,56 @@ an un-hydrated SPA shell.
   judge (a tools-free single call) are genuinely two different things, and only one obeys the rule.
 - **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
   `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.
+
+---
+
+## 2026-09-20 — A judge that never ran did not pass
+
+**Branch `claude/a-judge-that-never-ran-did-not-pass`.** Found while the admin was configuring
+Nemotron, not from the autopsy list — and it is older and wider than Nemotron.
+
+**The trigger.** The admin's Cloud Run screenshot showed `NEMOTRON_BASE_URL =
+https://integrate.api.nvidia.com/v1` (NVIDIA's own endpoint) while the model-id defaults keep the
+OpenRouter spelling `nvidia/nemotron-3-…` — a mismatch `nemotron.ts`'s own docblock explicitly warns
+about (*"a Nemotron id is spelled DIFFERENTLY by each host… these two ids must be set to match
+whichever host is actually bought"*). Chasing **what that would DO** is what found the bug.
+
+**What it would do: nothing visible, for ever.**
+
+- `judgeBuild` catches a provider failure and returns **`pass: true` on purpose** — a judge must never
+  fail a user's app over its own outage — and puts the truth in `findings`.
+- `recordVerdict` printed PASS/FAIL from `pass`, and appended `findings` **only when pass was false**.
+- `reviewerName` was an inline ternary with **no `nemotron` branch**, falling through to `'Sonnet'`.
+
+So a judge that could not run was filed as **`Sonnet review: PASS (score 0)`** — a pass, with its own
+explanation discarded, under the name of an engine that had not run. A misconfigured judge would have
+looked like a passing review on every build.
+
+### The fixes
+
+- **`reviewed?: boolean` on `JudgeVerdict`**, set false by both non-verdict returns (the provider
+  failure and the empty workspace, the latter already reasoned about on 2026-08-06). ⚠️ **Derived, not
+  inferred**: the reader must not guess "score 0 plus a finding means it did not run" — a real verdict
+  may legitimately score 0, and a rule built on that coincidence breaks the day one does. Absent ⇒
+  true, so any other producer keeps today's meaning.
+- **`describeJudgeVerdict`** — three outcomes, not two. `pass` answers *"may this build proceed?"*; it
+  was never an answer to *"what did the judge find?"*. `NOT RUN` is a **warning**, because a gate that
+  silently stopped existing is invisible precisely when it matters. **The detail is kept on every
+  outcome**, including a genuine pass.
+- **`judgeEngineLabel`** — exhaustive with a `never` check, so a future engine must be named at the
+  point where somebody has to think about it rather than silently becoming whichever branch the
+  ternary ended on.
+
+**Build-affecting behaviour is byte-identical** — a judge outage still never blocks a build. Only the
+record changed.
+
+`tests/aJudgeThatNeverRanDidNotPass.test.ts` — 17 cases. **Reversion-proven five ways**: NOT RUN back
+to PASS → 4 red · `reviewed: false` removed → 2 red · the nemotron branch removed → 1 red · the detail
+dropped on a pass → 1 red · the route's local ternary restored → 1 red.
+
+### Open, and it is the admin's to check
+
+`NEMOTRON_ULTRA_MODEL` / `NEMOTRON_SUPER_MODEL` were not visible in the screenshot. If they are unset
+while the base URL points at NVIDIA's own endpoint, the judge call fails and — from today — the report
+says `NOT RUN` instead of `PASS`. **That is the whole point of this change: the misconfiguration is now
+observable rather than silent.** The correct ids for that host are not guessed here.

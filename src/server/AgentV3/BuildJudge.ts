@@ -17,6 +17,24 @@ export interface JudgeVerdict {
   findings: string[];
   /** 0–100 quality score (best-effort; 100 on pass, lower on fail). */
   score: number;
+  /**
+   * Did the judge actually REVIEW the app?
+   *
+   * 🔴 `pass` means "do not block this build" — it has never meant "approved", and two returns below
+   * set it true precisely because a judge must not fail an app over its OWN failure. Both of them
+   * carry the truth in `findings`… which the one line that REPORTS them threw away: `recordVerdict`
+   * appends findings only when `pass` is false, so a judge that could not run was recorded as
+   *
+   *     Sonnet review: PASS (score 0)
+   *
+   * — a pass, with no explanation, under the wrong engine's name. Autopsy 31dc61fd.
+   *
+   * ⚠️ DERIVED, NOT INFERRED. The reader must not guess "score 0 and a finding means it did not run":
+   * a real verdict may legitimately score 0, and a rule built on that coincidence breaks the day one
+   * does. The judge states it. Absent ⇒ true, so any other producer of this shape keeps today's
+   * meaning.
+   */
+  reviewed?: boolean;
 }
 
 /** Build the STRICT-reviewer prompt: the user's request + the generated files. Pure. */
@@ -92,7 +110,7 @@ export async function judgeBuild(
   // It still never BLOCKS (a judge that fails a build on its own confusion is worse), but it no longer
   // awards marks it did not earn, and it says why so the report carries the alarm.
   if (!files || files.length === 0) {
-    return { pass: true, score: 0, findings: ['There were no files to review — the project was empty at review time. This is not a passing app; it is an absent one.'] };
+    return { pass: true, score: 0, reviewed: false, findings: ['There were no files to review — the project was empty at review time. This is not a passing app; it is an absent one.'] };
   }
   try {
     const { system, user } = buildJudgePrompt(userRequest, files);
@@ -100,7 +118,7 @@ export async function judgeBuild(
     return parseJudgeVerdict(t.text);
   } catch {
     // A judge that could not RUN has not approved anything either — same rule as above.
-    return { pass: true, score: 0, findings: ['The build review could not be completed, so this build has not been reviewed.'] }; // never breaks a build
+    return { pass: true, score: 0, reviewed: false, findings: ['The build review could not be completed, so this build has not been reviewed.'] }; // never breaks a build
   }
 }
 
@@ -123,4 +141,55 @@ export function judgeRepairPrompt(userRequest: string, findings: string[]): stri
     '',
     `Original request, for reference: ${userRequest.slice(0, 800)}`,
   ].join('\n');
+}
+
+/**
+ * How a verdict should be RECORDED in the admin build report. Pure, so the wording is testable.
+ *
+ * Three outcomes, not two. `pass` answers "may this build proceed?"; it was never an answer to
+ * "what did the judge find?", and reporting it as one is how "the reviewer could not run" came to be
+ * filed as a passing review (autopsy 31dc61fd).
+ *
+ * ⚠️ THE DETAIL IS KEPT ON EVERY OUTCOME, including a genuine pass. The old line appended findings
+ * only on failure, so the honest sentence the judge had written was discarded by the reader — the
+ * exact shape of losing an explanation that already existed.
+ */
+export function describeJudgeVerdict(v: JudgeVerdict): {
+  label: 'PASS' | 'FAIL' | 'NOT RUN';
+  severity: 'info' | 'warning';
+  detail: string;
+} {
+  const detail = (v.findings || []).slice(0, 3).join('; ');
+  if (v.reviewed === false) {
+    // A warning, not info: a judge that never runs is a gate that silently stopped existing, and a
+    // misconfigured provider can make that permanent without a single failing build to reveal it.
+    return { label: 'NOT RUN', severity: 'warning', detail };
+  }
+  return { label: v.pass ? 'PASS' : 'FAIL', severity: v.pass ? 'info' : 'warning', detail };
+}
+
+/**
+ * The ADMIN-ONLY name of the engine that judged. Exhaustive by construction.
+ *
+ * 🔴 The inline ternary this replaces had no branch for `nemotron` and fell through to `'Sonnet'`, so
+ * the report named an engine that had not run — and would have done so for every Nemotron judge from
+ * the day that vendor was added. A record that quietly attributes work to the wrong provider is worse
+ * than one that says "unknown", because nobody doubts it.
+ *
+ * ⚠️ Never reaches a user (White-Label Law) — this is the admin report's label only.
+ */
+export function judgeEngineLabel(kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'): string {
+  switch (kind) {
+    case 'grok': return 'Grok';
+    case 'glm': return 'GLM';
+    case 'opus': return 'Opus';
+    case 'nemotron': return 'Nemotron';
+    case 'sonnet': return 'Sonnet';
+    default: {
+      // A new kind must be named here, at the point where somebody has to think about it — rather
+      // than silently becoming whichever branch the old ternary ended on.
+      const never: never = kind;
+      return String(never);
+    }
+  }
 }

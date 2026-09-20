@@ -298,7 +298,7 @@ import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneG
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
-import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
+import { judgeBuild, judgeRepairPrompt, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
@@ -16021,10 +16021,22 @@ async function noteBuildOutcome(
             const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective);
             // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
-            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
+            // EXHAUSTIVE, via the shared label — the ternary this replaces had no `nemotron` branch and
+            // fell through to 'Sonnet', naming an engine that had not run. See judgeEngineLabel.
+            const reviewerName = judgeEngineLabel(judge.kind);
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
-            const recordVerdict = (v: { pass: boolean; score: number; findings: string[] }, tag: string): void => {
-              try { buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true }); } catch { /* diagnostics best-effort */ }
+            const recordVerdict = (v: JudgeVerdict, tag: string): void => {
+              // THREE OUTCOMES, AND THE DETAIL ON ALL OF THEM. This used to print `PASS`/`FAIL` from
+              // `v.pass` and append the findings ONLY on a failure — so a judge that could not run
+              // (which returns pass=true so it never blocks a build) was recorded as a passing review
+              // with its own explanation discarded. See describeJudgeVerdict.
+              const d = describeJudgeVerdict(v);
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW', autoResolved: true,
+                  message: `${tag}: ${d.label} (score ${v.score})${d.detail ? ' — ' + d.detail : ''}`,
+                });
+              } catch { /* diagnostics best-effort */ }
             };
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is checking the build…', ts: Date.now() });
             let verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);

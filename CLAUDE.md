@@ -2582,6 +2582,54 @@ the flag entries above promise.
   `NEVER_SUGGEST` — how OUR router behaved is never a finding about the user's app. Test-locked in
   `tests/ladderDepth.test.ts`.
 
+- **🔁 THE READ LOOP, AND THE TWO THINGS THAT LET IT RUN UNSEEN (autopsy `c847b523`, 2026-09-20; no
+  flag, all four fixes are on by construction).** The build read `src/App.tsx` **nine times**, wrote
+  **zero files**, and the user pressed **Stop at 108 s**. The report carried **39 `control-unlabeled`
+  findings**, every one against NavBharatAI's OWN golden scaffolds.
+  🔴 **THE ANALYZER WAS LYING ABOUT 20 OF THE 39, and none of the three bugs is a form-label bug —
+  each silently disabled EVERY OTHER RULE in `AccessibilityAnalysis.ts`.** (1) The tag scanner was
+  `/<\s*[a-zA-Z][\w-]*\b[^<>]*?\/?>/g`, and `[^<>]` cannot contain a `>` — but `(e) => set(e)` does,
+  so **every attribute after the first handler was invisible**: `aria-label`, `alt`, `id`, `title`,
+  `href`, `scope`, `lang`. (2) `tagName` lowercases, so `<Select label="Category">` was judged by the
+  rules for HTML `<select>` and `<Dialog.Root>` as `<dialog>` — a false finding that lands on any user
+  with a design system. JSX makes this **decidable, not heuristic**: lowercase is an element,
+  capitalised or dotted is a component, and we cannot know a component's contract. (3) A wrapping
+  `<label>` counted only on ONE line, so the commonest React form shape in the world read as
+  unlabelled. Findings fell **39 → 19** on these alone.
+  🔒 **THE OTHER 19 WERE REAL, AND THE FIX IS NOT 19 LABELS.** Nothing had ever run our own gate over
+  our own templates: the scaffolds have had a CI lock for parsing, for Babel compilation and for
+  duplicate imports since the white-screen work, and accessibility was never asked — so the first
+  thing a user's app inherited from us was a screen a blind user cannot fill in.
+  `tests/ourOwnTemplatesPassOurOwnGate.test.ts` runs the **real** `scanAccessibility` over every
+  registered scaffold (a copy of the rules would drift; asking the production module cannot), and
+  carries its own canary so a scanner that silently returned `[]` cannot make it pass for ever.
+  🔑 **AN INSTRUMENT ABOUT OUR OWN ENGINE MUST NOT LIVE INSIDE ANOTHER FEATURE'S CONDITIONAL — name
+  this class, it will recur.** `REPEATED_READS`, the ONE finding that describes this exact build, sat
+  inside `if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 &&
+  !abort.signal.aborted)` purely because that feature had already assembled a file map. Three of the
+  four were false here, so it had been reporting only on builds that **wrote files and were never
+  stopped** — the ones least likely to have looped. A biased sample reads as an ABSENCE of the problem,
+  which is worse than no measurement because nobody doubts it. It and its sibling
+  `WRITE_TIME_TYPECHECK` now sit beside `READY_BEFORE_END`, the block that already states this rule.
+  ⚠️ **`tsc` and `vitest` cannot see a measurement that is merely unreachable**, so the lock is a
+  SOURCE-level guard (`tests/theLoopBreakerAndItsMeasurement.test.ts`), proven by reversion.
+  🔁 **AND THE ADVICE NEVER ESCALATED:** the nudge fired on reads two through nine, word for word.
+  `READ_LOOP_LIMIT = 3` turns it into a STOP that names the three ways out — write the change, write a
+  different file, or **say plainly what is blocking you** (a stop that only forbids leaves a model
+  nowhere to go, and it reads again). What makes it MECHANICAL rather than a louder nag: `stalls`
+  counts only reads where the file was unchanged **and not one file anywhere had been written since
+  the previous read of that path** — a provably no-progress step. A re-read after an edit resets it to
+  zero and never sees the message. The write counter lives on `onFileWrite`, the one durable-write
+  door, so the answer is true by construction. ⚠️ **The content is STILL returned in full** — refusing
+  a read is the one intervention that can strand a model whose context was trimmed, which is worse
+  than the loop. `readLoopStops()` rides on the `REPEATED_READS` detail: stops **plus** a still-high
+  re-read count is the escalation being IGNORED, a different problem that must be legible as such.
+  ⚠️ **OPEN, not decided here: the DOUBLE DISCOUNT on a stopped build.** A cancelled build has its
+  markup waived (no proven preview) and is then halved again for the cancellation, so a stopped build
+  can cost NavBharatAI money rather than merely earning nothing. Both rules are individually correct
+  and admin-mandated; their composition was never decided. Raised to the admin — billing is not a
+  session's call.
+
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and
   nothing was PROVEN, because every runtime check needs a live preview and they all skip together. GREEN

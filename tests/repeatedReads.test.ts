@@ -86,8 +86,14 @@ describe('the wiring — the half that rots', () => {
   it('the ledger compares CONTENT, so "unchanged" can never be a false positive', () => {
     // Held rather than hashed: the bodies are already in memory on the way past, and a truncated hash
     // could collide into a wrong "you already have this".
-    expect(disp).toContain('private _readLedger = new Map<string, { count: number; content: string }>();');
+    expect(disp).toContain('private _readLedger = new Map<string, {');
+    expect(disp).toContain('content: string;');
     expect(disp).toContain('const unchanged = prior !== undefined && prior.content === full;');
+    // Since the loop breaker (autopsy c847b523) the entry also carries the two facts that make a
+    // no-progress read provable: the write count at the time of the read, and the streak of reads
+    // that followed no write at all.
+    expect(disp).toContain('writeSeq: number;');
+    expect(disp).toContain('stalls: number;');
   });
 
   it('the content is ALWAYS returned in full — both on a whole read and a ranged one', () => {

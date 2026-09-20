@@ -1,4 +1,4 @@
-import { repeatedReadNotice } from './repeatedReads';
+import { repeatedReadNotice, READ_LOOP_LIMIT } from './repeatedReads';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -531,6 +531,14 @@ export class ToolDispatcher {
    * reason it is there — stripping it from disk would fix a publishing bug by breaking a feature.
    */
   private readonly onFileWrite = (path: string, content: string): void => {
+    // ── THE PROOF THAT SOMETHING CHANGED (autopsy c847b523, 2026-09-20) ─────────────────────────
+    // The read-loop breaker needs one fact: has ANYTHING been written since the last read of this
+    // path? Counting it HERE — on the same callback the docblock above calls the one door every
+    // durable write must pass through — is what makes the answer true by construction rather than
+    // by remembering to increment at twenty call sites. It is deliberately a count of writes and
+    // not of write_file CALLS: a heal, a batch, a schema sync and a rename all count, because all
+    // of them change the project the model is reasoning about.
+    this._writeSeq++;
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
   };
 
@@ -2094,11 +2102,38 @@ export class ToolDispatcher {
    * Content is held rather than hashed: the bodies are already in memory on the way past, and an exact
    * comparison cannot produce a false "unchanged" the way a truncated hash could.
    */
-  private _readLedger = new Map<string, { count: number; content: string }>();
+  /**
+   * How many durable writes this build has made. Only ever compared against itself — an absolute
+   * value means nothing, a difference of zero means "nothing moved". See `onFileWrite`.
+   */
+  private _writeSeq = 0;
+
+  /** How many STOP-level read-loop notices this build has issued. Monotonic; see `readLoopStops`. */
+  private _readLoopStops = 0;
+
+  private _readLedger = new Map<string, {
+    count: number;
+    content: string;
+    /** `_writeSeq` as it stood when this path was last read — the no-progress comparison. */
+    writeSeq: number;
+    /** Consecutive reads of this path that were unchanged AND followed no write at all. */
+    stalls: number;
+  }>();
 
   /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
   readLedgerCounts(): Map<string, number> {
     return new Map([...this._readLedger].map(([p, r]) => [p, r.count]));
+  }
+
+  /**
+   * How many times this build had to tell the model to STOP re-reading (see repeatedReads.ts).
+   *
+   * Reported, not just acted on — the escalation is a behavioural fix, and a behavioural fix nobody
+   * measures is a hope. A build showing stops AND a still-high re-read count is the escalation being
+   * ignored, which is a different problem from the one it was built for and must be legible as such.
+   */
+  readLoopStops(): number {
+    return this._readLoopStops;
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
@@ -2509,11 +2544,22 @@ export class ToolDispatcher {
         // The content is ALWAYS returned in full. Suppressing it would save real tokens and is exactly
         // the wrong trade — if the model's context has been trimmed, "you already have this" leaves it
         // unable to proceed at all.
+        //
+        // 🔴 AND WHEN THE NUDGE IS IGNORED (autopsy c847b523): nine reads of one file, zero writes,
+        // the user pressed Stop at 108s — and the notice was word-for-word identical all nine times.
+        // `stalls` counts only the reads that were unchanged AND followed NO write anywhere in the
+        // project, so it is a count of provably useless steps rather than of impatience; a re-read
+        // after an edit resets it to zero and never escalates. At READ_LOOP_LIMIT the wording becomes
+        // a stop. The content is still returned in full — see repeatedReads.ts for why that line is
+        // not negotiable.
         const prior = this._readLedger.get(reqPath);
         const readCount = (prior?.count ?? 0) + 1;
         const unchanged = prior !== undefined && prior.content === full;
-        this._readLedger.set(reqPath, { count: readCount, content: full });
-        const notice = repeatedReadNotice(reqPath, readCount, unchanged);
+        const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
+        const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
+        this._readLedger.set(reqPath, { count: readCount, content: full, writeSeq: this._writeSeq, stalls });
+        const notice = repeatedReadNotice(reqPath, readCount, unchanged, stalls);
+        if (stalls >= READ_LOOP_LIMIT) this._readLoopStops++;
 
         if (sl === null && el === null) return notice ? `${notice}${full}` : full;
         const lines = full.split('\n');

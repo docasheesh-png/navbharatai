@@ -277,7 +277,7 @@ import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } 
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
-import { repeatedReadSummary } from '../AgentV3/repeatedReads';
+import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
@@ -16176,6 +16176,60 @@ async function noteBuildOutcome(
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
+
+      /**
+       * ── HOW THE ENGINE BEHAVED, MEASURED ON EVERY BUILD ────────────────────────────────────────
+       *
+       * 🔴 AUTOPSY c847b523 (2026-09-20). The build read `src/App.tsx` NINE times, wrote nothing, and
+       * the user pressed Stop at 108 s. `REPEATED_READS` — the one finding that names exactly that —
+       * is absent from the report, and it was not a detection failure: it had been nested inside
+       *
+       *     if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted)
+       *
+       * purely because that feature had already assembled the file map it wanted for something else.
+       * Three of those four conditions were false in this build, so the measurement could not fire in
+       * precisely the shape of build it exists to describe. It had been reporting only on builds that
+       * wrote files and were never stopped — the ones least likely to have looped.
+       *
+       * 🔑 THE CLASS, named so it is recognised again: AN INSTRUMENT ABOUT OUR OWN ENGINE MUST NOT
+       * LIVE INSIDE ANOTHER FEATURE'S CONDITIONAL. Its only precondition is that the build ran. A
+       * measurement whose coverage is decided by an unrelated flag reports a biased sample and reads
+       * as an absence of the problem — which is worse than no measurement, because nobody doubts it.
+       *
+       * So both lines now sit here, beside READY_BEFORE_END, for the reason that block already states:
+       * "never got there" and "got there and stopped at once" are opposite facts, and a missing line
+       * reads as the second. Each is independently wrapped — neither can suppress the other.
+       */
+      // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
+      // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
+      // worked: a behavioural fix nobody measures is a hope.
+      try {
+        const line = repeatedReadSummary(dispatcher.readLedgerCounts());
+        const stops = dispatcher.readLoopStops();
+        if (line) {
+          buildDiag.record({
+            phase: 'build', severity: 'warning', code: 'REPEATED_READS',
+            message: line, autoResolved: false,
+            // WHETHER THE BREAKER FIRED, AND WHETHER IT WORKED. A build with stops AND a still-high
+            // re-read count is the escalation being IGNORED — a different problem from the one it
+            // was built for, and it must be legible as such rather than hidden inside a total.
+            detail: stops > 0
+              ? `${stops} STOP-level notice(s) issued after ${READ_LOOP_LIMIT} no-progress reads of the same path.`
+              : 'No read reached the no-progress limit — every re-read followed a real change, or the streak was short.',
+          });
+        }
+      } catch { /* an advisory finding must never affect a build */ }
+      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+      // write time and how many errors were caught while the model still held the file. Reported
+      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+      try {
+        const wt = dispatcher.writeTypecheckStats();
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+          message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
+
       if (result.timedOut === true) {
         try {
           buildDiag.record({
@@ -17581,29 +17635,6 @@ async function noteBuildOutcome(
             for (const [fp, content] of entries) {
               if (/(^|\/)package\.json$/i.test(String(fp))) pkgTexts.push(String(content ?? ''));
             }
-            // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
-            // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
-            // worked: a behavioural fix nobody measures is a hope.
-            try {
-              const line = repeatedReadSummary(dispatcher.readLedgerCounts());
-              if (line) {
-                buildDiag.record({
-                  phase: 'build', severity: 'warning', code: 'REPEATED_READS',
-                  message: line, autoResolved: false,
-                });
-              }
-            } catch { /* an advisory finding must never affect a build */ }
-            // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
-            // write time and how many errors were caught while the model still held the file. Reported
-            // so the next autopsy can say whether the 7-minute endgame grind actually went away.
-            try {
-              const wt = dispatcher.writeTypecheckStats();
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
-                message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
-              });
-            } catch { /* an advisory line must never affect a build */ }
-
             const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
             if (stranded.stranded) {
               buildDiag.record({

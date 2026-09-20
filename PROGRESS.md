@@ -70953,3 +70953,103 @@ is a promise.
 ⚠️ **Open:** how often a build actually carries todos is unmeasured, and that decides how often the
 number glides rather than jumps. The first real builds answer it — the same evidence `LADDER_DEPTH` is
 waiting on.
+
+---
+
+## 2026-09-20 — AUTOPSY `c847b523`: the analyzer was the defect, and the finding that would have caught the loop could not fire
+
+Admin, with the whole build report: *"jo jo problem is build report me hai. sabhi ko diagnosis kar ke
+root cause dhund ke dna level par theek karo!!"*
+
+**What the build did:** read `src/App.tsx` **nine times**, wrote **zero files**, and the user pressed
+**Stop at 108 seconds**. The report carried **39 `control-unlabeled` findings** — every one of them
+against NavBharatAI's own golden scaffolds. Four distinct root causes, all fixed at the class.
+
+### 1 · The accessibility analyzer was lying about 20 of its 39 findings
+
+Three bugs in `AccessibilityAnalysis.ts`, and none of them is a form-label bug — each silently
+disabled **every other rule in the file** as well.
+
+- 🔴 **An arrow function ends a tag.** The scanner was `/<\s*[a-zA-Z][\w-]*\b[^<>]*?\/?>/g`, and
+  `[^<>]` cannot contain a `>` — but `(e) => set(e)` does. The match ended at the `>` of `=>`, so
+  **every attribute written after the first handler was invisible to every rule**: `aria-label`,
+  `alt`, `id`, `title`, `href`, `scope`, `lang`. `tagsOnLine` is now a brace-depth- and quote-aware
+  scanner that ends a tag only at a `>` genuinely outside `{…}`. A tag that does not close on its own
+  line is still skipped — an incomplete attribute set must never produce a missing-attribute finding.
+- 🔴 **A React component was judged as an HTML element.** `tagName` lowercases, so `<Select
+  label="Category">` — a component with a real, working prop — was judged by the rules for `<select>`,
+  and `<Dialog.Root>` was judged as `<dialog>` because the name regex stops at the dot. JSX makes this
+  **decidable rather than heuristic**: lowercase is an element, capitalised or dotted is a component.
+  We cannot know a component's contract, so `isHtmlElement` makes the analyzer say nothing about it.
+  This false finding lands on any user whose app has a design system.
+- 🔴 **A wrapping `<label>` only counted on one line.** The commonest React form shape in the world —
+  `<label>` newline `<input>` newline text `</label>` — was reported unlabelled. One counter carried
+  across lines (`labelDepth`) removes the whole family.
+
+**Scaffold findings fell 39 → 19 on these three fixes alone.** Eight regression tests in
+`AccessibilityAnalysis.test.ts`, six of which were **proven to fail** against the old analyzer; the
+other two lock the precision that must not be traded away (an unclosed tag is still not judged, and a
+sibling `<label>` with no `htmlFor` is still a real finding).
+
+### 2 · The other 19 were real — and nothing had ever run our own gate over our own templates
+
+The 50/50 law, literally. The first half was the analyzer; the other half is *why did the problem arise
+at all?* Because the golden scaffolds have had a CI lock for **parsing**, for **Babel compilation** and
+for **duplicate imports** since the white-screen work — accessibility was simply never asked. So the
+very first thing a user's app inherited from us was a screen a blind user cannot fill in, and the
+engine then spent its own turns being told about defects it had not caused.
+
+`aria-label` added to all 19 (`appsA.ts` ×3, `appsB.ts` ×5, `indiaApps.ts` ×11), each mirroring the
+control's own visible voice — the wedding-RSVP app's stay Hinglish because its placeholders are.
+**The fix is not 19 labels; it is `tests/ourOwnTemplatesPassOurOwnGate.test.ts`**, which runs the REAL
+`scanAccessibility` over every registered scaffold (a copy of the rules would drift; asking the
+production module cannot) and fails on any `control-unlabeled` or any HIGH-severity defect. It carries
+its own canary: a deliberately broken template must still be caught, so a scanner that silently
+returned `[]` cannot make the locks pass for ever while proving nothing.
+
+### 3 · 🔴 `REPEATED_READS` — the one finding that names this exact build — could not fire
+
+It was nested inside
+`if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted)`,
+**purely because that feature had already assembled a file map it wanted for something else.** Three of
+those four conditions were false here. So the measurement had been reporting only on builds that wrote
+files and were never stopped — **the ones least likely to have looped.**
+
+🔑 **THE CLASS, named so it is recognised again: an instrument about our own engine must not live
+inside another feature's conditional.** Its only precondition is that the build ran. A measurement
+whose coverage is decided by an unrelated flag reports a biased sample and reads as an *absence* of the
+problem — worse than no measurement, because nobody doubts it. Both `REPEATED_READS` and its sibling
+`WRITE_TIME_TYPECHECK` now sit beside `READY_BEFORE_END`, the block that already states this rule in
+words. Each is independently wrapped, so neither can suppress the other.
+
+⚠️ **`tsc` and `vitest` cannot see a measurement that is merely unreachable**, which is why the lock is
+a **source-level** guard asserting the record appears before that `if`. Proven by reversion.
+
+### 4 · The advice never escalated, so the loop had no brake
+
+`repeatedReadNotice` fired on reads two through nine with **word-for-word identical text**. Advice
+repeated unchanged is not a defence; it is wallpaper.
+
+- **`READ_LOOP_LIMIT = 3`.** At the limit the wording becomes a STOP that names the three ways out —
+  write the change, write a different file, or **say plainly what is blocking you**. A stop that only
+  forbids leaves a model nowhere to go, and it will read again.
+- 🔑 **What makes it mechanical rather than a louder nag:** `stalls` counts only reads where the file
+  was unchanged **AND not one file anywhere in the project had been written since the previous read of
+  that path**. That is a provably no-progress step. A re-read after an edit resets the streak to zero
+  and never sees the message — the distinction `repeatedReads.ts` was written to protect.
+- 🔒 **The write counter lives on `onFileWrite`**, the one door the class's own docblock calls the only
+  route to durable storage — so "did anything change?" is true by construction rather than by
+  remembering to increment at twenty call sites. It counts writes, not `write_file` calls: a heal, a
+  batch, a schema sync and a rename all change the project the model is reasoning about.
+- 🔒 **The content is still returned in full.** Refusing the read is the one intervention that can
+  strand a model whose context has been trimmed — a worse failure than the loop.
+- **Measured, not just acted on:** `readLoopStops()` rides on the `REPEATED_READS` detail. A build with
+  stops **and** a still-high re-read count is the escalation being *ignored* — a different problem from
+  the one it was built for, and it must be legible as such.
+
+### ⚠️ Open, and deliberately not decided here
+
+**The double discount on a stopped build.** A cancelled build has its markup waived (no proven preview)
+and is then halved again for the cancellation, so a stopped build can cost NavBharatAI money rather
+than merely earning nothing. Both rules are individually correct and admin-mandated; their composition
+was never decided. Raised to the admin rather than changed — billing is not a session's call.

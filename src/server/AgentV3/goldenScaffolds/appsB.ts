@@ -66,14 +66,14 @@ function App() {
         </div>
         <div className="field">
           <label>Value</label>
-          <input type="number" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} style={{ fontSize: 20 }} />
+          <input type="number" aria-label="Value" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} style={{ fontSize: 20 }} />
         </div>
         <div className="row">
-          <select value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1 }}>
+          <select aria-label="Convert from" value={from} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1 }}>
             {units.map((u) => <option key={u}>{u}</option>)}
           </select>
           <button onClick={swap} aria-label="Swap units" title="Swap">Swap</button>
-          <select value={to} onChange={(e) => setTo(e.target.value)} style={{ flex: 1 }}>
+          <select aria-label="Convert to" value={to} onChange={(e) => setTo(e.target.value)} style={{ flex: 1 }}>
             {units.map((u) => <option key={u}>{u}</option>)}
           </select>
         </div>
@@ -229,7 +229,7 @@ function App() {
           />
           <button className="primary" onClick={add}>Add</button>
         </div>
-        <input value={query} placeholder="Search notes" onChange={(e) => setQuery(e.target.value)} />
+        <input aria-label="Search notes" value={query} placeholder="Search notes" onChange={(e) => setQuery(e.target.value)} />
         {visible.length === 0 && (
           <p className="muted" style={{ textAlign: 'center', margin: '12px 0' }}>
             {notes.length === 0 ? 'No notes yet - your notes stay on this device.' : 'No notes match your search.'}
@@ -320,7 +320,7 @@ function App() {
         )}
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Length: {len}</label>
-          <input type="range" min={6} max={32} value={len} onChange={(e) => setLen(parseInt(e.target.value, 10))} />
+          <input type="range" aria-label="Password length" min={6} max={32} value={len} onChange={(e) => setLen(parseInt(e.target.value, 10))} />
         </div>
         <label className="row" style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={upper} onChange={(e) => setUpper(e.target.checked)} /> Uppercase letters (A-Z)

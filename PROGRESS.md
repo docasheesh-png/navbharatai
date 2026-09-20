@@ -73691,3 +73691,35 @@ what `recentCount` now answers, and why it shipped first.
 `return OTHER_REASON`, making `recentCount` a bare number, and putting the untagged abort back on
 `OUTCOME_STOPPED` each fail it). Four existing assertions were repointed to their INTENT and none was
 weakened: "unnameable" is still asserted, now precisely.
+
+### 🔎 AND THE SAME ROOT CAUSE IS PROBABLY WEARING OTHER ROWS' NAMES — recorded, deliberately NOT acted on
+
+Reading the classifier against `deriveRootCause`'s fallback order turns up a consequence worth
+writing down before anyone re-derives it from the next screenshot.
+
+When a build records **no** `OUTCOME_*` code, `deriveRootCause` falls back to *"the most severe
+unresolved issue"* — whatever warning happened to be loudest. `abortOutcome.ts`'s own header names
+what that usually is: *"a provider fallback, a benched rung, a `read_file` on a path not yet
+written"*. The classifier then reads THAT sentence. If it matches nothing it becomes
+`no-outcome-recorded` (row 1 above) — **but if it happens to match a grounded pattern it is given
+that pattern's name instead**, as a fact.
+
+So on the admin's table, an unknown share of:
+
+```
+AI provider timed out / ran out of budget     9  (6.3%)
+A tool call failed                            9  (6.3%)
+Every AI provider failed                      2  (1.4%)
+```
+
+may be **the same bug as row 1**, wearing a more confident label — a recovered tool error that the
+build moved past, named as the reason the build ended. "No code" means the sentence is a fallback,
+and a fallback that matches a regex is still a fallback.
+
+⚠️ **This is NOT being fixed now, and the reason is this file's own rule.** Downgrading every
+pattern match on an uncoded record would throw away real information (a legacy record's `rootCause`
+often genuinely IS its cause), and nothing here can say how big the share is. `recentCount` is the
+instrument that settles it: **if `no-outcome-recorded` reads "none in 7d" on the next reading, this
+whole concern is historical** and the remaining provider/tool rows are real. If it does not, this is
+where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
+the protection until the measurement has produced a reading.*

@@ -588,7 +588,30 @@ export function BillingPanel(props: BillingPanelProps) {
                         {storePurchaseNotice}
                       </div>
                     )}
-                    {storeRail === 'play-billing' && storeConfig ? (
+                    {storeRail === 'none' ? (
+                      /*
+                       * 🍎 APPLE 3.1.1 — this device may not buy here, so it is told so plainly.
+                       *
+                       * NOT a disabled button and NOT a hidden section: the second absolute rule
+                       * allows exactly two states, working or honestly unavailable, and a top-up
+                       * panel that silently disappears leaves a user hunting for a balance they can
+                       * see going down.
+                       *
+                       * ⚠️ AND IT DELIBERATELY DOES NOT SAY "buy it on the website". Pointing a user
+                       * at an outside purchase from inside the app is Apple's anti-steering rule, and
+                       * CLAUDE.md already records the same discipline for Play ("do NOT add 'cheaper
+                       * on the web' copy to the app"). Stating that a feature is unavailable is
+                       * allowed; routing around the store is not.
+                       */
+                      <div className="bg-well border border-line p-6 rounded-[2rem] space-y-3">
+                        <h4 className="text-xs font-black text-ink uppercase tracking-widest font-mono">Top-up is not available in this app</h4>
+                        <p className="text-xs text-muted leading-relaxed font-semibold">
+                          You cannot add credit from inside the iPhone app yet. Everything else is unchanged —
+                          your balance, your apps, and any credit you already have all work exactly as they do
+                          everywhere else.
+                        </p>
+                      </div>
+                    ) : storeRail === 'play-billing' && storeConfig ? (
                       /*
                        * GOOGLE PLAY PACKS. Google Play requires digital goods consumed in the app to
                        * be bought through Play's billing, so on the Play build these fixed packs

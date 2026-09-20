@@ -38,7 +38,7 @@ import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
-import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed } from '../AgentV3/nemotron';
+import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -12481,12 +12481,17 @@ async function noteBuildOutcome(
         const parsedLadder = tierLadder(powerLevelReqEffective);
         const keyless = parsedLadder.rungs.filter((r) => !(process.env[keyEnvFor(r.provider)] && String(process.env[keyEnvFor(r.provider)]).trim()));
         buildDiag.record({
-          phase: 'provider', severity: parsedLadder.rejected || keyless.length === parsedLadder.rungs.length ? 'warning' : 'info',
+          phase: 'provider',
+          severity: parsedLadder.rejected || nemotronConfigNote() || keyless.length === parsedLadder.rungs.length ? 'warning' : 'info',
           code: 'TIER_LADDER', autoResolved: !parsedLadder.rejected,
           message: `${tierDisplayName(toPowerLevel(powerLevelReqEffective))} ladder (${parsedLadder.source}): ${describeLadder(parsedLadder.rungs)}`,
           detail: [
             keyless.length ? `Keyless rungs skipped: ${describeLadder(keyless)} (set ${[...new Set(keyless.map((r) => keyEnvFor(r.provider)))].join(', ')}).` : 'Every rung has a key.',
             parsedLadder.rejected ? `Override refused: ${parsedLadder.rejected}` : '',
+            // A MISREAD FLAG BELONGS WHERE THE ADMIN LOOKS, not only in a server log. Autopsy
+            // 31dc61fd: Nemotron ran zero times, and the reason — an AGENTV3_NEMOTRON value that
+            // names no tier — was invisible on every screen. See nemotronConfigNote.
+            nemotronConfigNote() || '',
             routeStrong ? 'Large project / import build (routeStrong) — the ladder is unchanged; the tier decides the engine.' : '',
           ].filter(Boolean).join(' '),
         });

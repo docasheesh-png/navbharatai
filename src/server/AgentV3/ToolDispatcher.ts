@@ -2132,6 +2132,40 @@ export class ToolDispatcher {
     return new Map([...this._readLedger].map(([p, r]) => [p, r.count]));
   }
 
+  /**
+   * The LIVE ledger, for a child dispatcher to accumulate into.
+   *
+   * 🔴 WHY THIS EXISTS — autopsy f97eb0ec, 2026-09-20, and it is the FIFTH time this exact class has
+   * been paid for. The reviewer read `src/App.tsx` **seven times** in one build, unchanged, with our
+   * own nudge quoted back to it every single time; seven of its twelve steps went on it and it timed
+   * out with zero findings. `repeatedReadSummary` exists precisely to put that in the report — and
+   * the report carried NO such finding, because the reviewer is a SUB-AGENT with its own
+   * `ToolDispatcher`, and this ledger is an instance field. The route reads the PARENT's.
+   *
+   * ⚠️ The measurement was the whole point of the nudge. `repeatedReads.ts` says so in its own words:
+   * *"Reported rather than merely nudged, so the NEXT report says whether the nudge worked. A
+   * behavioural fix nobody measures is a hope."* Unshared, it was a hope.
+   *
+   * 🔒 AND THIS IS DELIBERATELY NOT A CACHE. That trade is settled in `repeatedReads.ts` and the
+   * reasoning holds: the content is always returned in full, because a model whose context has been
+   * trimmed must still be able to re-read a file. What was missing was never the suppression — it
+   * was the COUNT reaching the one place a human reads.
+   */
+  sharedReadLedger(): Map<string, { count: number; content: string }> {
+    return this._readLedger;
+  }
+
+  /**
+   * Count this child's reads in the parent's ledger.
+   *
+   * Replaces the reference rather than copying, so every later read lands in the shared map — the
+   * same shape as `shareWriteTypecheckStats`, which is the sibling of this bug that was fixed first
+   * (#3134). Called once at spawn, before the child has read anything.
+   */
+  shareReadLedger(ledger: Map<string, { count: number; content: string }>): void {
+    this._readLedger = ledger;
+  }
+
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
   private readonly _writeTypecheckQueue = new WriteTypecheckQueue<import('./EndgameRepair').TscError[] | null>();
   private _writeTypecheckStats: WriteTypecheckStats = emptyWriteTypecheckStats();

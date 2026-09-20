@@ -72018,6 +72018,92 @@ one. Held open by its own case in the suite. This is also the argument for the g
 WHOLE: the new suite was green while those three were red.
 ---
 
+## 2026-09-20 — A commented-out import is not an import (autopsy `31dc61fd`, re-read)
+
+**This is the SAME build id I autopsied earlier today.** The admin re-sent it; rather than repeat the
+tally, I re-read it end to end for what my first pass MISSED. This is the sharpest of four candidates,
+and the only one I could verify to the line.
+
+### The defect
+
+`WorkspaceMemory.extractFacts` ran its import, symbol, route and reference regexes over **RAW source**,
+so anything that merely LOOKED like code entered the project graph as a real fact. That graph is not a
+side channel — two independent consumers read it:
+
+- `analyzeArchitecture(graph)` turns `graph.imports` into `unresolvedImports`, which `releaseGate.ts`
+  counts as a **HARD BLOCKER** ("Hard blockers — an unresolved import, a missing dependency");
+- `collectDependencyIssues()` turns the same field into **"missing dependency"**, which
+  `BuildConfidence` then charges against the build.
+
+### ⚠️ And the trigger is OUR OWN SCAFFOLD, so it fired on EVERY vite-react build
+
+`ViteReactProviderContents.ts` writes this into every generated `vite.config.ts`:
+
+```
+// `import { useStore } from 'stores/useStore'` resolves at BUILD & RUNTIME too — not just in
+```
+
+Measured, not reasoned about: that line yields `stores/useStore`, package root `stores`, in no
+package.json. In this report an app that was **complete, typechecking, passing its own tests and
+rendering in a real browser** was scored `Build confidence: 35% (Low)` with "1 missing dependency(ies)
+not in package.json" — and the architect and then the reviewer between them spent **three greps, a
+shell grep and a repeated `evaluate`** proving it was a phantom. The reviewer's own conclusion was
+filed as a finding: *"`stores` dependency warning is a false positive."*
+
+### 🔑 The class: the rule already existed in this repo, TWICE, and not where it mattered
+
+`SpaFallbackAnalysis.ts` and `ProjectIntegrityChecks.ts` each carry a **private** `stripComments`, and
+the second one's doc comment states this exact rule — *"so a commented-out `.focus()` / import never
+counts."* They have already **drifted** (one substitutes a space, the other nothing). So the rule was
+written twice and was still missing from the one extractor that feeds the whole graph.
+
+`stripCodeComments.ts` is now the one implementation, used by `extractFacts`.
+
+- 🔒 **Length-preserving on purpose.** Deleting a comment can JOIN the tokens either side of it
+  (`foo/*c*/.bar()` → `foo.bar()`), inventing code nobody wrote — the same class of false fact this
+  removes. Blanking cannot.
+- 🔒 **The `[^:]` guard is what keeps a URL a URL.** Without it `from 'https://esm.sh/react'` loses
+  everything from `//` onwards and a REAL import disappears — turning a false-positive bug into a
+  false-negative one, which is strictly worse. Both existing copies carry the same guard; it was kept,
+  not re-invented.
+- 🔒 **SECURITY STILL READS RAW SOURCE.** A key pasted into a comment is a leaked key. Every other
+  extractor reads the stripped copy; `scanSecurity` deliberately does not, and a test holds that.
+
+**Measured before and after** — phantoms from the scaffold comment, a commented-out RELATIVE import, a
+block comment, a docblock example, a commented `require`, a commented `export`, a commented route: all
+gone. Controls unchanged: real imports, a URL import, a real import with a trailing comment.
+
+**Tests** — `tests/aCommentedOutImportIsNotAnImport.test.ts` (11 cases), **reversion-proven four ways**:
+raw content again → 4 red · security switched to the stripped copy → 1 red · the `[^:]` URL guard
+removed → 1 red · length preservation dropped → 2 red.
+
+### Deliberately NOT done, and why
+
+- **The two private `stripComments` copies were NOT migrated.** They are not instances of the bug —
+  they are instances of the SOLUTION that was never shared, and they already behave differently from
+  each other. Unifying them changes two working modules for no measured gain today, which is exactly
+  the "never trade one problem for another" rule. Recorded as a follow-up with its own tests.
+- **String literals are still read.** `const s = "import a from 'react-dom'"` still yields a phantom.
+  That is a lexer's job, not a regex's, and unlike the comment case **nobody has measured it happening
+  in a real build** — comments were measured, strings are speculative. Recorded rather than guessed at.
+- **`syncDependencies` (`src/server/project/`) has the same raw-source extractor and it WRITES —**
+  `pkg.dependencies[name] = …` for every harvested bare import, then installs. It is on the Engineer AI
+  / BuildPipeline path, not AgentV3's, so it did not cause this report. **Named here as an open sibling
+  because its failure mode is worse than a warning:** a package name harvested from a comment would be
+  added to a user's package.json and fetched from npm.
+
+### The other three candidates from the re-read, recorded but not fixed here
+
+1. **"build budget reached" named the wrong clock.** At 105s into a 1800s build, the report says
+   *"A model call was stopped because this build's time budget ended"* with `provider=unknown`, while
+   the line above it names KIMI. It was the FAST LANE's ~60s contract-call cap. An autopsy reading this
+   would believe the 30-minute budget expired 105 seconds in.
+2. **`evaluate` said "Nothing here was ever proven to RUN — no preview"** while the same build had
+   `PREVIEW_PUBLISHED`, a successful screenshot, and `GREEN_GUARD_SAVE` ("opened in a real browser and
+   rendered"). This is the **EVIDENCE LEDGER** open root cause caught with an exact quote, and it cost
+   money: the reviewer read "35% (Low)" and went hunting.
+3. **`PREVIEW_SNAPSHOT_STALE`** — the snapshot was taken, then a post-build pass wrote three more test
+   files, invalidating it. An ordering defect.
 ## 2026-09-20 — A BUILD THAT DID NOTHING TOLD THE USER IT HAD MADE THEIR CHANGE (autopsy 586295b7)
 
 **Admin:** *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna
@@ -72273,3 +72359,136 @@ including the pair that proves the rule is about the sentence rather than the wo
 Test-locked in `tests/theFruitIsNotABuildOrder.test.ts` (7 cases), reversion-proven (bare `banana`
 back in the list → 2 red). The TRIPWIRE left in `anOrderInHindiIsStillAnOrder.test.ts` fired and was
 answered deliberately, exactly as it was written to be.
+---
+
+## 2026-09-20 — Autopsy f97eb0ec (falling-block game): the reviewer's waste was invisible
+
+**Build:** 9 min, ok, 100% KIMI `kimi-k2.7-code`, weak tier, free-list. App rendered at 431s
+(`IN_BUILD_GREEN` fired — its first real evidence) and `PROD_BUILD_OK`.
+
+### Ledger — ✅ 0 · 🔀 3 · ⏭️ 3 · ❌ 5 · 🥵 5
+
+🔀 the fast lane spent 62s planning then gave up and its file list was **discarded** (the full builder
+re-explored from scratch); the shared-contract pass was skipped twice with two different reasons; the
+post-build review was handed to the user (*"send 'review it' and I'll run it on its own"*).
+⏭️ no journey; no per-route render check; **7 requirement gaps marked `autoResolved` — 4 of them
+(sound, saved progress, pause, in-app tutorial) were simply not built.**
+❌ `REVIEW_INCOMPLETE` (zero findings), `RELEASE_GATE` YELLOW, design 90/100, `vite@5.4.21` 3
+advisories, `PREVIEW_SNAPSHOT_STALE`.
+🥵 **the reviewer read `src/App.tsx` SEVEN TIMES, unchanged**; one model call took 169.6s (4,533
+output tokens ≈ 27 tok/s); 62s of planning thrown away; `READY_BEFORE_END` 92s; sandbox 91% idle.
+
+🔴 **The honest headline: this build proved the app RENDERS and proved nothing about whether it does
+what was asked.** The prompt's one measurable requirement — *"1 block drop ho, 5 second me"* — was
+checked by nothing, because the review timed out and no journey ran.
+
+### Fix 1 — a sub-agent's re-reads now reach the report (**fifth occurrence of one class**)
+
+`repeatedReadSummary` exists to put that waste in the build report, and the report carried **no such
+finding**. The reviewer is a SUB-AGENT with its own `ToolDispatcher`; `_readLedger` is an instance
+field; the route reads the PARENT's. So seven wasted steps were invisible.
+
+⚠️ **This is the same class as `onFileWrite` (#2988), the framework id, `onCommand` and
+`writeTypecheckStats` (#3134 — mine, this session).** The fix is deliberately the SAME SHAPE and sits
+two lines from #3134's, so the next dropped measurement is obvious at the same call site:
+`sharedReadLedger()` / `shareReadLedger()` + a `readLedger` thunk on `SubAgentDeps` + one route line.
+
+🔒 **NOT a cache, and that is settled rather than re-litigated.** `repeatedReads.ts` rejects
+suppression with a reason that holds — a model whose context was trimmed must still be able to re-read
+a file, and *"a builder that cannot re-read a file is a worse product than one that reads it twice"*.
+What was missing was never the suppression; it was the COUNT reaching a human. That module's own
+words: *"A behavioural fix nobody measures is a hope."* Unshared, it was a hope.
+
+⚠️ **Lean review is NOT the defect, and saying so matters.** The app was green, so suggest-only was
+correct by its own rule. But 12 steps left no slack, and 7 went on one unchanged file — **lean did not
+cause the waste; it removed the margin that had been hiding it.**
+
+### Fix 2 — a game is no longer told it takes no user input
+
+`noJourneyReason` said *"this app has no form for a journey to fill in — nothing here takes user
+input"* about an app with a canvas, touch handlers, arrow keys and on-screen ←/→ buttons. The
+game-aware sentence already existed one branch above — **gated on `pages.length === 0`, so a React
+game with an `App.tsx` can never reach it**, which is exactly the case its own comment describes.
+
+Both branches now ask the same pair (`hasRenderSurface && appHasNoDataEntry`) and return one
+constant, `NO_DATA_ENTRY_REASON`. Precise: `appHasNoDataEntry` scans EVERY file, so an app whose form
+merely sits deeper than `formSourcesFor` looks still gets the form wording — that is the real defect
+the form sentence is for. **Third time this line has told an app it takes no input when it does**
+(e4ebcb5f, a48d0f9e, now f97eb0ec).
+
+**Reversion-proven four ways** in `tests/theReviewersWasteWasInvisible.test.ts` (14 cases) — including
+the subtle one: making `sharedReadLedger()` return a **copy** looks like the fix and counts nothing.
+
+### Cross-check of the standing instructions, against this real run
+
+✅ weak ⇒ no Sonnet/Opus (`noClaude: true`) · ✅ the 3 ladders exactly as written, every rung keyed ·
+✅ NEMOTRON on the ladder (key set) · ✅ `COMPLEX_TO_KIMI` fired (score 63 > 40, opened on KIMI —
+first real evidence) · ✅ Project Mode ON and correctly did NOT fire (4 parts < 6) · ✅
+`IN_BUILD_GREEN` and `POST_GREEN_WRITES` fired (first real evidence of both) · ✅ `REVIEW_LEAN` fired.
+
+⚠️ **`AGENTV3_NEMOTRON`: the malformed-value warning is ABSENT, so the `week` typo is gone — but this
+report cannot distinguish "now a valid tier" from "unset".** The ladder rung only proves the KEY. The
+judge and plan roles remain UNCONFIRMED; the admin's console is the only place that settles it.
+
+❌ **Judge/reviewer was the SAME model as the builder** (`kimi-k2.7-code` both). **Already recorded by
+another session** in PROGRESS.md 2026-09-19 — the reviewer rides the build chain and does not obey
+`selectReviewJudge`'s different-model rule. Not taken here; this report is fresh evidence for it.
+
+### Still open (rule 6), not built here
+
+- **The fast lane's plan is thrown away when it aborts.** 62s and 2,220 output tokens, then the full
+  builder re-planned from scratch. Handing the file list over is the obvious saving.
+- **Every completeness gate we own is form-shaped.** Journey, release gate and feature coverage all
+  look for inputs; a game satisfies none of them, so a game's *behaviour* is never machine-verified.
+
+### 2026-09-20 (same autopsy, second pass) — the rest of f97eb0ec's ledger
+
+Admin: *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna level
+par theek karo."* Three more fixed, one examined and deliberately NOT "fixed", two recorded.
+
+**3. The shared-contract skip was announced TWICE, in the same millisecond.** `if (shareContract &&
+contractCap > 0 && !contractAffordable)` logged one sentence and the `else` of the run-it branch
+logged another — and an unaffordable contract satisfies **both**, so every such build told the user
+the pass was skipped twice for two different-sounding reasons. Both reasons are worth keeping (they
+are different facts: "no time for both" vs "no cap at all"), so the CHOICE moved inside the one branch
+that can fire once.
+
+**4. A plan the lane paid for is no longer thrown away.** The lane spent **62 s and 2,220 output
+tokens** planning five files, then the budget projection bailed before writing any — and the bail's
+own comment read *"there is nothing to salvage"*, which is true of FILES and false of the PLAN. The
+full builder then re-ran `ls` and re-read the scaffold it had just been told about. `plannedFiles`
+already existed but is a NUMBER for the ETA, so the list had no home: `plannedPaths` now carries it,
+and the route offers it to the full builder.
+🔒 **Offered as a PLAN, never as done work** — the salvage block beside it says *"CONTINUE — DO NOT
+START OVER … YOUR OWN prior work"* about files that EXIST. Saying that about files that do not is the
+confident-and-wrong instruction this codebase forbids, so the wording is deliberately different and a
+test asserts the difference. Only when nothing was salvaged; real files are the stronger signal.
+
+**5. `PREVIEW_SNAPSHOT_STALE` now names WHICH files differ.** It said *"a later pass changed a file"*
+and could not say which — while the two hashes come from **different places**: the copy's from the
+SANDBOX tree the production build just consumed, the confirmation's from the DURABLE set that was
+persisted. If those sets differ by one path the hashes can never match and the copy is stale on every
+build, looking identical to a real late write.
+⚠️ **The suspicion is NOT asserted — it is made settleable.** The paths travel with the copy for that
+build only (never persisted, never part of the identity — the HASH still decides), and the sentence
+now says either *"both sides hold the same N files, so a file's CONTENT changed"* or *"the two sides
+cover DIFFERENT files … so this is a file-set mismatch, not necessarily a late write"*. The next
+report answers the question instead of restating it.
+
+**EXAMINED AND DELIBERATELY NOT CHANGED — `REQUIREMENT_GAPS` with `autoResolved: true`.** My own
+ledger called this an honesty defect: 7 gaps recorded as handled while sound, saved progress, pause
+and an in-app tutorial were never built. Re-reading it, the finding claims only that the engine
+*"assumed sensible defaults"* — and the sensible default for "does it need sound?" is no sound, which
+is what shipped. It is `info` severity and cannot become a root cause. **Changing it would have been
+manufacturing a defect to have something to fix**, which the third absolute rule forbids in the same
+breath as flattery.
+
+**RECORDED, NOT BUILT:**
+- **`READY_BEFORE_END` (92 s after the app was judged done) is an INSTRUMENT, not a defect** — #3084
+  shipped it measurement-first on purpose, and CLAUDE.md says plainly not to build the protection
+  until the line has produced warnings on real builds. It worked; this is its data point.
+- **Every completeness gate we own is FORM-SHAPED.** Journey, release gate and feature coverage all
+  look for inputs, so a game satisfies none of them and its *behaviour* is never machine-verified.
+  That is why the prompt's one measurable requirement — *"1 block drop ho, 5 second me"* — was checked
+  by nothing. A real fix is a control-driven journey (press ←, assert the canvas changed), and it is a
+  product decision with its own cost, not a line in this autopsy.

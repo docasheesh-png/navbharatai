@@ -25,6 +25,7 @@ import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
+import { WelcomeBackfillCard } from './admin/WelcomeBackfillCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
@@ -4036,6 +4037,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* BUILD COSTS (admin 2026-09-14): real cost vs bill per tier × app size, measured from
                   the same durable records the list below reads. Admin-only by construction. */}
               <BuildCostCard adminToken={adminToken} />
+              <WelcomeBackfillCard adminToken={adminToken} />
               <ReferralCostCard adminToken={adminToken} />
               {/* FAILURE CATEGORY (admin 2026-09-16): which app TYPE fails most, and WHY — grouped from
                   the same durable per-workspace records the All Builds list below reads. */}

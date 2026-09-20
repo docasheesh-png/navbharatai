@@ -71643,6 +71643,64 @@ restored → 1 red · **the rule widened to bare `^no` → 4 red** (it swallows 
 
 ---
 
+## 2026-09-20 — The estimate threw away its best measurement (autopsy 31dc61fd, item 3 of 6)
+
+**Branch `claude/the-estimate-threw-away-its-best-measurement`.**
+
+### 🔴 First, a correction to my own reading of that report
+
+I told the admin the fast lane *"had that arithmetic BEFORE spending the 177 seconds."* **It did not
+have THAT arithmetic.** It had a different, more optimistic one — `canFinishAfterPreamble` — which it
+ran, and which passed. Reading the code rather than the narrative is what found the real defect.
+
+### The real defect
+
+| measurement | value | used? |
+|---|---|---|
+| plan call | **34s** | ✅ the only sample the projection used |
+| contract call | **~61s** — ran to its cap and was killed | ❌ measured nowhere, ignored |
+| a real tier | **~62.5s** | — what a file-writing stage actually cost |
+
+```
+projected:  95s elapsed + 3 tiers × 34s   = 197s  ≤ 240s  → PROCEED
+reality:   167s elapsed + 2 tiers × 62.5s = 292s  > 240s  → bail, one file written
+```
+
+**A plan call emits a short FILE LIST; a tier writes whole files, and output tokens dominate latency.**
+So the plan systematically under-measures a tier — by 1.8× here — while the contract call, which also
+produces a long body, predicted it almost exactly. **The lane had the better sample in hand and
+projected from the cheapest one.** And a call cut off by its own cap is the *strongest* evidence the
+chain is slow; that one was discarded entirely.
+
+### The fix
+
+`tierEstimateMs` takes the **slowest real sample**, never the cheapest — and `SimpleBuilder` now times
+the contract call on **both** paths, because a throw there is usually the cap firing and that duration
+is the measurement worth having (clamped to the cap, so a stray clock cannot inflate the projection).
+
+- **Max, never sum and never mean.** Both calls ran on the same chain, so both are evidence; the longer
+  one is the closer analogue of a tier.
+- **Over-estimating is the safe direction**: it costs a handoff that was going to happen anyway, while
+  under-estimating starts a phase that cannot finish and burns the whole budget to discover it.
+- **Never bail on an absent signal** — the rule this module already follows. No contract, a zero, a
+  NaN: all fall back to the plan-only projection, i.e. today's behaviour exactly.
+- The bail reason now **names which call it believed**. *"Planning alone took 34s"* was a true sentence
+  about the wrong sample.
+
+`tests/theEstimateThrewAwayItsBestMeasurement.test.ts` — 16 cases driven by the report's own numbers.
+**Reversion-proven five ways**: back to plan-only → 3 red · summed instead of maxed → 2 red · an
+unusable value trusted → 1 red · the measurement never captured → 1 red · the reason no longer naming
+the call → 1 red.
+
+### ⚠️ The honest trade, stated rather than discovered later
+
+With the better estimate this build would have bailed **before** writing anything — losing the 893-line
+`src/index.css` the lane did produce and the architect then reused. That is a real cost, not a pure
+win: the exchange is ~72 seconds and a doomed phase against one salvageable file. It is the right side
+of the trade (the full builder writes its own stylesheet anyway, and the lane's partial output is
+usually discarded), but **the next report should be read for whether bails became more common and
+whether those builds got faster** — the projection is now honest, and the threshold behind it is still
+the same 240s nobody has re-measured.
 ## 2026-09-20 — An untouched scaffold is not a finished app (autopsy 31dc61fd, item 2 of 6)
 
 **Branch `claude/an-untouched-scaffold-is-not-a-finished-app`.** Five minutes into the UPSC build the

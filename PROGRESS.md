@@ -71907,3 +71907,101 @@ empty findings, so the difference is nearly always nothing — not worth widenin
 - **Item 5** — the deterministic complexity scorer scored an app-build prompt **5** with taskType
   `"chat"`.
 - **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.
+
+---
+
+## 2026-09-20 — A BUILD THAT DID NOTHING TOLD THE USER IT HAD MADE THEIR CHANGE (autopsy 586295b7)
+
+**Admin:** *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna
+level par theek karo!!"*
+
+### What the report showed
+
+The user typed *"Add pagination or infinite scroll to the main list"* and pressed Stop. The build
+lasted **10.5 seconds**. Three independent facts in that one report say nothing happened:
+`writtenFiles.size === 0` (the zero-bill branch it took requires it), `LADDER_DEPTH matched=0`, and
+`realCostUsd: 0` with no `llmCalls` at all. `UPSELL_SUPPRESSED` says it in words — *"no engine was
+ever asked to build anything"*.
+
+The user was nonetheless told, in their own chat:
+
+> ⚠️ *"I made your change, but I could not open your app to confirm it works this time. Your change is saved…"*
+> 🧾 *"I could not confirm your app running here, so you have been charged only what this build actually cost to run…"*
+
+**No change was made. They were charged ₹0.** And the same report's `summary` said the opposite two
+lines away — *"Nothing had been written yet, so nothing was lost."*
+
+### The five-bucket ledger, honestly
+
+| | count | |
+|---|---|---|
+| ✅ Self-heal | **0** — the report claimed **2** | both counted entries were our own user notices, not heals |
+| 🔀 Workaround | 0 | nothing ran |
+| ⏭️ Skipped | 5 runtime checks | **legitimate** — the user stopped it, and the release gate said so plainly |
+| ❌ Still broken | **4** | the four doors below |
+| 🥵 Struggle | 0 in the engine | but `GRAPH_RESTORED_STUBS`: 7 of 13 files are cold-resume placeholders — a real handicap on an edit build, recorded as an open item |
+
+Of the four entries counted `unresolved`, **not one was a defect of this build**.
+
+### One root cause, four doors — a fact with more cases than the code tests for
+
+| # | The code asked | The honest question | What it cost |
+|---|---|---|---|
+| 1 | `hasSnapshot && !previewGreen` | did this turn **write anything**? | *"I made your change"* |
+| 2 | is the bill waived? | is the bill **final**? | *"you have been charged"* on a ₹0 build |
+| 3 | is this line `severity: error`? | is this a **measurement** or a repeated sentence? | 3 errors, 2 self-heals, on a build that had neither |
+| 4 | is this an **import** turn? | **did we write this code?** | a warning about the user's own untouched file counted as "unresolved" |
+
+🔑 **Door 1 is the THIRD meaning of a distinction this repo had already drawn once.** `provenBroken`
+exists precisely because `green: false` meant both *"we looked and it is broken"* and *"we could not
+look"*. Nobody split the third: **there was nothing to look at.** `filesWrittenThisTurn` is now a
+REQUIRED field on `decideGreenGuard` — required for exactly the reason `provenBroken` is, so a future
+call site cannot quietly re-acquire the old behaviour; the typechecker asks the question instead. The
+route's private `} else if (hasSnapshot && !previewGreen) {` is replaced by
+`greenGuardShouldTellUnverified`, so the rule has one home.
+
+🔑 **Door 2 was never specific to a stopped build.** The waiver's sentence was emitted where the bill
+is still provisional, and **four** later rules can zero it — `writtenFiles.size === 0`, the
+unrendered-preview rule, the cancelled/failed-build rule, and the onboarding credit. On a FAILED build
+it is worse than false, it is contradictory: this sentence and *"🛡️ This build did not fully succeed,
+so it is FREE"* are both emitted, seconds apart, about the same build. The waiver's ARITHMETIC stays
+where it is (it runs before the zeroing rules on purpose, and can only ever reduce); only the SENTENCE
+moves, to the one point where what the user pays is settled — and it is held, not dropped, so a user
+who really is billed the waived amount still gets the explanation they are owed.
+
+🔑 **Door 3 is the FOURTH time this tally has counted something that is not a heal** — heartbeats,
+import observations, provider fallbacks, and now NavBharatAI's own honest notices, classified `error`
+because they contain the words "could not". The narration classifier has been patched FIVE times to be
+cleverer about which sentences are problems (long prose, the project recap, benign compounds,
+remediation intent, echoing the user's words). Each patch was right and each left the category error
+untouched: **whoever said it, a repeated sentence is not a measurement of the build.** `AGENT_STEP` is
+already `info` and therefore already excluded; `AGENT_NOTE` is the same thing said in a louder voice.
+Narration stays on the timeline — where it is often the clearest human signal — and stops moving the
+four numbers an autopsy reads.
+
+🔑 **Door 4: the machinery existed and the trigger was one case wide.** `importTurnObservation` has
+marked "this is the user's pre-existing code" since the mitrify autopsy, keyed on `isImportTurn`. An
+import is one way of not having written the code; a zero-write turn is another. `findingAboutUntouchedCode`
+asks the real question, and the import caveat ("part of the repo may have been too large to import")
+is deliberately NOT attached to the other case — on a zero-write turn the file map is the real project,
+so borrowing that caveat would be a different untruth in the opposite direction.
+
+### Verified by reversion, four ways
+
+Each door fails exactly its own case and only that case: the guard stops asking about writes; the
+billing notice is emitted at the old place; narration is counted again; the untouched-code trigger
+narrows back to imports.
+
+### Recorded, not fixed (rule 6)
+
+- **`RELEASE_GATE` counts as an `error` even though it is a SUMMARY of other findings.** With door 3
+  fixed the reported build drops from 3 errors to 1, and that 1 is the gate's own RED verdict. The gate
+  is honest about a stopped build (*"you stopped this build before it could be finished or checked"*)
+  and `stoppedByUser` is its own predicate, so this is arguable rather than wrong — but a summary that
+  counts alongside the things it summarises is double-counting. Left alone rather than widened silently.
+- **`GRAPH_RESTORED_STUBS`: 7 of 13 files carried placeholder facts from a cold resume**, contributing
+  nothing to recall, the architecture analysis or the readiness score — on an EDIT build, which is
+  exactly where project recall matters most.
+- **ETA accuracy is measured against a build the user STOPPED** (promised 2.9 min, actual 0.2 min,
+  recorded as `withinBand: false`). Nothing was shown to the user, so no harm reached them, but a
+  cancelled build is not evidence about the estimator and should not train it.

@@ -216,18 +216,26 @@ export function nemotronAllowedFor(
  * NOT do was say so. The console showed the key configured, the code showed it disabled, and nothing
  * anywhere connected the two.
  *
- * The admin reported setting `AGENTV3_NEMOTRON=week` on 2026-09-20. `week` is not `weak`: it matches
- * no tier word, so the judge and the plan stayed off while every screen said the feature was on. One
- * letter, no error, no log, and the single measured saving this vendor was adopted for — the judge, at
- * 78% of a cheap build's real provider cost — silently not taken.
+ * ⚠️ CORRECTED 2026-09-20, THE SAME DAY, FROM THE CONSOLE ITSELF. This docblock used to state as
+ * fact that "the admin reported setting `AGENTV3_NEMOTRON=week`". The admin then sent a screenshot of
+ * the live Cloud Run variable list: it reads **`weak`**, and `NEMOTRON_BASE_URL` is the NVIDIA host —
+ * so the judge and the plan are ON for that tier and always may have been. What the earlier note
+ * recorded was a report about the config, not the config; nobody had opened the console.
  *
- * This repo has paid for this exact shape four times now: a trailing space in `BRAVE_API_KEY`, an `=`
- * in `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`, and now this. The fix is the same one
- * `parseRolloutPercent` already applies: keep the safe verdict, and make the misreading LOUD.
+ * 🔴 THE LESSON IS THIS FILE'S OWN, TURNED ON ITSELF: a claim about a value that lives in a console no
+ * session can read is only ever as good as the last person who looked. Two sessions then repeated it —
+ * one into this comment, one to the admin as live advice. **Do not restate a config value here. Say
+ * what the code DOES with it, and leave the value to the console.**
  *
- * ⚠️ The value is NOT corrected toward the nearest word. Guessing that `week` meant `weak` would make
- * the config mean whatever we think it resembles — and the next typo would be a tier the admin never
- * chose. It stays off; it just stops being quiet about it.
+ * The GUARD below is unaffected and stays, because it was never about one typo: this repo has paid for
+ * this exact shape three times for certain — a trailing space in `BRAVE_API_KEY`, an `=` in
+ * `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`. The fix is the same one `parseRolloutPercent`
+ * already applies: keep the safe verdict, and make the misreading LOUD. A protection built for a class
+ * is not retired because one suspected instance of it turned out not to have happened.
+ *
+ * ⚠️ An unreadable value is NOT corrected toward the nearest word. Guessing that (say) `week` meant
+ * `weak` would make the config mean whatever we think it resembles — and the next typo would be a tier
+ * the admin never chose. It stays off; it just stops being quiet about it.
  */
 export function nemotronConfigNote(env: NodeJS.ProcessEnv = process.env): string | null {
   if (nemotronHardOff(env)) return null;              // an explicit off is a decision, not a mistake

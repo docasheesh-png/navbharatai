@@ -1992,8 +1992,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   | **`GRIEVANCE_OFFICER_NAME`** (+ optional `_EMAIL` / `_PHONE` / `_ADDRESS`) — read by `src/server/lib/grievanceOfficer.ts`; the public page is `/grievance` | Admin Monitor: the amber "Grievance Officer not named" warning is GONE. It is driven by `officerIsNamed`, so it cannot be green while the key is missing |
   | **`NAVBHARAT_WEB_RISK=on`** | An admin build report's `outboundNote` stops saying `unknown` for every origin |
   | **`E2B_USD_PER_HOUR` = `0.1656`** (was the half-true `0.083`) | The Monitor's amber rate-mismatch tile clears — `sandboxRate.ts` raises it by comparing the configured rate against the template's REAL size, so a wrong value cannot look right |
-  | **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | Console only. ⚠️ **Nothing in the code can detect a duplicate** — the process sees one value and cannot know a second row existed. This is the one item with no self-verifying signal, which is exactly why the audit below calls it the urgent one |
-  | **Play developer verification → Identity tab** (deadline 30 Sep 2026) | Play Console only |
+  | ✅ **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | **DELETED — the admin said so directly on 2026-09-20 ("maine delete kar diye hai, 10-12 din pahle hi"), i.e. around 2026-09-08/10.** This was the one row with NO self-verifying signal: nothing in the code can detect a duplicate, because the process sees one value and cannot know a second row existed. So the admin's word IS the record here, and it is written down the day it was said — exactly what this registry's hand-to-hand rule is for |
+  | ✅ **Android developer verification — package registration** (deadline 30 Sep 2026) | **DONE, verified from a screenshot 2026-09-20.** BOTH rows read `Registered`: `com.navbharat.ai` (the real `applicationId`, the app on Play) and `com.navbharatai.app` (only the Java `namespace` — not a distributed app; its friendly name was typed as "DELETE" and leaving it registered is harmless). ⚠️ This screen covers PACKAGE REGISTRATION only — whether a separate identity/verification section is still outstanding was not visible in that capture and is Play Console's to answer |
   | **The approved Play update published**, then `ANDROID_LATEST_VERSION_CODE` set to that run number | Play Console shows the release live; the number must be set AFTER it is downloadable, never before (see that key's own entry) |
 
   🔴 **WHY THE UNRECONCILED COUNT IS WRITTEN DOWN RATHER THAN ROUNDED AWAY.** This file already records
@@ -3628,18 +3628,24 @@ rung only when it is the known-weak 4.7-flash.
   rescue, being a single call over the app rather than a 70-call loop over a stable prefix. Ultra does
   it at **$0.50/MTok in** against glm-5.3's $1.40 and Grok's $3.00, with **no tools exposed**, which is
   also why it is the safest place to try an unproven vendor.
-  🔴 **`week` IS NOT `weak`, AND UNTIL 2026-09-20 THAT WAS SILENT.** The admin reported setting
-  `AGENTV3_NEMOTRON=week`. It names no tier, so the judge and the plan stayed **OFF** while the console
-  showed the key configured and nothing anywhere said otherwise — the fourth time this repo has paid
-  for that exact shape (a trailing space in `BRAVE_API_KEY`, an `=` in `ALERT_EMAIL_FROM`, `20%` in
-  `AGENTV3_FEATURE_HEAL_PCT`). The VERDICT was always right (an unreadable value can never have meant
-  "everywhere" — somebody who wanted that would type `on`); what was missing was the report.
-  `nemotronConfigNote()` now names the offending word and the accepted ones, **in the build report's
-  `TIER_LADDER` line as a WARNING**, and once in the server log. ⚠️ The value is deliberately **NOT**
-  corrected toward the nearest word: guessing that `week` meant `weak` would make the config mean
-  whatever it resembles, and the next typo would enable a tier nobody chose. **So this must be verified
-  in the console, not assumed from this entry** — an admin build report whose `TIER_LADDER` line is
-  clean is the confirmation.
+  ✅ **THE LIVE VALUE IS `weak`, VERIFIED FROM THE CONSOLE 2026-09-20** — the admin sent a screenshot
+  of the Cloud Run variable list (`AGENTV3_NEMOTRON = weak`, `NEMOTRON_BASE_URL` = the NVIDIA host), so
+  the judge and the plan ARE on for that tier.
+  🔴 **AND THIS ENTRY SAID OTHERWISE FOR HALF A DAY, WHICH IS THE PART WORTH KEEPING.** It read *"the
+  admin reported setting `AGENTV3_NEMOTRON=week`… the judge and the plan stayed OFF"*, ending with the
+  exact sentence **"this must be verified in the console, not assumed from this entry"** — and a
+  session (mine) then read the paragraph, skipped its own warning, and told the admin as a live fact
+  that their config was broken and to go and change it. The admin opened the console and it was already
+  right. **A doc's claim about a value in a console no session can read is only as good as the last
+  person who looked; repeating it does not make it truer.** Same shape as the idle-minutes default that
+  said "NOT taken" eight days after it was taken, and the E2B rate whose derivation "could not fail".
+  🔒 **The GUARD is untouched and stays**, because it was never about one typo: `nemotronConfigNote()`
+  names an unreadable value and the accepted words **in the build report's `TIER_LADDER` line as a
+  WARNING**, and once in the server log. The value is still deliberately **NOT** corrected toward the
+  nearest word — guessing would make the config mean whatever it resembles, and the next typo would
+  enable a tier nobody chose. Three real instances of the class remain (a trailing space in
+  `BRAVE_API_KEY`, an `=` in `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`); a protection
+  built for a class is not retired because one suspected instance turned out not to have happened.
   ⚠️ **NEVER the architect, sub-agents, reviewer or heal passes** — those are the cached 40–70-call
   tool loops where Nemotron is **6.2× DEARER** than flashx (its route does not honour prompt-cache
   markers). `nemotron.ts` makes every other role structurally unreachable; do not widen it.

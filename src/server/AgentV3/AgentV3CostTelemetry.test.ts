@@ -114,6 +114,33 @@ describe('foldCostTelemetry (pure cost-ladder aggregation)', () => {
     expect(doc.byDeliveredVia.CLAUDE.okBuilds).toBe(0); // a fallback that failed
   });
 
+  // The rung-depth split (2026-09-20) — the number `deliveredVia` structurally could not give, because
+  // on Weak/Normal the vendor GLM holds rung 1 AND rung 3.
+  it('breaks down by how deep the build went down its ladder', () => {
+    let doc: DailyCostTelemetryDoc | null = null;
+    doc = foldCostTelemetry(doc, DATE, entry({ ladderDepth: 1 }), 1);
+    doc = foldCostTelemetry(doc, DATE, entry({ ladderDepth: 1 }), 2);
+    doc = foldCostTelemetry(doc, DATE, entry({ ladderDepth: 3, ok: false }), 3);
+    expect(doc.byLadderDepth?.['1'].builds).toBe(2);
+    expect(doc.byLadderDepth?.['3'].builds).toBe(1);
+    expect(doc.byLadderDepth?.['3'].okBuilds).toBe(0);
+  });
+
+  it('folds an unattributable depth under "unknown" rather than dropping the build', () => {
+    // A dropped build would make the rung-1 share look BETTER than it is — the one direction this
+    // number must never lie in.
+    const doc = foldCostTelemetry(null, DATE, entry(), 1); // no ladderDepth
+    expect(doc.byLadderDepth?.unknown.builds).toBe(1);
+    expect(doc.totalBuilds).toBe(1);
+  });
+
+  it('tolerates a day doc written before byLadderDepth existed', () => {
+    const legacy = foldCostTelemetry(null, DATE, entry({ ladderDepth: 1 }), 1);
+    delete (legacy as Partial<DailyCostTelemetryDoc>).byLadderDepth;
+    const next = foldCostTelemetry(legacy, DATE, entry({ ladderDepth: 2 }), 2);
+    expect(next.byLadderDepth?.['2'].builds).toBe(1);
+  });
+
   it('folds a missing deliveredVia under "unknown" (non-agentic SimpleBuild/OneShot lanes)', () => {
     const doc = foldCostTelemetry(null, DATE, entry(), 1); // no deliveredVia
     expect(doc.byDeliveredVia.unknown.builds).toBe(1);

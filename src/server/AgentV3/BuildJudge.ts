@@ -218,14 +218,26 @@ export function describeJudgeVerdict(v: JudgeVerdict): {
 }
 
 /**
- * The ADMIN-ONLY name of the engine that judged. Exhaustive by construction.
+ * The ADMIN-ONLY name of the engine that judged this build. Exhaustive by construction.
  *
- * 🔴 The inline ternary this replaces had no branch for `nemotron` and fell through to `'Sonnet'`, so
- * the report named an engine that had not run — and would have done so for every Nemotron judge from
- * the day that vendor was added. A record that quietly attributes work to the wrong provider is worse
- * than one that says "unknown", because nobody doubts it.
+ * 🔴 THE BUG. `selectReviewJudge` can return `kind: 'nemotron'`, and the report's label was an inline
+ * ternary with no branch for it:
  *
- * ⚠️ Never reaches a user (White-Label Law) — this is the admin report's label only.
+ *     judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet'
+ *
+ * So every Nemotron verdict was filed under **Sonnet** — an engine that had not run. It is not
+ * hypothetical: Nemotron went LIVE on the Weak tier on 2026-09-19 (`AGENTV3_NEMOTRON=weak`), so the
+ * judge line in every Weak build report since then has named the wrong provider.
+ *
+ * ⚠️ A record that quietly attributes work to the wrong engine is worse than one that says "unknown",
+ * because nobody doubts it — and this is the exact line an autopsy reads to decide which vendor to
+ * trust, tune or drop. #3143 made that line stop calling an un-run review a PASS; this makes it stop
+ * naming the wrong engine.
+ *
+ * The `never` check is the point: a future engine must be named HERE, where somebody has to think
+ * about it, instead of silently becoming whichever branch the ternary happened to end on.
+ *
+ * Never reaches a user (White-Label Law) — this is the admin report's label only.
  */
 export function judgeEngineLabel(kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'): string {
   switch (kind) {
@@ -235,8 +247,6 @@ export function judgeEngineLabel(kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nem
     case 'nemotron': return 'Nemotron';
     case 'sonnet': return 'Sonnet';
     default: {
-      // A new kind must be named here, at the point where somebody has to think about it — rather
-      // than silently becoming whichever branch the old ternary ended on.
       const never: never = kind;
       return String(never);
     }

@@ -16029,8 +16029,9 @@ async function noteBuildOutcome(
             const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective);
             // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
-            // EXHAUSTIVE, via the shared label — the ternary this replaces had no `nemotron` branch and
-            // fell through to 'Sonnet', naming an engine that had not run. See judgeEngineLabel.
+            // EXHAUSTIVE, via the shared label. The ternary this replaces had no `nemotron` branch and
+            // fell through to 'Sonnet', so every Nemotron verdict named an engine that had not run —
+            // and Nemotron has been LIVE on Weak since 2026-09-19. See judgeEngineLabel.
             const reviewerName = judgeEngineLabel(judge.kind);
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: JudgeVerdict, tag: string): void => {

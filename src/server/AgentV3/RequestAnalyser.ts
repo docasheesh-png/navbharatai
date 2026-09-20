@@ -16,6 +16,7 @@
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
 import { isComplexAppPrompt, namesBusinessDomain, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
+import { userAskedForAnAppToBeBuilt } from './IntentClassifier';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
@@ -47,6 +48,13 @@ export function startBandLabel(tier: StartTier | string | null | undefined): str
 
 export type TaskType =
   | 'chat'
+  /**
+   * An app WAS ordered and this module could not recognise what kind (2026-09-20, autopsy 31dc61fd).
+   * Distinct from `chat` on purpose: see `anAppWasOrderedButNotRecognised`. Its `BASE_SCORE` entry is
+   * used as a FLOOR applied last, never as a starting base — the block at the end of `analyzeRequest`
+   * is the only reader.
+   */
+  | 'app_unsized'
   | 'translate'
   | 'summary'
   | 'simple_app'
@@ -185,6 +193,55 @@ export function signalsFoundNothing(prompt: string): boolean {
 }
 
 /**
+ * PURE. The platform is about to BUILD AN APP, and this module recognised nothing in the request.
+ *
+ * 🔴 THE DEFECT (autopsy `31dc61fd`, 2026-09-20). *"Create a upsc preparation aap"* was recorded as
+ * `taskType: 'chat'`, `complexityScore: 5` — **the score of the word "hi"** — for a request that then
+ * ran a 15.9-minute build and produced ten files. The misspelling is NOT the cause and chasing it
+ * would have fixed nothing: `"Create a upsc preparation app"`, spelled correctly, scores 5 too. The
+ * cause is that every signal in this module is a NAMED DOMAIN or a NAMED KIND of app, and "upsc
+ * preparation" is neither — so an explicit build order in plain English falls through to `chat`.
+ *
+ * 🔑 THE CLASS: TWO MODULES ANSWER "IS THIS A BUILD?" AND ONE IS NEVER TOLD THE OTHER'S ANSWER.
+ * `IntentClassifier` said `new_build` — that is why a build ran at all. `detectTaskType` ends in
+ * `return 'chat'`, which is the SAME WORD the other module uses for the opposite decision. So the
+ * report, the cost telemetry and the prompt audit all filed a real app build under "chat", and the
+ * only thing standing between that 5 and the cheapest engine was a PAID model call that may time
+ * out, be unavailable, or be switched off.
+ *
+ * 🔒 IT IS THE **AND** OF TWO FACTS, AND THAT IS THE PRECISION LOCK. Measured on the real prompt plus
+ * controls before a line was written:
+ *
+ *   | request                                   | matched nothing | app ordered | verdict |
+ *   |-------------------------------------------|-----------------|-------------|---------|
+ *   | `Create a upsc preparation aap`           | yes             | yes         | **unsized app** |
+ *   | `build a gurudwara langar seva app`       | yes             | yes         | **unsized app** |
+ *   | `can you generate images?`                | yes             | no          | chat    |
+ *   | `Continue from where you left off…`       | yes             | no          | chat    |
+ *   | `hi` · `thanks!`                          | no              | no          | chat    |
+ *   | `make a todo app`                         | no              | yes         | simple_app |
+ *
+ * Either fact alone is wrong: "matched nothing" catches questions and continuations, and "app
+ * ordered" catches every request this module already reads correctly.
+ *
+ * ⚠️ `userAskedForAnAppToBeBuilt` is reused rather than reinvented — it is the predicate written for
+ * autopsy 697b38ee to ask this exact question directly, it already refuses continuations, problem
+ * reports, our own "Fix error" template and pasted machine errors, and it requires HIGH confidence.
+ * A second copy of "is this a build order?" is the drift this repo has paid for twice.
+ *
+ * 🔒 WHY THE IMPORT LIVES HERE rather than the fact being passed in by the caller: this module's own
+ * history settles it. `signalsCouldNotRead` was first kept in `complexityRouting` and that is
+ * recorded, in this repo, as "a workaround wearing a fix's clothes" — the one caller got the honest
+ * answer and every other reader was still told the confident version. A fact about this module's
+ * signals belongs to this module. (No cycle: `IntentClassifier` does not import this file.)
+ */
+export function anAppWasOrderedButNotRecognised(prompt: string): boolean {
+  const text = String(prompt ?? '');
+  if (!signalsMatchedNothing(text)) return false;
+  return userAskedForAnAppToBeBuilt(text);
+}
+
+/**
  * PURE. TRUE when NONE of this module's signals matched — the request was read, and nothing in it was
  * recognised.
  *
@@ -233,6 +290,9 @@ export function signalsMatchedNothing(prompt: string): boolean {
 /** Base complexity by task type (before feature adjustments). */
 const BASE_SCORE: Record<TaskType, number> = {
   chat: 5,
+  // The cheapest APP we recognise — deliberately not a paisa more. Used as a FLOOR, never as a base;
+  // see `anAppWasOrderedButNotRecognised` and the block that applies it.
+  app_unsized: 15,
   translate: 10,
   summary: 10,
   simple_app: 15, // cheap models handle these → Gemini
@@ -455,7 +515,14 @@ export function rankFeatures(prompt: string): FeatureRanking {
 export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   const prompt = (input?.prompt ?? '').toString();
   const p = prompt.toLowerCase();
-  const taskType = detectTaskType(p);
+  const detected = detectTaskType(p);
+  /**
+   * 🔴 An app was ordered and nothing here recognised it — see `anAppWasOrderedButNotRecognised`.
+   * Relabelled BEFORE the pinned-tier return below, because a pinned build records `taskType` too and
+   * a report should not file a real app build under "chat" on either path.
+   */
+  const unsizedApp = anAppWasOrderedButNotRecognised(prompt);
+  const taskType: TaskType = unsizedApp ? 'app_unsized' : detected;
 
   // A PAID pinned tier bypasses the ladder entirely: the build runs on the tier's pinned model,
   // no cheap start, no escalation. Strong ('mini') pins SONNET (admin 2026-07-13); Powerful/Full
@@ -477,8 +544,19 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
     };
   }
 
-  let score = BASE_SCORE[taskType];
-  const reasons: string[] = [`task=${taskType} (base ${score})`];
+  /**
+   * ⚠️ `detected`, NOT `taskType`, and the difference is deliberate. An unsized app is corrected by a
+   * FLOOR applied last (below), not by a higher starting base, so that every existing adjustment
+   * behaves exactly as it does today and the change is provably routing-neutral. Starting the score
+   * at an app's base instead would also raise LONG unrecognised orders past a tier boundary — a real
+   * routing change that nobody has measured. Recorded as deliberately not done.
+   */
+  let score = BASE_SCORE[detected];
+  // When the two differ, SAY so — a reader seeing `task=app_unsized (base 5)` would otherwise have
+  // to guess where the 5 came from. It came from the fall-through this fix exists to correct.
+  const reasons: string[] = [taskType === detected
+    ? `task=${taskType} (base ${score})`
+    : `task=${taskType} (unrecognised — scored from ${detected}, base ${score})`];
 
   // Feature adjustments.
   const hasCode = /```|<\/?[a-z][\s\S]*>|\bfunction\b|=>/.test(prompt);
@@ -536,6 +614,35 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
       reasons.push(`floor ${floor} — the signals cannot read this script; ${enumeratedParts(prompt)} enumerated part(s), ${prompt.length} chars`);
     } else {
       reasons.push('the signals cannot read this script; no script-neutral size evidence either');
+    }
+  }
+
+  /**
+   * 🔴 AN ORDERED APP IS NEVER WORTH THE SCORE OF THE WORD "hi" (autopsy 31dc61fd, 2026-09-20).
+   *
+   * A FLOOR, exactly like the script-neutral one above and for the same reason: it is what survives
+   * when the signals recognised nothing, not another adjustment competing with them. It can only ever
+   * RAISE the score, never lower it.
+   *
+   * 🔒 PROVABLY ROUTING-NEUTRAL TODAY, and a test pins that. 15 and every score below it map to the
+   * SAME tier (`scoreToTier` returns 'gemini' for everything ≤20), to the same
+   * `complexityFromScore` verdict (both below the 40 line), and to the same `isNearBoundary` answer
+   * (|15−20| = 5 and |5−20| = 15 are both outside the ±3 margin). So this changes what the report
+   * SAYS, not where the build goes — which is the whole intent: the routing for these requests is
+   * already handled by the second opinion `signalsMatchedNothing` buys, and guessing a higher number
+   * would be an unmeasured change to where real money is spent.
+   *
+   * WHY 15: it is `BASE_SCORE.simple_app`, the cheapest APP this module recognises. An app order is
+   * worth at least the cheapest app and — since nobody has measured what a UPSC prep app really
+   * costs — not one point more.
+   */
+  if (unsizedApp) {
+    const floor = BASE_SCORE.app_unsized;
+    if (floor > score) {
+      score = floor;
+      reasons.push(`floor ${floor} — an app was ordered but no signal recognised it`);
+    } else {
+      reasons.push('an app was ordered but no signal recognised it');
     }
   }
 

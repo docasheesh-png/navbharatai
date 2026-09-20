@@ -71459,3 +71459,64 @@ readiness no longer running it → 1 red · **the match loosened to a "Hello Wor
 ⚠️ **Not fixed here:** `READY_BEFORE_END` measured 701s "after ready" from that bogus point, so its
 number in past reports is polluted. From now on it cannot start from a scaffold — but the historical
 figures should not be trusted.
+
+---
+
+## 2026-09-20 — An ordered app is not chat (autopsy `31dc61fd`, item 5 of 6)
+
+**The defect.** *"Create a upsc preparation aap"* was recorded as `taskType: 'chat'`,
+`complexityScore: 5` — **the score of the word "hi"** — for a request that then ran a 15.9-minute build
+and produced ten files.
+
+⚠️ **THE MISSPELLING IS NOT THE CAUSE, and chasing it would have fixed nothing.** Measured before a
+line was written: `"Create a upsc preparation app"`, spelled correctly, scores 5 too. Every signal in
+`RequestAnalyser` is a NAMED DOMAIN or a NAMED KIND of app, and "upsc preparation" is neither.
+
+### 🔑 The class: two modules answer "is this a build?" and one is never told the other's answer
+
+`IntentClassifier` said `new_build` — that is why a build ran at all. `detectTaskType` ends in
+`return 'chat'`, **the same word the other module uses for the opposite decision**. So the build report,
+the cost telemetry (`AgentV3CostTelemetry` groups by `taskType`) and the prompt audit all filed a real
+app build under "chat" — and the only thing standing between that 5 and the cheapest engine was a PAID
+model call that may time out, be unavailable, or be switched off.
+
+This is the EVIDENCE LEDGER class in miniature: one subsystem holds a fact, the other re-derives a
+contradictory one, and nothing reconciles them.
+
+### The fix
+
+`anAppWasOrderedButNotRecognised(prompt)` — the **AND** of `signalsMatchedNothing` and
+`userAskedForAnAppToBeBuilt` — relabels the task `app_unsized` and floors the score at 15.
+
+- ⚠️ **The AND is the precision lock.** Measured with controls first: "matched nothing" alone catches
+  questions (*"can you generate images?"*) and continuations; "app ordered" alone overwrites every
+  request this module already reads correctly. Together: **zero false positives on the control set.**
+- **`userAskedForAnAppToBeBuilt` is REUSED, not reinvented** — it is the predicate written for autopsy
+  697b38ee to ask exactly this, it already refuses continuations, problem reports, our own "Fix error"
+  template and pasted machine errors, and it requires HIGH confidence.
+- 🔒 **The import lives in `RequestAnalyser`, not in the caller,** and this module's own history
+  settles it: `signalsCouldNotRead` was first kept in `complexityRouting` and is recorded here as *"a
+  workaround wearing a fix's clothes"* — one caller got the honest answer, every other reader was told
+  the confident version. No cycle: `IntentClassifier` does not import this file.
+
+### 🔒 It moves no build, and that is asserted rather than promised
+
+The floor only ever RAISES, and 15 maps to the same start tier (`gemini`, everything ≤20), the same
+`complexityFromScore` verdict and the same `isNearBoundary` answer as the 5 it replaces. A test pins
+all three, and pins that 15 sits strictly inside the cheapest tier — so raising it later fails CI,
+which is the point: that would be a routing change and must be deliberate and measured.
+
+**Deliberately NOT done:** starting the score at an app's base instead of flooring it. That would push
+LONG unrecognised orders across a tier boundary — a real change to where money is spent, that nobody
+has measured. The routing for these requests is already handled by the second opinion
+`signalsMatchedNothing` buys; this fix makes the deterministic FALLBACK honest.
+
+**Tests** — `tests/anOrderedAppIsNotChat.test.ts` (26 cases), **reversion-proven five ways**: drop
+either half of the AND → 4 / 3 red · relabel without the floor → 7 red · raise the floor past the tier
+boundary → 6 red · relabel on the ladder path but not the pinned one → 1 red.
+
+### Still open from `31dc61fd`
+
+- **Item 4** — the reviewer can run on the same model family as the builder.
+- **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause, and item 5
+  turned out to be a small instance of it.

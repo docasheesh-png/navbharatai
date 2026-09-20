@@ -8,7 +8,7 @@
 // consistency AND that SettingsPanel never statically imports the heavy index again.
 
 export interface LegalMeta {
-  id: 'legal_privacy' | 'legal_terms' | 'legal_grievance' | 'legal_dpa' | 'legal_security';
+  id: 'legal_privacy' | 'legal_terms' | 'legal_refund' | 'legal_grievance' | 'legal_dpa' | 'legal_security';
   title: string;
   subtitle: string;
   updated: string;
@@ -43,6 +43,22 @@ export const LEGAL_META: LegalMeta[] = [
     subtitle: 'The rules of using NavBharatAI — tokens, refunds, your app ownership',
     updated: '8 August 2026',
     settingsTile: true,
+  },
+  {
+    /**
+     * No tile, for the same reason as the three below it — and one more that is specific to this
+     * document: a refund policy is read by somebody who has ALREADY decided to ask for their money
+     * back, and they find it from the Terms, from Billing, or from a search engine, never by
+     * browsing a Settings grid. What it must have is a PUBLIC, separately-addressable URL
+     * (/refund), because that is what a payment aggregator's onboarding asks for and what a
+     * reviewer checks. It is linked from Terms Section 4, which is the tested requirement for
+     * every untiled document.
+     */
+    id: 'legal_refund',
+    title: 'Refund & Cancellation Policy',
+    subtitle: 'When you can cancel, what comes back, and how long the money takes',
+    updated: '20 September 2026',
+    settingsTile: false,
   },
   {
     // No tile, and reachable in MORE places than before: /grievance is a public URL (the address a

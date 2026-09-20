@@ -98,8 +98,11 @@ describe('The policy has a PUBLIC URL — the thing Meta and Play actually requi
     // `/dpa` and `/security` joined on 2026-09-14, when those two lost their Settings tiles — a tile
     // only serves somebody already signed in, and the people who want these are a business
     // customer's lawyer and a security researcher, neither of whom has an account.
-    expect(Object.keys(PUBLIC_LEGAL_ROUTES).sort()).toEqual(['/dpa', '/grievance', '/privacy', '/security', '/terms']);
+    // `/refund` joined on 2026-09-20 for the same reason again: a payment aggregator's onboarding
+    // asks for a refund-policy URL, and the rules living inside Terms Section 4 gave them no address.
+    expect(Object.keys(PUBLIC_LEGAL_ROUTES).sort()).toEqual(['/dpa', '/grievance', '/privacy', '/refund', '/security', '/terms']);
     expect(PUBLIC_LEGAL_ROUTES['/privacy']).toBe('legal_privacy');
+    expect(PUBLIC_LEGAL_ROUTES['/refund']).toBe('legal_refund');
     expect(PUBLIC_LEGAL_ROUTES['/grievance']).toBe('legal_grievance');
     expect(PUBLIC_LEGAL_ROUTES['/dpa']).toBe('legal_dpa');
     expect(PUBLIC_LEGAL_ROUTES['/security']).toBe('legal_security');

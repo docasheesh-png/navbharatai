@@ -19,7 +19,7 @@ const byId = Object.fromEntries(LEGAL_DOCS.map((d) => [d.id, d.body]));
 describe('the registry — the documents, stable ids, real content', () => {
   it('has exactly the documents it should, each with a title, subtitle, date and a long body', () => {
     expect(LEGAL_DOCS.map((d) => d.id)).toEqual([
-      'legal_privacy', 'legal_terms', 'legal_grievance', 'legal_dpa', 'legal_security',
+      'legal_privacy', 'legal_terms', 'legal_refund', 'legal_grievance', 'legal_dpa', 'legal_security',
     ]);
     for (const d of LEGAL_DOCS) {
       expect(d.title.length).toBeGreaterThan(3);
@@ -85,6 +85,38 @@ describe('Terms of Service — the sections that make it real', () => {
   });
 });
 
+describe('Refund & Cancellation Policy — the sections a payment aggregator checks', () => {
+  const r = byId.legal_refund;
+  it('answers the four questions any refund policy has to answer', () => {
+    expect(r).toMatch(/cancel/i);                       // how to cancel
+    expect(r).toMatch(/7 days/);                        // the eligibility window
+    expect(r).toMatch(/7 working days/);                // how long the money takes
+    expect(r).toMatch(/info@navbharatai\.com/);         // where to ask
+  });
+
+  it('🔒 says the SAME things the Terms say — the two may never drift apart', () => {
+    const t = byId.legal_terms;
+    for (const claim of [/7 days/, /unused/i]) {
+      expect(r, 'refund policy').toMatch(claim);
+      expect(t, 'terms').toMatch(claim);
+    }
+    // Both documents state the two money rules the code really enforces.
+    expect(r).toMatch(/did not succeed is not charged|failed build is never charged|build that was meant to produce an app and did not succeed is not charged/i);
+    expect(r).toMatch(/cannot be measured, nothing is charged/i);
+  });
+
+  it('covers the cases people actually write in about', () => {
+    expect(r).toMatch(/Charged twice|duplicate/i);
+    expect(r).toMatch(/app store|Android or iOS/i);   // store purchases are the store's to refund
+    expect(r).toMatch(/App Mart/);
+    expect(r).toMatch(/Consumer Protection Act/);
+  });
+
+  it('never promises a refund on money that was a gift', () => {
+    expect(r).toMatch(/promotional credit has no cash value and is not refundable|no cash value and is not refundable/i);
+  });
+});
+
 describe('DPA — the sections an enterprise reviewer checks first', () => {
   const d = byId.legal_dpa;
   it('names the roles, the breach clock, sub-processor rules and deletion', () => {
@@ -145,7 +177,7 @@ describe('THE WHITE-LABEL LAW — no AI vendor or model name on any legal page',
 });
 
 describe('every document carries the lawyer-review honesty note in its source', () => {
-  for (const f of ['privacyPolicy', 'termsOfService', 'dpa', 'securityDocs']) {
+  for (const f of ['privacyPolicy', 'termsOfService', 'refundPolicy', 'dpa', 'securityDocs']) {
     it(`${f}.ts declares NOT LEGAL ADVICE`, () => {
       expect(readFileSync(join(process.cwd(), `src/content/legal/${f}.ts`), 'utf8')).toMatch(/NOT LEGAL ADVICE/);
     });

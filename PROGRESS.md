@@ -75054,3 +75054,55 @@ route remains what the weather half already documents.
 
 **Still open, unchanged:** `LIVE_WEATHER_SOURCE` defaults to off, so weather is web-searched too
 until Open-Meteo's commercial plan (~$29/month) is bought. One instruction, one value, no deploy.
+
+## 2026-09-20 — The refund policy had rules but no address (`/refund`)
+
+**Trigger (admin, with a screenshot):** Cashfree's merchant onboarding, *"Your Platform details —
+on verification, we found a few policies were missing in your website"*, asking for two URLs:
+**Terms and Conditions** and **Refund Policy**.
+
+- **Terms already had a URL** — `https://navbharatai.com/terms` (plus `/terms-and-conditions`,
+  which 301s to it). Nothing to build.
+- **The refund RULES already existed too** — Terms of Service **Section 4**, published since
+  2026-08-08: unused purchased credit refundable within 7 days, a failed build never charged,
+  unmeasured usage never charged. What did not exist was **a URL whose page IS the refund policy**,
+  and "halfway down our Terms" is not an address a reviewer, a form, or a non-JS crawler can accept.
+
+**Built:** `src/content/legal/refundPolicy.ts` (6.8k chars) served at **`/refund`**, server-rendered
+by the existing `registerLegalRoutes` path — same mechanism, same audience reasoning, as `/privacy`
+and `/terms`. Aliases `/refund-policy`, `/refunds`, `/cancellation-policy`,
+`/refund-and-cancellation-policy`, `/return-policy`. No Settings tile (a refund policy is found from
+the Terms, from Billing, or from a search engine — never by browsing a Settings grid), so the Terms
+Section 4 bullet now links to it, which is also the tested requirement for every untiled document.
+
+**Two decisions the Terms left open, written down as assumed defaults the admin can change** (the
+same pattern `termsOfService.ts` already uses for the 7-day window and the New Delhi courts):
+1. a purchase whose credit is **entirely unused** is refunded **in full, platform fee included** —
+   we absorb the gateway's charge rather than return a smaller number than the customer's statement
+   shows. A **partly** used purchase refunds the unused credit only.
+2. money reaches the original payment method **within 7 working days** of approval, plus whatever
+   the customer's own bank adds.
+
+**Found while reading the Terms to stay consistent with them:** the feature-change bullet cited
+*"Section 5 (refunds)"*. Refunds are Section **4**; Section 5 is app ownership. A published legal
+document sending a reader to the wrong section, on the exact subject they were looking for. Fixed,
+and the new test DERIVES the correct number from whichever `## N.` heading actually contains the
+Refunds bullet, so a future renumbering cannot quietly re-break it.
+
+**Also corrected in the same change:** my first draft of the new page and the AppKnowledgeBase entry
+said *"Nav App Store"*. The user-visible name has been **App Mart** since 2026-08-16 and
+`tests/appMart.test.ts` caught it. ⚠️ **Open, deliberately not swept:** the older legal documents
+(Privacy Policy ×5, DPA, Account deletion) still say "Nav App Store" — that guard's surface list does
+not cover `src/content/legal`, so the legal corpus is internally inconsistent about the store's name.
+Raised rather than fixed here, because an unrelated rename inside four published legal documents is
+its own change with its own review.
+
+**Gate (final state):** typecheck · typecheck:server · noUnusedImports · native:guard · build ·
+test:bundle · boot:check · deps:server-gate all green; `vitest run` **27,706 passed, 1 skipped, 0
+failed**. `tests/theRefundPolicyHasItsOwnUrl.test.ts` is reversion-proven twice — deleting the
+`/refund` route and restoring the wrong section number each turn it red.
+
+**Still the admin's to do, and neither is code:** paste the two URLs into Cashfree
+(`https://navbharatai.com/terms`, `https://navbharatai.com/refund` — the second only works once this
+merges and deploys), and whitelist `https://localhost` in the Cashfree dashboard so checkout works
+inside the Android WebView at all.

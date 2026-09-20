@@ -9,6 +9,7 @@
 import { LEGAL_META, type LegalMeta } from './meta';
 import { PRIVACY_POLICY } from './privacyPolicy';
 import { TERMS_OF_SERVICE } from './termsOfService';
+import { REFUND_POLICY } from './refundPolicy';
 import { DPA } from './dpa';
 import { SECURITY_DOCS } from './securityDocs';
 import { grievanceDoc, grievanceOfficerFrom } from './grievance';
@@ -20,6 +21,7 @@ export interface LegalDoc extends LegalMeta {
 const BODIES: Record<LegalMeta['id'], string> = {
   legal_privacy: PRIVACY_POLICY,
   legal_terms: TERMS_OF_SERVICE,
+  legal_refund: REFUND_POLICY,
   /**
    * The UNCONFIGURED version — role named, no person.
    *

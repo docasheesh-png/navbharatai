@@ -1,4 +1,4 @@
-import { repeatedReadNotice } from './repeatedReads';
+import { repeatedReadNotice, READ_LOOP_LIMIT } from './repeatedReads';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -471,6 +471,28 @@ const MAX_SUMMARY = 200;
  * transcript. Every failure is returned as an honest is_error result (never a
  * fake success), so the model can see and recover from it.
  */
+/**
+ * The read ledger's entry.
+ *
+ * ⚠️ ONE TYPE, NAMED, BECAUSE TWO SESSIONS DISAGREED ABOUT IT (merged 2026-09-20). `main`'s
+ * `sharedReadLedger` / `shareReadLedger` (autopsy f97eb0ec — a SUB-AGENT's reads never reached the
+ * report) were written against `{ count; content }`, which was the ledger when they were written;
+ * this branch had already widened it with the two fields a read-loop STOP is decided by. Narrowing
+ * the signatures to match would have compiled on the parent and silently dropped `writeSeq` and
+ * `stalls` the moment a CHILD shared the map — re-opening the sub-agent blindness that half exists
+ * to close. Widening a structural type in one place and not its readers is how that returns, so the
+ * type is declared once and referenced.
+ */
+export type ReadLedgerEntry = {
+  count: number;
+  content: string;
+  /** `_writeSeq` as it stood when this path was last read — the no-progress comparison. */
+  writeSeq: number;
+  /** Consecutive reads of this path that were unchanged AND followed no write at all. */
+  stalls: number;
+};
+export type ReadLedger = Map<string, ReadLedgerEntry>;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -531,8 +553,26 @@ export class ToolDispatcher {
    * ⚠️ It deliberately guards ONLY the durable copy. The SANDBOX file keeps its bridge, because the
    * running Vite server serves that document and the Live preview's console mirror is the whole
    * reason it is there — stripping it from disk would fix a publishing bug by breaking a feature.
+   *
+   * ── AND IT IS WHERE `_writeSeq` IS COUNTED (autopsy c847b523, 2026-09-20) ────────────────────
+   *
+   * The read-loop breaker needs exactly one fact: has ANYTHING been written since the last read of
+   * this path? Counting it on this callback — the one door the paragraphs above establish that every
+   * durable write must pass through — is what makes the answer true by construction rather than by
+   * remembering to increment at twenty call sites, including ones nobody has written yet. It is the
+   * same reasoning that put the bridge guard here, applied to a second question.
+   *
+   * ⚠️ It counts WRITES, not `write_file` CALLS: a heal, a batch, a schema sync and a rename all
+   * count, because every one of them changes the project the model is reasoning about — and the
+   * breaker's whole claim is that nothing did.
+   *
+   * ⚠️ The increment must stay ADJACENT to the call below: two source-level guards
+   * (`previewBridgeNotTheApp`, `previewLiveConsole`) assert that this wrapper reaches
+   * `withoutPreviewBridge` within 200 characters, so the explanation lives here and the body stays
+   * one line. That tightness is the security property — do not widen those guards to fit a comment.
    */
   private readonly onFileWrite = (path: string, content: string): void => {
+    this._writeSeq++; // see the docblock — one door, so "did anything change?" is true by construction
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
   };
 
@@ -2126,11 +2166,31 @@ export class ToolDispatcher {
    * Content is held rather than hashed: the bodies are already in memory on the way past, and an exact
    * comparison cannot produce a false "unchanged" the way a truncated hash could.
    */
-  private _readLedger = new Map<string, { count: number; content: string }>();
+  /**
+   * How many durable writes this build has made. Only ever compared against itself — an absolute
+   * value means nothing, a difference of zero means "nothing moved". See `onFileWrite`.
+   */
+  private _writeSeq = 0;
+
+  /** How many STOP-level read-loop notices this build has issued. Monotonic; see `readLoopStops`. */
+  private _readLoopStops = 0;
+
+  private _readLedger: ReadLedger = new Map();
 
   /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
   readLedgerCounts(): Map<string, number> {
     return new Map([...this._readLedger].map(([p, r]) => [p, r.count]));
+  }
+
+  /**
+   * How many times this build had to tell the model to STOP re-reading (see repeatedReads.ts).
+   *
+   * Reported, not just acted on — the escalation is a behavioural fix, and a behavioural fix nobody
+   * measures is a hope. A build showing stops AND a still-high re-read count is the escalation being
+   * ignored, which is a different problem from the one it was built for and must be legible as such.
+   */
+  readLoopStops(): number {
+    return this._readLoopStops;
   }
 
   /**
@@ -2152,7 +2212,7 @@ export class ToolDispatcher {
    * trimmed must still be able to re-read a file. What was missing was never the suppression — it
    * was the COUNT reaching the one place a human reads.
    */
-  sharedReadLedger(): Map<string, { count: number; content: string }> {
+  sharedReadLedger(): ReadLedger {
     return this._readLedger;
   }
 
@@ -2163,7 +2223,7 @@ export class ToolDispatcher {
    * same shape as `shareWriteTypecheckStats`, which is the sibling of this bug that was fixed first
    * (#3134). Called once at spawn, before the child has read anything.
    */
-  shareReadLedger(ledger: Map<string, { count: number; content: string }>): void {
+  shareReadLedger(ledger: ReadLedger): void {
     this._readLedger = ledger;
   }
 
@@ -2575,11 +2635,22 @@ export class ToolDispatcher {
         // The content is ALWAYS returned in full. Suppressing it would save real tokens and is exactly
         // the wrong trade — if the model's context has been trimmed, "you already have this" leaves it
         // unable to proceed at all.
+        //
+        // 🔴 AND WHEN THE NUDGE IS IGNORED (autopsy c847b523): nine reads of one file, zero writes,
+        // the user pressed Stop at 108s — and the notice was word-for-word identical all nine times.
+        // `stalls` counts only the reads that were unchanged AND followed NO write anywhere in the
+        // project, so it is a count of provably useless steps rather than of impatience; a re-read
+        // after an edit resets it to zero and never escalates. At READ_LOOP_LIMIT the wording becomes
+        // a stop. The content is still returned in full — see repeatedReads.ts for why that line is
+        // not negotiable.
         const prior = this._readLedger.get(reqPath);
         const readCount = (prior?.count ?? 0) + 1;
         const unchanged = prior !== undefined && prior.content === full;
-        this._readLedger.set(reqPath, { count: readCount, content: full });
-        const notice = repeatedReadNotice(reqPath, readCount, unchanged);
+        const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
+        const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
+        this._readLedger.set(reqPath, { count: readCount, content: full, writeSeq: this._writeSeq, stalls });
+        const notice = repeatedReadNotice(reqPath, readCount, unchanged, stalls);
+        if (stalls >= READ_LOOP_LIMIT) this._readLoopStops++;
 
         if (sl === null && el === null) return notice ? `${notice}${full}` : full;
         const lines = full.split('\n');

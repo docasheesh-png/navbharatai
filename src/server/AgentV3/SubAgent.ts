@@ -1,7 +1,7 @@
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { TurnRunner } from './ClaudeClient';
-import type { ActuatorPort, SubAgentSpawn } from './ToolDispatcher';
+import type { ActuatorPort, SubAgentSpawn, ReadLedger } from './ToolDispatcher';
 import type { Checkpointer } from './GitManager';
 import { ToolDispatcher } from './ToolDispatcher';
 import { AgentRunner } from './AgentRunner';
@@ -125,7 +125,7 @@ export interface SubAgentDeps {
    * constructor argument, so it does not exist when the spawn is built. Absent ⇒ the child keeps its
    * own map — which is exactly the behaviour that hid the reviewer's waste in autopsy f97eb0ec.
    */
-  readLedger?: () => Map<string, { count: number; content: string }> | undefined;
+  readLedger?: () => ReadLedger | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one

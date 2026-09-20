@@ -71417,6 +71417,106 @@ is a promise.
 ⚠️ **Open:** how often a build actually carries todos is unmeasured, and that decides how often the
 number glides rather than jumps. The first real builds answer it — the same evidence `LADDER_DEPTH` is
 waiting on.
+
+---
+
+## 2026-09-20 — AUTOPSY `c847b523`: the analyzer was the defect, and the finding that would have caught the loop could not fire
+
+Admin, with the whole build report: *"jo jo problem is build report me hai. sabhi ko diagnosis kar ke
+root cause dhund ke dna level par theek karo!!"*
+
+**What the build did:** read `src/App.tsx` **nine times**, wrote **zero files**, and the user pressed
+**Stop at 108 seconds**. The report carried **39 `control-unlabeled` findings** — every one of them
+against NavBharatAI's own golden scaffolds. Four distinct root causes, all fixed at the class.
+
+### 1 · The accessibility analyzer was lying about 20 of its 39 findings
+
+Three bugs in `AccessibilityAnalysis.ts`, and none of them is a form-label bug — each silently
+disabled **every other rule in the file** as well.
+
+- 🔴 **An arrow function ends a tag.** The scanner was `/<\s*[a-zA-Z][\w-]*\b[^<>]*?\/?>/g`, and
+  `[^<>]` cannot contain a `>` — but `(e) => set(e)` does. The match ended at the `>` of `=>`, so
+  **every attribute written after the first handler was invisible to every rule**: `aria-label`,
+  `alt`, `id`, `title`, `href`, `scope`, `lang`. `tagsOnLine` is now a brace-depth- and quote-aware
+  scanner that ends a tag only at a `>` genuinely outside `{…}`. A tag that does not close on its own
+  line is still skipped — an incomplete attribute set must never produce a missing-attribute finding.
+- 🔴 **A React component was judged as an HTML element.** `tagName` lowercases, so `<Select
+  label="Category">` — a component with a real, working prop — was judged by the rules for `<select>`,
+  and `<Dialog.Root>` was judged as `<dialog>` because the name regex stops at the dot. JSX makes this
+  **decidable rather than heuristic**: lowercase is an element, capitalised or dotted is a component.
+  We cannot know a component's contract, so `isHtmlElement` makes the analyzer say nothing about it.
+  This false finding lands on any user whose app has a design system.
+- 🔴 **A wrapping `<label>` only counted on one line.** The commonest React form shape in the world —
+  `<label>` newline `<input>` newline text `</label>` — was reported unlabelled. One counter carried
+  across lines (`labelDepth`) removes the whole family.
+
+**Scaffold findings fell 39 → 19 on these three fixes alone.** Eight regression tests in
+`AccessibilityAnalysis.test.ts`, six of which were **proven to fail** against the old analyzer; the
+other two lock the precision that must not be traded away (an unclosed tag is still not judged, and a
+sibling `<label>` with no `htmlFor` is still a real finding).
+
+### 2 · The other 19 were real — and nothing had ever run our own gate over our own templates
+
+The 50/50 law, literally. The first half was the analyzer; the other half is *why did the problem arise
+at all?* Because the golden scaffolds have had a CI lock for **parsing**, for **Babel compilation** and
+for **duplicate imports** since the white-screen work — accessibility was simply never asked. So the
+very first thing a user's app inherited from us was a screen a blind user cannot fill in, and the
+engine then spent its own turns being told about defects it had not caused.
+
+`aria-label` added to all 19 (`appsA.ts` ×3, `appsB.ts` ×5, `indiaApps.ts` ×11), each mirroring the
+control's own visible voice — the wedding-RSVP app's stay Hinglish because its placeholders are.
+**The fix is not 19 labels; it is `tests/ourOwnTemplatesPassOurOwnGate.test.ts`**, which runs the REAL
+`scanAccessibility` over every registered scaffold (a copy of the rules would drift; asking the
+production module cannot) and fails on any `control-unlabeled` or any HIGH-severity defect. It carries
+its own canary: a deliberately broken template must still be caught, so a scanner that silently
+returned `[]` cannot make the locks pass for ever while proving nothing.
+
+### 3 · 🔴 `REPEATED_READS` — the one finding that names this exact build — could not fire
+
+It was nested inside
+`if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted)`,
+**purely because that feature had already assembled a file map it wanted for something else.** Three of
+those four conditions were false here. So the measurement had been reporting only on builds that wrote
+files and were never stopped — **the ones least likely to have looped.**
+
+🔑 **THE CLASS, named so it is recognised again: an instrument about our own engine must not live
+inside another feature's conditional.** Its only precondition is that the build ran. A measurement
+whose coverage is decided by an unrelated flag reports a biased sample and reads as an *absence* of the
+problem — worse than no measurement, because nobody doubts it. Both `REPEATED_READS` and its sibling
+`WRITE_TIME_TYPECHECK` now sit beside `READY_BEFORE_END`, the block that already states this rule in
+words. Each is independently wrapped, so neither can suppress the other.
+
+⚠️ **`tsc` and `vitest` cannot see a measurement that is merely unreachable**, which is why the lock is
+a **source-level** guard asserting the record appears before that `if`. Proven by reversion.
+
+### 4 · The advice never escalated, so the loop had no brake
+
+`repeatedReadNotice` fired on reads two through nine with **word-for-word identical text**. Advice
+repeated unchanged is not a defence; it is wallpaper.
+
+- **`READ_LOOP_LIMIT = 3`.** At the limit the wording becomes a STOP that names the three ways out —
+  write the change, write a different file, or **say plainly what is blocking you**. A stop that only
+  forbids leaves a model nowhere to go, and it will read again.
+- 🔑 **What makes it mechanical rather than a louder nag:** `stalls` counts only reads where the file
+  was unchanged **AND not one file anywhere in the project had been written since the previous read of
+  that path**. That is a provably no-progress step. A re-read after an edit resets the streak to zero
+  and never sees the message — the distinction `repeatedReads.ts` was written to protect.
+- 🔒 **The write counter lives on `onFileWrite`**, the one door the class's own docblock calls the only
+  route to durable storage — so "did anything change?" is true by construction rather than by
+  remembering to increment at twenty call sites. It counts writes, not `write_file` calls: a heal, a
+  batch, a schema sync and a rename all change the project the model is reasoning about.
+- 🔒 **The content is still returned in full.** Refusing the read is the one intervention that can
+  strand a model whose context has been trimmed — a worse failure than the loop.
+- **Measured, not just acted on:** `readLoopStops()` rides on the `REPEATED_READS` detail. A build with
+  stops **and** a still-high re-read count is the escalation being *ignored* — a different problem from
+  the one it was built for, and it must be legible as such.
+
+### ⚠️ Open, and deliberately not decided here
+
+**The double discount on a stopped build.** A cancelled build has its markup waived (no proven preview)
+and is then halved again for the cancellation, so a stopped build can cost NavBharatAI money rather
+than merely earning nothing. Both rules are individually correct and admin-mandated; their composition
+was never decided. Raised to the admin rather than changed — billing is not a session's call.
 ## 2026-09-20 — THE SIBLING HUNT BEHIND #3151: 37 VIEWS AUDITED, ONE MORE WAS CLIPPING (PR #3152)
 
 #3151 fixed App Mart's scrolling. Rule 3 says the root cause almost always lives in more than one
@@ -72018,6 +72118,150 @@ one. Held open by its own case in the suite. This is also the argument for the g
 WHOLE: the new suite was green while those three were red.
 ---
 
+## 2026-09-20 — AUTOPSY `31dc61fd`, FULL LEDGER: every problem in the report, diagnosed
+
+Admin: *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna level
+par theek karo."* So this entry is the COMPLETE itemisation, with each item's state named honestly —
+fixed, already-PR'd, or open with the reason.
+
+**The build:** "Create a upsc preparation aap" · Weak tier · 15.9 min · 70 model calls · 2.6M input
+tokens (94.5% cache-read) · 10 files · free user billed ₹299.37 · `RELEASE_GATE` YELLOW.
+
+### ❌ Still broken / shipped imperfect — 4
+
+| # | Item | State |
+|---|---|---|
+| 1 | **2 vulnerable dependencies shipped in the user's app** (`vite@5.4.21`, `vitest@2.1.9`) | **FIXED HERE** |
+| 2 | Accessibility 92/100 — 1 form field with no label (`Forum.tsx`, WCAG 1.3.1) | open — see below |
+| 3 | Design consistency 80/100 — 38 spacing values off the 4px grid, 35 of them in `src/index.css` | open — see below |
+| 4 | `RELEASE_GATE` YELLOW — no user journey could be derived or run | open — see below |
+
+### 🥵 Struggle points — 8
+
+| # | Item | State |
+|---|---|---|
+| 5 | 13× `IN_BUILD_GREEN_UNCHECKED` — the platform's own browser never ran | fixed, **#3146 merged** |
+| 6 | Phantom "missing dependency: stores" cost 3 greps + a shell grep + a repeat `evaluate` | fixed, **#3161 open** |
+| 7 | Fast lane burned 177 s, produced 1 file, then bailed | fixed, **#3157 open** |
+| 8 | "App looks complete" at step 10 with an EMPTY workspace | fixed, **#3156 merged** |
+| 9 | **Researcher sub-agent spent a call to say it has no browsing tool** | **FIXED HERE** |
+| 10 | Architect then did 6 `browser_action` calls itself; loop-detector fired | consequence of 9 |
+| 11 | `READY_BEFORE_END` — judged finished at step 10, then ran 47 more steps over 701 s | open — measurement only |
+| 12 | ETA said 2.9 min, build took 15.9 — **5.5× out**, outside its own band | open — see below |
+
+### 🔀 Workarounds — 2
+
+| # | Item | State |
+|---|---|---|
+| 13 | `PROVIDER_FALLBACK` KIMI → next rung on "build budget reached" at **105 s of a 1800 s build** | open — see below |
+| 14 | Architect substituted itself for the sub-agent it had just spawned | fixed by 9 |
+
+### ⏭️ Skipped — 3
+
+| # | Item | State |
+|---|---|---|
+| 15 | No `JOURNEY_*` code in the report at all | open |
+| 16 | E2E suite scaffolded but never run here | by design (says so honestly) |
+| 17 | `SANDBOX_PEAK_MEMORY` not available on this machine | honest, no action |
+
+### ✅ Self-healed — 4 (each a RED FLAG per the 50/50 law, not a win)
+
+| # | Item | Why it should not have been needed |
+|---|---|---|
+| 18 | XSS: `dangerouslySetInnerHTML` in `Notes.tsx` rewritten to structured content | the builder generated the XSS in the first place |
+| 19 | Write-time typecheck caught 2 errors in the file just written | working as designed (#3084) |
+| 20 | `DependencyReconciler` added the missing `@playwright/test` | the E2E scaffolder wrote tests without declaring its own dep |
+| 21 | Preview snapshot saved — then **invalidated** by a later pass (`PREVIEW_SNAPSHOT_STALE`) | ordering defect, open |
+
+---
+
+## What was fixed in THIS change
+
+### 1. 🔴 The scaffold shipped known vulnerabilities to every app — and no heal could ever clear them
+
+`"vite": "^5.4.1"` resolves to **5.4.21, the LAST 5.4.x**, which still carries advisories. So
+`npm audit fix` — compatible-only, and exactly what `AGENTV3_AUDIT_FIX=on` runs — **could never fix
+it**. npm says so itself: *"To address all issues (including breaking changes), run `npm audit fix
+--force`."*
+
+**Measured on the REAL scaffold**, emitted to disk verbatim from the template module and installed:
+
+```
+current pins  →  2 vulnerabilities (1 high, 1 moderate)
++ vitest       →  5 vulnerabilities (1 CRITICAL, 1 high, 3 moderate)   ← what this build shipped
+vite ^8 / plugin-react ^5 / vitest ^5  →  0 vulnerabilities
+```
+
+⚠️ **They are dev-server flaws, and that makes them WORSE here, not better** — path traversal in
+optimized-deps `.map` files, a `server.fs.deny` bypass, an esbuild dev-server request flaw. **We
+publish the vite dev server on a public preview host.** A dev-server path traversal on a publicly
+reachable port is sandbox filesystem exposure.
+
+🔒 **Proven before it was written**, because a bump that breaks every build is worse than the
+advisories: the real scaffold **built clean** on the new pins (947 ms → 444 ms), its **dev server
+booted and served HTTP 200** with `#root` and the module script, and the exact-pinned, load-bearing
+`vite-tsconfig-paths@5.1.4` still resolved. Sandbox image is `node:22-bookworm`, satisfying vite 8's
+`^20.19.0 || >=22.12.0`.
+
+**The DNA half — the drift, not the version.** The pins live in THREE places: two live copies of the
+template plus a base64 blob in `e2b.Dockerfile`, whose own comment says they *"MUST stay in sync"* —
+enforced by nothing. All three are updated and `tests/theScaffoldShipsNoKnownVulnerability.test.ts`
+now asserts them equal **to each other**, so a future bump stays green only if all three move.
+
+🔴 **ADMIN ACTION: the E2B template image must be rebuilt** for the pre-baked warm `node_modules` to
+match. Until then the primer still primes react/react-dom and `npm install` reconciles the rest —
+the Dockerfile's own words: *"correct, only less optimal"*. Builds are not broken, just a slower
+install delta on vite-react.
+
+⚠️ **Deliberately NOT done:** vite 8 supports tsconfig paths natively (`resolve.tsconfigPaths: true`)
+and says so at startup. Dropping `vite-tsconfig-paths` is a second change with its own risk; this one
+is about the advisories.
+
+⚠️ **Unexplained and NOT guessed at:** the agent's own `npm install -D vitest` resolved **2.1.9**
+(carrying the CRITICAL) when npm's latest is 5.0.1. We pin vitest nowhere. That is a sandbox-runtime
+fact I could not reproduce from this session — recorded, not invented.
+
+### 2. 🔴 The Researcher could not research
+
+`researcher` advertises `best approach`, `framework choice`, `search` — and was handed
+`READONLY_TOOLS` (`read_file`, `grep`, `glob`, `recall`, `evaluate`), **every one of which reads the
+current workspace**. An agent whose job is "find the best approach BEFORE code is written" could only
+read code that did not exist yet.
+
+It spent a model call and 13 s replying *"I don't have a web-browsing or screenshot tool available"*.
+The architect then did it itself with six `browser_action` calls, the loop-detector fired, and the
+next thing it did was declare an empty workspace complete.
+
+**The rule: a sub-agent must be able to do the job its capabilities advertise.** `web_search` is the
+cheapest tool that closes it (read-only, ₹0 when unused, DuckDuckGo-first for `reference` intent) —
+added to **that role only**, never to the shared constant, because `accessibility` and `reviewer`
+share it and must not acquire a web budget as a side effect. A test asserts both halves.
+
+---
+
+## Open, with the reason (rule 6) — not silently dropped
+
+- **A11y label + 4px grid (items 2, 3).** Both are in MODEL-GENERATED files, so the DNA fix is
+  upstream: the per-page design contract in the architect prompt. ⚠️ `src/index.css` here was written
+  by the FAST LANE, and `platformAuthored.ts` correctly did not shield it. Worth doing; it is a prompt
+  change whose effect only a real build can measure, and I would rather ship it with evidence than
+  guess at wording.
+- **Journey never derived (items 4, 15).** `AGENTV3_JOURNEY_CHECK` only began launching a browser on
+  2026-09-17; per its own CLAUDE.md entry the first real `JOURNEY_PASSED`/`FAILED` lines are the first
+  evidence it has ever produced. **Watch the next reports before changing it.**
+- **"build budget reached" at 105 s of a 1800 s build, `provider=unknown` (item 13).** The streaming
+  half of this was root-caused on 2026-09-17 (autopsy fdd59ef8) and fixed; this report is from 09-19
+  and still shows it, so a path survives — most likely the fast lane's own stage deadline reported in
+  the language of the build budget. The fix lands in `BuildDiagnostics`/`OpenAiToolRunner`, and
+  **#3162 is open in the reviewer/diagnostics area** — per the concurrency rule I am not racing another
+  session into that file. Named, not taken.
+- **`READY_BEFORE_END` 701 s (item 11).** `#3084` shipped this as a MEASUREMENT first, deliberately,
+  and CLAUDE.md says not to build the stronger protection until the measurement produces warnings on
+  real builds. This is one data point.
+- **`PREVIEW_SNAPSHOT_STALE` (item 21).** The snapshot is taken, then a post-build pass writes more
+  files and invalidates it. An ordering defect in the post-build sequence.
+- **ETA 5.5× out (item 12).** The estimator correctly refused to SHOW a number (unevidenced), which is
+  the honesty guard working. The underlying estimate is still poor; `#3157` fixes the fast lane's half.
 ## 2026-09-20 — A commented-out import is not an import (autopsy `31dc61fd`, re-read)
 
 **This is the SAME build id I autopsied earlier today.** The admin re-sent it; rather than repeat the
@@ -72407,6 +72651,58 @@ asserts the eligible count EXCEEDS the cap before asserting the note is held to 
 - **`READY_BEFORE_END` 701 s** — `#3084` shipped it as a measurement first, deliberately.
 - **`PREVIEW_SNAPSHOT_STALE`** — an ordering defect in the post-build sequence.
 - **`vitest@2.1.9`** — a sandbox-runtime resolution I could not reproduce from this session.
+## 2026-09-20 — THE REPORT MUST SAY WHAT HAPPENED (autopsy f152c1ab, open items 5, 6 and the duplicate narration)
+
+Three findings from one report, all the same defect: **the engine behaved correctly and then
+described itself wrongly.** Rule 5 names this — fixing the code is not enough when the reporting
+still misleads the next reader.
+
+### 1. `LADDER_DEPTH` said *"Fell to rung 2 of 5"* about a build that fell nowhere
+
+That build was routed COMPLEX, so `withoutCheapFlashLead` dropped the cheap opener and the chain
+**began at rung 2**. It finished there. An admin reading "fell" goes hunting a rung-1 failure that
+never happened.
+
+**"Fell" is a claim about MOVEMENT, so it may only be made against where the build STARTED.**
+`describeLadderDepth` now takes the opening rung, and the caller computes it with `openingRung` —
+which asks `withoutCheapFlashLead`, **the same function that built the chain**, rather than
+re-deriving the rule. The sentence cannot drift from the routing it describes. An absent `openedAt`
+falls back to 1, so an older caller reads exactly as before.
+
+### 2. The per-call log named a VENDOR where a MODEL belongs
+
+The report recorded `model: "kimi"` for both calls while its own manifest carried `kimi-k2.7-code`.
+The expression behind it was **copy-pasted at five call sites**:
+
+    model: lbl === 'anthropic' ? fastBuildModel() : someProvider.toLowerCase()
+
+so every non-Claude aux call in every build report has been naming a family. **Not cosmetic:** two
+ids inside one family differ by 2× (`kimi-k2.7-code` $0.95/$4.00 against `-highspeed` at twice that,
+a distinction `providerRates.ts` had to grow a row for after it silently under-billed). A per-call
+log that says "kimi" cannot be reconciled against an invoice — on the one screen used to check a bill.
+
+🔒 **The fact was already there and simply not read.** `TurnResult.model` is documented as *"the
+model id that ACTUALLY produced this turn"*, and `AgentRunner` has read it since a test recorded the
+identical lesson ("onLlmCall recorded the REQUESTED model id, not the one that answered"). Only the
+AUX sites never did. One helper now answers it — `answeringModel`: what answered, else what was
+PLANNED, else the family. That order matters: a planned id can be checked against the ladder, a
+family label can be checked against nothing. It never invents an id.
+
+### 3. One skip, announced twice, with a reason that was false
+
+The reported build printed BOTH of these at the same millisecond:
+
+    ⏭️ … there is time to write your files or to design the contract, not both …
+    ⏭️ … planning used the time it needed, so the remaining budget goes to writing your files.
+
+The `else if` fired only because the `if` above it ALSO required `contractAffordable`, so the two
+branches were never mutually exclusive. And the second reason was **wrong** for that build: it
+describes a collapsed contract cap, while this build had a real cap and failed the AFFORDABILITY
+check. `contractSkipReason` is one pure decision derived from the same two facts the code branches
+on, and a test asserts the two reasons can never both describe one build.
+
+Test-locked in `tests/theReportMustSayWhatHappened.test.ts` (13 cases), reversion-proven twice
+(ignore `openedAt` → 1 red; restore the duplicate branch → 2 red).
 ## 2026-09-20 — THE FRUIT IS NOT A BUILD ORDER (autopsy f152c1ab, open item 1 — now closed)
 
 `'banana'` — the Hindi gerund "to make" — sat in `NEW_BUILD_SIGNALS` **and** `BUILD_SIGNALS` as a
@@ -72629,8 +72925,43 @@ breath as flattery.
   by nothing. A real fix is a control-driven journey (press ←, assert the canvas changed), and it is a
   product decision with its own cost, not a line in this autopsy.
 
+
+### ⚠️ CORRECTION, same day — item 3 was fixed by ANOTHER SESSION concurrently, and mine was WITHDRAWN
+
+While this fix was being written, a second live session root-caused the duplicate contract-skip
+narration independently (their autopsy `f97eb0ec`) and merged first. Their version reaches the same
+outcome with a ternary inside the single surviving branch; mine extracted a pure `contractSkipReason`
+with five cases.
+
+**Mine was withdrawn, not merged on top.** Re-landing work already in `main` is exactly the
+duplicated effort safeguard #6 exists to prevent, and CLAUDE.md is explicit that a correct change
+from a live session is not to be raced. The conflict in `SimpleBuilder.ts` was resolved by taking
+`main` whole.
+
+Recorded rather than deleted silently — both so the withdrawal is legible, and because **two sessions
+independently finding the same defect in the same hour is itself a measurement**: this class was
+visible enough in one report that two readers hit it. Items 1 (`LADDER_DEPTH`) and 2
+(`answeringModel`) are untouched by their change and remain this change's own work.
 ---
 
+## 2026-09-20 — The FOURTH vite pin site, found by the sibling hunt (autopsy `31dc61fd` addendum)
+
+Rule 3 applied after the fix, not before it — and it found one more.
+
+`FrameworkFoundation.ts` carried its **own** `vite: '^5.4.10'` / `@vitejs/plugin-react: '^4.3.4'`. It
+is **live**: `ensureViteReactFoundation` is called from `routes/agentv3.ts`, and it synthesizes a
+`package.json` for an app that does not have one. So fixing the two `ViteReactProviderContents`
+copies and the sandbox image's warm primer would have left the vulnerable range to walk straight
+back in — through exactly the apps that never got a scaffold.
+
+**Fixing three of four places is how a class survives a fix.** All four are now on `vite ^8.3.0` /
+`plugin-react ^5.2.0`, and `tests/theScaffoldShipsNoKnownVulnerability.test.ts` holds all four —
+reversion-proven by putting the fourth back to `^5.4.10` (1 red).
+
+⚠️ One detail worth recording: the four sites are written in **two different quote styles** (JSON
+`"vite": "^8.3.0"` in the templates, an object literal `vite: '^8.3.0'` in FrameworkFoundation). The
+test's reader now accepts both, so a pin site cannot escape the assertion merely by being spelled
+differently — which is precisely how the fourth one stayed invisible.
 ## 2026-09-20 — What the user must do, out of the chat and into one ❓ tray (PR 1 of 3)
 
 **THE ADMIN'S COMPLAINT, verbatim:** *"yeh cheez abhi text chat me hi hai, aur bahut sare navbharatai

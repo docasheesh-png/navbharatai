@@ -100,6 +100,16 @@ function inputTags(source: string): string[] {
  * is never mislabelled "stateless" — the worst a false positive could do is soften a YELLOW headline, and
  * it can NEVER promote anything to GREEN (rendering alone still cannot earn green). Pure.
  */
+/**
+ * The one sentence for "there is genuinely nothing here to prove".
+ *
+ * A constant because TWO branches now reach it — no pages at all, and pages with no form — and this
+ * file's own history is of the same explanation drifting into two slightly different claims.
+ */
+export const NO_DATA_ENTRY_REASON =
+  'this app has no data-entry surface at all — a game, a dashboard or a landing page has '
+  + 'nothing to save and reload, so there is no such journey to prove';
+
 export function appHasNoDataEntry(files: Record<string, string>): boolean {
   for (const src of Object.values(files ?? {})) {
     if (!src) continue;
@@ -456,8 +466,7 @@ export function noJourneyReason(files: Record<string, string>): string {
     // true of a canvas game, an empty file map and a project we are holding one utility file for, and
     // only the first of those is "there is nothing here to prove".
     if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
-      return 'this app has no data-entry surface at all — a game, a dashboard or a landing page has '
-        + 'nothing to save and reload, so there is no such journey to prove';
+      return NO_DATA_ENTRY_REASON;
     }
     return 'no page components were found to derive a user journey from';
   }
@@ -465,7 +474,24 @@ export function noJourneyReason(files: Record<string, string>): string {
   // composes its form from components, and asking a narrower question here is how this sentence came
   // to tell a chat app it takes no user input (see formSourcesFor).
   const anyForm = pages.some((p) => formSourcesFor(p, files).some((s) => inputTags(s.source).length > 0));
-  if (!anyForm) return 'this app has no form for a journey to fill in — nothing here takes user input';
+  if (!anyForm) {
+    // 🔴 A REACT GAME HAS A PAGE, SO IT NEVER REACHED THE SENTENCE WRITTEN FOR IT (autopsy f97eb0ec,
+    // 2026-09-20 — the THIRD time this line has told an app it takes no input when it does).
+    //
+    // The branch above is gated on `pages.length === 0`, and its own comment describes "a React game
+    // whose whole UI lives in src/App.tsx". But such a game HAS a page, so `journeyCandidates` finds
+    // one, this function walks straight past that branch, and the falling-block game the admin built
+    // was told: *"nothing here takes user input"* — with a canvas, touch handlers, arrow keys AND
+    // on-screen ←/→ buttons. The release gate then repeated it as "no data-entry flow to exercise".
+    //
+    // 🔒 THE SAME PAIR OF QUESTIONS, ASKED IN BOTH PLACES — not a new rule, and precise for the same
+    // reason it is precise above: `appHasNoDataEntry` scans EVERY file for inputs, UI-library form
+    // components, change/submit handlers and contentEditable, so an app whose form merely sits deeper
+    // than `formSourcesFor` looks (the real defect this sentence is for) still gets the form wording.
+    // Only an app with a render surface and no data entry anywhere reads as a game.
+    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return NO_DATA_ENTRY_REASON;
+    return 'this app has no form for a journey to fill in — nothing here takes user input';
+  }
   // ⚠️ THE REMEDY, NOT ONLY THE SYMPTOM (autopsy a48d0f9e, 2026-09-19). This sentence used to stop at
   // "no journey was derived", which reads like an environmental limit of the CHECK. It is not: it is a
   // fixable defect in the generated app, and in that report the SAME build's accessibility pass had

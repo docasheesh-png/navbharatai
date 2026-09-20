@@ -118,6 +118,14 @@ export interface SubAgentDeps {
    * is precisely the failure being fixed.
    */
   writeTypecheckStats?: () => import('./writeTimeTypecheck').WriteTypecheckStats | undefined;
+  /**
+   * The parent's file-read ledger, so a sub-agent's re-reads are counted in the build's own numbers.
+   *
+   * A thunk for the same reason as the one above: the parent `ToolDispatcher` takes this spawn as a
+   * constructor argument, so it does not exist when the spawn is built. Absent ⇒ the child keeps its
+   * own map — which is exactly the behaviour that hid the reviewer's waste in autopsy f97eb0ec.
+   */
+  readLedger?: () => Map<string, { count: number; content: string }> | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
@@ -202,6 +210,14 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     try {
       const shared = deps.writeTypecheckStats?.();
       if (shared) childDispatcher.shareWriteTypecheckStats(shared);
+    } catch { /* never block a spawn */ }
+    // Count this child's file READS in the PARENT's ledger too — same thunk, same reason, and the
+    // sibling of the line above. Autopsy f97eb0ec: the reviewer re-read one unchanged file SEVEN
+    // times and the build report carried no repeated-read finding at all, because this was the one
+    // measurement still left behind in the child.
+    try {
+      const sharedReads = deps.readLedger?.();
+      if (sharedReads) childDispatcher.shareReadLedger(sharedReads);
     } catch { /* never block a spawn */ }
     // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
     // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client

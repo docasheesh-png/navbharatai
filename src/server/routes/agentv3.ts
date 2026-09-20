@@ -13681,6 +13681,9 @@ async function noteBuildOutcome(
         // reads (autopsy 3ce8459b, 2026-09-19). A thunk for the same forward-reference reason as the
         // two lines above: `dispatcher` is constructed BELOW, with this very object as an argument.
         writeTypecheckStats: () => dispatcherForSubAgents?.sharedWriteTypecheckStats(),
+        // And its file READS — so the repeated-read finding covers the reviewer and every other
+        // sub-agent, not just the architect (autopsy f97eb0ec).
+        readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run

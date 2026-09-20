@@ -72021,3 +72021,85 @@ fact we store.
 
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
+
+---
+
+## 2026-09-20 — Autopsy f97eb0ec (falling-block game): the reviewer's waste was invisible
+
+**Build:** 9 min, ok, 100% KIMI `kimi-k2.7-code`, weak tier, free-list. App rendered at 431s
+(`IN_BUILD_GREEN` fired — its first real evidence) and `PROD_BUILD_OK`.
+
+### Ledger — ✅ 0 · 🔀 3 · ⏭️ 3 · ❌ 5 · 🥵 5
+
+🔀 the fast lane spent 62s planning then gave up and its file list was **discarded** (the full builder
+re-explored from scratch); the shared-contract pass was skipped twice with two different reasons; the
+post-build review was handed to the user (*"send 'review it' and I'll run it on its own"*).
+⏭️ no journey; no per-route render check; **7 requirement gaps marked `autoResolved` — 4 of them
+(sound, saved progress, pause, in-app tutorial) were simply not built.**
+❌ `REVIEW_INCOMPLETE` (zero findings), `RELEASE_GATE` YELLOW, design 90/100, `vite@5.4.21` 3
+advisories, `PREVIEW_SNAPSHOT_STALE`.
+🥵 **the reviewer read `src/App.tsx` SEVEN TIMES, unchanged**; one model call took 169.6s (4,533
+output tokens ≈ 27 tok/s); 62s of planning thrown away; `READY_BEFORE_END` 92s; sandbox 91% idle.
+
+🔴 **The honest headline: this build proved the app RENDERS and proved nothing about whether it does
+what was asked.** The prompt's one measurable requirement — *"1 block drop ho, 5 second me"* — was
+checked by nothing, because the review timed out and no journey ran.
+
+### Fix 1 — a sub-agent's re-reads now reach the report (**fifth occurrence of one class**)
+
+`repeatedReadSummary` exists to put that waste in the build report, and the report carried **no such
+finding**. The reviewer is a SUB-AGENT with its own `ToolDispatcher`; `_readLedger` is an instance
+field; the route reads the PARENT's. So seven wasted steps were invisible.
+
+⚠️ **This is the same class as `onFileWrite` (#2988), the framework id, `onCommand` and
+`writeTypecheckStats` (#3134 — mine, this session).** The fix is deliberately the SAME SHAPE and sits
+two lines from #3134's, so the next dropped measurement is obvious at the same call site:
+`sharedReadLedger()` / `shareReadLedger()` + a `readLedger` thunk on `SubAgentDeps` + one route line.
+
+🔒 **NOT a cache, and that is settled rather than re-litigated.** `repeatedReads.ts` rejects
+suppression with a reason that holds — a model whose context was trimmed must still be able to re-read
+a file, and *"a builder that cannot re-read a file is a worse product than one that reads it twice"*.
+What was missing was never the suppression; it was the COUNT reaching a human. That module's own
+words: *"A behavioural fix nobody measures is a hope."* Unshared, it was a hope.
+
+⚠️ **Lean review is NOT the defect, and saying so matters.** The app was green, so suggest-only was
+correct by its own rule. But 12 steps left no slack, and 7 went on one unchanged file — **lean did not
+cause the waste; it removed the margin that had been hiding it.**
+
+### Fix 2 — a game is no longer told it takes no user input
+
+`noJourneyReason` said *"this app has no form for a journey to fill in — nothing here takes user
+input"* about an app with a canvas, touch handlers, arrow keys and on-screen ←/→ buttons. The
+game-aware sentence already existed one branch above — **gated on `pages.length === 0`, so a React
+game with an `App.tsx` can never reach it**, which is exactly the case its own comment describes.
+
+Both branches now ask the same pair (`hasRenderSurface && appHasNoDataEntry`) and return one
+constant, `NO_DATA_ENTRY_REASON`. Precise: `appHasNoDataEntry` scans EVERY file, so an app whose form
+merely sits deeper than `formSourcesFor` looks still gets the form wording — that is the real defect
+the form sentence is for. **Third time this line has told an app it takes no input when it does**
+(e4ebcb5f, a48d0f9e, now f97eb0ec).
+
+**Reversion-proven four ways** in `tests/theReviewersWasteWasInvisible.test.ts` (14 cases) — including
+the subtle one: making `sharedReadLedger()` return a **copy** looks like the fix and counts nothing.
+
+### Cross-check of the standing instructions, against this real run
+
+✅ weak ⇒ no Sonnet/Opus (`noClaude: true`) · ✅ the 3 ladders exactly as written, every rung keyed ·
+✅ NEMOTRON on the ladder (key set) · ✅ `COMPLEX_TO_KIMI` fired (score 63 > 40, opened on KIMI —
+first real evidence) · ✅ Project Mode ON and correctly did NOT fire (4 parts < 6) · ✅
+`IN_BUILD_GREEN` and `POST_GREEN_WRITES` fired (first real evidence of both) · ✅ `REVIEW_LEAN` fired.
+
+⚠️ **`AGENTV3_NEMOTRON`: the malformed-value warning is ABSENT, so the `week` typo is gone — but this
+report cannot distinguish "now a valid tier" from "unset".** The ladder rung only proves the KEY. The
+judge and plan roles remain UNCONFIRMED; the admin's console is the only place that settles it.
+
+❌ **Judge/reviewer was the SAME model as the builder** (`kimi-k2.7-code` both). **Already recorded by
+another session** in PROGRESS.md 2026-09-19 — the reviewer rides the build chain and does not obey
+`selectReviewJudge`'s different-model rule. Not taken here; this report is fresh evidence for it.
+
+### Still open (rule 6), not built here
+
+- **The fast lane's plan is thrown away when it aborts.** 62s and 2,220 output tokens, then the full
+  builder re-planned from scratch. Handing the file list over is the obvious saving.
+- **Every completeness gate we own is form-shaped.** Journey, release gate and feature coverage all
+  look for inputs; a game satisfies none of them, so a game's *behaviour* is never machine-verified.

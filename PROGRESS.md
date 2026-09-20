@@ -70850,6 +70850,48 @@ planner call, so a false 8 is charged to somebody describing their shop in six s
 made, not only in a doc nobody editing a regex reads — and `tests/theDandaIsAFullStopNotAComma.test.ts`
 (4 cases) locking the parity as a COMPARISON rather than two constants, so a drift in either direction
 fails. Reversion-proven both ways: adding `।` to either counter turns two cases red.
+## 2026-09-19 — 🔎 THE SIBLING: the word does not always fall into LATIN
+
+The same-day follow-up to the `জungle` autopsy (3ce8459b) above, under rule 3 (hunt the siblings before
+calling a root cause closed).
+
+**What was still missed.** `mixedScriptTokens` required a LATIN letter in the token, so it only ever
+caught the half of the class where the model fell out of the target script into English. Measured, not
+assumed — the probe ran before any code changed:
+
+```
+"জungle" -> ["জungle"]      caught
+"জংगल"  -> []               MISSED   ← one Bengali letter, then Devanagari
+```
+
+Both are the identical root cause — the model leaves the target script part-way through ONE word — and
+both put the identical broken label on the user's screen. A Bengali app receiving a Devanagari letter is
+no less broken than one receiving `ungle`; it was simply invisible to a rule written around the one
+example that had been reported. Fixing the instance and not the class is what this file's own a38c6fef
+entry exists to warn about, and it would have recurred on the first non-Latin occurrence.
+
+**The fix.** `spansTwoIndicScripts(token)` — the token's LETTERS come from two different Indic blocks —
+now counts as broken alongside the Latin test, at both the literal fast-path and the per-token decision.
+
+⚠️ **LETTERS ONLY, and that is the whole precision rule.** The danda `।` (U+0964) and `॥` (U+0965) sit in
+the DEVANAGARI block but end a sentence in Bengali, Gurmukhi and the rest, and the Devanagari digits are
+shared the same way. Judging by every character would read `বাংলা।` — correct Bengali — as Bengali mixed
+with Devanagari, and the very first real Bengali app would have been flagged. The block index is
+arithmetic from U+0900 and stops exactly where the module's own `INDIC` range stops, so the two cannot
+drift apart about what counts as Indic.
+
+**Measured against real text, not reasoned about.** The new rule was swept over **29,223 string literals**
+in this repository's own Indic-carrying files: **10 hits, every one of them deliberate** — this module's
+documentation examples, the `জungle` test fixture, and the pre-existing `kितni` fixture in
+`agentv3.ts`. **Zero false positives.**
+
+**Reversion-proven both ways** in `tests/aLabelMustNotArriveBroken.test.ts` (12 cases): deleting the
+`\p{L}` letters-only test turns the danda case red, and restoring the old Latin-only condition turns the
+sibling case red. Two Indic languages in the SAME string stay clean — `বাংলা हिंदी`, `বাংলা / हिंदी`,
+`বাংলা-हिंदी` — because only a change inside one WORD is a defect.
+
+Unchanged: still deterministic, still free, still advisory. It cannot block, fail or heal a build, and it
+cannot move a bill.
 ## 2026-09-19 — a review that did not happen is not a PASS
 
 The admin put the NVIDIA **trial** key on the Weak judge and, told plainly that credits would one day

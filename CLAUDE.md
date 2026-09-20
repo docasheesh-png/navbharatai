@@ -1217,6 +1217,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   published under the **Government Open Data License – India**, which permits commercial use in terms.
   A free key from data.gov.in's own registration is all it needs. Read by
   `src/server/lib/cpcbAirQuality.ts`.
+  ⛔ **PARKED 2026-09-20, THE SAME DAY — THE KEY COULD NOT BE OBTAINED, AND THAT IS NOT THE ADMIN'S
+  TODO ANY MORE.** They registered on data.gov.in, reached `Dashboard → MyAccount`, and the portal's
+  own account verification would not complete (verbatim: *"yeh nahi mil sakti — government website
+  hai, nahi chal rahi, verification nahi ho raha hai"*). **Do NOT put "set `DATA_GOV_IN_API_KEY`" back
+  on their queue** — it was tried, it failed on the other side's side, and re-issuing the instruction
+  is the same wasted-instruction class #3196 was written about. AQI questions are answered by web
+  search today and the app is whole; this is a MISSING UPGRADE, never a breakage. Re-open it only if
+  the admin says the portal worked, or if someone finds another AQI source whose licence genuinely
+  covers a commercial product — and that search has to end in the LICENCE, since the two obvious
+  free candidates (waqi.info's free token, and the no-key provider this change moved AQI off) are
+  both non-commercial tiers, and swapping one grey source for another is not a fix.
   ⚠️ **UNSET ⇒ AQI questions fall through to web search, and NEVER back to the old source** — a
   silent fallback would re-open the exposure with nothing on any screen saying so.
   ⚠️ **IT IS ON ITS OWN GATE, NOT `LIVE_WEATHER_SOURCE`**, deliberately: that switch exists to pause

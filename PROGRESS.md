@@ -74806,3 +74806,37 @@ guard covers the class that broke us: source that is fine on Linux and wrong on 
 ships. Running the two workflows periodically rather than only on demand is the complete fix and is
 **not built here** — it burns a Play `versionCode` per run, which the admin's own standing rule
 reserves for when they ask.
+
+---
+
+## 2026-09-20 — `DATA_GOV_IN_API_KEY` PARKED: the key could not be obtained, and the item leaves the admin's queue
+
+The CPCB air-quality swap (earlier today) moved AQI off a non-commercially-licensed provider onto the
+Central Pollution Control Board's own feed on data.gov.in, under the Government Open Data License –
+India. It needs one free key. The admin was guided through the portal step by step: they registered,
+signed in, reached `Dashboard → MyAccount`, and **the portal's own account verification would not
+complete**. Verbatim: *"yeh nahi mil sakti — government website hai, nahi chal rahi, verification
+nahi ho raha hai"*.
+
+**Nothing is broken, and that is a property of the design rather than luck.** `cpcbAirQuality.ts`
+states it in its own header and the code does it: no key ⇒ the module returns null and the caller's
+web search answers the question — **never a silent fall back to the old non-commercial source**, which
+would have re-opened the very licence exposure the change closed, invisibly. So today's state is: AQI
+answered by web search, exactly as gold rates and showtimes already are, with zero exposure. The
+official-number upgrade is simply not switched on.
+
+**What is recorded, and why it is recorded rather than left to be re-discovered:** the registry entry
+now says PARKED and says *do not put this back on the admin's queue*. This is the same class as PR
+#3196, fresh from this morning — a session reads an open item out of `CLAUDE.md`, presents it as a
+live to-do, and spends the admin's time on something that is not actually theirs to do. There the
+value had already been set; here the instruction is impossible at the other end. Both cost the same
+thing, and both are prevented by writing down what was actually tried.
+
+**Re-open it only on new evidence**: the admin saying the portal worked, or a different AQI source
+whose licence genuinely covers a commercial product. That search must end in the LICENCE — the two
+obvious free candidates (waqi.info's free token, and the no-key provider AQI was just moved off) are
+both non-commercial tiers, and swapping one grey source for another is not a fix. The honest paid
+route remains what the weather half already documents.
+
+**Still open, unchanged:** `LIVE_WEATHER_SOURCE` defaults to off, so weather is web-searched too
+until Open-Meteo's commercial plan (~$29/month) is bought. One instruction, one value, no deploy.

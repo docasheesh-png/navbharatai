@@ -71908,6 +71908,114 @@ empty findings, so the difference is nearly always nothing — not worth widenin
   `"chat"`.
 - **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.
 
+## 2026-09-20 — AN ORDER IN HINDI IS STILL AN ORDER (autopsy f152c1ab)
+
+**The report.** Free tier, weak ladder. Prompt: *"Mughe eak aisa app bna kar do jisme mai apna pdf
+file ko audio overview me bnaba saku"*. 3.7 minutes, ONE file written (`src/App.css`), preview never
+started, **stopped by the user**. Billed ₹1.59 (markup waived, then halved — the money path behaved
+exactly as written).
+
+### The five buckets
+
+- ✅ **Self-healed — 2.** `INTEGRITY_CSS_WIRED` injected the orphan stylesheet's import into
+  `main.tsx`; `SIMPLE_BUILD_SALVAGE` carried the one finished file into the workspace. Both are red
+  flags rather than wins: the first only mattered because the stylesheet was the ONLY file, and the
+  50/50 law asks why a stylesheet was the only file at all.
+- 🔀 **Worked around — 2.** The shared-contract pass was skipped for budget; the fast lane bailed to
+  the full builder (`SIMPLE_BUILD_FALLBACK`). Both are deferred root causes.
+- ⏭️ **Skipped — 2.** The one-shot lane (correctly — 7 files). The contract pass, announced TWICE in
+  the same millisecond with two DIFFERENT reasons, which is a narration defect in its own right.
+- ❌ **Still broken — 1, and it is the headline** (below).
+- 🥵 **Struggle — 3.** 189 s of the 220 s build was inside TWO provider calls (**86%**); one CSS file
+  took **137 s** at 25.7 tok/s; the sandbox was up 4.9 min and **99% idle**, billing $0.0100 —
+  43% of the whole real cost — to do six seconds of work.
+
+### ROOT CAUSE, fixed here: the intent classifier could not read the order
+
+`requestAnalysis` recorded **`taskType: 'chat'`, `complexityScore: 5`** — the score of the word "hi" —
+for an explicit order to build an app.
+
+**#3159 ("an ordered app is not chat") merged SIX HOURS EARLIER and fixed this exact class for
+English.** Its guard is the AND of "signals matched nothing" and `userAskedForAnAppToBeBuilt`; the
+second half is English-shaped, so the Hindi sibling walked through the brand-new guard untouched.
+**Rule 3 failing inside one day, on the very class it was written for.**
+
+Measured, not reasoned about (`classifyIntentWithConfidence`):
+
+| prompt | before | after |
+|---|---|---|
+| `…app bna kar do…` (the report's own) | new_build · **low** | new_build · **high** |
+| the same sentence spelled perfectly | new_build · **low** | new_build · **high** |
+| `ek app bana ke do` · `app bana kar dijiye` | **low** | **high** |
+| `ek pdf to audio app banao` | high | high (unchanged) |
+
+**The misspelling is not the cause.** The correctly-spelled sentence is `low` too.
+
+🔑 **THE CLASS: `NEW_BUILD_SIGNALS` enumerates SURFACE FORMS of a verb Hindi splits and inflects.**
+It carries `bana do`, `bana de`, `bana dena`, `banao`, `banade`, `banwao` — every one a form with
+NOTHING between stem and auxiliary. Hindi routinely inserts a light verb (`bana **kar** do`,
+`bana **ke** do`) and swaps in a polite ending (`dijiye`). A list can never be complete against an
+inflecting language — the same lesson this repo already records for `theme-compat.css`'s allowlist.
+So the fix is a SHAPE (stem · optional `kar`/`ke` · giving auxiliary) plus the one-word imperatives,
+read through **one** function, `firstNewBuildOrder`, that BOTH call sites now use.
+
+🔴 **The evidence was already inside the file.** The `mat banana` rule's own comment quotes a real
+user verbatim: *"Tum mujhe as a app **bana kar do** … koi quiz app mat banana"*. The exact form that
+fails here is written into this module's documentation as something a real person typed.
+
+🔒 **Precision-first, because the asymmetry is brutal.** A miss costs a mis-sized report; a false
+positive turns a QUESTION into a HIGH-confidence build order, priced at 29 minutes (autopsy
+5abad374). So `banaya`/`banayi` (past), `ban gaya` (state) and `banaye` (subjunctive) are
+deliberately excluded, and the stem list never includes bare `ban`. 12 real orders matched, 12
+controls rejected, zero false positives — measured before a line was wired. It changes only
+CONFIDENCE, never intent: every one of these already returned `new_build`, just at `low`.
+`tests/anOrderInHindiIsStillAnOrder.test.ts`, 10 cases, reversion-proven twice (readers back to the
+word list → 3 red; split form dropped → 4 red).
+
+### 🔴 OPEN ROOT CAUSES — recorded, deliberately NOT fixed here (rule 6)
+
+1. **The fruit reads as a build order.** `NEW_BUILD_SIGNALS` carries the bare gerund `'banana'`.
+   Measured on `origin/main`: *"banana bread recipe batao"* → **new_build · HIGH · signal `banana`**,
+   and *"banana milkshake kaise banta hai"* likewise — a recipe question gets an APP BUILT. Deleting
+   the word is NOT the fix: `"mujhe ek app banana hai"` and the object-less `"app banana"` both
+   depend on it. The honest fix gates the gerund on a build NOUN in the same message; it needs its
+   own corpus and its own revert switch. A TRIPWIRE test asserts today's wrong behaviour so whoever
+   fixes it must update it on purpose.
+2. **The want-form.** `"mujhe ek billing app chahiye"` is still `low` — a want, not an imperative,
+   and the same word carries `"mujhe help chahiye"`. Same shape of fix as (1).
+3. **🔴 CSS IS TIER 0, SO A STYLESHEET CAN CONSUME THE WHOLE FAST LANE.** `generationTier` returns
+   **0** for `*.css` — the foundation wave, generated FIRST. Here tier 0 held exactly one file,
+   `src/App.css`; it took 137 s of a 240 s budget, the lane bailed with "2 stage(s) left would need
+   about 468s", and **the only thing salvaged from 3.7 minutes was a 10 KB stylesheet for an app that
+   did not exist.** The dependency argument for CSS-first is real (later tiers see the true class
+   names) but nothing in a later tier structurally REQUIRES it — unlike types or hooks. A tier whose
+   only member is a stylesheet should not be a stage of its own. Not changed here because it moves
+   where build money is spent and needs its own measurement.
+4. **The estimate the user saw was the ceiling, not the estimate.** `ETA_BASIS` held a real band
+   (2.0–4.3 min, midpoint 2.9) and withheld it as "unevidenced", while the minute-2 heartbeat showed
+   **"up to 27 min left"** — `maxBuildSeconds` minus elapsed. The user pressed Stop 100 s later. Each
+   half is defensible alone (#3157's reasoning for showing the cap is sound); together the engine
+   hid its good number and showed its worst one. Meanwhile a THIRD figure (~468 s remaining) existed
+   inside the fast lane and reached no screen. **There is no single ETA authority** — the same shape
+   as the missing EVIDENCE LEDGER already recorded here.
+5. **`LADDER_DEPTH` says "Fell to rung 2 of 5".** It did not fall; complexity routing STARTED it
+   there on purpose. An admin reading "fell" concludes rung 1 failed. Honesty defect (rule 5).
+6. **Per-call telemetry records the FAMILY, not the model.** `llmCalls[].model` is `"kimi"` while the
+   manifest has `kimi-k2.7-code`. Since `-code` and `-highspeed` differ 2× in price, per-call cost
+   cannot be verified from the report — the exact drift the `-highspeed` rate fix was written for.
+
+### ⚠️ The trade this fix almost made — recorded because the gate caught it, not a reviewer
+
+The first draft of `firstNewBuildOrder` claimed **bare** verbs as well (`"Bnao"`, `"bnado"`). Three
+suites went red on the full run: `objectlessBuildAsks` and `intentReaderCanSayUnclear` (×2). An
+object-less ask belongs to **#3039** — `assessBuildInput` answers it with *"tell me what to make"* —
+and raising a lone verb to HIGH ALSO stops the intention reader being consulted, which made its
+fourth answer ("unclear") unreachable. So the fix would have repaired a Hindi order and broken the
+Hindi *clarifying question* in the same commit: precisely the trade the fourth absolute rule forbids.
+
+The shape now requires **two words** — it recognises an order WITH AN OBJECT, and a lone verb is not
+one. Held open by its own case in the suite. This is also the argument for the gate running LAST and
+WHOLE: the new suite was green while those three were red.
 ---
 
 ## 2026-09-20 — A BUILD THAT DID NOTHING TOLD THE USER IT HAD MADE THEIR CHANGE (autopsy 586295b7)

@@ -71113,6 +71113,54 @@ an un-hydrated SPA shell.
 - **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
   `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.
 
+## 2026-09-20 — THE SIBLING HUNT BEHIND #3151: 37 VIEWS AUDITED, ONE MORE WAS CLIPPING (PR #3152)
+
+#3151 fixed App Mart's scrolling. Rule 3 says the root cause almost always lives in more than one
+place, so the class was stated and then hunted rather than assumed unique.
+
+**THE CLASS:** `ViewPanels.tsx` renders **all 37** of its views inside
+`<div className="flex-1 h-full overflow-hidden">`. That box has a definite height, it is
+`display: block` (so `flex-1` on a child does nothing — `flex-1` styles a flex CHILD, it does not
+make an element a flex CONTAINER), and it **clips**. It therefore hands scrolling DOWNWARD: every
+view must bound its own height and own its own scroller, or its content past the fold is cut off
+with no scrollbar anywhere.
+
+**THE AUDIT — all 37 checked, by hand where the detector could not be trusted:**
+- **2** views are scrolled by the wrapper itself (`domain`, `sharereview` — their wrappers carry
+  `overflow-y-auto` / `overflow-auto`), so bounding is the wrapper's job. Correct.
+- **34** bound themselves correctly with `h-full` or `height: '100%'`. The convention is solid — which
+  is why App Mart's break (introduced the day before by the pull-to-refresh wrapper) stood out at all.
+- **1 was genuinely broken: `DarkModeGenerator`.** Its root carried **`minHeight: '100%'`** — a FLOOR,
+  not a ceiling — and there is **no vertical `overflow` anywhere in the file** (every `overflow` in it
+  is `hidden` on a card, or `overflowX` on a code block). The box grew with its content, so it was
+  never taller than itself, nothing could scroll, and the wrapper cut off the rest.
+
+**MEASURED, not reasoned about** (Chromium, the real chain reproduced class-for-class, 390px and
+1440px, 40 cards):
+
+| | scroller vs content | can scroll | scrollTop reached | last card reachable |
+|---|---|---|---|---|
+| before | 4317 vs 4317 *(identical)* | **false** | **0** | **false** — y≈4231 in a 757px viewport |
+| after | 701 vs 4317 | true | 3616 | true |
+
+No second scrollbar and no horizontal overflow in either, at both widths.
+
+**Fixed:** `height: '100%'` + `overflowY: 'auto'` + `overscrollBehavior: 'contain'` — exactly what the
+other 34 do, with the overscroll matching the three views that already scroll (VoiceToApp, APKBuilder,
+NavAppStore). One consumer, inside the clipping wrapper, so the blast radius is that one screen.
+
+⚠️ **A STATIC SWEEP OVER ALL 37 WAS WRITTEN AND THROWN AWAY, and that is worth recording rather than
+hiding.** Across 37 heterogeneous components — Tailwind roots, inline `style` objects, a style const
+declared elsewhere, helper components defined both before and after the export — every variant of the
+detector produced false results in BOTH directions: one pass cleared `DarkModeGenerator` (the real
+defect) and another flagged `APITester` and `ProjectInsightsPanel`, which are correct. **A guard that
+cannot be trusted in either direction is worse than no guard** — it teaches people to edit the test.
+So `tests/everyViewOwnsItsScroll.test.ts` locks what was actually measured (the wrapper's premise, and
+this one root), and the CLASS is recorded here, where a reader meets it. Reversion-proven: restoring
+`minHeight` fails 2 of the 6 cases.
+
+⚠️ **Honest limit, same as #3151:** vitest runs in `node`, so no test in this repo can measure a
+scrollbar. The browser run above is the evidence; the test is the contract.
 ---
 
 ## 2026-09-20 — App Lock: ONE ACCOUNT'S UNLOCK IS NOT ANOTHER'S (audit + root-cause fix)

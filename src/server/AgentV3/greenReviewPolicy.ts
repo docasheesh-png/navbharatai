@@ -170,7 +170,7 @@ export function toReviewSuggestions(
     if (!detail) continue;
     const title = clean(detail);
     if (!title) continue;
-    out.push({ title: title.slice(0, 160), detail, functional: it.functional === true || it.critical === true });
+    out.push({ title: shortTitle(title), detail, functional: it.functional === true || it.critical === true });
   }
   // Functional first, then hygiene; stable within each group; capped.
   return out
@@ -189,6 +189,31 @@ export function toReviewSuggestions(
  *
  * Returns '' when there is nothing worth offering, so a clean build ships with no nagging.
  */
+/**
+ * A title the user reads, cut at a WORD boundary and marked as cut.
+ *
+ * 🔴 It used to be `title.slice(0, 160)`. Autopsy 31dc61fd shipped exactly 160 characters to a real
+ * user, ending mid-phrase — *"…The historical `write-typecheck` errors in the two "* — with no
+ * ellipsis, so the sentence simply stopped and there was nothing to say it had been shortened. Under
+ * a heading that invites "reply fix these", an unfinished sentence reads as the engine breaking
+ * rather than as a summary.
+ *
+ * The full text is never lost: `detail` carries it, and the card renders that.
+ */
+const TITLE_MAX = 160;
+export function shortTitle(text: string, max = TITLE_MAX): string {
+  const t = String(text ?? '').trim();
+  if (t.length <= max) return t;
+  // Leave room for the ellipsis, then step back to the last word break so a word is never halved.
+  const room = Math.max(1, max - 1);
+  const cut = t.slice(0, room);
+  const lastBreak = cut.lastIndexOf(' ');
+  // A single enormous word (a URL, a stack frame) has no break to fall back to — cut it rather than
+  // return the whole thing, but still mark it, so "no break found" is not a way to bypass the limit.
+  const body = lastBreak > Math.floor(room * 0.5) ? cut.slice(0, lastBreak) : cut;
+  return `${body.replace(/[\s,;:.\u2013\u2014-]+$/, '')}…`;
+}
+
 export function reviewSuggestionSummary(suggestions: ReadonlyArray<ReviewSuggestion>): string {
   if (!suggestions || suggestions.length === 0) return '';
   const lines = suggestions.map((s, i) => `  ${i + 1}. ${s.title}`);

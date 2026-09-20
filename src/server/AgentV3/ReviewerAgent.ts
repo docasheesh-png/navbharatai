@@ -48,6 +48,36 @@ const SECTION_LABEL_RE =
  * a genuine critical is never silently downgraded. Such a finding is demoted to a suggestion:
  * retained for the admin audit trail, but never a build-failing critical/warning.
  */
+/**
+ * A LINE THAT REPORTS THE ABSENCE OF FINDINGS IS NOT A FINDING (autopsy 31dc61fd, 2026-09-20).
+ *
+ * 🔴 WHAT THE USER ACTUALLY SAW, verbatim from the build report:
+ *
+ *     I also noticed one thing I could improve if you want
+ *     (I left your working app exactly as it is, rather than changing it without asking):
+ *       1. No  or  issues were found. The app structure, imports, accessibility, security, and
+ *          privacy checks all pass. The historical `write-typecheck` errors in the two
+ *     Want me to? Just reply "fix these" …
+ *
+ * Three defects in one sentence, and this rule is the root of the first two. The reviewer had written
+ * *"No [CRITICAL] or [WARNING] issues were found"* — a clean bill of health. `lower.includes('[critical]')`
+ * treats a MENTION of the tag as the tag, so the sentence became a critical finding; the tag-stripper
+ * then removed both brackets wherever they appeared, leaving the two holes; and the whole thing was
+ * offered to the user as something to fix.
+ *
+ * This is the same class the two guards below already handle — a section HEADER is not a finding
+ * (`SECTION_LABEL_RE`), a finding the reviewer discharged is not a finding (`SELF_DISMISSED_RE`) — and
+ * it belongs beside them rather than in a fourth place downstream.
+ *
+ * ⚠️ CONSERVATIVE BY CONSTRUCTION, because the opposite error is silent and worse: swallowing a REAL
+ * finding would hide a defect from the user for ever. It matches only the "nothing was FOUND" shape —
+ * a noun of finding (issues / problems / …) followed by found / detected / identified. So
+ * *"No error handling on the save button"* is a real finding and stays; *"No accessibility issues were
+ * found"* is a verdict and goes.
+ */
+const NO_FINDINGS_RE =
+  /^\s*(no|none|zero)\b[^.!?]{0,90}?\b(issues?|problems?|findings?|errors?|violations?|concerns?|defects?|bugs?)\b[^.!?]{0,40}?\b(found|detected|identified|present|reported|observed)\b/i;
+
 const SELF_DISMISSED_RE =
   /\bfalse[\s-]?positive\b|\bnot (a |an )?(real|actual|genuine|true|valid) (issue|problem|bug|concern|error|violation|vulnerability)\b/i;
 
@@ -101,10 +131,18 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
           .replace(/^(critical|warning|suggestion):/gi, ''),
       )
         .replace(/\*+/g, '') // strip markdown bold/italic asterisks
+        // A tag removed from MID-SENTENCE leaves a hole: "No [CRITICAL] or [WARNING] issues" became
+        // "No  or  issues" on a real user's screen. The tag-strip above is global on purpose (a
+        // reviewer writes "1. [CRITICAL] foo" as often as "[CRITICAL] foo"), so the gap is closed
+        // here rather than by making the strip positional and losing those.
+        .replace(/[ \t]{2,}/g, ' ')
         .trim();
       if (!message) continue;
       // A markdown SECTION HEADER ("### [CRITICAL] Issues", "🚨 ### Issues") is not a finding — never count it.
       if (SECTION_LABEL_RE.test(message)) continue;
+      // Nor is a clean bill of health. See NO_FINDINGS_RE — this is what put "No  or  issues were
+      // found" in front of a user as something to fix.
+      if (NO_FINDINGS_RE.test(message)) continue;
       // The reviewer discharged its own finding as a false positive → demote so it can't fail the build.
       let effective: ReviewIssue['severity'] =
         severity !== 'suggestion' && SELF_DISMISSED_RE.test(line) ? 'suggestion' : severity;

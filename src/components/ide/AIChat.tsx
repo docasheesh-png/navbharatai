@@ -7,6 +7,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
+import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
@@ -693,6 +694,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         )}
         <div className={cn("markdown-body prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-a:text-accent-text prose-a:no-underline hover:prose-a:underline", !isAI && "prose-p:text-ink")}>
           <ReactMarkdown
+            remarkPlugins={CHAT_MARKDOWN_PLUGINS}
             components={{
               a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
               // B10/B12: Code blocks with language header and copy button

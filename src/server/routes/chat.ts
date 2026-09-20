@@ -11,6 +11,7 @@ import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { groundingStatusFor, firstTokenLog } from '../lib/chatGrounding';
 import { songcraftFor } from '../AI/songcraft';
+import { answerShapeFor } from '../AI/answerShape';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
 import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
@@ -384,6 +385,18 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // prompt — and its cost — is byte-identical to before. Applies to every chat tier: a free user's
     // song deserves the same craft as a paid one.
     systemPrompt = `${systemPrompt}${songcraftFor(message)}`;
+
+    // ANSWER SHAPE (admin 2026-09-20): a long answer opens with a bold headline, then a gist that
+    // stands on its own, then the full detail — "jaise newspaper me koi news hote hai". Injected ONLY
+    // when it can apply: `answerShapeFor` returns '' for a short-answer request and for a request
+    // whose answer IS an artefact (song, poem, letter, translation, code), so those conversations'
+    // prompts stay byte-identical to before. The directive carries its own "skip it when your answer
+    // is short" rule, which is the half only the model can judge.
+    //
+    // ⚠️ FREE TIER ONLY, because that is the surface the admin reported and the one they asked to
+    // change. It is not a judgement that paid answers read better unshaped — widening it is this one
+    // condition, deliberately left for them to ask for rather than taken on their behalf.
+    if (isFree) systemPrompt = `${systemPrompt}${answerShapeFor(message)}`;
 
     // Every chat tier credits its creators consistently (single source of truth).
     systemPrompt = `${systemPrompt}\n\n${CREATOR_IDENTITY}`;

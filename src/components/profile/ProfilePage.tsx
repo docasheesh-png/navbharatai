@@ -18,6 +18,8 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { PublishedAppsCard } from './PublishedAppsCard';
 import { publishedAppRows, type PublishedAppRow } from '../../lib/publishedAppsView';
 import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth';
+import { isApplePlatform } from '../../lib/storePurchase';
+import { nativePlatformName } from '../../lib/mobileNative';
 import { maskPhone } from '../../lib/phoneNumber';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { ReferralEarningsSheet } from '../ReferralEarningsSheet';
@@ -129,6 +131,11 @@ function StatusBadge({ status, progress }: { status: BuildRecord['status']; prog
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, onNavigateToSettings, onLogout }: ProfilePageProps) {
+  /**
+   * 🍎 The SAME predicate the purchase rail decides on (`isApplePlatform`), never a second rule —
+   * two questions about one fact are how a surface drifts out of compliance while the other stays in.
+   */
+  const purchasesBlocked = isApplePlatform(nativePlatformName());
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [monthlySpend, setMonthlySpend] = useState<MonthlySpend | null>(null);
@@ -907,9 +914,16 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             className="flex items-center gap-3 bg-card border border-line rounded-2xl p-4 hover:border-indigo-500/30 transition-all group"
           >
             <Zap className="w-5 h-5 text-warn" />
+            {/*
+              🍎 The label names UPI / Card — an OUTSIDE payment method — and on iOS that is exactly
+              what Apple's anti-steering rule forbids an app from pointing at. The button itself is
+              safe (it only opens Wallet & Billing, which states honestly that top-up is unavailable
+              there), so only the promise is changed: the screen it opens is still worth reaching for
+              the balance and the history.
+            */}
             <div className="text-left">
-              <p className="text-sm font-black text-ink">Add Balance</p>
-              <p className="text-[10px] text-faint">Recharge via UPI / Card</p>
+              <p className="text-sm font-black text-ink">{purchasesBlocked ? 'Wallet' : 'Add Balance'}</p>
+              <p className="text-[10px] text-faint">{purchasesBlocked ? 'Balance and history' : 'Recharge via UPI / Card'}</p>
             </div>
             <ChevronRight className="w-4 h-4 text-faint ml-auto group-hover:text-accent-text transition-colors" />
           </button>

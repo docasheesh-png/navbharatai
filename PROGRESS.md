@@ -75204,6 +75204,82 @@ with a return deep link instead of inside the WebView. Not started — recorded 
 does not re-derive it.
 ---
 
+## 2026-09-20 — 🍎 THE iPHONE COULD OPEN A CASHFREE CHECKOUT — the App Store blocker, found while guiding the submission
+
+**The admin asked to be guided through getting NavBharatAI live on the App Store.** The build side
+turned out to be finished — **91 iOS runs, the latest green ten minutes earlier on `main`** — so the
+guidance was going to be App Store Connect paperwork. Reading the code to write that guidance found a
+blocker instead.
+
+### What was about to be submitted
+
+`purchaseRail` answered **`'web-gateway'` on iOS** — not by decision but by FALL-THROUGH: Play Billing
+does not exist on iOS, so the last branch won. `BillingPanel.tsx:591` renders the **Cashfree top-up**
+on `'web-gateway'`. A grep of all three billing surfaces (`BillingPanel`, `ProfilePage`,
+`FreeGiftBanner`) returned **zero** native gates.
+
+So the iPhone app offered to sell wallet credit through an outside payment gateway. **Apple Guideline
+3.1.1 is not a risk to weigh — it is a certain rejection**, and every App Store build is reviewed by a
+person.
+
+### 🔴 The strategy was decided long ago and never built
+
+`MOBILE_PUBLISHING.md` §5, in its own words:
+
+> *"v1 strategy (already decided — in-app purchases hidden in v1): do NOT show a 'Buy credits' flow
+> inside the native app… Detect the app via `Capacitor.isNativePlatform()` and hide the buy buttons."*
+
+**A decision written in a runbook and never implemented reads exactly like a decision that was
+implemented.** Nothing failed, nothing logged; the runbook simply described an app that did not exist.
+
+### The fix is narrower than the runbook said, deliberately
+
+Hiding on `isNativeApp()` — as §5 specifies — would have removed the working, **revenue-earning**
+top-up from **Android**, where it is live and legitimate. That is a fix trading one problem for
+another, which this file's own core rule forbids. **The gate is the PLATFORM, not the flag.**
+
+- `PurchaseRail` gains a third state, **`'none'`**, checked BEFORE every other rung — because on iOS
+  there is no rail to fall to: Play Billing is absent and the web gateway is the rejected thing.
+  ⚠️ This does **not** contradict the module's existing "no third state" paragraph: that reasoning is
+  entirely about Android, and it still holds there.
+- `platform` is a **required** field. An optional one would make *"the caller forgot"* and *"this is
+  Android"* the same input.
+- 🔑 **`createBillingOrder` refuses on `'none'` — the real chokepoint.** FOUR screens can start a
+  top-up, and gating each is a list the fifth screen is missing from. Refusing at the one function
+  every purchase passes through makes the guarantee true by construction rather than by inventory.
+- The UI still tells the truth: the panel says **top-up is not available in this app** (a dead button
+  is what the second absolute rule forbids), and the profile card stops promising *"Recharge via UPI /
+  Card"*.
+- ⚠️ **The notice deliberately does NOT say "buy it on the website."** Pointing at an outside purchase
+  from inside the app is Apple's anti-steering rule — and this file already records the identical
+  discipline for Play (*"do NOT add 'cheaper on the web' copy to the app"*).
+
+### Two things the work itself corrected
+
+🔴 **An overstatement in my own comment.** It claimed a required field means *"TypeScript refuses
+instead"*. `tsconfig.json` includes only `src/**`, so `tsc` enforces it at every APP call site and
+**not in `tests/`** — the existing suite was calling `purchaseRail` with no platform and compiling
+fine. The comment now says exactly that, and a **source-level guard** asserts every `purchaseRail(`
+in `src/` passes a platform, which is what makes the claim true either way.
+
+🔴 **The anti-steering test matched the code's own comment**, which necessarily quotes the forbidden
+wording in order to forbid it. Stripping comments before the assertion is this repo's own precedent
+(`oneWayBackAndEveryoneKnowsIt.test.ts`) — a test that cannot tell a comment from a rendered string
+would force the explanation to be deleted to stay green.
+
+### ⚠️ STILL OPEN — the second iOS risk, NOT fixed here (rule 6)
+
+**`metaPixel.ts` has no native gate**, and `META_PIXEL_ID` is set — so the Meta pixel loads inside the
+iOS WebView once the consent banner is accepted. Under Apple's rules that is **tracking**, which needs
+either an App Tracking Transparency prompt (no such plugin exists in this app) or an honest
+*"Data Used to Track You"* declaration on the App Privacy form. **Disabling the pixel on iOS is one
+line** and was deliberately NOT taken unasked: it changes ad measurement, which is the admin's call.
+Raised to them in the same reply; it is the likeliest remaining cause of a bounce.
+
+**Tests:** `tests/theIphoneCannotOpenACheckout.test.ts` — 14 cases, **each proven by reversion** (the
+Apple branch, the order refusal, the platform argument and the profile label each fail it when
+removed). Android and web are asserted **byte-identical**, including that a missing platform keeps
+today's behaviour rather than removing anybody's working top-up.
 ## 2026-09-20 — "nvidia nahi chal raha, kaha problem hai?" — the platform could not say, and that was the defect
 
 The admin reported that Nemotron was not working and asked the one question the system should have been

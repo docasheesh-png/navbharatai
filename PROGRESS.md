@@ -72130,3 +72130,97 @@ fact we store.
 
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
+
+## 2026-09-20 — LIVE FILE SYNC: the Files tab and Code Studio show the app as it is being written
+
+**Admin, verbatim:** *"navbharatai jo app banata hai, to 'file' and 'code studio' run time par live sync
+hona chahiye — abhi nahi ho raha hai. kya ham isko accuracy badha kar ek dam perfect kar sakte hai??"*
+
+**They were right, and the reason is narrow enough to name exactly.** The engine has always streamed a
+`file_changed` event on every write, and three surfaces listen to it. Two were already live, because a
+PATH is all they need: the preview reloads (`filesVersion`), and the Files tab's LIST grows
+(`state.files`). The two the admin named need the file's CONTENT, which the event does not carry — so
+they read it with `loadWorkspaceFiles()`, a WHOLE-workspace read. That read is expensive enough that the
+client was written to make it at three moments only:
+
+| effect | when it runs |
+|---|---|
+| "load on first open" | the Files tab is opened and the cache is empty |
+| "refresh on done" | `state.done` flips true |
+| "S4 rehydrate" | a cold reopen — and it says `if (running …) return;` in so many words |
+
+**None of them is "while the build is writing."** So a file created mid-build showed a name with no
+body, a file EDITED mid-build showed its body from BEFORE the build, and Code Studio — fed from the
+same cache through `onFilesSync`, which fired on `state.done` alone — showed the old project for the
+whole run.
+
+### The fix is a second QUESTION, not a second source
+
+*Which files changed?* is already answered, live, by the stream. *What is in them?* is a read — and a
+read of the four paths that just changed costs four reads, not a workspace scan. The client already
+knows which paths those are, because it received the events. Nothing new is measured, persisted or
+invented; the existing route is asked a narrower question.
+
+- **Server** — `collectNamedWorkspaceFiles` (`WorkspaceFiles.ts`), beside the whole-workspace collector
+  and sharing its exclusion, secret, binary and byte rules, so the two cannot drift. `/api/agentv3/
+  workspace-files` branches on an optional `paths` array; without it the route is byte-identical.
+- **Client** — `src/components/agentv3/liveFileSync.ts`, a pure queue + merge core, wired into
+  `AgentV3Panel` behind `running`.
+
+### 🔑 Object identity, not value, is what detects a repeated write
+
+`FileChange` is `{ path, kind }`, so a file modified twice yields two VALUE-IDENTICAL entries — a value
+comparison would call the second write "no change" and the file would keep its first body for the rest
+of the build. But the reducer re-appends the event's own object (`applyFileChange` does
+`[...without, change]`) and every SSE event parses into a fresh object, so *a different object than
+last render* **is** *written again*. That fact was already in the client; the alternative was a second
+write log beside the one the reducer keeps.
+
+### 🔴 Three things that make the narrow read correct rather than merely cheap
+
+1. **A late reply cannot silently win.** A path written AGAIN while its read is in the air is re-queued
+   (`pending` and `inFlight` are separate for exactly this), so the stale body is superseded rather
+   than becoming permanent — the event that would have asked again was consumed when it was queued.
+2. **It UPSERTS; it can never replace.** The whole-workspace load REPLACES the map, which is why the
+   rehydrate path refuses to run mid-build — a read taken while the sandbox is being written to can
+   legitimately come back partial. A named read touches only the paths it was asked for, so no surface
+   can lose a file to a badly-timed read. A path that could not be read is **skipped, never returned as
+   an empty file**: *we could not read it* is not *it is gone*.
+3. **The user's typing is protected by PATH.** The v5 surface stays MOUNTED while the user is in Code
+   Studio, so they really can be typing in a file at the moment the build writes one — a risk this
+   feature creates and had to answer. `WorkspaceSyncer.pendingPaths()` names the un-flushed files and
+   `App.tsx` drops exactly those from a `live` push. Holding back the whole batch would make the
+   feature stop working whenever the editor is open; overwriting would destroy typing. **The
+   end-of-build sync is deliberately unchanged** (it passes no `live`), so today's behaviour is not
+   touched anywhere.
+
+### Why the body does NOT ride the event stream, which was the obvious first idea
+
+`AgentEventStream` keeps a **500-event in-memory replay buffer per live build** so a late-mounting
+surface can catch up. Attaching file bodies to `file_changed` would put megabytes of source into that
+buffer for every concurrent build, to serve a surface that is usually not even open. A notification
+belongs on the stream; a payload belongs behind a request made when someone wants it.
+
+### ⚠️ It runs whether or not the Files tab is open, deliberately
+
+Code Studio is a DIFFERENT view reading the app-level file map, so gating on this panel's visible tab
+would leave the second surface the admin named permanently stale. Cost is bounded by the batch cap (24
+paths) and the request window (700 ms, a ceiling on rate — **not** a resetting debounce, which would
+starve exactly the continuously-writing build this exists for), and is proportional to what the build
+actually wrote.
+
+### Open, recorded rather than left to be discovered (rule 6)
+
+A path the SERVER could not read is settled, not re-queued — re-asking would chase a genuinely deleted
+file for the rest of the build. That one file keeps the body the surface already had until the next
+write to it or the end-of-build load. A failed REQUEST is re-queued, because that blip would otherwise
+strand a whole batch.
+
+**Kill switch:** `AGENTV3_LIVE_FILE_SYNC=off` — the route answers `liveSync: false`, the client stops
+asking for the rest of the build, and every surface behaves exactly as it did before. Default ON: the
+surfaces being stale during a build is the defect, so the env is a kill switch, not an opt-in.
+
+Test-locked in `tests/theFilesTabIsLiveWhileTheAppIsBuilt.test.ts` (28 cases), **reversion-proven five
+ways** — value-compare instead of identity, `settleSyncBatch` clearing `pending`, dropping the
+protected-path filter, collapsing "named no paths" into "named paths, all rejected", and removing the
+panel's `running` guard — each failing exactly its own case and only that case.

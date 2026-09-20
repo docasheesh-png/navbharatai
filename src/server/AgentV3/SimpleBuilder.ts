@@ -109,8 +109,36 @@ export function generationTier(path: string): number {
   if (/(^|\/)app\.[jt]sx?$/.test(p)) return 2;
   if (/(^|\/)(pages?|routes?|router)(\/|\.)/.test(p)) return 2;
   if (/(page|screen|view)\.[jt]sx?$/.test(p)) return 2;
+  /**
+   * 🔴 A STYLESHEET IS GENERATED **LAST**, NOT FIRST (autopsy `f152c1ab`, 2026-09-20).
+   *
+   * It used to `return 0` — the FOUNDATION wave, before everything. What that cost, measured: a
+   * 7-file app whose tier 0 held exactly ONE file, `src/App.css`. It took **137 seconds of a 240
+   * second budget**, the lane bailed with *"2 stage(s) left would need about 468s"*, and the only
+   * thing salvaged from a 3.7-minute build was a **10 KB stylesheet for an app that did not exist**.
+   * The user stopped the build 2.5 seconds later.
+   *
+   * 🔑 THE DEPENDENCY ARGUMENT RUNS THE OTHER WAY, and that is the real defect. Tier 0 exists so
+   * later tiers can be handed the REAL source of what they import (`dependencyContext`) — exact
+   * exported names, enum members, prop types. **A stylesheet exports none of those.** What it
+   * actually needs is the opposite: the class names the COMPONENTS chose, which only exist once the
+   * components are written. Generating CSS first forced the model to INVENT class names that every
+   * later file then had to match — backwards, and exactly how a 10 KB stylesheet gets written for an
+   * app nobody has built yet.
+   *
+   * 🔒 AND IT IS THE MOST DEFERRABLE FILE IN ANY APP. A build cut short after the components renders
+   * — plainly, but it renders. A build cut short after the stylesheet renders NOTHING. Under a
+   * budget the order must put the stylesheet last, and now does: in the reported build this alone
+   * takes the lane from THREE stages to TWO, so the first wave produces both real components
+   * instead of one stylesheet.
+   *
+   * ⚠️ Stated as a CLASS rather than one extension: `.scss` / `.sass` / `.less` / `.styl` were
+   * already landing in tier 1 by fall-through, and the same argument applies to every one of them —
+   * a stylesheet follows the markup it styles, whatever its syntax. A CSS MODULE follows it too: a
+   * component referencing `styles.card` is the thing that decides `.card` exists.
+   */
+  if (/\.(css|scss|sass|less|styl)$/.test(p)) return 2;
   // Foundation — generated first.
-  if (/\.css$/.test(p)) return 0;
   if (/\.d\.ts$/.test(p)) return 0;
   if (/(^|\/)(types?|interfaces?|models?|constants?|config|utils?|lib|helpers?|hooks?|contexts?|stores?|services?|api)(\/|\.)/.test(p)) return 0;
   if (/(^|\/)use[a-z0-9]/.test(p)) return 0; // useXxx hook files anywhere
@@ -821,6 +849,14 @@ export interface SimpleBuildResult {
    */
   salvagedPaths?: string[];
   /**
+   * The file list the lane PLANNED, whether or not it wrote any of them.
+   *
+   * Separate from `salvagedPaths`, which is finished work now in the workspace. This is only a plan —
+   * so the caller offers it to the full builder as a starting point, never as something already done.
+   * Empty when the lane failed before planning.
+   */
+  plannedPaths?: string[];
+  /**
    * FALSE when the verify gate was wired but could not EXECUTE (sandbox infra failure) — the app
    * shipped UNVERIFIED, so the caller must NOT skip its own downstream gates. True = tsc really ran
    * and passed; undefined = verify was not wired at all.
@@ -885,6 +921,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // on the failure path the closure's locals are gone before the caller can ask. See
   // `SimpleBuildResult.plannedFiles` for what the caller does with it.
   let plannedFiles = 0;
+  /**
+   * The manifest's PATHS — what `plannedFiles` counts, kept so an aborted lane can hand them over.
+   *
+   * 🔴 WHY (autopsy f97eb0ec, 2026-09-20): the lane spent 62 seconds and 2,220 output tokens planning
+   * five files, then the budget projection bailed BEFORE writing any of them — and the full builder
+   * started from nothing, re-running `ls` and re-reading the scaffold it had just been told about.
+   * The bail's own comment read *"there is nothing to salvage"*, which was true of FILES and false of
+   * the PLAN. `plannedFiles` already existed and is only a count, so the list itself had no home.
+   */
+  let plannedPaths: string[] = [];
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -932,6 +978,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // case the one-shot lane exists for, and it must still be able to see that number. Counted AFTER
       // the filter, because that is the number of files this build will actually write.
       plannedFiles = manifest.length;
+      plannedPaths = manifest.map((f) => f.path);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
@@ -964,9 +1011,6 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         overallMs,
         contractCapMs: contractCap,
       });
-      if (shareContract && contractCap > 0 && !contractAffordable) {
-        deps.log?.('⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.');
-      }
       // MEASURED, INCLUDING WHEN IT IS KILLED. A contract call that ran to its cap and was cut off is
       // the strongest evidence this chain is slow, and it used to be discarded — see PreambleProgress.
       let contractCallMs = 0;
@@ -987,7 +1031,15 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
         contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
       } else if (shareContract) {
-        deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
+        // 🔴 ONE SKIP, ONE SENTENCE (autopsy f97eb0ec, 2026-09-20). This used to be TWO logs: an
+        // `if (!contractAffordable)` above and this `else`, and they are not exclusive — an
+        // unaffordable contract satisfied both, so the user was told the pass was skipped twice, in
+        // the same millisecond, for two different-sounding reasons. The report shows the pair.
+        // The branches carry different facts and both are worth keeping, so the choice moves INTO
+        // the one place that can only fire once.
+        deps.log?.(contractCap > 0
+          ? '⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.'
+          : '⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
       // THE CONTRACT IS A FILE, NOT A PARAGRAPH — see `contractModule` for the build that proved it.
       // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the
@@ -1251,7 +1303,26 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try {
         await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');
         salvagedPaths = salvage.map((f) => f.path);
-        deps.log?.(`⏱️ The fast lane ran out of time — handing its ${salvage.length} finished file(s) to the full builder to complete.`);
+        // 🔴 THIS LINE WAS THE LAST THING A USER SAW BEFORE PRESSING STOP (autopsy `f152c1ab`,
+        // 2026-09-20), 2.5 seconds later. It used to read:
+        //
+        //     "⏱️ The fast lane ran out of time — handing its 1 finished file(s) to the full
+        //      builder to complete."
+        //
+        // Three things wrong with it, and none is the wording alone:
+        //  1. IT NAMES OUR ARCHITECTURE. "The fast lane", "the full builder" — a user has no lanes.
+        //     The White-Label Law's own list of forbidden leakage is routing internals *"or any hint
+        //     that more than one vendor exists"*; the same argument covers our own internal engines.
+        //  2. IT READS AS A FAILURE WHEN NOTHING FAILED. A handoff is how this build CONTINUES, and
+        //     the files are already saved. "Ran out of time" describes a lane; the user hears it
+        //     about their app.
+        //  3. IT COUNTS THE FILES. "1 finished file(s)" after three and a half minutes is, to the
+        //     person waiting, a progress report — and a damning one — when it is really an internal
+        //     batch size. The plural-in-parentheses gives away that nobody expected a human to read it.
+        //
+        // What replaces it says the one thing that IS true and does matter: the work so far is kept
+        // and the build is still going.
+        deps.log?.('Still building your app — your work so far is saved and I am carrying on from it.');
       } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
     }
     return {
@@ -1264,6 +1335,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       outcome: 'BUILD_FAILED',
       salvagedPaths,
       plannedFiles,
+      plannedPaths,
     };
   }
 
@@ -1439,13 +1511,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       // Circuit-breaker: the repair produced the identical compiler errors → zero progress, it's stuck.
       if (!verdict.ok && verdict.errors === promptingErrors) {
-        deps.log?.('The same build errors remain after a repair attempt — handing to the full builder to finish it.');
+        // Same rule as the salvage line above: the user has no "full builder" to hand anything to.
+        deps.log?.('Some build errors are still there after a repair — staying on it.');
         break;
       }
       promptingErrors = verdict.errors;
     }
     if (!verdict.ok) {
-      deps.log?.('The app still has build errors — handing to the full builder to finish it.');
+      deps.log?.('The app still has build errors — staying on it until it builds.');
       return {
         ok: false, filesWritten: files.length, reason: 'verify_failed',
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',

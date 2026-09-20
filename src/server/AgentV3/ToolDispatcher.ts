@@ -72,6 +72,7 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
+import { qualityNote } from './writeTimeQualityCheck';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
@@ -470,6 +471,28 @@ const MAX_SUMMARY = 200;
  * transcript. Every failure is returned as an honest is_error result (never a
  * fake success), so the model can see and recover from it.
  */
+/**
+ * The read ledger's entry.
+ *
+ * ⚠️ ONE TYPE, NAMED, BECAUSE TWO SESSIONS DISAGREED ABOUT IT (merged 2026-09-20). `main`'s
+ * `sharedReadLedger` / `shareReadLedger` (autopsy f97eb0ec — a SUB-AGENT's reads never reached the
+ * report) were written against `{ count; content }`, which was the ledger when they were written;
+ * this branch had already widened it with the two fields a read-loop STOP is decided by. Narrowing
+ * the signatures to match would have compiled on the parent and silently dropped `writeSeq` and
+ * `stalls` the moment a CHILD shared the map — re-opening the sub-agent blindness that half exists
+ * to close. Widening a structural type in one place and not its readers is how that returns, so the
+ * type is declared once and referenced.
+ */
+export type ReadLedgerEntry = {
+  count: number;
+  content: string;
+  /** `_writeSeq` as it stood when this path was last read — the no-progress comparison. */
+  writeSeq: number;
+  /** Consecutive reads of this path that were unchanged AND followed no write at all. */
+  stalls: number;
+};
+export type ReadLedger = Map<string, ReadLedgerEntry>;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -2152,14 +2175,7 @@ export class ToolDispatcher {
   /** How many STOP-level read-loop notices this build has issued. Monotonic; see `readLoopStops`. */
   private _readLoopStops = 0;
 
-  private _readLedger = new Map<string, {
-    count: number;
-    content: string;
-    /** `_writeSeq` as it stood when this path was last read — the no-progress comparison. */
-    writeSeq: number;
-    /** Consecutive reads of this path that were unchanged AND followed no write at all. */
-    stalls: number;
-  }>();
+  private _readLedger: ReadLedger = new Map();
 
   /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
   readLedgerCounts(): Map<string, number> {
@@ -2175,6 +2191,40 @@ export class ToolDispatcher {
    */
   readLoopStops(): number {
     return this._readLoopStops;
+  }
+
+  /**
+   * The LIVE ledger, for a child dispatcher to accumulate into.
+   *
+   * 🔴 WHY THIS EXISTS — autopsy f97eb0ec, 2026-09-20, and it is the FIFTH time this exact class has
+   * been paid for. The reviewer read `src/App.tsx` **seven times** in one build, unchanged, with our
+   * own nudge quoted back to it every single time; seven of its twelve steps went on it and it timed
+   * out with zero findings. `repeatedReadSummary` exists precisely to put that in the report — and
+   * the report carried NO such finding, because the reviewer is a SUB-AGENT with its own
+   * `ToolDispatcher`, and this ledger is an instance field. The route reads the PARENT's.
+   *
+   * ⚠️ The measurement was the whole point of the nudge. `repeatedReads.ts` says so in its own words:
+   * *"Reported rather than merely nudged, so the NEXT report says whether the nudge worked. A
+   * behavioural fix nobody measures is a hope."* Unshared, it was a hope.
+   *
+   * 🔒 AND THIS IS DELIBERATELY NOT A CACHE. That trade is settled in `repeatedReads.ts` and the
+   * reasoning holds: the content is always returned in full, because a model whose context has been
+   * trimmed must still be able to re-read a file. What was missing was never the suppression — it
+   * was the COUNT reaching the one place a human reads.
+   */
+  sharedReadLedger(): ReadLedger {
+    return this._readLedger;
+  }
+
+  /**
+   * Count this child's reads in the parent's ledger.
+   *
+   * Replaces the reference rather than copying, so every later read lands in the shared map — the
+   * same shape as `shareWriteTypecheckStats`, which is the sibling of this bug that was fixed first
+   * (#3134). Called once at spawn, before the child has read anything.
+   */
+  shareReadLedger(ledger: ReadLedger): void {
+    this._readLedger = ledger;
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
@@ -2734,6 +2784,12 @@ export class ToolDispatcher {
         // WRITE → TYPECHECK → NEXT (autopsy e706e068): the compiler's verdict on THIS file, now, while
         // the model still holds it — not twelve minutes later as one line of twenty-one.
         const typecheckNote = await this.writeTypecheckNote({ [path]: content });
+        // THE CONTRACT WAS WRITTEN BUT NOBODY TOLD THE MODEL IN TIME (autopsy 31dc61fd). The architect
+        // prompt has ALWAYS demanded a label on every input and 4/8/12/16/24px spacing — and an app
+        // still shipped with an unlabelled field and 38 off-grid values, because the prompt is read
+        // once, before any code exists. The same rule, delivered while the model holds the file.
+        // Pure, no model call, no shell, no edit; it can only ever append a sentence.
+        const qualNote = qualityNote(path, content);
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -2751,10 +2807,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote
+            reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote + qualNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote + qualNote;
       }
 
       case 'write_files_batch': {

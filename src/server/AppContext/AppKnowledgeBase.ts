@@ -609,6 +609,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_user_actions',
+    name: 'The ❓ tray — everything NavBharatAI Pro needs YOU to do, in one place',
+    path: 'NavBharatAI Pro → chat header → the ❓ badge beside the build stamp (it appears only when something is genuinely waiting on you)',
+    description: 'Some steps only you can take: pasting an API key your app needs, approving a plan before the build starts, or correcting something NavBharatAI assumed. These used to appear as cards inside the chat and got buried under the build\'s own messages. They now collect in one tray behind a ❓ badge in the Pro chat header.\n\nThe badge shows a number and appears ONLY when something really needs you — no number, no badge. The tray sorts items into "the build is waiting for you" (a build genuinely stopped until you answer), "your app needs this to work" (usually a key), and "worth a look, nothing is stuck" (assumptions you can correct). A stopped build opens the tray by itself; nothing else interrupts you.\n\nEvery item ends in a decision you can record: Done when you have done it, or "Not needed" when your app should not have that thing at all — and "Not needed" is remembered, so you are never asked again. Every item also has "Ask NavBharatAI", which loads a question into the chat box for you to edit and send, so you can discuss an item instead of doing it — for example asking where a key comes from, or telling NavBharatAI to use a different provider that needs no key at all.\n\nItems are saved with your project, so they survive a reload, a closed tab and a new session. A key you have already saved closes its own item automatically — the tray says "Checked" for what it verified and "you marked this done" for what it did not, so it never claims to have checked something it has not.',
+    howToUse: 'Look for the ❓ badge next to the build time at the top of NavBharatAI Pro. Tap it to see what is waiting on you. Fill a key straight in the tray, approve or reject a waiting build, press Done when you have finished a step outside the app, or press "Not needed" if your app should not use that thing. If you are not sure, press "Ask NavBharatAI" on that item and send the question — it explains, guides you step by step, or switches your app to something that needs no key.',
+    relatedFeatures: ['agentv3_builder', 'settings_secrets', 'agentv3_build_continuity'],
+    keywords: ['question mark', 'sawal', 'badge', 'notification', 'what do i do', 'mujhe kya karna hai', 'api key', 'key chahiye', 'key daalo', 'pending', 'baki hai', 'todo', 'action', 'approve', 'permission', 'manzoori', 'done button', 'kaam ho gaya', 'not needed', 'nahi chahiye', 'stuck', 'ruka hua', 'waiting for you', 'tray', 'checklist', 'steps', 'kya karna hai'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_build_continuity',
     name: 'Build survives reload & tab switch (no lost work)',
     path: 'NavBharatAI Pro — automatic; the build keeps running and re-attaches on its own',

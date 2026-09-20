@@ -123,15 +123,38 @@ export function ladderDepthUsed(
   return { depth, rungCount: rungs.length, matched, unmatched };
 }
 
-/** One admin-readable line for the build report. Never shown to a user (it names rungs). */
-export function describeLadderDepth(d: LadderDepth): string {
+/**
+ * One admin-readable line for the build report. Never shown to a user (it names rungs).
+ *
+ * 🔴 `openedAt` IS NOT OPTIONAL DECORATION — without it this line reports a lie (autopsy
+ * `f152c1ab`, 2026-09-20). That build was routed COMPLEX, so `withoutCheapFlashLead` dropped the
+ * cheap opener and the chain BEGAN at rung 2. It then finished there, having fallen nowhere at all —
+ * and the report said **"Fell to rung 2 of 5."** An admin reading that concludes rung 1 was tried
+ * and failed, and goes looking for a failure that never happened.
+ *
+ * "Fell" is a claim about MOVEMENT, so it may only be made against where the build STARTED. The
+ * caller passes the opening rung computed from the SAME function that built the chain
+ * (`withoutCheapFlashLead`), so the sentence cannot drift from the routing it describes.
+ *
+ * ⚠️ An absent or unusable `openedAt` falls back to 1 — the historical meaning — so an older caller
+ * reads exactly as it did before.
+ */
+export function describeLadderDepth(d: LadderDepth, openedAt?: number): string {
   if (d.depth == null) {
     return d.unmatched > 0
       ? `Ladder depth unknown — ${d.unmatched} delivered slice(s) named a model no rung of this tier claims.`
       : 'Ladder depth unknown — no delivered slice could be attributed to a rung.';
   }
+  const opened = Number.isFinite(Number(openedAt)) && Number(openedAt) >= 1
+    ? Math.floor(Number(openedAt))
+    : 1;
   const tail = d.unmatched > 0 ? ` (${d.unmatched} slice(s) unattributed)` : '';
-  return d.depth === 1
-    ? `Finished on rung 1 of ${d.rungCount} — the lead rung delivered the whole build${tail}.`
-    : `Fell to rung ${d.depth} of ${d.rungCount}${tail}.`;
+  const openedNote = opened > 1 ? ` — it opened there, past the cheap lead rung` : '';
+  if (d.depth <= opened) {
+    return opened === 1
+      ? `Finished on rung 1 of ${d.rungCount} — the lead rung delivered the whole build${tail}.`
+      : `Finished on rung ${opened} of ${d.rungCount}${openedNote}, and fell no further${tail}.`;
+  }
+  const from = opened > 1 ? ` from rung ${opened}, where it opened` : '';
+  return `Fell to rung ${d.depth} of ${d.rungCount}${from}${tail}.`;
 }

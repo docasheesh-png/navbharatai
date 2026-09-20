@@ -73823,9 +73823,23 @@ matters and which a future edit re-adding the old call would break even with the
 
 ### 🔴 STILL OPEN — the row is still RUNNING, and this must not be read as "done"
 
-- **Weather** is still on the restricted tier. Its honest fix is a purchase: **$29/month**
-  (Open-Meteo's commercial plan, verified on their pricing page today), or `LIVE_WEATHER_SOURCE=off`
-  as a pause — web search already answers weather questions.
+- ~~**Weather** is still on the restricted tier.~~ ✅ **CLOSED LATER THE SAME DAY** (admin: *"free me
+  jo ho woh"*). `LIVE_WEATHER_SOURCE` now defaults to **OFF** and is an **enable** switch: only the
+  explicit `on` starts the restricted source, so unset/blank/mistyped leaves it silent. A fresh
+  deployment therefore runs **zero** restricted sources, where it used to run one. Nothing broke —
+  weather questions fall through to web search, which already answers them. The honest fix is still
+  a purchase (**$29/month**); the day it is bought, `LIVE_WEATHER_SOURCE=on` restores it with no
+  deploy.
+  ⚠️ **A free REPLACEMENT was looked for and not found, and that is why the switch is the answer
+  rather than a new provider.** MET Norway's forecast data is free and commercially licensed
+  (CC BY 4.0) — but it needs lat/lon, and every free **geocoder** checked is either the same
+  restricted provider or (Nominatim) explicitly *"discourages serious business usage"*. Trading one
+  grey source for another is not a fix.
+  🔒 Two related defects were fixed with it: `exposureState` **re-derived** the off-rule with its own
+  string comparison instead of asking `liveWeatherSourceEnabled` (two implementations of one rule —
+  exactly how a panel comes to say "off" while calls go out), and the admin card **built the switch
+  sentence itself**, always printing `set <KEY>=off`, which went false the moment the default
+  flipped. The sentence now lives on the row (`switchHint`).
 - **VirusTotal cannot be bought at this stage.** Premium is roughly **$20,000–$50,000/year**;
   MetaDefender starts near **$500–1,000/month**. The realistic replacement is **ClamAV** run as a
   separate process (never linked, so GPLv2 is not an issue), whose honest cost is far weaker Android

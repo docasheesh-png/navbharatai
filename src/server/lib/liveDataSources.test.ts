@@ -46,10 +46,28 @@ describe('detectCurrency / detectPincode — pure shapes', () => {
 });
 
 describe('liveDataContext — weather', () => {
-  it('answers a placed weather question with real forecast numbers', async () => {
+  // 🔴 THE RESTRICTED WEATHER SOURCE IS OFF BY DEFAULT SINCE 2026-09-20, so every case below has
+  // to ask for it explicitly. The fixtures changed; not one assertion did.
+  const WEATHER_ON = { LIVE_WEATHER_SOURCE: 'on' } as unknown as NodeJS.ProcessEnv;
+
+  it('🔒 with nothing configured the restricted host is never touched, and the answer is \'\'', async () => {
+    let touched = false;
     const out = await liveDataContext('kanpur me barish hogi kya', {
       now: NOW,
       env: {} as NodeJS.ProcessEnv,
+      fetchImpl: (async (url: string) => {
+        if (String(url).includes('open-meteo')) touched = true;
+        return { ok: false, json: async () => ({}) } as unknown as Response;
+      }) as unknown as typeof fetch,
+    });
+    expect(out).toBe('');
+    expect(touched).toBe(false);
+  });
+
+  it('answers a placed weather question with real forecast numbers', async () => {
+    const out = await liveDataContext('kanpur me barish hogi kya', {
+      now: NOW,
+      env: WEATHER_ON,
       fetchImpl: routedFetch({
         'geocoding-api': GEO,
         'api.open-meteo.com/v1/forecast': {
@@ -70,7 +88,7 @@ describe('liveDataContext — weather', () => {
   it("no place named ⇒ '' with NO network — the directive makes the model ask the city", async () => {
     let called = false;
     const out = await liveDataContext('aaj barish hogi kya', {
-      env: {} as NodeJS.ProcessEnv,
+      env: WEATHER_ON,
       fetchImpl: (async () => { called = true; return new Response('{}'); }) as unknown as typeof fetch,
     });
     expect(out).toBe('');
@@ -79,10 +97,10 @@ describe('liveDataContext — weather', () => {
 
   it("an unknown place or a dead forecast API ⇒ '' — search answers instead", async () => {
     expect(await liveDataContext('xyzzyplace me barish hogi kya', {
-      env: {} as NodeJS.ProcessEnv, fetchImpl: routedFetch({ 'geocoding-api': { results: [] } }),
+      env: WEATHER_ON, fetchImpl: routedFetch({ 'geocoding-api': { results: [] } }),
     })).toBe('');
     expect(await liveDataContext('kanpur me barish hogi kya', {
-      env: {} as NodeJS.ProcessEnv, fetchImpl: routedFetch({ 'geocoding-api': GEO }),
+      env: WEATHER_ON, fetchImpl: routedFetch({ 'geocoding-api': GEO }),
     })).toBe('');
   });
 });

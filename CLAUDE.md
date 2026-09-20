@@ -1013,8 +1013,37 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
-- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19; ⚠️ NOT live — no key
-  yet).** `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
+- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19).** ✅ **LIVE: the admin
+  SET `NEMOTRON_API_KEY` and `AGENTV3_NEMOTRON=weak` in Cloud Run on 2026-09-19**, the same day it
+  merged — so the WEAK tier's judge and plan are the first Nemotron calls this platform has ever made,
+  and Normal/Strong are untouched until that flag names them.
+  ✅ **THE HOST IS SET: `NEMOTRON_BASE_URL = https://integrate.api.nvidia.com/v1`** (admin, 2026-09-19,
+  same day). The key was bought at **`build.nvidia.com`** — NVIDIA's OWN endpoint, not OpenRouter — so
+  the code default (`https://openrouter.ai/api/v1`) was wrong for it and the judge was silently off for
+  the hour between the key being set and this value being added. The model ids need NO override:
+  NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b` too, which is already the code default.
+  ⚠️ **FOR WHOEVER CHANGES HOST LATER:** Together AI is `https://api.together.xyz/v1`, OpenRouter is
+  the unset default. A wrong host does not error anywhere the operator can see — the judge call throws
+  and is swallowed — so **verify POSITIVELY by finding `NEMOTRON` in a Weak build's per-call log,
+  never by the absence of an error.**
+  💳 **IT IS A TRIAL POOL, NOT A PLAN — 1,000 free credits (5,000 with a business email), 40 req/min.**
+  The admin was told and chose it deliberately (*"abhi free wali/low cost wali use karoge"*). Those
+  credits WILL run out — "when", not "if" — and **how many builds they buy is genuinely unknown**:
+  NVIDIA does not publish per-request credit cost, and Ultra is a large model. Do not estimate it.
+  ⚠️ **CORRECTED 2026-09-20 — THE SENTENCE HERE CLAIMED A VISIBILITY THAT DID NOT EXIST.** It read
+  *"Since 2026-09-19 the day it happens is VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report)"*.
+  **There has never been a `CHEAP_REVIEW_NOT_RUN` code anywhere in this repo** — a grep of `src/`
+  returns the doc line and nothing else. The day the credits ran out would have appeared as a *passing
+  review*, which is precisely what that sentence promised it would not. The lesson is this file's own:
+  **a doc's claim about the code must be re-grepped, never trusted** — and an aspirational sentence
+  written in the past tense is the most dangerous shape it can take.
+  ✅ **AND THE FAIL-OPEN IS NOW CLOSED (2026-09-20).** That entry recorded it as an open root cause and
+  said *"the honest fix is a THIRD outcome"* — which is exactly what shipped: `JudgeVerdict.reviewed`
+  plus `describeJudgeVerdict`, so a judge that could not run is recorded as **`NOT RUN`, at WARNING
+  severity, with its own explanation attached** — inside the existing `CHEAP_REVIEW` line, not as a new
+  code. It is not a Nemotron problem and never was: `glm-5.3`, Grok and Sonnet all had it. Build
+  behaviour is unchanged — a judge outage still never blocks a build; only the record stopped lying.
+  `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
   role/tier gate — ⚠️ **unset means the judge and plan are OFF even with a key**; takes `off` as a HARD
   kill that removes the ladder rung too, `on` for every tier, or a comma list of tiers: `weak` / `free`,
   `normal` / `economy`, `strong` / `premium`), `NEMOTRON_BASE_URL` (default OpenRouter),
@@ -1644,6 +1673,44 @@ the code (it is actually read somewhere) on 2026-07-11.
   `github.com` among the linked providers) and our store for the referrer, never the request body.
   **Do not add a step without a proof rule**; `stepIsProven` is deliberately total rather than
   defaulting, so a fifth step is unpayable until someone decides how it is proven.
+- **🎁 THE ₹250 WELCOME BACKFILL (built 2026-09-20, admin-asked) — `WELCOME_BACKFILL` and
+  `WELCOME_BACKFILL_TOKENS`. ⚠️ NEITHER is set, and `WELCOME_BACKFILL` DEFAULTS TO **ON**** — the
+  opposite of most money flags here, on purpose: the admin asked for the button that day, and a button
+  that needs a Cloud Run key before it does anything is the dead button the second absolute rule
+  forbids. `WELCOME_BACKFILL=off` is the instant, no-deploy stop. Read by
+  `src/server/lib/welcomeBackfill.ts`; the routes are `GET /api/admin/welcome-backfill` (counts, writes
+  nothing) and `POST /api/admin/welcome-backfill/run` (refuses without `confirm: true`, ≤200 accounts a
+  press); the card is admin → Reports, beside Referral cost.
+  🔴 **WHY IT EXISTS — a gap at the seam between two CORRECT decisions.** `flatWelcomeGiftAllowed()`
+  has returned a hardcoded `false` since 2026-09-17 (the admin's own ruling), and the referral ladder
+  meant to pay instead is gated on `REFERRAL_REWARDS`, **which was never set**. So **every account
+  created since then received ₹0**, from a product whose own design says *"₹250 is what funds a
+  COMPLETE first app"*. Nothing could detect it: each module's guard was locally right.
+  ⚠️ **THE SIGNUP PATH IS UNTOUCHED.** This is a backfill, not a re-opening of the flat gift — a new
+  account still receives nothing, because the ladder is still the plan.
+  🎯 **SCOPE: ONLY ACCOUNTS OPENED IN THE GAP** (admin's own signal, same day: *"old walo ka 00 nahi
+  hoga, ya + me kuch hoga ya -ve ne. aap new user kar do, jinko bonus nhi mila"*). `RETIREMENT_ISO`
+  = 2026-09-17; `WELCOME_BACKFILL_SINCE` overrides it and an unreadable value falls back to that date,
+  never to "no cutoff". A wallet with **no `createdAt` reads as OLD** (only `buildInitialWallet`
+  creates a wallet and it always stamps that field). This is what RETIRES the residual risk below —
+  an old wallet whose welcome row rolled off its bounded ledger is excluded by DATE, not by guesswork.
+  ⚠️ **₹400 is the instruction, not an inheritance** (*"kaise bhi jaye, maximum ₹400!!!"*) — and the
+  ceiling is really enforced by the clamp inside `backfillTokens`; the `capSelfGift` call in
+  `decideBackfill` is unreachable defence in depth, proven by reversion, and the code says so.
+  🔒 **NEVER PAYS TWICE — four signals, any one refuses:** its OWN marker
+  `payment_transactions/welcome_backfill_<uid>` (checked FIRST, before any wallet reasoning, and
+  written in the SAME transaction as the credit), the durable `welcome_<uid>` marker, the wallet
+  ledger row via `walletReceivedWelcome`, and `freeGiftedTokens`. Credits go through
+  `mirroredCreditPatch` — the one legal wallet writer — with `capSelfGift` still applied, so this
+  credit **counts toward the admin's own ₹400 lifetime ceiling** (a later referral ladder tops the
+  same account to ₹400, not ₹650).
+  ⚠️ **Residual risk, stated not hidden:** no signal is complete alone (the marker post-dates
+  2026-07-12, the ledger is bounded, `freeGiftedTokens` is newer than the oldest wallets), so a
+  pre-2026-07 wallet with 500+ ledger entries could in principle read as never-gifted. That is why the
+  preview is separate and the run needs a confirmation. Test-locked and reversion-proven five ways in
+  `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`.
+  📌 **STANDING DECISION (admin 2026-09-20): the referral code system starts when the new app is LIVE
+  on the Play Store — not before. Do NOT set `REFERRAL_REWARDS` until then.**
 - **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
   **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
   `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project

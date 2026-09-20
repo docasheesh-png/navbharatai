@@ -17,6 +17,55 @@ export interface JudgeVerdict {
   findings: string[];
   /** 0–100 quality score (best-effort; 100 on pass, lower on fail). */
   score: number;
+  /**
+   * 🔴 DID THE REVIEW ACTUALLY HAPPEN? (added 2026-09-19.)
+   *
+   * `false` means no verdict was reached at all — the judge threw (no key, wrong host, exhausted
+   * credits, a 404 on a mis-typed model id), or it answered with something this parser could not read.
+   * **A review that did not happen is not a pass**, and until now the two were indistinguishable at the
+   * one place a human looks.
+   *
+   * ⚠️ `pass` STAYS TRUE in that case, deliberately, and this field is why that is now safe to say out
+   * loud. `pass` is the CONTROL signal — `nextReviewAction` reads it to decide whether to spend a
+   * repair and then Claude — and flipping it to `false` on an unreachable judge would escalate EVERY
+   * build to Claude for the duration of a provider outage: a fix trading one problem for a dearer one.
+   * So the control flow is unchanged and the REPORTING becomes truthful, which is exactly what the
+   * fifth absolute rule asks for ("fix the system's honesty too").
+   *
+   * Absent is treated as `true` by every reader, so an older caller keeps today's meaning.
+   *
+   * 🔎 THE OTHER HALF OF THIS ROOT CAUSE, united here 2026-09-20 (PR #3154). Two sessions fixed this
+   * same bug from opposite ends on the same day and both added THIS field. #3143 fixed the PRODUCERS
+   * (an unreadable reply was awarding a perfect 100); #3154 fixed the READER — `recordVerdict`
+   * printed PASS/FAIL from `pass` and appended `findings` ONLY when pass was false, so a judge that
+   * could not run was filed as `Sonnet review: PASS (score 0)`: a pass, with its own explanation
+   * discarded, under the name of an engine that had not run (`reviewerName` was a ternary with no
+   * `nemotron` branch). Autopsy 31dc61fd. Neither half is redundant — without the first the judge
+   * invents marks, without the second the report throws away the truth the judge did write.
+   */
+  reviewed?: boolean;
+}
+
+/**
+ * The verdict for "the review did not happen". ONE function, so the two paths that need it (a throw
+ * and an unreadable reply) cannot drift into telling the user different stories — which is precisely
+ * what they had done: the throw path already returned `score: 0` with an honest finding, while the
+ * unreadable-reply path awarded a **perfect 100 with no findings at all**.
+ *
+ * 🔑 THE UNREADABLE REPLY IS THE DANGEROUS ONE, AND IT GOT MORE DANGEROUS ON 2026-09-19. It is the
+ * only path that was indistinguishable from a genuine pass, and the judge is now allowed to be a
+ * REASONING model (Nemotron Ultra) — a class far likelier to answer with prose around its JSON, or
+ * with reasoning and no JSON, than the `glm-5.3` this parser was written against. A judge that says
+ * nothing readable must not score 100.
+ */
+
+export function reviewDidNotHappen(why: string): JudgeVerdict {
+  return { pass: true, score: 0, findings: [why], reviewed: false };
+}
+
+/** Did this verdict come from a review that actually ran? Absent ⇒ yes, so old callers are unchanged. */
+export function judgeActuallyRan(v: Pick<JudgeVerdict, 'reviewed'> | null | undefined): boolean {
+  return (v?.reviewed ?? true) === true;
 }
 
 /** Build the STRICT-reviewer prompt: the user's request + the generated files. Pure. */
@@ -57,9 +106,14 @@ export function parseJudgeVerdict(text: string | null | undefined): JudgeVerdict
         if (!pass && findings.length === 0) return { pass: true, findings: [], score: 100 };
         return { pass, findings, score };
       }
-    } catch { /* fall through to the safe default */ }
+    } catch { /* fall through to the "not reviewed" verdict below */ }
   }
-  return { pass: true, findings: [], score: 100 };
+  // 🔴 WAS `{ pass: true, findings: [], score: 100 }` — a PERFECT SCORE for a reply nobody could read.
+  // An empty answer, prose with no JSON, and a genuinely flawless app all produced the identical
+  // verdict, and `recordVerdict` prints only `PASS (score N)` with the findings omitted on a pass — so
+  // the report said "PASS (score 100)" about a review that had produced nothing.
+  // It still never BLOCKS (see `reviewDidNotHappen`), it just no longer awards marks it did not earn.
+  return reviewDidNotHappen('The reviewer\'s answer could not be read, so this build has not been reviewed.');
 }
 
 /** A minimal model-call surface (a subset of ClaudeClient.runTurn) so the judge is DI-testable. */
@@ -92,15 +146,28 @@ export async function judgeBuild(
   // It still never BLOCKS (a judge that fails a build on its own confusion is worse), but it no longer
   // awards marks it did not earn, and it says why so the report carries the alarm.
   if (!files || files.length === 0) {
-    return { pass: true, score: 0, findings: ['There were no files to review — the project was empty at review time. This is not a passing app; it is an absent one.'] };
+    // NOTE: `reviewed` stays TRUE here on purpose. We DID look; there was nothing to look at. That is a
+    // finding about the app, not about our instrument — the opposite of the two cases above.
+    //
+    // 🔴 THE TWO PRs DISAGREED ON EXACTLY THIS LINE, and the disagreement is recorded rather than
+    // silently resolved (united 2026-09-20). #3154 set it FALSE, reasoning that an empty project
+    // produced no review. `main`'s value stands, for two reasons: `reviewed` answers "did OUR
+    // instrument run?", and here it did — `judgeActuallyRan` gates `CHEAP_REVIEW_NOT_RUN`, which is a
+    // statement about the platform, not the app. The wording complaint behind #3154's choice ("PASS
+    // for an app that does not exist") is real and is fixed by its OTHER half, kept below: the detail
+    // is now printed on EVERY outcome, so this reads `PASS (score 0) — There were no files to
+    // review … it is an absent one.` rather than a bare PASS.
+    return { pass: true, score: 0, findings: ['There were no files to review — the project was empty at review time. This is not a passing app; it is an absent one.'], reviewed: true };
   }
   try {
     const { system, user } = buildJudgePrompt(userRequest, files);
     const t = await runTurn({ model: sonnetModelId, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 1500 });
     return parseJudgeVerdict(t.text);
   } catch {
-    // A judge that could not RUN has not approved anything either — same rule as above.
-    return { pass: true, score: 0, findings: ['The build review could not be completed, so this build has not been reviewed.'] }; // never breaks a build
+    // A judge that could not RUN has not approved anything either — same rule as above. This path was
+    // ALREADY honest about the score and the reason; what it lacked was a machine-readable flag, so
+    // the caller had to infer "did not happen" from `score === 0`, which a real bad build can also be.
+    return reviewDidNotHappen('The build review could not be completed, so this build has not been reviewed.');
   }
 }
 
@@ -123,4 +190,65 @@ export function judgeRepairPrompt(userRequest: string, findings: string[]): stri
     '',
     `Original request, for reference: ${userRequest.slice(0, 800)}`,
   ].join('\n');
+}
+
+/**
+ * How a verdict should be RECORDED in the admin build report. Pure, so the wording is testable.
+ *
+ * Three outcomes, not two. `pass` answers "may this build proceed?"; it was never an answer to
+ * "what did the judge find?", and reporting it as one is how "the reviewer could not run" came to be
+ * filed as a passing review (autopsy 31dc61fd).
+ *
+ * ⚠️ THE DETAIL IS KEPT ON EVERY OUTCOME, including a genuine pass. The old line appended findings
+ * only on failure, so the honest sentence the judge had written was discarded by the reader — the
+ * exact shape of losing an explanation that already existed.
+ */
+export function describeJudgeVerdict(v: JudgeVerdict): {
+  label: 'PASS' | 'FAIL' | 'NOT RUN';
+  severity: 'info' | 'warning';
+  detail: string;
+} {
+  const detail = (v.findings || []).slice(0, 3).join('; ');
+  if (v.reviewed === false) {
+    // A warning, not info: a judge that never runs is a gate that silently stopped existing, and a
+    // misconfigured provider can make that permanent without a single failing build to reveal it.
+    return { label: 'NOT RUN', severity: 'warning', detail };
+  }
+  return { label: v.pass ? 'PASS' : 'FAIL', severity: v.pass ? 'info' : 'warning', detail };
+}
+
+/**
+ * The ADMIN-ONLY name of the engine that judged this build. Exhaustive by construction.
+ *
+ * 🔴 THE BUG. `selectReviewJudge` can return `kind: 'nemotron'`, and the report's label was an inline
+ * ternary with no branch for it:
+ *
+ *     judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet'
+ *
+ * So every Nemotron verdict was filed under **Sonnet** — an engine that had not run. It is not
+ * hypothetical: Nemotron went LIVE on the Weak tier on 2026-09-19 (`AGENTV3_NEMOTRON=weak`), so the
+ * judge line in every Weak build report since then has named the wrong provider.
+ *
+ * ⚠️ A record that quietly attributes work to the wrong engine is worse than one that says "unknown",
+ * because nobody doubts it — and this is the exact line an autopsy reads to decide which vendor to
+ * trust, tune or drop. #3143 made that line stop calling an un-run review a PASS; this makes it stop
+ * naming the wrong engine.
+ *
+ * The `never` check is the point: a future engine must be named HERE, where somebody has to think
+ * about it, instead of silently becoming whichever branch the ternary happened to end on.
+ *
+ * Never reaches a user (White-Label Law) — this is the admin report's label only.
+ */
+export function judgeEngineLabel(kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'): string {
+  switch (kind) {
+    case 'grok': return 'Grok';
+    case 'glm': return 'GLM';
+    case 'opus': return 'Opus';
+    case 'nemotron': return 'Nemotron';
+    case 'sonnet': return 'Sonnet';
+    default: {
+      const never: never = kind;
+      return String(never);
+    }
+  }
 }

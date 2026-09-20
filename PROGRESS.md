@@ -74422,3 +74422,62 @@ prompt fails exactly the two prompt cases.
   and `.html` by design (esbuild has no opinion on them), so a truncated non-JS file written through
   the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
   the path this autopsy traced and is named here rather than bundled in.
+
+## 2026-09-20 — "DID THIS BUILD LEAVE A VERSION?" — a question the engine could not answer
+
+The admin opened the Time Machine minutes after #3190 merged, found nothing automatic, and pressed
+**"Save this version" by hand**: *"yeh to mujhe khud backup lena pada"*.
+
+The most likely explanation was timing — the merge landed at 15:01 UTC and the screenshot is 15:05,
+inside Cloud Run's own deploy window, so that build almost certainly ran on the previous code. **But
+"most likely" was the only answer available**, and that is the finding, not the timing.
+
+### The engine knew six answers and told nobody any of them
+
+`saveRestorePoint` computes a decision — build failed / no files / already saved / switched off / no
+workspace / saved — and **returned it to a `void` call site**. Nothing was recorded anywhere. So the
+only instrument for "did this build leave a version?" was a user opening a screen on a phone.
+
+That is the same shape as the bug #3190 fixed: a writer nobody could hear, whose silence looked
+exactly like success for two months. Fixing the writer without giving it a voice left the next
+failure to be found the same way — by the admin.
+
+### Two things underneath had to be fixed first, or the report would have lied
+
+**1. `BuildHistoryStore.save` returned `void` and swallowed everything — including `if (!db) return`,
+the case where Firestore is not configured at all.** So even a caller that wanted to be honest could
+only ever report an INTENTION. It returns a boolean now. The retention trim got its own `try` in the
+same change: past the `set` the version EXISTS, and reporting it unsaved because an unrelated delete
+failed is the opposite lie, equally bad.
+
+**2. The double-write claim was never released on failure.** The claim is taken BEFORE the write so
+the two settle paths cannot both save — correct, with one hole: a FAILED write left the key claimed,
+so the deadline finalizer, which exists precisely to rescue what the settle path could not finish,
+refused with `already-saved` and the user ended with **no version at all**. `forgetRestorePoint`
+releases it; nothing can be duplicated, because nothing was written.
+
+### The line itself
+
+`RESTORE_POINT`, recorded on **both** settle paths (Fix 67's rule, inherited), carrying one sentence
+per outcome from `describeRestorePoint` and a severity that matches the fact: a refusal we CHOSE is
+`info`, a failure is `warning`. Registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — a perfect app
+whose version write failed is still a perfect app.
+
+🔒 **It is AWAITED, briefly, and the comment that stood there said the opposite.** "Fire-and-forget"
+and "say what happened" cannot both be true: the report is persisted at the end of the build, so an
+answer arriving afterwards reaches nobody. Bounded by `RESTORE_POINT_CONFIRM_MS` (5 s) at the end of a
+build measured in minutes, and **a timeout is a third outcome — `unconfirmed`, never "saved" and never
+"failed"** — the same rule `JudgeVerdict.reviewed` already states: an instrument that could not read
+must not report a reading.
+
+### Two process failures in this change, both worth recording
+
+**A weak assertion, caught only by reversion — the third this session.** The case asserting "both
+settle paths record it" counted the `RESTORE_POINT` records and **passed with one call gutted**: a
+record fed by nothing, reporting a version that was never attempted. It counts the CALLS and the
+records now, and reverting one call fails it.
+
+**`git checkout <file>` destroyed uncommitted work for the third time in one session** — here, every
+edit to `restorePoint.ts`, wiped while undoing a reversion proof. The rule that follows is mechanical:
+**commit before running any reversion proof, and undo with `git restore --source=HEAD --worktree`**,
+never a bare `git checkout` on a file whose changes are not yet committed.

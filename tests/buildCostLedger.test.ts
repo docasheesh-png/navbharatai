@@ -182,8 +182,35 @@ describe('🔒 WHERE the real cost comes from — settled first, the call log on
 
   it('the cap the ledger honours IS the cap storage applies — one constant, read from the store', () => {
     const store = readFileSync('src/server/AgentV3/DiagnosticsStore.ts', 'utf8');
-    expect(store).toContain('lastN(report.llmCalls, STORED_LLM_CALLS_MAX)');
+    // The spelling moved from `lastN(...)` to `trimChannel(...)` on 2026-09-20, when trimming and
+    // declaring the loss became one operation (reportTruncation.ts). The CONSTANT is what this test
+    // is about, and it is still the store's, still shared, still the ledger's import.
+    expect(store).toContain('trimChannel(report.llmCalls, STORED_LLM_CALLS_MAX');
     expect(readFileSync('src/server/lib/buildCostLedger.ts', 'utf8')).toContain("import { STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore'");
+  });
+
+  it('🔑 a DECLARED loss beats the length guess — and exactly-40 real calls are no longer discarded', () => {
+    // The guess (`length >= cap`) had a real false positive: a build that genuinely made 40 calls was
+    // marked a lower bound, so a correct measurement was dropped from the admin's measured sample and
+    // its margin shown as null. The report now states the truth, so the guess is only the fallback.
+    const exactly40 = Array.from({ length: STORED_LLM_CALLS_MAX }, (_, i) => call(i));
+    const honest = buildCostRow(report({ llmCalls: exactly40, truncation: { complete: true } } as never), 87)!;
+    expect(honest.source).toBe('call-log');
+    expect(honest.measured).toBe(true);
+    expect(honest.marginInr).not.toBeNull();
+
+    // …and a report that says it lost calls is a lower bound however short its list is.
+    const short = buildCostRow(report({
+      llmCalls: [call(1)],
+      truncation: { complete: false, channels: { llmCalls: { kept: 1, total: 312 } } },
+    } as never), 87)!;
+    expect(short.source).toBe('call-log-capped');
+    expect(short.measured).toBe(false);
+    expect(short.marginInr).toBeNull();
+
+    // A LEGACY report (no statement) keeps the old, margin-safe heuristic.
+    const legacy = buildCostRow(report({ llmCalls: exactly40 }), 87)!;
+    expect(legacy.source).toBe('call-log-capped');
   });
 });
 

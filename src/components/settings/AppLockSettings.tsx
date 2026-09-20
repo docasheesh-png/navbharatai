@@ -56,10 +56,12 @@ export function appLockRowSubtitle(status: AppLockStatus | null, loadFailed: boo
  * It reads the shared status cache, so it costs no request of its own once any gate has asked.
  */
 export const AppLockRow: React.FC<{ userId: string | undefined; onOpen: () => void }> = ({ userId, onOpen }) => {
-  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus());
+  // Scoped to the signed-in account: an answer cached for a different user is not an answer about this
+  // one, and this row is the first thing that draws on General. See THE ACCOUNT BOUNDARY in appLock.ts.
+  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus(userId));
   const [loadFailed, setLoadFailed] = useState(false);
 
-  useEffect(() => subscribeAppLock(() => setStatus(cachedAppLockStatus())), []);
+  useEffect(() => subscribeAppLock(() => setStatus(cachedAppLockStatus(userId))), [userId]);
 
   const load = useCallback(() => {
     if (!userId) return;

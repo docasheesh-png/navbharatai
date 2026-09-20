@@ -102,6 +102,37 @@ export function cssBraceImbalance(css: string): number {
  * PURE + unit-testable. With only one effective tier present, the staged build collapses to today's
  * single parallel batch.
  */
+/**
+ * WHY — in ONE sentence — the shared-contract pass is being skipped, or `null` when it is running.
+ *
+ * 🔴 THE DEFECT (autopsy `f152c1ab`, 2026-09-20). The skip was announced by TWO separate branches,
+ * and an unaffordable contract satisfied both. The reported build shows both lines at the SAME
+ * millisecond, giving the user two different explanations for one decision:
+ *
+ *     ⏭️ Skipping the shared-contract pass — there is time to write your files or to design the
+ *        contract, not both, and the files are the app.
+ *     ⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining
+ *        budget goes to writing your files.
+ *
+ * Worse than noise: the second reason was FALSE for that build. "Planning used the time it needed"
+ * describes the case where the contract cap collapsed to nothing; this build had a real cap and
+ * failed the AFFORDABILITY check instead. The `else if` fired only because the `if` above it also
+ * required `contractAffordable`, so the two branches were never mutually exclusive.
+ *
+ * 🔒 One decision, one sentence, and the reason is derived from the SAME two facts the code branches
+ * on — so the narration cannot drift from the behaviour it narrates.
+ */
+export function contractSkipReason(
+  input: { shareContract: boolean; contractCapMs: number; affordable: boolean },
+): string | null {
+  if (!input.shareContract) return null; // the pass is off — there is nothing to announce
+  if (!(Number(input.contractCapMs) > 0)) {
+    return '⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.';
+  }
+  if (input.affordable) return null; // it is running; the "Designing…" line speaks for it
+  return '⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.';
+}
+
 export function generationTier(path: string): number {
   const p = path.toLowerCase();
   // Shell / entry / pages — generated last (they import the components + foundation).
@@ -964,9 +995,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         overallMs,
         contractCapMs: contractCap,
       });
-      if (shareContract && contractCap > 0 && !contractAffordable) {
-        deps.log?.('⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.');
-      }
+      // ONE skip, ONE sentence — see `contractSkipReason`.
+      const contractSkip = contractSkipReason({ shareContract, contractCapMs: contractCap, affordable: contractAffordable });
+      if (contractSkip) deps.log?.(contractSkip);
       // MEASURED, INCLUDING WHEN IT IS KILLED. A contract call that ran to its cap and was cut off is
       // the strongest evidence this chain is slow, and it used to be discarded — see PreambleProgress.
       let contractCallMs = 0;
@@ -986,8 +1017,6 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // Recorded on BOTH paths: a throw here is usually the cap firing, and that duration is the
         // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
         contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
-      } else if (shareContract) {
-        deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
       // THE CONTRACT IS A FILE, NOT A PARAGRAPH — see `contractModule` for the build that proved it.
       // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the

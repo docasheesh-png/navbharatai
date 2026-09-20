@@ -37,7 +37,8 @@ import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, e
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
-import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { answeringModel } from '../AgentV3/answeringModel';
+import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
@@ -12692,7 +12693,7 @@ async function noteBuildOutcome(
             } catch (err) {
               try {
                 const lbl = fastLaneProviderLabel(rmProvider);
-                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -12705,7 +12706,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -14385,7 +14386,7 @@ async function noteBuildOutcome(
             const t = await Promise.race([call, timeout]);
             try {
               const lbl = fastLaneProviderLabel(bpProvider);
-              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : bpProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -15244,7 +15245,7 @@ async function noteBuildOutcome(
               // as every other one, or the report cannot say whether the key was working at all.
               try {
                 const lbl = fastLaneProviderLabel(ppProvider);
-                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {
@@ -15252,7 +15253,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(ppProvider);
-              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -20816,17 +20817,18 @@ async function noteBuildOutcome(
       // rungs below it reason unconditionally and expose no switch. So the share of builds that leave
       // rung 1 IS the size of the model-reasoning problem — and of the cost gap between the cheapest
       // rung and the rest. Pure computation over the ledger we already hold; no call, no I/O.
-      const ladderDepth = ladderDepthUsed(
-        providerLedger.entries(),
-        tierLadder(powerLevelReqEffective).rungs,
-      );
+      const ladderRungsForDepth = tierLadder(powerLevelReqEffective).rungs;
+      const ladderDepth = ladderDepthUsed(providerLedger.entries(), ladderRungsForDepth);
+      // WHERE DID IT OPEN? A complex build skips the cheap lead rung, so "fell" would be a lie.
+      // Asked of the same helper that built the chain — see openingRung.
+      const ladderOpenedAt = openingRung(ladderRungsForDepth, { complex: buildIsComplex });
       try {
         buildDiag.record({
           phase: 'build',
           severity: 'info',
           code: 'LADDER_DEPTH',
-          message: describeLadderDepth(ladderDepth),
-          detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
+          message: describeLadderDepth(ladderDepth, ladderOpenedAt),
+          detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · opened-at=${ladderOpenedAt} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
           autoResolved: true,
         });
       } catch { /* an observation must never affect a finished build */ }

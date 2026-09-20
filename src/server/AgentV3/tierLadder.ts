@@ -233,6 +233,25 @@ export function withoutCheapFlashLead(rungs: readonly LadderRung[]): LadderRung[
 }
 
 /**
+ * WHICH RUNG DID THIS BUILD OPEN ON? 1-based, against the FULL tier ladder.
+ *
+ * 🔴 Why it exists (autopsy `f152c1ab`, 2026-09-20). A build routed COMPLEX — or any heal — drops
+ * the cheap lead rung and BEGINS at rung 2, so it can finish on rung 2 having fallen nowhere. The
+ * report said *"Fell to rung 2 of 5"*, which sends an admin hunting a rung-1 failure that never
+ * happened. "Fell" is a claim about MOVEMENT and needs a starting point.
+ *
+ * 🔒 It asks `withoutCheapFlashLead` — the SAME function that builds the chain — rather than
+ * re-deriving the rule, so the sentence in the report can never drift from the routing it describes.
+ * That is the discipline this repo has paid for three times (four stale ladder comments; `safeRelPath`
+ * in four copies).
+ */
+export function openingRung(rungs: readonly LadderRung[], opts?: { complex?: boolean; heal?: boolean }): number {
+  if (!opts?.complex && !opts?.heal) return 1;
+  const opened = withoutCheapFlashLead(rungs);
+  return opened.length === rungs.length ? 1 : rungs.length - opened.length + 1;
+}
+
+/**
  * The ladder a HEAL pass runs on — the tier ladder minus its cheap leading flash rung.
  *
  * The 2026-08-13 rule, admin-mandated: "a repair must not begin on the model that produced the

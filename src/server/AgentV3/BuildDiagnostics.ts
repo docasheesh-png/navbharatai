@@ -64,6 +64,10 @@ const PROCESS_ONLY_CODES = new Set([
   'PAGE_RENDER_NOT_RUN',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
   'PROJECT_MODE_FAILED',
+  // Whether THIS BUILD left a version in the Time Machine (restorePoint.ts). A statement about our own
+  // safety net, never a finding about the user's app — a perfect app whose version write failed is
+  // still a perfect app, and counting it against them is the provider-error-as-app-blocker class.
+  'RESTORE_POINT',
   // The gate said RED and a real run said otherwise — a statement about OUR verdict (runProvenApp.ts).
   'VERDICT_HELD_BY_RUN',
   // HOW A BUILD ENDED IS NOT A FINDING ABOUT THE APP (abortOutcome.ts, 2026-09-18). These are recorded

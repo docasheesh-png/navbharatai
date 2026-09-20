@@ -71907,3 +71907,92 @@ empty findings, so the difference is nearly always nothing — not worth widenin
 - **Item 5** — the deterministic complexity scorer scored an app-build prompt **5** with taskType
   `"chat"`.
 - **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.
+
+---
+
+## 2026-09-20 — A commented-out import is not an import (autopsy `31dc61fd`, re-read)
+
+**This is the SAME build id I autopsied earlier today.** The admin re-sent it; rather than repeat the
+tally, I re-read it end to end for what my first pass MISSED. This is the sharpest of four candidates,
+and the only one I could verify to the line.
+
+### The defect
+
+`WorkspaceMemory.extractFacts` ran its import, symbol, route and reference regexes over **RAW source**,
+so anything that merely LOOKED like code entered the project graph as a real fact. That graph is not a
+side channel — two independent consumers read it:
+
+- `analyzeArchitecture(graph)` turns `graph.imports` into `unresolvedImports`, which `releaseGate.ts`
+  counts as a **HARD BLOCKER** ("Hard blockers — an unresolved import, a missing dependency");
+- `collectDependencyIssues()` turns the same field into **"missing dependency"**, which
+  `BuildConfidence` then charges against the build.
+
+### ⚠️ And the trigger is OUR OWN SCAFFOLD, so it fired on EVERY vite-react build
+
+`ViteReactProviderContents.ts` writes this into every generated `vite.config.ts`:
+
+```
+// `import { useStore } from 'stores/useStore'` resolves at BUILD & RUNTIME too — not just in
+```
+
+Measured, not reasoned about: that line yields `stores/useStore`, package root `stores`, in no
+package.json. In this report an app that was **complete, typechecking, passing its own tests and
+rendering in a real browser** was scored `Build confidence: 35% (Low)` with "1 missing dependency(ies)
+not in package.json" — and the architect and then the reviewer between them spent **three greps, a
+shell grep and a repeated `evaluate`** proving it was a phantom. The reviewer's own conclusion was
+filed as a finding: *"`stores` dependency warning is a false positive."*
+
+### 🔑 The class: the rule already existed in this repo, TWICE, and not where it mattered
+
+`SpaFallbackAnalysis.ts` and `ProjectIntegrityChecks.ts` each carry a **private** `stripComments`, and
+the second one's doc comment states this exact rule — *"so a commented-out `.focus()` / import never
+counts."* They have already **drifted** (one substitutes a space, the other nothing). So the rule was
+written twice and was still missing from the one extractor that feeds the whole graph.
+
+`stripCodeComments.ts` is now the one implementation, used by `extractFacts`.
+
+- 🔒 **Length-preserving on purpose.** Deleting a comment can JOIN the tokens either side of it
+  (`foo/*c*/.bar()` → `foo.bar()`), inventing code nobody wrote — the same class of false fact this
+  removes. Blanking cannot.
+- 🔒 **The `[^:]` guard is what keeps a URL a URL.** Without it `from 'https://esm.sh/react'` loses
+  everything from `//` onwards and a REAL import disappears — turning a false-positive bug into a
+  false-negative one, which is strictly worse. Both existing copies carry the same guard; it was kept,
+  not re-invented.
+- 🔒 **SECURITY STILL READS RAW SOURCE.** A key pasted into a comment is a leaked key. Every other
+  extractor reads the stripped copy; `scanSecurity` deliberately does not, and a test holds that.
+
+**Measured before and after** — phantoms from the scaffold comment, a commented-out RELATIVE import, a
+block comment, a docblock example, a commented `require`, a commented `export`, a commented route: all
+gone. Controls unchanged: real imports, a URL import, a real import with a trailing comment.
+
+**Tests** — `tests/aCommentedOutImportIsNotAnImport.test.ts` (11 cases), **reversion-proven four ways**:
+raw content again → 4 red · security switched to the stripped copy → 1 red · the `[^:]` URL guard
+removed → 1 red · length preservation dropped → 2 red.
+
+### Deliberately NOT done, and why
+
+- **The two private `stripComments` copies were NOT migrated.** They are not instances of the bug —
+  they are instances of the SOLUTION that was never shared, and they already behave differently from
+  each other. Unifying them changes two working modules for no measured gain today, which is exactly
+  the "never trade one problem for another" rule. Recorded as a follow-up with its own tests.
+- **String literals are still read.** `const s = "import a from 'react-dom'"` still yields a phantom.
+  That is a lexer's job, not a regex's, and unlike the comment case **nobody has measured it happening
+  in a real build** — comments were measured, strings are speculative. Recorded rather than guessed at.
+- **`syncDependencies` (`src/server/project/`) has the same raw-source extractor and it WRITES —**
+  `pkg.dependencies[name] = …` for every harvested bare import, then installs. It is on the Engineer AI
+  / BuildPipeline path, not AgentV3's, so it did not cause this report. **Named here as an open sibling
+  because its failure mode is worse than a warning:** a package name harvested from a comment would be
+  added to a user's package.json and fetched from npm.
+
+### The other three candidates from the re-read, recorded but not fixed here
+
+1. **"build budget reached" named the wrong clock.** At 105s into a 1800s build, the report says
+   *"A model call was stopped because this build's time budget ended"* with `provider=unknown`, while
+   the line above it names KIMI. It was the FAST LANE's ~60s contract-call cap. An autopsy reading this
+   would believe the 30-minute budget expired 105 seconds in.
+2. **`evaluate` said "Nothing here was ever proven to RUN — no preview"** while the same build had
+   `PREVIEW_PUBLISHED`, a successful screenshot, and `GREEN_GUARD_SAVE` ("opened in a real browser and
+   rendered"). This is the **EVIDENCE LEDGER** open root cause caught with an exact quote, and it cost
+   money: the reviewer read "35% (Low)" and went hunting.
+3. **`PREVIEW_SNAPSHOT_STALE`** — the snapshot was taken, then a post-build pass wrote three more test
+   files, invalidating it. An ordering defect.

@@ -13,7 +13,7 @@
  *   • no key ⇒ nothing, and above all never a fall back to the source this replaced
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import {
@@ -28,6 +28,7 @@ import {
   fetchCityAirQuality,
   CPCB_RESOURCE_ID,
 } from './cpcbAirQuality';
+import { __resetGovDataClient } from './govData/client';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -193,17 +194,29 @@ describe('the request', () => {
   });
 });
 
-describe('fetchCityAirQuality — the one I/O function', () => {
+describe('fetchCityAirQuality — now through the shared government-data client', () => {
+  // ⚠️ THE SEAM IS A REAL `fetch` SINCE 2026-09-20, because this source stopped making its own
+  // bespoke call and went through `govData/client.ts` — which is what lets the next dataset be a
+  // registry row rather than a new code path. The fakes below changed shape with it; not one
+  // assertion did. The first draft of that migration kept the old json-shaped parameter and ignored
+  // it, which silently disconnected every injected fetch; these tests are what caught it.
+  const reply = (body: unknown, ok = true) =>
+    (async () => ({ ok, status: ok ? 200 : 500, json: async () => body })) as unknown as typeof fetch;
+
+  beforeEach(() => __resetGovDataClient());
+
   it('🔒 makes NO request at all without a key', async () => {
     let called = 0;
-    const out = await fetchCityAirQuality('Kanpur', async () => { called += 1; return null; }, {} as never);
+    const spy = (async () => { called += 1; return { ok: true, status: 200, json: async () => ({}) }; }) as unknown as typeof fetch;
+    const out = await fetchCityAirQuality('Kanpur', spy, {} as never);
     expect(out).toBeNull();
     expect(called).toBe(0);
   });
 
   it('makes no request for an unusable place name', async () => {
     let called = 0;
-    const out = await fetchCityAirQuality('', async () => { called += 1; return null; }, { DATA_GOV_IN_API_KEY: 'k' } as never);
+    const spy = (async () => { called += 1; return { ok: true, status: 200, json: async () => ({}) }; }) as unknown as typeof fetch;
+    const out = await fetchCityAirQuality('', spy, { DATA_GOV_IN_API_KEY: 'k' } as never);
     expect(out).toBeNull();
     expect(called).toBe(0);
   });
@@ -211,7 +224,7 @@ describe('fetchCityAirQuality — the one I/O function', () => {
   it('returns the city figure when the feed answers', async () => {
     const out = await fetchCityAirQuality(
       'kanpur',
-      async () => ({ records: [row('S1', 'PM2.5', '148'), row('S1', 'PM10', '211'), row('S1', 'NO2', '38')] }),
+      reply({ records: [row('S1', 'PM2.5', '148'), row('S1', 'PM10', '211'), row('S1', 'NO2', '38')] }),
       { DATA_GOV_IN_API_KEY: 'k' } as never,
     );
     expect(out!.aqi).toBe(211);
@@ -219,10 +232,19 @@ describe('fetchCityAirQuality — the one I/O function', () => {
 
   it('returns null — never throws — on an empty, missing or malformed response', async () => {
     const env = { DATA_GOV_IN_API_KEY: 'k' } as never;
-    expect(await fetchCityAirQuality('Kanpur', async () => null, env)).toBeNull();
-    expect(await fetchCityAirQuality('Kanpur', async () => ({}), env)).toBeNull();
-    expect(await fetchCityAirQuality('Kanpur', async () => ({ records: 'nope' }), env)).toBeNull();
-    expect(await fetchCityAirQuality('Kanpur', async () => ({ records: [] }), env)).toBeNull();
+    for (const body of [null, {}, { records: 'nope' }, { records: [] }]) {
+      __resetGovDataClient();
+      expect(await fetchCityAirQuality('Kanpur', reply(body), env), JSON.stringify(body)).toBeNull();
+    }
+  });
+
+  it('returns null on a refused key, a rate limit and a dead endpoint', async () => {
+    const env = { DATA_GOV_IN_API_KEY: 'k' } as never;
+    for (const status of [401, 429, 404, 500]) {
+      __resetGovDataClient();
+      const res = (async () => ({ ok: false, status, json: async () => ({}) })) as unknown as typeof fetch;
+      expect(await fetchCityAirQuality('Kanpur', res, env), String(status)).toBeNull();
+    }
   });
 });
 

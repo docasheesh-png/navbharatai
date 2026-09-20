@@ -77,7 +77,11 @@ const PROCESS_ONLY_CODES = new Set([
   // wall-clock cap and an abort with no recorded cause end the RUN; neither is evidence about the app.
   // The release gate is RED on `buildOk:false` regardless, so this changes no verdict — only the
   // "N build-breaking blocker(s)" count a stopped build used to print about itself.
-  'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT',
+  // ⚠️ `OUTCOME_ABORTED_UNKNOWN` was split OUT of `OUTCOME_STOPPED` on 2026-09-20 (an abort whose
+  // signal carried no cause, i.e. one that never went through `abortBuild`). It must be listed here
+  // too or the split silently turns "we do not know why the run ended" into a blocker counted
+  // against the user's app — `tests/everyAbortCauseRecordsAnOutcome.test.ts` caught exactly that.
+  'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT', 'OUTCOME_ABORTED_UNKNOWN',
 ]);
 
 /**
@@ -1257,7 +1261,17 @@ export class BuildDiagnostics {
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_BUDGET_ENDED',
-        message: `A model call was stopped because this build's time budget ended, not because it failed (${rec.model ?? 'model'}).`,
+        // 🔴 "THIS BUILD'S TIME BUDGET" WAS THE WRONG CLOCK, AND IT COST AN AUTOPSY (bb688add,
+        // 2026-09-20). That line appeared 100 SECONDS into a build whose budget was 3,480 seconds, so
+        // every reader — the admin, and this session — starts by looking for why a 58-minute build ran
+        // out of time in a minute and a half. It never did. The clock that ended was the fast lane's
+        // own shared-contract slice (47,800ms, derived to the millisecond from the preamble share).
+        // `BUDGET_REACHED_MESSAGE` is one constant thrown for EVERY deadline in the stack, and this
+        // record cannot tell which one produced it — so it must not name one. "One of our own clocks"
+        // is the whole of what is known here, and it still carries the fact that matters: the provider
+        // did nothing wrong. (The same autopsy's prevention half is `contractCallCanFinish`, which
+        // stops the commonest such call being started at all.)
+        message: `A model call was stopped by one of our own clocks — a budget or step deadline ran out while it was still running, so it did not fail (${rec.model ?? 'model'}).`,
         autoResolved: true,
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
       });

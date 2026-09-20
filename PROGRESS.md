@@ -73240,8 +73240,170 @@ into the per-turn context — deliberately the per-turn message, not the cached 
 prompt cache breaks. Extracting rows from the summary with a regex or an extra model pass was
 considered and **rejected**: fragile, and it would bill every build for it.
 
+## 2026-09-20 — AUTOPSY `bb688add`: a failed probe is not an answer, and a call the clock cannot carry is not started
+
+**The build:** a Hindi मंगल विवाह निश्चय पत्र (one page, no data entry), free tier, weak ladder. **16.4
+minutes, ₹177.98 charged to a FREE user** — 71% of the ₹250 welcome balance for a printable invitation
+card. It succeeded: release gate YELLOW, app rendered, `PROD_BUILD_OK`.
+
+### The five-bucket ledger
+
+| | count | |
+|---|---|---|
+| ✅ Self-heal | **3** | CSS import injected (`INTEGRITY_CSS_WIRED`), truncation continued (`FASTLANE_CONTINUED`), fast-lane → full-builder hand-off |
+| 🔀 Workaround | **1** | the hand-off itself: 3 repair attempts failed, the full builder rewrote the app from scratch |
+| ⏭️ Skipped | 2 | no user journey (no data-entry surface — correct), no tests |
+| ❌ Still broken | **4** | the four below |
+| 🥵 Struggle | **882 s to first render** — 14.7 minutes before the user's app existed on screen | |
+
+### One root cause, in two places: a thing we could not measure, written down as a measurement of zero
+
+**① The `tsconfig.json` probe could not be read, so the compiler was switched off for the whole build.**
+`ToolDispatcher` latched `catch { this._isTsProject = false; }` on the FIRST TypeScript write, and never
+asked again. Every later TypeScript write counted as "skipped", and the report said:
+
+> *"Write-time typecheck: no TypeScript source was written this build (22 write(s) skipped as not TypeScript)."*
+
+That build wrote **six** TypeScript files (`types/invitation.ts`, `data/invitation.ts`,
+`hooks/useInvitation.ts`, `components/Invitation.tsx`, `App.tsx`, `main.tsx`). The sentence is false, and
+the `skipped` counter could not have told the truth — it merged *"this write was a `.css` file"* with
+*"we judged the project non-TypeScript"*. **The cost was not the sentence.** Write-time typecheck exists
+(2026-09-17, autopsy e706e068) precisely to quote a file's own compiler errors back while the model still
+holds it. It stood down — and the build then ground **eleven `TS2339` errors** through three repair
+passes over five minutes, which is the exact struggle that feature was built to end.
+
+**Fixed:** a probe that THREW leaves the verdict `unknown` and is retried (`MAX_TSCONFIG_PROBES` = 3), so
+one sandbox hiccup cannot disable the compiler for a 16-minute build. Only an unmistakable not-found is
+an absence (`isMissingFileError`, precision-first: a false *absent* kills the feature, a false *unknown*
+costs two file reads) — and a dead sandbox saying *"no such file"* about `/home/user/workspace` is a
+missing MACHINE, not a missing tsconfig, so it is never a verdict. The two skip reasons are counted
+separately and the summary names which one happened.
+
+⚠️ **Honest limit (rule 6):** the report cannot say WHY that read failed — a transient sandbox error and a
+race with the scaffold look identical from here. That is itself part of the defect, and `probeFailures`
+is the field that will answer it on the next occurrence. The fix is correct for every cause.
+
+**② OPEN, NOT FIXED — and the gate is what stopped me shipping it (rule 6, safeguard #3).** The
+shared-contract call was started against a clock that had just been measured. The arithmetic is exact:
+
+```
+preamble share    96,000ms   (240,000 × (1 − BUILD_PHASE_RESERVE))
+plan call         48,198ms   MEASURED, a real call on this build's own chain
+contract cap      47,802ms   → 396ms SHORT of what the plan had just cost
+contract call     47,804ms   → hit its cap exactly, returned NOTHING (₹1.17, UNBILLED_BARREN_WORK)
+```
+
+With no contract, the files were generated in isolated calls and disagreed — which IS ①'s eleven
+`TS2339` errors. 🔑 The assumption hides in a `Math.min`: `canAffordSharedContract` models the cost as
+`min(cap, measured)`, which treats a call that hits its cap as *cheaper*, when it is **free of value and
+full of cost**.
+
+🔴 **I built the guard (`contractCallCanFinish`: refuse a preamble call whose cap is below the measured
+cost of the one before it), and the full suite refused it — correctly.** Two deliberately-written cases
+in `theOptionalPassMustNotDoomTheLane.test.ts` say *"the boundary is the budget itself, not a new
+invented number"* and *"no tiers to build ⇒ keep the contract"*, and my guard broke both. Re-reading the
+evidence, they are right and I was over-reaching: **one report cannot tell "the cap was 396ms too small"
+from "that call was stalled regardless"** — the record shows 0 input and 0 output tokens, which is the
+shape of a call that never got going, not of one that needed slightly longer. Changing the budget rule
+for every fast-lane build on n=1 is exactly the guess safeguard #3 forbids.
+
+**So the arithmetic is pinned as a test and the behaviour is untouched.** What settles it is the number:
+how often a contract call ends barren, and how its cap compared with the measured plan. Until several
+reports show the pattern, this stays open — the same discipline `POST_GREEN_WRITES` and `LADDER_DEPTH`
+were shipped under.
+
+### ③ "This build's time budget ended" was the wrong clock, and it cost an autopsy
+
+The report's `LLM_CALL_BUDGET_ENDED` line fired **100 seconds into a build whose budget was 3,480 seconds**.
+`BUDGET_REACHED_MESSAGE` is ONE constant thrown for every deadline in the stack, and that record cannot
+tell which one produced it — so it must not name one. It now says *"stopped by one of our own clocks"*,
+which is the whole of what is known there and still carries the fact that matters: the provider did
+nothing wrong. **This closes the item CLAUDE.md records as open from autopsy 31dc61fd** (*"build budget
+reached at 105 s of a 1800 s build"*); ② is its prevention half.
+
+### ④ Recorded, not fixed (rule 6)
+
+- **`provider=unknown` beside a sibling line that says KIMI.** `fastLaneCallIdentity` returns `unknown`
+  when no provider *reported in*, and its docblock explains at length why guessing is worse — that
+  reasoning is right. But *which rung was ATTEMPTED* and *which provider DELIVERED* are different facts
+  and only the second reaches this record. Threading the attempted rung is a wider change than this
+  autopsy should make; named here so it is not re-discovered.
+- **The lean post-build review timed out producing nothing** — 45 s budget, 2 calls, 5 file reads,
+  `REVIEW_INCOMPLETE`, then told the user an 18-file invitation card was *"this large app"*. This is the
+  first real evidence `AGENTV3_GREEN_REVIEW_LEAN` (2026-09-18) has produced, and its own entry says to
+  watch exactly this. **Watch, do not tune yet** — one report is not a distribution.
+- **A truncation continuation wrote a corrupted file.** `FASTLANE_CONTINUED` resumed mid-declaration and
+  the emitted `src/components/Invitation.css` began `-size: 0.9rem;` — the tail of `font-size`. It was
+  overwritten later, so nothing shipped, but the continuation path can produce a file whose first line
+  is garbage.
+- **`PREVIEW_SNAPSHOT_STALE`** again (same 18 files, different content) — the post-build ordering defect
+  already open from 31dc61fd.
+- **₹177.98 to a free user for a one-page card.** Billing is not a session's call; raised to the admin.
 ---
 
+## 2026-09-20 — The history popup is a LIST again, not a stack of cards
+
+Admin, with Claude's and ChatGPT's own sidebars screenshotted beside ours: *"navbharatai free, me jo
+history button hai, jisnpar click kar kar popup ata hai, history hai, isko popup ka ui badalna hai!!
+claude nad gpt jaisa karo!! open chat button kyu banaya hai. hatao isko!!"*
+
+**What was there.** Each row was a `p-6` card carrying: the title, a `CUI: <id>` chip, a mode chip, an
+App/Chat badge, a full `toLocaleString()` timestamp, the agent name, a big indigo **Open Chat** button
+and a kebab. Seven pieces of chrome to reach one conversation, and three or four rows to a phone screen
+out of 235 sessions.
+
+### 🔑 The move that makes a list possible is the GROUP HEADING, not minimalism
+
+Claude and ChatGPT show the title and nothing else, and the reason is structural rather than aesthetic:
+**the heading carries the time for every row beneath it**, so no row spends a line saying when it was.
+`src/components/history/historyGroups.ts` is that heading — pure, `now` passed in, headings
+`Ongoing / Today / Yesterday / Previous 7 days / Previous 30 days / Older`.
+
+- 🔒 **It never re-sorts.** `sortMergedRows` puts LIVE professional conversations on top and the
+  Firestore query is newest-first, so it walks the rows in the order it was handed and only buckets
+  them. A sort here would silently overrule that and **nothing would fail** — the live chat would just
+  stop being first.
+- ⚠️ **An unknown date is `Older`, never `Today`.** A row with no timestamp is not new; it is a row
+  whose date we do not know, and putting it at the top would place it above conversations that
+  genuinely are from today. Wrong toward "old" costs one scroll; wrong toward "today" is a claim
+  nothing supports.
+
+### What was removed, and why each is a removal rather than a restyle
+
+| Gone | Why |
+|---|---|
+| **The "Open Chat" button** | The row IS the button now. That is the only honest way to delete that control — a row you can see but not tap would be worse than the button it replaced. |
+| The `CUI:` chip | A support id on every row of a user's own history. It is **still searchable** (the box matches it, unchanged), so nothing became unfindable. |
+| The timestamp + agent line | The group heading says when. This is the single change that turns cards back into a list. |
+| The App/Chat and mode chips | The mode survives as a coloured dot **and inside the row's own `aria-label`** — quieter, not lost. An app session keeps one `</>` glyph, because opening one genuinely does something different. |
+| The idle "235 SESSIONS" | A number nobody came for, costing a row of the list it describes. While **searching** it is the answer, so it stays exactly there. |
+| `font-mono` on the search box | A monospace search field is the same "developer's sentence on a shopkeeper's phone" problem the live build strip had. |
+
+**Delete STAYS**, behind the quiet kebab, with its existing confirmation (now a compact inline row that
+still names what is about to go). Claude and ChatGPT both keep it; dropping a real capability to look
+like them would be a regression wearing a redesign. And a destructive action on a one-line row must not
+become a one-tap action.
+
+### Two things fixed on the way that were not asked for
+
+- **The popup titled itself twice.** The sheet's header says "Chat history" and the view underneath
+  printed "SESSION HISTORY" again — a quarter of a phone screen saying the same thing. `embedded` drops
+  the view's own heading and outer padding; the TAB keeps its heading, because it is a whole screen.
+- **The sheet was painted GitHub-dark** (`bg-[#0d1117]`, zinc borders, `bg-black/60`) — a black panel
+  over a white app on the Light theme. Now `bg-surface` / `border-line` / `bg-scrim`. Both
+  `HistoryView.tsx` and `HistoryPopup.tsx` left the colour baseline **entirely** (3 and 9 literals → 0),
+  which is the ratchet moving the only direction it may.
+
+### Scope, stated plainly
+
+`HistoryView` is rendered by exactly two callers — the History **tab** and this **popup**. So the row
+redesign lands on both, deliberately: two different row designs for one list would drift the moment
+either changed, which is the reason `HistoryPopup`'s own header already says it delegates rather than
+reimplements.
+
+Test-locked in `tests/theHistoryListLooksLikeAList.test.ts` (18): the grouping's local-day boundaries,
+the unknown-date refusal, order preservation, and source guards that the chrome really left — including
+that the blank-title fallback `sessionShape.test.ts` depends on survived the rewrite.
 ## 2026-09-20 — The wallet tiles come first and can be read; the budget console is gone at the root
 
 **THE ADMIN'S MESSAGE, three instructions and three screenshots.** *"sabse upar yeh tile … yeh tile
@@ -73518,3 +73680,678 @@ first carried each native capability and compares it with the live release — s
 is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
 here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
 asked.
+
+## 2026-09-20 — `bb688add`, the UPSTREAM half: a printed invitation was scored a complex app
+
+The autopsy above fixed what the build DID. This is why it went where it went — and it is the same
+class a third and fourth time: **a signal that learned one thing while the checks around it did not.**
+
+### 🔴 The word `विवाह` made a printed card a complex APP
+
+Traced to the score, reproduced verbatim from the real prompt:
+
+```
+namesBusinessDomain → domain `events`  →  taskType complex_app (base 58)
+                              + 10 long prompt (1,233 chars)
+                              = 68  → COMPLEX → past the cheap opener → KIMI
+```
+
+The `events` domain regex **deliberately reads Devanagari** — `शादी|विवाह|समारोह|मेला|कार्यक्रम`.
+Its two narrowing guards, `PAGE_DELIVERABLE_SIGNAL` and `SIMPLE_APP_SIGNAL`, are **pure ASCII**. So
+the promotion learned Hindi and the brakes did not: in Devanagari that predicate has run **unguarded
+since the day it shipped**. A guard that cannot read what its signal reads is not a guard.
+
+The cost, all downstream of that one verdict: the slower opening rung → ~48s preamble calls → a
+shared-contract call left 396ms short that returned nothing → eleven `TS2339` errors → three repair
+passes → hand-off → **16.4 minutes and ₹177.98 on the free tier, for a card**. And the same report
+told the builder the app was missing *ticket types, RSVP, QR check-in and payments*.
+
+**Fixed:** `DOCUMENT_DELIVERABLE_SIGNAL` — the same guard, in the script the domain regexes already
+read. Precision-first, because the asymmetry decides the list: wrong toward "document" costs one
+cheap opening call the ladder climbs out of; wrong toward "system" cost this build sixteen minutes
+with no recovery. So it names only things people ask to be PRINTED or SHOWN — invitation, card,
+certificate, biodata, notice, poster, menu, résumé — and never a word that could name an app (`ऐप`,
+`सिस्टम`, `पोर्टल`, `डैशबोर्ड` are deliberately absent). `पत्र` matches only in its document senses,
+never bare. A genuine Hindi hospital-system request is still promoted; a test pins that.
+
+### 🔴 An admitted unknown took the EXPENSIVE side
+
+`complexityRouting` correctly bought a second opinion (the scorer could not read the script). The call
+was unavailable. The fallback was the deterministic verdict — **COMPLEX** — so the module acted with
+full confidence on a score derived from evidence it admits it could not read.
+
+**It already states, twice, the rule it broke:** *"`simple` is the default on every doubt"* and *"a
+confident wrong answer is worse than an admitted unknown."* `fallbackVerdict` applies its own rule:
+when the signals could neither read nor match the request AND no second opinion answered, the routing
+verdict is `simple`. Wrong toward simple ⇒ the cheap rung is tried and the ladder climbs — that is
+what the ladder is for. Wrong toward complex ⇒ 13× the input price with no recovery path.
+
+🔒 **The SCORE is untouched** — `scriptNeutralFloor` still makes it honest for every other reader.
+Only the binary routing verdict falls back, and only where this module has said in writing it cannot
+tell. A borderline score that was read and understood still stands exactly as before.
+
+⚠️ **Left alone, deliberately:** `scriptNeutralFloor`'s `text.length > 800 || parts >= 6`. A long
+prompt is not a big app and a pasted document breaks that proxy hardest — but the floor exists so a
+Devanagari hospital app is not scored 5, and nobody has measured a better rule. The routing is made
+safe by the fallback instead. Pinned as a test, not changed on a guess.
+
+### 🔴 Our own clock was recorded as a provider failing
+
+The timeline opened with *"Provider KIMI failed"* and the tally read `providerFailures: { KIMI: 1 }`
+— for a call KIMI answered nothing wrong in; the lane's step deadline ended it. `turnDeadline.ts`
+went to some length so a budget error would never BENCH a provider, and its docblock states the other
+half in as many words: *"it must not INDICT anyone either."* It was still indicting one in the two
+places an admin reads. The event is still recorded at the same severity — it simply stops being an
+accusation.
+
+### 🔴 The cost line named a number that was not on the bill
+
+`SANDBOX_BILLING` said *"Sandbox 1310s ≈ $0.0603 … included in this build's real cost"*; the bill used
+**$0.045369 — 986 seconds**. Nothing was mis-billed: the bill caps held seconds at the build's own
+duration so idle time cannot be sold twice, and that cap is deliberate and right. What was wrong is
+that the one line used to judge E2B spend over-stated what reached the bill by **33%** — the same
+shape as the `E2B_USD_PER_HOUR` drift, a correct system with a wrong dashboard. Both facts are now
+printed when they differ, and the line reuses the ONE existing measurement rather than a second copy
+of the capping rule.
+
+### ⚠️ A false alarm I nearly reported, recorded because the next reader will hit it
+
+Probing `analyzeRequest(promptString)` returns `score 5, task=chat` for every prompt on earth: it takes
+`{ prompt }`, not a string. I had drafted the words "this is a regression since this morning" before
+checking. It was my probe. `analyzeRequest({ prompt })` reproduces the real build exactly — 68,
+`complex_app` — which is what made the trace above possible.
+
+Test-locked in `tests/aDocumentIsNotABigApp.test.ts` (19 cases), reversion-proven three ways.
+---
+
+## 2026-09-20 — 🚪 CLOSING THE DOOR CLOSES THE ROOMS: ✕-ing NavBharatAI Free left every professional after the first
+
+**Trigger (admin, verbatim):** *"navbharatai free, me koi professional open ho, aur user header se
+'navbharatai free' ki window x(close)/band kar de! to navbharatai ke sare professional bhi band ho
+jane chahiye! (abhi nahi ho rahe hai!)"*
+
+**The word that names the defect is `sare` — ALL of them.** Closing Free took the FIRST professional
+with it and left every one after that on screen. It was reproduced against the real modules before a
+line was changed:
+
+```
+Free → Mentor → Teacher, then ✕ Free
+closing: [ 'nbi_chat', 'mentor_ai' ]        ← teacher_ai survives
+```
+
+### Two things were wrong at once, and either one alone hides the other
+
+1. **`openers` is a TREE and `computeTabClose` read one level of it.** It could answer *"who are my
+   children?"* and nothing deeper.
+2. **The tree had depth it should never have had.** The Mode sheet opens from INSIDE a professional,
+   so picking Teacher while Mentor was on screen recorded `teacher_ai → mentor_ai` — one
+   professional as another's PARENT. `nbi_chat → mentor_ai → teacher_ai`, and the one-level walk
+   stopped at Mentor. The deeper a user went, the more was left behind.
+
+### ⚠️ Fixing either alone trades one bug for another
+
+- **Subtree close alone** ⇒ ✕-closing **Mentor** would take Teacher down with it. The user never
+  entered Teacher *through* Mentor; they are siblings behind one door. That is a new bug, not a fix.
+- **Re-parenting alone** ⇒ every genuine nesting elsewhere (Settings → an option → its own option)
+  stays orphaned, because the walk is still one level deep.
+
+So both shipped together, in the two pure modules that already own the question:
+
+- **`tabClose.ts`** — `computeTabClose` now closes the whole DESCENDANT subtree, breadth-first, with
+  a `seen` set. ⚠️ That guard is not decoration: a tab can be closed and reopened from what used to
+  be its own child, so `openers` can genuinely hold a cycle, and an unguarded walk would hang the
+  header.
+- **`tabParenting.ts`** — new `parentForOpen(view, activeView, openers)` resolves **the door, not the
+  room beside it**: it walks up from `activeView` until it reaches a non-child surface and records
+  THAT. Free → Mentor → Teacher now parents *both* to Free, so no chain exists to walk. It returns
+  **`undefined`** rather than falling back to the sibling when no real door is reachable — *a child
+  surface may never be recorded as a parent*, which is the invariant that makes chains, and the
+  cycles a chain can grow into, impossible by construction rather than by care.
+
+`App.tsx`'s `toggleTab` now asks `parentForOpen` instead of writing `activeView` directly.
+
+### What it fixes beyond the tab strip
+
+`closeTab` already runs its per-tab teardown for **every** tab in `closing` — so a professional that
+now closes as a child of Free also gets `endProfessionalChat`, which **archives** the transcript into
+Professional History rather than leaving it live to restore itself on the next open. Doctor AI is
+covered too: `sda_chat` is `PROFESSIONALS_IMPLEMENTED_ELSEWHERE`, so `childSurfaceIds()` already
+includes it and its own `startFreshCase` branch runs.
+
+### Verification
+
+`tests/closingTheDoorClosesTheRooms.test.ts` replays `toggleTab`'s real opener bookkeeping rather
+than hand-writing a convenient map, so the cases describe what the app actually records. It pins the
+admin's own flow, the depth-3 Settings nesting, companions at depth, cycle termination, and the three
+things that must NOT become children whoever opened them (Settings from inside Free, the v5.0
+builder, and any professional as another's parent).
+
+**Proven by reversion, each half separately** — which is also the proof that neither is redundant:
+
+| reverted | result |
+|---|---|
+| the subtree close | **2 red** — `sare` fails again |
+| the parent resolution | **4 red**, including *"✕-closing ONE professional closes only that one"* — the new bug the subtree close would have introduced on its own |
+
+### ⚠️ One existing lock went red, and it is worth recording why
+
+`src/lib/tabParenting.test.ts` asserted that `App.tsx` contains
+`shouldRecordOpener(view as string, activeView as string)` — the NAME of the shared rule on the day
+it was written. `App.tsx` now asks `parentForOpen`, which calls that same rule as its first statement
+and then resolves *which* tab to record. **The wiring was never lost, only renamed — so the lock went
+red on a change that strengthened the very thing it guards.**
+
+Same shape as the 2026-09-20 Firestore-index autopsy's sharpest finding: a source assertion can only
+pin what the code SAYS. It now asserts the PROPERTY — the decision comes from `lib/tabParenting`, and
+the inline allowlist it replaced has not crept back — instead of one spelling of it.
+## 2026-09-20 — 🗣️ ONE COMPOSER, EVERYWHERE: the doctor typed into a different box from everyone else
+
+**Trigger:** the admin sent two phone screenshots side by side — Mentor / Career Coach and Senior
+Doctor Assistant — and said, verbatim: *"yeh 2 chat ui hai … mujhe SDA ka input box bhi baki ai ke
+jaisa karna hai. isko badal ke, other professionals ke jaise hi karo!!"*
+
+### What was actually different
+
+The two screens already agreed about everything except the one row a doctor types into:
+
+| | Professionals (Mentor) | SDA, before |
+|---|---|---|
+| attach | its own `w-9 h-9` bordered button on the row | a bare paperclip **inside** the text box |
+| dictation mic | — | a second glyph **inside** the text box |
+| text size | `text-sm` | `text-[12px]` |
+| resting height | the browser's own one line (`rows={1}`) | pinned at a **44px** minimum, against 40px buttons |
+| placeholder | `Ask <name>…` | *"Type your answer or clinical finding..."* — **two lines on a phone** |
+
+Two controls inside the box is what made it read as a different product: the writing area starts a
+third of the way across, so a normal placeholder wraps, so the box is tall, so nothing on the row
+lines up with anything else on the row.
+
+### The fix
+
+Every control is now its own `w-9 h-9 rounded-xl` button on the row, and the text box is the row's
+only growing element, carrying the **same classes `ProfessionalChat` uses**. The two screens are the
+same screen with a different persona in it.
+
+Three things were fixed along the way that were not cosmetic:
+
+1. **The camera was never offered here.** The paperclip opened the file browser directly. SDA now
+   uses the shared **`AttachMenu`** (camera / gallery / file) like every other surface — and
+   photographing an X-ray or an ECG strip is the single likeliest attachment on this screen, which
+   is the exact miss `AttachMenu` was written for. `handleFileSelect(event)` became
+   `acceptFile(file)` + a `handleFiles` adapter; the hidden `<input type="file">` and its ref are gone.
+2. **A drifted copy of the sizing rule (rule 2).** `SDAChat` carried its own three-line `autoResize`,
+   byte-for-byte the body of `autoGrow` in `lib/autoGrowTextarea.ts`, written before that helper
+   existed. It now calls the shared one, and send calls `resetGrow` instead of assigning a hardcoded
+   44px. **Two copies of a sizing rule is how one composer ends up behaving differently from every
+   other** — which is this whole report.
+3. **`BASE_HEIGHT` is gone.** The 44px floor it set is where the row's misalignment came from; the
+   cap it derived is now the plain `128` (`max-h-32`) every other composer uses.
+
+### Kept on purpose, each with a reason
+
+- **The emerald accent** (focus ring, voice button, send). The persona's identity, which the rest of
+  this screen carries and which the admin did not ask to remove. The SHAPE is what was asked for.
+- **The dictation mic** — speech → text, a control the professionals do not have. It moves out of
+  the box like everything else; its existence is not a deviation from the shape.
+- **The `Volume2` icon on the voice button.** Two mic glyphs side by side would be two different
+  features wearing one icon; the distinction predates this change.
+
+### 🔒 The 50/50 half — nothing had ever held the composers to one shape
+
+The instance is one screen's markup. The CONDITION is that **every chat screen in this repo
+hand-rolls its composer**, which is the same reason `lib/autoGrowTextarea.ts` had to be written at
+all: two composers had shipped `rows={1}` with a max-height and **no grow logic**, so the box stayed
+one line for ever.
+
+`tests/oneComposerEverywhere.test.ts` does not assert a list of classes it was handed — it **DERIVES**
+the professionals' composer from their own source and requires the doctor's to carry every class of
+it, with the accent-coloured focus ring the one permitted difference. Restyle `ProfessionalChat` and
+the test asks for `SDAChat` in the same breath. It also pins the row's one button size, the shared
+attach menu, the absence of a private sizing rule, and a placeholder short enough for one phone line.
+
+Test-locked and **proven by reversion**: restoring the transparent-slot textarea and the old
+placeholder turns **four of seven cases red**.
+
+**Sibling hunt (rule 3):** one other file matches `bg-transparent resize-none` —
+`ide/ImageStudioPro.tsx`. Checked and deliberately NOT changed: it is an image-generation prompt bar,
+not a chat composer, and pulling it into this contract would be widening the shape rather than
+enforcing it. Recorded so the next reader does not re-derive the check.
+
+`AppKnowledgeBase.ts` updated in the same commit — the attach button now offering **Take a photo** is
+a real new capability on this screen, and an AI that cannot see it cannot tell a doctor about it.
+## 2026-09-20 — Settings: three one-tile groups became ONE, "Profile Settings", at the top
+
+**Admin, with a screenshot of the Settings home on a phone (verbatim):** *"setting ke andar account,
+your app, general settings teeno ko mila kar ek setting option bana do! 'profile settings' — aur
+profile settings ke andar sabhi teeno tile add kar do! profile, apk download, general … profile
+settings sabse upar!"*
+
+### What was wrong, and it is not "too many headings"
+
+Each of the three groups carried **exactly one tile**. So the Settings home spent three whole
+section cards — three uppercase headings, two descriptions, three borders — to offer three buttons,
+and on a phone that filled the first screen before a single App Setting came into view. The reader
+had to parse three labels to discover that each box held one thing.
+
+The three also belong together by a line the screen already draws: **Account / Your App / General
+Settings are all about YOU and YOUR copy of NavBharatAI** (your profile, your app's installable
+file, how the app looks), while **App Settings below is about THE APP YOU BUILT** (its domain, its
+database, its hosting). That is the distinction the 2026-08-14 regroup established; this change
+keeps it and stops subdividing the near side of it.
+
+### What shipped
+
+- `SettingsPanel.tsx` — one group, `title: 'Profile Settings'`, first on the screen, three tiles:
+  **My Profile**, **Download APK**, **General**. The user identity card (avatar, name, email) still
+  renders above it: that is who you are, not an option you can open.
+- 🔒 **The risk this change carries, and the reason its test file exists: the three tiles ROUTE
+  THREE DIFFERENT WAYS.** `nav: true` → `setActiveView` (a top-level VIEW), `tab: true` →
+  `toggleTab` (a workspace TAB), neither → `setSettingsScreen` (a Settings SUB-SCREEN). Merging
+  three groups into one is exactly the edit that quietly drops a flag — and a dropped flag fails no
+  typecheck and breaks no render. The tile simply stops working, or opens a blank Settings page
+  with a heading and nothing under it, which is the `'modules'` / `'admin'` bug class this repo has
+  already paid for twice. The mapper already branched per ITEM rather than per group, so the merge
+  changes where the tiles sit and nothing about where they go — and each flag is now asserted by
+  its own tile.
+- **Knowledge base**: 21 path strings rewritten across `AppKnowledgeBase.ts`, plus the Settings hub
+  entry's own description of its groups, and `profile settings` added to the keywords of the three
+  entries that now live inside it. An AI that still answered *"Settings → Your App → Download APK"*
+  would be describing a box the user cannot find.
+- **One user-facing string outside the KB**: the App Mart adult-content notice
+  (`routes/navStore.ts`) tells a creator whose app is waiting for review which switch to turn on. A
+  stale path there is a person hunting for a box that no longer exists, so it moved too.
+
+### Tests
+
+`tests/profileSettingsIsOneGroup.test.ts` (12 cases), **reversion-proven four ways**: dropping
+`nav: true`, dropping `tab: true`, removing the General tile, and restoring a stale KB path each
+turn one red; the restored tree is green.
+
+`tests/settingsGeneralGroup.test.ts` was **updated, not weakened** — every assertion it made is
+still true and still asserted (General is not an App Settings tile, its group sits above App
+Settings, the screen id is still `'general'`, View Mode is not a loose card). Only the name of the
+box moved, and its header now records the rename so nobody reads the old naming as current. One
+assertion was made *stronger* on the way past: the "General is inside this group" check used a
+fixed 600-byte slice, which the merge's added comments would have pushed the tile out of — it now
+bounds the group by the next group's title, so it can never start passing for the wrong reason.
+
+⚠️ **A SECOND guard named the old group and I did not hunt it before running the gate**:
+`tests/websiteHub.test.ts` asserts that General left App Settings *for a named group rather than an
+invented catch-all*, and it named that group by its title. The full suite caught it (1 failed /
+27,316 passed) — which is the gate doing its job, and also the cost of grepping for the group names
+in `src/` and reading only one of the two test files the same grep listed. Updated with the same
+intent: the group is now named `'Profile Settings'`, and the comment records why.
+
+### Gate
+
+typecheck ✓ · noUnusedImports ✓ · typecheck:server ✓ · vitest (full suite) ✓ · build ✓ ·
+test:bundle ✓ · boot:check ✓ · deps:server-gate ✓
+
+⚠️ **Honest limit:** no browser was driven. The layout reasoning is from the existing group renderer
+(`grid-cols-2`, so three tiles are 2 + 1, the same shape App Settings already uses with six) rather
+than from a screenshot at every breakpoint.
+
+⚠️ **This is a FRONTEND change**, so under bundled mode it reaches installed Android users only in a
+fresh `.aab` — not on the next merge.
+## 2026-09-20 — "Versioning kam hi nahi kar raha hai": two version systems, and the screen read the dead one
+
+**Admin**, with a screenshot of Time Machine showing *"No saved versions yet"* under an app of 20 files.
+
+### It was not broken. It was never connected.
+
+| | Store | Written by | Read by | Can it restore days later? |
+|---|---|---|---|---|
+| **A** | `workspace_checkpoints_v3` — git commit **metadata** | every v5 build | the Pro panel's own History tab | **No.** `/api/agentv3/restore` checks the sha out **in the sandbox**; its own comment says it *"can offer a restore the sandbox can no longer perform"* |
+| **B** | `build_history/{sessionId}` — whole **file snapshots** | the LEGACY `/api/build` route, `workspaceEdit`, the manual Save button | **the Time Machine** | Yes — that is the point of it |
+
+`BuildHistoryStore`'s own docblock says *"Every build (ok: true) writes one entry here."* A grep of its
+importers returns exactly **two files**, and **neither is the v5 engine**. So the Time Machine has been
+empty for every app this engine has ever built, for every user — with nothing failing, nothing logged,
+and the screen blaming the user's app for having no versions. `AppKnowledgeBase` has meanwhile told
+every NavBharatAI AI that *"every build you make is automatically saved as a Restore point"*.
+
+**The instance was fixed in one lane and the sibling was never hunted** — this file's own class.
+
+### The writer (`src/server/AgentV3/restorePoint.ts`)
+
+ONE function, called from **both** settle paths (the normal settle and the Fix-67 deadline finalizer),
+keyed by the same `${workspaceId}_${buildStartedAt}` the wallet debit uses — so a build that settles
+twice leaves exactly one version. Fix 67 exists because those two paths drifted on billing once already.
+
+🔒 **The key is the whole bug in miniature.** `/api/versioning/apps` lists apps as workspaceId MINUS
+`agentv3-{uid}-`, and the Time Machine then asks `/api/build-history/:sessionId` with that bare id. A
+restore point written under the FULL workspace id would be invisible to the very screen it exists for,
+**and would look identical to writing nothing at all.**
+
+🔒 It copies the **durable file set**, not the turn's writes — restoring a three-file diff over a
+twenty-file app would produce a state that never existed. A failed build never leaves a version.
+Fire-and-forget throughout. `AGENTV3_RESTORE_POINTS=off` reverts with no deploy.
+
+### The screen (`CodeVersioning.tsx`) — three honesty defects in one panel
+
+1. The `<select>` **displayed** an app while `viewSession` was `''`, so `loadPoints('')` returned
+   immediately and nothing was ever requested. "No saved versions yet" was a claim about the user's app
+   when the truth was that no question had been asked. **This is the screenshot.**
+2. A failed read and an empty history produced the identical sentence. They are different facts and
+   only one is the app's fault; the empty state now says which.
+3. The fetch sent no Bearer token — the sibling of the bug recorded in the comment **three lines above
+   it**, where the same omission had already been found and fixed for `/api/versioning/apps`.
+
+### OPEN, stated rather than patched (rule 6)
+
+- **Two version systems still exist.** This makes B work; it does not merge A into it. A user's v5
+  History tab and their Time Machine will show overlapping-but-different timelines, and the honest fix
+  is one timeline from one endpoint. Not built here: it changes what Restore means on a cold sandbox,
+  which is a product decision.
+- **Apps built BEFORE this commit have no restore points and never will** — the snapshots were never
+  taken. Their first version appears on their next successful build. Nothing can recover the past.
+
+---
+
+## 2026-09-20 — One way back, and everyone knows where it is
+
+**Admin, two instructions together:** *"system A ko hata do agar safe ho to. B hi lagao"* and
+*"par sabhi ko pata hona chahiye. galti hone par backup/revers kaise liya jaye!!"*
+
+### The verdict that had to be given first: A is not one thing
+
+Asked to remove "system A", I mapped every dependency before touching anything, and the honest answer
+was that a full removal is **not** safe. A is two separable things:
+
+| | What it is | Who depends on it |
+|---|---|---|
+| **A1** | git commits inside the sandbox | 🔴 **Engineer AI's own undo** (`EngineerAgentLoop` checkpoints before every edit and every patch), **Preview** (an old version RUNNING, via `git worktree` on the SAME sandbox — costs no extra VM, and B cannot do it at any price), **Compare** |
+| **A2** | the Pro panel's checkpoint list **with a Restore button** | nothing but the user's eye |
+
+**The complaint was A2; the danger was A1.** So A2's restore went and A1 stayed — and the admin
+accepted that before a line was changed.
+
+### What was removed
+
+The per-checkpoint Restore. `/api/agentv3/restore` says in its own comment that it *"can offer a
+restore the sandbox can no longer perform"* — the sandbox pauses after minutes and is rebuilt from
+durable files, taking that git history with it. **A button that works this minute and not tomorrow is
+worse than no button, because it is only ever pressed on the day it matters.**
+
+`handleRestoreCheckpoint` was **deleted, not unhooked**, and `restore` was dropped from the panel's
+destructure: a dead handler beside a removed button is how the button comes back — the next reader
+finds a ready-made restore and a list to hang it on, and the decision is silently undone. The panel
+now contains zero references to the sandbox restore.
+
+### The half that was not optional
+
+Removing the control alone would have moved the way back from a screen the user is already on to a
+tool three menus deep — **satisfying the first instruction by making the second one worse.** So the
+History tab carries one line, above the list, stating the difference and the exact path: these are the
+steps inside this session; the versions you can go back to live in **Time Machine (Other AI → AI Tools
+→ Versioning)**, saved permanently, restorable from any device. It names no number of days, because
+the limit is a COUNT (`versionRetention.ts`).
+
+`AppKnowledgeBase` needed **no change**, and was left alone because #3186 held that file: its
+Versioning entry already carries the words a panicking user actually types — *"galti ho gayi"*,
+*"app kharab ho gaya"*, *"wapas lao"*, *"undo karo"* — and its description became TRUE with this PR's
+writer rather than needing a rewrite.
+
+### A weak assertion caught by its own reversion proof
+
+The test asserting Preview survived checked for the function NAME, which passes while the button that
+calls it is gutted — the definition survives alone. Removing only the `onClick` left the suite green.
+It asserts the CALL SITE now. **This is the second time in one session that a source-level assertion
+proved to be testing nothing until it was reverted against** (the first was a cap assertion whose
+fixture happened to sit exactly on the cap).
+
+### OPEN (rule 6)
+
+- **Two version systems still exist.** One timeline from one endpoint is the complete fix; it changes
+  what Restore means on a cold sandbox, which is a product decision, not a session's.
+- **Time Machine is still three menus deep.** A button that opens it for the current app would close
+  this properly — `AppKnowledgeBase` even carries `nav: { view: 'versioning' }` for it. Not built here:
+  it needs `App.tsx`, which another session is live in.
+
+### The removal was caught by the suite that guarded the removed feature
+
+`tests/restoreCheckpoint.test.ts` — written in July for the instance-affinity bug — asserted that the
+History tab CALLS `restore(sha)`. Removing the button therefore turned that suite red, and it went red
+only in the FULL run at the end: the targeted suites for this change were all green. That is safeguard
+#5's "run the gate LAST, on the final state" earning its place, on a change where every file I had
+touched looked clean.
+
+The fix was not to delete the file. Its six server cases (`restoreSessionDetailed`'s four reasons, the
+malformed-sha refusal, the no-sandbox case) and its three route cases test the half that is UNCHANGED —
+the endpoint still works and is still reachable. Only the UI case's premise was superseded, so that one
+case now asserts the opposite fact (no `await restore(sha)` in the panel, `HISTORY_TAB_NOTE` present)
+and says in its own comment why the assertion flipped and which test owns the screen now. **Proven by
+reversion**: re-introducing the call makes it fail.
+
+`useAgentV3Build.ts` keeps `restore` — the endpoint is real — but its doc comment now states that **no
+UI calls it**, so the next session to find it does not read an unused export as a missing wire-up.
+
+---
+
+## 2026-09-20 — AQI moves to CPCB: half the licence exposure closed, and the answer got better
+
+**Admin, after reading the Licence Exposure panel and being shown the options:** *"use karo!!"* —
+approving the data.gov.in / CPCB route for air quality. They also reported the App Store's real
+size: **8 instant apps and 3 APKs.**
+
+### The exposure, and the half that is now closed
+
+Weather and AQI both ran on one provider's **no-key tier**, whose terms reserve it for
+**non-commercial** use while NavBharatAI charges money. AQI now comes from the **Central Pollution
+Control Board's** real-time feed on `data.gov.in`, published under the **Government Open Data
+License – India**, which states in terms that the data may be used *"for all lawful commercial and
+non-commercial purposes"*.
+
+🔑 **It is also a better answer, which is why it is not merely a licence swap.** The old source
+returned the **US AQI** — a different country's scale and method. An Indian user compares what we
+say against CPCB's number on the news and on their phone. We were quoting a scale nobody around
+them uses.
+
+### What shipped
+
+- **`src/server/lib/cpcbAirQuality.ts`** (new). CPCB's own method, not an approximation:
+  the index is the **maximum sub-index**, it needs **three pollutants with at least one
+  particulate**, and `"NA"` is a missing reading rather than zero (zero is *excellent* air). A
+  city's figure is the **worst real station, named**, never an average across stations — averaging
+  would produce a number that appears on no official page, which is the fabricated-figure this
+  codebase forbids everywhere else.
+- **Attribution is a licence condition**, not a courtesy: GODL-India requires it, so the block
+  credits CPCB by name. That does not conflict with the White-Label Law — that law hides which **AI
+  vendor** did the work; CPCB is a government data source we are obliged to credit.
+- 🔒 **Its own gate, not `LIVE_WEATHER_SOURCE`.** That switch exists to pause one provider's licence
+  exposure. Leaving AQI on it would mean **pausing the problem also pauses the fix**. So the weather
+  switch now stops the weather only.
+- 🔒 **No key ⇒ nothing, never a fallback to the old feed.** A fallback would silently re-open the
+  exposure this change closes, with nothing on any screen saying so.
+- No geocoding on this path any more — CPCB is keyed by city name, so one call to the restricted
+  host is simply gone rather than moved.
+
+### Honesty fixed in the same change (rule 5)
+
+- **The Licence Exposure panel's own row** said *"Weather and AQI"*. That row is the one place the
+  admin learns what a legal exposure covers — leaving it would have **overstated the risk on the
+  exact screen used to judge it**, and made the fixed half invisible. It now reads *"Live weather"*,
+  names the date AQI left, and carries the verified price of the real fix.
+- **`AppKnowledgeBase`** claimed AQI needed *"no key, no configuration"*, which this makes false.
+  Rewritten to say where the number comes from and what happens when the key is unset.
+
+### Two bugs my own tests caught before CI did
+
+1. **`cpcbCityQuery('NEW DELHI')` returned `'NEW DELHI'`.** The title-caser only lifted a lowercase
+   initial and never lowered the rest, so an all-caps place went verbatim into an **exact-match**
+   filter — zero rows, indistinguishable from "no station there".
+2. An assertion expected the city filter percent-encoded (`filters%5Bcity%5D`). data.gov.in
+   documents **literal** brackets; inventing an encoding against a parser this environment cannot
+   reach would have been a guess. The **test** was corrected to the documented form, not the code.
+
+### Tests
+
+`src/server/lib/cpcbAirQuality.test.ts` — 23 cases. Every CPCB rule is asserted against records
+shaped like the real feed, because **an AQI computed the wrong way still looks like an AQI** and no
+one reading a chat reply could tell. `licenceExposure.test.ts` gained the source-level guards.
+
+⚠️ **One assertion in `licenceExposure.test.ts` was replaced rather than updated**, and it was made
+**stronger**: it used to pin the dispatcher's ternary shape (`? [weatherBlock, aqiBlock, …]`) to
+prove the switch removed *both* restricted callers. That fact changed — there is only one now. It
+now asserts the restricted **host** is unreachable from the AQI path at all, which is what actually
+matters and which a future edit re-adding the old call would break even with the list looking right.
+
+### 🔴 STILL OPEN — the row is still RUNNING, and this must not be read as "done"
+
+- ~~**Weather** is still on the restricted tier.~~ ✅ **CLOSED LATER THE SAME DAY** (admin: *"free me
+  jo ho woh"*). `LIVE_WEATHER_SOURCE` now defaults to **OFF** and is an **enable** switch: only the
+  explicit `on` starts the restricted source, so unset/blank/mistyped leaves it silent. A fresh
+  deployment therefore runs **zero** restricted sources, where it used to run one. Nothing broke —
+  weather questions fall through to web search, which already answers them. The honest fix is still
+  a purchase (**$29/month**); the day it is bought, `LIVE_WEATHER_SOURCE=on` restores it with no
+  deploy.
+  ⚠️ **A free REPLACEMENT was looked for and not found, and that is why the switch is the answer
+  rather than a new provider.** MET Norway's forecast data is free and commercially licensed
+  (CC BY 4.0) — but it needs lat/lon, and every free **geocoder** checked is either the same
+  restricted provider or (Nominatim) explicitly *"discourages serious business usage"*. Trading one
+  grey source for another is not a fix.
+  🔒 Two related defects were fixed with it: `exposureState` **re-derived** the off-rule with its own
+  string comparison instead of asking `liveWeatherSourceEnabled` (two implementations of one rule —
+  exactly how a panel comes to say "off" while calls go out), and the admin card **built the switch
+  sentence itself**, always printing `set <KEY>=off`, which went false the moment the default
+  flipped. The sentence now lives on the row (`switchHint`).
+- **VirusTotal cannot be bought at this stage.** Premium is roughly **$20,000–$50,000/year**;
+  MetaDefender starts near **$500–1,000/month**. The realistic replacement is **ClamAV** run as a
+  separate process (never linked, so GPLv2 is not an issue), whose honest cost is far weaker Android
+  detection. What makes that defensible rather than a downgrade: **no app can reach `approved`
+  without the admin personally approving it** — the scan was always a pre-filter in front of a human,
+  never the only gate. Verified today: the scan sits in `ingestApkSubmission`, the **APK** path only,
+  so the 8 instant web apps do not depend on it at all. **Not started — the admin's decision.**
+
+### Honest limit
+
+`data.gov.in` is blocked by this environment's egress proxy, so **no call was made against the live
+endpoint**. The resource id, filters and field names come from its published documentation, and
+`subIndexOf` deliberately accepts **both** column names the resource has used (`avg_value` and
+`pollutant_avg`) because which is live today could not be verified here. **The first real question
+in the chat is this feature's first real evidence** — watch for an AQI answer appearing at all.
+## 2026-09-20 — 🔴 THE FAILURE TABLE'S BIGGEST ROW WAS NOT A FAILURE CLASS, IT WAS A BLIND SPOT
+
+**The report (admin, with a screenshot of the admin panel's *BY FAILURE REASON — ACROSS EVERY APP
+TYPE*):** *"yeh mail failure hai. navbharatai me. inko kaise kaise fix kar sakte hai! kya kya kar
+sakte ho aap jisse yeh failure ab wapas na aye?"*
+
+```
+Other (not yet in the known pattern list)   42  (29.2% of failures)   ← the biggest row, by 2×
+The release gate found evidence …           25  (17.4%)
+The run ended before it finished            16  (11.1%)
+… 11 more rows, 144 failures in all
+```
+
+**THREE ROOT CAUSES, and none of them is a build bug. All three are the panel failing to say what
+happened — which is why two fixes shipped straight at that top row in the preceding 72 hours could
+neither be judged nor credited.**
+
+### 1 · The top row told every reader to do the wrong work
+
+`classifyFailureReason` returns a mapped reason for EVERY `OUTCOME_*` code it knows, and
+`tests/failureNaming.test.ts` fails CI when a code exists without a label. **So a build reaching the
+end of that function with no code at all did not record why it ended.** That is a hole in the
+engine's record — not a gap in our vocabulary — and it was wearing the label *"not yet in the known
+pattern list"*, i.e. *go and write more regexes*. No regex that could ever be written would have
+helped, because those records say nothing to match.
+
+Both fixes aimed at this row were attacking exactly that hole — the empty-build verdict flip
+(2026-09-17, *"the ONLY verdict flip in the route that recorded none"*) and `abortOutcome.ts`
+(2026-09-18, seven abort causes that ended a build with no outcome). The panel could not show that
+either had worked, so the admin saw the same 29.2% two days later and reasonably asked again.
+
+**Fixed at the class:** `NO_OUTCOME_REASON` — *"The build never recorded WHY it ended (no outcome on
+the record)"* — split from `OTHER_REASON` on the MACHINE FACT (`return code ? OTHER_REASON :
+NO_OUTCOME_REASON`), never on a reading. `other` now means only what its label says: the engine said
+why and we have no word for it yet. Two rows, two different pieces of work.
+
+⚠️ **`no-cause-recorded` is deliberately still its own third bucket** — that one is the engine SAYING
+in prose that it does not know (*"no specific error was captured"*). The record being silent and the
+record admitting ignorance are different facts.
+
+### 2 · A number no fix could ever move
+
+Every row is a LIFETIME tally over the latest build of every project. A failure from three weeks ago
+counts as loudly as one from this morning and goes on counting for ever — so the panel is
+structurally incapable of showing that anything was fixed. **A verdict no evidence can change is the
+shape this repo keeps paying for** (`RELEASE_GATE` saying the typecheck did not run after two clean
+runs; `CLAIM_UNSUPPORTED` two seconds before `2 changed, 2 new`).
+
+**Fixed:** every `ReasonRow` carries `recentCount` — how many of its failures happened in the last
+7 days — and the row renders `42 (29.2% of failures) · none in 7d` in green, or `· 3 in last 7d` in
+amber. **A large total with none this week is a fixed bug, and nothing on that panel could previously
+have shown that.**
+
+🔒 **`null`, never `0`, when no window was given** — *"not measured"* and *"it stopped happening"* are
+the two answers this column exists to tell apart. An UNDATED record counts as neither recent nor old:
+counting it as recent would invent improvement, counting it as old would invent the opposite.
+🔒 The clock lives in the ROUTE (`sinceMsFor('7d')`, the same 7 days the All-Builds browser means);
+`buildFailureCategory.ts` stays pure and takes the boundary as data.
+🔒 It changes NOTHING about who is counted as failed — `verdictSplit`, `failed`, `ok` and the rate are
+asserted identical with and without a window.
+
+### 3 · "The run ended before it finished" (11.1%) was three endings wearing one label
+
+`OUTCOME_STOPPED` carried the wall-clock watchdog (a real timeout: the build ran out of MINUTES), a
+platform-composed stop, AND `abortCauseOf` returning `'unknown'` — an abort raised somewhere that
+never went through `abortBuild` at all. The third is a hole of the same shape as (1) and cannot be
+found while it is averaged in with a budget that was simply spent.
+
+**Fixed:** `OUTCOME_ABORTED_UNKNOWN`, its own code — because the classifier reads the CODE, so a
+distinction living only in prose is one no panel will ever show. Named in BOTH maps
+(`OUTCOME_REASONS` and `OUTCOME_TO_CATEGORY`), or an unmapped code falls straight back through to the
+text and the split buys nothing.
+
+🔎 **THE SIBLING THE EXISTING SUITE CAUGHT (rule 3, and it is the good kind of catch):**
+`PROCESS_ONLY_CODES` in `BuildDiagnostics.ts` excluded `OUTCOME_STOPPED` from `isAppFinding`, because
+*how a build ended is not a finding about the app*. Splitting the code out without listing the new
+one would have turned *"we do not know why the run ended"* into a build-breaking blocker counted
+against the user's app — the provider-error-as-app-blocker class (autopsy `4efab9d7`) through a new
+door. `tests/everyAbortCauseRecordsAnOutcome.test.ts` failed on it before it could reach `main`.
+
+### What this does NOT claim
+
+**Not one of these three fixes makes a single build succeed.** They make the failures legible, which
+is the precondition for fixing them and the reason the last two attempts could not be judged. The
+remaining rows are real engine work and are named honestly in the reply to the admin: the release
+gate (25), the reviewer (10), provider timeouts (9), tool calls (9). **The 42 cannot be worked on
+until the next reading of this panel says how many of them are still happening** — which is exactly
+what `recentCount` now answers, and why it shipped first.
+
+**Tests:** `tests/aFailureNobodyCanName.test.ts` — 15 cases, each **proven by reversion** (restoring
+`return OTHER_REASON`, making `recentCount` a bare number, and putting the untagged abort back on
+`OUTCOME_STOPPED` each fail it). Four existing assertions were repointed to their INTENT and none was
+weakened: "unnameable" is still asserted, now precisely.
+
+### 🔎 AND THE SAME ROOT CAUSE IS PROBABLY WEARING OTHER ROWS' NAMES — recorded, deliberately NOT acted on
+
+Reading the classifier against `deriveRootCause`'s fallback order turns up a consequence worth
+writing down before anyone re-derives it from the next screenshot.
+
+When a build records **no** `OUTCOME_*` code, `deriveRootCause` falls back to *"the most severe
+unresolved issue"* — whatever warning happened to be loudest. `abortOutcome.ts`'s own header names
+what that usually is: *"a provider fallback, a benched rung, a `read_file` on a path not yet
+written"*. The classifier then reads THAT sentence. If it matches nothing it becomes
+`no-outcome-recorded` (row 1 above) — **but if it happens to match a grounded pattern it is given
+that pattern's name instead**, as a fact.
+
+So on the admin's table, an unknown share of:
+
+```
+AI provider timed out / ran out of budget     9  (6.3%)
+A tool call failed                            9  (6.3%)
+Every AI provider failed                      2  (1.4%)
+```
+
+may be **the same bug as row 1**, wearing a more confident label — a recovered tool error that the
+build moved past, named as the reason the build ended. "No code" means the sentence is a fallback,
+and a fallback that matches a regex is still a fallback.
+
+⚠️ **This is NOT being fixed now, and the reason is this file's own rule.** Downgrading every
+pattern match on an uncoded record would throw away real information (a legacy record's `rootCause`
+often genuinely IS its cause), and nothing here can say how big the share is. `recentCount` is the
+instrument that settles it: **if `no-outcome-recorded` reads "none in 7d" on the next reading, this
+whole concern is historical** and the remaining provider/tool rows are real. If it does not, this is
+where to look next. Same discipline `POST_GREEN_WRITES` states in the flag registry — *do not build
+the protection until the measurement has produced a reading.*

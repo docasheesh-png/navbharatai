@@ -61,8 +61,23 @@ export const ABORT_OUTCOME_CODES = Object.freeze({
   deployDrain: 'OUTCOME_DEPLOY_DRAIN',
   superseded: 'OUTCOME_SUPERSEDED',
   reaped: 'OUTCOME_REAPED',
-  /** Shared with the wall-clock finalizer: "the run ended before it finished", cause unrecorded. */
+  /** Shared with the wall-clock finalizer: "the run ended before it finished". */
   stopped: 'OUTCOME_STOPPED',
+  /**
+   * 🔴 AN ABORT THAT DID NOT COME THROUGH `abortBuild` (admin's failure table, 2026-09-20 — "the run
+   * ended before it finished" was 11.1% of every failure, and nothing on the panel could say which
+   * of three unrelated endings it was).
+   *
+   * `OUTCOME_STOPPED` was carrying the wall-clock watchdog (a real timeout: the build ran out of
+   * MINUTES), a platform-composed stop, AND `abortCauseOf` returning `'unknown'` — which happens for
+   * any abort signal this repo did not tag, i.e. a path that never reached the funnel at all. The
+   * first two are understood endings. The third is a HOLE, the same shape as a failure with no
+   * outcome, and it cannot be found while it is averaged in with a timeout.
+   *
+   * ⚠️ Deliberately its own code rather than a message variant: the classifier reads the CODE, so a
+   * distinction that lives only in prose is a distinction no panel will ever show.
+   */
+  abortedUnknown: 'OUTCOME_ABORTED_UNKNOWN',
 } as const);
 
 /**
@@ -116,8 +131,8 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
       };
     case 'unknown':
       return {
-        code: ABORT_OUTCOME_CODES.stopped, severity: 'error',
-        message: 'Build outcome: STOPPED — the build was aborted with no cause recorded on its signal. The cause is genuinely unknown; it is not attributed to the user.',
+        code: ABORT_OUTCOME_CODES.abortedUnknown, severity: 'error',
+        message: 'Build outcome: STOPPED — the build was aborted with no cause recorded on its signal, so it did not come through the abort funnel. The cause is genuinely unknown; it is not attributed to the user, and it is not a fact about the app.',
       };
     default: {
       // A new AbortCause reaches here only if this switch was not extended — the compiler says so.

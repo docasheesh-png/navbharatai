@@ -25,12 +25,22 @@ import {
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 describe('the weather switch — one definition, obeyed by the source AND reported by the panel', () => {
-  it('is ON by default and off only on the explicit word', () => {
-    expect(liveWeatherSourceEnabled({} as NodeJS.ProcessEnv)).toBe(true);
-    expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: 'off' } as never)).toBe(false);
-    expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: ' OFF ' } as never)).toBe(false);
+  it('🔴 is OFF by default — reversed 2026-09-20, and the reversal is the fix, not a detail', () => {
+    // It used to default ON, so a licence exposure was live on every deployment unless somebody
+    // typed a value into a console. On-by-default and off-by-effort is backwards for a legal risk:
+    // the effort belongs on the side that costs money.
+    expect(liveWeatherSourceEnabled({} as NodeJS.ProcessEnv)).toBe(false);
     expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: 'on' } as never)).toBe(true);
-    expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: 'false' } as never)).toBe(true); // not "off"
+    expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: ' ON ' } as never)).toBe(true);
+    expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: 'off' } as never)).toBe(false);
+  });
+
+  it('🔒 anything unreadable stays OFF — the safe direction for a legal exposure', () => {
+    // The mirror image of the AGENTV3_FEATURE_HEAL_PCT trap this repo already paid for, where a
+    // mistyped value silently meant "everyone". Here a typo must never mean "start calling".
+    for (const v of ['', '   ', 'true', 'yes', 'ON!', '1', 'enabled', 'onn']) {
+      expect(liveWeatherSourceEnabled({ LIVE_WEATHER_SOURCE: v } as never), v).toBe(false);
+    }
   });
 
   it('🔒 the SOURCE reads this exact function — a panel that kept its own opinion would be a false assurance', () => {
@@ -39,16 +49,41 @@ describe('the weather switch — one definition, obeyed by the source AND report
     const src = read('../server/lib/liveDataSources.ts');
     expect(src).toContain("import { liveWeatherSourceEnabled } from '../../lib/licenceExposure'");
     expect(src).toContain('liveWeatherSourceEnabled(env)');
-    // …and switching it off must remove BOTH Open-Meteo callers, not just the obvious one.
-    expect(src).toContain('? [weatherBlock, aqiBlock, currencyBlock, pincodeBlock]');
-    expect(src).toContain(': [currencyBlock, pincodeBlock]');
+    // The switch gates the weather block, and only that one.
+    expect(src).toContain('if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);');
+  });
+
+  it('🔒 the restricted host has exactly ONE caller left — the AQI one is GONE, not merely moved', () => {
+    // ⚠️ THIS REPLACES an assertion that the switch removed "BOTH Open-Meteo callers" (the old
+    // ternary `? [weatherBlock, aqiBlock, …]`). That assertion's FACT changed on 2026-09-20: air
+    // quality moved to CPCB's own feed, which is licensed for commercial use, so there is only one
+    // restricted caller now.
+    //
+    // It is replaced by something STRONGER rather than merely updated. The old line proved a list's
+    // shape; this proves the restricted HOST is unreachable from the AQI path at all — which is the
+    // thing that actually matters, and which a future edit re-adding the old call would break even
+    // if it kept the list looking right.
+    const src = read('../server/lib/liveDataSources.ts');
+    expect(src).not.toContain('air-quality-api.open-meteo.com');
+    // The weather forecast + its geocoder are the ONE remaining restricted pair.
+    expect(src).toContain('api.open-meteo.com/v1/forecast');
+  });
+
+  it('🔒 AQI is gated by its OWN credential, never by the weather switch', () => {
+    // Pausing a provider's licence exposure must not also silence a properly licensed source —
+    // otherwise pausing the problem pauses the fix.
+    const src = read('../server/lib/liveDataSources.ts');
+    expect(src).toContain('if (cpcbAqiConfigured(env)) sources.push(');
+    const weatherGate = src.indexOf('if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);');
+    const aqiGate = src.indexOf('if (cpcbAqiConfigured(env)) sources.push(');
+    expect(weatherGate).toBeGreaterThan(-1);
+    expect(aqiGate).toBeGreaterThan(weatherGate); // two separate statements, not one condition
   });
 
   it('the sources that are NOT restricted keep working when it is off', () => {
     const src = read('../server/lib/liveDataSources.ts');
-    const off = src.slice(src.indexOf(': [currencyBlock, pincodeBlock]'));
-    expect(off).toContain('currencyBlock');
-    expect(off).toContain('pincodeBlock');
+    // Currency and PIN code are pushed unconditionally — outside every gate.
+    expect(src).toContain('sources.push(currencyBlock, pincodeBlock);');
   });
 });
 
@@ -62,11 +97,22 @@ describe('exposureState — what is actually running right now', () => {
     expect(exposureState(vt, { VIRUSTOTAL_API_KEY: '   ' } as never)).toBe('not-configured');
   });
 
-  it('🔒 a source needing NO key is active by default — the reason this one went unnoticed', () => {
-    // Every other restricted integration announces itself by having a key to set. This one does not,
-    // so "nobody configured it" is not available as a defence.
-    expect(exposureState(om, {} as never)).toBe('active');
+  it('🔴 the key-free source now reads SWITCHED-OFF on a fresh deployment', () => {
+    // It used to read 'active' here, and that was the honest report of a wrong default. Both moved
+    // together: the source stopped running AND the panel stopped saying it was.
+    expect(exposureState(om, {} as never)).toBe('switched-off');
+    expect(exposureState(om, { LIVE_WEATHER_SOURCE: 'on' } as never)).toBe('active');
     expect(exposureState(om, { LIVE_WEATHER_SOURCE: 'off' } as never)).toBe('switched-off');
+  });
+
+  it('🔒 the panel ASKS the source\'s own function — it does not re-derive the rule', () => {
+    // Two implementations of one rule is exactly how a panel comes to say "off" while the calls
+    // keep going out. `exposureState` must agree with `liveWeatherSourceEnabled` on every input.
+    for (const v of [undefined, '', 'on', ' ON ', 'off', 'true', 'garbage']) {
+      const env = (v === undefined ? {} : { LIVE_WEATHER_SOURCE: v }) as never;
+      const running = liveWeatherSourceEnabled(env);
+      expect(exposureState(om, env), String(v)).toBe(running ? 'active' : 'switched-off');
+    }
   });
 
   it('switched-off beats everything — an off source is not in use, whatever its key says', () => {
@@ -77,9 +123,29 @@ describe('exposureState — what is actually running right now', () => {
 
 describe('the register as a whole', () => {
   it('counts only what is running', () => {
-    expect(activeExposureCount({ VIRUSTOTAL_API_KEY: 'k' } as never)).toBe(2); // both live
-    expect(activeExposureCount({} as never)).toBe(1);                          // weather only
-    expect(activeExposureCount({ LIVE_WEATHER_SOURCE: 'off' } as never)).toBe(0);
+    // 🔴 A FRESH DEPLOYMENT NOW COUNTS ZERO. Before 2026-09-20 an untouched environment ran the
+    // weather source, so `{}` counted 1 — the number that made this panel worth building.
+    expect(activeExposureCount({} as never)).toBe(0);
+    expect(activeExposureCount({ VIRUSTOTAL_API_KEY: 'k' } as never)).toBe(1);  // the scanner only
+    expect(activeExposureCount({ LIVE_WEATHER_SOURCE: 'on' } as never)).toBe(1); // the weather only
+    expect(activeExposureCount({ VIRUSTOTAL_API_KEY: 'k', LIVE_WEATHER_SOURCE: 'on' } as never)).toBe(2);
+  });
+
+  it('🔒 every row carries the sentence the card shows about its switch', () => {
+    // The component must never build this line itself: it always said "=off", which went false the
+    // day a default flipped and `on` became the word that matters.
+    for (const row of LICENCE_EXPOSURES) {
+      expect(row.switchHint, row.id).toBeTruthy();
+    }
+    const weather = LICENCE_EXPOSURES.find((e) => e.id === 'open-meteo')!;
+    expect(weather.switchHint).toContain('LIVE_WEATHER_SOURCE=on');
+    expect(weather.switchHint).not.toContain('=off');
+  });
+
+  it('🔒 the card renders the row\'s sentence, not one of its own', () => {
+    const dash = read('../components/AdminDashboard.tsx');
+    expect(dash).toContain('{row.switchHint}');
+    expect(dash).not.toContain('=off in Cloud Run');
   });
 
   it('every row carries the four things an admin needs to decide', () => {
@@ -114,11 +180,13 @@ describe('the register as a whole', () => {
   });
 
   it('the headline is honest in BOTH directions', () => {
-    const running = licenceExposureHeadline({ VIRUSTOTAL_API_KEY: 'k' } as never);
+    // Both running now takes an explicit `on` for the weather — the default stopped doing it for us
+    // on 2026-09-20. The assertion's point is unchanged: when two are live, the headline says two.
+    const running = licenceExposureHeadline({ VIRUSTOTAL_API_KEY: 'k', LIVE_WEATHER_SOURCE: 'on' } as never);
     expect(running).toMatch(/2 of 2/);
     expect(running.toLowerCase()).toContain('pause, not a fix');
     // Zero running is "not currently exposed", never "solved" — one env change reverses it.
-    const none = licenceExposureHeadline({ LIVE_WEATHER_SOURCE: 'off' } as never);
+    const none = licenceExposureHeadline({} as never);
     expect(none.toLowerCase()).toContain('none of the');
     expect(none.toLowerCase()).not.toMatch(/\bsolved\b|\bsafe\b|\bfixed\b/);
   });

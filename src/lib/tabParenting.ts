@@ -59,3 +59,46 @@ export function shouldRecordOpener(view: string, activeView: string): boolean {
   if (!view || !activeView || view === activeView) return false;
   return (PARENT_SURFACES as readonly string[]).includes(activeView) || isChildSurface(view);
 }
+
+/**
+ * WHICH TAB TO RECORD AS THE PARENT — the door the user came through, never the room next to it.
+ *
+ * 🔴 THE OTHER HALF OF THE 2026-09-20 BUG, and without it the subtree close in `tabClose.ts` trades
+ * one bug for another.
+ *
+ * The opener was simply `activeView`. But the Mode sheet is reachable from INSIDE a professional, so
+ * picking Teacher while Mentor is on screen recorded `teacher_ai → mentor_ai`: one professional as
+ * another professional's PARENT. Two things follow, and both are wrong:
+ *
+ *   • closing NavBharatAI Free left Teacher behind, because Teacher hung off Mentor rather than Free
+ *     — the admin's report; and
+ *   • once the close walks the whole subtree, closing MENTOR alone would take Teacher down with it,
+ *     which is a new bug, not a fix. The user never entered Teacher "through" Mentor.
+ *
+ * A professional is not a container. Mentor and Teacher are SIBLINGS you switch between through the
+ * same door, so the new tab inherits its opener's door: walk up until a real parent is found, and
+ * record that. Free → Mentor → Teacher now parents BOTH to Free, so no chain exists to walk.
+ *
+ * ⚠️ `undefined` when the walk cannot reach a non-child surface, rather than falling back to the
+ * sibling: a child surface may never be recorded as a parent at all. That invariant is what makes
+ * chains — and the cycles a chain can grow into — impossible by construction rather than by care.
+ *
+ * Pure.
+ */
+export function parentForOpen(
+  view: string,
+  activeView: string,
+  openers: Readonly<Record<string, string | undefined>> = {},
+): string | undefined {
+  if (!shouldRecordOpener(view, activeView)) return undefined;
+  let parent: string | undefined = activeView;
+  const seen = new Set<string>();
+  // A tab closed and reopened from what used to be its own child can leave a cycle behind; the guard
+  // is what stops this walk becoming an infinite loop on a corrupted map.
+  while (parent && isChildSurface(parent) && !seen.has(parent)) {
+    seen.add(parent);
+    parent = openers[parent];
+  }
+  if (!parent || parent === view || isChildSurface(parent)) return undefined;
+  return parent;
+}

@@ -427,6 +427,7 @@ import {
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, collectNamedWorkspaceFiles, listWorkspaceFiles, collectWorkspaceConfigFiles, writeWorkspaceFiles, pool } from '../AgentV3/WorkspaceFiles';
 import { liveFileSyncEnabled, requestedSyncPaths } from '../AgentV3/liveFileSync';
+import { isBudgetEndedError } from '../AgentV3/turnDeadline';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
@@ -470,6 +471,7 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
+import { saveRestorePoint } from '../AgentV3/restorePoint';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
@@ -11747,6 +11749,21 @@ async function noteBuildOutcome(
           }
         } catch { /* billing enrichment is best-effort — never blocks finalization */ }
       }
+      // A VERSION THE USER CAN GO BACK TO (2026-09-20). Written on BOTH settle paths for the reason
+      // Fix 67 exists: a rule on only one of them is a rule a long build escapes. Fire-and-forget —
+      // a history write must never delay or fail a build that has already produced an app.
+      if (ok) {
+        void saveRestorePoint({
+          ok: true,
+          workspaceId,
+          uid: userId,
+          prompt,
+          isEdit: intent === 'edit_existing',
+          tier: powerLevelReqEffective,
+          buildKey: `${workspaceId}_${billingCtx.buildStartedAt}`,
+          io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
+        }).catch(() => {});
+      }
       // STALE-SUCCESS SUMMARY ON THE TIMEOUT PATH (real report, 2026-09-14, an "EduTube" build):
       // the model had already emitted a `done` event mid-build ("Your app is live and ready …
       // zero TypeScript errors") minutes before the watchdog fired — `BuildDiagnostics.ingestEvent`
@@ -12551,6 +12568,24 @@ async function noteBuildOutcome(
         });
       };
       const recordProviderFallback = (name: string, err: unknown): void => {
+        // 🔴 OUR OWN CLOCK IS NOT A PROVIDER FAILURE, AND THE REPORT SAID IT WAS (autopsy bb688add,
+        // 2026-09-20). That build's timeline opens with *"Provider KIMI failed"* and its tally reads
+        // `providerFailures: { KIMI: 1 }` — for a call KIMI answered nothing wrong in. The lane's own
+        // step deadline ended it. `turnDeadline.ts` went to some length so a budget error would never
+        // BENCH a provider, and its docblock says the other half in as many words: *"it must not
+        // INDICT anyone either."* This is that half. It was still indicting one here, in the two
+        // places an admin actually reads — the first timeline line and the per-provider tally.
+        //
+        // The event is still recorded, at the same severity: a build that ran out of clock mid-call
+        // is a real struggle and the timeline must show where. It simply stops being an accusation.
+        if (isBudgetEndedError(err)) {
+          buildDiag.record({
+            phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
+            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — moving to the next one`,
+            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+          });
+          return;
+        }
         // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
         // kitni baar") + the existing per-event timeline entry (carries the message).
         try { buildDiag.recordProviderFailure(name, err); } catch { /* diagnostics are best-effort */ }
@@ -20518,6 +20553,23 @@ async function noteBuildOutcome(
         // the admin cannot account for is the same problem as a number that is wrong.
         absorbedUnbilledUsd: decidedAbsorbedUsd,
       } = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, livePreviewCharge.usd, barrenPhases);
+      // A VERSION THE USER CAN GO BACK TO (2026-09-20). The Time Machine reads `build_history`, which
+      // until today only the LEGACY builder ever wrote — so it showed "No saved versions yet" for every
+      // app this engine has ever made. Written here AND in the deadline finalizer, keyed by the same
+      // `${workspaceId}_${buildStartedAt}` the wallet debit uses, so a build leaves exactly one.
+      // Fire-and-forget: a history write must never delay or fail a build that produced an app.
+      if (result.ok === true) {
+        void saveRestorePoint({
+          ok: true,
+          workspaceId,
+          uid: userId,
+          prompt,
+          isEdit: isEditMode,
+          tier: powerLevelReqEffective,
+          buildKey: `${workspaceId}_${buildStartedAt}`,
+          io: { loadFiles: (ws) => loadWorkspaceFiles(ws) },
+        }).catch(() => {});
+      }
       // PLATFORM TELEMETRY — feed the admin Monitor / Health Score / FinOps the REAL engine's numbers.
       // Until this line, those panels saw only the legacy Engineer-AI builder and were blind to every
       // Pro build. Uses the reconciled per-provider tokens, so the cost graph and the bill agree.
@@ -21555,13 +21607,16 @@ async function noteBuildOutcome(
           ? (actuator as any).sandboxHeldSeconds(workspaceId) as number | null
           : null;
         buildDiagRef?.setSandboxSeconds(held);
+        // The seconds that actually reached the bill — capped at this build's own duration, so the
+        // line cannot state a figure the bill did not use (autopsy bb688add).
+        const billedSandboxSeconds = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt).measuredSeconds;
         // SAY WHETHER IT REACHED THE BILL, and why (admin 2026-08-11). Without this line the admin
         // cannot tell "we charged for the VM" from "we absorbed it" — and the difference is a config
         // flag plus a rate they alone can supply. ADMIN-ONLY: the user never sees an infrastructure
         // line item (White-Label Law §3).
         buildDiagRef?.record({
           phase: 'build', severity: 'info', code: 'SANDBOX_BILLING',
-          message: sandboxBillingNote(sandboxCost(held)),
+          message: sandboxBillingNote(sandboxCost(held), process.env, billedSandboxSeconds),
           autoResolved: true,
         });
       } catch { /* a cost measurement must never affect a build */ }

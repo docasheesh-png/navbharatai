@@ -16,7 +16,6 @@ import { describe, it, expect } from 'vitest';
 import { describeLadderDepth } from '../src/server/AgentV3/ladderDepth';
 import { openingRung, TIER_LADDERS } from '../src/server/AgentV3/tierLadder';
 import { answeringModel, looksLikeFamilyLabelOnly } from '../src/server/AgentV3/answeringModel';
-import { contractSkipReason } from '../src/server/AgentV3/SimpleBuilder';
 
 describe('1 — "fell" is a claim about movement', () => {
   /** The reported build: Weak ladder, routed COMPLEX, so it opened past the cheap flash rung. */
@@ -92,34 +91,15 @@ describe('2 — a per-call record names a MODEL, not a vendor', () => {
   });
 });
 
-describe('3 — one skip, one sentence', () => {
-  it('an UNAFFORDABLE contract is announced once, with the affordability reason', () => {
-    const reason = contractSkipReason({ shareContract: true, contractCapMs: 40_000, affordable: false });
-    expect(reason).toContain('not both');
-    // The reported build printed BOTH sentences at the same millisecond. This one is not the other.
-    expect(reason).not.toContain('planning used the time it needed');
-  });
-
-  it('a COLLAPSED cap gets its own, different and correct, reason', () => {
-    const reason = contractSkipReason({ shareContract: true, contractCapMs: 0, affordable: false });
-    expect(reason).toContain('planning used the time it needed');
-    expect(reason).not.toContain('not both');
-  });
-
-  it('says nothing when the pass is running, or when it is switched off', () => {
-    expect(contractSkipReason({ shareContract: true, contractCapMs: 40_000, affordable: true })).toBeNull();
-    expect(contractSkipReason({ shareContract: false, contractCapMs: 40_000, affordable: false })).toBeNull();
-    expect(contractSkipReason({ shareContract: false, contractCapMs: 0, affordable: false })).toBeNull();
-  });
-
-  it('the two reasons can never both describe one build', () => {
-    for (const capMs of [0, 1, 40_000]) {
-      for (const affordable of [true, false]) {
-        const reason = contractSkipReason({ shareContract: true, contractCapMs: capMs, affordable });
-        if (reason === null) continue;
-        const both = reason.includes('not both') && reason.includes('planning used the time it needed');
-        expect(both, `cap=${capMs} affordable=${affordable}`).toBe(false);
-      }
-    }
-  });
-});
+/**
+ * ⚠️ ITEM 3 OF THIS AUTOPSY — the duplicate contract-skip narration — WAS FIXED BY ANOTHER SESSION
+ * WHILE THIS ONE WAS FIXING IT (their autopsy `f97eb0ec`, merged first). Their version reaches the
+ * same outcome with a ternary inside the single surviving branch.
+ *
+ * My `contractSkipReason` helper and its five cases were WITHDRAWN rather than merged on top:
+ * re-landing work already in `main` is the duplicated effort safeguard #6 exists to prevent, and
+ * CLAUDE.md is explicit that a correct change from a live session is not to be raced. Recorded here
+ * rather than deleted silently, so the withdrawal is legible and nobody re-derives it.
+ *
+ * Items 1 and 2 above are untouched by their change and are this PR's own work.
+ */

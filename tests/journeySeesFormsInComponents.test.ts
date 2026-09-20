@@ -4,8 +4,7 @@ import {
   noJourneyReason,
   formSourcesFor,
   resolveLocalImport,
-  MAX_IMPORTS_PER_PAGE,
-} from '../src/server/AgentV3/journeyDerivation';
+  MAX_IMPORTS_PER_PAGE, NO_DATA_ENTRY_REASON } from '../src/server/AgentV3/journeyDerivation';
 
 /**
  * 🔴 THE EXACT REPORT (build e4ebcb5f, 2026-09-17 — the SECOND occurrence; the first was recorded as
@@ -96,9 +95,14 @@ describe('a journey can be derived from a form the page COMPOSES, not only one i
       'src/main.tsx': "createRoot(document.getElementById('root')).render(<App />);",
     };
     expect(deriveJourneys({ files: game, marker: 'm1' })).toHaveLength(0);
-    // Following its imports finds no input anywhere, so the SAME sentence the chat app wrongly got is
-    // returned here — where it is simply true. The fix is about which apps reach it, not its wording.
-    expect(noJourneyReason(game)).toContain('no form for a journey to fill in');
+    // ⚠️ THE WORDING MOVED ON 2026-09-20, THE GUARD DID NOT (autopsy f97eb0ec). This used to expect
+    // "no form for a journey to fill in", whose second clause reads "— nothing here takes user
+    // input" — false of a canvas game with touch handlers, arrow keys and on-screen buttons, which is
+    // what the admin's falling-block game was told. A game now gets the neutral sentence that the
+    // no-pages branch has always given a canvas game, and the guard this test exists for is unchanged
+    // and asserted directly below: no journey is derived, and nothing claims the app has data entry.
+    expect(noJourneyReason(game)).toBe(NO_DATA_ENTRY_REASON);
+    expect(noJourneyReason(game)).not.toContain('takes user input');
   });
 });
 

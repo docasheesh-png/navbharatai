@@ -56,7 +56,9 @@ describe('which builds leave one', () => {
     const saved: Array<{ key: string; fileCount: number }> = [];
     const io = {
       loadFiles: async () => ({ 'src/App.tsx': 'x'.repeat(50) }),
-      save: async (key: string, v: { fileCount: number }) => { saved.push({ key, fileCount: v.fileCount }); },
+      // ⚠️ RETURNS TRUE since 2026-09-20 — the real store now reports whether the version LANDED, and
+      // a fake that resolves `undefined` means "the write failed" rather than "I am not checking".
+      save: async (key: string, v: { fileCount: number }) => { saved.push({ key, fileCount: v.fileCount }); return true; },
     };
     const args = { ok: true, workspaceId: 'agentv3-u-s', uid: 'u', buildKey: 'b-race', io } as const;
     // The normal settle and the Fix-67 deadline finalizer both run for one build.
@@ -68,7 +70,7 @@ describe('which builds leave one', () => {
 
   it('a DIFFERENT build still leaves its own', async () => {
     const saved: string[] = [];
-    const io = { loadFiles: async () => ({ 'a.ts': 'a' }), save: async (k: string) => { saved.push(k); } };
+    const io = { loadFiles: async () => ({ 'a.ts': 'a' }), save: async (k: string) => { saved.push(k); return true; } };
     await saveRestorePoint({ ok: true, workspaceId: 'agentv3-u-s1', uid: 'u', buildKey: 'b1', io });
     await saveRestorePoint({ ok: true, workspaceId: 'agentv3-u-s2', uid: 'u', buildKey: 'b2', io });
     expect(saved).toEqual(['s1', 's2']);
@@ -115,11 +117,15 @@ describe('what it snapshots', () => {
     expect(called).toBe(false);
   });
 
-  it('a store that throws never reaches the build', async () => {
+  it('a store that throws never reaches the build — and is no longer reported as a save', async () => {
+    // CHANGED 2026-09-20. This case used to assert `{ save: true, reason: '' }` for a store that THREW,
+    // which is the fake-success class written down as an expectation: the build would have reported a
+    // version the user did not have. The thing it was really guarding — the throw never escaping into
+    // the build — is unchanged and still asserted by `resolves`.
     await expect(saveRestorePoint({
       ok: true, workspaceId: 'agentv3-u-s', uid: 'u', buildKey: 'b',
       io: { loadFiles: async () => ({ 'a.ts': 'a' }), save: async () => { throw new Error('nope'); } },
-    })).resolves.toEqual({ save: true, reason: '' });
+    })).resolves.toEqual({ save: false, reason: 'write-failed' });
   });
 });
 
@@ -161,11 +167,13 @@ describe('BOTH settle paths write one — the reversion guard', () => {
   const route = fs.readFileSync(path.resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
 
   it('imports the writer', () => {
-    expect(route).toMatch(/import \{ saveRestorePoint \} from '\.\.\/AgentV3\/restorePoint'/);
+    // The import moved to the REPORTING wrapper on 2026-09-20 (saveRestorePointForReport): the same
+    // write, bounded, returning an outcome the build report can state instead of guessing at.
+    expect(route).toMatch(/import \{ saveRestorePointForReport, describeRestorePoint, restorePointSeverity \} from '\.\.\/AgentV3\/restorePoint'/);
   });
 
   it('calls it from the normal settle AND the deadline finalizer', () => {
-    const calls = route.match(/saveRestorePoint\(\{/g) ?? [];
+    const calls = route.match(/saveRestorePointForReport\(\{/g) ?? [];
     expect(calls.length).toBe(2);
   });
 

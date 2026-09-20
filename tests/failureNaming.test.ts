@@ -37,8 +37,17 @@ describe('the code is read before the prose', () => {
     for (const [code, message] of Object.entries(REAL_MESSAGES)) {
       const byTextOnly = classifyFailureReason(message);
       const byCode = classifyFailureReason(message, code, 'error');
-      if (code !== 'OUTCOME_STOPPED') expect(byTextOnly.key, `${code} should have been unnamed by text alone`).toBe('other');
+      // ⚠️ THE INTENT IS "unnamed by text alone", NOT the literal word `other`. Since 2026-09-20 an
+      // unmatched reason with NO code is `no-outcome-recorded` (the engine never said why it ended)
+      // and `other` is reserved for a coded failure whose wording we have no pattern for — two
+      // different bugs that used to share one row. Both are still "unnamed", which is what this
+      // asserts; naming either one would fail it.
+      if (code !== 'OUTCOME_STOPPED') {
+        expect(['other', 'no-outcome-recorded'], `${code} should have been unnamed by text alone`)
+          .toContain(byTextOnly.key);
+      }
       expect(byCode.key, `${code} must be named once the code is read`).not.toBe('other');
+      expect(byCode.key, `${code} must be named once the code is read`).not.toBe('no-outcome-recorded');
       expect(byCode, `${code} must be named by its OWN code, not by a text guess`).toEqual(OUTCOME_REASONS[code]);
       expect(byCode.label.length).toBeGreaterThan(0);
     }

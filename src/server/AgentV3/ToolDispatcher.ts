@@ -530,16 +530,26 @@ export class ToolDispatcher {
    * ⚠️ It deliberately guards ONLY the durable copy. The SANDBOX file keeps its bridge, because the
    * running Vite server serves that document and the Live preview's console mirror is the whole
    * reason it is there — stripping it from disk would fix a publishing bug by breaking a feature.
+   *
+   * ── AND IT IS WHERE `_writeSeq` IS COUNTED (autopsy c847b523, 2026-09-20) ────────────────────
+   *
+   * The read-loop breaker needs exactly one fact: has ANYTHING been written since the last read of
+   * this path? Counting it on this callback — the one door the paragraphs above establish that every
+   * durable write must pass through — is what makes the answer true by construction rather than by
+   * remembering to increment at twenty call sites, including ones nobody has written yet. It is the
+   * same reasoning that put the bridge guard here, applied to a second question.
+   *
+   * ⚠️ It counts WRITES, not `write_file` CALLS: a heal, a batch, a schema sync and a rename all
+   * count, because every one of them changes the project the model is reasoning about — and the
+   * breaker's whole claim is that nothing did.
+   *
+   * ⚠️ The increment must stay ADJACENT to the call below: two source-level guards
+   * (`previewBridgeNotTheApp`, `previewLiveConsole`) assert that this wrapper reaches
+   * `withoutPreviewBridge` within 200 characters, so the explanation lives here and the body stays
+   * one line. That tightness is the security property — do not widen those guards to fit a comment.
    */
   private readonly onFileWrite = (path: string, content: string): void => {
-    // ── THE PROOF THAT SOMETHING CHANGED (autopsy c847b523, 2026-09-20) ─────────────────────────
-    // The read-loop breaker needs one fact: has ANYTHING been written since the last read of this
-    // path? Counting it HERE — on the same callback the docblock above calls the one door every
-    // durable write must pass through — is what makes the answer true by construction rather than
-    // by remembering to increment at twenty call sites. It is deliberately a count of writes and
-    // not of write_file CALLS: a heal, a batch, a schema sync and a rename all count, because all
-    // of them change the project the model is reasoning about.
-    this._writeSeq++;
+    this._writeSeq++; // see the docblock — one door, so "did anything change?" is true by construction
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
   };
 

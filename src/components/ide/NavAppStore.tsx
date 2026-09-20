@@ -520,6 +520,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     <PullToRefresh
       onRefresh={handlePullRefresh}
       className="h-full overflow-y-auto overscroll-contain bg-surface text-ink"
+      // Browse / Publish / My apps / Review share ONE scroll container, so without this a deep
+      // offset from one tab opens the next one halfway down. See PullToRefreshProps.
+      scrollToTopKey={tab}
     >
       <div className="max-w-3xl mx-auto px-4 py-5 sm:px-6">
         {/* Header */}

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import {
   MAX_PULL_PX,
@@ -31,9 +31,22 @@ export interface PullToRefreshProps {
   className?: string;
   /** Off by default nowhere — pass false to disable (e.g. while a modal owns the gestures). */
   enabled?: boolean;
+  /**
+   * Scroll back to the top whenever this value CHANGES.
+   *
+   * For a screen whose tabs share ONE scroll container — App Mart's Browse / Publish / My apps /
+   * Review are four contents inside a single scroller — the offset is otherwise carried across:
+   * scroll to the end of a long Browse list, tap Publish, and the form opens halfway down with its
+   * first fields above the fold. That is not preserved scroll position, it is somebody else's.
+   *
+   * The scroll element belongs to this component (see `children`), so resetting it belongs here too
+   * rather than leaking a ref to every caller. Omit it and nothing scrolls on its own, exactly as
+   * before.
+   */
+  scrollToTopKey?: string | number;
 }
 
-export const PullToRefresh: React.FC<PullToRefreshProps> = ({ onRefresh, children, className, enabled = true }) => {
+export const PullToRefresh: React.FC<PullToRefreshProps> = ({ onRefresh, children, className, enabled = true, scrollToTopKey }) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const armedRef = useRef(false);
@@ -94,10 +107,37 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({ onRefresh, childre
       .finally(() => { setRefreshing(false); setDistance(0); });
   }, [onRefresh]);
 
+  // Only on a CHANGE, and never on first mount: the initial render must honour whatever tab the
+  // caller opened on without an unexplained jump, and a screen that mounts already at the top has
+  // nothing to reset. `scrollTop = 0` rather than `scrollTo({ behavior: 'smooth' })` — a tab switch
+  // replaces the content outright, so animating the old content away is motion with nothing behind it.
+  const lastScrollKey = useRef(scrollToTopKey);
+  useEffect(() => {
+    if (lastScrollKey.current === scrollToTopKey) return;
+    lastScrollKey.current = scrollToTopKey;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [scrollToTopKey]);
+
   const progress = pullProgress(distance);
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+    // 🔴 THIS WRAPPER MUST FILL ITS PARENT, NEVER HUG ITS CONTENT (App Mart scroll bug, 2026-09-20).
+    //
+    // Wrapping a list in this component INSERTS A BOX into the page's height chain, and that box is
+    // what the caller's `className` height then resolves against. The first version carried only
+    // `flex-1 min-h-0` — correct for a FLEX-COLUMN parent, and inert in a BLOCK one, where `flex-1`
+    // means nothing and the box falls back to `height: auto`.
+    //
+    // App Mart's parent is exactly that block: `<div className="flex-1 h-full overflow-hidden">` in
+    // ViewPanels. So this wrapper became content-height, the scroll container's `h-full` resolved
+    // `100%` OF `auto` — which is `auto` — and a list that had scrolled for months stopped: nothing
+    // was ever taller than its own box, so `overflow-y-auto` had nothing to scroll, and the
+    // grandparent's `overflow-hidden` simply clipped everything below the fold.
+    //
+    // `h-full` fills a block parent that has a definite height; `flex-1 min-h-0` fills a flex one.
+    // Both are kept because this component cannot see which kind of parent it was dropped into.
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <div
         className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center"
         style={{ height: distance, opacity: progress }}
@@ -112,7 +152,12 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({ onRefresh, childre
       </div>
       <div
         ref={scrollRef}
-        className={className}
+        // 🔒 …AND THE SCROLL CONTAINER IS BOUNDED BY CONSTRUCTION, not by the caller remembering to
+        // pass `h-full`. That is the other half: the fix above restores the height chain, this one
+        // makes the broken branch impossible to re-enter from a new call site. `flex-1 min-h-0`
+        // inside the column wrapper fills it whatever the caller's className says; a caller that
+        // also passes `h-full` is simply saying the same thing twice, which costs nothing.
+        className={`min-h-0 flex-1 ${className ?? ''}`}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

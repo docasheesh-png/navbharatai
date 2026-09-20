@@ -93,10 +93,18 @@ describe('the user is told which of those it was', () => {
     expect(route).toContain('Restore all files');
   });
 
-  it('the old guess is gone from the UI', () => {
+  it('the UI no longer offers a per-checkpoint restore — and names the way back that IS durable', () => {
+    // CHANGED 2026-09-20 (admin: "system A ko hata do agar safe ho to. B hi lagao"). This case used
+    // to assert the History tab CALLED restore(sha). The server path above is unchanged and still
+    // tested — what went is its only caller, the per-checkpoint Restore button. Those checkpoints are
+    // git commits INSIDE the sandbox, which pauses after minutes and is rebuilt from durable files, so
+    // that button worked this minute and not tomorrow — and it is only ever pressed on the day it
+    // matters. The panel names Time Machine above the list instead (durable, every build, any device).
+    // The screen's own invariants are owned by tests/oneWayBackAndEveryoneKnowsIt.test.ts.
     const panel = readFileSync('src/components/agentv3/AgentV3Panel.tsx', 'utf8');
     expect(panel).not.toContain("isn't active in this session yet");
-    expect(panel).toContain('const { ok, message } = await restore(sha)');
+    expect(panel).not.toContain('await restore(sha)');
+    expect(panel).toContain('HISTORY_TAB_NOTE');
   });
 
   it('a failed restore never claims the files changed', () => {

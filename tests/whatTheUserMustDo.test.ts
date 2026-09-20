@@ -13,7 +13,7 @@ import {
   askPrompt, closedNote, closedRows, groupedOpen, isLiveOnly, mergeLiveActions, traySummary,
   type UserActionView,
 } from '../src/components/agentv3/userActionView';
-import { badgeCountLabel, visibleBadges, MAX_VISIBLE_BADGES, type HeaderBadge } from '../src/components/agentv3/headerBadges';
+import { badgeCountLabel, visibleBadges, MAX_VISIBLE_BADGES, type HeaderBadge } from '../src/components/agentv3/headerBadgeRules';
 
 /**
  * WHAT THE USER MUST DO — one place, and only when there is something (admin 2026-09-20).

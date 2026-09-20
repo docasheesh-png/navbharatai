@@ -74422,3 +74422,67 @@ prompt fails exactly the two prompt cases.
   and `.html` by design (esbuild has no opinion on them), so a truncated non-JS file written through
   the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
   the path this autopsy traced and is named here rather than bundled in.
+## 2026-09-20 — BOTH STORE BUILDS FAILED ON A GREEN `main`, on two faults CI cannot see
+
+The admin asked for a fresh `.aab` and `.ipa`. Both were dispatched from `main` at `9ae1c0af` — a
+commit whose CI had gone green minutes earlier across typecheck, the unused-import gate, the server
+typecheck, **27,370 tests**, the Linux bundle build, the bundle budget, the boot check and the
+server-deps gate. **Both failed inside two minutes.**
+
+### The two faults
+
+**ANDROID — `:app:mergeReleaseResources` refused `android/app/src/main/res/values/nbai_colors.xml`:**
+*"The string `--` is not permitted within comments."* The comment named a CSS custom property the way
+CSS spells it, so it contained a literal double hyphen. That is illegal XML anywhere, in any file.
+**It was mine**, from the notification work in #3174, and it has blocked every Android build since
+that merge — silently, because nothing in this repo reads Android resource XML.
+
+**iOS — `npm run build` died at rollup:** *"HeaderBadges is not exported by headerBadges.ts"*.
+`HeaderBadges.tsx` (the component) and `headerBadges.ts` (its rules) sat in one directory differing
+only by case. Linux is case-SENSITIVE and has two modules; the macOS runner is case-INSENSITIVE and
+has one, so `import { HeaderBadges } from './HeaderBadges'` resolved to the rules file. The Linux gate
+could not reproduce it at any effort — **the same command passes there by construction.**
+
+### The root cause is neither fault
+
+**The two platforms that actually ship the app are built by MANUAL workflows, and nothing on the
+ordinary path speaks for them.** A fault reachable only by a run somebody triggers by hand is
+discovered on the day somebody needs a release — which is exactly when it costs the most. Both faults
+had been sitting on `main`: the XML one since #3174 merged, the case one since the badge strip landed.
+
+### The guard — `scripts/nativeShellGuard.mjs`, in CI, no SDK and no mac required
+
+Three exact rules over the repo as a fresh checkout would see it:
+- **Android XML comments** — no `--` inside one, and none left unclosed; plus a bare `&` that begins
+  no entity. Each is exactly what aapt refuses, so there are no false positives.
+- **Case-colliding paths** — two files that are one file on macOS/Windows.
+- **Case-ambiguous module names** — two modules in one directory whose names match once the extension
+  is removed.
+
+🔴 **The last rule exists because the second one DID NOT CATCH THE BUG.** The first version checked
+full paths only, was run against the real pair, and **passed** — `.tsx` and `.ts` are different paths
+on every platform. What collides is the SPECIFIER, not the file. Both rules are kept: one is about the
+filesystem, the other about resolution, and neither implies the other. The distinction is a test case.
+
+🔴 **And the guard reproduced the very class it hunts, on its first run: it printed
+`0 tracked files` and exited 0** — the `git ls-files` call had been written with `require` inside an
+ESM module, and the `catch` swallowed it. A check of zero files reported as a pass. It now **fails**
+when the list cannot be read or comes back empty, and the success line prints the count so a silent
+skip is visible. Caught because the number was printed; it would not have been caught by review.
+
+Measured before enforcing: that one pair was the only case-ambiguous module name in **4,049 tracked
+files**, and `nbai_colors.xml` the only malformed XML of 15 — so the rules are enforceable today
+rather than being a sweep of dozens of renames.
+
+Test-locked in `tests/theStoreBuildsCannotBreakSilently.test.ts` (16 cases), and **both rules proven
+against the two real faults**: restoring the `--` fails the guard, and `git mv`-ing the rules module
+back to `headerBadges.ts` fails it too.
+
+### What this does not do
+
+It does not compile an Android app or an iOS app. A fault that needs a real SDK — a Gradle plugin
+clash, a signing problem, a missing entitlement — is still found only by the store workflows. This
+guard covers the class that broke us: source that is fine on Linux and wrong on the machine that
+ships. Running the two workflows periodically rather than only on demand is the complete fix and is
+**not built here** — it burns a Play `versionCode` per run, which the admin's own standing rule
+reserves for when they ask.

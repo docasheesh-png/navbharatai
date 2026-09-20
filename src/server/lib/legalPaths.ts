@@ -48,6 +48,14 @@ export const PUBLIC_LEGAL_ROUTES: Readonly<Record<string, string>> = {
 export const DELETE_ACCOUNT_PATH = '/delete-account';
 
 /**
+ * Contact Us — required by payment-aggregator onboarding alongside the Terms and the Refund policy,
+ * and the one of the three NavBharatAI did not have at all. Its own module for the same reason the
+ * deletion page has one: it must be actionable in ten seconds, and the five-document registry is
+ * long-form by contract.
+ */
+export const CONTACT_PATH = '/contact';
+
+/**
  * Legacy / alternate spellings that must reach the same document.
  *
  * WHY THIS EXISTS: the Google Play listing has carried `https://www.navbharatai.com/privacy-policy`
@@ -78,6 +86,10 @@ export const LEGAL_PATH_ALIASES: Readonly<Record<string, string>> = {
   '/grievance-redressal': '/grievance',
   '/grievances': '/grievance',
   '/complaint': '/grievance',
+  '/contact-us': CONTACT_PATH,
+  '/contactus': CONTACT_PATH,
+  '/support': CONTACT_PATH,
+  '/help': CONTACT_PATH,
   '/account-deletion': DELETE_ACCOUNT_PATH,
   '/delete_account': DELETE_ACCOUNT_PATH,
 };
@@ -86,5 +98,6 @@ export const LEGAL_PATH_ALIASES: Readonly<Record<string, string>> = {
 export const ALL_PUBLIC_LEGAL_PATHS: readonly string[] = [
   ...Object.keys(PUBLIC_LEGAL_ROUTES),
   DELETE_ACCOUNT_PATH,
+  CONTACT_PATH,
   ...Object.keys(LEGAL_PATH_ALIASES),
 ];

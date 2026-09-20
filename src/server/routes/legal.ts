@@ -16,12 +16,13 @@
 import type { Express, Request, Response } from 'express';
 import { renderLegalPageHtml } from '../lib/legalMarkdown';
 import { ACCOUNT_DELETION, ACCOUNT_DELETION_TITLE, ACCOUNT_DELETION_UPDATED } from '../../content/legal/accountDeletion';
-import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
+import { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { grievanceDoc, GRIEVANCE_TITLE, GRIEVANCE_UPDATED } from '../../content/legal/grievance';
+import { contactDoc, CONTACT_TITLE, CONTACT_UPDATED } from '../../content/legal/contact';
 
 // Re-exported so existing importers (and the tests that pin these paths) keep one import site.
-export { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
+export { PUBLIC_LEGAL_ROUTES, DELETE_ACCOUNT_PATH, CONTACT_PATH, LEGAL_PATH_ALIASES } from '../lib/legalPaths';
 
 export function registerLegalRoutes(app: Express): void {
   // Aliases first: a permanent redirect to the canonical path, which the handlers below serve.
@@ -30,6 +31,20 @@ export function registerLegalRoutes(app: Express): void {
       res.redirect(301, canonical);
     });
   }
+
+  /**
+   * Contact Us. Built with the SAME officer details the /grievance page uses, so the postal address
+   * and telephone can never differ between the two pages a regulator reads side by side — and, when
+   * nothing is configured, both omit them rather than printing an empty label.
+   */
+  app.get(CONTACT_PATH, (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'public, max-age=600');
+    res.type('html').send(renderLegalPageHtml({
+      title: CONTACT_TITLE,
+      updated: CONTACT_UPDATED,
+      body: contactDoc(grievanceOfficer()),
+    }));
+  });
 
   app.get(DELETE_ACCOUNT_PATH, (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=600');

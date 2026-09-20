@@ -75106,3 +75106,44 @@ failed**. `tests/theRefundPolicyHasItsOwnUrl.test.ts` is reversion-proven twice 
 (`https://navbharatai.com/terms`, `https://navbharatai.com/refund` — the second only works once this
 merges and deploys), and whitelist `https://localhost` in the Cashfree dashboard so checkout works
 inside the Android WebView at all.
+
+## 2026-09-20 (same change) — the aggregator names THREE pages, and one did not exist
+
+The whitelisting dialog's own list: **Contact Us · Terms & Conditions · Refunds & Cancellations.**
+Checked each rather than assumed:
+
+| Page | Before |
+|---|---|
+| Terms & Conditions | ✅ `/terms` since 2026-09-02 |
+| Refunds & Cancellations | ⚠️ rules existed (Terms §4), **no URL** |
+| Contact Us | ❌ **did not exist at all** — verified by filename search AND content search; `ContactFormGenerator.ts` builds contact forms for USERS' apps, not our own page |
+
+So `/contact` was built too, in the same change — its own module beside `accountDeletion.ts` rather
+than in the five-document registry, for that file's own stated reason: a page whose job is to be
+acted on in ten seconds must not be padded to the registry's 4,000-character contract. Aliases
+`/contact-us`, `/contactus`, `/support`, `/help`.
+
+🔒 **The rule that shaped it: a contact page is where a fabricated detail does the most damage.**
+One address (`info@navbharatai.com`), a subject line per topic, response clocks taken from the SAME
+constants the Grievance page is built from (`ACK_HOURS`, `RESOLVE_DAYS`) rather than re-typed, and
+the postal address and telephone rendered **only when the deployment really publishes them** — the
+same `grievanceOfficer()` source the /grievance page uses, so the two pages a regulator reads side
+by side cannot disagree. Unconfigured it says plainly that we answer by email and run no telephone
+line, instead of showing an empty label. Reversion-proven: making it print a placeholder address
+turns the suite red.
+
+**Gate re-run on the final state:** typecheck · typecheck:server · noUnusedImports · native:guard ·
+build · test:bundle · boot:check · deps:server-gate all green; `vitest run` **27,710 passed, 1
+skipped, 0 failed**.
+
+### The app whitelisting the admin did — and the caveat that goes with it
+
+`com.navbharat.ai` now shows **Approved** in Cashfree's whitelisting list. ⚠️ **Whether that clears
+the `https://localhost is not enabled or approved` error is UNVERIFIED, and there is a specific
+reason to doubt it:** this app does not use Cashfree's native Android SDK. `paymentService.ts` loads
+their **JavaScript** SDK (`sdk.cashfree.com/js/v3/cashfree.js`) into the Capacitor WebView, and a JS
+SDK identifies itself by **page origin** — `https://localhost` — not by package name. Only a real
+₹1 top-up from the Android app settles it. If the same error returns, the options are a `https://localhost`
+origin entry, or the architecturally correct fix: open checkout in the system browser / Custom Tab
+with a return deep link instead of inside the WebView. Not started — recorded so the next session
+does not re-derive it.

@@ -13,12 +13,13 @@ import { describe, it, expect } from 'vitest';
 import {
   PUBLIC_LEGAL_ROUTES,
   DELETE_ACCOUNT_PATH,
+  CONTACT_PATH,
   LEGAL_PATH_ALIASES,
   ALL_PUBLIC_LEGAL_PATHS,
 } from '../src/server/lib/legalPaths';
 import { spaFallbackShouldDefer } from '../src/server/lib/spaFallback';
 
-const renderedPaths = new Set<string>([...Object.keys(PUBLIC_LEGAL_ROUTES), DELETE_ACCOUNT_PATH]);
+const renderedPaths = new Set<string>([...Object.keys(PUBLIC_LEGAL_ROUTES), DELETE_ACCOUNT_PATH, CONTACT_PATH]);
 
 describe('public legal path aliases', () => {
   it('the URL stored in the Play Console resolves to the privacy policy', () => {

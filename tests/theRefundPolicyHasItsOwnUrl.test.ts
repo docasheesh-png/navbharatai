@@ -18,7 +18,7 @@
 //      worse than one document nobody can address.
 
 import { describe, it, expect } from 'vitest';
-import { PUBLIC_LEGAL_ROUTES, LEGAL_PATH_ALIASES, ALL_PUBLIC_LEGAL_PATHS } from '../src/server/lib/legalPaths';
+import { PUBLIC_LEGAL_ROUTES, LEGAL_PATH_ALIASES, ALL_PUBLIC_LEGAL_PATHS, CONTACT_PATH } from '../src/server/lib/legalPaths';
 import { spaFallbackShouldDefer } from '../src/server/lib/spaFallback';
 import { LEGAL_DOCS, legalDocById } from '../src/content/legal';
 import { LEGAL_META } from '../src/content/legal/meta';
@@ -86,5 +86,55 @@ describe('it is findable, and it agrees with the Terms', () => {
 
   it('never names an AI vendor — a legal page is a user-facing surface', () => {
     expect(refund).not.toMatch(/\b(anthropic|claude|openai|gpt-?[0-9]|gemini|vertex ai|glm|z\.ai|kimi|moonshot|grok|xai|bedrock|deepseek|sonnet|opus|haiku)\b/i);
+  });
+});
+
+// ── THE THIRD PAGE ──────────────────────────────────────────────────────────────────────────────
+// The aggregator's whitelisting dialog names THREE: "Contact Us. Terms & Conditions. Refunds &
+// Cancellations." Terms had a URL, the refund rules had no address, and Contact Us did not exist at
+// all — verified by filename AND content search before it was written, not assumed.
+import { contactDoc, CONTACT_EMAIL, CONTACT_TITLE } from '../src/content/legal/contact';
+
+describe('Contact Us — the third page, and it may invent nothing', () => {
+  it('/contact is a real server-rendered page with its own spellings', () => {
+    expect(CONTACT_PATH).toBe('/contact');
+    expect(ALL_PUBLIC_LEGAL_PATHS).toContain('/contact');
+    expect(spaFallbackShouldDefer('/contact')).toBe(true);
+    for (const alias of ['/contact-us', '/contactus', '/support', '/help']) {
+      expect(LEGAL_PATH_ALIASES[alias], `${alias} is not an alias`).toBe('/contact');
+      expect(spaFallbackShouldDefer(alias), `${alias} would be swallowed by the SPA catch-all`).toBe(true);
+    }
+  });
+
+  it('gives a real address and routes the things people actually write about', () => {
+    const c = contactDoc(null);
+    expect(CONTACT_TITLE).toMatch(/Contact/i);
+    expect(c).toContain(CONTACT_EMAIL);
+    for (const topic of [/Refund/i, /Payment/i, /Grievance/i, /SECURITY/]) expect(c).toMatch(topic);
+    expect(c).toMatch(/Indian Rupees|₹/);            // the aggregator also asks that pricing be INR
+    expect(c).toContain('(/refund)');
+    expect(c).toContain('(/terms)');
+    expect(c).toContain('(/grievance)');
+  });
+
+  it('🔒 PRINTS NO POSTAL ADDRESS OR PHONE UNLESS ONE IS REALLY CONFIGURED', () => {
+    // A contact page is exactly where a fabricated detail does the most damage. Unconfigured, the
+    // page must omit the line — never show an empty label, and never invent a plausible one.
+    const bare = contactDoc(null);
+    expect(bare).not.toMatch(/Postal address/);
+    expect(bare).not.toMatch(/Telephone:/);
+    expect(bare).toMatch(/do not run a telephone support line/i);
+
+    const configured = contactDoc({ name: 'A Person', email: 'x@y.z', phone: '+91 98765 43210', address: '1 Example Road\nNew Delhi 110001' });
+    expect(configured).toMatch(/Postal address/);
+    expect(configured).toContain('+91 98765 43210');
+    expect(configured).toContain('1 Example Road');
+  });
+
+  it('quotes the grievance clocks from the constants, never re-typed', async () => {
+    const { ACK_HOURS, RESOLVE_DAYS } = await import('../src/content/legal/grievance');
+    const c = contactDoc(null);
+    expect(c).toContain(`${ACK_HOURS} hours`);
+    expect(c).toContain(`${RESOLVE_DAYS} days`);
   });
 });

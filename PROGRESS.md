@@ -72325,6 +72325,58 @@ fact we store.
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
 
+## 2026-09-20 — THE REPORT MUST SAY WHAT HAPPENED (autopsy f152c1ab, open items 5, 6 and the duplicate narration)
+
+Three findings from one report, all the same defect: **the engine behaved correctly and then
+described itself wrongly.** Rule 5 names this — fixing the code is not enough when the reporting
+still misleads the next reader.
+
+### 1. `LADDER_DEPTH` said *"Fell to rung 2 of 5"* about a build that fell nowhere
+
+That build was routed COMPLEX, so `withoutCheapFlashLead` dropped the cheap opener and the chain
+**began at rung 2**. It finished there. An admin reading "fell" goes hunting a rung-1 failure that
+never happened.
+
+**"Fell" is a claim about MOVEMENT, so it may only be made against where the build STARTED.**
+`describeLadderDepth` now takes the opening rung, and the caller computes it with `openingRung` —
+which asks `withoutCheapFlashLead`, **the same function that built the chain**, rather than
+re-deriving the rule. The sentence cannot drift from the routing it describes. An absent `openedAt`
+falls back to 1, so an older caller reads exactly as before.
+
+### 2. The per-call log named a VENDOR where a MODEL belongs
+
+The report recorded `model: "kimi"` for both calls while its own manifest carried `kimi-k2.7-code`.
+The expression behind it was **copy-pasted at five call sites**:
+
+    model: lbl === 'anthropic' ? fastBuildModel() : someProvider.toLowerCase()
+
+so every non-Claude aux call in every build report has been naming a family. **Not cosmetic:** two
+ids inside one family differ by 2× (`kimi-k2.7-code` $0.95/$4.00 against `-highspeed` at twice that,
+a distinction `providerRates.ts` had to grow a row for after it silently under-billed). A per-call
+log that says "kimi" cannot be reconciled against an invoice — on the one screen used to check a bill.
+
+🔒 **The fact was already there and simply not read.** `TurnResult.model` is documented as *"the
+model id that ACTUALLY produced this turn"*, and `AgentRunner` has read it since a test recorded the
+identical lesson ("onLlmCall recorded the REQUESTED model id, not the one that answered"). Only the
+AUX sites never did. One helper now answers it — `answeringModel`: what answered, else what was
+PLANNED, else the family. That order matters: a planned id can be checked against the ladder, a
+family label can be checked against nothing. It never invents an id.
+
+### 3. One skip, announced twice, with a reason that was false
+
+The reported build printed BOTH of these at the same millisecond:
+
+    ⏭️ … there is time to write your files or to design the contract, not both …
+    ⏭️ … planning used the time it needed, so the remaining budget goes to writing your files.
+
+The `else if` fired only because the `if` above it ALSO required `contractAffordable`, so the two
+branches were never mutually exclusive. And the second reason was **wrong** for that build: it
+describes a collapsed contract cap, while this build had a real cap and failed the AFFORDABILITY
+check. `contractSkipReason` is one pure decision derived from the same two facts the code branches
+on, and a test asserts the two reasons can never both describe one build.
+
+Test-locked in `tests/theReportMustSayWhatHappened.test.ts` (13 cases), reversion-proven twice
+(ignore `openedAt` → 1 red; restore the duplicate branch → 2 red).
 ## 2026-09-20 — THE FRUIT IS NOT A BUILD ORDER (autopsy f152c1ab, open item 1 — now closed)
 
 `'banana'` — the Hindi gerund "to make" — sat in `NEW_BUILD_SIGNALS` **and** `BUILD_SIGNALS` as a
@@ -72547,6 +72599,23 @@ breath as flattery.
   by nothing. A real fix is a control-driven journey (press ←, assert the canvas changed), and it is a
   product decision with its own cost, not a line in this autopsy.
 
+
+### ⚠️ CORRECTION, same day — item 3 was fixed by ANOTHER SESSION concurrently, and mine was WITHDRAWN
+
+While this fix was being written, a second live session root-caused the duplicate contract-skip
+narration independently (their autopsy `f97eb0ec`) and merged first. Their version reaches the same
+outcome with a ternary inside the single surviving branch; mine extracted a pure `contractSkipReason`
+with five cases.
+
+**Mine was withdrawn, not merged on top.** Re-landing work already in `main` is exactly the
+duplicated effort safeguard #6 exists to prevent, and CLAUDE.md is explicit that a correct change
+from a live session is not to be raced. The conflict in `SimpleBuilder.ts` was resolved by taking
+`main` whole.
+
+Recorded rather than deleted silently — both so the withdrawal is legible, and because **two sessions
+independently finding the same defect in the same hour is itself a measurement**: this class was
+visible enough in one report that two readers hit it. Items 1 (`LADDER_DEPTH`) and 2
+(`answeringModel`) are untouched by their change and remain this change's own work.
 ---
 
 ## 2026-09-20 — What the user must do, out of the chat and into one ❓ tray (PR 1 of 3)

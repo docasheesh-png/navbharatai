@@ -21,13 +21,10 @@ export interface HomeData {
   features: HomeFeature[];
 }
 
-export interface AboutData {
-  logoUrl?: string;
-  headline: string;
-  description: string;
-  team: string;
-  vision: string;
-}
+// AboutData / DEFAULT_ABOUT_DATA were REMOVED on 2026-09-20. The About page's content now lives in
+// `src/content/about.ts` and is served from the server (`/api/site/about`), because the old shape was
+// persisted only to this browser's localStorage and therefore reached no other user. Nothing else read
+// them — a grep for either name returns this comment.
 
 export interface DonationData {
   headline: string;
@@ -78,13 +75,6 @@ export const DEFAULT_HOME_DATA: HomeData = {
   ],
 };
 
-export const DEFAULT_ABOUT_DATA: AboutData = {
-  logoUrl: '',
-  headline: 'Bharat ka Apna AI - navBharat',
-  description: 'Navbharat AI is a mission to empower every Indian with the power of Artificial Intelligence.',
-  team: 'Built with ❤️ by a passionate developer.',
-  vision: 'To make Bharat a global leader in AI.',
-};
 
 export const DEFAULT_DONATION_DATA: DonationData = {
   headline: '🇮🇳 Support NavBharat AI',

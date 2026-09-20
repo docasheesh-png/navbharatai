@@ -150,12 +150,12 @@ import { type ApnapanProfile, loadApnapanProfile, saveApnapanProfile, updateApna
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
 import {
   DEFAULT_HOME_DATA,
-  DEFAULT_ABOUT_DATA,
   DEFAULT_DONATION_DATA,
   loadPersistedContent,
 } from './config/defaultContent';
 // ZipSizeModal component → moved to ViewPanels.tsx
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
+import { aboutContent, type AboutContent, type AboutOverrides } from './content/about';
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
 import { loadNativeShellContext, exitNativeApp } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
@@ -887,11 +887,53 @@ export default function App() {
   }, [setBuildSteps]);
   const [isDonationEditing, setIsDonationEditing] = useState(false);
   const [donationData, setDonationData] = useState(() => loadPersistedContent('navbharat_donation_v1', DEFAULT_DONATION_DATA));
-  const [aboutData, setAboutData] = useState(() => loadPersistedContent('navbharat_about_v1', DEFAULT_ABOUT_DATA));
+  // ABOUT US — served from the SERVER so every user sees the same page (2026-09-20).
+  //
+  // 🔴 It used to be `loadPersistedContent('navbharat_about_v1', …)` with a `localStorage.setItem`
+  // beside it and NO server route anywhere in the repo — so an admin's edit was saved on that one
+  // browser and reached nobody, while the page showed an "Admin Edit Mode Active" badge over it.
+  // The shipped copy (`content/about.ts`) is the fallback, so the page is complete before the fetch
+  // returns and stays complete if it fails.
+  const [about, setAbout] = useState<AboutContent>(() => aboutContent(null));
+  // ⚠️ The overrides are their OWN state, never derived back out of `about`. Deriving them would save
+  // the shipped copy as an override, and the page would then be frozen against every later edit to
+  // content/about.ts — a change nobody would see failing.
+  const [aboutOverrides, setAboutOverrides] = useState<AboutOverrides>({});
+  const [aboutSaveState, setAboutSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
 
   useEffect(() => {
-    localStorage.setItem('navbharat_about_v1', JSON.stringify(aboutData));
-  }, [aboutData]);
+    let active = true;
+    fetch('/api/site/about')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        if (!active || !body?.about) return;
+        setAbout(body.about as AboutContent);
+        setAboutOverrides((body.overrides ?? {}) as AboutOverrides);
+      })
+      .catch(() => { /* the shipped copy is already on screen — a failed fetch changes nothing */ });
+    return () => { active = false; };
+  }, []);
+
+  const saveAboutOverride = useCallback(async (patch: AboutOverrides) => {
+    // Show the admin's own edit at once, but do NOT call it saved until the server says so.
+    const next = { ...aboutOverrides, ...patch };
+    setAbout(aboutContent(next));
+    setAboutSaveState('saving');
+    try {
+      const res = await fetch('/api/admin/site/about', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem('admin_token') || '' },
+        body: JSON.stringify({ overrides: next }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) { setAboutSaveState('error'); return; }
+      if (body.about) setAbout(body.about as AboutContent);
+      setAboutOverrides((body.overrides ?? next) as AboutOverrides);
+      setAboutSaveState('idle');
+    } catch {
+      setAboutSaveState('error');
+    }
+  }, [aboutOverrides]);
 
 
 
@@ -3924,8 +3966,9 @@ export default function App() {
                     {activeView === 'about' && (
             <AboutPanel
               isAdmin={isAdmin}
-              aboutData={aboutData}
-              onAboutDataChange={setAboutData}
+              about={about}
+              saveState={aboutSaveState}
+              onOverrideChange={saveAboutOverride}
             />
           )}
 

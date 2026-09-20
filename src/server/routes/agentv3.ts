@@ -42,6 +42,7 @@ import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadR
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
+import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -2828,6 +2829,57 @@ export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: strin
   return selectReviewer({ reviewer: reviewerEnv, grokKey });
 }
 
+/**
+ * One OpenAI-compatible judge candidate. The client is constructed here; the CALL is not made here,
+ * which is the distinction the old code got wrong — see `judgeChain.ts` for the full autopsy.
+ */
+function openAiJudgeCandidate(
+  kind: JudgeKind,
+  apiKey: string | undefined,
+  baseURL: string,
+  modelId: string,
+  timeout: number,
+): JudgeCandidate | null {
+  if (!(apiKey || '').trim()) return null;
+  try {
+    const client = new OpenAI({ apiKey, baseURL, timeout, maxRetries: 1 });
+    const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
+      const r = await client.chat.completions.create({
+        model,
+        messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
+        max_tokens: maxTokens,
+      });
+      return { text: r.choices?.[0]?.message?.content ?? '' };
+    };
+    return { kind, modelId, runTurn };
+  } catch {
+    // An unconstructable client is the ONE failure the old try/catch really did cover, and it stays
+    // covered: this candidate simply does not join the chain.
+    return null;
+  }
+}
+
+/**
+ * THE JUDGE CHAIN — the engines that may answer, in order, with the fall-through where the failures
+ * are (2026-09-20).
+ *
+ * 🔴 WHAT CHANGED AND WHY. This function used to `return` inside each branch's `try`, so the "fall
+ * through to the judge below" its own comments promised only ever happened when constructing an SDK
+ * client threw — which it does not do for a wrong key, a wrong model id, a wrong host, an exhausted
+ * plan or a timeout. Those all happen inside the returned `runTurn`, and landed in `judgeBuild`'s
+ * catch: NOT REVIEWED, no fallback, no reason recorded anywhere. See `judgeChain.ts`.
+ *
+ * 🔒 THE ORDER IS EXACTLY TODAY'S, deliberately — this is a fix to WHEN the fall-through happens, not
+ * to who is in it. Nemotron (when its tier allows) → GLM (never on `power`, matching the old branch
+ * condition) → Grok → Sonnet last. No engine becomes reachable that was not reachable before, which
+ * is what keeps this a repair rather than a routing change requiring admin sign-off.
+ *
+ * ⚠️ SONNET'S PRESENCE ON A WEAK BUILD IS NOT NEW AND IS NOT AN EXEMPTION. The old code's final
+ * `return` was an unconditional Sonnet judge, so it was already the last resort on every tier; the
+ * weak tier's protection against it is `noClaudeZone`, which refuses a non-Haiku Claude id inside a
+ * weak build's async context at CALL time. Under the chain that refusal is simply recorded as that
+ * candidate's failure instead of being invisible — the guard is untouched and still decides.
+ */
 function selectReviewJudge(
   mode: 'free' | 'paid' | 'power' = 'paid',
   // The tier the BUILD is running on, for the Nemotron flag's per-tier allowlist. `mode` cannot
@@ -2835,62 +2887,38 @@ function selectReviewJudge(
   // 'power'), so scoping a rollout by mode would switch three tiers on at once. Optional and
   // defaulting to 'off' (Normal) so a caller that does not pass it can never widen the rollout.
   tier: PowerLevel | string | boolean | null | undefined = 'off',
-): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron' } {
+): { runTurn: JudgeRunTurn; modelId: string; kind: JudgeKind; chain: JudgeChain } {
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   const glmKey = parseKeyPool(process.env.GLM_API_KEY)[0];
   const nemotronOk = nemotronTierAllowed(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null));
   const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER, glmKey, nemotronOk);
+
+  const candidates: JudgeCandidate[] = [];
   if (kind === 'nemotron') {
-    try {
-      const client = new OpenAI({ apiKey: nemotronKey(), baseURL: nemotronBaseUrl(), timeout: 45_000, maxRetries: 1 });
-      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
-        const r = await client.chat.completions.create({
-          model,
-          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
-          max_tokens: maxTokens,
-        });
-        return { text: r.choices?.[0]?.message?.content ?? '' };
-      };
-      return { runTurn, modelId: nemotronUltraModel(), kind: 'nemotron' };
-    } catch { /* client not constructable → fall through to the GLM / Grok / Claude judge below */ }
+    const c = openAiJudgeCandidate('nemotron', nemotronKey(), nemotronBaseUrl(), nemotronUltraModel(), 45_000);
+    if (c) candidates.push(c);
   }
-  // ⚠️ THE FALL-THROUGH IS THE WHOLE SAFETY STORY, and it is why this reads as a sequence of `if`s
-  // rather than a switch. A Nemotron outage, a revoked key, an unconstructable client — each simply
-  // lands on the judge that is running in production today. Behaviour with the flag unset is
-  // byte-identical to before this existed.
-  if (kind === 'glm' || (kind === 'nemotron' && (glmKey || '').trim() && mode !== 'power')) {
-    try {
-      const client = new OpenAI({ apiKey: glmKey, baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: 45_000, maxRetries: 1 });
-      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
-        const r = await client.chat.completions.create({
-          model,
-          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
-          max_tokens: maxTokens,
-        });
-        return { text: r.choices?.[0]?.message?.content ?? '' };
-      };
-      return { runTurn, modelId: process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', kind: 'glm' };
-    } catch { /* client not constructable → fall through to Grok / Claude */ }
+  if (kind === 'glm' || (kind === 'nemotron' && mode !== 'power')) {
+    const c = openAiJudgeCandidate('glm', glmKey, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', 45_000);
+    if (c) candidates.push(c);
   }
-  // 'nemotron' joins the two kinds that may land here: a Nemotron judge whose client could not be
-  // built, and whose GLM fall-through also failed, must still reach Grok before Claude.
-  if ((kind === 'grok' || kind === 'glm' || kind === 'nemotron') && (grokKey || '').trim()) {
-    try {
-      const client = new OpenAI({ apiKey: grokKey, baseURL: process.env.GROK_BASE_URL || 'https://api.x.ai/v1', timeout: 30_000, maxRetries: 1 });
-      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
-        const r = await client.chat.completions.create({
-          model,
-          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
-          max_tokens: maxTokens,
-        });
-        return { text: r.choices?.[0]?.message?.content ?? '' };
-      };
-      return { runTurn, modelId: process.env.GROK_JUDGE_MODEL || 'grok-3', kind: 'grok' };
-    } catch { /* client not constructable → fall through to the Claude judge */ }
+  if (kind === 'grok' || kind === 'glm' || kind === 'nemotron') {
+    const c = openAiJudgeCandidate('grok', grokKey, process.env.GROK_BASE_URL || 'https://api.x.ai/v1', process.env.GROK_JUDGE_MODEL || 'grok-3', 30_000);
+    if (c) candidates.push(c);
   }
-  // Claude judge — Sonnet. Never Opus (2026-09-14).
-  const runTurn: JudgeRunTurn = (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text }));
-  return { runTurn, modelId: sonnetModel(), kind: 'sonnet' };
+  // Claude judge — Sonnet. Never Opus (2026-09-14). Always last, always present: it is the backstop
+  // that makes "the review happened" true when every other vendor is down.
+  candidates.push({
+    kind: 'sonnet',
+    modelId: sonnetModel(),
+    runTurn: (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text })),
+  });
+
+  const chain = composeJudgeChain(candidates);
+  // `modelId` and `kind` keep their old meaning — the engine this build PLANS to judge on — so the
+  // caller's existing label and `judgeBuild` call are unchanged. Who actually answered is
+  // `chain.servedBy()`, read AFTER the call, because before it there is nothing to know.
+  return { runTurn: chain.runTurn, modelId: candidates[0].modelId, kind: candidates[0].kind, chain };
 }
 
 /**
@@ -16150,7 +16178,14 @@ async function noteBuildOutcome(
             // EXHAUSTIVE, via the shared label. The ternary this replaces had no `nemotron` branch and
             // fell through to 'Sonnet', so every Nemotron verdict named an engine that had not run —
             // and Nemotron has been LIVE on Weak since 2026-09-19. See judgeEngineLabel.
-            const reviewerName = judgeEngineLabel(judge.kind);
+            // 🔴 THE ENGINE IS NAMED AFTER THE CALL, NOT BEFORE IT (2026-09-20). `judge.kind` is the
+            // engine this build PLANS to judge on; with a real call-time fall-through in place
+            // (judgeChain.ts) the engine that actually answered can be a different one, and printing
+            // the planned name would re-create the exact defect `judgeEngineLabel` was written to fix
+            // — a report attributing work to an engine that did not do it. `servedBy()` is null until
+            // something has answered, so before the first call the planned name is all there is, and
+            // that is what it falls back to.
+            const reviewerNameNow = (): string => judgeEngineLabel(judge.chain.servedBy() ?? judge.kind);
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: JudgeVerdict, tag: string): void => {
               // 🔴 A REVIEW THAT DID NOT HAPPEN IS NEVER PRINTED AS "PASS" (2026-09-19/20).
@@ -16176,20 +16211,34 @@ async function noteBuildOutcome(
               // and nobody infers. The early return is kept as #3143 wrote it because the CODE is the
               // point there; the line below is #3154's, because the DETAIL is the point there.
               try {
+                // 🔴 WHAT EACH ENGINE ACTUALLY SAID — the half that was missing when the admin asked
+                // "nvidia nahi chal raha hai … kya problem hai? kaha?" and nothing in this platform
+                // could answer. Every provider failure was caught and DISCARDED, so a wrong key
+                // (401), a wrong model id (404), a timeout and an empty reasoning-only reply all
+                // produced the same one sentence naming neither the engine nor the cause. This line
+                // carries the status code, which is precisely what separates those four.
+                // ADMIN-ONLY by construction (White-Label Law): it names vendors and model ids, so it
+                // lives in the diagnostics detail and never in a narration, a summary or a finding.
+                const attemptNote = describeJudgeAttempts(judge.chain.attempts(), judgeEngineLabel);
                 if (!judgeActuallyRan(v)) {
-                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'CHEAP_REVIEW_NOT_RUN', message: `${tag}: NOT REVIEWED — ${v.findings[0] || 'the reviewer produced no usable verdict'}`, autoResolved: true });
+                  buildDiag.record({
+                    phase: 'build', severity: 'warning', code: 'CHEAP_REVIEW_NOT_RUN',
+                    message: `${tag}: NOT REVIEWED — ${v.findings[0] || 'the reviewer produced no usable verdict'}`,
+                    detail: attemptNote, autoResolved: true,
+                  });
                   return;
                 }
                 const d = describeJudgeVerdict(v);
                 buildDiag.record({
                   phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW', autoResolved: true,
                   message: `${tag}: ${d.label} (score ${v.score})${d.detail ? ' — ' + d.detail : ''}`,
+                  detail: attemptNote,
                 });
               } catch { /* diagnostics best-effort */ }
             };
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is checking the build…', ts: Date.now() });
             let verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
-            recordVerdict(verdict, `${reviewerName} review`);
+            recordVerdict(verdict, `${reviewerNameNow()} review`);
             // BOUNCE loop: `nextReviewAction` bounds it — after `cap` cheap repairs it can ONLY go to
             // Sonnet, never bounce to the weak model again (that was the 51-fallback grind).
             const cap = cheapBounceCap(process.env.AGENTV3_CHEAP_BOUNCES);
@@ -16202,7 +16251,7 @@ async function noteBuildOutcome(
               try { await runner.run(judgeRepairPrompt(prompt, verdict.findings)); } catch { break; /* GLM/KIMI down → stop bouncing, escalate to Sonnet */ }
               events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is re-checking the fix…', ts: Date.now() });
               verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
-              recordVerdict(verdict, `${reviewerName} re-review`);
+              recordVerdict(verdict, `${reviewerNameNow()} re-review`);
             }
             if (verdict.pass) return base; // the cheap build (or its one self-fix) is genuinely good → no Sonnet spend
             judgeFindings = verdict.findings; // still failing after the bounce → hand to Sonnet as the repair list

@@ -218,6 +218,18 @@ export function describeJudgeVerdict(v: JudgeVerdict): {
 }
 
 /**
+ * THE ENGINES THAT MAY JUDGE A BUILD — one declaration, so the union and its label cannot drift.
+ *
+ * 🔴 IT USED TO BE WRITTEN TWICE: inline in `selectReviewJudge`'s return type and again inline in
+ * `judgeEngineLabel`'s parameter, with a test comparing the two strings. That test was the right
+ * instinct and the wrong mechanism — it could only fail AFTER somebody had already written the two
+ * lists differently. Naming the type once makes the drift impossible instead of detectable: a sixth
+ * engine added here fails `npm run typecheck:server` on `judgeEngineLabel`'s `never` default, at the
+ * one place somebody has to think about what to call it.
+ */
+export type JudgeKind = 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron';
+
+/**
  * The ADMIN-ONLY name of the engine that judged this build. Exhaustive by construction.
  *
  * 🔴 THE BUG. `selectReviewJudge` can return `kind: 'nemotron'`, and the report's label was an inline
@@ -239,7 +251,7 @@ export function describeJudgeVerdict(v: JudgeVerdict): {
  *
  * Never reaches a user (White-Label Law) — this is the admin report's label only.
  */
-export function judgeEngineLabel(kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'): string {
+export function judgeEngineLabel(kind: JudgeKind): string {
   switch (kind) {
     case 'grok': return 'Grok';
     case 'glm': return 'GLM';

@@ -72021,3 +72021,58 @@ fact we store.
 
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
+
+## 2026-09-20 — A STYLESHEET CANNOT BE THE WHOLE APP (autopsy f152c1ab, item 3)
+
+`generationTier` returned **0** for `*.css` — the FOUNDATION wave, generated before everything else.
+
+**What it cost, measured.** The reported build planned seven files; tier 0 held exactly ONE of them,
+`src/App.css`. That single file took **137 s of a 240 s budget** (10,176 chars, 3,522 output tokens,
+25.7 tok/s). The lane then bailed — *"2 stage(s) left would need about 468s"* — and the only thing
+salvaged from a 3.7-minute build was a **10 KB stylesheet for an app that did not exist**. The user
+pressed Stop 2.5 seconds later. `INTEGRITY_CSS_WIRED` then dutifully wired that orphan stylesheet
+into `main.tsx`, which is the self-heal rule 5 calls a red flag rather than a win.
+
+🔑 **THE DEPENDENCY RAN BACKWARDS, and that is the root cause rather than the budget.** Tier 0 exists
+so later tiers can be handed the REAL source of what they import (`dependencyContext`) — exact export
+names, enum members, prop types. **A stylesheet exports none of those.** What a stylesheet needs is
+the class names the COMPONENTS chose, and those do not exist until the components are written. So
+CSS-first forced the model to INVENT class names every later file then had to match — which is
+precisely how a 10 KB stylesheet gets written for an app nobody has built.
+
+🔒 **And it is the most deferrable file in any app.** A build cut short after the components renders
+— plainly, but it renders. A build cut short after the stylesheet renders NOTHING.
+
+**The fix:** stylesheets move to the LAST tier, stated as a class (`.css`/`.scss`/`.sass`/`.less`/
+`.styl` — the argument is identical for every syntax, and a CSS MODULE follows its component too).
+On the reported manifest this alone takes the lane from **three stages to two**, so the first wave
+produces both real components instead of one stylesheet — and the budget projection, which
+multiplies by stage count, now fits where it did not.
+
+⚠️ **One existing test needed its FIXTURE changed, and that is recorded rather than quietly edited.**
+`SimpleBuilder.test.ts`'s contract-cap test deliberately relies on a SINGLE-tier manifest (its own
+comment explains why: a multi-tier fixture would test the doomed-lane bail instead). Its third file
+was `src/index.css`, which is now tier 2 — so the lane became two-stage and bailed. Swapped for
+`src/constants.ts`, a real tier-0 file; the property under test is unchanged.
+
+⚠️ **The honest trade:** a lane cut short after the components now ships an UNSTYLED app rather than
+a styled non-app. That is the right side of it, and the design gate plus the full builder both run
+after. Test-locked and reversion-proven in `tests/aStylesheetCannotBeTheWholeApp.test.ts` (6 cases;
+CSS back to tier 0 → 4 red).
+
+### ✅ `chahiye` — INVESTIGATED AND CLOSED AS **NOT A DEFECT** (correcting my own ledger)
+
+The previous entry listed *"mujhe ek billing app chahiye is still low"* as an open root cause. On
+measurement it is the DESIGNED behaviour, and raising it would be the trade the fourth rule forbids:
+
+| prompt | verdict |
+|---|---|
+| `mujhe ek billing app chahiye` | new_build · **low** · `build-signal` |
+| `mujhe apne app me login chahiye` (an EDIT) | new_build · **low** · `build-signal` |
+| `mujhe help chahiye` | chat · low |
+
+`low` is what sends the turn to the LLM intention reader **with project and conversation context** —
+the one actor that can tell "I want a new billing app" from "I want login in my existing app". Both
+sentences are indistinguishable by keyword, so a HIGH lock on `chahiye` + a build noun would hard-lock
+the second one into rebuilding somebody's project. **The want-form is exactly the case the reader
+exists for.** Closed deliberately, not left silent.

@@ -109,6 +109,39 @@
         <meta-data android:name="com.facebook.sdk.AutoLogAppEventsEnabled" android:value="false" />
         <meta-data android:name="com.facebook.sdk.AdvertiserIDCollectionEnabled" android:value="false" />
 
+        <!--
+          PUSH NOTIFICATIONS — WHAT ONE LOOKS LIKE (2026-09-20, admin: "ek dam native app jaise
+          notification mobile me dikhe").
+
+          The SEND side has existed since 2026-08-25 (PushNotificationService.ts) and the receive side
+          since the same day (@capacitor-firebase/messaging, src/lib/pushNotifications.ts). What was
+          never set is how the notification PRESENTS, and all three of these default badly:
+
+            • default_notification_icon — unset, so Firebase falls back to android:icon. That is an
+              adaptive launcher icon, and Android renders a full-colour icon in the status bar as a
+              featureless WHITE SQUARE. A notification-specific icon must be a silhouette defined by
+              its ALPHA; @drawable/ic_stat_nbai is exactly that, derived from the app's own
+              ic_launcher_monochrome mark (see scripts/notificationIcon.mjs) rather than drawn anew.
+            • default_notification_color — unset, so the system greys the icon and the app-name line.
+            • default_notification_channel_id — unset, so every message lands in Android's fallback
+              "Miscellaneous" channel. That channel is what the user sees in Settings -> Notifications,
+              and "Miscellaneous" is the single clearest tell that an app did not set this up.
+
+          The channel named here is CREATED by the app at startup (src/lib/pushNotifications.ts). Naming
+          a channel that does not exist is not an error and not a fix either — Android silently falls
+          back to Miscellaneous again, so the two must be changed together. Pinned in both directions
+          by tests/aNotificationLooksLikeOurApp.test.ts.
+        -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_nbai" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/nbaiNotificationAccent" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="nbai_updates" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

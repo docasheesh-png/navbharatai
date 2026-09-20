@@ -25,6 +25,7 @@ import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
+import { PushHealthCard } from './admin/PushHealthCard';
 import { WelcomeBackfillCard } from './admin/WelcomeBackfillCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
@@ -40,12 +41,21 @@ import {
   badgesFromPayload, formatBadge, badgeNeedsAttention, BADGE_HINTS,
   type AdminTabBadges,
 } from '../lib/adminTabBadges';
+import { adminFooterItems, type AdminFooterApi } from './admin/adminFooterApi';
 import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
 
 interface AdminDashboardProps {
   adminToken: string;
   onLogout: () => void;
+  /**
+   * The shared bottom bar is on screen and is showing THIS panel's tabs (admin 2026-09-20), so the
+   * header strip below stands down. Mirrors `AgentV3Panel`'s prop of the same name for the same
+   * reason: one boolean decides both halves, so the tabs can never be in two places or in neither.
+   */
+  mobileFooter?: boolean;
+  /** Publish this panel's tab strip upward so the ONE bottom bar can render it. See adminFooterApi. */
+  onFooterApi?: (api: AdminFooterApi | null) => void;
 }
 
 type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'apkreports' | 'security' | 'settings';
@@ -148,7 +158,7 @@ const statCard = (label: string, value: string | number, sub: string, color: str
   </div>
 );
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLogout }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLogout, mobileFooter, onFooterApi }) => {
   const [activeTab, setActiveTab] = useState<TabId>('monitor');
   // ── User reports (admin 2026-08-21) ──────────────────────────────────────
   const [userReports, setUserReports] = useState<any[]>([]);
@@ -1584,6 +1594,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     else toast('Error: ' + r.error);
   };
 
+  /**
+   * ── HAND THE TAB STRIP TO THE BOTTOM BAR (admin 2026-09-20) ──────────────────────────────────
+   *
+   * The admin panel's nine tabs are the panel. On a phone they sat in a scrolling strip up in the
+   * header while the one row a thumb can always reach carried five buttons that lead OUT of the
+   * console. This publishes the strip upward so `App.tsx`'s single `<nav>` renders it instead.
+   *
+   * 🔒 `select` IS `setActiveTab` — not a copy of it. There is one piece of tab state in this whole
+   * feature, so the footer and the header can never disagree about which page is open, and a tab
+   * added to `TABS` appears in both by construction rather than by somebody remembering.
+   *
+   * ⚠️ The cleanup publishes `null`, so the moment this panel unmounts — logout, or navigating out
+   * of /admin — the bar goes straight back to its ordinary items. Without it the footer would keep
+   * offering admin tabs on a screen that no longer has them (the same discipline `AgentV3Panel`
+   * already applies to `v3FooterApi`).
+   */
+  useEffect(() => {
+    if (!onFooterApi) return;
+    onFooterApi({
+      items: adminFooterItems(TABS, tabBadges),
+      activeId: activeTab,
+      select: (id: string) => setActiveTab(id as TabId),
+    });
+  }, [onFooterApi, tabBadges, activeTab]);
+  useEffect(() => () => { onFooterApi?.(null); }, [onFooterApi]);
+
   const providerColors: Record<string, string> = { gemini: 'bg-blue-500 text-on-accent', anthropic: 'bg-orange-500 text-on-accent', grok: 'bg-purple-500 text-on-accent', vertex: 'bg-green-500 text-on-accent', openai: 'bg-emerald-500 text-on-accent' };
 
   return (
@@ -1698,8 +1734,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-card p-1 rounded-2xl border border-line overflow-x-auto">
+      {/* Tabs — HIDDEN on mobile while the bottom bar is carrying them (admin 2026-09-20).
+          `hidden lg:flex` rather than a JS branch, the same idiom AgentV3Panel uses for its own
+          header strip: the row survives on a wide screen even inside a mobile-footer session, so a
+          desktop admin is byte-identical to before and there is never a screen with no tabs at all. */}
+      <div className={`${mobileFooter ? 'hidden lg:flex' : 'flex'} gap-1 bg-card p-1 rounded-2xl border border-line overflow-x-auto`}>
         {TABS.map(tab => {
           // THE COUNTER BESIDE THE NAME. `formatBadge` returns null for anything unmeasured, and a
           // null renders NOTHING — never a zero, which on this bar would read as "I looked, there is
@@ -4039,6 +4078,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <BuildCostCard adminToken={adminToken} />
               <WelcomeBackfillCard adminToken={adminToken} />
               <ReferralCostCard adminToken={adminToken} />
+              {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
+                  at every link — which one is broken, and a real test send to prove the chain. */}
+              <PushHealthCard adminToken={adminToken} />
               {/* FAILURE CATEGORY (admin 2026-09-16): which app TYPE fails most, and WHY — grouped from
                   the same durable per-workspace records the All Builds list below reads. */}
               <FailureCategoryCard adminToken={adminToken} />

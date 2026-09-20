@@ -497,6 +497,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
+import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
 import {
   startVersionPreview,
   listLiveVersionsCommand,
@@ -10575,6 +10576,13 @@ async function noteBuildOutcome(
       const evt = e as { type?: string; checkpoint?: unknown };
       if (evt?.type === 'checkpoint' && evt.checkpoint) saveCheckpoint(workspaceId, evt.checkpoint).catch(() => {});
     }, false);
+    // WHAT THE USER MUST DO (admin 2026-09-20: "user se jo jo chahiye woh sab ❓ me"). Every ask this
+    // build makes — a credential, a gate it is waiting on, an assumption it wants corrected — is
+    // recorded durably as it is emitted, so it survives a reload and is readable in one place instead
+    // of being buried in the narration. Same choke point and same best-effort contract as the
+    // checkpoint persister above: one subscription, and a failure never reaches the build.
+    const userActionBuildId = String(Date.now());
+    attachUserActionRecorder(events, { workspaceId, buildId: userActionBuildId });
     // `let` — a zip import below adopts the DETECTED framework of the imported app (persisted
     // durably by persistSessionTimeline), overriding whatever the client's picker defaulted to.
     let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';

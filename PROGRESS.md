@@ -72377,6 +72377,40 @@ on, and a test asserts the two reasons can never both describe one build.
 
 Test-locked in `tests/theReportMustSayWhatHappened.test.ts` (13 cases), reversion-proven twice
 (ignore `openedAt` → 1 red; restore the duplicate branch → 2 red).
+## 2026-09-20 — THE FRUIT IS NOT A BUILD ORDER (autopsy f152c1ab, open item 1 — now closed)
+
+`'banana'` — the Hindi gerund "to make" — sat in `NEW_BUILD_SIGNALS` **and** `BUILD_SIGNALS` as a
+bare word. It is a perfect homograph of the English fruit. Measured on `main` before this change:
+
+| prompt | verdict |
+|---|---|
+| `banana bread recipe batao` | new_build · **HIGH** · signal `banana` |
+| `banana milkshake kaise banta hai` | new_build · **HIGH** · signal `banana` |
+
+**Somebody asking for a recipe got an app built.** It is the failure the 2026-09-13 "read the mood
+first" rule exists to prevent, and worse than the case that rule was written for: **HIGH confidence
+means the LLM intention-reader is never consulted at all**, so nothing downstream could correct it.
+Found by a CONTROL in the corpus of the previous fix — no user had to pay for this one first.
+
+⚠️ **Deleting the word was not the fix, which is why it needed a gate and not a grep.**
+`"mujhe ek app banana hai"`, the object-less `"app banana"` (named in this file's own comments as the
+case #3039 answers downstream) and a bare `"banana hai"` are all real orders, all HIGH, and all
+depend on this word. Removing it would have silently demoted every one — the trade the fourth
+absolute rule forbids.
+
+🔑 **THE CLASS, and it is the `bana-` shape's twin seen from the other side: a flat word list cannot
+carry a word whose meaning depends on the sentence around it.** So the signal is CONDITIONAL
+(`bananaMeansBuild`): it counts when the message names something buildable (`mentionsBuildNoun`), or
+when the gerund is completed into a statement of intent (`banana hai` / `tha` / `chahta hoon`). The
+fruit is followed by a FOOD, never by `hai`.
+
+**After:** every fruit sentence answers as **chat**; every real order is still `new_build · HIGH`,
+including the pair that proves the rule is about the sentence rather than the word —
+`"banana bread wala app banana hai"` → build.
+
+Test-locked in `tests/theFruitIsNotABuildOrder.test.ts` (7 cases), reversion-proven (bare `banana`
+back in the list → 2 red). The TRIPWIRE left in `anOrderInHindiIsStillAnOrder.test.ts` fired and was
+answered deliberately, exactly as it was written to be.
 ## 2026-09-20 — A STYLESHEET CANNOT BE THE WHOLE APP (autopsy f152c1ab, item 3)
 
 `generationTier` returned **0** for `*.css` — the FOUNDATION wave, generated before everything else.
@@ -72582,3 +72616,76 @@ Recorded rather than deleted silently — both so the withdrawal is legible, and
 independently finding the same defect in the same hour is itself a measurement**: this class was
 visible enough in one report that two readers hit it. Items 1 (`LADDER_DEPTH`) and 2
 (`answeringModel`) are untouched by their change and remain this change's own work.
+---
+
+## 2026-09-20 — What the user must do, out of the chat and into one ❓ tray (PR 1 of 3)
+
+**THE ADMIN'S COMPLAINT, verbatim:** *"yeh cheez abhi text chat me hi hai, aur bahut sare navbharatai
+ke response me kahi dab jati hai! ab isko bahar rakh do! user se jo jo chahiye woh sab question mark
+❓ me!"* — with three conditions attached in the same conversation: the badge shows **only when
+something is genuinely needed** (*"nahi to user isko ignore karega"*), every row must be **talkable
+to** from the input box (*"ho sakta hai user kuch aur soch raha ho"*), and the ❓ must not be
+**hard-coded** because ⁉️ and ✔️ will join it later.
+
+**WHAT WAS ALREADY THERE, and it is most of the hard part.** The engine asks well: `secret_request`
+names the exact variables and routes the value straight to the encrypted vault (never up the build
+stream); `permission_request` genuinely blocks a build; `clarify` records the assumptions it made.
+**What none of them had was a home.** All three rendered as cards *inside* the message stream at three
+different moments, and none was written down anywhere — `pendingSecrets` / `pendingPermission` /
+`pendingClarify` are React state on one screen, so a reload, a tab switch or coming back tomorrow lost
+the record entirely. And there was **no notion of "I did it" at all**.
+
+**SHIPPED.**
+- **`userActions.ts` (PURE)** — the record's rules. Identity is the THING (this variable, this gate),
+  never the wording, so one credential asked twice is **one row**; the platform's own credentials and
+  unusable names can never become rows; assumptions are capped at four; an open row is never pruned.
+- **`UserActionStore.ts`** — one document per row at a deterministic id, so "merge" reads one document
+  instead of the list and two concurrent recorders cannot race. Closing a row is an **`update`**, never
+  a merge-set: the latter would MINT a task nobody ever had (the `DeploymentStore.setStatus` class).
+- **`userActionRecorder.ts`** — ONE subscription on the build's own event stream, beside the checkpoint
+  persister, `replay: false`. Six emit sites would each have had to remember; this one cannot forget.
+- **`routes/userActions.ts`** — read and close, gated by `verifiedWorkspaceReadOk`, because a workspace
+  id is not a password and this list would otherwise reveal which credentials somebody's app awaits.
+- **The tray + a header badge STRIP** (`headerBadges.ts`, `HeaderBadges.tsx`, `UserActionTray.tsx`,
+  `useUserActions.ts`, `userActionView.ts`), mounted beside the build stamp — exactly where the admin
+  drew it. The credential form is the **same `SecretRequestCard`**, hoisted and handed to the tray as a
+  slot; the inline approve/reject row and the inline assumptions card are **gone from the stream**.
+
+**THE THREE CONDITIONS, as code rather than intention.**
+- **Precision.** Zero open rows ⇒ `visibleBadges` renders *nothing* — not a grey icon, not a zero. A
+  key that reaches the vault closes its **own** row as `verified` on every read, so the count going
+  down is a measurement. A row closed as "not needed" is **never** re-asked; an unverified "done" is
+  re-opened only by a **later** build that still needs the thing. Only a genuinely blocking gate opens
+  the tray by itself, once per row.
+- **Control.** Every row carries "Ask NavBharatAI", which loads a prepared question into the composer
+  and closes the tray. **Never auto-sent** — a message the user did not choose to send is not a
+  conversation and would spend their money.
+- **Not hard-coded.** The header takes a LIST of badges (glyph, tone, count, panel); today exactly one
+  is registered. ⁉️ and ✔️ are one array entry each. It stops there deliberately: a list and a sort,
+  not a plugin system.
+
+**HONESTY, kept where it is easy to lose.** `verified` and `user` are different claims and the tray
+prints them differently ("Checked — this is set." vs "You marked this done. Nothing was checked."). A
+stored row that cannot be read is **dropped**, never repaired into a plausible task.
+
+🔒 **THE SAFETY PROPERTY THAT MADE THIS SHIPPABLE:** the durable record is best-effort by design, so
+every write can silently do nothing — and a permission gate **auto-denies** on its timeout. If the tray
+could only show what the store returned, an unavailable store would have turned this feature into the
+cause of the failure it exists to prevent, with the inline card it replaces already deleted. So
+`mergeLiveActions` renders the **union** of what was stored and what the running build is asking for
+right now, matched on the THING rather than the id (a second copy of the server's hash on the client is
+a drift waiting to happen). A live-only row can be answered but carries no Done button: there is
+nowhere to record that decision, and a button that forgets what it was told is worse than no button.
+
+**Gate:** 46 new tests in `tests/whatTheUserMustDo.test.ts`, reversion-proven four ways (dropping the
+recorder, letting a declined row re-open, closing with `set(merge)`, skipping the vault check each turn
+one test red).
+
+**STILL OPEN — this is PR 1 of 3, and the biggest half is PR 2.** The tray shows what the engine
+already *emits*. The larger category — "connect GitHub", "connect a database", "point your domain" — is
+still **prose inside the model's summary** and reaches no structured surface. PR 2 derives those from
+facts the server already holds (an env var with no value, no repo connected, no database connected) at
+zero model cost; PR 3 gives the builder a tool to raise and resolve rows itself, and feeds the open list
+into the per-turn context — deliberately the per-turn message, not the cached prefix, or every build's
+prompt cache breaks. Extracting rows from the summary with a regex or an extra model pass was
+considered and **rejected**: fragile, and it would bill every build for it.

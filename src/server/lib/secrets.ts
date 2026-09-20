@@ -261,6 +261,21 @@ export async function loadUserVaultSecrets(
 }
 
 /**
+ * The NAMES of the keys an app would actually receive — nothing else.
+ *
+ * Added for the build's "what the user must do" list (2026-09-20), which has to answer one question:
+ * would the build find this variable? So it asks through the SAME scoped read the build itself uses
+ * rather than a cheaper query over the collection, because the two would not agree. A names-only
+ * query would also count a row whose stored value no longer decrypts, and marking such a task
+ * "verified" would be a false statement about the user's own app — the one thing that list may not do.
+ *
+ * The values are discarded in this expression and never leave this function.
+ */
+export async function loadUserSecretNamesFor(userId: string, workspaceId?: string | null): Promise<string[]> {
+  return Object.keys(await loadUserVaultSecrets(userId, workspaceId));
+}
+
+/**
  * The names this app did NOT receive, for an honest line in the build report.
  *
  * Least privilege's own failure mode is a user wondering why the key they definitely saved is not

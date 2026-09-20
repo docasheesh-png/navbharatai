@@ -12,6 +12,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { audit, truncateForAudit } from '../lib/audit';
 import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { trimChannel, dropChannel, mergeTruncation } from './reportTruncation';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 
@@ -169,7 +170,16 @@ export const STORED_LLM_CALLS_MAX = 40;
 
 export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDiagnosticsReport {
   const report = redactReportSecrets(reportIn);
-  const trimmedIssues = (report.issues ?? []).slice(-500);
+  const prior = report.truncation;
+  // 🔒 EVERY CAP BELOW GOES THROUGH `trimChannel`, WHICH RETURNS THE LOSS WITH THE LIST. That is the
+  // whole point: before 2026-09-20 these were four `slice`/`lastN` calls that returned only the
+  // shorter list, so a report stored with 40 of 312 model calls said "40" and nothing else. Trimming
+  // and declaring are now ONE operation and cannot be done separately. See reportTruncation.ts.
+  const issues = trimChannel(report.issues, 500, prior?.channels?.issues);
+  const commands = trimChannel(report.commands, 40, prior?.channels?.commands);
+  const llmCalls = trimChannel(report.llmCalls, STORED_LLM_CALLS_MAX, prior?.channels?.llmCalls);
+  const errors = trimChannel(report.errors, 50, prior?.channels?.errors);
+  const trimmedIssues = issues.list ?? [];
   return {
     ...report,
     issues: trimmedIssues,
@@ -177,11 +187,45 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDia
     // never reference an entry that just fell out of the stored `issues` timeline, and can never
     // itself bypass this function's byte-budget trimming with an unbounded list of its own.
     problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
-    commands: lastN(report.commands, 40)?.map((c) => ({ ...c, stdout: cap(c.stdout, 1500) ?? '', stderr: cap(c.stderr, 1500) ?? '' })),
-    llmCalls: lastN(report.llmCalls, STORED_LLM_CALLS_MAX)?.map((c) => ({ ...c, promptPreview: cap(c.promptPreview, 800), responsePreview: cap(c.responsePreview, 800) })),
-    errors: lastN(report.errors, 50)?.map((e) => ({ ...e, message: cap(e.message, 2000) ?? '', stack: cap(e.stack, 1500) })),
+    commands: commands.list?.map((c) => ({ ...c, stdout: cap(c.stdout, 1500) ?? '', stderr: cap(c.stderr, 1500) ?? '' })),
+    llmCalls: llmCalls.list?.map((c) => ({ ...c, promptPreview: cap(c.promptPreview, 800), responsePreview: cap(c.responsePreview, 800) })),
+    errors: errors.list?.map((e) => ({ ...e, message: cap(e.message, 2000) ?? '', stack: cap(e.stack, 1500) })),
     // generatedFiles already capped at 20 × 6000 chars by BuildDiagnostics — kept as-is (the bug evidence).
     generatedFiles: report.generatedFiles,
+    truncation: mergeTruncation(prior, {
+      issues: issues.fact, commands: commands.fact, llmCalls: llmCalls.fact, errors: errors.fact,
+    }),
+  };
+}
+
+/**
+ * THE LAST-RESORT DROP — one function, because there were four identical copies of it.
+ *
+ * 🔴 WHY IT IS A FUNCTION AND NOT FOUR SPREADS (rule 2 — fix the class, not the instance). Each of
+ * `saveDiagnostics`, `saveDiagnosticsHistory` and their two per-user siblings carried its own
+ * `{ ...stored, commands: undefined, llmCalls: undefined, issues: slice(-200) }`. A fix written at
+ * one of them would have been forgotten at the fourth — the drifted-copy class this repo has already
+ * paid for with `safeRelPath` (four copies) and the zombie-write lane (fixed in one of two). Here it
+ * would have been worse than a drift: three of four paths would keep lying about the same build.
+ *
+ * 🔒 It declares what it destroys. `commands: undefined` is otherwise indistinguishable from a build
+ * that ran no commands, and `dropChannel` carries the count forward so the record reads "0 of 312".
+ */
+export function dropHeavyChannelsForStorage(stored: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const prior = stored.truncation;
+  const issues = trimChannel(stored.issues, 200, prior?.channels?.issues);
+  const commands = dropChannel(stored.commands, prior?.channels?.commands);
+  const llmCalls = dropChannel(stored.llmCalls, prior?.channels?.llmCalls);
+  const trimmedIssues = issues.list ?? [];
+  return {
+    ...stored,
+    commands: commands.list,
+    llmCalls: llmCalls.list,
+    issues: trimmedIssues,
+    problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
+    truncation: mergeTruncation(prior, {
+      issues: issues.fact, commands: commands.fact, llmCalls: llmCalls.fact,
+    }),
   };
 }
 
@@ -204,8 +248,27 @@ const EMBED_MAX_ISSUES = 120;
  */
 export function compactReportForRecord(reportIn: BuildDiagnosticsReport): BuildDiagnosticsReport {
   const report = redactReportSecrets(reportIn); // SECURITY 2.1 — the embedded copy is redacted too
-  const issues = (report.issues ?? []).slice(-EMBED_MAX_ISSUES).map((i) => ({ ...i, message: cap(i.message, 400) ?? '' }));
+  const prior = report.truncation;
+  const trimmed = trimChannel(report.issues, EMBED_MAX_ISSUES, prior?.channels?.issues);
+  const issues = (trimmed.list ?? []).map((i) => ({ ...i, message: cap(i.message, 400) ?? '' }));
+  // 🔒 THE DELIBERATE DROPS ARE DECLARED TOO, and that is not pedantry. This copy omits the forensic
+  // channels ON PURPOSE (they live in workspace_diagnostics_v3), but a reader holding only this copy
+  // cannot tell "omitted by design" from "the build made none" — the same ambiguity the storage caps
+  // created. `fullerCopy` says where the whole record is, so the answer is findable rather than
+  // guessable.
+  const dropped = {
+    issues: trimmed.fact,
+    commands: dropChannel(report.commands, prior?.channels?.commands).fact,
+    llmCalls: dropChannel(report.llmCalls, prior?.channels?.llmCalls).fact,
+    errors: dropChannel(report.errors, prior?.channels?.errors).fact,
+    generatedFiles: dropChannel(report.generatedFiles, prior?.channels?.generatedFiles).fact,
+  };
+  const truncation = mergeTruncation(
+    { ...(prior ?? { complete: true }), fullerCopy: 'the full build report saved for this workspace' },
+    dropped,
+  );
   return {
+    truncation,
     schema: report.schema,
     // P0 — the identity fields MUST ride with the embedded copy too, else the export can't verify a
     // report loaded from the conversation record belongs to the active build.
@@ -271,14 +334,7 @@ export async function saveDiagnostics(workspaceId: string, report: BuildDiagnost
     // Final safety net: if it is still somehow over the limit, drop the heaviest channels entirely
     // rather than fail the write (an empty-channel report still beats no report at all).
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
-      stored = {
-        ...stored,
-        commands: undefined,
-        llmCalls: undefined,
-        issues: furtherTrimmedIssues,
-        problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')),
-      };
+      stored = dropHeavyChannelsForStorage(stored);
     }
     const db = getDb();
     if (!db) { reportSaveFailure('workspace', workspaceId, stored, new Error('Firestore unavailable (init failed)')); return; }
@@ -346,8 +402,7 @@ export async function saveLatestForUser(userId: string | null, report: BuildDiag
   try {
     let stored = trimReportForStorage(report);
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
-      stored = { ...stored, commands: undefined, llmCalls: undefined, issues: furtherTrimmedIssues, problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')) };
+      stored = dropHeavyChannelsForStorage(stored);
     }
     const db = getDb();
     if (!db) { reportSaveFailure('user', uid, stored, new Error('Firestore unavailable (init failed)')); return; }
@@ -435,14 +490,7 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
     // Same final safety net as saveDiagnostics — a history entry that fails to write because it's
     // over budget is worse than a lighter one that succeeds.
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
-      stored = {
-        ...stored,
-        commands: undefined,
-        llmCalls: undefined,
-        issues: furtherTrimmedIssues,
-        problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')),
-      };
+      stored = dropHeavyChannelsForStorage(stored);
     }
     const db = getDb();
     // History gets retry + LOUD failure but no emergency stash: the same report is already held by
@@ -491,8 +539,7 @@ export async function upsertDiagnosticsHistoryProgress(workspaceId: string, repo
   try {
     let stored = trimReportForStorage(report);
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
-      stored = { ...stored, commands: undefined, llmCalls: undefined, issues: furtherTrimmedIssues, problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')) };
+      stored = dropHeavyChannelsForStorage(stored);
     }
     const db = getDb();
     if (!db) return; // the latest-doc + per-user paths still hold this report; the archive entry is optional here

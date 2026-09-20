@@ -29,6 +29,7 @@ import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { toPowerLevel, type PowerLevel } from '../AgentV3/powerLevel';
 import { tierDisplayName } from '../AgentV3/tierLadder';
 import { STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore';
+import { channelWasTruncated, type ReportTruncation } from '../AgentV3/reportTruncation';
 
 export type AppSize = 'simple' | 'mid' | 'full-stack' | 'unknown';
 
@@ -77,7 +78,23 @@ export interface RealCost {
 const tokens = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
 
 /** Recompute a build's real provider cost from its persisted per-call records. Pure. */
-export function realCostFromCalls(calls: readonly LlmCallRecord[] | undefined): RealCost {
+export function realCostFromCalls(
+  calls: readonly LlmCallRecord[] | undefined,
+  /**
+   * The report's OWN statement of what it lost (reportTruncation.ts) — the exact answer where the
+   * line below could only guess.
+   *
+   * 🔴 THE GUESS HAS A REAL FALSE POSITIVE. `calls.length >= STORED_LLM_CALLS_MAX` marks a build
+   * that genuinely made exactly 40 calls as a lower bound, so its cost is dropped from the admin's
+   * measured sample and its margin shown as null — a correct measurement discarded as unreliable.
+   * The guess existed only because the stored report could not say; since 2026-09-20 it can.
+   *
+   * A LEGACY report carries nothing here and keeps the length heuristic, which is why that line
+   * stays: erring toward "lower bound" is the margin-safe direction, and dropping the fallback
+   * would silently start trusting old truncated logs as complete.
+   */
+  truncation?: ReportTruncation,
+): RealCost {
   let usd = 0; let measuredCalls = 0; let unmeasuredCalls = 0;
   for (const c of calls ?? []) {
     const inp = tokens(c?.inputTokens); const out = tokens(c?.outputTokens);
@@ -86,7 +103,10 @@ export function realCostFromCalls(calls: readonly LlmCallRecord[] | undefined): 
     usd += usageCostUsd({ inputTokens: inp ?? 0, outputTokens: out ?? 0 }, rate);
     measuredCalls += 1;
   }
-  const capped = (calls?.length ?? 0) >= STORED_LLM_CALLS_MAX;
+  const declared = channelWasTruncated(truncation, 'llmCalls');
+  const capped = declared !== undefined
+    ? declared                                        // measured: the report says so, either way
+    : (calls?.length ?? 0) >= STORED_LLM_CALLS_MAX;   // legacy: the only signal an old report has
   return { usd, measuredCalls, unmeasuredCalls, capped, measured: measuredCalls > 0 && unmeasuredCalls === 0 && !capped };
 }
 
@@ -142,7 +162,7 @@ export function buildCostRow(entry: StoredReport, usdInr: number): BuildCostRow 
   // Settled figure first — it is what the bill was priced from. The call-log path exists only for
   // reports written before the settle recorded it.
   const settled = tokens(billing?.realCostUsd);
-  const fromLog = settled === null ? realCostFromCalls(r.llmCalls) : null;
+  const fromLog = settled === null ? realCostFromCalls(r.llmCalls, r.truncation) : null;
   const realUsd = settled !== null ? settled : fromLog && fromLog.measuredCalls > 0 ? fromLog.usd : null;
   const realKnown = realUsd !== null && rate > 0;
   const source: RealCostSource = settled !== null ? 'settled'

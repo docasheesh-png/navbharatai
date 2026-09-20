@@ -16026,12 +16026,33 @@ async function noteBuildOutcome(
             const reviewerName = judgeEngineLabel(judge.kind);
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: JudgeVerdict, tag: string): void => {
-              // THREE OUTCOMES, AND THE DETAIL ON ALL OF THEM. This used to print `PASS`/`FAIL` from
-              // `v.pass` and append the findings ONLY on a failure — so a judge that could not run
-              // (which returns pass=true so it never blocks a build) was recorded as a passing review
-              // with its own explanation discarded. See describeJudgeVerdict.
+              // 🔴 A REVIEW THAT DID NOT HAPPEN IS NEVER PRINTED AS "PASS" (2026-09-19/20).
+              //
+              // This line used to render `PASS` for anything with `pass: true` and then DROP the
+              // findings on a pass (`v.pass ? '' : ' — ' + …`). So a judge that threw — no key, wrong
+              // host, exhausted credits — was recorded as `PASS (score 0)` with its own honest
+              // explanation thrown away, and a reply nobody could parse as `PASS (score 100)`, which
+              // is indistinguishable from a real pass at the one place a human looks.
+              //
+              // ⚠️ TWO PRs FIXED THIS FROM OPPOSITE ENDS AND BOTH ARE KEPT (united 2026-09-20):
+              //   • the SEPARATE CODE (#3143) — `CHEAP_REVIEW` is what somebody greps for to ask
+              //     "what did the reviewer say?", and a run where it said nothing must not answer
+              //     that question with a number. `CHEAP_REVIEW_NOT_RUN` is in PROCESS_ONLY_CODES
+              //     because it is a fact about OUR instrument, never a finding about the user's app
+              //     (same rule as JOURNEY_NOT_RUN and PAGE_RENDER_NOT_RUN);
+              //   • the DETAIL ON EVERY OUTCOME (#3154) — the honest sentence the judge wrote was
+              //     being discarded by the reader on a pass, which is how an empty project came to
+              //     be filed as a bare `PASS (score 0)`.
+              //
+              // 🔒 ONE decision, two readers. `describeJudgeVerdict` is the single place that turns a
+              // verdict into label + severity + detail; the CODE is derived from its label rather
+              // than from a second copy of the same rule, so the two can never drift apart.
               const d = describeJudgeVerdict(v);
               try {
+                if (d.label === 'NOT RUN') {
+                  buildDiag.record({ phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW_NOT_RUN', message: `${tag}: NOT REVIEWED — ${d.detail || 'the reviewer produced no usable verdict'}`, autoResolved: true });
+                  return;
+                }
                 buildDiag.record({
                   phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW', autoResolved: true,
                   message: `${tag}: ${d.label} (score ${v.score})${d.detail ? ' — ' + d.detail : ''}`,

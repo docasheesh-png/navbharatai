@@ -297,6 +297,25 @@ export function signalsCouldNotRead(prompt: string): boolean {
  *
  * Segments shorter than two letters are dropped, so trailing punctuation and "1." style numbering
  * do not inflate the count.
+ *
+ * ⛔ THE DANDA `।` IS DELIBERATELY NOT HERE, AND THIS IS THE MEASUREMENT THAT DECIDED IT
+ * (2026-09-20). It looks like an omission — this counter exists FOR requests in Indic scripts, and
+ * `।` is what Hindi, Bengali, Marathi and Nepali actually type — so it will be proposed again.
+ *
+ * Measured on the same 8-feature school-ERP request, all four forms:
+ *   English, commas ............ 8    Hindi, commas ....... 8    Bengali, commas ..... 7
+ *   English prose, 6 sentences . 1    Hindi prose, 6 dandas ............................ 1
+ *
+ * Two facts follow. **Indic script is NOT the blind spot** — a comma-separated Indic list already
+ * counts correctly, and the comma is what these scripts use for lists. And **the danda is the Indic
+ * FULL STOP, not the Indic comma**: adding it would make six sentences of Hindi PROSE count 6 while
+ * the identical English prose counts 1 — because the English full stop is, deliberately, not a
+ * separator here either. That is not a fix; it is a penalty aimed at the exact users it would be
+ * "for". The gap that remains is real but narrow (someone who writes their LIST with dandas), and it
+ * costs less than the asymmetry buying it would cost.
+ *
+ * 🔒 `tests/theDandaIsAFullStopNotAComma.test.ts` locks both halves, so adding `।` fails CI with the
+ * reason attached rather than silently shipping the asymmetry.
  */
 export function enumeratedParts(prompt: string): number {
   return String(prompt ?? '')

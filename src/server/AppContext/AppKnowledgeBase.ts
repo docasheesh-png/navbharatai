@@ -1832,8 +1832,9 @@ Tap a tab to open that surface (it takes over the screen on mobile); tap it agai
 • Remembers conversation context within a session.
 • Responds in the SAME language and tone the user writes in — Hindi reply for Hindi input, English for English, etc.
 • START A NEW CHAT any time with the "+ New" button at the top-right of the chat, next to the Teach toggle. It clears the screen for a fresh conversation; the one you were having is already saved and stays in History, so nothing is lost and you can reopen it whenever you like.
+• SWITCH MODE (2026-09-20): the Mode picker — NavBharatAI FREE, Image Generator AI, Doctor AI or any expert — is the "Mode" button in the bottom bar on a phone, and on a desktop/laptop the "Mode" button at the LEFT of the message box. Both open the same list and the same choice; picking an expert opens that expert's real chat.
 NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
-    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language. To get a picture, just ask for one in plain text (e.g. "generate an image of…", "ek image banao…") — it is generated free and shown inline. To begin a fresh conversation, tap "+ New" at the top-right of the chat — your previous chat stays saved in History.',
+    howToUse: 'Open "NavBharatAI FREE" from the sidebar menu (or tap "Start Free Chat" on Home) and type your question in any language. To get a picture, just ask for one in plain text (e.g. "generate an image of…", "ek image banao…") — it is generated free and shown inline. To begin a fresh conversation, tap "+ New" at the top-right of the chat — your previous chat stays saved in History. To switch to Image Generator AI, Doctor AI or any expert, use "Mode": in the bottom bar on a phone, or the Mode button at the left of the message box on a desktop.',
     relatedFeatures: ['pro_chat', 'history', 'free_chat_file_analysis', 'ai_image_gen'],
     aiSurface: 'nbi_chat',
     keywords: [
@@ -1843,6 +1844,7 @@ NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
       'generate image in chat', 'image banao', 'photo banao', 'make an image', 'draw', 'picture in chat', 'free image',
       'new chat', 'start new chat', 'naya chat', 'nayi chat', 'new conversation', 'clear chat', 'chat clear karo',
       'fresh chat', 'purani chat hatao', 'reset chat', 'start over', 'naya shuru karo',
+      'mode', 'mode button', 'change mode', 'mode badlo', 'switch expert', 'mode selector', 'mode on desktop', 'mode kahan hai',
     ],
   },
   {
@@ -2703,7 +2705,7 @@ NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
     id: 'pro_chat_extended_thinking',
     name: 'NavBharatAI Pro — Extended Thinking (Complex Tasks)',
     path: 'NavBharatAI Pro → just describe a complex task (auto-detected)',
-    description: `NavBharatAI Pro automatically detects complex tasks (full-stack apps, multi-system architecture, OAuth, real-time features, enterprise scale) and switches on deeper "extended thinking" for that build — the engine reasons harder before it writes code. No setting needed; it decides when deep reasoning is required, and shows a short "thinking" status while it plans. (You can also force the strongest reasoning tiers from the build-options menu.)`,
+    description: `NavBharatAI Pro automatically detects complex tasks (full-stack apps, multi-system architecture, OAuth, real-time features, enterprise scale) and switches on deeper "extended thinking" for that build — the engine reasons harder before it writes code. No setting needed; it decides when deep reasoning is required. Since 2026-09-20 that reasoning is NOT printed into the chat — the chat shows what the engine is DOING (the live activity line, the files it changes, the reply and the diff), not its private working notes. (You can also force the strongest reasoning tiers from the build-options menu.)`,
     howToUse: 'Describe a complex app (e.g. "Build a full-stack SaaS with OAuth and payments") and NavBharatAI Pro automatically uses extended thinking for deeper architectural reasoning. For maximum reasoning, pick a higher power tier in the build-options (⚙) menu.',
     relatedFeatures: ['pro_chat', 'pro_chat_planner'],
     aiSurface: 'pro_chat',

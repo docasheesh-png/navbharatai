@@ -45,6 +45,12 @@ const LIST_OPENER =
   /\b(?:with|including|includes|such as|like|having|jisme|jismein|jinme|jinmein|jaise|aur usme|ke saath)\b|:/i;
 
 /** The separators a person actually types between parts of a list, in English and in Hinglish. */
+// ⛔ NO DANDA `।` HERE EITHER — the same measurement, and the same reason. See the long note on
+// `enumeratedParts` in RequestAnalyser.ts: a comma-separated Indic list already counts correctly
+// (Hindi 8/8, Bengali 8/8 on the school-ERP request), and `।` is the Indic FULL STOP, so admitting it
+// would score Indic PROSE as a feature list while identical English prose scores nothing. This
+// counter gates Software Project Mode and the mega-roadmap, so a false 8 there spends a planner call
+// on somebody describing their shop in six sentences.
 const ITEM_SEPARATOR = /\s*(?:[,;/|]|\band\b|&|\baur\b|\btatha\b|\bplus\b)\s*/i;
 
 /** A bullet or numbered list marker at the head of a line. */

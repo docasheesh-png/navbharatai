@@ -51,6 +51,7 @@ import { NextSuggestionsBulb } from './NextSuggestionsBulb';
 import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
+import { buildProgress, type BuildProgress } from './buildProgress';
 import { MessageActions } from './MessageActions';
 import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
@@ -970,6 +971,32 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // continuity feature must compute that same id instead of silently going dead (`undefined`).
   const expectedWorkspaceId = (): string | undefined =>
     state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current) || undefined;
+
+  // HOW MUCH OF THE APP IS BUILT (admin 2026-09-20: "app kitne % ban gayi woh bhi likh kar aana
+  // chahiye … 100% done - tap on preview!").
+  //
+  // The floor is held in a ref so the number can never fall back mid-build — a percentage that drops
+  // reads as failure even when the engine is fine. It is reset by BUILD ID, not by a timer or by
+  // `running`: a new build is a new app, and the previous build's 100% must not seed the next one's
+  // first frame. Everything else comes from buildProgress.ts, which is pure and refuses to invent a
+  // value that no event supports.
+  const progressFloorRef = useRef(0);
+  const progressBuildRef = useRef<string | undefined>(undefined);
+  if (progressBuildRef.current !== state.buildId) {
+    progressBuildRef.current = state.buildId;
+    progressFloorRef.current = 0;
+  }
+  const progress = buildProgress({
+    started: running || state.done,
+    todos: state.todos,
+    buildPhase: state.buildPhase,
+    previewUrl: state.previewUrl,
+    appRendered: state.appRendered,
+    done: state.done,
+    ok: state.ok,
+    floor: progressFloorRef.current,
+  });
+  progressFloorRef.current = progress.pct;
 
   // The chat thread merges the user's own messages with the engine's live
   // narration (which streams in word-by-word and finalizes in place), ordered by
@@ -4411,7 +4438,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {(running || state.activity.length > 0) && (
-              <WorkingIndicator activity={state.activity} running={running} />
+              <WorkingIndicator activity={state.activity} running={running} progress={progress} />
             )}
             {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
                 NavBharatAI drives a real browser through the app's own forms — fills them in,
@@ -5509,7 +5536,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <span className="font-medium text-muted capitalize shrink-0">{tab}</span>
             {(running || state.activity.length > 0) && (
               <div className="flex-1 min-w-0 flex justify-end">
-                <WorkingIndicator activity={state.activity} running={running} />
+                <WorkingIndicator activity={state.activity} running={running} progress={progress} />
               </div>
             )}
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" aria-label="Close workspace" className="ml-auto shrink-0 flex items-center text-muted hover:text-ink">
@@ -6418,7 +6445,7 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, running }: { activity: ActivityEntry[]; running: boolean }) {
+function WorkingIndicator({ activity, running, progress }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const mountTsRef = useRef(Date.now());
 
@@ -6445,8 +6472,15 @@ function WorkingIndicator({ activity, running }: { activity: ActivityEntry[]; ru
     <div className="text-xs text-faint w-full max-w-[90%]">
       <div className="flex items-center gap-2 w-full text-left">
         {running ? <WavingTiranga size={16} /> : <span className="text-success">✓</span>}
-        <span className="truncate flex-1">{running ? `${current ? `${activityIcon(current)} ${current.text}` : 'working…'}` : 'Done'}</span>
+        <span className="truncate flex-1">{running ? `${current ? `${activityIcon(current)} ${current.text}` : 'working…'}` : (progress?.label ?? 'Done')}</span>
         {running && current?.active && <span className="inline-block w-1 h-3 bg-current animate-pulse shrink-0" />}
+        {/* HOW MUCH OF THE APP IS BUILT (admin 2026-09-20). Every point of it is a count of things that
+            really happened — see buildProgress.ts, which exists mainly to refuse a timer-driven bar.
+            While running it rides beside the clock; once finished the label takes over the line, so a
+            done build reads "100% done — tap Preview" instead of a bare "Done". */}
+        {running && progress && progress.pct > 0 && (
+          <span className="shrink-0 tabular-nums font-medium text-accent-text">{progress.pct}%</span>
+        )}
         <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
     </div>

@@ -33,6 +33,15 @@ export interface JudgeVerdict {
    * fifth absolute rule asks for ("fix the system's honesty too").
    *
    * Absent is treated as `true` by every reader, so an older caller keeps today's meaning.
+   *
+   * 🔎 THE OTHER HALF OF THIS ROOT CAUSE, united here 2026-09-20 (PR #3154). Two sessions fixed this
+   * same bug from opposite ends on the same day and both added THIS field. #3143 fixed the PRODUCERS
+   * (an unreadable reply was awarding a perfect 100); #3154 fixed the READER — `recordVerdict`
+   * printed PASS/FAIL from `pass` and appended `findings` ONLY when pass was false, so a judge that
+   * could not run was filed as `Sonnet review: PASS (score 0)`: a pass, with its own explanation
+   * discarded, under the name of an engine that had not run (`reviewerName` was a ternary with no
+   * `nemotron` branch). Autopsy 31dc61fd. Neither half is redundant — without the first the judge
+   * invents marks, without the second the report throws away the truth the judge did write.
    */
   reviewed?: boolean;
 }
@@ -49,6 +58,7 @@ export interface JudgeVerdict {
  * with reasoning and no JSON, than the `glm-5.3` this parser was written against. A judge that says
  * nothing readable must not score 100.
  */
+
 export function reviewDidNotHappen(why: string): JudgeVerdict {
   return { pass: true, score: 0, findings: [why], reviewed: false };
 }
@@ -138,6 +148,15 @@ export async function judgeBuild(
   if (!files || files.length === 0) {
     // NOTE: `reviewed` stays TRUE here on purpose. We DID look; there was nothing to look at. That is a
     // finding about the app, not about our instrument — the opposite of the two cases above.
+    //
+    // 🔴 THE TWO PRs DISAGREED ON EXACTLY THIS LINE, and the disagreement is recorded rather than
+    // silently resolved (united 2026-09-20). #3154 set it FALSE, reasoning that an empty project
+    // produced no review. `main`'s value stands, for two reasons: `reviewed` answers "did OUR
+    // instrument run?", and here it did — `judgeActuallyRan` gates `CHEAP_REVIEW_NOT_RUN`, which is a
+    // statement about the platform, not the app. The wording complaint behind #3154's choice ("PASS
+    // for an app that does not exist") is real and is fixed by its OTHER half, kept below: the detail
+    // is now printed on EVERY outcome, so this reads `PASS (score 0) — There were no files to
+    // review … it is an absent one.` rather than a bare PASS.
     return { pass: true, score: 0, findings: ['There were no files to review — the project was empty at review time. This is not a passing app; it is an absent one.'], reviewed: true };
   }
   try {
@@ -171,6 +190,31 @@ export function judgeRepairPrompt(userRequest: string, findings: string[]): stri
     '',
     `Original request, for reference: ${userRequest.slice(0, 800)}`,
   ].join('\n');
+}
+
+/**
+ * How a verdict should be RECORDED in the admin build report. Pure, so the wording is testable.
+ *
+ * Three outcomes, not two. `pass` answers "may this build proceed?"; it was never an answer to
+ * "what did the judge find?", and reporting it as one is how "the reviewer could not run" came to be
+ * filed as a passing review (autopsy 31dc61fd).
+ *
+ * ⚠️ THE DETAIL IS KEPT ON EVERY OUTCOME, including a genuine pass. The old line appended findings
+ * only on failure, so the honest sentence the judge had written was discarded by the reader — the
+ * exact shape of losing an explanation that already existed.
+ */
+export function describeJudgeVerdict(v: JudgeVerdict): {
+  label: 'PASS' | 'FAIL' | 'NOT RUN';
+  severity: 'info' | 'warning';
+  detail: string;
+} {
+  const detail = (v.findings || []).slice(0, 3).join('; ');
+  if (v.reviewed === false) {
+    // A warning, not info: a judge that never runs is a gate that silently stopped existing, and a
+    // misconfigured provider can make that permanent without a single failing build to reveal it.
+    return { label: 'NOT RUN', severity: 'warning', detail };
+  }
+  return { label: v.pass ? 'PASS' : 'FAIL', severity: v.pass ? 'info' : 'warning', detail };
 }
 
 /**

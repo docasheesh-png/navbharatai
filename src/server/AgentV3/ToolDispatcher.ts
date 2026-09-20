@@ -146,6 +146,7 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
+import { STARTER_ENTRY_PATHS, starterAppBlocker } from './stillTheStarterApp';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
@@ -1214,11 +1215,41 @@ export class ToolDispatcher {
         // Reading the actual file tree first makes the gate judge the app that exists.
         await this.seedGraphFromWorkspace();
         await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
-        return this.lastReadiness ?? permissive;
+        const report = this.lastReadiness ?? permissive;
+        // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
+        // HEALTH, and a pristine starter template is perfectly healthy — so this gate scored 100/100
+        // on `<h1>Hello World</h1>` and the done signal told the model to stop and hand it over. The
+        // model disbelieved us and kept building; the next one may not.
+        //
+        // Routed through `blockers` deliberately: `appIsDone` already refuses any report carrying
+        // one, so the done signal, the weak checkpoint and every other reader inherit this at once
+        // instead of each learning it separately. See stillTheStarterApp.ts.
+        return await this._blockIfStillTheStarterApp(report);
       })(), 45_000, 'assessBuildReadiness');
     } catch {
       return permissive;
     }
+  }
+
+  /**
+   * Add the "still the starter template" blocker when the app's entry point has not been touched.
+   *
+   * Best-effort and fail-OPEN: a file we cannot read leaves the report exactly as it was. "We could
+   * not look" is not "the app is a scaffold", and inventing a blocker from an unreadable file would
+   * fail real builds on our own trouble — the same rule the timeout above already follows.
+   */
+  private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
+    try {
+      for (const path of STARTER_ENTRY_PATHS) {
+        let content: string;
+        try { content = await withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'starter-entry-read'); }
+        catch { continue; }                       // not this framework's entry, or unreadable — try the next
+        const blocker = starterAppBlocker(content);
+        if (!blocker) return report;              // the entry EXISTS and has been edited → genuinely built
+        return { ...report, ready: false, blockers: [...report.blockers, blocker] };
+      }
+    } catch { /* best-effort — never fail a build on this check's own trouble */ }
+    return report;
   }
 
   /**

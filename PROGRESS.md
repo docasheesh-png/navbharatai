@@ -73918,3 +73918,79 @@ endpoint**. The resource id, filters and field names come from its published doc
 `subIndexOf` deliberately accepts **both** column names the resource has used (`avg_value` and
 `pollutant_avg`) because which is live today could not be verified here. **The first real question
 in the chat is this feature's first real evidence** — watch for an AQI answer appearing at all.
+
+---
+
+## 2026-09-20 — the external data registry: drift made impossible, not merely documented
+
+**Admin** forwarded a ChatGPT plan for a "Government Data Intelligence Layer" over data.gov.in
+across 12 categories, then said: *"sabhi ke jo jo api chahiye … le lunga. batao, kon kon si api
+chahiye … aap kam suru karo."*
+
+### What the audit found, which is NOT what the plan assumed
+
+**The architecture the plan asks for is ~70% already built.** `liveSearchContext` → `liveDataContext`
+→ an ordered list of structured sources, reached from exactly three call sites (chat, professionals,
+agentv3). Detection is **deterministic regex**, not a model call — which is *better* than the plan's
+"AI/Intent Router", that would put an LLM call on every chat turn against the standing "kharcha kam
+se kam" instruction. Kept deterministic deliberately.
+
+🔴 **The real defect is DRIFT, and it was measurable.** `licenceExposure.ts` listed **two** restricted
+sources; the live-data layer calls **seven** external API hosts. **Three had never been examined by
+anybody**, and two of those carry licence conditions we were not meeting:
+
+- **`api.postalpincode.in`** — **not a government API at all** despite the name; a third-party mirror
+  with no published terms.
+- **`open.er-api.com`** — its open tier permits commercial use **only with attribution**, and forbids
+  redistribution. **We show no attribution.** Same class as the Open-Meteo exposure.
+- **`api.themoviedb.org`** — TMDB's terms require an attribution statement; never examined.
+
+Adding a thirteenth category to a list nobody can keep in sync would have made that worse. So the
+valuable thing here is not a dataset.
+
+### What shipped
+
+- **`govData/registry.ts`** — every external data source declared in one place with its host,
+  licence, commercial-use verdict, required attribution, coverage, cache window and verification
+  status.
+- 🔒 **`registryDrift.test.ts` fails CI when code calls a host the registry does not declare.**
+  **Reversion-proven**: an invented host added to the data layer was caught immediately, and the
+  restored tree is green. A source can never again be called without somebody writing down what its
+  licence permits.
+- 🔒 **"Do not fake an endpoint" is now a PROPERTY, not a promise.** `callableSources()` returns only
+  rows that are `verified`/`documented` **and** `enabled`; a data.gov.in row with no resource id is
+  unreachable because there is nothing to call. A test asserts it.
+- **`status` distinguishes `documented` from `verified`**, and the difference is honest: **not one
+  endpoint in this file was confirmed by calling it.** Every data.gov.in host answers
+  `403 CONNECT tunnel failed` through this environment's egress proxy — *tested, not assumed*. Rows
+  marked `documented` come from published documentation only.
+- **One key, whole catalogue**: data.gov.in issues an account-level key, so `DATA_GOV_IN_API_KEY`
+  covers every resource. Adding a dataset needs a **resource id and nothing else** — which is what
+  makes the registry the unit of growth instead of the code.
+
+### Two guards caught my own work before CI did
+
+1. **`typecheck:server` caught five rows missing `lastVerified`** — and the *frontend* typecheck
+   passed while it failed, which is exactly the gap `CLAUDE.md` warns the narrow gate leaves.
+2. 🔴 **The dead-code guard caught the registry itself as unreachable**, because nothing in
+   production imported it. That is correct and it is the second absolute rule biting: a registry no
+   code consults is "built but not really working". Fixed by making it **load-bearing** — the CPCB
+   attribution line now comes *from the registry* instead of being a second hardcoded copy in
+   `liveDataSources.ts`. A licence condition written in two places is one that goes stale in one of
+   them.
+
+### Gate
+
+typecheck ✓ · noUnusedImports ✓ · typecheck:server ✓ · vitest **1912 files, 27,399 passed, 0 FAIL** ·
+build ✓ · test:bundle ✓ · boot:check ✓ · deps:server-gate ✓
+
+### 🔴 Still open — deliberately not built
+
+- **Router, adapters and cache** are the next slice. The cache will reuse `braveSearch.ts`'s proven
+  in-process TTL + in-flight-coalesce pattern rather than inventing one.
+- **`liveDataContext` is FIRST-WINS** (`if (block) return block`), so the plan's multi-source example
+  ("UP aur Bihar compare karo population, literacy, employment") **cannot work today**. Real gap;
+  widening it changes behaviour on all three chat surfaces, so it is its own step.
+- **No government dataset beyond CPCB AQI has a resource id**, and none was invented. The admin is
+  fetching ids + one sample response each, from a list mapped to NavBharatAI's **own 73
+  Professionals** (mandi prices → Kisan AI first) rather than to the plan's generic 12 categories.

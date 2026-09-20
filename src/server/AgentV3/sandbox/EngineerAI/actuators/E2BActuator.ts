@@ -98,6 +98,38 @@ function assertSafeId(id: string, label: string): string {
 // Dedicated tools dir outside the user's workspace — persists across workspace resets
 const TOOLS_DIR = '/home/user/.e-tools';
 
+/**
+ * Where a generated sandbox script MUST live if it `require()`s anything we installed.
+ *
+ * 🔴 THE BUG THIS EXISTS TO KILL, and it is the reason the platform's own browser had NEVER run.
+ *
+ * Playwright is installed with `npm install playwright --prefix ${TOOLS_DIR}`, so it resolves from
+ * `${TOOLS_DIR}/node_modules`. **Node resolves `require()` by walking up from the SCRIPT'S OWN
+ * DIRECTORY — never from `cwd`.** A script written to `/tmp` therefore searches `/tmp/node_modules`
+ * and `/node_modules`, finds no playwright, and exits non-zero. Passing `cwd: TOOLS_DIR` to the
+ * command does nothing about it: `cwd` governs relative PATHS, not module resolution.
+ *
+ * ⚠️ AND THE PREVIOUS FIX IS WHAT INTRODUCED IT — the exact "a fix must never trade one problem for
+ * another" case. These bodies used to run as `node -e "…"`, which had a real shell-quoting bug (the
+ * URL's own double quotes closed the string). Moving the body into a FILE fixed the quoting — and
+ * silently moved the module-resolution root from `cwd` (which `node -e` does use, and which was
+ * already TOOLS_DIR) to the file's directory, `/tmp`. One bug traded for another, and the curl
+ * fallback hid the new one exactly as it had hidden the old one.
+ *
+ * Evidence, from build 31dc61fd: `IN_BUILD_GREEN_UNCHECKED` thirteen times across 912 seconds, every
+ * one of them "WITHOUT a real browser" — while in the SAME sandbox the agent's own `screenshot` and
+ * `browser_action` tools succeeded. Those run `${TOOLS_DIR}/screenshot.js` and
+ * `${TOOLS_DIR}/browser-action.js`; the two that failed were the two written to `/tmp`.
+ *
+ * The unique filename is KEPT — it is why these moved out of a fixed path in the first place: a
+ * long-lived sandbox only has to make one fixed name un-writable to break every later run.
+ * TOOLS_DIR is guaranteed to exist here, because every caller reaches this only after
+ * `_kickoffPlaywright` has resolved true, and that creates it.
+ */
+function toolsScriptPath(prefix: string): string {
+  return `${TOOLS_DIR}/nb_${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}.cjs`;
+}
+
 // THE SANDBOX LIFETIME IS NO LONGER AN HOUR. It used to be a one-hour constant here, refreshed on
 // every activity — a backstop nobody expected to fire, which is exactly why every deploy-orphaned
 // machine billed for the full twenty-minute reaper window (and, before #2782, for the whole hour and
@@ -2212,12 +2244,13 @@ export class E2BActuator implements IEngineerActuator {
       // the `source: 'curl'` fallback below, which is the platform's own documented
       // `PREVIEW_UNVERIFIED` — "fetched without running its JavaScript". The fallback is what kept it
       // invisible. Same bug, same file, found via the deploy failure the admin reported.
-      // Unique per call, for the same reason downloadDistFiles is (see its comment): a fixed name in
-      // /tmp is shared by every run in a sandbox that lives for days, and it only has to become
-      // un-writable once for every later browse to fail. A browse that fails here falls back to the
-      // curl path, which is PREVIEW_UNVERIFIED — the quiet failure that hid the previous bug in this
-      // exact function for weeks.
-      const browsePath = `/tmp/nb_browse_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}.cjs`;
+      // Unique per call, for the same reason downloadDistFiles is (see its comment): a fixed name is
+      // shared by every run in a sandbox that lives for days, and it only has to become un-writable
+      // once for every later browse to fail. A browse that fails here falls back to the curl path,
+      // which is PREVIEW_UNVERIFIED — the quiet failure that hid TWO successive bugs in this exact
+      // function. ⚠️ The DIRECTORY is not a detail: it must be TOOLS_DIR, or `require('playwright')`
+      // cannot resolve and this path fails 100% of the time. See `toolsScriptPath`.
+      const browsePath = toolsScriptPath('browse'); // TOOLS_DIR, never /tmp — see toolsScriptPath.
       const playwrightBody = `
 const {chromium}=require('playwright');
 (async()=>{
@@ -2300,7 +2333,9 @@ ${paintWaitJs('p')}
     // double-quoted `node -e "…"` closed the string, so this screenshot script has never run either.
     // Proven by reproducing the exact shape in a shell, not by reading it. The script goes to a file.
     // Unique per call — same reasoning as browseUrl and downloadDistFiles above.
-    const shotPath = `/tmp/nb_shot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}.cjs`;
+    // ⚠️ IN TOOLS_DIR, never /tmp: it shared browseUrl's SECOND bug too (see `toolsScriptPath`), so
+    // after the quoting was fixed this had still never run — for a different reason, silently.
+    const shotPath = toolsScriptPath('shot'); // TOOLS_DIR, never /tmp — see toolsScriptPath.
     const shotBody = `
 const {chromium}=require('playwright');
 (async()=>{

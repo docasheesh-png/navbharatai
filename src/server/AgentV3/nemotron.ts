@@ -140,6 +140,9 @@ export function nemotronTierAllowed(
 ): boolean {
   if (nemotronHardOff(env)) return false;
   if (!nemotronConfigured(env)) return false;
+  // An unreadable value is still OFF (see the docblock) — but it is no longer SILENT. See
+  // `nemotronConfigNote`.
+  warnIfUnreadable(env);
   // THREE-WAY, and the shared parser gives exactly that shape: `true` (every tier), `false` (handled
   // above as the hard kill), `null` for anything it does not recognise — which is where a tier name
   // like `weak` lands, and where an actual typo lands too. So an unreadable value falls through to the
@@ -201,4 +204,56 @@ export function nemotronAllowedFor(
   if (role === 'rung') return nemotronRungOk(env);
   if (role === 'plan' && PLAN_FORBIDDEN_TIERS.has(tier)) return false;
   return nemotronTierAllowed(tier, env);
+}
+
+
+/**
+ * 🔴 "OFF" AND "I COULD NOT READ WHAT YOU TYPED" ARE DIFFERENT FACTS, AND ONLY ONE OF THEM IS A
+ * DECISION (2026-09-20).
+ *
+ * `nemotronTierAllowed` correctly treats an unrecognised value as OFF — a person who wanted every
+ * tier would type `on`, so a value that is present and unreadable cannot have meant that. What it did
+ * NOT do was say so. The console showed the key configured, the code showed it disabled, and nothing
+ * anywhere connected the two.
+ *
+ * The admin reported setting `AGENTV3_NEMOTRON=week` on 2026-09-20. `week` is not `weak`: it matches
+ * no tier word, so the judge and the plan stayed off while every screen said the feature was on. One
+ * letter, no error, no log, and the single measured saving this vendor was adopted for — the judge, at
+ * 78% of a cheap build's real provider cost — silently not taken.
+ *
+ * This repo has paid for this exact shape four times now: a trailing space in `BRAVE_API_KEY`, an `=`
+ * in `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`, and now this. The fix is the same one
+ * `parseRolloutPercent` already applies: keep the safe verdict, and make the misreading LOUD.
+ *
+ * ⚠️ The value is NOT corrected toward the nearest word. Guessing that `week` meant `weak` would make
+ * the config mean whatever we think it resembles — and the next typo would be a tier the admin never
+ * chose. It stays off; it just stops being quiet about it.
+ */
+export function nemotronConfigNote(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (nemotronHardOff(env)) return null;              // an explicit off is a decision, not a mistake
+  const raw = (env.AGENTV3_NEMOTRON || '').trim();
+  if (!raw) return null;                              // unset is the documented default, not an error
+  if (parseEnvFlag(raw) === true) return null;        // `on` — recognised
+  const parts = raw.toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+  const unknown = parts.filter((p) => !(p in TIER_WORDS));
+  if (unknown.length === 0) return null;              // every part named a real tier
+  return (
+    `AGENTV3_NEMOTRON contains ${unknown.map((u) => JSON.stringify(u)).join(', ')}, which names no tier — ` +
+    `that part is IGNORED and Nemotron's judge/plan stay OFF for it. ` +
+    // ⚠️ "off" is deliberately NOT offered here even though TIER_WORDS contains it. `nemotronHardOff`
+    // is checked first, so a bare `off` disables everything — suggesting it as a tier name would be
+    // advice that does the opposite of what it says.
+    `Accepted: ${Object.keys(TIER_WORDS).filter((w) => w !== 'off').join(', ')}, or "on" for every tier.`
+  );
+}
+
+/** Log the note at most once per distinct value — this is called on every build. */
+const WARNED = new Set<string>();
+function warnIfUnreadable(env: NodeJS.ProcessEnv): void {
+  const note = nemotronConfigNote(env);
+  if (!note) return;
+  const key = (env.AGENTV3_NEMOTRON || '').trim();
+  if (WARNED.has(key)) return;
+  WARNED.add(key);
+  console.error(`[NEMOTRON] ${note}`);
 }

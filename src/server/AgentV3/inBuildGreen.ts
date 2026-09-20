@@ -93,12 +93,44 @@ export function shouldAttemptInBuildProof(s: AttemptState, now: number): boolean
   return true;
 }
 
+/**
+ * 🔴 "COULD NOT TELL" WAS THREE DIFFERENT FACTS WEARING ONE NAME (2026-09-19).
+ *
+ * `inconclusive` collapsed a curl fallback, an unpainted browser snapshot and a dead dev server into
+ * ONE line — `IN_BUILD_GREEN_UNCHECKED`, whose message then had to hedge: "no real-browser capture,
+ * or the server was down". Those three have nothing in common except our ignorance, and they have
+ * completely different fixes: the first is the browser tooling not being installed yet, the second is
+ * the app genuinely not having painted, the third is the machine. A report that cannot tell them
+ * apart cannot be used to fix any of them — which is exactly the position this check was in.
+ *
+ * The older sibling of this very proof already did it right: `LAST_CHANCE_PROOF` records
+ * `rendered=… · inconclusive=… · serverDown=…` in its detail and has a separate
+ * `LAST_CHANCE_PROOF_UNAVAILABLE` for "could not open it at all". This is that discipline, applied to
+ * the proof that was written second and inherited none of it.
+ */
 export type AttemptOutcome =
   | { kind: 'proven' }
   /** The app rendered, but a file was written while the browser was open — the bytes are not the proof. */
   | { kind: 'raced' }
+  /** A real browser looked and the page carried a defect signal (an error overlay, an empty root). */
   | { kind: 'not-rendered' }
-  | { kind: 'inconclusive' };
+  /** The capture never ran the app's JavaScript (the curl fallback) — the browser was not available. */
+  | { kind: 'no-browser' }
+  /** The host or the dev server answered with its own error page. The machine, not the app. */
+  | { kind: 'server-down' }
+  /** A real browser looked and nothing had painted within its wait. Ignorance, not a defect. */
+  | { kind: 'not-painted' }
+  /**
+   * The render WAS proven, but there was nothing to snapshot — collecting the workspace failed and the
+   * build had captured no writes of its own. The one outcome where the app is fine and the protection
+   * still did not happen, so it must never be reported as `proven`.
+   */
+  | { kind: 'nothing-to-save' }
+  /**
+   * The attempt never came back — its own budget ran out, or opening the app threw. We learned
+   * NOTHING, and until 2026-09-19 that was recorded nowhere at all (see `inBuildGreenNote`).
+   */
+  | { kind: 'gave-up'; why?: string };
 
 /**
  * Decide what a finished attempt means. `writesBefore`/`writesAfter` are the write counter read
@@ -110,15 +142,39 @@ export function attemptOutcome(input: {
   writesBefore: number;
   writesAfter: number;
 }): AttemptOutcome {
-  if (input.shot.source !== 'browser' || input.verdict.inconclusive || input.verdict.serverDown) return { kind: 'inconclusive' };
+  // Order is the point: a capture that never ran the app's JavaScript makes every judgement below it
+  // meaningless, and `analyzePreviewHtml` returns `serverDown` from its own early exit, never beside
+  // a paint verdict. Each branch is one fact, so each can be reported as one fact.
+  if (input.shot.source !== 'browser') return { kind: 'no-browser' };
+  if (input.verdict.serverDown) return { kind: 'server-down' };
+  if (input.verdict.inconclusive) return { kind: 'not-painted' };
   if (!input.verdict.rendered) return { kind: 'not-rendered' };
   if (input.writesAfter !== input.writesBefore) return { kind: 'raced' };
   return { kind: 'proven' };
 }
 
-/** The admin-only timeline line for each outcome. Only `proven` is worth a user-facing word. */
+/**
+ * How long ONE in-build proof may take before it is abandoned. Deliberately SMALLER than
+ * `browseUrl`'s own worst case (a 60 s wait for the browser tooling + a 30 s browse command + a 30 s
+ * curl fallback), and that is a trade rather than an oversight: the write counter is read before the
+ * browser opens and again after the files are collected, so the budget IS the race window. A longer
+ * budget would mostly buy `raced` outcomes on a busy loop. So the attempt is cut short — and, since
+ * 2026-09-19, it SAYS so instead of disappearing.
+ */
+export const IN_BUILD_PROOF_BUDGET_MS = 35_000;
+
+/**
+ * The admin-only timeline line for each outcome. Only `proven` is worth a user-facing word.
+ *
+ * 🔴 `autoResolved` IS NOT DECORATION, AND IT USED TO BE WRONG ON EVERY FAILURE. It was `true` for
+ * every outcome, including `raced`, `not-rendered` and the whole blind family — the same shape as the
+ * `JOURNEY_PASSED` bug this repo has already paid for once, where a check that found nothing recorded
+ * a passing code whose own message said it had not run. Nothing is being resolved when a proof fails,
+ * so only `proven` claims it. Severity stays `info` for all of them, so this changes NO count and NO
+ * gate: `shippingIssueCount` filters on `error` / `warning` and never reads an `info` line.
+ */
 export function inBuildGreenNote(outcome: AttemptOutcome, facts: { elapsedMs: number; fileCount?: number }): {
-  code: string; severity: 'info'; message: string; autoResolved: true;
+  code: string; severity: 'info'; message: string; autoResolved: boolean; detail?: string;
 } {
   const secs = Math.max(0, Math.round(facts.elapsedMs / 1000));
   switch (outcome.kind) {
@@ -129,18 +185,47 @@ export function inBuildGreenNote(outcome: AttemptOutcome, facts: { elapsedMs: nu
       };
     case 'raced':
       return {
-        code: 'IN_BUILD_GREEN_RACED', severity: 'info', autoResolved: true,
+        code: 'IN_BUILD_GREEN_RACED', severity: 'info', autoResolved: false,
         message: `The app rendered ${secs}s into this build, but a file was written while it was being opened, so the state on disk is not the state that was proven — no snapshot taken; will try again.`,
       };
     case 'not-rendered':
       return {
-        code: 'IN_BUILD_GREEN_NOT_YET', severity: 'info', autoResolved: true,
+        code: 'IN_BUILD_GREEN_NOT_YET', severity: 'info', autoResolved: false,
         message: `Opened the app ${secs}s into this build; it had not rendered yet. Nothing recorded.`,
+      };
+    case 'not-painted':
+      return {
+        code: 'IN_BUILD_GREEN_UNCHECKED', severity: 'info', autoResolved: false,
+        message: `A real browser opened the app ${secs}s into this build and nothing had painted before it gave up waiting. Nothing recorded — and this is NOT evidence the app is broken.`,
+        detail: 'The capture was a real browser; the page simply had no content yet. A later trigger looks again.',
+      };
+    case 'no-browser':
+      return {
+        code: 'IN_BUILD_GREEN_UNCHECKED', severity: 'info', autoResolved: false,
+        message: `Looked at the app ${secs}s into this build, but the capture came back WITHOUT a real browser, so nothing could be proven. Nothing recorded.`,
+        detail: 'The page was fetched without running its JavaScript (the curl fallback), which is what happens while the '
+          + "sandbox's browser tooling is still installing or failed to install. A single-page app looks empty there whether it works or not.",
+      };
+    case 'nothing-to-save':
+      return {
+        code: 'IN_BUILD_GREEN_UNCHECKED', severity: 'info', autoResolved: false,
+        message: `The app rendered ${secs}s into this build, but there were no files to record as the last known good, so nothing was protected.`,
+        detail: 'Collecting the workspace did not return a file and the build had captured no writes of its own — '
+          + 'the render is real, the snapshot is not. Reported separately because "it rendered" and "it is protected" are different facts.',
+      };
+    case 'server-down':
+      return {
+        code: 'IN_BUILD_GREEN_UNCHECKED', severity: 'info', autoResolved: false,
+        message: `Looked at the app ${secs}s into this build and the server was not answering. Nothing recorded — that is the machine, not the app.`,
+        detail: 'The host or the dev server returned its own error page, so the app was never reached.',
       };
     default:
       return {
-        code: 'IN_BUILD_GREEN_UNCHECKED', severity: 'info', autoResolved: true,
-        message: `Opened the app ${secs}s into this build but could not tell whether it rendered (no real-browser capture, or the server was down). Nothing recorded.`,
+        code: 'IN_BUILD_GREEN_UNCHECKED', severity: 'info', autoResolved: false,
+        message: `The in-build proof could not complete ${secs}s into this build, so it learned nothing. Nothing recorded — a limit of the check, never a verdict about the app.`,
+        detail: (outcome.kind === 'gave-up' && outcome.why ? `${outcome.why} · ` : '')
+          + `budget ${Math.round(IN_BUILD_PROOF_BUDGET_MS / 1000)}s. Until 2026-09-19 this case recorded NOTHING AT ALL, so a proof that `
+          + 'timed out and a proof that never ran looked identical in the report.',
       };
   }
 }

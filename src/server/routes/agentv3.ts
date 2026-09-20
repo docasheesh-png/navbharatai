@@ -192,7 +192,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -229,7 +229,7 @@ import {
   getShell,
   MAX_SHELLS_PER_WORKSPACE,
 } from '../AgentV3/ShellSessions';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, findingAboutUntouchedCode, type UntouchedCodeReason, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
 import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
@@ -16915,7 +16915,16 @@ async function noteBuildOutcome(
         // ADVISORY notes so they can never be counted as OUR unresolved defects or become the build's
         // rootCause — which is exactly what made a successful survey report "14 unresolved problems" with
         // an unused-dependency hint as its headline cause. Unchanged on a real build/edit turn.
-        const obs = (message: string) => importTurnObservation(isImportTurn, message);
+        // 🔴 …AND A TURN THAT WROTE NOTHING IS THE SAME SITUATION (autopsy 586295b7, 2026-09-20).
+        // An import turn is one way of not having written the code under analysis; a build the user
+        // stopped, or one that produced nothing, is another. That build filed an accessibility warning
+        // about the user's own untouched `src/App.tsx` as one of four "unresolved problems" — and not
+        // one of the four was a defect of the build. The question is "did we write this?", never "how
+        // did this turn begin?".
+        const untouchedReason: UntouchedCodeReason | null = isImportTurn
+          ? 'import'
+          : (writtenFiles.size === 0 ? 'no-writes' : null);
+        const obs = (message: string) => findingAboutUntouchedCode(untouchedReason, message);
         // MISSING SPA FALLBACK (ROADMAP #1 Phase 4.1) — the "Cannot GET /customer/home" class. Until now
         // this was only ever noticed AFTER the fact, by the preview verifier, as a symptom with no named
         // cause; the report said the preview did not render and the autopsy had to guess why. This names
@@ -20231,6 +20240,9 @@ async function noteBuildOutcome(
                 provenBroken: previewProvenBroken,
                 // Carried so the recorded reason cannot claim more than the build itself reported.
                 ready: !buildDiag.hasUnresolvedReadinessBlocker(),
+                // THE THIRD MEANING OF "not green" — see the field's own docblock. A turn that wrote
+                // nothing has no changes to keep, lose or verify, and the guard must not say it does.
+                filesWrittenThisTurn: writtenFiles.size,
               });
               buildDiag.record({
                 phase: 'build', severity: 'info', code: `GREEN_GUARD_${decision.action.toUpperCase()}`,
@@ -20273,7 +20285,7 @@ async function noteBuildOutcome(
                   removed: plan.remove.length,
                   fromThisBuild: snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt),
                 };
-              } else if (hasSnapshot && !previewGreen) {
+              } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
                 // quieter one; the change is theirs, it stayed, and we could not confirm it.
@@ -20482,15 +20494,33 @@ async function noteBuildOutcome(
         expectsArtifacts,
         enabled: markupNeedsPreview(),
       });
+      /**
+       * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).
+       *
+       * This message used to be emitted HERE, and FOUR later rules can still change the bill —
+       * `writtenFiles.size === 0`, the unrendered-preview rule, the cancelled/failed-build rule and
+       * the onboarding credit. Every one of them sets the bill to ZERO. So on the reported build the
+       * user was told
+       *
+       *     "🧾 …you have been charged only what this build actually cost to run"
+       *
+       * and was then charged nothing at all. On a FAILED build it is worse than false, it is
+       * contradictory: this sentence and "🛡️ This build did not fully succeed, so it is FREE" are
+       * both emitted, seconds apart, about the same build.
+       *
+       * The waiver's ARITHMETIC must stay here — it runs before the zeroing rules on purpose, so they
+       * still take precedence and it can only ever reduce. Only the SENTENCE moves, to the one point
+       * where what the user pays is settled. Held, not dropped: a user who really is billed the
+       * waived amount still gets the explanation they are owed.
+       */
+      let waivedMarkupNotice: string | null = null;
       if (!markupDecision.markupApplied) {
         effectiveBilledUsd = markupDecision.billedUsd;
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
           message: markupDecision.reason, autoResolved: true,
         });
-        if (markupDecision.userMessage) {
-          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${markupDecision.userMessage}`, ts: Date.now() });
-        }
+        if (markupDecision.userMessage) waivedMarkupNotice = markupDecision.userMessage;
       }
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
@@ -20708,6 +20738,13 @@ async function noteBuildOutcome(
           zeroBillReason = 'free onboarding build (new-user welcome credit)';
           events.emit({ type: 'narration', agent: 'architect', text: '🎁 This build is on us — welcome to NavBharatAI Pro!', ts: Date.now() });
         }
+      }
+
+      // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
+      // waiver's explanation be true, and only if the waived amount is still what the user pays:
+      // a later rule that zeroed the bill has already said why in its own words.
+      if (waivedMarkupNotice && effectiveBilledUsd > 0 && effectiveBilledUsd === markupDecision.billedUsd) {
+        events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${waivedMarkupNotice}`, ts: Date.now() });
       }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the

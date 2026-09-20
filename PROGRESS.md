@@ -70796,6 +70796,74 @@ and got a word that reads as nonsense does not file a bug; they leave.
 
 ---
 
+## 2026-09-19 — a review that did not happen is not a PASS
+
+The admin put the NVIDIA **trial** key on the Weak judge and, told plainly that credits would one day
+run out, chose it anyway: *"par aap abhi free wali/low cost wali use karoge."* Their call. What that
+makes urgent is the honesty of the judge's own failure reporting, so that is what shipped.
+
+### ⚠️ FIRST, A CORRECTION TO WHAT I TOLD THE ADMIN AN HOUR EARLIER
+
+I reported that `judgeBuild`'s catch returns `{ pass: true, score: 100 }`, and that exhausted credits
+would therefore pass every build silently. **Both halves were wrong**, and the correction matters
+because it changes what to watch for:
+
+- The **throw** path — no key, wrong host, exhausted credits, a 404 on a mis-typed id — already
+  returned `score: 0` with a plain explanation. It was honest.
+- The path that was NOT honest is the **unreadable reply**: `parseJudgeVerdict` returned
+  **`{ pass: true, findings: [], score: 100 }`** — a perfect score, no findings, indistinguishable
+  from a genuinely flawless app.
+
+I had read the two `catch` blocks as one. The real defect is narrower and sharper than the one I
+described, and it is the one a brand-new vendor is most likely to trip.
+
+### 🔑 Why the unreadable reply got more dangerous the same day
+
+The judge is now allowed to be a **reasoning** model (Nemotron Ultra). That class is far likelier to
+wrap its JSON in prose — or emit reasoning and no JSON at all — than the `glm-5.3` this parser was
+written against. A judge that says nothing readable must not score 100.
+
+### What changed, and the one thing that deliberately did NOT
+
+- `reviewDidNotHappen(why)` is **one function** for both not-run paths, so they cannot drift into
+  telling the user different stories — which is exactly what they had already done.
+- `JudgeVerdict.reviewed?: boolean` makes it machine-readable. **Absent ⇒ true**, so an older caller
+  keeps today's meaning.
+- An **empty project** deliberately keeps `reviewed: true`: we DID look, there was nothing to look at.
+  That is a finding about the app, not about our instrument — the opposite of the other two.
+- The report records **`CHEAP_REVIEW_NOT_RUN`** at `warning`, **showing the reason**. It was printing
+  `CHEAP_REVIEW: PASS (score 0)` and *dropping the findings on a pass* (`v.pass ? '' : …`), so the
+  judge's own honest explanation was thrown away at the one place a human looks. A separate CODE, not
+  a reworded message: `CHEAP_REVIEW` is what somebody greps to ask "what did the reviewer say?", and a
+  run where it said nothing must not answer that with a number. Registered in `PROCESS_ONLY_CODES` and
+  `NEVER_SUGGEST` — our instrument, never a mark against the user's app.
+
+🔒 **`pass` STAYS TRUE, and that is the whole reason this was shippable now.** `pass` is the CONTROL
+signal — `nextReviewAction` reads it to spend a repair and then Claude — so flipping it on an
+unreachable judge would escalate **every** build to Claude for the length of a provider outage: a fix
+trading one problem for a dearer one. Control flow untouched; reporting truthful. That split is what
+the fifth absolute rule asks for.
+
+### Still open, and now visible rather than silent
+
+The Weak judge runs on a **trial** key (1,000 free credits, 5,000 with a business email, 40 req/min).
+Those credits will run out — "when", not "if". This change does not prevent that; it makes the day it
+happens appear in the build report as `CHEAP_REVIEW_NOT_RUN` instead of as a passing review. The
+durable fix is a paid plan, which is the admin's decision and is recorded as theirs.
+
+### Evidence
+
+`tests/aReviewThatDidNotHappenIsNotAPass.test.ts` — **19 cases**: six unreadable-reply shapes (empty,
+null, undefined, prose, reasoning-only, malformed JSON) all scoring 0 with an honest finding and still
+not blocking; a real pass and a real fail untouched; the pre-existing "fail with no findings is
+unactionable" rule untouched; four exhausted-trial error shapes; the empty-project carve-out; the
+control-flow lock (`nextReviewAction` unchanged); the absent-flag default; the distinct code at warning
+severity showing the reason; the process-only/never-suggest registration; and white-label cleanliness
+of the wording.
+
+**Proven by reversion, three ways** — each reverted, run, restored: the unreadable reply back to score
+100 (6 cases fail); the report printing PASS again (1 case); `reviewed` defaulting to false instead of
+true (5 cases, i.e. the old-caller guarantee is real).
 ## 2026-09-19 — Nemotron is LIVE on Weak, and the fail-open judge is now an open root cause
 
 The admin set **`NEMOTRON_API_KEY`** and **`AGENTV3_NEMOTRON=weak`** in Cloud Run the same day PR #3141

@@ -50,6 +50,10 @@ const PROCESS_ONLY_CODES = new Set([
   'UNBILLED_BARREN_WORK',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
+  // …and the reviewer's own version of that: the judge threw, or answered with something unreadable.
+  // It used to be recorded as `CHEAP_REVIEW: PASS`, which is the fake-success class exactly. A review
+  // that did not happen says something about OUR instrument, never about the user's app.
+  'CHEAP_REVIEW_NOT_RUN',
   // How this turn was ROUTED is a fact about our engine, never a finding about the user's app.
   'BUILD_ORDER_READ_AS_EDIT',
   // …and its sibling: our own page-render browser produced nothing (autopsy c6e4c6ff). Same rule —

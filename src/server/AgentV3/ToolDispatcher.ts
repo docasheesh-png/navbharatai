@@ -72,6 +72,7 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
+import { qualityNote } from './writeTimeQualityCheck';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
@@ -2678,6 +2679,12 @@ export class ToolDispatcher {
         // WRITE → TYPECHECK → NEXT (autopsy e706e068): the compiler's verdict on THIS file, now, while
         // the model still holds it — not twelve minutes later as one line of twenty-one.
         const typecheckNote = await this.writeTypecheckNote({ [path]: content });
+        // THE CONTRACT WAS WRITTEN BUT NOBODY TOLD THE MODEL IN TIME (autopsy 31dc61fd). The architect
+        // prompt has ALWAYS demanded a label on every input and 4/8/12/16/24px spacing — and an app
+        // still shipped with an unlabelled field and 38 off-grid values, because the prompt is read
+        // once, before any code exists. The same rule, delivered while the model holds the file.
+        // Pure, no model call, no shell, no edit; it can only ever append a sentence.
+        const qualNote = qualityNote(path, content);
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -2695,10 +2702,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote
+            reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote + qualNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote + qualNote;
       }
 
       case 'write_files_batch': {

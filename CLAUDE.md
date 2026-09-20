@@ -1217,6 +1217,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   published under the **Government Open Data License – India**, which permits commercial use in terms.
   A free key from data.gov.in's own registration is all it needs. Read by
   `src/server/lib/cpcbAirQuality.ts`.
+  ⛔ **PARKED 2026-09-20, THE SAME DAY — THE KEY COULD NOT BE OBTAINED, AND THAT IS NOT THE ADMIN'S
+  TODO ANY MORE.** They registered on data.gov.in, reached `Dashboard → MyAccount`, and the portal's
+  own account verification would not complete (verbatim: *"yeh nahi mil sakti — government website
+  hai, nahi chal rahi, verification nahi ho raha hai"*). **Do NOT put "set `DATA_GOV_IN_API_KEY`" back
+  on their queue** — it was tried, it failed on the other side's side, and re-issuing the instruction
+  is the same wasted-instruction class #3196 was written about. AQI questions are answered by web
+  search today and the app is whole; this is a MISSING UPGRADE, never a breakage. Re-open it only if
+  the admin says the portal worked, or if someone finds another AQI source whose licence genuinely
+  covers a commercial product — and that search has to end in the LICENCE, since the two obvious
+  free candidates (waqi.info's free token, and the no-key provider this change moved AQI off) are
+  both non-commercial tiers, and swapping one grey source for another is not a fix.
   ⚠️ **UNSET ⇒ AQI questions fall through to web search, and NEVER back to the old source** — a
   silent fallback would re-open the exposure with nothing on any screen saying so.
   ⚠️ **IT IS ON ITS OWN GATE, NOT `LIVE_WEATHER_SOURCE`**, deliberately: that switch exists to pause
@@ -1992,8 +2003,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   | **`GRIEVANCE_OFFICER_NAME`** (+ optional `_EMAIL` / `_PHONE` / `_ADDRESS`) — read by `src/server/lib/grievanceOfficer.ts`; the public page is `/grievance` | Admin Monitor: the amber "Grievance Officer not named" warning is GONE. It is driven by `officerIsNamed`, so it cannot be green while the key is missing |
   | **`NAVBHARAT_WEB_RISK=on`** | An admin build report's `outboundNote` stops saying `unknown` for every origin |
   | **`E2B_USD_PER_HOUR` = `0.1656`** (was the half-true `0.083`) | The Monitor's amber rate-mismatch tile clears — `sandboxRate.ts` raises it by comparing the configured rate against the template's REAL size, so a wrong value cannot look right |
-  | **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | Console only. ⚠️ **Nothing in the code can detect a duplicate** — the process sees one value and cannot know a second row existed. This is the one item with no self-verifying signal, which is exactly why the audit below calls it the urgent one |
-  | **Play developer verification → Identity tab** (deadline 30 Sep 2026) | Play Console only |
+  | ✅ **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | **DELETED — the admin said so directly on 2026-09-20 ("maine delete kar diye hai, 10-12 din pahle hi"), i.e. around 2026-09-08/10.** This was the one row with NO self-verifying signal: nothing in the code can detect a duplicate, because the process sees one value and cannot know a second row existed. So the admin's word IS the record here, and it is written down the day it was said — exactly what this registry's hand-to-hand rule is for |
+  | ✅ **Android developer verification — package registration** (deadline 30 Sep 2026) | **DONE, verified from a screenshot 2026-09-20.** BOTH rows read `Registered`: `com.navbharat.ai` (the real `applicationId`, the app on Play) and `com.navbharatai.app` (only the Java `namespace` — not a distributed app; its friendly name was typed as "DELETE" and leaving it registered is harmless). ⚠️ This screen covers PACKAGE REGISTRATION only — whether a separate identity/verification section is still outstanding was not visible in that capture and is Play Console's to answer |
   | **The approved Play update published**, then `ANDROID_LATEST_VERSION_CODE` set to that run number | Play Console shows the release live; the number must be set AFTER it is downloadable, never before (see that key's own entry) |
 
   🔴 **WHY THE UNRECONCILED COUNT IS WRITTEN DOWN RATHER THAN ROUNDED AWAY.** This file already records
@@ -3242,6 +3253,63 @@ is now enforced at the source, by CI.**
 - **Two more tokens exist since PR C:** `bg-well` (an inset panel inside a card — the old
   `bg-black/20–40` on dark; a 6% ink wash on light) and `bg-scrim` (the modal backdrop, deliberately
   the same dark on every theme because it dims what is behind it).
+- **AN INLINE STYLE IS A COLOUR LITERAL TOO, and the codemod could not see one until PR L
+  (2026-09-20).** The class table had `theme-compat.css` remapping it per theme; an inline style was
+  remapped by NOTHING — `style={{ color: 'rgba(255,255,255,0.4)' }}` is white-at-40% on Light exactly
+  as on Dark, 1.1:1, one of the audit's 236 invisible nodes. The codemod could not see a single one.
+  `themeMigrate.mjs` now carries an inline table (`INLINE_TEXT` / `INLINE_LINE` / `INLINE_BG`):
+  **inline literals 296 → 206** across 15 files (37 exact, 57 readability fixes).
+  ⚠️ **The ratchet's 991 is 695 CLASS literals and 296 inline ones — MEASURED, after an earlier draft
+  of this bullet asserted the tail was "almost entirely" inline from reading the top three files.** The
+  class sweep is its own later slice. ⚠️ **`exact` is MEASURED here too, never claimed**: there
+  is no compat layer to be identical to, so a row is `exact` only when the literal IS that role's
+  value in `DARK_VALUE` — which `tests/themeMigrate.test.ts` asserts against `index.css`'s own dark
+  block. Inheriting `exact` from the class rows (where it means "compat remaps it") would have
+  labelled `#e6edf3 → --text-body` as no change when Dark's `--text-body` is `#c9d1d9`.
+  🔴 **A DECLARATION'S CONTEXT IS ITS ELEMENT, NEVER ITS LINE**, and this is the one rule not to
+  simplify: the first version asked what the background on that LINE was, and a style object is
+  routinely written over several — so `color: 'white'` under `background: '#4f46e5'` saw no fill and
+  became `--text-primary`, near-black on indigo at ~2.2:1. **The tool that removes invisible labels
+  created one**, caught in its own diff before it left the branch. And the object was not enough
+  either: `AuthComponent`'s Apple button sets its fill in `className` (`bg-black text-on-accent`) with
+  a forced `color: '#ffffff'` beside it whose own comment says it exists to be unthemeable — that one
+  broke TRAP 3 and needed `elementAt` + `elementFixesItsLabel`. **A fill is a fill whether it is
+  written as a style or as a class.** Eight cases in `tests/themeMigrate.test.ts` lock both halves,
+  proven by reversion.
+- **🔴 `@theme inline` EMITS NO CUSTOM PROPERTY — so `var(--color-…)` names NOTHING in an inline style
+  (verified 2026-09-20).** That is what `inline` means: the utility (`text-on-accent`) gets the value
+  baked in, and no `--color-*` variable ever reaches the stylesheet. Checked against the built CSS, not
+  reasoned about: `--color-surface`, `--color-ink`, `--color-well`, `--color-scrim` and
+  `--color-on-accent` are **all absent**, while `--text-muted`, `--surface-well`, `--scrim` and
+  `--accent` — declared in `@layer base` — are present. So `style={{ color: 'var(--color-on-accent)' }}`
+  would resolve to nothing, `color` would fall back to the inherited `--text-body`, and a label on a
+  solid indigo button would render near-black on Light. **Nothing would fail**: not tsc, not a test, not
+  the ratchet, which counts literals and has no opinion about a var that does not exist. The CLASSES are
+  fine and widely used; it is only the raw `var(--color-…)` form that is a silent no-op.
+  ⚠️ **No shipped component had this bug** — it was found because the inline codemod emitted exactly
+  that shape and its own diff was read. **In an inline style use the `@layer base` names**: `--accent`,
+  `--on-accent`, `--text-*`, `--surface-*`, `--border-soft`, `--scrim`, `--brand-*`.
+  🔒 `--on-accent` is now declared in all three palette blocks and `@theme inline` points
+  `--color-on-accent` at it, so the utility and the raw var are one value rather than two.
+  `tests/everyTokenAStyleUsesIsDeclared.test.ts` fails CI on any `var(--x)` in client code that nothing
+  anywhere declares — reversion-proven. It knows the three ways this app really declares one (a CSS
+  declaration, a style-object key, `setProperty`), because `--nbai-pane` is written by `splitPane.ts`
+  and read by `AgentV3Panel.tsx`, and `--nb-font-scale` is set imperatively in `a11y.ts`; a narrower
+  scan would report half the app as broken and be switched off within a week.
+- **⚠️ `tests/inlineThemeColours.test.ts` ALREADY GOVERNED INLINE COLOURS since 2026-08-16 — read it
+  before touching them.** Its three traps are binding: **1** a library config is not a DOM style
+  (`ShellTerminal`'s xterm theme parses colours itself and cannot read `var()`); **2** the user's
+  colours are not ours (`MultiPageBuilder`, `DarkModeGenerator`, `WhitelabelBranding` export colours
+  into the USER'S app, where our variables do not exist); **3** a label on a brand fill keeps its white.
+  The codemod now names those files in `INLINE_SKIP` and treats a brand fill as FIXED — theming it is
+  not even an improvement, since white on Dark's `--accent` (#818cf8) is 3.0:1 against 5.6:1 on #4f46e5.
+  🔴 **I did not find that suite before writing the pass, and it cost a full red gate** — safeguard #6's
+  vocabulary failure exactly: I searched the codemod and the ratchet, never `find tests -iname "*inline*"`.
+- **The class sweep and the inline sweep are SEPARATE runs (`--inline-only`), on purpose.** They touch
+  different literals and collide with different pinned tests, so mixing them makes the diff
+  unreviewable and the failures indistinguishable. A file whose class literals an earlier PR
+  deliberately left — a status dot whose `bg-emerald-500` a test names, an exit dialog's `bg-white/10` —
+  must not be migrated as a side effect of fixing its inline styles.
 
 ## Engineer AI — permanent constraints (never change without admin sign-off)
 
@@ -3628,18 +3696,24 @@ rung only when it is the known-weak 4.7-flash.
   rescue, being a single call over the app rather than a 70-call loop over a stable prefix. Ultra does
   it at **$0.50/MTok in** against glm-5.3's $1.40 and Grok's $3.00, with **no tools exposed**, which is
   also why it is the safest place to try an unproven vendor.
-  🔴 **`week` IS NOT `weak`, AND UNTIL 2026-09-20 THAT WAS SILENT.** The admin reported setting
-  `AGENTV3_NEMOTRON=week`. It names no tier, so the judge and the plan stayed **OFF** while the console
-  showed the key configured and nothing anywhere said otherwise — the fourth time this repo has paid
-  for that exact shape (a trailing space in `BRAVE_API_KEY`, an `=` in `ALERT_EMAIL_FROM`, `20%` in
-  `AGENTV3_FEATURE_HEAL_PCT`). The VERDICT was always right (an unreadable value can never have meant
-  "everywhere" — somebody who wanted that would type `on`); what was missing was the report.
-  `nemotronConfigNote()` now names the offending word and the accepted ones, **in the build report's
-  `TIER_LADDER` line as a WARNING**, and once in the server log. ⚠️ The value is deliberately **NOT**
-  corrected toward the nearest word: guessing that `week` meant `weak` would make the config mean
-  whatever it resembles, and the next typo would enable a tier nobody chose. **So this must be verified
-  in the console, not assumed from this entry** — an admin build report whose `TIER_LADDER` line is
-  clean is the confirmation.
+  ✅ **THE LIVE VALUE IS `weak`, VERIFIED FROM THE CONSOLE 2026-09-20** — the admin sent a screenshot
+  of the Cloud Run variable list (`AGENTV3_NEMOTRON = weak`, `NEMOTRON_BASE_URL` = the NVIDIA host), so
+  the judge and the plan ARE on for that tier.
+  🔴 **AND THIS ENTRY SAID OTHERWISE FOR HALF A DAY, WHICH IS THE PART WORTH KEEPING.** It read *"the
+  admin reported setting `AGENTV3_NEMOTRON=week`… the judge and the plan stayed OFF"*, ending with the
+  exact sentence **"this must be verified in the console, not assumed from this entry"** — and a
+  session (mine) then read the paragraph, skipped its own warning, and told the admin as a live fact
+  that their config was broken and to go and change it. The admin opened the console and it was already
+  right. **A doc's claim about a value in a console no session can read is only as good as the last
+  person who looked; repeating it does not make it truer.** Same shape as the idle-minutes default that
+  said "NOT taken" eight days after it was taken, and the E2B rate whose derivation "could not fail".
+  🔒 **The GUARD is untouched and stays**, because it was never about one typo: `nemotronConfigNote()`
+  names an unreadable value and the accepted words **in the build report's `TIER_LADDER` line as a
+  WARNING**, and once in the server log. The value is still deliberately **NOT** corrected toward the
+  nearest word — guessing would make the config mean whatever it resembles, and the next typo would
+  enable a tier nobody chose. Three real instances of the class remain (a trailing space in
+  `BRAVE_API_KEY`, an `=` in `ALERT_EMAIL_FROM`, `20%` in `AGENTV3_FEATURE_HEAL_PCT`); a protection
+  built for a class is not retired because one suspected instance turned out not to have happened.
   ⚠️ **NEVER the architect, sub-agents, reviewer or heal passes** — those are the cached 40–70-call
   tool loops where Nemotron is **6.2× DEARER** than flashx (its route does not honour prompt-cache
   markers). `nemotron.ts` makes every other role structurally unreachable; do not widen it.

@@ -16,7 +16,7 @@ export interface FrameworkOption {
 export const FRAMEWORK_OPTIONS: FrameworkOption[] = [
   // React ecosystem
   { id: 'vite-react', name: 'React + Vite', description: 'Fast SPA, React 18', category: 'frontend', language: 'TypeScript', color: '#61DAFB', iconChar: '⚛' },
-  { id: 'nextjs', name: 'Next.js', description: 'SSR + App Router', category: 'fullstack', language: 'TypeScript', color: '#ffffff', iconChar: '▲' },
+  { id: 'nextjs', name: 'Next.js', description: 'SSR + App Router', category: 'fullstack', language: 'TypeScript', color: 'var(--text-primary)', iconChar: '▲' },
   { id: 'remix', name: 'Remix', description: 'Full-stack, Web standards', category: 'fullstack', language: 'TypeScript', color: '#5B9CF6', iconChar: '💿' },
   { id: 'preact', name: 'Preact', description: '3kB React alternative', category: 'frontend', language: 'TypeScript', color: '#673AB8', iconChar: '💜' },
   // Vue
@@ -36,11 +36,11 @@ export const FRAMEWORK_OPTIONS: FrameworkOption[] = [
   { id: 'node-express', name: 'Express.js', description: 'Minimal Node HTTP', category: 'backend', language: 'TypeScript', color: '#68A063', iconChar: '🚂' },
   { id: 'hono', name: 'Hono', description: 'Ultrafast edge API', category: 'backend', language: 'TypeScript', color: '#E36002', iconChar: '🔥' },
   { id: 'nestjs', name: 'NestJS', description: 'Enterprise Node + DI', category: 'backend', language: 'TypeScript', color: '#E0234E', iconChar: '🐈' },
-  { id: 'fastify', name: 'Fastify', description: 'High-performance Node', category: 'backend', language: 'TypeScript', color: '#ffffff', iconChar: '⚡' },
+  { id: 'fastify', name: 'Fastify', description: 'High-performance Node', category: 'backend', language: 'TypeScript', color: 'var(--text-primary)', iconChar: '⚡' },
   // Python
   { id: 'python-fastapi', name: 'FastAPI', description: 'Async Python + OpenAPI', category: 'backend', language: 'Python', color: '#009688', iconChar: '🐍' },
   { id: 'django', name: 'Django', description: 'Batteries-included ORM', category: 'fullstack', language: 'Python', color: '#44B78B', iconChar: '🎸' },
-  { id: 'flask', name: 'Flask', description: 'Lightweight micro-framework', category: 'backend', language: 'Python', color: '#ffffff', iconChar: '🌶' },
+  { id: 'flask', name: 'Flask', description: 'Lightweight micro-framework', category: 'backend', language: 'Python', color: 'var(--text-primary)', iconChar: '🌶' },
   // JVM / Go backends — run on the fullstack sandbox (JDK 17 + Maven, Go 1.23, Mongo, Redis)
   { id: 'spring-boot', name: 'Spring Boot', description: 'Java 17 + Maven REST API', category: 'backend', language: 'Java', color: '#6DB33F', iconChar: '🍃' },
   { id: 'go', name: 'Go', description: 'Fast net/http backend', category: 'backend', language: 'Go', color: '#00ADD8', iconChar: '🐹' },

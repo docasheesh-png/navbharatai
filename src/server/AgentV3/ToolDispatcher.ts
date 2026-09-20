@@ -277,6 +277,7 @@ import { generateGameRuntime } from '../lib/GameRuntimeGenerator';
 import { generateGame3D } from '../lib/Game3DGenerator';
 import { generateGameController } from '../lib/GameControllerGenerator';
 import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
+import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
@@ -6468,6 +6469,30 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('game shell');
         return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}`;
+      }
+
+      case 'generate_melody': {
+        // A TUNE NEEDS NO SOUND FILE. `generate_game_vfx` ships a careful audio engine whose only
+        // input is `load(name, url)`, so an app that has no `.mp3` — which is most of them — is
+        // silent for ever. A note is a frequency and an envelope, and the browser has an oscillator.
+        // Reads Indian sargam as well as Western letters, because MUSIC_AI already teaches sargam and
+        // a builder that then demands C-D-E makes a learner translate their own notation.
+        const melRec = (input as Record<string, unknown>) || {};
+        const melInclude = Array.isArray(melRec.include)
+          ? melRec.include.filter((v): v is string => typeof v === 'string')
+          : undefined;
+        const mel = generateMelody(melInclude);
+        const melWritten: string[] = [];
+        for (const [path, content] of Object.entries(mel.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          melWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('melody engine');
+        return `Added the melody engine:\n${melWritten.join('\n')}\n\n${mel.instructions}`;
       }
 
       case 'generate_game_vfx': {

@@ -18,9 +18,9 @@ interface ShareForReviewProps {
 /** Firebase ID token for the RBAC-gated share endpoints. Best-effort → {} when signed out. */
 
 const RATING_META: Record<Feedback['rating'], { label: string; color: string }> = {
-  approve: { label: 'Approved', color: '#4ade80' },
-  changes: { label: 'Changes', color: '#fbbf24' },
-  reject: { label: 'Rejected', color: '#f87171' },
+  approve: { label: 'Approved', color: 'var(--brand-success-text)' },
+  changes: { label: 'Changes', color: 'var(--brand-warn-strong)' },
+  reject: { label: 'Rejected', color: 'var(--brand-danger-text)' },
 };
 
 const card: React.CSSProperties = { background: 'var(--surface-base)', border: '1px solid #1e293b', borderRadius: 8, padding: 12 };
@@ -107,7 +107,7 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
             <button onClick={loadFeedback} disabled={loadingFb} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.14)', cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 11 }}>
               {loadingFb ? 'Loading…' : `View feedback${feedback.length ? ` (${feedback.length})` : ''}`}
             </button>
-            <button onClick={revoke} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(248,113,113,0.3)', cursor: 'pointer', background: 'transparent', color: '#f87171', fontSize: 11 }}>Revoke link</button>
+            <button onClick={revoke} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(248,113,113,0.3)', cursor: 'pointer', background: 'transparent', color: 'var(--brand-danger-text)', fontSize: 11 }}>Revoke link</button>
           </div>
           {feedback.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto' }}>

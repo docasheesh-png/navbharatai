@@ -71238,3 +71238,66 @@ Under a heading that invites *"reply fix these"*, that reads as the engine break
 report and a **precision lock** of four real findings phrased with "no". **Reversion-proven four
 ways**: the clean-bill rule removed → 6 red · the whitespace collapse removed → 1 red · the hard slice
 restored → 1 red · **the rule widened to bare `^no` → 4 red** (it swallows real findings).
+
+---
+
+## 2026-09-20 — An untouched scaffold is not a finished app (autopsy 31dc61fd, item 2 of 6)
+
+**Branch `claude/an-untouched-scaffold-is-not-a-finished-app`.** Five minutes into the UPSC build the
+platform told the model, in its own words:
+
+```
+[BUILD CHECKPOINT] An automatic check of the whole project says the app is complete and healthy
+— 100/100, no blockers. If everything the user asked for is present, STOP HERE.
+```
+
+and narrated **"✅ The app looks complete — wrapping up."** The workspace at that moment, from the
+build's own `cat src/App.tsx`:
+
+```
+function App() { return (<div><h1>Hello World</h1></div>); }
+```
+
+The model **disbelieved us**, ran `find src -type f`, wrote *"The workspace still only has the scaffold
+— I need to build the actual UPSC app"*, and went on to build it. **A model rescuing a platform signal
+is a red flag, not a self-heal** (the 50/50 law): the next model may simply obey and hand over a Hello
+World.
+
+### Why the score was 100 — and why that is not a bug in the scorer
+
+Readiness measures **code health**: unresolved imports, security findings, a missing entry point. A
+pristine scaffold has none of those. It is healthy. It is also empty.
+
+🔎 **This is EXACTLY the class `BuildJudge.ts` already names**, in a fix made on 2026-08-06 for the
+JUDGE: *"AN EMPTY WORKSPACE IS NOT A PERFECT ONE … every analyser here treats 'no files' as 'nothing
+wrong' … for the JUDGE, whose whole output is a quality VERDICT, it is a false success of the worst
+kind: the emptier the app, the better it scored."* **The judge was fixed. The readiness gate — which
+feeds the done signal — was never hunted.** Sibling closed (rule 3).
+
+⚠️ **And a file COUNT would not have caught it.** `producingToolUses` and `hasExistingFiles` both said
+"yes, something was built": the fast lane had salvaged a real 893-line `src/index.css` before dying.
+One real file plus an untouched entry point is not an app — so the question is about the **entry**, not
+the count.
+
+### The fix
+
+`stillTheStarterApp.ts` (new, pure) asks one narrow question and `assessBuildReadiness` adds the answer
+as a **BLOCKER**. Routed through `blockers` deliberately: `appIsDone` already refuses any report
+carrying one, so the done signal, the weak checkpoint and every other reader inherit it at once rather
+than each learning the same fact separately and drifting.
+
+- **Exact match on the seeded template**, whitespace-insensitive — never a heuristic like "contains
+  Hello World", which a real app may legitimately. The comparison imports the SAME `appTsx` the
+  scaffold seeds, so the two cannot drift.
+- **Fails OPEN**: an entry we cannot read leaves the report untouched. *"We could not look"* is not
+  *"the app is a scaffold"*, and inventing a blocker from an unreadable file would fail real builds on
+  our own trouble.
+
+`tests/anUntouchedScaffoldIsNotAFinishedApp.test.ts` — 16 cases with a **precision lock** (a real app,
+an app that greets the world, the template plus one import, the template with its heading changed).
+**Reversion-proven four ways**: the blocker never produced → 1 red · downgraded to a warning → 1 red ·
+readiness no longer running it → 1 red · **the match loosened to a "Hello World" heuristic → 2 red**.
+
+⚠️ **Not fixed here:** `READY_BEFORE_END` measured 701s "after ready" from that bogus point, so its
+number in past reports is polluted. From now on it cannot start from a scaffold — but the historical
+figures should not be trusted.

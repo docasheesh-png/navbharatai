@@ -30,6 +30,8 @@
  * The real-time AQI resource on data.gov.in. Fixed id, fixed host — no SSRF surface, the same
  * discipline every other source in liveDataSources.ts follows.
  */
+import { fetchGovResource } from './govData/client';
+
 export const CPCB_RESOURCE_ID = '3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69';
 const CPCB_HOST = 'https://api.data.gov.in/resource';
 
@@ -266,16 +268,24 @@ export function cpcbCityUrl(city: string, apiKey: string): string {
  */
 export async function fetchCityAirQuality(
   place: string,
-  fetchJson: (url: string) => Promise<any | null>,
+  fetchImpl: typeof fetch,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<CityAqi | null> {
-  const apiKey = cpcbApiKey(env);
-  if (!apiKey) return null;
   const city = cpcbCityQuery(place);
   if (!city) return null;
 
-  const data = await fetchJson(cpcbCityUrl(city, apiKey));
-  const records = Array.isArray(data?.records) ? (data.records as CpcbRecord[]) : [];
-  if (!records.length) return null;
-  return cityAqi(records);
+  // 🔒 THROUGH THE SHARED CLIENT, NOT A PRIVATE FETCH — and this is the whole reason the client
+  // exists. A dataset reached by its own bespoke call is a dataset with its own cache policy, its
+  // own error handling and its own idea of which parameters are allowed; that is how a registry
+  // becomes decoration. Going through `fetchGovResource` means AQI inherits the allowlist, the
+  // per-row cache window, the typed failure reasons and the meter for free — and the next dataset
+  // is a registry row rather than a new code path.
+  //
+  // ⚠️ THE CALLER'S `fetchImpl` IS THREADED THROUGH, NOT DROPPED. The first version of this
+  // migration kept the old json-shaped seam as an unused parameter "to avoid widening the change".
+  // That silently disconnected every injected fetch — the route's as much as the tests' — which is
+  // a dead seam, not a small one. A parameter a function ignores is worse than one it does not take.
+  const out = await fetchGovResource('cpcb-aqi', { city }, { env, fetchImpl });
+  if (!out.ok) return null;
+  return cityAqi(out.records as CpcbRecord[]);
 }

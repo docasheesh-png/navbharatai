@@ -377,6 +377,325 @@ export function fillScopes(lines) {
 }
 
 /** Rewrite one source. Returns the new text plus what changed and what was left, for the report. */
+// ── INLINE STYLE COLOURS — `style={{ color: '#818cf8' }}` ────────────────────────────────────────
+//
+// 🔴 WHY THIS EXISTS, AND WHY IT IS THE WHOLE REMAINING TAIL. The table above covers Tailwind
+// utilities — the ones `theme-compat.css` was at least REMAPPING per theme. An inline style was
+// remapped by NOTHING: CSS cannot override it, which is why the census already counts it double as
+// a smell. `color: 'rgba(255,255,255,0.4)'` is white-at-40% on Light exactly as on Dark — 1.1:1,
+// one of the 236 invisible nodes the audit measured. After PR C–K the literals still standing are
+// almost entirely this shape, and the codemod could not see a single one of them.
+//
+// ⚠️ THE TWO ROW KINDS MEAN SOMETHING SLIGHTLY DIFFERENT HERE, and it is stated rather than blurred:
+// there is no compat layer for an inline style to be identical to, so
+//   exact — the literal IS the dark palette's own value for that role, byte for byte. Dark renders
+//           identically; LIGHT is repaired. That is the entire point of the row.
+//   fix   — the literal is NEAR a role without equalling it (a lighter brand shade, a white alpha).
+//           Dark shifts a little too, on purpose, toward the role it was imitating.
+// `tests/themeMigrate.test.ts` proves every `exact` row against `index.css`'s own dark block, so a
+// palette change that invalidates a row fails CI instead of silently repainting Dark.
+//
+// 🔒 THE CLASSIFICATION IS NOT RE-STATED — it is DERIVED from the class tables above. `#8b949e` must
+// mean `--text-muted` whether it arrives as `text-[#8b949e]` or as `color: '#8b949e'`; two hand-kept
+// lists of the same hexes is exactly how the two syntaxes would come to disagree.
+
+/** `[#c9d1d9]` rows of a class set → `{ '#c9d1d9': '--text-body' }`. Tailwind names have no inline form. */
+const hexRows = (set, varName) => Object.fromEntries(
+  set.filter((v) => v.startsWith('[#')).map((v) => [v.slice(1, -1).toLowerCase(), varName]),
+);
+
+/** Canonical form, so one colour has one key: `white`/`#FFF`/`#ffffff` are the same colour. */
+export function normaliseColour(raw) {
+  let v = String(raw).trim().toLowerCase();
+  if (v === 'white') v = '#ffffff';
+  if (v === 'black') v = '#000000';
+  if (/^#[0-9a-f]{3}$/.test(v)) v = `#${[...v.slice(1)].map((c) => c + c).join('')}`;
+  if (/^rgba?\(/.test(v)) v = v.replace(/\s+/g, '');
+  return v;
+}
+
+function rgbaParts(v) {
+  const m = v.match(/^rgba?\((\d+),(\d+),(\d+)(?:,([\d.]+))?\)$/);
+  return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : Number(m[4]) } : null;
+}
+
+/**
+ * The DARK palette's own value for each role, read off `index.css`'s `:root, html[data-theme="dark"]`
+ * block — and asserted against that block by `tests/themeMigrate.test.ts`, so a palette change that
+ * invalidates a row fails CI rather than silently repainting Dark.
+ *
+ * 🔴 THIS EXISTS BECAUSE `exact` HAD TO BECOME A MEASUREMENT, NOT A CLAIM. The first version of this
+ * pass inherited `exact` from the class tables above, where it means "the compat layer already remaps
+ * this literal to that variable". For an inline style there IS no compat layer, so that inheritance
+ * would have labelled `color: '#e6edf3'` → `var(--text-body)` as pixel-identical when Dark's
+ * `--text-body` is `#c9d1d9` — a visible change reported as no change at all. The kind is now derived
+ * by comparing the literal with the value below, so the label cannot disagree with the pixels.
+ */
+export const DARK_VALUE = {
+  '--text-primary': '#ffffff', '--text-body': '#c9d1d9', '--text-muted': '#8b949e', '--text-faint': '#838d97',
+  '--border-soft': 'rgba(255, 255, 255, 0.1)',
+  '--surface-base': '#0d1117', '--surface-card': '#161b22', '--surface-raised': '#21262d',
+  '--surface-raised-hover': '#191c22', '--surface-well': 'rgba(0, 0, 0, 0.3)',
+  '--surface-well-hover': 'rgba(0, 0, 0, 0.45)', '--scrim': 'rgba(0, 0, 0, 0.7)',
+  '--accent': '#818cf8', '--brand-accent-text': '#a5b4fc', '--brand-accent-strong': '#818cf8',
+  '--brand-success-text': '#34d399', '--brand-success-strong': '#6ee7b7',
+  '--brand-warn-text': '#fcd34d', '--brand-warn-strong': '#fbbf24',
+  '--brand-danger-text': '#f87171', '--brand-info-text': '#7dd3fc',
+};
+
+/** `exact` iff the literal IS this role's dark value: Dark renders identically, Light is repaired. */
+const hit = (value, varName) => ({
+  varName,
+  kind: normaliseColour(DARK_VALUE[varName] ?? '\u0000') === value ? 'exact' : 'fix',
+});
+
+/**
+ * ONE map per ROLE — the classification is derived from the class tables above wherever they already
+ * decided what a hex means, so `#8b949e` cannot mean `--text-muted` as a class and something else as
+ * an inline style. Only the rows the class table never needed (a hex form of a shade it maps by NAME)
+ * are written out here.
+ */
+export const INLINE_TEXT = {
+  ...hexRows(TEXT_BODY, '--text-body'), ...hexRows(TEXT_MUTED, '--text-muted'),
+  ...hexRows(TEXT_FAINT, '--text-faint'), ...hexRows(TEXT_BODY_FIX, '--text-body'),
+  ...hexRows(TEXT_MUTED_FIX, '--text-muted'), ...hexRows(TEXT_FAINT_FIX, '--text-faint'),
+  ...Object.fromEntries(Object.entries(HEX_BRAND).map(([k, t]) => [k.slice(1, -1).toLowerCase(), TOKEN_VAR[t]])),
+  '#ffffff': '--text-primary',
+  '#818cf8': '--brand-accent-strong', '#a5b4fc': '--brand-accent-text', '#6366f1': '--brand-accent-strong',
+  '#4f46e5': '--brand-accent-strong', '#a78bfa': '--brand-accent-text',
+  '#34d399': '--brand-success-text', '#6ee7b7': '--brand-success-strong', '#22c55e': '--brand-success-text',
+  '#86efac': '--brand-success-text', '#7ee787': '--brand-success-text', '#4ade80': '--brand-success-text',
+  '#fcd34d': '--brand-warn-text', '#fbbf24': '--brand-warn-strong', '#f59e0b': '--brand-warn-text',
+  '#fde68a': '--brand-warn-text',
+  '#f87171': '--brand-danger-text', '#ef4444': '--brand-danger-text', '#fca5a5': '--brand-danger-text',
+  '#7dd3fc': '--brand-info-text', '#3b82f6': '--brand-info-text', '#93c5fd': '--brand-info-text',
+  '#a5f3fc': '--brand-info-text',
+};
+export const INLINE_LINE = {
+  'rgba(255,255,255,0.1)': '--border-soft',
+  ...hexRows(LINE, '--border-soft'), ...hexRows(LINE_FIX, '--border-soft'),
+};
+export const INLINE_BG = {
+  ...hexRows(BG_SURFACE, '--surface-base'), ...hexRows(BG_CARD, '--surface-card'),
+  ...hexRows(BG_RAISED, '--surface-raised'), ...hexRows(BG_SURFACE_FIX, '--surface-base'),
+  ...hexRows(BG_CARD_FIX, '--surface-card'), ...hexRows(BG_RAISED_FIX, '--surface-raised'),
+  'rgba(0,0,0,0.7)': '--scrim', 'rgba(0,0,0,0.3)': '--surface-well', 'rgba(0,0,0,0.45)': '--surface-well-hover',
+};
+/**
+ * Solid brand fills — LEFT EXACTLY AS WRITTEN, and the reason is TRAP 3 of
+ * `tests/inlineThemeColours.test.ts` (2026-08-16), which this pass must not relitigate: *"a label on
+ * an indigo button must keep its white, or the sweep would have put dark text on a dark-blue button."*
+ * Theming the FILL is not free either — white on Dark's `--accent` (#818cf8) is 3.0:1 against 5.6:1
+ * on #4f46e5, so "follow the theme" would have LOWERED contrast on the theme most users are in.
+ * So a brand fill counts as FIXED: its background stays, and its label stays.
+ */
+export const INLINE_ACCENT_FILL = new Set(['#818cf8', '#4f46e5', '#6366f1']);
+
+const TEXT_PROPS = new Set(['color', 'caretColor', 'fill', 'stroke']);
+const LINE_PROPS = new Set(['borderColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor', 'outlineColor']);
+const BG_PROPS = new Set(['background', 'backgroundColor']);
+
+/**
+ * What the element's own inline background is, for the ONE question that matters: may the text on it
+ * be themed?
+ *
+ *   'themed' — a value this pass turns into a surface token, so the text must follow the theme too.
+ *   'wash'   — a tint under 50%: whatever encloses it shows through, so it is not a background.
+ *   'fixed'  — an opaque colour, or an expression we cannot read (a user's own brand). The theme can
+ *              never repaint it, so a white label on it must STAY white. That is the same verdict
+ *              `inlineFillKind` already gives the class pass, applied to the inline props.
+ */
+export function inlineBackgroundKind(scope) {
+  const m = scope.match(/\bbackground(?:Color)?\s*:\s*(['"])([^'"\n]*)\1/);
+  if (!m) return /\bbackground(?:Color)?\s*:(?!\s*['"`]?var\()/.test(scope) ? 'fixed' : 'none';
+  const v = normaliseColour(m[2]);
+  if (INLINE_ACCENT_FILL.has(v)) return 'fixed';
+  if (v in INLINE_BG) return 'themed';
+  const p = rgbaParts(v);
+  if (p && p.a < 0.5) return 'wash';
+  if (/^#[0-9a-f]{6}$/.test(v) || (p && p.a >= 0.5)) return 'fixed';
+  return 'none';
+}
+
+/**
+ * The `style={{ … }}` objects of a source, as [start, end) offsets.
+ *
+ * 🔴 THIS IS NOT A REFINEMENT — IT IS THE FIX FOR A REGRESSION THIS PASS ACTUALLY PRODUCED, caught in
+ * its own diff before it left the branch. The first version asked "what is the background on this
+ * LINE?", and a style object is routinely written over several:
+ *
+ *     style={{
+ *       background: '#4f46e5',
+ *       color: 'white',
+ *     }}
+ *
+ * The `color` line carries no background, so the guard saw none, and `white` became `--text-primary`
+ * — near-black on Light, sitting on an indigo fill at about 2.2:1. That is precisely the invisible
+ * label this whole migration exists to remove, re-created by the tool removing it. A declaration's
+ * context is its OBJECT, never its line.
+ */
+export function styleObjectSpans(src) {
+  const spans = [];
+  for (let i = src.indexOf('style={{'); i !== -1; i = src.indexOf('style={{', i + 1)) {
+    let depth = 0;
+    for (let j = i + 6; j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}') { depth--; if (depth === 0) { spans.push([i, j + 1]); i = j; break; } }
+    }
+  }
+  return spans;
+}
+
+/**
+ * The palette variable for one inline declaration, or null to leave it exactly as written.
+ *
+ * ⚠️ A WHITE ALPHA IS THE DEFECT ITSELF, so it is a ladder rather than a lookup: `rgba(255,255,255,α)`
+ * was the old dark UI's way of writing "less important text", and every rung of it is invisible on
+ * Light. The α bands below are that intent, translated into the roles that mean it on every theme.
+ * ⚠️ A LOW-ALPHA BACKGROUND IS LEFT ALONE, deliberately: a 5% white wash on Light is merely invisible,
+ * not unreadable, and a wrong surface guess is a change a reader can SEE. Nothing is guessed — it is
+ * reported and left, exactly as the class table treats a literal it has no row for.
+ */
+export function inlineColourToken(prop, raw, backgroundKind = 'none') {
+  const v = normaliseColour(raw);
+  if (v.startsWith('var(')) return null;
+  const p = rgbaParts(v);
+  const whiteAlpha = p && p.r === 255 && p.g === 255 && p.b === 255 && p.a < 1;
+  if (TEXT_PROPS.has(prop)) {
+    // ON A SOLID ACCENT FILL THE LABEL IS `--on-accent`, which is white on every theme. Reading
+    // it as "white text" and mapping it to `--text-primary` is what put a near-black label on an
+    // indigo button; leaving it as the literal `white` would be right on the pixels and wrong on the
+    // ratchet, since the token is how the census tells "white by design" from "white because the app
+    // was dark". A NON-white label on an accent fill is the author's own choice and is left alone.
+    if (v in INLINE_TEXT) return hit(v, INLINE_TEXT[v]);
+    if (whiteAlpha) {
+      if (p.a >= 0.8) return hit(v, '--text-primary');
+      if (p.a >= 0.55) return hit(v, '--text-body');
+      if (p.a >= 0.35) return hit(v, '--text-muted');
+      return hit(v, '--text-faint');
+    }
+    return null;
+  }
+  if (LINE_PROPS.has(prop)) {
+    if (v in INLINE_LINE) return hit(v, INLINE_LINE[v]);
+    // A BRAND-COLOURED RULE IS NOT A DIVIDER. `borderLeftColor: '#ef4444'` is the red stripe down the
+    // side of an error row — it carries the meaning, so it takes the danger token. Mapping it to the
+    // divider colour would be a readability fix that deleted the information.
+    const brand = INLINE_TEXT[v];
+    if (brand && brand.startsWith('--brand-')) return hit(v, brand);
+    if (whiteAlpha && p.a <= 0.25) return hit(v, '--border-soft');
+    return null;
+  }
+  if (BG_PROPS.has(prop)) {
+    if (v in INLINE_BG) return hit(v, INLINE_BG[v]);
+    if (p && p.r === 0 && p.g === 0 && p.b === 0) {
+      if (p.a >= 0.6) return hit(v, '--scrim');
+      if (p.a >= 0.35) return hit(v, '--surface-well-hover');
+      if (p.a >= 0.15) return hit(v, '--surface-well');
+    }
+    return null;
+  }
+  return null;
+}
+
+const INLINE_DECL = new RegExp(
+  '\\b(color|caretColor|fill|stroke|background|backgroundColor|borderColor|borderTopColor'
+  + '|borderRightColor|borderBottomColor|borderLeftColor|outlineColor)\\s*:\\s*'
+  + "(['\"])(#[0-9a-fA-F]{3,8}|rgba?\\([^)'\"\\n]*\\)|white|black)\\2",
+  'g',
+);
+
+/**
+ * FILES THE INLINE PASS MUST NOT TOUCH — excluded BY NAME, never by a loose pattern, because (in that
+ * suite's own words) *"an exception that is not named is an exception nobody can tell from an
+ * oversight"*. Each was already decided by the 2026-08-16 sweep, and this pass re-states it rather
+ * than rediscovering the same two traps the hard way.
+ */
+export const INLINE_SKIP = {
+  'ShellTerminal.tsx': 'TRAP 1 — xterm parses colours itself and cannot read var(); a library config is not a DOM style.',
+  'MultiPageBuilder.tsx': "TRAP 2 — exports colours into the USER'S app, where our variables do not exist.",
+  'DarkModeGenerator.tsx': "TRAP 2 — generates a theme for the USER'S app.",
+  'WhitelabelBranding.tsx': "TRAP 2 — the user's own brand colours.",
+};
+export const inlineSkipReason = (file) => INLINE_SKIP[String(file).split('/').pop()] ?? null;
+
+/**
+ * The JSX element a declaration sits in — its opening tag, from `<` to the matching `>`.
+ *
+ * 🔴 WHY THE OBJECT IS STILL NOT ENOUGH. `styleObjectSpans` fixed "the background is on another
+ * LINE"; this fixes "the background is not inline at all". `AuthComponent`'s Apple button carries
+ * `className="… bg-black … text-on-accent …"` and, beside it, an inline `color: '#ffffff'` whose own
+ * comment says it exists to be unthemeable: *"Force white text + icon inline so the label is readable
+ * no matter what theme/global CSS is applied"*. The inline guard saw no inline background, themed it,
+ * and broke TRAP 3 of `tests/inlineThemeColours.test.ts`. A fill is a fill whether it is written as a
+ * style or as a class.
+ */
+export function elementAt(src, offset) {
+  let a = src.lastIndexOf('<', offset);
+  if (a === -1) return src.slice(Math.max(0, offset - 400), offset + 400);
+  let depth = 0;
+  for (let j = a; j < src.length; j++) {
+    const ch = src[j];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    else if (ch === '>' && depth <= 0) return src.slice(a, j + 1);
+  }
+  return src.slice(a);
+}
+
+/**
+ * Does this element already fix its own text colour? A solid or fixed CLASS fill, or an explicit
+ * `text-on-accent`, both mean the author decided the label — so an inline colour beside it is a
+ * deliberate override and is left exactly as written.
+ */
+export function elementFixesItsLabel(element) {
+  return fixedFill(element) !== null || SOLID_FILL.test(element) || /(?<![\w-])text-on-accent(?![\w-])/.test(element);
+}
+
+/** The inline pass. Runs BEFORE the class pass so the class pass masks the source it actually edits. */
+export function migrateInlineStyles(src, changed, left) {
+  let exact = 0; let fix = 0;
+  const masked = maskEmbeddedSources(src);            // same length: offsets line up
+  const spans = styleObjectSpans(src);
+  /** The style object a declaration sits in — its real context (see `styleObjectSpans`). */
+  const scopeAt = (offset) => {
+    const s2 = spans.find(([from, to]) => offset >= from && offset < to);
+    return s2 ? src.slice(s2[0], s2[1]) : src.slice(src.lastIndexOf('\n', offset) + 1, src.indexOf('\n', offset) + 1 || undefined);
+  };
+  const out = src.replace(INLINE_DECL, (m, prop, q, value, offset) => {
+    if (masked.slice(offset, offset + m.length) !== m) return m; // somebody else's app — never touched
+    const bg = TEXT_PROPS.has(prop)
+      ? (elementFixesItsLabel(elementAt(src, offset)) ? 'fixed' : inlineBackgroundKind(scopeAt(offset)))
+      : 'none';
+    if (bg === 'fixed') {
+      const key = `${prop}: ${value} (on a fixed inline fill — somebody else's surface, by hand)`;
+      left[key] = (left[key] || 0) + 1;
+      return m;
+    }
+    const r = inlineColourToken(prop, value, bg);
+    if (!r) { const k = `${prop}: ${value}`; left[k] = (left[k] || 0) + 1; return m; }
+    if (r.kind === 'exact') exact++; else fix++;
+    changed[`${prop}: ${value} → var(${r.varName})`] = (changed[`${prop}: ${value} → var(${r.varName})`] || 0) + 1;
+    return `${prop}: ${q}var(${r.varName})${q}`;
+  });
+  return { out, exact, fix };
+}
+
+/**
+ * The inline pass alone, in `migrate`'s shape.
+ *
+ * WHY IT EXISTS: the class sweep and the inline sweep touch different literals and collide with
+ * different pinned tests, so mixing them in one change makes the diff unreviewable and the failures
+ * indistinguishable. A file whose class literals an earlier PR deliberately left — a status dot whose
+ * `bg-emerald-500` a test names, an exit dialog's `bg-white/10` — must not be migrated as a side
+ * effect of fixing its inline styles.
+ */
+export function inlineOnlyRun(src) {
+  const changed = {}; const left = {};
+  const { out, exact, fix } = migrateInlineStyles(src, changed, left);
+  return { out, changed, left, exact, fix };
+}
+
 export function migrate(src) {
   const changed = {}; const left = {}; let exact = 0; let fix = 0;
   // Arbitrary-opacity forms first: `bg-white/[0.02]` is `bg-white` at 2%, and the LITERAL regex reads
@@ -386,8 +705,13 @@ export function migrate(src) {
     (_, cls, frac) => `${cls}/${Math.max(1, Math.round(Number(frac) * 100))}`);
   // Embedded source (a starter project, a copyable snippet) is somebody else's app: masked here so
   // no literal inside it is ever rewritten, and the real lines are restored below from `lines`.
-  const lines = normalised.split('\n');
-  const masked = maskEmbeddedSources(normalised).split('\n');
+  // The INLINE pass runs first and hands its output to the class pass, so the class pass computes its
+  // own mask over the text it is actually editing — offsets from a stale mask are how a rewrite lands
+  // inside somebody else's starter project.
+  const inlined = migrateInlineStyles(normalised, changed, left);
+  exact += inlined.exact; fix += inlined.fix;
+  const lines = inlined.out.split('\n');
+  const masked = maskEmbeddedSources(inlined.out).split('\n');
   const insideFill = fillScopes(masked);
   // LITERAL has one variant-prefix capture per alternative (grey/hex, hue text, dark tint): the callback
   // receives all of them before `offset`, so the arity here must follow the regex.
@@ -470,10 +794,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const dry = args.includes('--dry');
   const files = args.filter((a) => !a.startsWith('--'));
   if (!files.length) { console.error('usage: node scripts/themeMigrate.mjs <file...> [--dry]'); process.exit(2); }
+  const inlineOnly = args.includes('--inline-only');
   for (const f of files) {
+    const skip = inlineSkipReason(f);
+    if (skip) { console.log(`\n${f}: SKIPPED — ${skip}`); continue; }
     const src = readFileSync(f, 'utf8');
     const before = literalsIn(src).length;
-    const { out, changed, left, exact, fix } = migrate(src);
+    const { out, changed, left, exact, fix } = inlineOnly ? inlineOnlyRun(src) : migrate(src);
     const after = literalsIn(out).length;
     console.log(`\n${f}: ${before} → ${after} literals (${exact} exact, ${fix} readability fixes)${dry ? ' [dry]' : ''}`);
     for (const [k, n] of Object.entries(changed).sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${k}`);

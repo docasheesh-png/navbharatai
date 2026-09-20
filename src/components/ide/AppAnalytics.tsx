@@ -424,7 +424,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           {/* Time Range Tabs */}
           <div
             className="flex rounded-lg overflow-hidden border"
-            style={{ borderColor: '#30363d', background: 'var(--surface-card)' }}
+            style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
           >
             {(
               [
@@ -451,7 +451,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
           <button
             onClick={handleRefresh}
             className="p-2 rounded-lg border text-muted hover:text-ink transition-colors"
-            style={{ borderColor: '#30363d', background: 'var(--surface-card)' }}
+            style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-card)' }}
             title="Refresh data"
           >
             <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
@@ -481,7 +481,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {/* ── Activity Chart ── */}
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}
+        style={{ background: 'var(--surface-card)', borderColor: 'var(--border-soft)' }}
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -497,7 +497,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
       {/* ── Build Performance (P-BRE.8 — real server pipeline health) ── */}
       {buildPerf && buildPerf.totalJobs > 0 && (
-        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-soft)' }}>
           <div className="flex items-center gap-2 mb-4">
             <Activity size={16} className="text-success" />
             <h2 className="font-semibold text-ink text-sm">Build Performance</h2>
@@ -539,7 +539,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
       {/* ── AI Build Optimizer (P-BRE.11 — deterministic suggestions from real telemetry) ── */}
       {optimizer && optimizer.suggestions.length > 0 && (
-        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-soft)' }}>
           <div className="flex items-center gap-2 mb-4">
             <Activity size={16} className="text-accent-text" />
             <h2 className="font-semibold text-ink text-sm">Build Optimizer</h2>
@@ -564,7 +564,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
 
       {/* ── Build Reliability (P-TQA.13 — real MTTD/MTTR from failure→recovery history) ── */}
       {reliability && reliability.totalFailures > 0 && (
-        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}>
+        <div className="rounded-xl border p-4" style={{ background: 'var(--surface-card)', borderColor: 'var(--border-soft)' }}>
           <div className="flex items-center gap-2 mb-4">
             <Activity size={16} className="text-info" />
             <h2 className="font-semibold text-ink text-sm">Build Reliability</h2>
@@ -598,7 +598,7 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
       {/* ── Recent Sessions (real, from local chat history) ── */}
       <div
         className="rounded-xl border p-4"
-        style={{ background: 'var(--surface-card)', borderColor: '#30363d' }}
+        style={{ background: 'var(--surface-card)', borderColor: 'var(--border-soft)' }}
       >
         <div className="flex items-center gap-2 mb-4">
           <Clock size={16} className="text-success" />

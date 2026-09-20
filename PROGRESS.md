@@ -74726,6 +74726,99 @@ day they were said (the registry's rule), because neither has any signal the cod
 quality path merged today answers nothing), the E2B rate tile on the Monitor, and naming a PR to merge.
 ---
 
+## 2026-09-20 — Theme PR L: the inline-style tail, and a token that named nothing
+
+**Context.** PR C–K migrated the Tailwind *class* literals. The ratchet then stood at **991 literals
+across 108 files** — measured afterwards as **695 class and 296 inline** — and the codemod could not
+see an inline style at all. An inline style had never been covered by `theme-compat.css` either, so
+`color: 'rgba(255,255,255,0.4)'` was white-at-40% on Light exactly as on Dark — 1.1:1, one of the
+audit's 236 invisible nodes.
+
+**What shipped.**
+- `scripts/themeMigrate.mjs` gained an inline pass with one map per role (`INLINE_TEXT`,
+  `INLINE_LINE`, `INLINE_BG`, `INLINE_ACCENT_FILL`). The classification is **derived from the
+  existing class tables** wherever they already decided what a hex means, so `#8b949e` cannot mean
+  `--text-muted` as a class and something else inline.
+- **Inline literals 296 → 206**, across 15 files (37 exact, 57 readability fixes). The 695 CLASS
+  literals are untouched — a separate slice, for the reason below.
+
+⚠️ **A number I got wrong in my own first draft, corrected here rather than quietly.** This entry
+first said "991 → 297", which was the result of running BOTH passes over all 108 files — a change that
+failed the gate 12 ways. It also said the remaining tail was "almost all" inline, a generalisation made
+from reading the three heaviest files. The measured split is 695 class / 296 inline.
+
+**`exact` had to become a MEASUREMENT.** The first draft inherited `exact` from the class rows, where
+it means "the compat layer already remaps this literal". Inline styles have no compat layer, so that
+inheritance would have reported `#e6edf3 → var(--text-body)` as pixel-identical when Dark's
+`--text-body` is `#c9d1d9`. `DARK_VALUE` now holds each role's dark value, the kind is computed by
+comparison, and `tests/themeMigrate.test.ts` asserts every row of it against `index.css`'s own dark
+block — so a palette change that invalidates a row fails CI instead of silently repainting Dark.
+
+**🔴 The regression this pass produced, caught in its own diff.** The guard that protects a label on a
+fixed fill read the **line**. A style object is routinely written over several:
+
+```
+style={{
+  background: '#4f46e5',
+  color: 'white',
+}}
+```
+
+The `color` line carries no background, so the guard saw none and `white` became `--text-primary` —
+near-black, on an indigo fill, about 2.2:1. **The tool that removes invisible labels had created
+one.** Reverted before it left the branch; `styleObjectSpans` is the fix, a declaration's context is
+its OBJECT — and then its ELEMENT: `AuthComponent`'s Apple button sets its fill in `className`
+(`bg-black text-on-accent`) with a forced `color: '#ffffff'` beside it whose own comment says it is
+there to be unthemeable, and that one broke TRAP 3 on the next full run. **A fill is a fill whether it
+is written as a style or as a class.** `styleObjectSpans`, `elementAt` and `elementFixesItsLabel` are
+the fix; eight cases lock both halves, proven by reversion.
+
+**🔴 A trap in the token system, found because this pass fell into it.** `--color-on-accent` is
+declared inside `@theme inline`, and **`@theme inline` emits no custom property at all**: the utility
+(`text-on-accent`) gets the value baked in and no `--color-*` variable ever reaches the stylesheet.
+Verified against the built CSS rather than reasoned about — of `--color-surface`, `--color-ink`,
+`--color-well`, `--color-scrim`, `--color-on-accent`, the bundle contains **none**; `--text-muted`,
+`--surface-well`, `--scrim`, `--accent` are all present. So `style={{ color: 'var(--color-on-accent)' }}`
+resolves to nothing and the label falls back to the inherited `--text-body` — near-black on an indigo
+button, on Light. Nothing would fail: not tsc, not a test, not the ratchet, which counts literals and
+has no opinion about a var that does not exist.
+
+⚠️ **Correction, recorded rather than quietly fixed.** An earlier draft of this entry said the bug was
+"live in three shipped components". **It was not.** Those three references were the codemod's OWN
+output from a run that was then reverted; `git grep color-on-accent origin/main -- src` returns
+`src/index.css` and nothing else. The claim was written from a grep of my own working tree and would
+have shipped as a finding about the product. The real finding is narrower and still worth the guard:
+the trap is real, and the first thing to walk into it was the tool written that afternoon.
+
+Prevention shipped anyway: `--on-accent: #ffffff` is declared in all three palette blocks and
+`@theme inline` points `--color-on-accent` at it, so the utility and the raw var are one value.
+`tests/everyTokenAStyleUsesIsDeclared.test.ts` fails CI on any `var(--x)` in client code that nothing
+anywhere declares. It recognises the three ways this app really declares one — a CSS declaration, a
+style-object key, `setProperty` — because `--nbai-pane` is written by `splitPane.ts` and read by
+`AgentV3Panel.tsx`, and `--nb-font-scale` is set imperatively in `a11y.ts`; a narrower scan would have
+reported half the app as broken and been switched off within a week.
+
+**🔴 And the sweep ran straight into a suite that already governed inline colours.**
+`tests/inlineThemeColours.test.ts` has existed since 2026-08-16 with three traps, all of which this
+pass broke on its first full run (12 failures, 5 files): a library config is not a DOM style
+(ShellTerminal's xterm theme cannot read `var()`); the user's colours are not ours (MultiPageBuilder,
+DarkModeGenerator, WhitelabelBranding export colours into the USER'S app); and a label on a brand fill
+keeps its white. **I never looked for it** — safeguard #6's vocabulary failure, again: I searched the
+codemod and the ratchet and never ran `find tests -iname "*inline*"`. The four files are now named in
+`INLINE_SKIP` with the reason each was excluded, and a brand fill is treated as FIXED — theming it is
+not even an improvement, since white on Dark's `--accent` (#818cf8) is 3.0:1 against 5.6:1 on #4f46e5.
+
+**The class sweep is now a separate run (`--inline-only`).** The other failures came from passing all
+108 baseline files to the CLASS pass, migrating files earlier PRs had deliberately left and whose
+tests name their literals (`bg-emerald-500` for a status dot, `bg-white/10` for the exit dialog). The
+two sweeps touch different literals and collide with different pinned tests; mixing them makes the
+diff unreviewable and the failures indistinguishable.
+
+**Still open.** The remaining literals are deliberate leftovers, not misses: low-alpha washes
+(`background: 'rgba(255,255,255,0.05)'` — invisible on Light but not unreadable, and a wrong surface
+guess is a change a reader can see), brand tints, brand fills, the four excluded files, and every
+CLASS literal, which is its own later slice. Nothing is guessed; each is reported by the codemod and
+left.
 ## 2026-09-20 — 🎵 THE LINE BREAKS THE MODEL WROTE, AND A NEWSPAPER SHAPE FOR LONG ANSWERS
 
 **Two asks in one message (admin, with a screenshot of a Hindi song in free chat):**

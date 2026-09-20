@@ -33,6 +33,7 @@ import { registerNavigateRoutes } from './src/server/routes/navigate';
 import { registerWebhookRoutes } from './src/server/routes/webhooks';
 import { registerBotRoutes } from './src/server/routes/bots';
 import { registerChangelogRoutes } from './src/server/routes/changelog';
+import { registerSiteAboutRoutes } from './src/server/routes/siteAbout';
 import { registerTechDebtRoutes } from './src/server/routes/techDebt';
 import { registerVersionRoutes } from './src/server/routes/version';
 import { registerHallucinationRoutes } from './src/server/routes/hallucination';
@@ -732,6 +733,9 @@ setInterval(() => {
   registerWebhookRoutes(app);
   registerBotRoutes(app); // Hosted chat bots — real Telegram/WhatsApp connectors for the Bot Builder
   registerChangelogRoutes(app);
+  // About Us — a PUBLIC read so every user sees the same page, and an admin-gated write so an edit
+  // reaches them. Before this the content lived in one browser's localStorage and reached nobody.
+  registerSiteAboutRoutes(app);
   registerTechDebtRoutes(app);
   registerVersionRoutes(app);
   registerHallucinationRoutes(app);

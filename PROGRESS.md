@@ -74422,3 +74422,59 @@ prompt fails exactly the two prompt cases.
   and `.html` by design (esbuild has no opinion on them), so a truncated non-JS file written through
   the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
   the path this autopsy traced and is named here rather than bundled in.
+
+## 2026-09-20 — ABOUT US: the page had four lines, and whatever the admin wrote reached nobody
+
+The admin asked what About Us should contain. Reading the page first turned one question into two.
+
+### The content
+
+Four fields: a headline, one sentence, **"Built with ❤️ by a passionate developer"**, and "To make
+Bharat a global leader in AI". Nothing a person could use to decide whether to trust an app that
+takes their money — not what it does, not who made it, not what happens to their data, not how to
+reach anybody. The description said *"a mission to empower every Indian with the power of Artificial
+Intelligence"*: true in spirit, and a visitor could read it and still not know what the app does.
+
+The page now carries what an About page is for: what it is in one line, what you can do here, why it
+is built for India rather than translated for it, who builds it, where it is going, four promises,
+an "we are early and we say so" section, and the contact plus the legal links India requires.
+
+🔒 **Every claim is anchored.** The data promise is taken from the **Privacy Policy's own** "What we
+do NOT do" paragraph, in its words, and `tests/aboutUsTellsTheTruth.test.ts` asserts it against the
+real policy text — so the two pages cannot drift. "A working app or it is free" is an existing
+billing rule, not a slogan. The founder text is the admin's own wording, already shipped in the
+donation panel.
+
+⚠️ **And a claim I invented was caught before it shipped:** the first draft put
+`support@navbharatai.com` on the page. A grep shows `info@navbharatai.com` in fourteen places and
+that address in none. An About page carrying a mailbox nobody reads looks like a way to reach a
+human and is not one. A test now pins the address to the one the legal pages publish, and another
+refuses a team size, a user count, an investor, an award, a certification or a company name — each
+easy to write, impossible to withdraw, and a public statement by a business that charges money.
+
+### The half that mattered more: the edit reached nobody
+
+`navbharat_about_v1` appeared at exactly **two places in the whole repo** — one `localStorage` read
+and one write — with **no server route anywhere**. So an admin edit was saved in that one browser,
+every other user saw the shipped default, and clearing site data threw the edit away. Over it sat a
+badge reading **"Admin Edit Mode Active"**. That is the second absolute rule's built-but-not-working
+state, on a page whose entire job is to be read by other people.
+
+Now: `GET /api/site/about` (public — it returns the words on a public page and nothing else) and
+`PUT /api/admin/site/about` behind the **shared** `requireAdmin`, never a second hand-rolled check.
+The override is a PATCH, never the page: the content ships with the code like the Privacy Policy, so
+an empty, corrupt or unreachable store renders the full page rather than an empty screen. A write
+that does not land returns **503** and the badge says *"Not saved"* — telling an admin "saved" about
+a write that never happened would rebuild the same bug one layer in.
+
+### Two process notes
+
+**A weak assertion, caught by reversion — the fourth this session.** The case asserting the route is
+registered used `toContain('registerSiteAboutRoutes(app)')` and **passed with the registration
+commented out**. It is a line check now, and reverting the registration fails it.
+
+🔎 **OPEN, recorded not fixed: `stripCodeComments` mis-parses `server.ts`.** Run over that file it is
+length-preserving but blanks a large region — including a live call ~line 738 — so a guard using it
+on `server.ts` would fail on correct code, or pass on wrong code depending on which side of the
+blanked region it looks at. This suite uses a line check instead and says so. Whether other guards
+lean on that helper for large files is unchecked; it belongs to another change, not this one.

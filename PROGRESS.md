@@ -72569,6 +72569,88 @@ fact we store.
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
 
+---
+
+## 2026-09-20 — The contract was written, but nobody told the model until it was too late (autopsy `31dc61fd`, items 2 + 3)
+
+Admin: *"sabhi problem theek honi chahiye hamesha ke liye."* These were the last two ❌ items in the
+`31dc61fd` ledger that were genuinely in our power to fix.
+
+### 🔴 The finding — and why the obvious fix is the wrong one
+
+The report shipped `ACCESSIBILITY 92/100 — 1 form field with no label` and
+`DESIGN_CONSISTENCY 80/100 — 38 spacing values off the 4px grid`. The reflex is to add both rules to
+the architect prompt. **They were already there, and have been:**
+
+```
+systemPrompt.ts:504   "consistent 4/8/12/16/24px spacing"
+systemPrompt.ts:518   every <input>/<textarea> needs a real `name` and either a visible
+                      <label htmlFor=…> or an `aria-label`
+```
+
+So writing the rule a second time, louder, is exactly the treadmill the fifth absolute rule warns
+about. **The prompt is read ONCE, before a single file exists.** By the twentieth file it is thousands
+of tokens behind. What was missing was never the rule — it was the rule arriving at the moment the
+model is holding the file.
+
+### 🔑 Third instance of a pattern this repo already trusts
+
+Shaped deliberately like the other two, and sitting next to them at the same call site:
+
+- `writeTimeImportCheck` — *"Detection and a deterministic fixer both already existed but ran at the
+  END, by which time the agent's intent was elsewhere and these files are never revisited."*
+- `writeTimeTypecheck` (autopsy e706e068) — 20 files written before the first `tsc`, then 21 errors
+  ground for seven minutes, **every one of them visible the moment its file was written**.
+
+`writeTimeQualityCheck.ts` is the same cure for the same defect: say it NOW.
+
+### 🔒 Why this is the SAFE half of "prevent, don't heal"
+
+The alternative — auto-repairing afterwards — means **editing an app already proven green**, which is
+precisely what Green Freeze forbids and what `verifyAfterFix` and `designHealGuard` exist to survive.
+This spends **no model call, runs no shell, edits no file**, and cannot fail a build: it appends a
+sentence to a tool result the model is reading anyway, while the app is still being written.
+
+It also **reuses the linters rather than re-implementing them**: `lintBuiltApp` already owns which
+files are lintable and already runs `lintDesign`/`lintA11y` over one file at a time inside
+`attributeOffenders`, so single-file use is a proven path. `lintBuiltApp` returning `null` IS the
+"not a file we lint" answer — the selection rule is never restated.
+
+### ⚠️ The exclusions ARE the precision
+
+`color-count`, `font-count` and `hardcoded-colors` are **whole-app** judgements ("≤ 12 distinct
+colours"). On one file they would fire on nearly every write and become noise the model learns to
+skip — costing the real findings their credibility. **Proven load-bearing rather than assumed:** a
+palette-heavy stylesheet genuinely produces `hardcoded-colors` from the raw linter, and the filter
+suppresses it, and a test asserts both halves.
+
+**One selection rule this module DOES own, deliberately: test files.** `lintBuiltApp` lints them, and
+correctly so — but a test file's JSX is a FIXTURE. Telling a model *"this input has no label, fix it
+now"* about a fixture invites it to edit the markup the test's assertions are written against. The
+end-of-build lint only REPORTS; this one STEERS, and that difference is the whole reason.
+
+### Tests — `tests/theContractWasWrittenButNeverEnforced.test.ts` (15 cases)
+
+Driven by the report's own two defects. **Reversion-proven four ways:** drop the per-file filter → 1
+red · append the note on only one of the two write return paths → 1 red · remove the cap → 1 red ·
+ignore the kill switch → 1 red.
+
+⚠️ **The cap test was DEAD on its first draft and the reversion proof is what caught it.** Its fixture
+produced exactly 3 per-file violations — *equal* to `MAX_NOTE_LINES` — so deleting the cap changed
+nothing and the test stayed green. Replaced with a measured 5-violation fixture, and the test now
+asserts the eligible count EXCEEDS the cap before asserting the note is held to it.
+
+`AGENTV3_WRITE_QUALITY=off` is the instant, no-deploy revert to the pre-2026-09-20 behaviour exactly.
+
+### What remains open from `31dc61fd`, and why — unchanged
+
+- **Journey never derived** — the journey check only began launching a browser on 2026-09-17; its own
+  CLAUDE.md entry says the first real outcomes are the first evidence it has ever produced.
+- **"build budget reached" at 105 s of a 1800 s build / `provider=unknown`** — the fix lands in
+  `BuildDiagnostics`/`OpenAiToolRunner`, where another session's PR is live. Named, not raced.
+- **`READY_BEFORE_END` 701 s** — `#3084` shipped it as a measurement first, deliberately.
+- **`PREVIEW_SNAPSHOT_STALE`** — an ordering defect in the post-build sequence.
+- **`vitest@2.1.9`** — a sandbox-runtime resolution I could not reproduce from this session.
 ## 2026-09-20 — THE REPORT MUST SAY WHAT HAPPENED (autopsy f152c1ab, open items 5, 6 and the duplicate narration)
 
 Three findings from one report, all the same defect: **the engine behaved correctly and then

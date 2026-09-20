@@ -47,8 +47,13 @@ const WRITE_WORDS = [
  * गाना, लिखो, लोरी — are category Mn, NOT letters. A `[^\p{L}\p{N}]` class silently shreds every
  * Hindi word into consonant fragments ("गाना" → "ग न"), so Devanagari requests would never match.
  * Any tokenizer in this India-first app must keep marks with their letters.
+ *
+ * EXPORTED (2026-09-20) so `answerShape.ts` asks this question of the same tokenizer rather than
+ * growing a fourth copy of it. This repo already carries three near-identical Unicode tokenizers
+ * (here, `scriptIntegrity.ts`, `indicDomainTerms.ts`) — the drifted-copy class — and the matra rule
+ * above is exactly the subtlety a copy gets wrong.
  */
-function tokens(text: string): string[] {
+export function tokens(text: string): string[] {
   return (text || '')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')

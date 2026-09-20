@@ -6,6 +6,7 @@ import { loadVials } from '../../lib/vialMemory';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
+import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { isSafeHttpUrl, openInRealBrowser } from '../../lib/linkify';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -1132,6 +1133,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
                       phone (admin 2026-08-25). Every source link opens in a new tab instead, and only
                       http/https is ever clickable — this text is model-authored. */}
                   <ReactMarkdown
+                    remarkPlugins={CHAT_MARKDOWN_PLUGINS}
                     components={{
                       a: ({ node, href, children, ...props }: any) => (
                         isSafeHttpUrl(String(href ?? ''))

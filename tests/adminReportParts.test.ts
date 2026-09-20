@@ -274,11 +274,19 @@ describe('the report modal header survives a mobile screen (admin 2026-09-03)', 
   // and let it scroll internally instead of being clipped by the parent.
   const dash = read('src/components/AdminDashboard.tsx');
   const rowAt = dash.indexOf('className="flex items-center gap-2 shrink-0 max-w-[68vw]');
-  // Wide enough to run past the row's own `</div>` and the "Close" button that ends it.
-  const header = dash.slice(rowAt, rowAt + 6200);
+  // 🔴 BOUNDED BY THE ROW'S OWN LAST BUTTON, NOT BY A CHARACTER COUNT (2026-09-20).
+  // This was `dash.slice(rowAt, rowAt + 6200)` with the note "wide enough to run past the row's
+  // `</div>`". It was wide enough until a chip was added INSIDE the row, at which point "Mark fixed"
+  // fell outside the window and this test failed saying the button was missing — from a header where
+  // it was present and correct. A window measured in characters is an anchor on a POSITION; the row
+  // ends at Close, so that is what it is measured to now. (Same lesson, same week, as
+  // `starterTilesAreTextButtons`, which found its chips as "the first wrap after the heading".)
+  const rowEnd = dash.indexOf('Close</button>', rowAt);
+  const header = dash.slice(rowAt, rowEnd + 'Close</button>'.length);
 
   it('the button row is capped narrower than the modal AND scrolls, so it never relies on the clip', () => {
     expect(rowAt).toBeGreaterThan(-1);
+    expect(rowEnd, 'the row no longer ends with Close — the window below would be empty').toBeGreaterThan(rowAt);
     expect(header.slice(0, 90)).toMatch(/max-w-\[\d+vw\][^"]*overflow-x-auto/);
   });
 

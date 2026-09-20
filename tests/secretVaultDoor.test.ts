@@ -222,7 +222,12 @@ describe('the client half leaks nothing and decides nothing', () => {
   it('changing WHAT is locked carries the ticket too', () => {
     // A lock that can be switched off without the PIN is a preference. The server enforces this as well
     // (tests/appLockRoutes.test.ts); this pins that the client does not even try without one.
-    expect(client).toContain('const unlock = currentUnlock();');
+    //
+    // ⚠️ This used to read `currentUnlock();`. The rule did not move — it got STRICTER on 2026-09-20:
+    // the ticket must belong to the account being saved for, not merely be live (see THE ACCOUNT
+    // BOUNDARY in appLock.ts, and tests/oneAccountsUnlockIsNotAnothers.test.ts). Repointed rather than
+    // deleted, because the requirement it guards is the same one.
+    expect(client).toContain('const unlock = currentUnlock(userId);');
     expect(client).toContain("jsonBody('PUT', { areas }, unlock.ticket)");
   });
 });

@@ -45,13 +45,48 @@ function looksLikePattern(text: string): boolean {
   return /\\[bdswBDSW]|\[[^\]]*\]|\(\?|\{\d+,\d*\}|\\u\{?[0-9a-fA-F]{4}/.test(text);
 }
 
-/** Tokens inside ONE literal that mix an Indic script with Latin letters. Pure. */
+/**
+ * 🔎 THE SIBLING, HUNTED THE SAME DAY (rule 3, 2026-09-19). The root cause is the model falling OUT
+ * of the target script part-way through a word. It fell into Latin in the reported case — but a
+ * Bengali app can just as easily receive a Devanagari letter, and `জंगल` (one Bengali letter,
+ * then Devanagari) was returning [] while `জungle` was caught. Same cause, same broken word on the
+ * same screen, and only the Latin half was covered. Fixing the instance and not the class is what
+ * this repository's a38c6fef entry exists to warn about.
+ *
+ * ⚠️ LETTERS ONLY, and that IS the precision rule. The danda `।` (U+0964) sits in the DEVANAGARI
+ * block but ends a sentence in Bengali, Gurmukhi and the rest; Vedic tone marks and the Devanagari
+ * digits are shared the same way. Judging by every character would make `বাংলা।` — correct
+ * Bengali — read as Bengali mixed with Devanagari, and the first real Bengali app would be flagged.
+ *
+ * Blocks are 0x80 apart from U+0900, so the script is arithmetic rather than a table that can drift.
+ * The range stops where `INDIC` above stops, so the two can never disagree about what is Indic.
+ */
+const INDIC_FIRST = 0x0900;
+const INDIC_LAST = 0x0d7f;
+
+export function spansTwoIndicScripts(token: string): boolean {
+  let seen: number | null = null;
+  for (const ch of token) {
+    if (!/\p{L}/u.test(ch)) continue;
+    const code = ch.codePointAt(0);
+    if (code === undefined || code < INDIC_FIRST || code > INDIC_LAST) continue;
+    const block = Math.floor((code - INDIC_FIRST) / 0x80);
+    if (seen === null) seen = block;
+    else if (seen !== block) return true;
+  }
+  return false;
+}
+
+/** Tokens inside ONE literal whose script changes part-way through the word. Pure. */
 export function mixedScriptTokens(literal: string): string[] {
-  if (!literal || !INDIC.test(literal) || !LATIN.test(literal)) return [];
+  if (!literal || !INDIC.test(literal)) return [];
+  if (!LATIN.test(literal) && !spansTwoIndicScripts(literal)) return [];
   if (looksLikePattern(literal)) return [];
   const out: string[] = [];
   for (const token of literal.split(NON_WORD)) {
-    if (token && INDIC.test(token) && LATIN.test(token) && !out.includes(token)) out.push(token);
+    if (!token || !INDIC.test(token)) continue;
+    if (!LATIN.test(token) && !spansTwoIndicScripts(token)) continue;
+    if (!out.includes(token)) out.push(token);
   }
   return out;
 }

@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  mixedScriptTokens, stringLiterals, findMixedScriptText, scriptIntegritySummary,
+  mixedScriptTokens, stringLiterals, findMixedScriptText, scriptIntegritySummary, spansTwoIndicScripts,
 } from '../src/server/AgentV3/scriptIntegrity';
 
 const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
@@ -33,6 +33,31 @@ describe('a label must not arrive broken', () => {
     // and shredded the word before it could be compared. This is the reversion that matters most.
     expect(mixedScriptTokens('वीडियोdownload')).toEqual(['वीडियोdownload']);
     expect(mixedScriptTokens('ভিডিওdownload')).toEqual(['ভিডিওdownload']);
+  });
+
+  it('\ud83d\udd0e THE SIBLING — the word falls out of the script into ANOTHER INDIC script, not into Latin', () => {
+    // Same root cause as the shipped `\u099Cungle`: the model leaves the target script part-way through a
+    // word. Here it lands in Devanagari instead of Latin, and the user reads exactly the same broken
+    // label. Before this, `mixedScriptTokens` returned [] for every one of these.
+    expect(mixedScriptTokens('\u099C\u0902\u0917\u0932')).toEqual(['\u099C\u0902\u0917\u0932']);
+    expect(mixedScriptTokens("{ label: '\u09AC\u09BE\u0982\u09B2\u09BE\u0915\u094B\u0936' }")).toContain('\u09AC\u09BE\u0982\u09B2\u09BE\u0915\u094B\u0936');
+    expect(mixedScriptTokens('\u0B85\u0BAE\u0BCD\u092E\u093E')).toEqual(['\u0B85\u0BAE\u0BCD\u092E\u093E']);
+  });
+
+  it('\ud83d\udd12 judges the script by LETTERS ONLY — the danda and the shared digits are not evidence', () => {
+    // The danda `\u0964` and `\u0965` live in the DEVANAGARI block and end a sentence in Bengali too, and the
+    // Devanagari digits are shared the same way. Counting either as a letter would flag correct
+    // Bengali — this is the reversion that matters: drop the `\p{L}` test and these turn true.
+    expect(spansTwoIndicScripts('\u09AC\u09BE\u0982\u09B2\u09BE\u0964')).toBe(false);
+    expect(spansTwoIndicScripts('\u09AC\u09BE\u0982\u09B2\u09BE\u0965')).toBe(false);
+    expect(spansTwoIndicScripts('\u09AC\u09BE\u0982\u09B2\u09BE\u0968')).toBe(false);
+    expect(spansTwoIndicScripts('\u09AC\u09BE\u0982\u09B2\u09BE')).toBe(false);
+  });
+
+  it('two Indic languages in the SAME string are fine — only inside one WORD is it broken', () => {
+    for (const ok of ['\u09AC\u09BE\u0982\u09B2\u09BE \u0939\u093F\u0928\u094D\u0926\u0940', '\u09AC\u09BE\u0982\u09B2\u09BE\u0964 \u0939\u093F\u0928\u094D\u0926\u0940\u0964', '\u09AC\u09BE\u0982\u09B2\u09BE / \u0939\u093F\u0928\u094D\u0926\u0940', '\u09AC\u09BE\u0982\u09B2\u09BE-\u0939\u093F\u0928\u094D\u0926\u0940']) {
+      expect(mixedScriptTokens(ok), ok).toEqual([]);
+    }
   });
 
   it('leaves correct Indic text alone, including beside English words and digits', () => {

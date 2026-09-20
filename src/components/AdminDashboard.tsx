@@ -28,6 +28,7 @@ import { ReferralCostCard } from './admin/ReferralCostCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
+import { completenessLine, readCompleteness } from '../server/AgentV3/reportTruncation';
 import { problemKindLabel } from '../lib/userReport';
 import { ReportInfoButton } from './admin/ReportInfoButton';
 import { ReportFilterBar } from './admin/ReportFilterBar';
@@ -4480,6 +4481,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                             ⚠ Earlier builds could not be read — this may not be the whole session
                           </span>
                         )}
+                        {/* ⚠️ THIS REPORT IS NOT THE WHOLE RECORD (admin 2026-09-20).
+                            A report is capped twice on its way here — the recorder's own limits, then
+                            Firestore's 900 KB ceiling — and until this chip existed neither said so.
+                            A build that made 312 model calls was stored with 40 and read as a build
+                            that made 40. The autopsy CLAUDE.md mandates begins "read the WHOLE report,
+                            never a truncated tail", and the storage layer was quietly making that
+                            impossible. See reportTruncation.ts.
+                            A legacy report says "not recorded", never "complete" — the two are
+                            different claims and only one of them is verified. */}
+                        {(() => {
+                          const state = readCompleteness(selectedReport?.report?.truncation);
+                          if (!selectedReport || state === 'complete') return null;
+                          const line = completenessLine(selectedReport.report?.truncation);
+                          const hard = state === 'truncated';
+                          return (
+                            <span
+                              title={line}
+                              className={`shrink-0 whitespace-nowrap text-[10px] font-black uppercase tracking-wider px-2.5 py-2 rounded-xl border ${hard
+                                ? 'border-red-500/50 text-danger bg-red-500/10'
+                                : 'border-line text-muted'}`}
+                            >
+                              {hard ? '⚠ Part of this report was dropped' : 'Completeness not recorded'}
+                            </span>
+                          );
+                        })()}
                         {/* PART PICKER (admin 2026-08-09) — the record holds the whole 0→100% session,
                             so the admin chooses how much to take: All, or the 1st / 2nd / 3rd … build.
                             Only shown when there is genuinely more than one part to choose between. */}

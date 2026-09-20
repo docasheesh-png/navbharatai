@@ -4,7 +4,7 @@ import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { areaLabel, type AppLockArea } from '../lib/appLockAreas';
 import {
-  appLockStatus, cachedAppLockStatus, subscribeAppLock, currentUnlock, clearUnlock,
+  appLockStatus, cachedAppLockStatus, subscribeAppLock, currentUnlock, clearUnlock, resetAppLock,
   sendPinCode, setPin, unlockWithPin, unlockIsLive, secondsRemaining, shouldGate,
   looksLikePin, lockoutMinutes, type AppLockStatus, type UnlockState, type VaultError,
 } from '../lib/appLock';
@@ -32,8 +32,11 @@ import {
 
 /** Everything the PIN flow needs, shared by the wrapper and the overlay so there is one implementation. */
 function usePinFlow(userId: string) {
-  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus());
-  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock());
+  // 🔒 EVERY READ NAMES THE USER. `appLockStatus` already drops another account's state, but these run
+  // FIRST — on the very first render, before any request — so an unscoped read here would hand this
+  // gate the previous account's open lock for exactly as long as it takes the status to come back.
+  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus(userId));
+  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock(userId));
   /** `unlock` = type the PIN; `setup` = the code-and-new-PIN form (first time OR after "Forgot PIN"). */
   const [mode, setMode] = useState<'unlock' | 'setup'>('unlock');
   const [pin, setPinValue] = useState('');
@@ -46,14 +49,14 @@ function usePinFlow(userId: string) {
   const [notice, setNotice] = useState('');
   /** The status read itself failed. Shown ONLY on a screen that cannot open without it (`always`). */
   const [statusError, setStatusError] = useState('');
-  const [secondsLeft, setSecondsLeft] = useState(() => secondsRemaining(currentUnlock()));
+  const [secondsLeft, setSecondsLeft] = useState(() => secondsRemaining(currentUnlock(userId)));
 
   // ONE subscription to the shared store, so every gate re-renders together when the ticket is minted or
   // lapses. Per-gate timers would drift and leave one screen open while another had re-locked.
   useEffect(() => subscribeAppLock(() => {
-    setUnlockState(currentUnlock());
-    setStatus(cachedAppLockStatus());
-  }), []);
+    setUnlockState(currentUnlock(userId));
+    setStatus(cachedAppLockStatus(userId));
+  }), [userId]);
 
   const refreshStatus = useCallback(async (force = false) => {
     try {
@@ -79,11 +82,11 @@ function usePinFlow(userId: string) {
   /** The countdown, so a lock that is about to close does not look like it broke. */
   useEffect(() => {
     if (!unlock) { setSecondsLeft(0); return; }
-    const tick = () => setSecondsLeft(secondsRemaining(currentUnlock()));
+    const tick = () => setSecondsLeft(secondsRemaining(currentUnlock(userId)));
     tick();
     const timer = setInterval(tick, 1_000);
     return () => clearInterval(timer);
-  }, [unlock]);
+  }, [unlock, userId]);
 
   const relock = useCallback(() => {
     clearUnlock();
@@ -165,6 +168,13 @@ function usePinFlow(userId: string) {
    */
   const signInAgain = async () => {
     try {
+      // 🔴 THE ONE SIGN-OUT IN THE APP THAT DOES NOT RELOAD. Every other logout goes through
+      // `performSignOut`, whose last step is `window.location.reload()` — which is what was quietly
+      // clearing this module's state all along. This one is a raw `signOut(auth)`, so without the reset
+      // the next person to sign in on this page load inherits this account's open lock and its
+      // locked-area list. `appLockStatus` would also catch it on the next read; this shuts it NOW,
+      // before a single gate can render against stale state.
+      resetAppLock();
       await signOut(auth);
     } catch {
       setError('Could not sign you out. Please sign out from Settings and sign in again.');
@@ -490,13 +500,13 @@ export const AppLockGate: React.FC<AppLockGateProps> = ({ userId, area, render, 
  * so asking here costs no extra request and can never disagree with a gate elsewhere.
  */
 export function useAreaLocked(userId: string, area: AppLockArea): boolean {
-  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus());
-  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock());
+  const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus(userId));
+  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock(userId));
 
   useEffect(() => subscribeAppLock(() => {
-    setStatus(cachedAppLockStatus());
-    setUnlockState(currentUnlock());
-  }), []);
+    setStatus(cachedAppLockStatus(userId));
+    setUnlockState(currentUnlock(userId));
+  }), [userId]);
 
   useEffect(() => {
     if (!userId) return;

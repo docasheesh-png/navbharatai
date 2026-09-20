@@ -71849,3 +71849,86 @@ empty findings, so the difference is nearly always nothing — not worth widenin
 - **Item 5** — the deterministic complexity scorer scored an app-build prompt **5** with taskType
   `"chat"`.
 - **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.
+
+---
+
+## 2026-09-20 — The ₹250 welcome backfill, and the gap that made it necessary
+
+**Admin, verbatim:** *"woh sare user jinko welcome bonus nahi mila hai, unko sabhi ki 250₹ ke welcome
+bonus dene hai! admin penal me kuch der ke liye aisi vyabasta kar do! jab new app playstore par live
+hogi tab han, apna refral code wala system start kar denge."*
+
+### 🔴 The gap was real, and it was the seam between two correct decisions
+
+- `giftPolicy.ts` → `flatWelcomeGiftAllowed()` returns a **hardcoded `false`** since **2026-09-17**, by
+  the admin's own ruling (*"nahi welcome bonus ₹500 band karna hai"*). `weeklyTopUpAllowed()` likewise.
+- The referral ladder that was designed to pay **instead** is gated on `REFERRAL_REWARDS`, which **was
+  never set**.
+- Net: **since 2026-09-17 a new account has received ₹0**, from a product whose own first-run design
+  states that *"₹250 is what funds a COMPLETE first app"* (`giftPlan.ts`).
+
+Neither decision was wrong on its own. The gap is the seam between them, and nothing in the code could
+see it, because each module's guard was locally correct.
+
+⚠️ **A wrong turn worth recording:** mid-audit I concluded from `welcomeGiftExclusion.ts` that CLAUDE.md
+was wrong and the flat gift was still live — `flatWelcomeGiftSuppressed()` really does return `false`
+while `REFERRAL_REWARDS` is unset. It is a **different, older guard at a different height**. The
+unconditional one is `flatWelcomeGiftAllowed()` in `giftPolicy.ts`, applied at `routes/wallet.ts`. Two
+similarly-named predicates, only one of which decides. CLAUDE.md was right; I checked further before
+saying so.
+
+### What shipped — a BACKFILL, not a policy change
+
+The signup path is **untouched**: a new account still receives nothing, because the ladder is still the
+plan and it starts when the Play Store build is live (the admin's own sequencing, above).
+
+- **`src/server/lib/welcomeBackfill.ts`** (pure) — `decideBackfill`, `backfillTokens`,
+  `backfillMarkerId`, the tally.
+- **`GET /api/admin/welcome-backfill`** — counts and totals, **writes nothing** (test-locked).
+- **`POST /api/admin/welcome-backfill/run`** — refuses without `confirm: true`; pays at most 200
+  accounts per press, returns `remaining`.
+- **`WelcomeBackfillCard`** on the admin dashboard, beside Referral cost.
+
+### 🔒 Never pay the same person twice — three signals, any one refuses
+
+"Who has not had a welcome bonus?" has no single authoritative answer in this data, because the grant
+has been written three ways over the project's life. So the decision reads all three and refuses on any:
+
+1. the durable marker `payment_transactions/welcome_<uid>` (written in-transaction since 2026-07-12);
+2. the wallet ledger row, via the existing `walletReceivedWelcome` (`accountMerge.ts`) — **found by
+   filename search, not rebuilt**;
+3. `freeGiftedTokens`, the lifetime gift total.
+
+Plus its **own** marker `welcome_backfill_<uid>`, checked **first** — before any wallet reasoning — so a
+paid account reads as paid even if its wallet has since changed. Written in the **same transaction** as
+the credit; split across two writes is exactly how a retry pays twice.
+
+⚠️ **Residual risk, stated rather than hidden:** none of the three is complete alone — the marker
+post-dates 2026-07-12, the ledger is bounded, `freeGiftedTokens` is newer than the oldest wallets. A
+pre-2026-07 wallet with 500+ ledger entries and no gift total could in principle read as never-gifted.
+That is why the preview exists and why the POST needs an explicit confirmation: the spend is agreed
+against real counts, not against a comment.
+
+### Money discipline
+
+Credits go through **`mirroredCreditPatch`** — the one legal wallet writer (money audit 2026-09-12) —
+inside a transaction that re-reads both markers as preconditions, with the ledger row appended through
+`ledgerPatch`. **`capSelfGift` still applies**: an account that has had nothing has ₹400 of room so the
+full ₹250 lands, but this credit counts toward the admin's own ₹400 lifetime ceiling — so a later
+referral ladder tops the same account to ₹400, not ₹650. **That is the admin's standing ruling being
+respected, and it is flagged to them rather than silently overridden.**
+
+⚠️ **`WELCOME_BACKFILL` defaults to ON** — deliberately the opposite of most money flags here, because
+the admin asked for the button today and a button that needs a Cloud Run key first is a dead button
+(second absolute rule). `off` is the instant stop; the real protections are once-per-account, the cap,
+and the required confirmation.
+
+**Test-locked and REVERSION-PROVEN five ways** in `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`
+(25 cases): dropping the ledger signal fails 2, the gift-total signal 1, the marker signal 1, moving the
+own-marker check after the wallet check 1, and replacing `mirroredCreditPatch` with a direct balance
+write 1.
+
+### 📌 Standing decision recorded so nobody re-asks or acts early
+
+**The referral code system starts when the new app is LIVE on the Play Store** — not before. Do not set
+`REFERRAL_REWARDS` until then.

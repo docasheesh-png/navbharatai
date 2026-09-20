@@ -1673,6 +1673,35 @@ the code (it is actually read somewhere) on 2026-07-11.
   `github.com` among the linked providers) and our store for the referrer, never the request body.
   **Do not add a step without a proof rule**; `stepIsProven` is deliberately total rather than
   defaulting, so a fifth step is unpayable until someone decides how it is proven.
+- **🎁 THE ₹250 WELCOME BACKFILL (built 2026-09-20, admin-asked) — `WELCOME_BACKFILL` and
+  `WELCOME_BACKFILL_TOKENS`. ⚠️ NEITHER is set, and `WELCOME_BACKFILL` DEFAULTS TO **ON**** — the
+  opposite of most money flags here, on purpose: the admin asked for the button that day, and a button
+  that needs a Cloud Run key before it does anything is the dead button the second absolute rule
+  forbids. `WELCOME_BACKFILL=off` is the instant, no-deploy stop. Read by
+  `src/server/lib/welcomeBackfill.ts`; the routes are `GET /api/admin/welcome-backfill` (counts, writes
+  nothing) and `POST /api/admin/welcome-backfill/run` (refuses without `confirm: true`, ≤200 accounts a
+  press); the card is admin → Reports, beside Referral cost.
+  🔴 **WHY IT EXISTS — a gap at the seam between two CORRECT decisions.** `flatWelcomeGiftAllowed()`
+  has returned a hardcoded `false` since 2026-09-17 (the admin's own ruling), and the referral ladder
+  meant to pay instead is gated on `REFERRAL_REWARDS`, **which was never set**. So **every account
+  created since then received ₹0**, from a product whose own design says *"₹250 is what funds a
+  COMPLETE first app"*. Nothing could detect it: each module's guard was locally right.
+  ⚠️ **THE SIGNUP PATH IS UNTOUCHED.** This is a backfill, not a re-opening of the flat gift — a new
+  account still receives nothing, because the ladder is still the plan.
+  🔒 **NEVER PAYS TWICE — four signals, any one refuses:** its OWN marker
+  `payment_transactions/welcome_backfill_<uid>` (checked FIRST, before any wallet reasoning, and
+  written in the SAME transaction as the credit), the durable `welcome_<uid>` marker, the wallet
+  ledger row via `walletReceivedWelcome`, and `freeGiftedTokens`. Credits go through
+  `mirroredCreditPatch` — the one legal wallet writer — with `capSelfGift` still applied, so this
+  credit **counts toward the admin's own ₹400 lifetime ceiling** (a later referral ladder tops the
+  same account to ₹400, not ₹650).
+  ⚠️ **Residual risk, stated not hidden:** no signal is complete alone (the marker post-dates
+  2026-07-12, the ledger is bounded, `freeGiftedTokens` is newer than the oldest wallets), so a
+  pre-2026-07 wallet with 500+ ledger entries could in principle read as never-gifted. That is why the
+  preview is separate and the run needs a confirmation. Test-locked and reversion-proven five ways in
+  `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`.
+  📌 **STANDING DECISION (admin 2026-09-20): the referral code system starts when the new app is LIVE
+  on the Play Store — not before. Do NOT set `REFERRAL_REWARDS` until then.**
 - **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
   **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
   `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project

@@ -78,6 +78,21 @@ describe('🔴 door 1 — "I made your change" on a turn that made none', () => 
     expect(kept.reason).toContain('changes were kept');
   });
 
+  it('🔴 AN ABSENT COUNT IS NOT A COUNT OF ZERO — the mistake this very fix made first', () => {
+    // The first draft read `Number(input.filesWrittenThisTurn) > 0`, so a caller that said NOTHING
+    // got the new silence and the new "nothing was written this turn" wording — a STRONGER claim
+    // than the sentence being replaced, justified by an absent measurement. That is precisely the
+    // class this autopsy exists to remove, reproduced inside its own fix and caught by the gate.
+    // Only a STATED zero earns the new behaviour; silence keeps the older, weaker wording.
+    const silent = { hasSnapshot: true, previewGreen: false } as never;
+    expect(greenGuardShouldTellUnverified(silent)).toBe(true);
+    const d = decideGreenGuard({
+      before: { green: true }, after: { green: false }, hasSnapshot: true, provenBroken: false,
+    } as never);
+    expect(d.reason).toContain('changes were kept');
+    expect(d.reason).not.toContain('Nothing was written');
+  });
+
   it('🔒 the route holds NO private copy of the rule', () => {
     // It used to be `} else if (hasSnapshot && !previewGreen) {` — two of the three questions.
     expect(route).not.toMatch(/\}\s*else if \(hasSnapshot && !previewGreen\)/);

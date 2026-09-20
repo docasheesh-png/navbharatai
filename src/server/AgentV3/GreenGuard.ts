@@ -130,7 +130,14 @@ export function decideGreenGuard(input: {
    */
   filesWrittenThisTurn: number;
 }): GreenDecision {
-  const wroteNothing = !(Number(input.filesWrittenThisTurn) > 0);
+  // 🔴 AN ABSENT COUNT IS NOT A COUNT OF ZERO — and the first draft of this very fix got that wrong,
+  // which is the same mistake the fix exists to remove. A caller that does not state the number has
+  // told us nothing, so the WEAKER, older wording stands: claiming "nothing was written" on silence
+  // would be a stronger assertion than the sentence being replaced. Only a stated zero earns it.
+  // (The field is REQUIRED at the type level; this guards the JS callers TypeScript cannot reach.)
+  const wroteNothing = typeof input.filesWrittenThisTurn === 'number'
+    && Number.isFinite(input.filesWrittenThisTurn)
+    && input.filesWrittenThisTurn <= 0;
   const afterGreen = input.after?.green === true;
   const beforeGreen = input.before?.green === true;
   if (afterGreen) {
@@ -287,7 +294,11 @@ export function greenGuardShouldTellUnverified(input: {
 }): boolean {
   if (!input.hasSnapshot) return false;
   if (input.previewGreen) return false;
-  return Number(input.filesWrittenThisTurn) > 0;
+  // Same rule as `wroteNothing` above: silence is not a zero. A caller that did not state the count
+  // gets the pre-2026-09-20 behaviour, never a new silence justified by an absent measurement.
+  const n = input.filesWrittenThisTurn;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return true;
+  return n > 0;
 }
 
 export function greenGuardUnverifiedMessage(): string {

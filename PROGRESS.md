@@ -71986,6 +71986,20 @@ asks the real question, and the import caveat ("part of the repo may have been t
 is deliberately NOT attached to the other case — on a zero-write turn the file map is the real project,
 so borrowing that caveat would be a different untruth in the opposite direction.
 
+### ⚠️ The fix reproduced the bug inside itself, and the gate caught it
+
+The first draft read `Number(input.filesWrittenThisTurn) > 0`, so a caller that said **nothing** got
+the new silence and the new *"nothing was written this turn"* wording. That is a STRONGER claim than
+the sentence being replaced, justified by an absent measurement — **the exact class this autopsy
+exists to remove, reproduced inside its own fix.** It failed two existing GreenGuard cases whose
+calls predate the new field. Only a STATED zero now earns the new behaviour; silence keeps the older,
+weaker wording, and the field stays REQUIRED at the type level so the runtime guard only ever covers
+callers TypeScript cannot reach. Locked as its own case.
+
+A neighbouring test also had to be re-anchored: `agentv3.test.ts` asserted the literal spelling
+`importTurnObservation(isImportTurn, message)` rather than the behaviour it is about. Third instance
+this month of a test bound to a position or a spelling instead of a thing.
+
 ### Verified by reversion, four ways
 
 Each door fails exactly its own case and only that case: the guard stops asking about writes; the

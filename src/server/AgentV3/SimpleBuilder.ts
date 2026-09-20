@@ -967,8 +967,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       if (shareContract && contractCap > 0 && !contractAffordable) {
         deps.log?.('⏭️ Skipping the shared-contract pass — there is time to write your files or to design the contract, not both, and the files are the app.');
       }
+      // MEASURED, INCLUDING WHEN IT IS KILLED. A contract call that ran to its cap and was cut off is
+      // the strongest evidence this chain is slow, and it used to be discarded — see PreambleProgress.
+      let contractCallMs = 0;
       if (shareContract && contractCap > 0 && contractAffordable) {
         deps.log?.('Designing the shared types & component contract…');
+        const contractStartedAt = Date.now();
         try {
           contract = (await withTimeout(
             deps.generate(
@@ -979,6 +983,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             ),
             contractCap, 'simple-contract') || '').trim();
         } catch { contract = ''; }
+        // Recorded on BOTH paths: a throw here is usually the cap firing, and that duration is the
+        // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
+        contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
       } else if (shareContract) {
         deps.log?.('⏭️ Skipping the shared-contract pass — planning used the time it needed, so the remaining budget goes to writing your files.');
       }
@@ -1059,10 +1066,18 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // that happens to be single-tier is judged on the one stage it will really run.
       // ⚠️ `depOrder` / `tiers` / `populatedTiers` are computed ABOVE the contract now — the contract's
       // own affordability needs the same projection, and one computation cannot drift from itself.
-      if (!canFinishAfterPreamble({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })) {
+      // ⚠️ `contractCallMs` IS PART OF THE PROJECTION NOW (autopsy 31dc61fd). Using the plan call alone
+      // was 1.8× optimistic — 34s measured against a real 62.5s tier — because a plan emits a short file
+      // LIST while a tier writes whole files. The contract call, which also produces a long body,
+      // predicted the tier almost exactly and was being thrown away. See tierEstimateMs.
+      const preambleProgress = {
+        preambleCallMs: planCallMs, contractCallMs, tiers: populatedTiers,
+        elapsedMs: Date.now() - laneStartedAt, overallMs,
+      };
+      if (!canFinishAfterPreamble(preambleProgress)) {
         // No file has been generated yet, so there is nothing to salvage — this is the same handoff the
         // timeout was going to perform, minutes earlier and without burning the budget to reach it.
-        throw new Error(`simple-build ${preambleBailReason({ preambleCallMs: planCallMs, tiers: populatedTiers, elapsedMs: Date.now() - laneStartedAt, overallMs })}`);
+        throw new Error(`simple-build ${preambleBailReason(preambleProgress)}`);
       }
       // The contract file is produced, not generated: it leads `written` so every tier's dependency
       // context includes it, and is excluded from the "did the model generate enough?" counts below.

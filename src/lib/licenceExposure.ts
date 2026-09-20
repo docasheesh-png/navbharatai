@@ -72,12 +72,21 @@ export const LICENCE_EXPOSURES: readonly LicenceExposure[] = [
     requires: 'VIRUSTOTAL_API_KEY',
   },
   {
+    // ✅ THE AQI HALF LEFT THIS ROW ON 2026-09-20 (admin: "use karo!!"). Air quality now comes from
+    // CPCB via data.gov.in under the Government Open Data License – India, which permits commercial
+    // use in terms — so it is no longer an exposure and is no longer named here. WEATHER still runs
+    // on the restricted tier, which is why this row is still RUNNING.
+    //
+    // 🔒 The wording had to move with the code, and that is rule 5 rather than tidiness: this row
+    // is the ONE place the admin learns what a licence risk covers. Leaving it saying "Weather and
+    // AQI" would have overstated a legal exposure on the exact screen used to judge it, and would
+    // have made the half that was fixed invisible.
     id: 'open-meteo',
-    name: 'Live weather and air quality',
-    powers: 'Weather and AQI answers in the chat assistants.',
+    name: 'Live weather',
+    powers: 'Weather answers in the chat assistants. (Air quality moved to CPCB\'s official feed on 2026-09-20 and is no longer affected.)',
     restriction: 'The no-key tier is licensed for non-commercial use only. It needs no credential, which is exactly why it is easy to leave running without noticing.',
-    honestFix: 'Buy the provider\'s commercial tier, or switch to a source whose free tier permits commercial use. This cannot be fixed in code.',
-    whenOff: 'Weather and AQI questions fall through to the normal web search, which already answers them. Nothing breaks and no answer is invented.',
+    honestFix: 'Buy the provider\'s commercial tier (about $29 a month), or switch to a source whose free tier permits commercial use. This cannot be fixed in code.',
+    whenOff: 'Weather questions fall through to the normal web search, which already answers them. AQI is unaffected — it runs on a separate, properly licensed source. Nothing breaks and no answer is invented.',
     killSwitch: 'LIVE_WEATHER_SOURCE',
     requires: null, // needs no key at all — the reason it is easy to miss
   },

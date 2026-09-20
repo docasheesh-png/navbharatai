@@ -6,7 +6,9 @@
 // user from the moment it merges:
 //
 //   • Weather + rain ("mausam", "barish hogi kya")  — Open-Meteo forecast + its geocoder.
-//   • Air quality ("AQI", "pollution")              — Open-Meteo air-quality.
+//   • Air quality ("AQI", "pollution")              — CPCB's official real-time feed on
+//     data.gov.in, keyed by DATA_GOV_IN_API_KEY (see cpcbAirQuality.ts). Without the key it
+//     degrades to web search — never back to the non-commercial source it replaced.
 //   • Currency ("dollar ka rate")                   — open.er-api.com daily rates.
 //   • PIN code ("208001 kaha ka hai")               — India Post data via api.postalpincode.in.
 //   • Movies now playing ("kaun si movie lagi hai") — TMDB, ONLY when TMDB_API_KEY is set (no free
@@ -25,6 +27,13 @@
 // traffic the admin either buys Open-Meteo's commercial plan or we switch this source to a keyed
 // provider. The code isolates the choice to ONE builder function per source, so a swap is one edit.
 //
+// ✅ 2026-09-20 — THE AQI HALF IS DONE, AND THE SWAP WAS ALSO AN UPGRADE. Air quality now comes from
+// the Central Pollution Control Board via data.gov.in, under the Government Open Data License –
+// India, which permits commercial use in terms. It replaced the **US AQI** — a different country's
+// scale — with the number Indian users actually see quoted around them. **WEATHER IS STILL ON THE
+// RESTRICTED SOURCE**, so the licence row stays RUNNING until that half is decided too: the
+// isolation this header promised is what made half the problem solvable on its own.
+//
 // ✅ 2026-09-09 — IT NOW HAS A SWITCH, AND THE ADMIN CAN SEE IT. `LIVE_WEATHER_SOURCE=off` stops the
 // weather and AQI blocks (the two Open-Meteo callers) while everything else here keeps working; the
 // questions then fall through to web search, exactly as gold rates and showtimes already do. The
@@ -34,6 +43,7 @@
 
 import { liveTransitContext } from './transitLive';
 import { liveWeatherSourceEnabled } from '../../lib/licenceExposure';
+import { fetchCityAirQuality, aqiCategory, cpcbAqiConfigured } from './cpcbAirQuality';
 
 const SOURCE_TIMEOUT_MS = 5_000;
 
@@ -126,26 +136,46 @@ async function weatherBlock(message: string, fetchImpl: typeof fetch, now: Date)
     'For official Indian forecasts and warnings link [IMD](https://mausam.imd.gov.in).');
 }
 
-async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date): Promise<string> {
+/**
+ * AIR QUALITY — India's OWN official index (admin 2026-09-20: "use karo!!").
+ *
+ * This block used to call the same non-commercially-licensed provider as the weather and report the
+ * **US AQI**. It now reads the Central Pollution Control Board's real-time feed on data.gov.in,
+ * published under the Government Open Data License – India, which permits commercial use in terms.
+ * See `cpcbAirQuality.ts` for the method (CPCB's own: the maximum sub-index, three pollutants
+ * minimum, one of them particulate) and for why the WORST station is named rather than an average.
+ *
+ * ⚠️ TWO THINGS THAT ARE DELIBERATE AND WOULD BE EASY TO "TIDY" BACK:
+ *
+ *  1. It is gated by its own credential, NOT by `LIVE_WEATHER_SOURCE`. That switch exists to pause
+ *     ONE provider's licence exposure; CPCB is not that provider, so switching the weather off must
+ *     not also silence a source that is properly licensed. Splitting the gate is the entire point
+ *     of the swap.
+ *  2. No key ⇒ NOTHING, never a fall back to the old feed. Falling back would silently re-open the
+ *     exposure this change closes, and nothing on any screen would say so.
+ *
+ * It also needs no geocoding: CPCB is keyed by city name, so the old lookup that turned a place into
+ * a latitude is simply gone from this path.
+ */
+async function aqiBlock(message: string, fetchImpl: typeof fetch, now: Date, env: NodeJS.ProcessEnv): Promise<string> {
   if (!AQI_SIGNAL.test(message)) return '';
   const place = extractPlace(message);
-  if (!place) return '';
-  const geo = await geocode(place, fetchImpl);
-  if (!geo) return '';
-  const data = await fetchJson(
-    `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${geo.lat}&longitude=${geo.lon}`
-      + `&current=pm2_5,pm10,us_aqi&timezone=auto`,
-    fetchImpl,
-  );
-  const cur = data?.current;
-  if (!cur || typeof cur.us_aqi !== 'number') return '';
+  if (!place) return ''; // no place named → the directive makes the model ask, honestly
+  const air = await fetchCityAirQuality(place, (url) => fetchJson(url, fetchImpl), env);
+  if (!air) return '';
   const lines = [
-    `Place: ${geo.label}`,
-    `Air quality index (US AQI): ${cur.us_aqi}`,
-    `PM2.5: ${cur.pm2_5 ?? '?'} µg/m³, PM10: ${cur.pm10 ?? '?'} µg/m³`,
+    `Place: ${air.city || place}`,
+    `Air Quality Index (CPCB National AQI): ${air.aqi} — ${aqiCategory(air.aqi)}`,
+    `Main pollutant: ${air.dominant}`,
+    air.stationCount > 1
+      ? `Reading: the worst of ${air.stationCount} monitoring stations in the city (${air.station})`
+      : `Monitoring station: ${air.station}`,
+    ...(air.lastUpdate ? [`Measured at: ${air.lastUpdate}`] : []),
   ];
+  // GODL-India REQUIRES the source to be attributed, so this credit is a licence condition rather
+  // than a nicety — do not drop it to shorten the block.
   return liveBlock('LIVE AIR QUALITY DATA', lines.join('\n'), now,
-    'For official Indian AQI link [CPCB](https://app.cpcbccr.com).');
+    'Source: Central Pollution Control Board (CPCB) via data.gov.in. Full details at [CPCB](https://app.cpcbccr.com).');
 }
 
 // ── Currency ───────────────────────────────────────────────────────────────────────────────────────
@@ -250,22 +280,27 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
   /**
    * 🔒 THE ONE SOURCE HERE WHOSE LICENCE DOES NOT COVER A COMMERCIAL PRODUCT (admin 2026-09-09).
    *
-   * Weather and AQI both come from the same provider's NO-KEY tier, which its terms reserve for
-   * non-commercial use. Needing no credential is precisely why it was easy to leave running: every
-   * other restricted integration in this codebase announces itself by having an API key to set.
+   * WEATHER comes from a provider's NO-KEY tier, which its terms reserve for non-commercial use.
+   * Needing no credential is precisely why it was easy to leave running: every other restricted
+   * integration in this codebase announces itself by having an API key to set.
    *
    * The switch is read from `licenceExposure.liveWeatherSourceEnabled` — the SAME function the admin
    * panel's licence register reads — so the panel can never claim a source is off while its calls
-   * keep going out. Off is an honest degradation, not a break: these two blocks simply return
-   * nothing, and the caller's web search answers the question as it already does for gold rates and
-   * showtimes.
+   * keep going out. Off is an honest degradation, not a break: the block simply returns nothing, and
+   * the caller's web search answers the question as it already does for gold rates and showtimes.
    *
    * ⚠️ This is a PAUSE, not the fix. The fix is a commercial plan or a differently-licensed source,
    * and that is the admin's purchase decision — see licenceExposure.ts.
+   *
+   * ✅ AQI IS NO LONGER ON THAT SWITCH (admin 2026-09-20). It moved to CPCB's own feed, whose licence
+   * (GODL-India) permits commercial use, so it carries its OWN gate — the presence of its key. A
+   * properly-licensed source must not be silenced by a switch that exists to pause a different
+   * provider's exposure; keeping them on one flag would mean pausing the problem also pauses the fix.
    */
-  const sources = liveWeatherSourceEnabled(env)
-    ? [weatherBlock, aqiBlock, currencyBlock, pincodeBlock]
-    : [currencyBlock, pincodeBlock];
+  const sources: Array<(m: string, f: typeof fetch, n: Date) => Promise<string>> = [];
+  if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);
+  if (cpcbAqiConfigured(env)) sources.push((m, f, n) => aqiBlock(m, f, n, env));
+  sources.push(currencyBlock, pincodeBlock);
   for (const source of sources) {
     const block = await source(message, fetchImpl, now).catch(() => '');
     if (block) return block;

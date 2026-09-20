@@ -39,16 +39,41 @@ describe('the weather switch — one definition, obeyed by the source AND report
     const src = read('../server/lib/liveDataSources.ts');
     expect(src).toContain("import { liveWeatherSourceEnabled } from '../../lib/licenceExposure'");
     expect(src).toContain('liveWeatherSourceEnabled(env)');
-    // …and switching it off must remove BOTH Open-Meteo callers, not just the obvious one.
-    expect(src).toContain('? [weatherBlock, aqiBlock, currencyBlock, pincodeBlock]');
-    expect(src).toContain(': [currencyBlock, pincodeBlock]');
+    // The switch gates the weather block, and only that one.
+    expect(src).toContain('if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);');
+  });
+
+  it('🔒 the restricted host has exactly ONE caller left — the AQI one is GONE, not merely moved', () => {
+    // ⚠️ THIS REPLACES an assertion that the switch removed "BOTH Open-Meteo callers" (the old
+    // ternary `? [weatherBlock, aqiBlock, …]`). That assertion's FACT changed on 2026-09-20: air
+    // quality moved to CPCB's own feed, which is licensed for commercial use, so there is only one
+    // restricted caller now.
+    //
+    // It is replaced by something STRONGER rather than merely updated. The old line proved a list's
+    // shape; this proves the restricted HOST is unreachable from the AQI path at all — which is the
+    // thing that actually matters, and which a future edit re-adding the old call would break even
+    // if it kept the list looking right.
+    const src = read('../server/lib/liveDataSources.ts');
+    expect(src).not.toContain('air-quality-api.open-meteo.com');
+    // The weather forecast + its geocoder are the ONE remaining restricted pair.
+    expect(src).toContain('api.open-meteo.com/v1/forecast');
+  });
+
+  it('🔒 AQI is gated by its OWN credential, never by the weather switch', () => {
+    // Pausing a provider's licence exposure must not also silence a properly licensed source —
+    // otherwise pausing the problem pauses the fix.
+    const src = read('../server/lib/liveDataSources.ts');
+    expect(src).toContain('if (cpcbAqiConfigured(env)) sources.push(');
+    const weatherGate = src.indexOf('if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);');
+    const aqiGate = src.indexOf('if (cpcbAqiConfigured(env)) sources.push(');
+    expect(weatherGate).toBeGreaterThan(-1);
+    expect(aqiGate).toBeGreaterThan(weatherGate); // two separate statements, not one condition
   });
 
   it('the sources that are NOT restricted keep working when it is off', () => {
     const src = read('../server/lib/liveDataSources.ts');
-    const off = src.slice(src.indexOf(': [currencyBlock, pincodeBlock]'));
-    expect(off).toContain('currencyBlock');
-    expect(off).toContain('pincodeBlock');
+    // Currency and PIN code are pushed unconditionally — outside every gate.
+    expect(src).toContain('sources.push(currencyBlock, pincodeBlock);');
   });
 });
 

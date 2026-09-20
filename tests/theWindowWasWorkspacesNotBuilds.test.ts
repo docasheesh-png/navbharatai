@@ -47,14 +47,32 @@ describe('🔴 the window is BUILDS now, not workspaces', () => {
   it('the store reads each workspace\'s history subcollection, one entry per build', () => {
     const store = code('../src/server/AgentV3/DiagnosticsStore.ts');
     const fn = store.slice(store.indexOf('export async function listRecentBuildReports'));
-    expect(fn).toContain('HISTORY_SUBCOLLECTION');
+    // The subcollection is reached through the shared index-free reader (2026-09-20), not inline.
+    expect(fn).toContain('newestHistoryRefs(');
     expect(fn).toContain("source: 'history'");
   });
 
-  it('⚠️ it orders by documentId, so it needs no Firestore index that nobody creates', () => {
+  /**
+   * 🔴 THIS CASE USED TO ASSERT THE DEFECT, and it is the sharpest lesson of the 2026-09-20 autopsy.
+   *
+   * It read: *"⚠️ it orders by documentId, so it needs no Firestore index that nobody creates"*, and
+   * it proved that by asserting the source contained `admin.firestore.FieldPath.documentId()`. That
+   * is a claim about a SHAPE, presented as a guarantee about BEHAVIOUR — and the behaviour was the
+   * opposite. Firestore indexes `__name__` ASCENDING automatically; the query sorted it DESCENDING,
+   * which needs a composite index this project cannot deploy, so it threw on **every single call**
+   * from the day it shipped. This test passed throughout, and `DIAGNOSTICS_READ_FAILED` filled the
+   * admin's server log while it did.
+   *
+   * Kept here, rewritten, rather than deleted: a source assertion can only ever pin what the code
+   * SAYS. When the thing at stake is what a third party will accept, the assertion has to name the
+   * property that actually makes it safe.
+   */
+  it('it needs no Firestore index — because the sort is the built-in ascending one', () => {
     const store = code('../src/server/AgentV3/DiagnosticsStore.ts');
     const fn = store.slice(store.indexOf('export async function listRecentBuildReports'));
-    expect(fn).toContain('admin.firestore.FieldPath.documentId()');
+    // A DESCENDING document-id sort is what broke it. The class scan in
+    // src/server/lib/firestoreIndexSafe.test.ts now fails on that shape in any server file.
+    expect(fn).not.toContain("documentId(), 'desc'");
     // An ordered collectionGroup query is the obvious alternative and needs a collection-group index;
     // its absence is a RUNTIME failure, and this repo ships no firestore.indexes.json.
     expect(fn).not.toContain('collectionGroup');

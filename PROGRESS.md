@@ -73242,6 +73242,117 @@ considered and **rejected**: fragile, and it would bill every build for it.
 
 ---
 
+## 2026-09-20 — 🔴 THE INDEX NOBODY CAN DEPLOY: the admin's server log was reporting one of OUR queries, not a missing click
+
+**Trigger:** the admin pasted the Server-logs panel from the admin panel and asked, verbatim,
+*"dekh ke batao — koi problem hai?"*
+
+**Three things in that capture, and only one of them was a defect.**
+
+1. **`DIAGNOSTICS_READ_FAILED` — WARN, 8 rows across 3 days** (18 Sep 19:41 → 20 Sep 13:10), every
+   one carrying the identical `9 FAILED_PRECONDITION: The query requires an index` with the
+   Firestore create-index link. **This is the defect, and it was ours.**
+2. **`BLOCKED_SCAN` — WARN, ~18 rows.** `/.env`, `/.env.prod`, `/config.php`, `/wp-admin/install.php`
+   … and notably **`/.env.openai` and `/.env.anthropic`**. Internet background noise from
+   credential-hunting bots, and every one **BLOCKED** — the guard doing exactly its job. Not a
+   defect. Recorded because the two AI-key paths say what today's bots are shopping for.
+3. **`AGENTV3_BUILD_BLOCKED_NO_CREDITS` — WARN ×2** (18 Sep 20:54, 19 Sep 20:03). Real users refused
+   a build at a ₹0 balance. Not a code defect — it is the seam this repo already named on 2026-09-20:
+   the flat welcome gift was retired on 2026-09-17 and `REFERRAL_REWARDS` was never set, so accounts
+   opened in the gap received ₹0. The ₹250 backfill (`WELCOME_BACKFILL`, default ON) is the answer
+   and it now exists; these two rows are what it is for.
+
+### The root cause of (1), and why the 2026-09-17 fix did not end it
+
+On 2026-09-17 the same warning was root-caused as a **truncation** bug: two independent
+`slice(0, 300)` calls were cutting the create-index URL mid-token, so *"the fix was in the part we
+cut off"*. That fix was right and shipped. It made the remedy **reachable**. It never asked what the
+index was **for** — and the entry closed with *"⚠️ This does not fix the missing index."*
+
+Decoding the link (base64 → the Firestore Admin `Index` proto) answers it in one line:
+
+```
+projects/gen-lang-client-0866594388/databases/(default)/collectionGroups/history/indexes/_
+queryScope = COLLECTION        fields = [ __name__ DESCENDING ]
+```
+
+Not a nested field. Not a collection-group query. That is exactly `.orderBy(documentId(), 'desc')`.
+
+🔑 **Firestore's automatic indexes cover `__name__` ASCENDING. A DESCENDING `__name__` sort as the
+only order is not covered** — it needs a composite index. And `firestoreIndexSafe.ts` already records,
+in its own header, why this project can never answer that with an index: nothing here deploys one,
+and `.firebaserc` names the **Hosting** project (`navbharatai-3395f`) while Firestore lives in
+`gen-lang-client-0866594388`. So the query could only ever fail. **It did, on every call, for as long
+as it existed.**
+
+**Two call sites carried it, and the second inherited the belief from the first in a comment:**
+- `listDiagnosticsHistoryInner` — the workspace build history.
+- `listRecentBuildReports` (shipped **2026-09-18**, commit `10a71a76`), whose docblock read
+  *"It orders by `documentId()`, exactly as `listDiagnosticsHistory` does, so it needs NO Firestore
+  index."* Copied reasoning, copied failure.
+
+### What it cost — and why nothing lied about it
+
+Both readers are honest about a read that failed, which is the 2026-08-27 `ok: false` work paying
+off: nothing reported a confident wrong number. What they did instead was **degrade silently to a
+lesser answer**:
+
+- The **whole-session build report** (`scope=session`, the stitch the admin uses when submitting a
+  report) could never reach the history, so it fell back to the single latest turn — which is why
+  every report submitted since has been one build rather than a session.
+- The admin **build-cost window** fell back to `source: 'latest-per-workspace'`. The feature shipped
+  on 2026-09-18 to show *one row per BUILD* had therefore **never once run successfully**.
+
+### The fix (PR "the index nobody can deploy")
+
+- **One shared reader, `newestHistoryRefs`** — reads the history document **refs** in the default
+  **ascending** `__name__` order (always built-in, never an index error) via `.select()` (references
+  only, the cheapest read Firestore has), picks the newest in memory, then fetches only those whole.
+  Both call sites go through it, so a third cannot inherit the belief.
+- **`newestFirstHistoryIds` is PURE and exported**, so the ordering the whole fix turns on is tested
+  without Firestore. Ids are compared **numerically** (a legacy id of a different length does not
+  sort right lexicographically), and an unrecognised id sorts **last and is never dropped**.
+- ⚠️ **The ascending scan is deliberately unbounded.** A Firestore `.limit(n)` on an ascending scan
+  keeps the **oldest** n — the exact opposite of what every caller wants. History is a per-workspace
+  archive of settled builds (tens of documents), so the honest cost of correctness is paid there
+  rather than in a cap that silently drops the newest build.
+- **Both false comments corrected**, in place, naming why the claim was wrong.
+
+### 🔒 The 50/50 half — the guard existed and could not see this shape
+
+`src/server/lib/firestoreIndexSafe.test.ts` is this repo's own CI answer to *"a query needing an
+index nobody can deploy"*. It scans every server file for `.where(A,'==',…).orderBy(B)` and has
+stopped that shape returning since the store's first publish. It is **deliberately narrow** — and
+narrow around a `where`, so a bare `.orderBy(documentId(),'desc')` was structurally invisible to it.
+
+**The class is "a query that needs an index nobody can deploy", and it has more than one shape.** The
+scan now fails on the second shape too, in any server file including ones written later, with the
+remedy named in the failure message. Its own guard-the-guard case asserts that an **ascending**
+document-id sort (legal, used on purpose in `DeploymentStore`) is not flagged.
+
+Test-locked in `tests/theIndexNobodyCanDeploy.test.ts` (+ the widened class scan) and **proven by
+reversion**: restoring the old query shape turns three cases red across both suites.
+
+### What is NOT claimed here
+
+Creating the index in the Firestore console would also have stopped the error, and the link in the
+log does exactly that. It is not the fix: it leaves a query in the code that fails for anyone
+without that console, in any new project, and the day someone deletes the index it returns. The link
+is now redundant rather than pending.
+
+### 🔴 The sharpest part: a TEST asserted the defect and called it a guarantee
+
+`tests/theWindowWasWorkspacesNotBuilds.test.ts` shipped with the 2026-09-18 feature and carried a
+case titled *"⚠️ it orders by documentId, so it needs no Firestore index that nobody creates"*. It
+proved that by asserting the source contained `admin.firestore.FieldPath.documentId()`.
+
+**That is a claim about a SHAPE, presented as a guarantee about BEHAVIOUR — and the behaviour was the
+exact opposite.** The test passed for two days while the query it blessed threw on every call.
+
+A source assertion can only pin what the code **says**. When what is at stake is what a third party
+(here, Firestore) will **accept**, the assertion has to name the property that actually makes it
+safe. The case is rewritten in place rather than deleted, with that reasoning attached, because the
+wrong version is the evidence.
 ## 2026-09-20 — "Notifications nahi aa rahe": the feature was built, shipped to nobody, and could not be diagnosed
 
 **Admin, verbatim:** *"jaise app notifications ate hai hamare mobile me woh notifications abhi

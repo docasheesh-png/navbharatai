@@ -596,8 +596,8 @@ export async function listDiagnosticsHistoryResult(
 
 /**
  * List a workspace's past builds, most-recent-first, metadata only (cheap for a picker/list UI).
- * Ordered by document id (the stringified `startedAt` epoch-ms — lexicographic order matches numeric
- * order for same-length epoch-ms strings) so no composite index on a nested field is ever needed.
+ * Ordered in memory by `newestFirstHistoryIds` from an ASCENDING ref scan, so no Firestore index of
+ * any kind is needed — see `newestHistoryRefs` for why a descending sort was never free.
  * Never throws — returns [] on any failure or when nothing has been recorded yet.
  *
  * ⚠️ THIS SHAPE CANNOT TELL YOU WHICH OF THOSE TWO HAPPENED. For anything that reports a COUNT to a
@@ -608,22 +608,84 @@ export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HI
   return (await listDiagnosticsHistoryResult(workspaceId, limit)).entries;
 }
 
+/**
+ * 🔴 THE INDEX NOBODY CAN DEPLOY (admin server-log capture, 2026-09-20).
+ *
+ * `DIAGNOSTICS_READ_FAILED` had repeated for days, every row carrying the same Firestore error:
+ * *"9 FAILED_PRECONDITION: The query requires an index."* The 2026-09-17 fix made the create-index
+ * LINK survive truncation so the remedy was reachable — it did not ask why an index was needed.
+ * Decoding that link answers it: queryScope **COLLECTION**, collection `history`, one field,
+ * **`__name__` DESCENDING**. That is not a nested field and not a collection-group query. It is
+ * exactly `.orderBy(documentId(), 'desc')`.
+ *
+ * 🔑 **Firestore's built-in indexes do not cover a DESCENDING `__name__` sort on its own.** Every
+ * collection is indexed by `__name__` ascending; ordering by it descending as the only sort needs a
+ * composite index — and **this repo ships no `firestore.indexes.json` and has no way to deploy one**,
+ * so such a query is a permanent runtime failure, not a one-off.
+ *
+ * Two call sites believed otherwise, and the second copied the belief from the first in a comment:
+ * *"orders by documentId(), exactly as listDiagnosticsHistory does, so it needs NO Firestore index"*.
+ * Both are fixed here, in ONE reader, so a third cannot inherit it.
+ *
+ * What it does instead: read the refs in the DEFAULT ascending `__name__` order — always built-in,
+ * never an index error — and pick the newest in memory. `.select()` with no fields returns document
+ * REFERENCES only, the cheapest read Firestore has, so the sweep costs refs rather than payloads.
+ *
+ * ⚠️ It reads every history ref for the workspace rather than a bounded page, and that is deliberate:
+ * a `limit` on an ASCENDING scan keeps the OLDEST entries, which is the exact opposite of what every
+ * caller wants. History is a per-workspace archive of settled builds — tens of documents — so the
+ * honest cost of correctness is paid here instead of a cap that silently drops the newest build.
+ *
+ * Never throws for the caller to interpret — it propagates, because both callers already distinguish
+ * "could not look" from "there is nothing".
+ */
+async function newestHistoryRefs(
+  parent: FirebaseFirestore.DocumentReference,
+  limit: number,
+): Promise<FirebaseFirestore.DocumentReference[]> {
+  const snap = await parent.collection(HISTORY_SUBCOLLECTION).select().get();
+  const ids = newestFirstHistoryIds(snap.docs.map((d) => d.id), limit);
+  const byId = new Map(snap.docs.map((d) => [d.id, d.ref]));
+  return ids.flatMap((id) => { const ref = byId.get(id); return ref ? [ref] : []; });
+}
+
+/**
+ * The newest history document ids, most-recent-first. PURE and exported so the ordering this whole
+ * fix turns on is tested without Firestore.
+ *
+ * Ids are `String(report.startedAt)` — epoch milliseconds. They are compared NUMERICALLY rather than
+ * lexicographically: same-length epoch-ms strings sort identically either way, but a legacy or
+ * hand-written id of a different length does not, and a numeric compare is right in both cases.
+ * Anything that is not a number sorts LAST (never silently in front of a real build) and keeps a
+ * stable order among its peers, so an unrecognised id is visible rather than lost.
+ */
+export function newestFirstHistoryIds(ids: readonly string[], limit: number): string[] {
+  const n = Math.max(0, limit);
+  if (n === 0) return [];
+  const keyed = ids.map((id, i) => ({ id, i, at: Number(id) }));
+  keyed.sort((a, b) => {
+    const aOk = Number.isFinite(a.at), bOk = Number.isFinite(b.at);
+    if (aOk !== bOk) return aOk ? -1 : 1;
+    if (aOk && bOk && a.at !== b.at) return b.at - a.at;
+    return a.i - b.i;
+  });
+  return keyed.slice(0, n).map((k) => k.id);
+}
+
 async function listDiagnosticsHistoryInner(
   db: NonNullable<ReturnType<typeof getDb>>,
   workspaceId: string,
   limit: number,
 ): Promise<DiagnosticsHistoryEntry[]> {
   {
-    const snap = await db
-      .collection(COLLECTION)
-      .doc(workspaceId)
-      .collection(HISTORY_SUBCOLLECTION)
-      .orderBy(admin.firestore.FieldPath.documentId(), 'desc')
-      .limit(Math.max(0, limit))
-      .get();
-    return snap.docs.map((d) => {
-      const r = d.data().report as BuildDiagnosticsReport;
-      return {
+    const refs = await newestHistoryRefs(db.collection(COLLECTION).doc(workspaceId), limit);
+    if (refs.length === 0) return [];
+    const docs = await db.getAll(...refs);
+    return docs.flatMap((d) => {
+      if (!d.exists) return [];
+      const r = d.data()?.report as BuildDiagnosticsReport | undefined;
+      if (!r || typeof r !== 'object') return [];
+      return [{
         id: d.id, buildId: r.buildId, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok,
         summary: r.summary, rootCause: r.rootCause, counts: r.counts,
         // Carried so a SESSION summary can be built from the history we already read (admin 2026-08-06):
@@ -631,7 +693,7 @@ async function listDiagnosticsHistoryInner(
         // across a session were invisible in all three of them.
         dataLossCount: Array.isArray(r.dataLossEvents) ? r.dataLossEvents.length : 0,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
-      };
+      }];
     });
   }
 }
@@ -921,9 +983,11 @@ export async function getDiagnosticsHistoryItem(workspaceId: string, id: string)
  * every one of the `limit` workspaces above it would have to hold only builds OLDER than that one —
  * impossible, since each of them holds at least one build saved more recently still.
  *
- * ⚠️ It orders by `documentId()`, exactly as `listDiagnosticsHistory` does, so it needs NO Firestore
- * index — an ordered collectionGroup query would have needed a collection-group index that nothing in
- * this repo creates, and its absence is a runtime error, not a compile one.
+ * ⚠️ It reads refs in the built-in ASCENDING order and picks the newest in memory (`newestHistoryRefs`),
+ * so it needs NO Firestore index of any kind. The earlier wording here claimed the same of a
+ * `documentId()` DESCENDING sort, and that was false — see `newestHistoryRefs`. A collectionGroup
+ * query would need one too, and nothing in this repo creates indexes: their absence is a runtime
+ * error, not a compile one.
  *
  * Never throws. If the history sweep comes back with nothing at all (a fresh deployment, or reads
  * failing), it falls back to the old per-workspace view and SAYS which one it returned — the card
@@ -950,13 +1014,8 @@ export async function listRecentBuildReports(limit = 30): Promise<RecentBuildRep
     const parents = await db.collection(COLLECTION).orderBy('savedAt', 'desc').limit(want).select().get();
     const candidates = (await Promise.all(parents.docs.map(async (p) => {
       try {
-        const snap = await p.ref
-          .collection(HISTORY_SUBCOLLECTION)
-          .orderBy(admin.firestore.FieldPath.documentId(), 'desc')
-          .limit(want)
-          .select()
-          .get();
-        return snap.docs.map((d) => ({ workspaceId: p.id, startedAt: Number(d.id) || 0, ref: d.ref }));
+        const refs = await newestHistoryRefs(p.ref, want);
+        return refs.map((ref) => ({ workspaceId: p.id, startedAt: Number(ref.id) || 0, ref }));
       } catch {
         return []; // one unreadable workspace must not empty the whole card
       }

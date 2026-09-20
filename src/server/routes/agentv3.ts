@@ -37,7 +37,8 @@ import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, e
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
-import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { answeringModel } from '../AgentV3/answeringModel';
+import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
@@ -277,7 +278,7 @@ import { analyzeSpaFallback, spaFallbackSnippet, spaFallbackRepairInstruction } 
 import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoScaffold';
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
-import { repeatedReadSummary } from '../AgentV3/repeatedReads';
+import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
@@ -497,6 +498,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
+import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
 import {
   startVersionPreview,
   listLiveVersionsCommand,
@@ -10597,6 +10599,13 @@ async function noteBuildOutcome(
       const evt = e as { type?: string; checkpoint?: unknown };
       if (evt?.type === 'checkpoint' && evt.checkpoint) saveCheckpoint(workspaceId, evt.checkpoint).catch(() => {});
     }, false);
+    // WHAT THE USER MUST DO (admin 2026-09-20: "user se jo jo chahiye woh sab ❓ me"). Every ask this
+    // build makes — a credential, a gate it is waiting on, an assumption it wants corrected — is
+    // recorded durably as it is emitted, so it survives a reload and is readable in one place instead
+    // of being buried in the narration. Same choke point and same best-effort contract as the
+    // checkpoint persister above: one subscription, and a failure never reaches the build.
+    const userActionBuildId = String(Date.now());
+    attachUserActionRecorder(events, { workspaceId, buildId: userActionBuildId });
     // `let` — a zip import below adopts the DETECTED framework of the imported app (persisted
     // durably by persistSessionTimeline), overriding whatever the client's picker defaulted to.
     let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
@@ -12715,7 +12724,7 @@ async function noteBuildOutcome(
             } catch (err) {
               try {
                 const lbl = fastLaneProviderLabel(rmProvider);
-                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -12728,7 +12737,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : rmProvider.toLowerCase(), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -13704,6 +13713,9 @@ async function noteBuildOutcome(
         // reads (autopsy 3ce8459b, 2026-09-19). A thunk for the same forward-reference reason as the
         // two lines above: `dispatcher` is constructed BELOW, with this very object as an argument.
         writeTypecheckStats: () => dispatcherForSubAgents?.sharedWriteTypecheckStats(),
+        // And its file READS — so the repeated-read finding covers the reviewer and every other
+        // sub-agent, not just the architect (autopsy f97eb0ec).
+        readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -14408,7 +14420,7 @@ async function noteBuildOutcome(
             const t = await Promise.race([call, timeout]);
             try {
               const lbl = fastLaneProviderLabel(bpProvider);
-              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : bpProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -15267,7 +15279,7 @@ async function noteBuildOutcome(
               // as every other one, or the report cannot say whether the key was working at all.
               try {
                 const lbl = fastLaneProviderLabel(ppProvider);
-                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {
@@ -15275,7 +15287,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(ppProvider);
-              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -15913,6 +15925,30 @@ async function noteBuildOutcome(
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }
+        // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,
+        // 2026-09-20). The lane can bail AFTER planning and BEFORE writing: its budget projection
+        // says the remaining stages will not fit, and the bail's own comment reads "there is nothing
+        // to salvage" — true of FILES, false of the PLAN. On that build 62 seconds and 2,220 output
+        // tokens produced a five-file manifest, and the full builder then re-ran `ls` and re-read the
+        // scaffold it had just been told about.
+        //
+        // ⚠️ OFFERED AS A PLAN, NEVER AS DONE WORK — which is the whole difference from the salvage
+        // block above. Those files EXIST in the workspace; these do not, and telling the builder to
+        // "continue from" files that are not there is precisely the confident-and-wrong instruction
+        // this codebase forbids. So it is a starting point it may change, and it is only offered when
+        // nothing was salvaged (salvaged work is the stronger signal and already carries its own).
+        if (!sb.ok && !sb.salvagedPaths?.length && sb.plannedPaths?.length) {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_PLAN_HANDOFF',
+            message: `Fast lane planned ${sb.plannedPaths.length} file(s) before it stopped — the plan was handed to the full builder instead of being thrown away.`,
+            autoResolved: true, detail: sb.plannedPaths.join(', '),
+          });
+          buildPrompt =
+            `[A PLAN ALREADY EXISTS — these files are NOT written yet] A faster lane planned THIS app's file list before it ran out of time. ` +
+            `Nothing below has been created; this is a starting point, not prior work:\n${sb.plannedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            `Use it so you do not spend the budget re-deciding the same structure. You may add, merge or rename a file where the app genuinely needs it — ` +
+            `the plan is a head start, not a contract.\n\n---\n\n${buildPrompt}`;
+        }
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
         if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
@@ -16234,6 +16270,60 @@ async function noteBuildOutcome(
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
+
+      /**
+       * ── HOW THE ENGINE BEHAVED, MEASURED ON EVERY BUILD ────────────────────────────────────────
+       *
+       * 🔴 AUTOPSY c847b523 (2026-09-20). The build read `src/App.tsx` NINE times, wrote nothing, and
+       * the user pressed Stop at 108 s. `REPEATED_READS` — the one finding that names exactly that —
+       * is absent from the report, and it was not a detection failure: it had been nested inside
+       *
+       *     if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted)
+       *
+       * purely because that feature had already assembled the file map it wanted for something else.
+       * Three of those four conditions were false in this build, so the measurement could not fire in
+       * precisely the shape of build it exists to describe. It had been reporting only on builds that
+       * wrote files and were never stopped — the ones least likely to have looped.
+       *
+       * 🔑 THE CLASS, named so it is recognised again: AN INSTRUMENT ABOUT OUR OWN ENGINE MUST NOT
+       * LIVE INSIDE ANOTHER FEATURE'S CONDITIONAL. Its only precondition is that the build ran. A
+       * measurement whose coverage is decided by an unrelated flag reports a biased sample and reads
+       * as an absence of the problem — which is worse than no measurement, because nobody doubts it.
+       *
+       * So both lines now sit here, beside READY_BEFORE_END, for the reason that block already states:
+       * "never got there" and "got there and stopped at once" are opposite facts, and a missing line
+       * reads as the second. Each is independently wrapped — neither can suppress the other.
+       */
+      // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
+      // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
+      // worked: a behavioural fix nobody measures is a hope.
+      try {
+        const line = repeatedReadSummary(dispatcher.readLedgerCounts());
+        const stops = dispatcher.readLoopStops();
+        if (line) {
+          buildDiag.record({
+            phase: 'build', severity: 'warning', code: 'REPEATED_READS',
+            message: line, autoResolved: false,
+            // WHETHER THE BREAKER FIRED, AND WHETHER IT WORKED. A build with stops AND a still-high
+            // re-read count is the escalation being IGNORED — a different problem from the one it
+            // was built for, and it must be legible as such rather than hidden inside a total.
+            detail: stops > 0
+              ? `${stops} STOP-level notice(s) issued after ${READ_LOOP_LIMIT} no-progress reads of the same path.`
+              : 'No read reached the no-progress limit — every re-read followed a real change, or the streak was short.',
+          });
+        }
+      } catch { /* an advisory finding must never affect a build */ }
+      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+      // write time and how many errors were caught while the model still held the file. Reported
+      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+      try {
+        const wt = dispatcher.writeTypecheckStats();
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+          message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
+
       if (result.timedOut === true) {
         try {
           buildDiag.record({
@@ -17648,29 +17738,6 @@ async function noteBuildOutcome(
             for (const [fp, content] of entries) {
               if (/(^|\/)package\.json$/i.test(String(fp))) pkgTexts.push(String(content ?? ''));
             }
-            // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
-            // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
-            // worked: a behavioural fix nobody measures is a hope.
-            try {
-              const line = repeatedReadSummary(dispatcher.readLedgerCounts());
-              if (line) {
-                buildDiag.record({
-                  phase: 'build', severity: 'warning', code: 'REPEATED_READS',
-                  message: line, autoResolved: false,
-                });
-              }
-            } catch { /* an advisory finding must never affect a build */ }
-            // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
-            // write time and how many errors were caught while the model still held the file. Reported
-            // so the next autopsy can say whether the 7-minute endgame grind actually went away.
-            try {
-              const wt = dispatcher.writeTypecheckStats();
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
-                message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
-              });
-            } catch { /* an advisory line must never affect a build */ }
-
             const stranded = uiWithoutBuildVerdict({ paths: [...entries.keys()].map(String), packageJsonFiles: pkgTexts });
             if (stranded.stranded) {
               buildDiag.record({
@@ -18762,10 +18829,13 @@ async function noteBuildOutcome(
                     // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
                     // consumed — nothing writes between the two. The final durable save compares this
                     // with what it persists; a copy whose source could not be read is never promoted.
-                    const filesHash = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                      .then((c) => workspaceContentHash(c.files)).catch(() => null);
+                    const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
+                      .then((c) => c.files as Record<string, string>).catch(() => null);
+                    const filesHash = source ? workspaceContentHash(source) : null;
                     await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                    snapshotTaken = { url, filesHash };
+                    // The paths travel with the copy for THIS build only, so a mismatch can say which
+                    // side holds what — see staleDetail. The hash is still what decides.
+                    snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
                     // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                     // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                     // lets the frame move to the real build output the moment the build settles,
@@ -20331,7 +20401,11 @@ async function noteBuildOutcome(
           // stays what it always was — a fallback for an expired machine.
           if (snapshotTaken) {
             await finalSave;
-            const verdict = snapshotConfirmation({ taken: snapshotTaken, persistedHash: workspaceContentHash(persisted) });
+            const verdict = snapshotConfirmation({
+              taken: snapshotTaken,
+              persistedHash: workspaceContentHash(persisted),
+              persistedPaths: Object.keys(persisted ?? {}),
+            });
             if (verdict.action === 'restamp') {
               const at = Date.now();
               await sandboxStore.saveSnapshot(workspaceId, snapshotTaken.url, at, snapshotTaken.filesHash).catch(() => {});
@@ -20839,17 +20913,18 @@ async function noteBuildOutcome(
       // rungs below it reason unconditionally and expose no switch. So the share of builds that leave
       // rung 1 IS the size of the model-reasoning problem — and of the cost gap between the cheapest
       // rung and the rest. Pure computation over the ledger we already hold; no call, no I/O.
-      const ladderDepth = ladderDepthUsed(
-        providerLedger.entries(),
-        tierLadder(powerLevelReqEffective).rungs,
-      );
+      const ladderRungsForDepth = tierLadder(powerLevelReqEffective).rungs;
+      const ladderDepth = ladderDepthUsed(providerLedger.entries(), ladderRungsForDepth);
+      // WHERE DID IT OPEN? A complex build skips the cheap lead rung, so "fell" would be a lie.
+      // Asked of the same helper that built the chain — see openingRung.
+      const ladderOpenedAt = openingRung(ladderRungsForDepth, { complex: buildIsComplex });
       try {
         buildDiag.record({
           phase: 'build',
           severity: 'info',
           code: 'LADDER_DEPTH',
-          message: describeLadderDepth(ladderDepth),
-          detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
+          message: describeLadderDepth(ladderDepth, ladderOpenedAt),
+          detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · opened-at=${ladderOpenedAt} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
           autoResolved: true,
         });
       } catch { /* an observation must never affect a finished build */ }

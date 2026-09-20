@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
@@ -7,6 +7,10 @@ import { LoadMore } from '../../components/common/LoadMore';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import { AttachMenu } from '../AttachMenu';
 import { SecretRequestCard } from './SecretRequestCard';
+import { HeaderBadges } from './HeaderBadges';
+import { UserActionTray } from './UserActionTray';
+import { useUserActions } from './useUserActions';
+import { askPrompt, isLiveOnly, type LiveAsks, type UserActionView } from './userActionView';
 import { saveSecret, listSecrets } from '../../lib/secretsApi';
 // THE SAME vault UI the Settings screen renders — imported, never reimplemented, so the two doors
 // cannot drift into two behaviours. Lazy because most sessions never open it.
@@ -165,8 +169,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [remixArrived, setRemixArrived] = useState<{ appName: string; owned: boolean } | null>(null);
   // ASK-USER (opt-in): dismiss state for the non-blocking clarify card. Reset whenever a NEW clarify
   // arrives so a fresh build's questions always show; the build itself never waits on this.
-  const [clarifyDismissed, setClarifyDismissed] = useState(false);
-  useEffect(() => { if (state.pendingClarify) setClarifyDismissed(false); }, [state.pendingClarify]);
   // Save-as-template: the user's own reusable starters (on-device), shown beside the built-in ones.
   const [savedTpls, setSavedTpls] = useState<SavedTemplate[]>(() => loadSavedTemplates());
   const pagedSavedTpls = usePagedList(savedTpls);
@@ -547,6 +549,94 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const pagedFiles = usePagedList(files);
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // WHAT THE USER MUST DO (admin 2026-09-20: "user se jo jo chahiye woh sab ❓ me"). The three asks the
+  // build makes used to render as three cards inside the message stream, where a long narration buried
+  // them and a reload lost them entirely. They now live in one tray behind one header badge.
+  //
+  // `live` is memoised on the three pending gates themselves: the hook folds them into the durable
+  // list, so a waiting build stays answerable even when the durable write did not land.
+  const liveAsks = useMemo<LiveAsks>(() => ({
+    pendingSecrets: state.pendingSecrets,
+    pendingPermission: state.pendingPermission,
+    pendingClarify: state.pendingClarify,
+  }), [state.pendingSecrets, state.pendingPermission, state.pendingClarify]);
+  /**
+   * The credential form, hoisted out of the message stream so the tray can hold it.
+   *
+   * Not a re-implementation: this is the same `SecretRequestCard` with the same handlers it always
+   * had — the value still goes straight to the encrypted vault and never back up the build stream,
+   * and the build is still answered through `respond`. Only where it MOUNTS changed.
+   */
+  const secretCardNode = state.pendingSecrets ? (
+    <SecretRequestCard
+                    prompt={state.pendingSecrets.prompt}
+                    secrets={state.pendingSecrets.secrets}
+                    /* THE CLOSING ASK (admin 2026-08-22). A `postbuild-` callId is the deterministic
+                       end-of-build ask: the app is done and these keys are the one remaining step, so the
+                       card turns vivid and its buttons stop implying a waiting build. `respond` for a gone
+                       waiter is a harmless no-op on the server, so one code path serves both. */
+                    finale={state.pendingSecrets.callId.startsWith('postbuild-')}
+                    onGuide={(name) => {
+                      // "Nahi hai to batao, main guide karunga" — PREPARE the question, never auto-send.
+                      // The AI answers like any chat turn, in the user's own language, step by step.
+                      setPrompt(`I don't have ${name} yet. Where do I get it? Guide me step by step — I'll tell you what I see on the screen.`);
+                      composerRef.current?.focus();
+                    }}
+                    onSwitchProvider={() => {
+                      // "Razorpay ki jagah koi aur?" — the keys on the card come from the app's OWN code,
+                      // but the user may not want that provider at all. The AI lists the alternatives
+                      // (including keyless ones like UPI) and rewires the app as a normal edit turn.
+                      const names = state.pendingSecrets!.secrets.map((s) => s.name).join(', ');
+                      setPrompt(`My app currently needs ${names}, but I'd rather use a different provider for this. What are my options (including any that need no key at all)? Switch the app to the one I choose.`);
+                      composerRef.current?.focus();
+                    }}
+                    onSave={async (vals) => {
+                      // Straight to the encrypted vault over the authenticated API — the value never goes
+                      // back up the build stream, which is stored in the transcript and the admin report.
+                      if (!userId) return false;
+                      for (const [name, value] of Object.entries(vals)) {
+                        await saveSecret(userId, name, value);
+                      }
+                      return true;
+                    }}
+                    onDone={(saved) => { respond(state.pendingSecrets!.callId, saved); }}
+                  />
+  ) : null;
+
+  const userActions = useUserActions(
+    state.workspaceId,
+    liveAsks,
+    `${state.done}|${state.pendingSecrets?.callId ?? ''}|${state.pendingPermission?.callId ?? ''}|${state.pendingClarify?.questions.length ?? 0}`,
+  );
+
+  /**
+   * "ASK NAVBHARATAI" — the way out of every row (admin 2026-09-20).
+   *
+   * The tray states what the engine THINKS is needed, and the user may want something else entirely.
+   * So each row can be turned into a question instead of a task: the sentence is loaded into the
+   * composer and the tray closes, leaving the user in the one place they were already going to type.
+   * Never auto-sent — that would spend their money on a message they did not choose to send.
+   */
+  const askAboutAction = useCallback((action: UserActionView) => {
+    setPrompt(askPrompt(action));
+    userActions.setTrayOpen(false);
+    setTimeout(() => composerRef.current?.focus(), 0);
+  }, [userActions]);
+
+  /**
+   * Answer the gate a build is stopped on, from the tray.
+   *
+   * `respond` is the same call the inline block made. The row is then closed with the user's own
+   * verdict — approved is `done`, rejected is `not_needed`, which is the status that also stops a
+   * later build from asking again. A row that exists only in this screen's memory has nowhere to
+   * record that, so it is left to the recorder's write and the next refresh.
+   */
+  const answerGate = useCallback((action: UserActionView, approve: boolean) => {
+    if (action.callId) respond(action.callId, approve);
+    if (!isLiveOnly(action)) void userActions.close(action, approve ? 'done' : 'not_needed');
+    userActions.setTrayOpen(false);
+  }, [respond, userActions]);
   const [composerExpanded, setComposerExpanded] = useState(false);
   // Shared composer toolbar state (admin 2026-08-10). The Enter preference is the ONE key every AI
   // reads — set it here and Doctor AI, the professionals and the free chat all follow.
@@ -4121,6 +4211,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <span className={mobileFooter ? 'hidden lg:inline' : ''}>{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
           </button>
           <span className="text-[9px] text-faint font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
+          {/* WHAT THE USER MUST DO — exactly where the admin drew it, beside the build stamp. The strip
+              renders nothing at all while the count is zero, which is the first rule of this feature:
+              a badge that is always lit is a badge nobody reads. */}
+          <HeaderBadges
+            badges={[{
+              id: 'needs-you',
+              glyph: '❓',
+              label: 'What you need to do',
+              count: userActions.openCount,
+              tone: userActions.actions.some((a) => a.status === 'open' && a.blocking) ? 'urgent' : 'info',
+              onOpen: () => userActions.setTrayOpen(true),
+            }]}
+          />
           {running ? (
             // Attached + streaming here → Stop.
             <button
@@ -4588,33 +4691,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
                 dismiss. It never pauses the build (honours "text reply > build app"). */}
-            {state.pendingClarify && !clarifyDismissed && state.pendingClarify.questions.length > 0 && (
-              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-sm text-accent-text">
-                <div className="flex items-start gap-2">
-                  <Bot className="w-4 h-4 mt-0.5 shrink-0 text-accent-text" />
-                  <div className="flex-1">
-                    <div className="font-medium">Building your {state.pendingClarify.domain} app — a few things I assumed</div>
-                    <div className="text-accent-text text-xs mt-0.5">
-                      I’m already building with sensible defaults. Want to adjust any of these? Just reply below — no need to wait.
-                    </div>
-                    <ul className="mt-1.5 space-y-1">
-                      {state.pendingClarify.questions.map((q, i) => (
-                        <li key={i} className="text-xs text-accent-text flex gap-1.5"><span className="text-accent-text">•</span><span>{q}</span></li>
-                      ))}
-                    </ul>
-                    <div className="mt-2">
-                      <button
-                        type="button"
-                        onClick={() => setClarifyDismissed(true)}
-                        className="px-2.5 py-1 rounded-md text-accent-text text-xs hover:text-accent-text hover:bg-raised transition-colors"
-                      >
-                        Looks good — dismiss
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* THE ASSUMPTIONS CARD HAS MOVED TOO (admin 2026-09-20). Each question the engine
+                wants corrected is now a row in the ❓ tray, under "worth a look, nothing is stuck" —
+                non-blocking there exactly as it was here, but still there after a reload, and with a
+                way to answer it rather than only a way to dismiss it. */}
             {/* FIX #6 → COMPACT (admin 2026-07-21 — "roadmap screen se hatao, chhota button bana do"):
                 the proposed plan/fixes no longer render as a block here (it used to pin itself after
                 the last AI message and hide the responses). It now lives as a small chip just above
@@ -4786,55 +4866,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 </div>
               )
             )}
-            {state.pendingSecrets && (
-              <SecretRequestCard
-                prompt={state.pendingSecrets.prompt}
-                secrets={state.pendingSecrets.secrets}
-                /* THE CLOSING ASK (admin 2026-08-22). A `postbuild-` callId is the deterministic
-                   end-of-build ask: the app is done and these keys are the one remaining step, so the
-                   card turns vivid and its buttons stop implying a waiting build. `respond` for a gone
-                   waiter is a harmless no-op on the server, so one code path serves both. */
-                finale={state.pendingSecrets.callId.startsWith('postbuild-')}
-                onGuide={(name) => {
-                  // "Nahi hai to batao, main guide karunga" — PREPARE the question, never auto-send.
-                  // The AI answers like any chat turn, in the user's own language, step by step.
-                  setPrompt(`I don't have ${name} yet. Where do I get it? Guide me step by step — I'll tell you what I see on the screen.`);
-                  composerRef.current?.focus();
-                }}
-                onSwitchProvider={() => {
-                  // "Razorpay ki jagah koi aur?" — the keys on the card come from the app's OWN code,
-                  // but the user may not want that provider at all. The AI lists the alternatives
-                  // (including keyless ones like UPI) and rewires the app as a normal edit turn.
-                  const names = state.pendingSecrets!.secrets.map((s) => s.name).join(', ');
-                  setPrompt(`My app currently needs ${names}, but I'd rather use a different provider for this. What are my options (including any that need no key at all)? Switch the app to the one I choose.`);
-                  composerRef.current?.focus();
-                }}
-                onSave={async (vals) => {
-                  // Straight to the encrypted vault over the authenticated API — the value never goes
-                  // back up the build stream, which is stored in the transcript and the admin report.
-                  if (!userId) return false;
-                  for (const [name, value] of Object.entries(vals)) {
-                    await saveSecret(userId, name, value);
-                  }
-                  return true;
-                }}
-                onDone={(saved) => { respond(state.pendingSecrets!.callId, saved); }}
-              />
-            )}
-            {state.pendingPermission && (
-              <div className="px-3 py-2.5 bg-amber-500/10 border border-amber-900 rounded">
-                <div className="flex items-center gap-2 text-xs text-warn mb-2">
-                  <AlertCircle className="w-4 h-4" /> {state.pendingPermission.action}
-                </div>
-                {state.todos.length > 0 && (
-                  <div className="mb-2"><TodoList todos={state.todos} /></div>
-                )}
-                <div className="flex gap-2">
-                  <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-on-accent">Approve &amp; build</button>
-                  <button onClick={() => respond(state.pendingPermission!.callId, false)} className="px-3 py-1 text-xs rounded bg-raised hover:bg-raised-hover text-body">Reject</button>
-                </div>
-              </div>
-            )}
+            {/* THE CREDENTIAL FORM AND THE GATE HAVE MOVED (admin 2026-09-20: "ab isko bahar rakh
+                do! user se jo jo chahiye woh sab ❓ me!"). Both used to render right here, in the
+                middle of the message stream, where a long narration pushed them out of sight and a
+                reload lost them. They are now rows in the ❓ tray in the header — the SAME card and
+                the SAME `respond` call, mounted somewhere the user can find them again. */}
             {fwConflict && (
               <div className="px-3 py-2.5 bg-indigo-500/10 border border-indigo-800 rounded">
                 <div className="flex items-center gap-2 text-xs text-accent-text mb-1">
@@ -6253,6 +6289,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             </div>
           </div>
         </div>
+      )}
+
+      {userActions.trayOpen && (
+        <UserActionTray
+          actions={userActions.actions}
+          busyId={userActions.busyId}
+          secretCard={secretCardNode}
+          onClose={() => userActions.setTrayOpen(false)}
+          onDone={(action) => { void userActions.close(action, 'done'); }}
+          onNotNeeded={(action) => { void userActions.close(action, 'not_needed'); }}
+          onAsk={askAboutAction}
+          onAnswerGate={answerGate}
+        />
       )}
 
       {/* Framework Picker Modal */}

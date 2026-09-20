@@ -72569,6 +72569,99 @@ fact we store.
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
 
+## 2026-09-20 — LIVE FILE SYNC: the Files tab and Code Studio show the app as it is being written
+
+**Admin, verbatim:** *"navbharatai jo app banata hai, to 'file' and 'code studio' run time par live sync
+hona chahiye — abhi nahi ho raha hai. kya ham isko accuracy badha kar ek dam perfect kar sakte hai??"*
+
+**They were right, and the reason is narrow enough to name exactly.** The engine has always streamed a
+`file_changed` event on every write, and three surfaces listen to it. Two were already live, because a
+PATH is all they need: the preview reloads (`filesVersion`), and the Files tab's LIST grows
+(`state.files`). The two the admin named need the file's CONTENT, which the event does not carry — so
+they read it with `loadWorkspaceFiles()`, a WHOLE-workspace read. That read is expensive enough that the
+client was written to make it at three moments only:
+
+| effect | when it runs |
+|---|---|
+| "load on first open" | the Files tab is opened and the cache is empty |
+| "refresh on done" | `state.done` flips true |
+| "S4 rehydrate" | a cold reopen — and it says `if (running …) return;` in so many words |
+
+**None of them is "while the build is writing."** So a file created mid-build showed a name with no
+body, a file EDITED mid-build showed its body from BEFORE the build, and Code Studio — fed from the
+same cache through `onFilesSync`, which fired on `state.done` alone — showed the old project for the
+whole run.
+
+### The fix is a second QUESTION, not a second source
+
+*Which files changed?* is already answered, live, by the stream. *What is in them?* is a read — and a
+read of the four paths that just changed costs four reads, not a workspace scan. The client already
+knows which paths those are, because it received the events. Nothing new is measured, persisted or
+invented; the existing route is asked a narrower question.
+
+- **Server** — `collectNamedWorkspaceFiles` (`WorkspaceFiles.ts`), beside the whole-workspace collector
+  and sharing its exclusion, secret, binary and byte rules, so the two cannot drift. `/api/agentv3/
+  workspace-files` branches on an optional `paths` array; without it the route is byte-identical.
+- **Client** — `src/components/agentv3/liveFileSync.ts`, a pure queue + merge core, wired into
+  `AgentV3Panel` behind `running`.
+
+### 🔑 Object identity, not value, is what detects a repeated write
+
+`FileChange` is `{ path, kind }`, so a file modified twice yields two VALUE-IDENTICAL entries — a value
+comparison would call the second write "no change" and the file would keep its first body for the rest
+of the build. But the reducer re-appends the event's own object (`applyFileChange` does
+`[...without, change]`) and every SSE event parses into a fresh object, so *a different object than
+last render* **is** *written again*. That fact was already in the client; the alternative was a second
+write log beside the one the reducer keeps.
+
+### 🔴 Three things that make the narrow read correct rather than merely cheap
+
+1. **A late reply cannot silently win.** A path written AGAIN while its read is in the air is re-queued
+   (`pending` and `inFlight` are separate for exactly this), so the stale body is superseded rather
+   than becoming permanent — the event that would have asked again was consumed when it was queued.
+2. **It UPSERTS; it can never replace.** The whole-workspace load REPLACES the map, which is why the
+   rehydrate path refuses to run mid-build — a read taken while the sandbox is being written to can
+   legitimately come back partial. A named read touches only the paths it was asked for, so no surface
+   can lose a file to a badly-timed read. A path that could not be read is **skipped, never returned as
+   an empty file**: *we could not read it* is not *it is gone*.
+3. **The user's typing is protected by PATH.** The v5 surface stays MOUNTED while the user is in Code
+   Studio, so they really can be typing in a file at the moment the build writes one — a risk this
+   feature creates and had to answer. `WorkspaceSyncer.pendingPaths()` names the un-flushed files and
+   `App.tsx` drops exactly those from a `live` push. Holding back the whole batch would make the
+   feature stop working whenever the editor is open; overwriting would destroy typing. **The
+   end-of-build sync is deliberately unchanged** (it passes no `live`), so today's behaviour is not
+   touched anywhere.
+
+### Why the body does NOT ride the event stream, which was the obvious first idea
+
+`AgentEventStream` keeps a **500-event in-memory replay buffer per live build** so a late-mounting
+surface can catch up. Attaching file bodies to `file_changed` would put megabytes of source into that
+buffer for every concurrent build, to serve a surface that is usually not even open. A notification
+belongs on the stream; a payload belongs behind a request made when someone wants it.
+
+### ⚠️ It runs whether or not the Files tab is open, deliberately
+
+Code Studio is a DIFFERENT view reading the app-level file map, so gating on this panel's visible tab
+would leave the second surface the admin named permanently stale. Cost is bounded by the batch cap (24
+paths) and the request window (700 ms, a ceiling on rate — **not** a resetting debounce, which would
+starve exactly the continuously-writing build this exists for), and is proportional to what the build
+actually wrote.
+
+### Open, recorded rather than left to be discovered (rule 6)
+
+A path the SERVER could not read is settled, not re-queued — re-asking would chase a genuinely deleted
+file for the rest of the build. That one file keeps the body the surface already had until the next
+write to it or the end-of-build load. A failed REQUEST is re-queued, because that blip would otherwise
+strand a whole batch.
+
+**Kill switch:** `AGENTV3_LIVE_FILE_SYNC=off` — the route answers `liveSync: false`, the client stops
+asking for the rest of the build, and every surface behaves exactly as it did before. Default ON: the
+surfaces being stale during a build is the defect, so the env is a kill switch, not an opt-in.
+
+Test-locked in `tests/theFilesTabIsLiveWhileTheAppIsBuilt.test.ts` (28 cases), **reversion-proven five
+ways** — value-compare instead of identity, `settleSyncBatch` clearing `pending`, dropping the
+protected-path filter, collapsing "named no paths" into "named paths, all rejected", and removing the
+panel's `running` guard — each failing exactly its own case and only that case.
 ---
 
 ## 2026-09-20 — In the admin console, the bottom bar IS the tab strip
@@ -73212,3 +73305,279 @@ reimplements.
 Test-locked in `tests/theHistoryListLooksLikeAList.test.ts` (18): the grouping's local-day boundaries,
 the unknown-date refusal, order preservation, and source guards that the chrome really left — including
 that the blank-title fallback `sessionShape.test.ts` depends on survived the rewrite.
+## 2026-09-20 — The wallet tiles come first and can be read; the budget console is gone at the root
+
+**THE ADMIN'S MESSAGE, three instructions and three screenshots.** *"sabse upar yeh tile … yeh tile
+sabse upar aani chahiye. aur inka colour aise ho ki user ke saaf dikhe, background oppsit colour me
+karo ya text me border banao, kuch bhi karo. bas clear hona chahiye!"* and, separately: *"note: yeh
+budget warning system kaam to karta nahi hai! isko jad se khatam karo! -ve balance bhi ho ja raha
+hai, user ka!!"*
+
+### 1. Why the tiles were unreadable, which is not "the colours were ugly"
+
+Every tile was written for a DARK-ONLY app: a `from-emerald-950/50` gradient into `to-card`, with
+**`text-on-accent` on top**. `text-on-accent` is WHITE by definition — it is the label colour for a
+SOLID brand fill — and the fill under it was the themed card, which on the Light theme is near-white.
+**White on near-white.** The 900/950 tints are the same shape: the theme rules already record that a
+dark tint is a Light defect because no theme can lighten a 950 shade.
+
+**The rule now holds in both directions:** a tile is EITHER a solid brand fill wearing
+`text-on-accent`, OR a themed surface wearing themed ink — never one in the other's clothes. Buy
+Tokens is the single solid fill (it is the only action); the two data tiles keep the card surface and
+earn their contrast from a 2px hue border and a solid icon chip.
+
+📐 **AND THE LAYOUT WAS HALF THE COMPLAINT.** Four tiles in `grid-cols-2` on a phone gave each about
+160px, which truncated the balance to **"89,894 tok…"** — the one number the screen exists to show.
+Now one per row on a phone, three across above it, no fixed height, no `truncate`.
+
+Placement: the tiles and the detail panel they switch moved above the daily-usage, plan and
+monthly-cost blocks — **together**, because a tile at the top whose panel is four sections lower
+appears to do nothing when tapped on a phone.
+
+### 2. 🔴 The budget console did not merely not work — it made a false promise
+
+Its own copy read *"Set your budget floor value. **At this limit the system automatically switches
+you to Free-version mode.**"*
+
+**Both numbers lived in `localStorage` and nowhere else** (`usePaymentEngine`: four `useState`s over
+`navbharat_reminder_limit` / `navbharat_budget_limit`). They were sent to no server. Grepped against
+the whole repo: **no build gate, no affordability check and no wallet debit reads either one.** The
+only thing the "floor" ever changed was a badge on that same screen. That is precisely the
+"built but not really working" state the second absolute rule forbids, so it is deleted rather than
+repaired — state, props, tile, detail tab and the `'budget'` member of `BillingDetailTab`.
+
+⚠️ **The two stored keys are deliberately NOT cleared from anyone's browser**: nobody asked for their
+data to be deleted, and an orphaned key costs nothing once no code reads it.
+
+### 3. 🔴 THE NEGATIVE BALANCE IS A SEPARATE FACT, AND CONFLATING THE TWO WOULD HAVE BEEN THE REAL MISTAKE
+
+Removing this console **cannot** have made overdraft worse, because it never bounded anything. What
+actually bounds it is `WALLET_OVERDRAFT_FLOOR_INR` (`walletFloor.ts`, **₹50** by default), applied
+**inside every debit** — server-side, unreachable from any screen, and untouched here. A build is
+already refused at a balance of zero; the floor exists for the build that was legitimately allowed to
+start and then cost more than the balance held. So a user CAN sit at up to −₹50, by design, and that
+number is the admin's to change (one Cloud Run value), not this screen's.
+
+The Profile page's own monthly budget (`budgetLimitInr`) is a different, server-stored thing and is
+untouched — it is honestly advisory (`/api/profile/cost-alerts`) and never claimed to gate anything.
+
+**Also removed with the tab**, and said plainly rather than left for someone to notice: a "Still
+having issues? Try Open in New Tab" button that lived inside the deleted console and did
+`window.open(location.href)`.
+
+**Gate:** 14 tests in `tests/theWalletTilesAreReadable.test.ts`, reversion-proven three ways — white
+ink put back on a card tile, the localStorage limit re-added, and the false sentence re-introduced
+each turn one test red. The theme colour baseline was regenerated (the file's literal count fell).
+## 2026-09-20 — 🔴 THE INDEX NOBODY CAN DEPLOY: the admin's server log was reporting one of OUR queries, not a missing click
+
+**Trigger:** the admin pasted the Server-logs panel from the admin panel and asked, verbatim,
+*"dekh ke batao — koi problem hai?"*
+
+**Three things in that capture, and only one of them was a defect.**
+
+1. **`DIAGNOSTICS_READ_FAILED` — WARN, 8 rows across 3 days** (18 Sep 19:41 → 20 Sep 13:10), every
+   one carrying the identical `9 FAILED_PRECONDITION: The query requires an index` with the
+   Firestore create-index link. **This is the defect, and it was ours.**
+2. **`BLOCKED_SCAN` — WARN, ~18 rows.** `/.env`, `/.env.prod`, `/config.php`, `/wp-admin/install.php`
+   … and notably **`/.env.openai` and `/.env.anthropic`**. Internet background noise from
+   credential-hunting bots, and every one **BLOCKED** — the guard doing exactly its job. Not a
+   defect. Recorded because the two AI-key paths say what today's bots are shopping for.
+3. **`AGENTV3_BUILD_BLOCKED_NO_CREDITS` — WARN ×2** (18 Sep 20:54, 19 Sep 20:03). Real users refused
+   a build at a ₹0 balance. Not a code defect — it is the seam this repo already named on 2026-09-20:
+   the flat welcome gift was retired on 2026-09-17 and `REFERRAL_REWARDS` was never set, so accounts
+   opened in the gap received ₹0. The ₹250 backfill (`WELCOME_BACKFILL`, default ON) is the answer
+   and it now exists; these two rows are what it is for.
+
+### The root cause of (1), and why the 2026-09-17 fix did not end it
+
+On 2026-09-17 the same warning was root-caused as a **truncation** bug: two independent
+`slice(0, 300)` calls were cutting the create-index URL mid-token, so *"the fix was in the part we
+cut off"*. That fix was right and shipped. It made the remedy **reachable**. It never asked what the
+index was **for** — and the entry closed with *"⚠️ This does not fix the missing index."*
+
+Decoding the link (base64 → the Firestore Admin `Index` proto) answers it in one line:
+
+```
+projects/gen-lang-client-0866594388/databases/(default)/collectionGroups/history/indexes/_
+queryScope = COLLECTION        fields = [ __name__ DESCENDING ]
+```
+
+Not a nested field. Not a collection-group query. That is exactly `.orderBy(documentId(), 'desc')`.
+
+🔑 **Firestore's automatic indexes cover `__name__` ASCENDING. A DESCENDING `__name__` sort as the
+only order is not covered** — it needs a composite index. And `firestoreIndexSafe.ts` already records,
+in its own header, why this project can never answer that with an index: nothing here deploys one,
+and `.firebaserc` names the **Hosting** project (`navbharatai-3395f`) while Firestore lives in
+`gen-lang-client-0866594388`. So the query could only ever fail. **It did, on every call, for as long
+as it existed.**
+
+**Two call sites carried it, and the second inherited the belief from the first in a comment:**
+- `listDiagnosticsHistoryInner` — the workspace build history.
+- `listRecentBuildReports` (shipped **2026-09-18**, commit `10a71a76`), whose docblock read
+  *"It orders by `documentId()`, exactly as `listDiagnosticsHistory` does, so it needs NO Firestore
+  index."* Copied reasoning, copied failure.
+
+### What it cost — and why nothing lied about it
+
+Both readers are honest about a read that failed, which is the 2026-08-27 `ok: false` work paying
+off: nothing reported a confident wrong number. What they did instead was **degrade silently to a
+lesser answer**:
+
+- The **whole-session build report** (`scope=session`, the stitch the admin uses when submitting a
+  report) could never reach the history, so it fell back to the single latest turn — which is why
+  every report submitted since has been one build rather than a session.
+- The admin **build-cost window** fell back to `source: 'latest-per-workspace'`. The feature shipped
+  on 2026-09-18 to show *one row per BUILD* had therefore **never once run successfully**.
+
+### The fix (PR "the index nobody can deploy")
+
+- **One shared reader, `newestHistoryRefs`** — reads the history document **refs** in the default
+  **ascending** `__name__` order (always built-in, never an index error) via `.select()` (references
+  only, the cheapest read Firestore has), picks the newest in memory, then fetches only those whole.
+  Both call sites go through it, so a third cannot inherit the belief.
+- **`newestFirstHistoryIds` is PURE and exported**, so the ordering the whole fix turns on is tested
+  without Firestore. Ids are compared **numerically** (a legacy id of a different length does not
+  sort right lexicographically), and an unrecognised id sorts **last and is never dropped**.
+- ⚠️ **The ascending scan is deliberately unbounded.** A Firestore `.limit(n)` on an ascending scan
+  keeps the **oldest** n — the exact opposite of what every caller wants. History is a per-workspace
+  archive of settled builds (tens of documents), so the honest cost of correctness is paid there
+  rather than in a cap that silently drops the newest build.
+- **Both false comments corrected**, in place, naming why the claim was wrong.
+
+### 🔒 The 50/50 half — the guard existed and could not see this shape
+
+`src/server/lib/firestoreIndexSafe.test.ts` is this repo's own CI answer to *"a query needing an
+index nobody can deploy"*. It scans every server file for `.where(A,'==',…).orderBy(B)` and has
+stopped that shape returning since the store's first publish. It is **deliberately narrow** — and
+narrow around a `where`, so a bare `.orderBy(documentId(),'desc')` was structurally invisible to it.
+
+**The class is "a query that needs an index nobody can deploy", and it has more than one shape.** The
+scan now fails on the second shape too, in any server file including ones written later, with the
+remedy named in the failure message. Its own guard-the-guard case asserts that an **ascending**
+document-id sort (legal, used on purpose in `DeploymentStore`) is not flagged.
+
+Test-locked in `tests/theIndexNobodyCanDeploy.test.ts` (+ the widened class scan) and **proven by
+reversion**: restoring the old query shape turns three cases red across both suites.
+
+### What is NOT claimed here
+
+Creating the index in the Firestore console would also have stopped the error, and the link in the
+log does exactly that. It is not the fix: it leaves a query in the code that fails for anyone
+without that console, in any new project, and the day someone deletes the index it returns. The link
+is now redundant rather than pending.
+
+### 🔴 The sharpest part: a TEST asserted the defect and called it a guarantee
+
+`tests/theWindowWasWorkspacesNotBuilds.test.ts` shipped with the 2026-09-18 feature and carried a
+case titled *"⚠️ it orders by documentId, so it needs no Firestore index that nobody creates"*. It
+proved that by asserting the source contained `admin.firestore.FieldPath.documentId()`.
+
+**That is a claim about a SHAPE, presented as a guarantee about BEHAVIOUR — and the behaviour was the
+exact opposite.** The test passed for two days while the query it blessed threw on every call.
+
+A source assertion can only pin what the code **says**. When what is at stake is what a third party
+(here, Firestore) will **accept**, the assertion has to name the property that actually makes it
+safe. The case is rewritten in place rather than deleted, with that reasoning attached, because the
+wrong version is the evidence.
+## 2026-09-20 — "Notifications nahi aa rahe": the feature was built, shipped to nobody, and could not be diagnosed
+
+**Admin, verbatim:** *"jaise app notifications ate hai hamare mobile me woh notifications abhi
+navbharatai me nahi aa rahe hai. isko on karwane ke liye aur kya karna chahiye — ek dam native app
+jaise notification mobile me dikhe!"*
+
+**The instinct to resist, and the reason safeguard #6 exists.** The obvious reading is "push
+notifications were never built" — which is what the 2026-07-26 entry says about the *previous* time
+this was asked. Searched by FILENAME first, then by package: `@capacitor-firebase/messaging` is
+INSTALLED, `src/lib/pushNotifications.ts` is wired into `App.tsx:1261` on sign-in,
+`android/app/google-services.json` is present and names the right project and package,
+`android/build.gradle` carries the google-services plugin, `routes/push.ts` is mounted at
+`server.ts:718`, and `PushNotificationService.sendPushToUser` is a real firebase-admin sender called
+from three places. **The whole chain exists and has since 2026-08-25.**
+
+### The root cause, established rather than assumed
+
+`android-aab.yml` stamps `versionCode = run number`. Asked the Actions API for every run's head SHA
+and asked git whether the commit that introduced the plugin (`f71e101e`) is an ANCESTOR of each:
+
+| run | head | carries push? |
+|---|---|---|
+| **91** (`cc236f0f`, 12:10 on 2026-08-25) — the first production release, and the value `ANDROID_LATEST_VERSION_CODE` still holds | no | **NO** |
+| 92–95 | no | NO |
+| **96** (`7065c7dd`, 2026-08-26) | yes | **YES** |
+
+The plugin merged at 21:18 that day and run #91 was built at 12:10 the same day, **so the dates alone
+say the opposite of the truth** — which is exactly why this was checked by ancestry.
+
+**The app people have installed contains no notification code at all.** It never asks permission,
+never obtains an FCM token, never calls `/api/push`. Nothing the server does can reach it, and
+nothing the server can see says so.
+
+### The missing subsystem (step 2): nothing could tell four different failures apart
+
+`sendPushToUser` is fire-and-forget and silent **by design** — a push must never fail a build — and
+it returned `void`. So an app too old to receive, an empty device registry, a Cloud Messaging API
+that was never enabled, and a service account without permission all produced the identical outcome:
+nothing arrives, nothing errors, nothing logged. The silence is right for the callers; the
+information was being **thrown away rather than not existing**.
+
+- **`src/server/lib/pushPreflight.ts`** — the loud half, in the shape `hostingPreflight.ts` and
+  `referralPreflight.ts` already established. It probes the REAL send path with the REAL credential
+  and a token Google cannot decode, so the answer can only be a refusal and the diagnosis is WHICH
+  one. 🔒 **"Invalid argument" is the GOOD answer** and is reported `ok`: it means we authenticated,
+  the project was right, Cloud Messaging was reached, and only the fake token was refused. Reporting
+  it as a failure would send the admin to fix a setup that already works. A send that SUCCEEDS is
+  reported `unknown`, not `ok` — a check that cannot fail proves nothing (the E2B-rate lesson).
+- **`sendPushToUser` now returns `PushSendResult`.** Every existing caller ignores it; no behaviour
+  changed.
+- **`GET /api/admin/push/preflight` + `POST /api/admin/push/test`** and a **Notifications card** on
+  admin → Reports. The test sends a real notification to a real account — the only thing that proves
+  the chain — and the card never claims the second half: Firebase accepting a message is not a phone
+  showing one.
+
+### The 50/50 half — why a notification would not have LOOKED native either
+
+Three Firebase presentation settings had never been set, each failing in a way nothing reports:
+no `default_notification_icon` (Android renders the full-colour launcher icon as a featureless
+**white square**), no `default_notification_color`, no `default_notification_channel_id` (every
+message lands in Android's fallback **"Miscellaneous"** channel — the single clearest tell in
+Settings → Notifications that an app did not set this up).
+
+- `@drawable/ic_stat_nbai` at five densities, **derived** from the app's own `ic_launcher_monochrome`
+  by `scripts/notificationIcon.mjs` (crop the adaptive-icon safe zone, box-filter the alpha) — the
+  app's own mark, not new artwork. Verified numerically: it is a silhouette (93% transparent) filling
+  ~90% of its slot.
+- The channel is created at **importance 4 (High)**. Android fixes a channel's importance at creation
+  and refuses to let an app raise it later, so shipping the default once would make "my notifications
+  do not pop up" **permanently unfixable** for everyone who had already installed the app. That is the
+  one value that must be right the first time.
+- ⚠️ The channel id exists twice — named in the manifest, CREATED in the client — and a manifest
+  naming a channel nobody created is **not an error**: Android falls back to Miscellaneous again. Both
+  directions are pinned by `tests/aNotificationLooksLikeOurApp.test.ts`.
+
+### OPEN ROOT CAUSES (rule 6) — stated, not patched
+
+1. **🔴 ADMIN: only a fresh Play release makes any of this reach a phone.** Build 96 or later. Per
+   CLAUDE.md a store build is made **only when the admin asks**, so none was triggered. After it is
+   downloadable, set `ANDROID_LATEST_VERSION_CODE` to that run number — after, never before.
+2. **🔴 ADMIN: the Firebase Cloud Messaging API and the service-account role cannot be checked from a
+   session.** The new preflight is what turns each into a named next action.
+3. **iOS cannot work at all today.** `ios/App/App/GoogleService-Info.plist` is not in this repository
+   and no APNs key has ever been uploaded to Firebase. Listed as manual work in the report rather
+   than left silent.
+4. **`AppKnowledgeBase.ts` has no notifications entry, and deliberately still does not.** Adding one
+   now would have every NavBharatAI AI promise a capability today's installed app does not have —
+   the fake-success the second absolute rule forbids. It is owed the moment a release carrying push
+   is live on Play.
+5. **Only three things ever send a notification** (build finished, low balance, update broadcast).
+   Whether that is the right set is a product question for the admin, not a defect.
+
+### Proactive layer (step 6)
+
+The lever here is not more notification kinds — it is that **a feature can be complete, merged, green
+and shipped to nobody for four weeks with nothing anywhere saying so**. Push is the second case this
+month (Play Billing and Play Integrity have the same shape, and each grew its own hand-written
+"release N and earlier do not have it" constant). The real fix is one place that knows which run
+first carried each native capability and compares it with the live release — so "the app on the phone
+is too old" becomes a warning on the Monitor instead of an admin's question weeks later. Not built
+here: it wants the admin's word on where it belongs, and this PR's job was to answer the question
+asked.

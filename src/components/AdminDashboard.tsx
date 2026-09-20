@@ -25,6 +25,7 @@ import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
+import { PushHealthCard } from './admin/PushHealthCard';
 import { WelcomeBackfillCard } from './admin/WelcomeBackfillCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
@@ -4077,6 +4078,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <BuildCostCard adminToken={adminToken} />
               <WelcomeBackfillCard adminToken={adminToken} />
               <ReferralCostCard adminToken={adminToken} />
+              {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
+                  at every link — which one is broken, and a real test send to prove the chain. */}
+              <PushHealthCard adminToken={adminToken} />
               {/* FAILURE CATEGORY (admin 2026-09-16): which app TYPE fails most, and WHY — grouped from
                   the same durable per-workspace records the All Builds list below reads. */}
               <FailureCategoryCard adminToken={adminToken} />

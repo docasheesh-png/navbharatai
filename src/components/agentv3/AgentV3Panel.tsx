@@ -83,6 +83,11 @@ import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
+import {
+  EMPTY_LIVE_SYNC_QUEUE, LIVE_SYNC_BATCH_MAX, LIVE_SYNC_WINDOW_MS,
+  applyLiveDelete, applyLiveFiles, diffFileEntries, noteChangedPath, requeueFailedBatch, settleSyncBatch, takeSyncBatch,
+  type LiveSyncQueue,
+} from './liveFileSync';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
 import { useRuntimeLogs } from '../../hooks/useRuntimeLogs';
 import { checkpointDisplayName } from '../../lib/checkpointLabel';
@@ -126,7 +131,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
@@ -3574,6 +3579,113 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.workspaceId]);
+
+  // ── LIVE FILE SYNC ────────────────────────────────────────────────────────
+  // Admin 2026-09-20: "file and code studio runtime par live sync hona chahiye — abhi nahi ho raha."
+  //
+  // They were right, and the reason is narrow. The engine streams a `file_changed` event on every
+  // write, and this panel already uses it for two things: the preview reloads, and `state.files`
+  // grows. Both need only the PATH, which the event carries. The Files viewer and Code Studio need
+  // the CONTENT, which it does not — so the content came from `loadWorkspaceFiles()`, a
+  // whole-workspace read that runs at three moments, none of them "while the build is writing":
+  // the tab being opened, the build finishing, and a cold reopen.
+  //
+  // The effect below asks the narrow question instead. The reducer's list tells us WHICH paths were
+  // just written (see diffFileEntries for why object identity, not value, is the signal), and the
+  // existing route now answers a named read — so a step that wrote four files costs four reads, not
+  // a workspace scan. See src/server/AgentV3/liveFileSync.ts for why the body travels on a request
+  // rather than on the event stream (a 500-event in-memory replay buffer per live build).
+  //
+  // ⚠️ It runs whether or not the Files tab is open, deliberately. Code Studio reads the app-level
+  // file map (fed by onFilesSync), and it is a DIFFERENT view — gating on this panel's visible tab
+  // would leave the surface the admin named second permanently stale. The cost is bounded by the
+  // batch cap and the request window, and is proportional to what the build actually wrote.
+  const liveQueueRef = useRef<LiveSyncQueue>(EMPTY_LIVE_SYNC_QUEUE);
+  const prevFileEntriesRef = useRef<typeof state.files | null>(null);
+  const liveSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set when the SERVER says the kill switch is engaged. One answer stops the asking for the rest of
+  // this panel's life, so `AGENTV3_LIVE_FILE_SYNC=off` is genuinely today's behaviour and not
+  // today's behaviour plus a request per window.
+  const liveSyncOffRef = useRef(false);
+  // A mirror of `workspaceFiles` readable from inside the async flush without making it a dependency.
+  const workspaceFilesRef = useRef<Record<string, string> | null>(null);
+  useEffect(() => { workspaceFilesRef.current = workspaceFiles; }, [workspaceFiles]);
+
+  const armLiveSync = () => {
+    if (liveSyncTimerRef.current || liveSyncOffRef.current) return; // a window is already open
+    liveSyncTimerRef.current = setTimeout(() => { void flushLiveSync(); }, LIVE_SYNC_WINDOW_MS);
+  };
+
+  const flushLiveSync = async () => {
+    liveSyncTimerRef.current = null;
+    if (liveSyncOffRef.current) return;
+    const wsId = state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
+    if (!wsId) return;
+    // Nothing to upsert INTO yet — this panel has never loaded the project's contents (a build
+    // started straight from an empty chat). One whole-workspace load seeds the map, exactly as
+    // opening the Files tab would; every batch after it is targeted. Seeding from the batch instead
+    // would leave the viewer showing only the files this build touched and, worse, would make the
+    // "load on first open" effect believe the contents were already there.
+    if (workspaceFilesRef.current === null) {
+      liveQueueRef.current = EMPTY_LIVE_SYNC_QUEUE;
+      await loadWorkspaceFiles(wsId);
+      return;
+    }
+    const { queue, batch } = takeSyncBatch(liveQueueRef.current, LIVE_SYNC_BATCH_MAX);
+    liveQueueRef.current = queue;
+    if (batch.length === 0) return;
+    try {
+      const res = await fetch('/api/agentv3/workspace-files', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId: wsId, userId, email, paths: batch }),
+      });
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const data = await res.json() as { files?: Record<string, string>; liveSync?: boolean };
+      if (data.liveSync === false) {
+        liveSyncOffRef.current = true;
+        liveQueueRef.current = EMPTY_LIVE_SYNC_QUEUE;
+        return;
+      }
+      liveQueueRef.current = settleSyncBatch(liveQueueRef.current, batch);
+      const files = data.files || {};
+      if (Object.keys(files).length > 0) {
+        setWorkspaceFiles((prev) => applyLiveFiles(prev, files));
+        // Code Studio and the sidebar Files view read the app-level map. `live` tells the app this
+        // came from a build that is still running, so it can decline to overwrite a file the user is
+        // editing by hand right now — the one way this feature could otherwise destroy real work.
+        onFilesSync?.(files, { live: true });
+      }
+    } catch {
+      // A blip must not leave these files stale for the whole build: the events that named them were
+      // consumed when they were queued, so nothing else would ever ask for them again.
+      liveQueueRef.current = requeueFailedBatch(liveQueueRef.current, batch);
+    } finally {
+      if (liveQueueRef.current.pending.length > 0) armLiveSync();
+    }
+  };
+
+  useEffect(() => {
+    const prev = prevFileEntriesRef.current;
+    prevFileEntriesRef.current = state.files;
+    if (!running || liveSyncOffRef.current) return;
+    const { changed, deleted } = diffFileEntries(prev, state.files);
+    if (deleted.length > 0) {
+      setWorkspaceFiles((map) => deleted.reduce<Record<string, string> | null>((acc, p) => applyLiveDelete(acc, p), map));
+    }
+    let q = liveQueueRef.current;
+    for (const path of deleted) q = noteChangedPath(q, path, 'delete');
+    for (const path of changed) q = noteChangedPath(q, path, 'modify');
+    liveQueueRef.current = q;
+    if (q.pending.length > 0) armLiveSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.files, running]);
+
+  // A panel that goes away mid-build must not leave a timer firing into a dead component.
+  useEffect(() => () => {
+    if (liveSyncTimerRef.current) clearTimeout(liveSyncTimerRef.current);
+    liveSyncTimerRef.current = null;
+  }, []);
 
   // Lift the v5.0 preview state (live URL + workspace) up to the app shell so the MAIN slide-out
   // "Preview" menu can render the SAME working v5.0 preview — not the retired v2.0 generatedCode.

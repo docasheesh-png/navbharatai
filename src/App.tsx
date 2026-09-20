@@ -291,13 +291,6 @@ export default function App() {
     isRedeemingCoupon, setIsRedeemingCoupon,
     couponError, setCouponError,
     couponSuccess, setCouponSuccess,
-    reminderLimit, setReminderLimit,
-    budgetLimit, setBudgetLimit,
-    tempReminderLimit, setTempReminderLimit,
-    tempBudgetLimit, setTempBudgetLimit,
-    limitError, setLimitError,
-    limitSuccess, setLimitSuccess,
-    dismissedReminderWarning, setDismissedReminderWarning,
     buyAmountInput, setBuyAmountInput,
     fetchWallet,
     createBillingOrder,
@@ -3381,7 +3374,23 @@ export default function App() {
                  is visible, so v5.0's header controls and their footer replacements never both hide. */
               mobileFooter={v3MobileFooterActive(effectiveDeviceMode, focusMode)}
               onFooterApi={setV3FooterApi}
-              onFilesSync={(synced) => { const clean = sanitizeFileMap(synced); workspaceSyncerRef.current?.noteRemote(clean); setFiles((prev) => ({ ...prev, ...clean })); }}
+              /* LIVE FILE SYNC (admin 2026-09-20) — `live` marks a push from a build that is STILL
+                 RUNNING, so Code Studio shows the app as it is written instead of only at the end.
+                 The one risk that creates is real: the v5.0 surface stays mounted while the user is
+                 in Code Studio, so they can be typing in a file at the moment the build writes one.
+                 A path with un-flushed local edits is therefore held back — only that path, and only
+                 on a live push. The end-of-build sync is deliberately unchanged (no `live`), because
+                 by then the user's edits have flushed and the build's result is the project. */
+              onFilesSync={(synced, opts) => {
+                let clean = sanitizeFileMap(synced);
+                if (opts?.live) {
+                  const dirty = new Set(workspaceSyncerRef.current?.pendingPaths() ?? []);
+                  if (dirty.size > 0) clean = Object.fromEntries(Object.entries(clean).filter(([p]) => !dirty.has(p)));
+                }
+                if (Object.keys(clean).length === 0) return;
+                workspaceSyncerRef.current?.noteRemote(clean);
+                setFiles((prev) => ({ ...prev, ...clean }));
+              }}
               /* Phase S3 conflict guard: before a v5.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
                  hand edits are what v5.0 reads/acknowledges). Best-effort — never blocks the build. */
@@ -3952,9 +3961,6 @@ export default function App() {
               billingTransactions={billingTransactions}
               billingLogs={billingLogs}
               activeBillingDetailTab={activeBillingDetailTab}
-              reminderLimit={reminderLimit}
-              budgetLimit={budgetLimit}
-              dismissedReminderWarning={dismissedReminderWarning}
               couponCodeInput={couponCodeInput}
               isRedeemingCoupon={isRedeemingCoupon}
               couponError={couponError}
@@ -3967,26 +3973,15 @@ export default function App() {
               buyingProductId={buyingProductId}
               storePurchaseNotice={storePurchaseNotice}
               onBuyStorePack={(id) => { void buyStorePack(id); }}
-              tempReminderLimit={tempReminderLimit}
-              tempBudgetLimit={tempBudgetLimit}
-              limitError={limitError}
-              limitSuccess={limitSuccess}
               onShowAuth={() => setShowAuth(true)}
               onFetchWallet={fetchWallet}
               onSetActiveBillingDetailTab={setActiveBillingDetailTab}
-              onSetReminderLimit={setReminderLimit}
-              onSetBudgetLimit={setBudgetLimit}
-              onSetDismissedReminderWarning={setDismissedReminderWarning}
               onSetCouponCodeInput={setCouponCodeInput}
               onRedeemPromoCoupon={redeemPromoCoupon}
               referral={referralProgress}
               onRefreshReferral={referralProgress.refresh}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
-              onSetTempReminderLimit={setTempReminderLimit}
-              onSetTempBudgetLimit={setTempBudgetLimit}
-              onSetLimitError={setLimitError}
-              onSetLimitSuccess={setLimitSuccess}
               onToast={addToast}
               monthlyAiCost={monthlyAiCost}
             />

@@ -121,6 +121,8 @@ const NEVER_SUGGEST = new Set([
   // "₹X of engine work produced nothing and was not billed" is our own accounting, not something
   // the user could ever act on.
   'UNBILLED_BARREN_WORK',
+  // Whether our own safety net saved a version is not a next move we can offer the user.
+  'RESTORE_POINT',
 ]);
 
 /**

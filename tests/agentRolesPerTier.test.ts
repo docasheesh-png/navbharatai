@@ -31,7 +31,11 @@ describe('Judge: a different model from the builder, at the lowest input price t
     expect(body).not.toMatch(/'opus'/);
     const sel = route.indexOf('function selectReviewJudge(');
     const selBody = route.slice(sel, route.indexOf('\n}\n', sel));
-    expect(selBody).toContain("modelId: process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', kind: 'glm'");
+    // ⚠️ RE-ANCHORED 2026-09-20. The judge is built as a CHAIN of candidates now (judgeChain.ts), so
+    // the GLM judge is a candidate rather than an inline return — but WHICH model it is, and that it
+    // is filed as 'glm', are exactly the two facts this line has always been about.
+    expect(selBody).toContain("openAiJudgeCandidate('glm'");
+    expect(selBody).toContain("process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3'");
     expect(selBody).not.toMatch(/opusModel\(\)/);
   });
   it('🔒 White-Label: the review narration the USER sees names no vendor or model', () => {

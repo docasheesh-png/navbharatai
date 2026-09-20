@@ -44,10 +44,11 @@
 //
 // PURE — no I/O, no clock, no env. Every candidate is injected.
 
-import type { JudgeRunTurn } from './BuildJudge';
+// `JudgeKind` is imported, never re-declared: it is ONE type in BuildJudge.ts beside the label that
+// must stay exhaustive over it, so a sixth engine cannot be added here and forgotten there.
+import type { JudgeRunTurn, JudgeKind } from './BuildJudge';
 
-/** The engines that may judge a build. Mirrors `selectReviewJudge`'s own union, deliberately. */
-export type JudgeKind = 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron';
+export type { JudgeKind };
 
 export interface JudgeCandidate {
   kind: JudgeKind;

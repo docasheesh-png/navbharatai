@@ -34,7 +34,10 @@ describe('three outcomes, not two', () => {
     expect(describeJudgeVerdict({ pass: true, score: 0, reviewed: false, findings: ['x'] }).severity).toBe('warning');
   });
 
-  it('an empty workspace is NOT RUN too — the same rule, already in the code since 2026-08-06', () => {
+  it('any verdict carrying reviewed:false is NOT RUN, whatever its findings say', () => {
+    // ⚠️ TITLE CORRECTED AT THE MERGE: this case passes `reviewed: false` in by hand, so it tests the
+    // DESCRIBER, not what `judgeBuild` returns for an empty workspace — which is `reviewed: true`,
+    // decided below. Leaving the old title would have made this file contradict itself.
     expect(describeJudgeVerdict({ pass: true, score: 0, reviewed: false, findings: ['There were no files to review'] }).label).toBe('NOT RUN');
   });
 
@@ -90,9 +93,30 @@ describe('the judge itself reports whether it reviewed', () => {
     expect(describeJudgeVerdict(v).label).toBe('NOT RUN');
   });
 
-  it('an empty workspace yields reviewed:false', async () => {
+  /**
+   * 🔴 THE ONE PLACE THE TWO SESSIONS DISAGREED, decided at the merge and recorded here rather than
+   * quietly flipped (2026-09-20). This PR set the empty-workspace verdict to `reviewed: false`;
+   * #3143 — which fixed the other half of this same root cause and landed first — set it TRUE, with
+   * its reasoning in the code: `reviewed` answers *"did OUR instrument run?"*, and for an empty
+   * project it did. We looked; there was nothing to look at. That is a finding about the APP, which
+   * is the opposite of a judge that could not be reached.
+   *
+   * It matters because `judgeActuallyRan` gates `CHEAP_REVIEW_NOT_RUN`, a PROCESS_ONLY code that says
+   * the PLATFORM's reviewer did not run — filing an empty project under it would blame our instrument
+   * for the user's app being absent.
+   *
+   * ⚠️ The complaint behind this PR's original choice was real and is NOT dropped: a bare `PASS` for
+   * an app that does not exist. That is fixed by this PR's OTHER half, which is kept — the detail is
+   * now printed on EVERY outcome, so the report reads `PASS (score 0) — There were no files to
+   * review …` instead of a naked PASS. The wording is honest; the flag stays with its owner's meaning.
+   */
+  it('an empty workspace is reviewed:true — we DID look, and the honest reason is printed', async () => {
     const v = await judgeBuild('make a todo app', [], async () => ({ text: 'PASS 100' }), 'm');
-    expect(v.reviewed).toBe(false);
+    expect(v.reviewed).toBe(true);
+    expect(v.score).toBe(0);
+    const d = describeJudgeVerdict(v);
+    expect(d.label).toBe('PASS');
+    expect(d.detail).toMatch(/no files to review/i);
   });
 });
 

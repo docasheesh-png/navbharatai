@@ -298,7 +298,7 @@ import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneG
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
-import { judgeBuild, judgeRepairPrompt, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
+import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
@@ -16044,15 +16044,16 @@ async function noteBuildOutcome(
               //     being discarded by the reader on a pass, which is how an empty project came to
               //     be filed as a bare `PASS (score 0)`.
               //
-              // 🔒 ONE decision, two readers. `describeJudgeVerdict` is the single place that turns a
-              // verdict into label + severity + detail; the CODE is derived from its label rather
-              // than from a second copy of the same rule, so the two can never drift apart.
-              const d = describeJudgeVerdict(v);
+              // 🔒 BOTH READERS ASK THE SAME ONE FIELD. `judgeActuallyRan` and `describeJudgeVerdict`
+              // are not two rules that could drift — they read `v.reviewed`, which the JUDGE states
+              // and nobody infers. The early return is kept as #3143 wrote it because the CODE is the
+              // point there; the line below is #3154's, because the DETAIL is the point there.
               try {
-                if (d.label === 'NOT RUN') {
-                  buildDiag.record({ phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW_NOT_RUN', message: `${tag}: NOT REVIEWED — ${d.detail || 'the reviewer produced no usable verdict'}`, autoResolved: true });
+                if (!judgeActuallyRan(v)) {
+                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'CHEAP_REVIEW_NOT_RUN', message: `${tag}: NOT REVIEWED — ${v.findings[0] || 'the reviewer produced no usable verdict'}`, autoResolved: true });
                   return;
                 }
+                const d = describeJudgeVerdict(v);
                 buildDiag.record({
                   phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW', autoResolved: true,
                   message: `${tag}: ${d.label} (score ${v.score})${d.detail ? ' — ' + d.detail : ''}`,

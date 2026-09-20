@@ -109,8 +109,36 @@ export function generationTier(path: string): number {
   if (/(^|\/)app\.[jt]sx?$/.test(p)) return 2;
   if (/(^|\/)(pages?|routes?|router)(\/|\.)/.test(p)) return 2;
   if (/(page|screen|view)\.[jt]sx?$/.test(p)) return 2;
+  /**
+   * 🔴 A STYLESHEET IS GENERATED **LAST**, NOT FIRST (autopsy `f152c1ab`, 2026-09-20).
+   *
+   * It used to `return 0` — the FOUNDATION wave, before everything. What that cost, measured: a
+   * 7-file app whose tier 0 held exactly ONE file, `src/App.css`. It took **137 seconds of a 240
+   * second budget**, the lane bailed with *"2 stage(s) left would need about 468s"*, and the only
+   * thing salvaged from a 3.7-minute build was a **10 KB stylesheet for an app that did not exist**.
+   * The user stopped the build 2.5 seconds later.
+   *
+   * 🔑 THE DEPENDENCY ARGUMENT RUNS THE OTHER WAY, and that is the real defect. Tier 0 exists so
+   * later tiers can be handed the REAL source of what they import (`dependencyContext`) — exact
+   * exported names, enum members, prop types. **A stylesheet exports none of those.** What it
+   * actually needs is the opposite: the class names the COMPONENTS chose, which only exist once the
+   * components are written. Generating CSS first forced the model to INVENT class names that every
+   * later file then had to match — backwards, and exactly how a 10 KB stylesheet gets written for an
+   * app nobody has built yet.
+   *
+   * 🔒 AND IT IS THE MOST DEFERRABLE FILE IN ANY APP. A build cut short after the components renders
+   * — plainly, but it renders. A build cut short after the stylesheet renders NOTHING. Under a
+   * budget the order must put the stylesheet last, and now does: in the reported build this alone
+   * takes the lane from THREE stages to TWO, so the first wave produces both real components
+   * instead of one stylesheet.
+   *
+   * ⚠️ Stated as a CLASS rather than one extension: `.scss` / `.sass` / `.less` / `.styl` were
+   * already landing in tier 1 by fall-through, and the same argument applies to every one of them —
+   * a stylesheet follows the markup it styles, whatever its syntax. A CSS MODULE follows it too: a
+   * component referencing `styles.card` is the thing that decides `.card` exists.
+   */
+  if (/\.(css|scss|sass|less|styl)$/.test(p)) return 2;
   // Foundation — generated first.
-  if (/\.css$/.test(p)) return 0;
   if (/\.d\.ts$/.test(p)) return 0;
   if (/(^|\/)(types?|interfaces?|models?|constants?|config|utils?|lib|helpers?|hooks?|contexts?|stores?|services?|api)(\/|\.)/.test(p)) return 0;
   if (/(^|\/)use[a-z0-9]/.test(p)) return 0; // useXxx hook files anywhere

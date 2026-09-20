@@ -72018,6 +72018,92 @@ one. Held open by its own case in the suite. This is also the argument for the g
 WHOLE: the new suite was green while those three were red.
 ---
 
+## 2026-09-20 — A commented-out import is not an import (autopsy `31dc61fd`, re-read)
+
+**This is the SAME build id I autopsied earlier today.** The admin re-sent it; rather than repeat the
+tally, I re-read it end to end for what my first pass MISSED. This is the sharpest of four candidates,
+and the only one I could verify to the line.
+
+### The defect
+
+`WorkspaceMemory.extractFacts` ran its import, symbol, route and reference regexes over **RAW source**,
+so anything that merely LOOKED like code entered the project graph as a real fact. That graph is not a
+side channel — two independent consumers read it:
+
+- `analyzeArchitecture(graph)` turns `graph.imports` into `unresolvedImports`, which `releaseGate.ts`
+  counts as a **HARD BLOCKER** ("Hard blockers — an unresolved import, a missing dependency");
+- `collectDependencyIssues()` turns the same field into **"missing dependency"**, which
+  `BuildConfidence` then charges against the build.
+
+### ⚠️ And the trigger is OUR OWN SCAFFOLD, so it fired on EVERY vite-react build
+
+`ViteReactProviderContents.ts` writes this into every generated `vite.config.ts`:
+
+```
+// `import { useStore } from 'stores/useStore'` resolves at BUILD & RUNTIME too — not just in
+```
+
+Measured, not reasoned about: that line yields `stores/useStore`, package root `stores`, in no
+package.json. In this report an app that was **complete, typechecking, passing its own tests and
+rendering in a real browser** was scored `Build confidence: 35% (Low)` with "1 missing dependency(ies)
+not in package.json" — and the architect and then the reviewer between them spent **three greps, a
+shell grep and a repeated `evaluate`** proving it was a phantom. The reviewer's own conclusion was
+filed as a finding: *"`stores` dependency warning is a false positive."*
+
+### 🔑 The class: the rule already existed in this repo, TWICE, and not where it mattered
+
+`SpaFallbackAnalysis.ts` and `ProjectIntegrityChecks.ts` each carry a **private** `stripComments`, and
+the second one's doc comment states this exact rule — *"so a commented-out `.focus()` / import never
+counts."* They have already **drifted** (one substitutes a space, the other nothing). So the rule was
+written twice and was still missing from the one extractor that feeds the whole graph.
+
+`stripCodeComments.ts` is now the one implementation, used by `extractFacts`.
+
+- 🔒 **Length-preserving on purpose.** Deleting a comment can JOIN the tokens either side of it
+  (`foo/*c*/.bar()` → `foo.bar()`), inventing code nobody wrote — the same class of false fact this
+  removes. Blanking cannot.
+- 🔒 **The `[^:]` guard is what keeps a URL a URL.** Without it `from 'https://esm.sh/react'` loses
+  everything from `//` onwards and a REAL import disappears — turning a false-positive bug into a
+  false-negative one, which is strictly worse. Both existing copies carry the same guard; it was kept,
+  not re-invented.
+- 🔒 **SECURITY STILL READS RAW SOURCE.** A key pasted into a comment is a leaked key. Every other
+  extractor reads the stripped copy; `scanSecurity` deliberately does not, and a test holds that.
+
+**Measured before and after** — phantoms from the scaffold comment, a commented-out RELATIVE import, a
+block comment, a docblock example, a commented `require`, a commented `export`, a commented route: all
+gone. Controls unchanged: real imports, a URL import, a real import with a trailing comment.
+
+**Tests** — `tests/aCommentedOutImportIsNotAnImport.test.ts` (11 cases), **reversion-proven four ways**:
+raw content again → 4 red · security switched to the stripped copy → 1 red · the `[^:]` URL guard
+removed → 1 red · length preservation dropped → 2 red.
+
+### Deliberately NOT done, and why
+
+- **The two private `stripComments` copies were NOT migrated.** They are not instances of the bug —
+  they are instances of the SOLUTION that was never shared, and they already behave differently from
+  each other. Unifying them changes two working modules for no measured gain today, which is exactly
+  the "never trade one problem for another" rule. Recorded as a follow-up with its own tests.
+- **String literals are still read.** `const s = "import a from 'react-dom'"` still yields a phantom.
+  That is a lexer's job, not a regex's, and unlike the comment case **nobody has measured it happening
+  in a real build** — comments were measured, strings are speculative. Recorded rather than guessed at.
+- **`syncDependencies` (`src/server/project/`) has the same raw-source extractor and it WRITES —**
+  `pkg.dependencies[name] = …` for every harvested bare import, then installs. It is on the Engineer AI
+  / BuildPipeline path, not AgentV3's, so it did not cause this report. **Named here as an open sibling
+  because its failure mode is worse than a warning:** a package name harvested from a comment would be
+  added to a user's package.json and fetched from npm.
+
+### The other three candidates from the re-read, recorded but not fixed here
+
+1. **"build budget reached" named the wrong clock.** At 105s into a 1800s build, the report says
+   *"A model call was stopped because this build's time budget ended"* with `provider=unknown`, while
+   the line above it names KIMI. It was the FAST LANE's ~60s contract-call cap. An autopsy reading this
+   would believe the 30-minute budget expired 105 seconds in.
+2. **`evaluate` said "Nothing here was ever proven to RUN — no preview"** while the same build had
+   `PREVIEW_PUBLISHED`, a successful screenshot, and `GREEN_GUARD_SAVE` ("opened in a real browser and
+   rendered"). This is the **EVIDENCE LEDGER** open root cause caught with an exact quote, and it cost
+   money: the reviewer read "35% (Low)" and went hunting.
+3. **`PREVIEW_SNAPSHOT_STALE`** — the snapshot was taken, then a post-build pass wrote three more test
+   files, invalidating it. An ordering defect.
 ## 2026-09-20 — A BUILD THAT DID NOTHING TOLD THE USER IT HAD MADE THEIR CHANGE (autopsy 586295b7)
 
 **Admin:** *"jo jo problem is build report me hai, sabhi ko diagnosis kar ke root cause dhund ke dna
@@ -72239,6 +72325,60 @@ fact we store.
 Reversion-proven: dropping the cutoff fails 4, treating a missing `createdAt` as new fails 1, an
 unreadable cutoff meaning "no cutoff" fails 4, removing the real clamp fails 1. 34 cases.
 
+## 2026-09-20 — A STYLESHEET CANNOT BE THE WHOLE APP (autopsy f152c1ab, item 3)
+
+`generationTier` returned **0** for `*.css` — the FOUNDATION wave, generated before everything else.
+
+**What it cost, measured.** The reported build planned seven files; tier 0 held exactly ONE of them,
+`src/App.css`. That single file took **137 s of a 240 s budget** (10,176 chars, 3,522 output tokens,
+25.7 tok/s). The lane then bailed — *"2 stage(s) left would need about 468s"* — and the only thing
+salvaged from a 3.7-minute build was a **10 KB stylesheet for an app that did not exist**. The user
+pressed Stop 2.5 seconds later. `INTEGRITY_CSS_WIRED` then dutifully wired that orphan stylesheet
+into `main.tsx`, which is the self-heal rule 5 calls a red flag rather than a win.
+
+🔑 **THE DEPENDENCY RAN BACKWARDS, and that is the root cause rather than the budget.** Tier 0 exists
+so later tiers can be handed the REAL source of what they import (`dependencyContext`) — exact export
+names, enum members, prop types. **A stylesheet exports none of those.** What a stylesheet needs is
+the class names the COMPONENTS chose, and those do not exist until the components are written. So
+CSS-first forced the model to INVENT class names every later file then had to match — which is
+precisely how a 10 KB stylesheet gets written for an app nobody has built.
+
+🔒 **And it is the most deferrable file in any app.** A build cut short after the components renders
+— plainly, but it renders. A build cut short after the stylesheet renders NOTHING.
+
+**The fix:** stylesheets move to the LAST tier, stated as a class (`.css`/`.scss`/`.sass`/`.less`/
+`.styl` — the argument is identical for every syntax, and a CSS MODULE follows its component too).
+On the reported manifest this alone takes the lane from **three stages to two**, so the first wave
+produces both real components instead of one stylesheet — and the budget projection, which
+multiplies by stage count, now fits where it did not.
+
+⚠️ **One existing test needed its FIXTURE changed, and that is recorded rather than quietly edited.**
+`SimpleBuilder.test.ts`'s contract-cap test deliberately relies on a SINGLE-tier manifest (its own
+comment explains why: a multi-tier fixture would test the doomed-lane bail instead). Its third file
+was `src/index.css`, which is now tier 2 — so the lane became two-stage and bailed. Swapped for
+`src/constants.ts`, a real tier-0 file; the property under test is unchanged.
+
+⚠️ **The honest trade:** a lane cut short after the components now ships an UNSTYLED app rather than
+a styled non-app. That is the right side of it, and the design gate plus the full builder both run
+after. Test-locked and reversion-proven in `tests/aStylesheetCannotBeTheWholeApp.test.ts` (6 cases;
+CSS back to tier 0 → 4 red).
+
+### ✅ `chahiye` — INVESTIGATED AND CLOSED AS **NOT A DEFECT** (correcting my own ledger)
+
+The previous entry listed *"mujhe ek billing app chahiye is still low"* as an open root cause. On
+measurement it is the DESIGNED behaviour, and raising it would be the trade the fourth rule forbids:
+
+| prompt | verdict |
+|---|---|
+| `mujhe ek billing app chahiye` | new_build · **low** · `build-signal` |
+| `mujhe apne app me login chahiye` (an EDIT) | new_build · **low** · `build-signal` |
+| `mujhe help chahiye` | chat · low |
+
+`low` is what sends the turn to the LLM intention reader **with project and conversation context** —
+the one actor that can tell "I want a new billing app" from "I want login in my existing app". Both
+sentences are indistinguishable by keyword, so a HIGH lock on `chahiye` + a build noun would hard-lock
+the second one into rebuilding somebody's project. **The want-form is exactly the case the reader
+exists for.** Closed deliberately, not left silent.
 ---
 
 ## 2026-09-20 — Autopsy f97eb0ec (falling-block game): the reviewer's waste was invisible

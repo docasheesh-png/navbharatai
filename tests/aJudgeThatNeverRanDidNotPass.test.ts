@@ -130,7 +130,11 @@ describe('the wiring — asserted from source, comments stripped', () => {
   });
 
   it('and through the shared label, so a new engine cannot fall through to a lie', () => {
-    expect(route).toContain('judgeEngineLabel(judge.kind)');
+    // ⚠️ RE-ANCHORED 2026-09-20: the judge now falls through at CALL time (judgeChain.ts), so the
+    // label is read from the engine that ANSWERED, with the planned kind as the fallback before any
+    // call. The invariant is unchanged and stricter — it must still come from the shared function,
+    // and it must no longer name an engine that did not run.
+    expect(route).toContain('judgeEngineLabel(judge.chain.servedBy() ?? judge.kind)');
     expect(route).not.toContain("judge.kind === 'grok' ? 'Grok'");
   });
 });

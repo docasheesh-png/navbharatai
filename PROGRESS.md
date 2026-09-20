@@ -74558,6 +74558,61 @@ prompt fails exactly the two prompt cases.
   the tool path is not reported. `JSON.parse` would be a free, deterministic addition; it is outside
   the path this autopsy traced and is named here rather than bundled in.
 
+## 2026-09-20 — ABOUT US: the page had four lines, and whatever the admin wrote reached nobody
+
+The admin asked what About Us should contain. Reading the page first turned one question into two.
+
+### The content
+
+Four fields: a headline, one sentence, **"Built with ❤️ by a passionate developer"**, and "To make
+Bharat a global leader in AI". Nothing a person could use to decide whether to trust an app that
+takes their money — not what it does, not who made it, not what happens to their data, not how to
+reach anybody. The description said *"a mission to empower every Indian with the power of Artificial
+Intelligence"*: true in spirit, and a visitor could read it and still not know what the app does.
+
+The page now carries what an About page is for: what it is in one line, what you can do here, why it
+is built for India rather than translated for it, who builds it, where it is going, four promises,
+an "we are early and we say so" section, and the contact plus the legal links India requires.
+
+🔒 **Every claim is anchored.** The data promise is taken from the **Privacy Policy's own** "What we
+do NOT do" paragraph, in its words, and `tests/aboutUsTellsTheTruth.test.ts` asserts it against the
+real policy text — so the two pages cannot drift. "A working app or it is free" is an existing
+billing rule, not a slogan. The founder text is the admin's own wording, already shipped in the
+donation panel.
+
+⚠️ **And a claim I invented was caught before it shipped:** the first draft put
+`support@navbharatai.com` on the page. A grep shows `info@navbharatai.com` in fourteen places and
+that address in none. An About page carrying a mailbox nobody reads looks like a way to reach a
+human and is not one. A test now pins the address to the one the legal pages publish, and another
+refuses a team size, a user count, an investor, an award, a certification or a company name — each
+easy to write, impossible to withdraw, and a public statement by a business that charges money.
+
+### The half that mattered more: the edit reached nobody
+
+`navbharat_about_v1` appeared at exactly **two places in the whole repo** — one `localStorage` read
+and one write — with **no server route anywhere**. So an admin edit was saved in that one browser,
+every other user saw the shipped default, and clearing site data threw the edit away. Over it sat a
+badge reading **"Admin Edit Mode Active"**. That is the second absolute rule's built-but-not-working
+state, on a page whose entire job is to be read by other people.
+
+Now: `GET /api/site/about` (public — it returns the words on a public page and nothing else) and
+`PUT /api/admin/site/about` behind the **shared** `requireAdmin`, never a second hand-rolled check.
+The override is a PATCH, never the page: the content ships with the code like the Privacy Policy, so
+an empty, corrupt or unreachable store renders the full page rather than an empty screen. A write
+that does not land returns **503** and the badge says *"Not saved"* — telling an admin "saved" about
+a write that never happened would rebuild the same bug one layer in.
+
+### Two process notes
+
+**A weak assertion, caught by reversion — the fourth this session.** The case asserting the route is
+registered used `toContain('registerSiteAboutRoutes(app)')` and **passed with the registration
+commented out**. It is a line check now, and reverting the registration fails it.
+
+🔎 **OPEN, recorded not fixed: `stripCodeComments` mis-parses `server.ts`.** Run over that file it is
+length-preserving but blanks a large region — including a live call ~line 738 — so a guard using it
+on `server.ts` would fail on correct code, or pass on wrong code depending on which side of the
+blanked region it looks at. This suite uses a line check instead and says so. Whether other guards
+lean on that helper for large files is unchecked; it belongs to another change, not this one.
 ---
 
 ## 2026-09-20 — A TUNE NEEDS NO SOUND FILE: NavBharatAI learns to read notes (sargam AND letters) and play them
@@ -75133,3 +75188,82 @@ Raised to them in the same reply; it is the likeliest remaining cause of a bounc
 Apple branch, the order refusal, the platform argument and the profile label each fail it when
 removed). Android and web are asserted **byte-identical**, including that a missing platform keeps
 today's behaviour rather than removing anybody's working top-up.
+## 2026-09-20 — "nvidia nahi chal raha, kaha problem hai?" — the platform could not say, and that was the defect
+
+The admin reported that Nemotron was not working and asked the one question the system should have been
+able to answer by itself: **where**. Investigating it found that nothing in this platform could — and
+two real defects on the judge path, both read out of the code rather than inferred from a report.
+
+### Defect 1 — the fall-through was guarding the wrong statement
+
+`selectReviewJudge` built each judge like this:
+
+```
+try { const client = new OpenAI({ apiKey, baseURL, … }); … return { runTurn, … }; }
+catch { /* fall through to the GLM / Grok / Claude judge below */ }
+```
+
+with a comment underneath stating, in writing: *"A Nemotron outage, a revoked key, an unconstructable
+client — each simply lands on the judge that is running in production today."*
+
+**Only the third is true.** Constructing an SDK client is local object creation — it contacts nothing,
+so it does not throw for a wrong key, a wrong model id, a wrong base URL, an exhausted plan, a 404, a
+401 or a timeout. All of those happen later, inside the returned `runTurn`, which the `try` does not
+cover. They landed in `judgeBuild`'s own catch, which records NOT REVIEWED and returns. So the review
+did not fall back to the judge running in production; **the build lost its quality gate entirely**, and
+on the Weak tier — where Nemotron has been the judge since 2026-09-19 — that would have been every
+build, silently.
+
+### Defect 2 — the reason was thrown away, which is why "kaha?" had no answer
+
+`judgeBuild`'s catch discarded the error object. A wrong key (401), a wrong model id (404), a timeout
+and an empty reply all produced the identical sentence, naming neither the engine nor the cause. **The
+status code is the diagnosis** — 401/403 is the key, 404 is the model id or the host, a timeout is the
+network or the plan — and it was being deleted at the exact moment it mattered.
+
+### The fix: a chain around the CALL, not around the construction
+
+`src/server/AgentV3/judgeChain.ts` (pure, DI, no I/O). A candidate is `(kind, modelId, runTurn)`; the
+composed runner walks them at call time, records each attempt with its reason, and returns the first
+real answer.
+
+- **The order is exactly today's** — Nemotron → GLM (never on `power`) → Grok → Sonnet last. No engine
+  became reachable that was not reachable before; only *when* the fall-through happens changed. That is
+  what keeps this a repair rather than a routing change needing admin sign-off.
+- **An EMPTY answer is that rung failing, not a verdict.** A reasoning model can spend its whole output
+  allowance thinking and return empty content — `glm-5.3` and `kimi-k2.7-code` are both in
+  `MEASURED_ALWAYS_REASONS` for precisely this, and the judge is called with `maxTokens: 1500`. The old
+  path handed that empty string to `parseJudgeVerdict`, which recorded *"the reviewer's answer could not
+  be read"*: a sentence about our parser, for a rung that never wrote a character.
+- **Each engine is asked for its own model id.** `judgeBuild` passes one; without the chain owning it,
+  the second candidate would be asked for the first one's model at a host that has never heard of it.
+- **The engine is named after the call.** With a real fall-through, printing the planned name would
+  re-create the defect `judgeEngineLabel` was written to fix.
+- **It still never blocks a build.** When every candidate fails the chain re-throws, so `judgeBuild`
+  produces the same honest NOT REVIEWED verdict as before. Cost on the ordinary path is unchanged; at
+  most one extra call per failed rung.
+
+Test-locked in `tests/theJudgeFallsThroughWhereItFails.test.ts` (16 cases) and **reversion-proven three
+ways**, one of them at SOURCE level — `tsc` and `vitest` cannot see that a try/catch guards the wrong
+statement, which is exactly how this survived review and shipped.
+
+### OPEN root cause (rule 6) — which of three causes is the live one is NOT decided here
+
+Why the Nemotron call fails is still unproven, and this entry deliberately does not guess:
+
+1. **The model id.** `CLAUDE.md` says NVIDIA spells the ids the same as OpenRouter and no override is
+   needed. **`nemotron.ts`'s own docblock says the opposite** — *"Bedrock and NVIDIA's own endpoint do
+   not"* use the `nvidia/…` form — and the key was bought at `build.nvidia.com`. Both cannot be true;
+   if the code's comment is right, every judge and plan call is a 404 on a model name.
+2. **The 1,500-token ceiling on a reasoning model** — the empty-answer case above. It spends credits
+   while looking identical to a failure.
+3. The key or host being rejected (401/403).
+
+**A Claude session cannot settle it:** outbound to `integrate.api.nvidia.com` is refused by this
+execution environment's egress policy (tried, `connect_rejected`). The admin's NVIDIA usage dashboard
+separates all three in one glance — requests arriving and succeeding ⇒ (2); arriving and erroring ⇒ (1)
+or (3); none arriving ⇒ our own gating. **And after this change the build report answers it too**: the
+`CHEAP_REVIEW` / `CHEAP_REVIEW_NOT_RUN` detail now names each engine that failed and its status code.
+
+That is the 50/50 law applied: the reported symptom is repaired, and the condition that made the
+symptom undiagnosable — an error path that deleted its own evidence — is gone.

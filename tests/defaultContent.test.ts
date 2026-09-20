@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   DEFAULT_HOME_DATA,
-  DEFAULT_ABOUT_DATA,
   DEFAULT_DONATION_DATA,
   loadPersistedContent,
 } from '../src/config/defaultContent';
+// MOVED 2026-09-20: the About page's content left this module for `src/content/about.ts` when it
+// stopped being a localStorage blob and started being served to every user.
+import { DEFAULT_ABOUT } from '../src/content/about';
 
 describe('default content constants', () => {
   it('home data has hero fields and exactly 4 features', () => {
@@ -18,10 +20,13 @@ describe('default content constants', () => {
   });
 
   it('about data has the required text fields', () => {
-    expect(DEFAULT_ABOUT_DATA.headline).toBeTruthy();
-    expect(DEFAULT_ABOUT_DATA.description).toBeTruthy();
-    expect(DEFAULT_ABOUT_DATA.team).toBeTruthy();
-    expect(DEFAULT_ABOUT_DATA.vision).toBeTruthy();
+    // The fields are unchanged; only their home moved. The About page's own invariants — that its
+    // claims match the Privacy Policy, and that an edit reaches every user — live in
+    // tests/aboutUsTellsTheTruth.test.ts.
+    expect(DEFAULT_ABOUT.headline).toBeTruthy();
+    expect(DEFAULT_ABOUT.description).toBeTruthy();
+    expect(DEFAULT_ABOUT.team).toBeTruthy();
+    expect(DEFAULT_ABOUT.vision).toBeTruthy();
   });
 
   it('donation data has a UPI id and name', () => {
@@ -47,7 +52,7 @@ describe('loadPersistedContent', () => {
 
   it('returns parsed value when valid JSON is stored', () => {
     localStorage.setItem('k', JSON.stringify({ headline: 'Custom' }));
-    const result = loadPersistedContent('k', DEFAULT_ABOUT_DATA);
+    const result = loadPersistedContent('k', DEFAULT_ABOUT);
     expect(result).toEqual({ headline: 'Custom' });
   });
 

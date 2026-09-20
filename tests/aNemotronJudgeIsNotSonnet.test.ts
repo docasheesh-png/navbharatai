@@ -62,19 +62,26 @@ describe('the union and the label cannot drift apart', () => {
     // the FRONTEND `tsc --noEmit` does not cover src/server and stays green, so the server typecheck
     // is the one that catches it). This test fails first if somebody widens the union in the route
     // and narrows it in the label to make that compile error go away.
+    // ⚠️ RE-ANCHORED 2026-09-20 — THE DRIFT IS NOW IMPOSSIBLE, NOT MERELY DETECTABLE.
+    //
+    // This used to pull the union out of the route's return type and out of the label's parameter and
+    // compare the two strings. That could only fail AFTER somebody had already written two different
+    // lists. `JudgeKind` is now declared ONCE, in BuildJudge.ts beside the label that must stay
+    // exhaustive over it, and both the route and the chain import it — so a sixth engine cannot be
+    // added in one place and forgotten in the other. What is asserted is that single source.
     const route = codeOnly(ROUTE);
     const at = route.indexOf('function selectReviewJudge');
     expect(at).toBeGreaterThan(-1);
     const signature = route.slice(at, route.indexOf('{', route.indexOf('kind:', at)));
-    const routeUnion = (signature.match(/kind:\s*([^}]+)}/) || [])[1];
-    expect(routeUnion).toBeTruthy();
-    const routeKinds = (routeUnion as string).split('|').map((s) => s.trim().replace(/'/g, '')).sort();
+    expect(signature).toMatch(/kind:\s*JudgeKind/);
 
-    const labelSig = codeOnly(JUDGE).match(/export function judgeEngineLabel\(kind:\s*([^)]+)\)/);
-    expect(labelSig).toBeTruthy();
-    const labelKinds = (labelSig as RegExpMatchArray)[1].split('|').map((s) => s.trim().replace(/'/g, '')).sort();
-
-    expect(labelKinds).toEqual(routeKinds);
+    const judge = codeOnly(JUDGE);
+    // ONE declaration, and the label takes exactly it.
+    expect(judge).toMatch(/export type JudgeKind = 'grok' \| 'sonnet' \| 'opus' \| 'glm' \| 'nemotron';/);
+    expect(judge).toMatch(/export function judgeEngineLabel\(kind: JudgeKind\)/);
+    // The `never` default is what turns a widened union into a compile error rather than a silent
+    // fall-through to the last branch — the original defect. It must stay.
+    expect(judge).toContain('const never: never = kind');
   });
 
   it('🔒 the label is a SWITCH with a `never` default, not a ternary chain', () => {
@@ -92,8 +99,15 @@ describe('the union and the label cannot drift apart', () => {
 describe('the route uses it — the ternary is gone', () => {
   const code = codeOnly(ROUTE);
 
-  it('🔒 reviewerName comes from the shared label', () => {
-    expect(code).toMatch(/const reviewerName = judgeEngineLabel\(judge\.kind\)/);
+  it('🔒 the reviewer name comes from the shared label — and is read AFTER the call', () => {
+    // ⚠️ RE-ANCHORED 2026-09-20, and the invariant got STRONGER rather than weaker. This asserted the
+    // literal `const reviewerName = judgeEngineLabel(judge.kind)`. The judge now falls through at CALL
+    // time (judgeChain.ts), so the engine that ANSWERED can differ from the one this build planned on —
+    // and printing the planned name would be this very test's own bug in a new costume: a report
+    // crediting work to an engine that did not do it. The label must still come from the shared
+    // function; it must now also come from `servedBy()`, with the planned kind only as the fallback
+    // for a label needed before any call has happened.
+    expect(code).toMatch(/judgeEngineLabel\(judge\.chain\.servedBy\(\) \?\? judge\.kind\)/);
   });
 
   it("🔒 and the four-branch ternary is not left behind anywhere in the route", () => {

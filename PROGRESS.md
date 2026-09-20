@@ -70796,6 +70796,60 @@ and got a word that reads as nonsense does not file a bug; they leave.
 
 ---
 
+## 2026-09-20 — The danda is a full stop, not a comma (a fix MEASURED and then NOT shipped)
+
+Closing out autopsy `3ce8459b`. Two of its four ❌ items were fixed and merged (#3134, #3138). **The
+other two were not defects, and both of my "still open" notes were wrong** — recorded plainly, because
+a wrong open item costs the next session the same investigation:
+
+- **`startTier: "gemini"`** — already fixed on **2026-09-17** by another session (autopsy `2b0a3ed5`):
+  the band keeps its telemetry key and gains `startBandLabel`, and the report prints the label. The
+  report I autopsied *carried the new field*. I listed it as open twice without re-grepping — exactly
+  the failure CLAUDE.md records about a "STILL OPEN" note being a claim with a date on it.
+- **"the scorer is blind to Bengali"** — it is not. `signalsCouldNotRead` fires correctly, sets
+  `ambiguous: true`, and that is what bought the LLM second opinion that read the real build as
+  COMPLEX. Designed behaviour with a working escape hatch, not a gap.
+  ⚠️ My first probe appeared to prove otherwise (`unreadable: false`, score 5). **That was my own
+  miscall**: `analyzeRequest` takes ONE object (`{ prompt }`) and I passed the string positionally, so
+  it analysed an empty prompt. Caught by re-measuring before reporting.
+
+### The thing that looked like a real India-first bug, and the measurement that killed it
+
+Both list counters split on `,` `;` `\n` `·` `•` and know the romanized `aur` / `tatha` — and **neither
+knows the danda `।`**, which Hindi, Bengali, Marathi and Nepali actually type. Ten other files in this
+repo know that character, so its absence reads like an omission. Measured on one 8-feature school-ERP
+request:
+
+| | `countEnumeratedFeatures` | `enumeratedParts` |
+|---|---|---|
+| English, commas | 8 | 8 |
+| **Hindi, dandas** | **0** | **1** |
+| **Bengali, dandas** | **0** | **1** |
+
+That looks decisive. **The control is what decided it:**
+
+| | features | parts |
+|---|---|---|
+| Hindi, **commas** | **8** | 8 |
+| Bengali, **commas** | **8** | 7 |
+| English prose, 6 sentences | 0 | **1** |
+| Hindi prose, 6 dandas | 0 | **1** |
+
+1. **Indic script is not the blind spot** — a comma-separated Indic list already counts correctly, and
+   the comma is what these scripts use for lists.
+2. **The danda is the Indic FULL STOP.** Admitting it would score six sentences of Hindi PROSE as six
+   features while identical English prose scores one, because the English full stop is deliberately not
+   a separator here either. A penalty aimed at exactly the users it would be "for".
+
+🔴 **So the fix was NOT shipped**, and that is the deliverable. It would have traded a narrow problem
+(someone who writes their list with dandas is under-counted) for a wider one — and
+`countEnumeratedFeatures` gates Software Project Mode and the mega-roadmap, both of which spend a real
+planner call, so a false 8 is charged to somebody describing their shop in six sentences.
+
+**What shipped instead:** the measurement, recorded at BOTH separator sites — where the change would be
+made, not only in a doc nobody editing a regex reads — and `tests/theDandaIsAFullStopNotAComma.test.ts`
+(4 cases) locking the parity as a COMPARISON rather than two constants, so a drift in either direction
+fails. Reversion-proven both ways: adding `।` to either counter turns two cases red.
 ## 2026-09-19 — 🔎 THE SIBLING: the word does not always fall into LATIN
 
 The same-day follow-up to the `জungle` autopsy (3ce8459b) above, under rule 3 (hunt the siblings before
@@ -71020,6 +71074,113 @@ and the sheet's desktop rendering are asserted from the source and the existing 
 a screenshot. The composer's control-row arithmetic test (`chatComposerAlignment.test.ts`) still passes.
 ---
 
+## 2026-09-20 — The chat shows the WORK, not the THINKING (+ the number that sized the problem)
+
+**Admin, with two screenshots of a phone filled top to bottom with grey italic text**, classifying a Pro
+reply into three things and passing judgement on each:
+
+> *"1- main reply with diff · 2- light/gray reply (bakwaas, yah nahi chahiye!) · 3- live events (yeh
+> theek hai). ham noise kam se kam karni hai, ui clean and indian user ke liye usefull banana hai!"*
+
+### The finding that made this cheap: the admin's 1/2/3 already exist as three channels
+
+| Their name | The code | Where from |
+|---|---|---|
+| 1. Main reply + diff | `stream_delta kind:'text'` → final `narration` (`turn.text`) | `AgentRunner.ts` |
+| 2. Grey "bakwaas" | `stream_delta kind:'thinking'` | `AgentRunner.ts` + the fast lane |
+| 3. Live events | `tool_call` / `tool_result` / `file_changed` → `activity` | the reducer |
+
+So removing #2 needed no clever filtering, and **cannot touch #1** — different `kind`, different emit
+site. Verified by reading both before writing anything, which is the whole of the "a fix must never
+trade one problem for another" rule applied.
+
+### 🔑 It was not merely long — it was STRUCTURALLY UNFOLDABLE
+
+`FoldableMessage` collapses any reply over 700 characters. It is skipped entirely while a line is
+`streaming` — and a thinking line **never stops streaming**, because the reducer finalizes only
+`kind: 'text'`. **No length limit, present or future, could ever have reached that channel.** That is
+why the first instinct (a scrollable box with an expander, which the admin asked for one message
+earlier and then superseded with "yeh nahi chahiye") would have been the wrong build: a second view of
+something nobody wants, which still has to be maintained.
+
+**The sibling was fixed in the same change (rule 3):** a `narration` line still marked `streaming` when
+a build ENDS — a turn that threw, a stream cut mid-flight, a user's Stop — stays streaming for ever and
+is therefore the one reply in the channel users *do* read that can never collapse. `settled()` clears it
+on `done` / `result` / `error`.
+
+### ⚠️ "Thinking off kar do?" — the honest answer was that it already IS off wherever it can be
+
+The admin asked whether the reasoning could simply be switched off, and offered to leave it if not.
+Read from the code rather than answered from memory:
+
+| Rung | Can it be silenced? | State |
+|---|---|---|
+| Claude (any) | yes, our own param | already off — `AgentV3Panel` pins `const thinking = false` |
+| `glm-4.7-flashx` (lead rung, Weak/Normal) | yes, 4.x accepts it | already off — `thinkingControl: true` sends `thinking: disabled` |
+| `glm-5.3` | **no** | GLM's own 400: *"This model always engages in thinking and cannot be disabled"* |
+| `kimi-k2.7-code` | **no** | `MEASURED_ALWAYS_REASONS` — measured from two admin reports, not assumed |
+
+**There was no switch left to flip.** The tokens are spent either way; the only question this change
+answers is who has to read them. Stated plainly to the admin rather than shipping a flag that would
+have looked like a saving and been none.
+
+### 📏 The measurement that sizes what remains — `LADDER_DEPTH`
+
+Admin: *"pehle yeh measure karo, kitni builds pehle rung par khatam hoti hai"*. **Nothing in this repo
+could answer it.** `deliveredVia` names the VENDOR, and on Weak/Normal the vendor GLM holds **rung 1
+AND rung 3** — so a build that fell two rungs and one that never left the first are the same value in
+that field. `escalations` counts TIER escalations and is 0 for every ordinary fall inside a tier.
+
+`ladderDepth.ts` (pure) reads the provider ledger we already hold. Two refusals are the point:
+
+- **an unrecognised model is never rounded into a rung** — exact-id match only (`glm-4.7-flash` is a
+  different model from `glm-4.7-flashx`), except the Claude rungs, which name a family by design;
+- **a rung that was tried and delivered no output tokens is never counted as reached** — otherwise a
+  build would be reported as "fell to rung 3" when rung 3 never wrote a character.
+
+Unattributable ⇒ `unknown`, **folded rather than dropped**: a dropped build would make the rung-1 share
+look better than it is, the one direction this number must not lie in.
+
+### What shipped
+
+| | |
+|---|---|
+| `AGENTV3_STREAM_THINKING` | default OFF; `on` restores the old behaviour with no deploy. Gates BOTH emit sites through one helper so the two lanes cannot drift |
+| client guard | the reducer refuses to make a chat line out of a reasoning delta, whatever the server sends — the Android shell is BUNDLED, so an installed client and the server are not the same age |
+| `settled()` | a build that ends settles every streaming line, so long replies can fold |
+| `toolLabels.ts` | `writing src/components/InvoiceForm.tsx` → `writing Invoice form`; `npm install --no-audit` → `installing packages` |
+| `ladderDepth.ts` | `LADDER_DEPTH` per build + `byLadderDepth` in the daily telemetry |
+
+**Tests:** `theChatShowsTheWorkNotTheThinking.test.ts` (6, incl. a source-level guard **proven by
+reversion** — deleting either gate breaks no behavioural test in this repo, which is precisely why it
+exists), `theStripSpeaksTheUsersLanguage.test.ts` (11), `ladderDepth.test.ts` (13), reducer (40, one
+REWRITTEN and the old assertion quoted in place so the change of behaviour is legible), cost telemetry
+(23).
+
+### 🔴 Deliberately NOT built, and why
+
+- **A collapsed box with an expander for the grey text.** Superseded by the admin's own "yeh nahi
+  chahiye" — a second view of something nobody wants is maintenance with no reader. It lives in the
+  admin build report, which is where debugging needs it.
+- **Compacting the intermediate `turn.text` prose.** Once the grey is gone, what remains in chat is the
+  user message, the action cards and the reply. Whether the prose still walls a phone is now an
+  observable question rather than a guess — and the system prompt asks for "1–2 short sentences" of
+  progress, which IS the "simple event summary" the admin asked for. **Next change only if a real
+  report shows it.**
+- **A Claude-Code-style terminal skin.** Discussed and argued against to the admin: the *discipline*
+  transfers (one line per action, collapsed by default, the work tells the story) and is most of what
+  was shipped here; the *skin* does not — file paths, monospace and diff-as-hero are written for a
+  developer with their own browser, and NavBharatAI's user has nothing but this screen.
+
+### ⚠️ Open, honestly
+
+- **The rung-1 share is now measurable and is not yet measured.** No production build has run with this
+  code. The first `LADDER_DEPTH` lines are its first evidence; the daily `byLadderDepth` aggregate has
+  no admin tile yet — deliberately, because a panel built before anybody has read a number is a guess
+  about what the number will say.
+- **This is a FRONTEND change as well as a server one**, so installed Android/iOS users keep the grey
+  wall until a fresh `.aab`/`.ipa` — and per the standing instruction that happens only when the admin
+  asks. The server half (not sending the bytes) reaches them immediately.
 ## 2026-09-20 — A REPORT MUST SAY WHAT IT NO LONGER CONTAINS (the autopsy's own instrument was lying)
 
 **Admin:** *"pahle autopsy ko fix karo, yeh problem wapas na aye. kisi bhi other apps bannae me."*
@@ -71223,6 +71384,39 @@ an un-hydrated SPA shell.
 - **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
   `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.
 
+### 2026-09-20 (same day, follow-up) — "app kitne % ban gayi" — a percentage that refuses to be a timer
+
+Admin: *"app kitne % ban gayi woh bhi likh kar aana chahiye … 0% 10% 12% … 89% 98% **100% done - tap on
+preview!**"*
+
+**The last clause decided the design.** The preview is the completion criterion — which is what this
+platform already believes: `markAppRendered` is the single producer of that proof and the billing law
+turns on it (*"app bani = preview chala"*). So 100% is EARNED by a proven render, never announced by a
+build that merely finished.
+
+**What was refused:** a bar that crawls on elapsed time. It is a lie by construction — it moves while
+nothing happens, and it is always near 90% when a build is about to fail. `buildProgress.ts` is pure
+and every point is a count of real events (todos marked `done`, the declared phase, a published preview
+URL, a proven render). A test calls it twice with identical facts and asserts an identical number.
+
+**Three refusals locked by test:**
+
+1. **100 is earned** — `done && ok && appRendered` only. `ok` without a proven render reads *"finished,
+   preview not confirmed"*; a running build is capped at 97 so 100 keeps meaning something.
+2. **It only moves on evidence** — no interpolation, ever. Only `done` todos count; half a point for
+   `in_progress` is a convention, and this module is worth nothing the moment it holds conventions.
+3. **It never falls backwards** — the floor is held per BUILD ID, so a plan that grows mid-build cannot
+   make a user watch their app get less built, and the previous build's 100% cannot seed the next one.
+
+⚠️ **Honest cost, recorded now rather than found later:** with no plan the reading JUMPS (5 → 80 → 90 →
+100) instead of gliding. The in-between values do not exist. `basis` (`plan` / `milestone` / `none`)
+says which case produced a reading so a lumpy number is distinguishable from a broken one. The elapsed
+clock beside it is what keeps a paused number from reading as a hang — a clock is a measurement, a bar
+is a promise.
+
+⚠️ **Open:** how often a build actually carries todos is unmeasured, and that decides how often the
+number glides rather than jumps. The first real builds answer it — the same evidence `LADDER_DEPTH` is
+waiting on.
 ## 2026-09-20 — THE SIBLING HUNT BEHIND #3151: 37 VIEWS AUDITED, ONE MORE WAS CLIPPING (PR #3152)
 
 #3151 fixed App Mart's scrolling. Rule 3 says the root cause almost always lives in more than one
@@ -71273,6 +71467,56 @@ this one root), and the CLASS is recorded here, where a reader meets it. Reversi
 scrollbar. The browser run above is the evidence; the test is the contract.
 ---
 
+## 2026-09-20 — A judge that never ran did not pass
+
+**Branch `claude/a-judge-that-never-ran-did-not-pass`.** Found while the admin was configuring
+Nemotron, not from the autopsy list — and it is older and wider than Nemotron.
+
+**The trigger.** The admin's Cloud Run screenshot showed `NEMOTRON_BASE_URL =
+https://integrate.api.nvidia.com/v1` (NVIDIA's own endpoint) while the model-id defaults keep the
+OpenRouter spelling `nvidia/nemotron-3-…` — a mismatch `nemotron.ts`'s own docblock explicitly warns
+about (*"a Nemotron id is spelled DIFFERENTLY by each host… these two ids must be set to match
+whichever host is actually bought"*). Chasing **what that would DO** is what found the bug.
+
+**What it would do: nothing visible, for ever.**
+
+- `judgeBuild` catches a provider failure and returns **`pass: true` on purpose** — a judge must never
+  fail a user's app over its own outage — and puts the truth in `findings`.
+- `recordVerdict` printed PASS/FAIL from `pass`, and appended `findings` **only when pass was false**.
+- `reviewerName` was an inline ternary with **no `nemotron` branch**, falling through to `'Sonnet'`.
+
+So a judge that could not run was filed as **`Sonnet review: PASS (score 0)`** — a pass, with its own
+explanation discarded, under the name of an engine that had not run. A misconfigured judge would have
+looked like a passing review on every build.
+
+### The fixes
+
+- **`reviewed?: boolean` on `JudgeVerdict`**, set false by both non-verdict returns (the provider
+  failure and the empty workspace, the latter already reasoned about on 2026-08-06). ⚠️ **Derived, not
+  inferred**: the reader must not guess "score 0 plus a finding means it did not run" — a real verdict
+  may legitimately score 0, and a rule built on that coincidence breaks the day one does. Absent ⇒
+  true, so any other producer keeps today's meaning.
+- **`describeJudgeVerdict`** — three outcomes, not two. `pass` answers *"may this build proceed?"*; it
+  was never an answer to *"what did the judge find?"*. `NOT RUN` is a **warning**, because a gate that
+  silently stopped existing is invisible precisely when it matters. **The detail is kept on every
+  outcome**, including a genuine pass.
+- **`judgeEngineLabel`** — exhaustive with a `never` check, so a future engine must be named at the
+  point where somebody has to think about it rather than silently becoming whichever branch the
+  ternary ended on.
+
+**Build-affecting behaviour is byte-identical** — a judge outage still never blocks a build. Only the
+record changed.
+
+`tests/aJudgeThatNeverRanDidNotPass.test.ts` — 17 cases. **Reversion-proven five ways**: NOT RUN back
+to PASS → 4 red · `reviewed: false` removed → 2 red · the nemotron branch removed → 1 red · the detail
+dropped on a pass → 1 red · the route's local ternary restored → 1 red.
+
+### Open, and it is the admin's to check
+
+`NEMOTRON_ULTRA_MODEL` / `NEMOTRON_SUPER_MODEL` were not visible in the screenshot. If they are unset
+while the base URL points at NVIDIA's own endpoint, the judge call fails and — from today — the report
+says `NOT RUN` instead of `PASS`. **That is the whole point of this change: the misconfiguration is now
+observable rather than silent.** The correct ids for that host are not guessed here.
 ## 2026-09-20 — App Lock: ONE ACCOUNT'S UNLOCK IS NOT ANOTHER'S (audit + root-cause fix)
 
 **The ask** was a per-OPTION PIN unlock: *"unlocking one option unlocks all options"*, to be fixed by
@@ -71399,6 +71643,64 @@ restored → 1 red · **the rule widened to bare `^no` → 4 red** (it swallows 
 
 ---
 
+## 2026-09-20 — The estimate threw away its best measurement (autopsy 31dc61fd, item 3 of 6)
+
+**Branch `claude/the-estimate-threw-away-its-best-measurement`.**
+
+### 🔴 First, a correction to my own reading of that report
+
+I told the admin the fast lane *"had that arithmetic BEFORE spending the 177 seconds."* **It did not
+have THAT arithmetic.** It had a different, more optimistic one — `canFinishAfterPreamble` — which it
+ran, and which passed. Reading the code rather than the narrative is what found the real defect.
+
+### The real defect
+
+| measurement | value | used? |
+|---|---|---|
+| plan call | **34s** | ✅ the only sample the projection used |
+| contract call | **~61s** — ran to its cap and was killed | ❌ measured nowhere, ignored |
+| a real tier | **~62.5s** | — what a file-writing stage actually cost |
+
+```
+projected:  95s elapsed + 3 tiers × 34s   = 197s  ≤ 240s  → PROCEED
+reality:   167s elapsed + 2 tiers × 62.5s = 292s  > 240s  → bail, one file written
+```
+
+**A plan call emits a short FILE LIST; a tier writes whole files, and output tokens dominate latency.**
+So the plan systematically under-measures a tier — by 1.8× here — while the contract call, which also
+produces a long body, predicted it almost exactly. **The lane had the better sample in hand and
+projected from the cheapest one.** And a call cut off by its own cap is the *strongest* evidence the
+chain is slow; that one was discarded entirely.
+
+### The fix
+
+`tierEstimateMs` takes the **slowest real sample**, never the cheapest — and `SimpleBuilder` now times
+the contract call on **both** paths, because a throw there is usually the cap firing and that duration
+is the measurement worth having (clamped to the cap, so a stray clock cannot inflate the projection).
+
+- **Max, never sum and never mean.** Both calls ran on the same chain, so both are evidence; the longer
+  one is the closer analogue of a tier.
+- **Over-estimating is the safe direction**: it costs a handoff that was going to happen anyway, while
+  under-estimating starts a phase that cannot finish and burns the whole budget to discover it.
+- **Never bail on an absent signal** — the rule this module already follows. No contract, a zero, a
+  NaN: all fall back to the plan-only projection, i.e. today's behaviour exactly.
+- The bail reason now **names which call it believed**. *"Planning alone took 34s"* was a true sentence
+  about the wrong sample.
+
+`tests/theEstimateThrewAwayItsBestMeasurement.test.ts` — 16 cases driven by the report's own numbers.
+**Reversion-proven five ways**: back to plan-only → 3 red · summed instead of maxed → 2 red · an
+unusable value trusted → 1 red · the measurement never captured → 1 red · the reason no longer naming
+the call → 1 red.
+
+### ⚠️ The honest trade, stated rather than discovered later
+
+With the better estimate this build would have bailed **before** writing anything — losing the 893-line
+`src/index.css` the lane did produce and the architect then reused. That is a real cost, not a pure
+win: the exchange is ~72 seconds and a doomed phase against one salvageable file. It is the right side
+of the trade (the full builder writes its own stylesheet anyway, and the lane's partial output is
+usually discarded), but **the next report should be read for whether bails became more common and
+whether those builds got faster** — the projection is now honest, and the threshold behind it is still
+the same 240s nobody has re-measured.
 ## 2026-09-20 — An untouched scaffold is not a finished app (autopsy 31dc61fd, item 2 of 6)
 
 **Branch `claude/an-untouched-scaffold-is-not-a-finished-app`.** Five minutes into the UPSC build the
@@ -71520,3 +71822,88 @@ boundary → 6 red · relabel on the ladder path but not the pinned one → 1 re
 - **Item 4** — the reviewer can run on the same model family as the builder.
 - **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause, and item 5
   turned out to be a small instance of it.
+## 2026-09-20 — The fail-open judge is CLOSED, and a doc claim it rested on was false
+
+`PROGRESS.md`'s 2026-09-19 entry recorded the fail-open judge as an **open root cause** and said
+plainly *"Deliberately not fixed here. The honest fix is a THIRD outcome."* **That is what
+`claude/a-judge-that-never-ran-did-not-pass` builds** — `JudgeVerdict.reviewed` + `describeJudgeVerdict`
+give exactly that third outcome (`NOT RUN`, at warning severity, with the judge's own explanation
+attached). Two sessions found the same defect independently, one recorded it and one fixed it; the
+record is updated here so `main` does not carry a doc calling closed work open.
+
+🔴 **And that entry's companion sentence in `CLAUDE.md` was FALSE when written.** It said the day the
+Nemotron trial credits run out is *"VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report)"*. **No such
+code has ever existed** — `grep -rn CHEAP_REVIEW_NOT_RUN src/` returns nothing. So the stated
+justification for running the judge on a trial pool (*"which is what made running on a trial acceptable
+at all"*) rested on a report line that was never built. It is true **now**, through `NOT RUN` inside
+the existing `CHEAP_REVIEW` code — but it was not true then, and an aspirational sentence written in
+the past tense is the most dangerous shape a doc claim can take.
+
+✅ **CLOSED for the admin, and my own advice was wrong:** I told them to check whether
+`NEMOTRON_ULTRA_MODEL` / `NEMOTRON_SUPER_MODEL` needed setting, reasoning from `nemotron.ts`'s docblock
+(*"Bedrock and NVIDIA's own endpoint do not use the `nvidia/…` form"*). The other session verified
+against the real account: **NVIDIA spells them `nvidia/nemotron-3-ultra-550b-a55b` too, so the code
+defaults are already correct and no override is needed.** The docblock's claim about that host is what
+misled me — a module comment is not a measurement either.
+## 2026-09-20 — A Nemotron judge is not Sonnet (autopsy `31dc61fd` residue, and a safeguard-#6 failure of my own)
+
+**The defect.** `selectReviewJudge` returns `kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron'`. The
+admin build report's label for that verdict was an inline ternary with **four** branches:
+
+```ts
+judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet'
+```
+
+A union member with no branch does not fail — it falls off the end. So **every Nemotron verdict was
+filed as "Sonnet review"**, naming an engine that had not run. Not hypothetical: the admin set
+`AGENTV3_NEMOTRON=weak` in Cloud Run on **2026-09-19**, so that line has been wrong in every Weak build
+report since.
+
+**Why it matters more than a cosmetic label.** This is the exact line an autopsy reads to decide which
+vendor to trust, tune or drop. A record that quietly attributes work to the wrong engine is worse than
+one that says "unknown", because nobody doubts it — and NVIDIA is on a trial key whose whole purpose is
+to be judged on its results.
+
+**The class, named so it is recognised again: a LABEL built as a chain of equality checks with a bare
+`else` is not exhaustive, and nothing tells you when it stops being right.** `tsc` cannot see the gap
+(every branch returns a string) and no behavioural test can either, because the wrong answer is a
+perfectly well-formed one. Only a `switch` with a `never` default turns "a new engine appeared" into a
+compile error — which is why the fix is `judgeEngineLabel()` in `BuildJudge.ts` and not a fifth ternary
+arm. ⚠️ The `never` guard fails **`npm run typecheck:server`**, not the frontend `tsc --noEmit` (which
+does not cover `src/server/`) — worth knowing before trusting a green frontend typecheck on this class.
+
+**Sibling hunt (rule 3):** the only other judge-kind label in the repo is `sda.ts:538`, a two-provider
+race in an admin-only console log — genuinely two providers, not this class. Recorded as an honest
+negative rather than left unsaid.
+
+🔒 **White-Label Law:** this is the ADMIN report's label only. The two narration lines beside it say
+"NavBharatAI's reviewer" (fixed 2026-09-14), and a test now holds that `reviewerName` may appear only on
+its own declaration and on `recordVerdict`. Naming Nemotron correctly to the admin is the fix; naming it
+to a user would be a new breach.
+
+**Tests** — `tests/aNemotronJudgeIsNotSonnet.test.ts` (8 cases), **reversion-proven four ways**: drop the
+`nemotron` branch → 1 red (and a server-typecheck error) · restore the route ternary → 2 red · drift the
+label's union from the route's → 1 red · swap the switch for a ternary chain that still answers
+correctly → 1 red.
+
+### 🔴 My own process failure, recorded because the rule exists for exactly this
+
+**PR #3154 was duplicated work, and safeguard #6 would have prevented it.** I built `reviewed?: boolean`
++ the three-outcome verdict record without listing the open PRs first — **#3143 was already in CI with
+the same fix** and merged while mine was still running. Only `judgeEngineLabel` was a genuine gap, so
+#3154 is closed and this PR carries that one piece.
+
+⚠️ The lesson is the one CLAUDE.md already states and I did not apply: with several sessions live,
+**`git log` is not the state of the work — open PRs are.** I listed them before starting this time.
+
+One small thing from #3154 was deliberately NOT carried over: it kept the judge's detail on a PASS as
+well as a failure, where `main`'s #3143 drops it (`v.pass ? '' : …`). A genuine pass almost always has
+empty findings, so the difference is nearly always nothing — not worth widening this PR to chase.
+
+### Still open from autopsy `31dc61fd`
+
+- **Item 4** — the reviewer can run on the same model family as the builder. Only the *label* is fixed
+  here; whether a judge should ever be the builder's own engine is untouched.
+- **Item 5** — the deterministic complexity scorer scored an app-build prompt **5** with taskType
+  `"chat"`.
+- **Item 6** — the missing **EVIDENCE LEDGER**. Third sighting; still an open root cause.

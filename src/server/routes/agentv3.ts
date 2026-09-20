@@ -38,6 +38,8 @@ import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
+import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
@@ -298,7 +300,7 @@ import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneG
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
-import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, type JudgeRunTurn } from '../AgentV3/BuildJudge';
+import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
@@ -15508,8 +15510,14 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
-              onThinking: (delta: string) =>
-                events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
+              // The SIBLING of AgentRunner's own reasoning emit — gated by the same one switch, so the
+              // two lanes cannot drift into showing the user different things (thinkingStream.ts).
+              ...(streamThinkingToChat()
+                ? {
+                    onThinking: (delta: string) =>
+                      events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
+                  }
+                : {}),
             });
           } catch (err) {
             const failedAs = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
@@ -16021,10 +16029,13 @@ async function noteBuildOutcome(
             const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective);
             // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
-            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
+            // EXHAUSTIVE, via the shared label. The ternary this replaces had no `nemotron` branch and
+            // fell through to 'Sonnet', so every Nemotron verdict named an engine that had not run —
+            // and Nemotron has been LIVE on Weak since 2026-09-19. See judgeEngineLabel.
+            const reviewerName = judgeEngineLabel(judge.kind);
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
-            const recordVerdict = (v: { pass: boolean; score: number; findings: string[]; reviewed?: boolean }, tag: string): void => {
-              // 🔴 A REVIEW THAT DID NOT HAPPEN IS NEVER PRINTED AS "PASS" (2026-09-19).
+            const recordVerdict = (v: JudgeVerdict, tag: string): void => {
+              // 🔴 A REVIEW THAT DID NOT HAPPEN IS NEVER PRINTED AS "PASS" (2026-09-19/20).
               //
               // This line used to render `PASS` for anything with `pass: true` and then DROP the
               // findings on a pass (`v.pass ? '' : ' — ' + …`). So a judge that threw — no key, wrong
@@ -16032,17 +16043,30 @@ async function noteBuildOutcome(
               // explanation thrown away, and a reply nobody could parse as `PASS (score 100)`, which
               // is indistinguishable from a real pass at the one place a human looks.
               //
-              // ⚠️ It is a SEPARATE CODE, not a reworded message: `CHEAP_REVIEW` is what somebody greps
-              // for to ask "what did the reviewer say?", and a run where it said nothing must not
-              // answer that question with a number. Registered in PROCESS_ONLY_CODES because it is a
-              // fact about OUR instrument, never a finding about the user's app (same rule as
-              // JOURNEY_NOT_RUN and PAGE_RENDER_NOT_RUN).
+              // ⚠️ TWO PRs FIXED THIS FROM OPPOSITE ENDS AND BOTH ARE KEPT (united 2026-09-20):
+              //   • the SEPARATE CODE (#3143) — `CHEAP_REVIEW` is what somebody greps for to ask
+              //     "what did the reviewer say?", and a run where it said nothing must not answer
+              //     that question with a number. `CHEAP_REVIEW_NOT_RUN` is in PROCESS_ONLY_CODES
+              //     because it is a fact about OUR instrument, never a finding about the user's app
+              //     (same rule as JOURNEY_NOT_RUN and PAGE_RENDER_NOT_RUN);
+              //   • the DETAIL ON EVERY OUTCOME (#3154) — the honest sentence the judge wrote was
+              //     being discarded by the reader on a pass, which is how an empty project came to
+              //     be filed as a bare `PASS (score 0)`.
+              //
+              // 🔒 BOTH READERS ASK THE SAME ONE FIELD. `judgeActuallyRan` and `describeJudgeVerdict`
+              // are not two rules that could drift — they read `v.reviewed`, which the JUDGE states
+              // and nobody infers. The early return is kept as #3143 wrote it because the CODE is the
+              // point there; the line below is #3154's, because the DETAIL is the point there.
               try {
                 if (!judgeActuallyRan(v)) {
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'CHEAP_REVIEW_NOT_RUN', message: `${tag}: NOT REVIEWED — ${v.findings[0] || 'the reviewer produced no usable verdict'}`, autoResolved: true });
                   return;
                 }
-                buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true });
+                const d = describeJudgeVerdict(v);
+                buildDiag.record({
+                  phase: 'build', severity: d.severity, code: 'CHEAP_REVIEW', autoResolved: true,
+                  message: `${tag}: ${d.label} (score ${v.score})${d.detail ? ' — ' + d.detail : ''}`,
+                });
               } catch { /* diagnostics best-effort */ }
             };
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 NavBharatAI\'s reviewer is checking the build…', ts: Date.now() });
@@ -20746,6 +20770,30 @@ async function noteBuildOutcome(
       // Fire-and-forget on purpose: an observation must never delay a user's finished build.
       void recordEngineUse(providerTurns);
 
+      // HOW DEEP DID THIS BUILD GO DOWN ITS LADDER? (admin 2026-09-20 — "pehle yeh measure karo,
+      // kitni builds pehle rung par khatam hoti hai"). Neither `deliveredVia` nor `escalations` could
+      // answer it: the first names a VENDOR, and on Weak/Normal the vendor GLM holds rung 1 AND rung 3;
+      // the second counts TIER escalations, which is 0 for every ordinary fall inside one tier.
+      //
+      // It matters beyond curiosity. The lead rung `glm-4.7-flashx` is sent `thinking: disabled`; the
+      // rungs below it reason unconditionally and expose no switch. So the share of builds that leave
+      // rung 1 IS the size of the model-reasoning problem — and of the cost gap between the cheapest
+      // rung and the rest. Pure computation over the ledger we already hold; no call, no I/O.
+      const ladderDepth = ladderDepthUsed(
+        providerLedger.entries(),
+        tierLadder(powerLevelReqEffective).rungs,
+      );
+      try {
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'LADDER_DEPTH',
+          message: describeLadderDepth(ladderDepth),
+          detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
@@ -20772,6 +20820,9 @@ async function noteBuildOutcome(
           // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
           escalationCohort: escalationCohort(workspaceId),
           escalations: escalationsCount,
+          // …and how far down the RUNGS it went inside that tier (a different question — see above).
+          // Omitted rather than zeroed when it could not be attributed: `0` would read as a real depth.
+          ...(ladderDepth.depth != null ? { ladderDepth: ladderDepth.depth } : {}),
           // Billing Phase 3 — per-provider token attribution (reconciled to the billed total) + loss
           // accounting. A LOSS = real tokens spent (buildUsage>0) but the build was zeroed (empty /
           // unrendered preview / free onboarding) → NavBharatAI ate the Sonnet-equivalent cost.

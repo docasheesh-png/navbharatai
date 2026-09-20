@@ -1030,11 +1030,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   The admin was told and chose it deliberately (*"abhi free wali/low cost wali use karoge"*). Those
   credits WILL run out — "when", not "if" — and **how many builds they buy is genuinely unknown**:
   NVIDIA does not publish per-request credit cost, and Ultra is a large model. Do not estimate it.
-  Since 2026-09-19 the day it happens is VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report) instead
-  of appearing as a passing review, which is what made running on a trial acceptable at all.
-  🔴 **AND THAT FAIL-OPEN IS AN OPEN ROOT CAUSE, not a Nemotron problem** — `glm-5.3` has always had
-  it too. A judge that cannot run has approved nothing, and reporting it as a pass is the
-  honesty defect rule 5 forbids. Recorded in `PROGRESS.md`; it needs its own change.
+  ⚠️ **CORRECTED 2026-09-20 — THE SENTENCE HERE CLAIMED A VISIBILITY THAT DID NOT EXIST.** It read
+  *"Since 2026-09-19 the day it happens is VISIBLE (`CHEAP_REVIEW_NOT_RUN` in the build report)"*.
+  **There has never been a `CHEAP_REVIEW_NOT_RUN` code anywhere in this repo** — a grep of `src/`
+  returns the doc line and nothing else. The day the credits ran out would have appeared as a *passing
+  review*, which is precisely what that sentence promised it would not. The lesson is this file's own:
+  **a doc's claim about the code must be re-grepped, never trusted** — and an aspirational sentence
+  written in the past tense is the most dangerous shape it can take.
+  ✅ **AND THE FAIL-OPEN IS NOW CLOSED (2026-09-20).** That entry recorded it as an open root cause and
+  said *"the honest fix is a THIRD outcome"* — which is exactly what shipped: `JudgeVerdict.reviewed`
+  plus `describeJudgeVerdict`, so a judge that could not run is recorded as **`NOT RUN`, at WARNING
+  severity, with its own explanation attached** — inside the existing `CHEAP_REVIEW` line, not as a new
+  code. It is not a Nemotron problem and never was: `glm-5.3`, Grok and Sonnet all had it. Build
+  behaviour is unchanged — a judge outage still never blocks a build; only the record stopped lying.
   `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
   role/tier gate — ⚠️ **unset means the judge and plan are OFF even with a key**; takes `off` as a HARD
   kill that removes the ladder rung too, `on` for every tier, or a comma list of tiers: `weak` / `free`,
@@ -2515,6 +2523,93 @@ the flag entries above promise.
   (`snapshotSubdomain`, `snapshotBucketEnabled`); test-locked in
   `tests/theCeilingWasNeverThePublishes.test.ts`. **What to watch:** the Publish load tile should stop
   rising as builds complete.
+
+- **🧹 `AGENTV3_STREAM_THINKING` — the model's REASONING no longer reaches the chat (added 2026-09-20).
+  ⚠️ NOT set, and the code default is OFF**; `on` restores the pre-2026-09-20 behaviour exactly with no
+  deploy. Read by `src/server/AgentV3/thinkingStream.ts`; gates BOTH emit sites — `AgentRunner`'s
+  `onThinking` and the fast lane's in `routes/agentv3.ts`.
+  🔴 **WHY (admin, with two screenshots of a phone filled top to bottom with grey italic text):**
+  *"1- main reply with diff · 2- light/gray reply (bakwaas, yeh nahi chahiye!) · 3- live events (yeh
+  theek hai)"*. What filled the screen was the architect's private working notes — *"The user asked to
+  verify and finish, not start over. I need to read the full App.tsx…"* — streamed verbatim to somebody
+  who asked for a billing app. The admin's own 1/2/3 maps exactly onto three separate channels in the
+  code, which is why removing #2 needed no clever filtering and **cannot touch #1**: they travel on
+  different `kind`s from different emit sites (verified before the change, not assumed).
+  🔑 **IT WAS NOT MERELY LONG, IT WAS STRUCTURALLY UNFOLDABLE.** `FoldableMessage` collapses any reply
+  over 700 chars, but the renderer skips it entirely while a line is `streaming` — and a thinking line
+  NEVER stops streaming, because the reducer finalizes only `kind: 'text'`. So no length limit, present
+  or future, could ever have reached that channel. The sibling was fixed in the same change: a
+  `narration` line still marked streaming when a build ENDS (a turn that threw, a user Stop) is now
+  settled, so every long reply can fold.
+  ⚠️ **THIS HIDES REASONING; IT DOES NOT STOP IT BEING GENERATED, and the difference is where the money
+  is.** Asked *"thinking off kar do?"*, the honest answer was that it already IS off wherever it can be:
+  Anthropic adaptive thinking is pinned `false` in `AgentV3Panel`, and the lead rung `glm-4.7-flashx` is
+  sent `thinking: disabled`. The rungs below it reason unconditionally and expose no switch — GLM says
+  so in its own 400 (*"This model always engages in thinking and cannot be disabled"*, glmThinking.ts)
+  and `kimi-k2.7-code` is in `MEASURED_ALWAYS_REASONS`. **The tokens are spent either way.**
+  🔒 **It cannot re-open the blank-screen autopsy (2b0a3ed5).** That silence is covered by the
+  elapsed-clock heartbeat (`startWorkingHeartbeat` → `workingLine`), which is untouched — verified: it
+  is set up eight lines below the emit this flag gates. Tool events and text deltas keep flowing, and
+  the agent card is still touched by a reasoning delta, so a build never looks frozen.
+  Test-locked and **proven by reversion** in `tests/theChatShowsTheWorkNotTheThinking.test.ts`, whose
+  source-level guard fails if either emit site loses its gate — deleting one breaks no behavioural test
+  in this repo, which is exactly why that guard exists.
+- **🗣️ THE LIVE STRIP SPEAKS THE USER'S LANGUAGE (same change, no flag, no cost).** It read `writing
+  src/components/InvoiceForm.tsx` and `running: npm install --no-audit --no-fund` — a developer's
+  sentence shown to a shopkeeper on a phone, and the only window they have onto the build. Now:
+  `writing Invoice form`, `installing packages`. `src/components/agentv3/toolLabels.ts` drops the
+  directories and spaces a **PascalCase** name (the convention this engine uses for a screen or a
+  component); a lowercase identifier like `useInvoices` is left EXACTLY as written, because it is a
+  real name the user meets again in Code Studio and "Use invoices" would be a different word from the
+  one in their project. A command is renamed only when recognised exactly — anything else is shown as
+  typed (capped at 48 chars), because *"running a command"* would hide a real fact and a guessed
+  description would state a false one. Full paths are unchanged in the Files tab, the diff and Code
+  Studio. Test-locked in `tests/theStripSpeaksTheUsersLanguage.test.ts`.
+- **💯 HOW MUCH OF THE APP IS BUILT — a percentage that refuses to be a timer (added 2026-09-20; no
+  flag, no cost).** Admin: *"app kitne % ban gayi woh bhi likh kar aana chahiye … **100% done - tap on
+  preview!**"*. That last clause is the design, not decoration: **the preview IS the completion
+  criterion**, which is what this platform already believes everywhere that matters (`markAppRendered`
+  is the single producer of that proof, and the billing law turns on it — *"app bani = preview chala"*).
+  🔴 **WHAT IT REFUSES: a bar that crawls on elapsed time.** Every competitor ships one and it is a lie
+  by construction — it moves while nothing happens and is always near 90% when a build is about to
+  fail. `src/components/agentv3/buildProgress.ts` is pure and every point is a COUNT of things that
+  really happened: todos the engine marked `done`, the phase it declared, a preview URL it published,
+  a render it proved. Call it a thousand times with the same facts and it returns the same number.
+  🔒 **100% IS EARNED.** Only `done && ok && appRendered` reaches it. A build that finished but whose
+  render was never proven stops at the number it really reached and says *"finished, preview not
+  confirmed"* — saying "100% done — tap Preview" there is autopsy `697b38ee` in the other direction. A
+  RUNNING build is capped at 97 so that 100 keeps meaning something; a failed one reports where it got
+  to plus *"Your files are saved."*
+  ⚠️ **THE HONEST COST, recorded rather than discovered later: without a plan the number JUMPS**
+  (5 → 80 → 90 → 100) instead of gliding, because the in-between values do not exist. `basis` on the
+  result says which case a reading came from (`plan` / `milestone` / `none`) so a lumpy number is
+  distinguishable from a broken one. **Only `done` todos count** — half a point for `in_progress` is a
+  convention, not a measurement.
+  📌 It rides on the ONE live strip (`WorkingIndicator`) beside the elapsed clock, and the clock is
+  what keeps a paused number from reading as a hang — a clock is a measurement, a bar is a promise. The
+  floor is held per BUILD ID so it can never fall back mid-build nor seed the next build's first frame.
+  Test-locked in `tests/hundredPercentIsEarned.test.ts`.
+- **📏 `LADDER_DEPTH` — how far down its tier's ladder a build actually went (added 2026-09-20; no flag,
+  always on, zero cost).** Admin: *"pehle yeh measure karo, kitni builds pehle rung par khatam hoti
+  hai"*. **Nothing in this repo could answer it**, and the reason is worth recording: `deliveredVia`
+  names the VENDOR, and on Weak/Normal the vendor GLM holds **rung 1 (`glm-4.7-flashx`) AND rung 3
+  (`glm-5.3`)** — so a build that fell two rungs and one that never left the first were
+  indistinguishable in that field; `escalations` counts TIER escalations, a different mechanism, and is
+  0 for every ordinary fall inside one tier.
+  **It is the size of two open questions at once:** the lead rung is the one sent `thinking: disabled`,
+  so the share of builds that LEAVE it is both how much reasoning a user can be shown and how much of
+  the cost gap between the cheapest rung and the rest is real. `src/server/AgentV3/ladderDepth.ts` is
+  pure and reads the provider ledger we already hold — no call, no I/O, and it decides nothing (a
+  measurement that fed back into the routing it measures would stop being a measurement).
+  🔒 **An unrecognised model is never rounded into a rung** (`glm-4.7-flash` is NOT `glm-4.7-flashx`;
+  exact-match only, except the Claude rungs which name a family by design), and **a rung that was tried
+  and delivered no output tokens is never counted as reached** — counting it would report "fell to rung
+  3" about a build rung 3 never wrote a character of. Unattributable ⇒ `unknown`, folded rather than
+  dropped, because a dropped build would make the rung-1 share look better than it is.
+  **Where to read it:** the `LADDER_DEPTH` line in the admin build report (per build), and
+  `byLadderDepth` in the daily cost telemetry (the aggregate). Registered in `PROCESS_ONLY_CODES` and
+  `NEVER_SUGGEST` — how OUR router behaved is never a finding about the user's app. Test-locked in
+  `tests/ladderDepth.test.ts`.
 
 **New report codes you will now see (2026-08-12) — what they mean:**
 - `RELEASE_GATE` — GREEN / YELLOW / RED / **UNKNOWN**. UNKNOWN is the important one: nothing failed and

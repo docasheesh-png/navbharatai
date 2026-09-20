@@ -123,6 +123,25 @@ export interface PreambleProgress {
   elapsedMs: number;
   /** The lane's whole budget. */
   overallMs: number;
+  /**
+   * The MEASURED duration of the shared-contract call, when one ran — including a call that was cut
+   * off by its cap, which counts as "at least this long".
+   *
+   * 🔴 WHY THIS EXISTS (autopsy 31dc61fd, 2026-09-20). The projection below used the PLAN call alone
+   * and was 1.8× optimistic, so the lane started a file phase it could not finish:
+   *
+   *     plan call        34s   ← the only sample the check used
+   *     contract call   ~61s   ← ran to its cap and was killed; IGNORED
+   *     real tier cost  ~62.5s ← what a file-writing stage actually took
+   *
+   * A plan call emits a short FILE LIST; a tier writes whole files. Output tokens dominate latency, so
+   * the plan systematically under-measures a tier — and the contract call, which also produces a long
+   * body, predicts it almost exactly. The check had that better sample in hand and threw it away,
+   * projecting from the cheapest measurement instead of the most representative one.
+   *
+   * Optional: a lane that skipped the contract has nothing to add and keeps the plan-only projection.
+   */
+  contractCallMs?: number;
 }
 
 /**
@@ -158,16 +177,37 @@ export function canFinishAfterPreamble(p: PreambleProgress): boolean {
   // call duration we know nothing, and guessing "too slow" from no evidence abandons healthy builds.
   if (!(p.preambleCallMs > 0) || !Number.isFinite(p.preambleCallMs)) return true;
   if (!(p.overallMs > 0) || !Number.isFinite(p.overallMs)) return true;
-  const projectedMs = p.tiers * p.preambleCallMs;
+  const projectedMs = p.tiers * tierEstimateMs(p);
   return Math.max(0, p.elapsedMs) + projectedMs <= p.overallMs;
+}
+
+/**
+ * What one file-writing tier is expected to cost, from the best measurement the lane actually has.
+ *
+ * THE SLOWEST REAL SAMPLE, not the cheapest. Both preamble calls ran on the same provider chain, so
+ * both are evidence — and the one that produces a long body (the contract) is the closer analogue of a
+ * tier. Taking the max is also the only direction that is safe to be wrong in: over-estimating costs a
+ * handoff that was going to happen anyway, while under-estimating starts a phase that cannot finish and
+ * burns the whole budget to discover it.
+ *
+ * An absent or unusable contract measurement falls back to the plan alone — today's behaviour exactly.
+ */
+export function tierEstimateMs(p: PreambleProgress): number {
+  const contract = p.contractCallMs;
+  const usable = typeof contract === 'number' && Number.isFinite(contract) && contract > 0 ? contract : 0;
+  return Math.max(p.preambleCallMs, usable);
 }
 
 /** The honest, provider-anonymous reason recorded when the lane bails before generating any file. */
 export function preambleBailReason(p: PreambleProgress): string {
-  const projectedS = Math.round((Math.max(0, p.elapsedMs) + p.tiers * p.preambleCallMs) / 1000);
+  const perTierMs = tierEstimateMs(p);
+  const projectedS = Math.round((Math.max(0, p.elapsedMs) + p.tiers * perTierMs) / 1000);
   const budgetS = Math.round(p.overallMs / 1000);
-  const callS = Math.round(p.preambleCallMs / 1000);
-  return `fast lane stopped before writing files — planning alone took ${callS}s, so ${p.tiers} stage(s) would need about ${projectedS}s against a ${budgetS}s budget`;
+  const callS = Math.round(perTierMs / 1000);
+  // Name WHICH measurement the projection came from. "Planning alone took 34s" was a true sentence
+  // about the wrong sample, and a reader chasing a bad bail needs to know which call was believed.
+  const source = perTierMs > p.preambleCallMs ? 'designing the shared contract took' : 'planning alone took';
+  return `fast lane stopped before writing files — ${source} ${callS}s, so ${p.tiers} stage(s) would need about ${projectedS}s against a ${budgetS}s budget`;
 }
 
 /** The honest, provider-anonymous reason recorded when the lane bails early (White-Label Law). */

@@ -72602,3 +72602,24 @@ breath as flattery.
   That is why the prompt's one measurable requirement — *"1 block drop ho, 5 second me"* — was checked
   by nothing. A real fix is a control-driven journey (press ←, assert the canvas changed), and it is a
   product decision with its own cost, not a line in this autopsy.
+
+---
+
+## 2026-09-20 — The FOURTH vite pin site, found by the sibling hunt (autopsy `31dc61fd` addendum)
+
+Rule 3 applied after the fix, not before it — and it found one more.
+
+`FrameworkFoundation.ts` carried its **own** `vite: '^5.4.10'` / `@vitejs/plugin-react: '^4.3.4'`. It
+is **live**: `ensureViteReactFoundation` is called from `routes/agentv3.ts`, and it synthesizes a
+`package.json` for an app that does not have one. So fixing the two `ViteReactProviderContents`
+copies and the sandbox image's warm primer would have left the vulnerable range to walk straight
+back in — through exactly the apps that never got a scaffold.
+
+**Fixing three of four places is how a class survives a fix.** All four are now on `vite ^8.3.0` /
+`plugin-react ^5.2.0`, and `tests/theScaffoldShipsNoKnownVulnerability.test.ts` holds all four —
+reversion-proven by putting the fourth back to `^5.4.10` (1 red).
+
+⚠️ One detail worth recording: the four sites are written in **two different quote styles** (JSON
+`"vite": "^8.3.0"` in the templates, an object literal `vite: '^8.3.0'` in FrameworkFoundation). The
+test's reader now accepts both, so a pin site cannot escape the assertion merely by being spelled
+differently — which is precisely how the fourth one stayed invisible.

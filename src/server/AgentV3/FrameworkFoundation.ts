@@ -44,8 +44,20 @@ const RUNTIME_DEPS: Record<string, string> = {
   'react-dom': '^18.3.1',
 };
 const DEV_DEPS_BASE: Record<string, string> = {
-  vite: '^5.4.10',
-  '@vitejs/plugin-react': '^4.3.4',
+  // 🔴 THE FOURTH PIN SITE, found by the sibling hunt and not by the report (autopsy 31dc61fd).
+  //
+  // `^5.4.x` resolves to 5.4.21 — the LAST 5.4 release — which still carries dev-server advisories,
+  // so `npm audit fix` (compatible-only, what AGENTV3_AUDIT_FIX runs) can never clear them. The two
+  // ViteReactProviderContents copies and the sandbox image's warm primer were moved to vite 8; this
+  // one synthesizes a package.json for an app that has none, is live via
+  // `ensureViteReactFoundation` in routes/agentv3.ts, and would have quietly put the vulnerable
+  // range back into exactly the apps that never got a scaffold.
+  //
+  // Fixing three of four places is how a class survives a fix — see this file's own neighbours for
+  // the measurement (real scaffold: 2 vulnerabilities before, 0 after; build clean, dev server
+  // serving HTTP 200). `tests/theScaffoldShipsNoKnownVulnerability.test.ts` now holds all four.
+  vite: '^8.3.0',
+  '@vitejs/plugin-react': '^5.2.0',
 };
 const DEV_DEPS_TS: Record<string, string> = {
   typescript: '^5.6.3',

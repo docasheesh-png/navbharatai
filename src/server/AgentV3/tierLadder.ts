@@ -104,9 +104,10 @@
 
 import type { PowerLevel } from './powerLevel';
 import { toPowerLevel } from './powerLevel';
+import { nemotronAllowedFor } from './nemotron';
 
 /** A rung's provider. The names are the bench/telemetry names the chain already uses. */
-export type LadderProvider = 'GLM' | 'KIMI' | 'OPENAI' | 'CLAUDE' | 'CLAUDE_HAIKU' | 'CLAUDE_OPUS';
+export type LadderProvider = 'GLM' | 'KIMI' | 'OPENAI' | 'NEMOTRON' | 'CLAUDE' | 'CLAUDE_HAIKU' | 'CLAUDE_OPUS';
 
 export interface LadderRung {
   provider: LadderProvider;
@@ -119,12 +120,19 @@ export const TIER_LADDERS: Readonly<Record<PowerLevel, readonly LadderRung[]>> =
     { provider: 'GLM', model: 'glm-4.7-flashx' },
     { provider: 'KIMI', model: 'kimi-k2.7-code' },
     { provider: 'GLM', model: 'glm-5.3' },
+    // NEMOTRON SUPER — added 2026-09-19, IN FRONT OF the Claude backstop and never in place of it.
+    // A fourth independent vendor between us and a Claude bill: it is reached only when all three
+    // rungs above have failed, so its one weakness (no prompt caching — see nemotron.ts) costs
+    // almost nothing here, while Haiku/Sonnet stay the insurance they were chosen to be.
+    // Keyless today ⇒ skipped by `rungHasKey`, so every build is byte-identical until a key exists.
+    { provider: 'NEMOTRON', model: 'nemotron-super' },
     { provider: 'CLAUDE_HAIKU', model: 'haiku' },
   ],
   off: [
     { provider: 'GLM', model: 'glm-4.7-flashx' },
     { provider: 'KIMI', model: 'kimi-k2.7-code-highspeed' },
     { provider: 'GLM', model: 'glm-5.3' },
+    { provider: 'NEMOTRON', model: 'nemotron-super' },
     { provider: 'CLAUDE', model: 'sonnet' },
   ],
   mini: [
@@ -140,6 +148,7 @@ const FORBIDDEN_ON_WEAK: ReadonlySet<LadderProvider> = new Set<LadderProvider>([
 
 const PROVIDER_ALIASES: Record<string, LadderProvider> = {
   GLM: 'GLM', KIMI: 'KIMI', OPENAI: 'OPENAI', GPT: 'OPENAI',
+  NEMOTRON: 'NEMOTRON', NEMO: 'NEMOTRON', NVIDIA: 'NEMOTRON',
   CLAUDE: 'CLAUDE', SONNET: 'CLAUDE', HAIKU: 'CLAUDE_HAIKU', CLAUDE_HAIKU: 'CLAUDE_HAIKU',
   OPUS: 'CLAUDE_OPUS', CLAUDE_OPUS: 'CLAUDE_OPUS',
 };
@@ -306,10 +315,29 @@ export const PLAN_RUNG: Readonly<Record<PowerLevel, LadderRung>> = {
   mini: { provider: 'GLM', model: 'glm-5.3' },
 };
 
+/**
+ * The plan rung Nemotron ULTRA takes over when its flag names this tier — otherwise the code table
+ * above, unchanged.
+ *
+ * WHY THE PLAN AND NOT THE BUILD: `PLAN_RUNG`'s own docblock already says the plan runs on "the
+ * tier's best cheap reasoner, not its cheapest rung" — it is ONE short, input-heavy reasoning call
+ * with nothing repeated for a cache to rescue, which is precisely the shape Nemotron is cheap at
+ * ($0.50/MTok in against glm-5.3's $1.40). The build loop is the opposite shape and is left alone;
+ * see nemotron.ts for the measured reason.
+ *
+ * ⚠️ FLAGGED, NOT MERELY KEYED, unlike the ladder rung above. A plan call happens on EVERY build, so
+ * letting the mere presence of a key start it would make a credential into a feature switch — the
+ * `AGENTV3_FILE_EMBEDDINGS` defect this repo has already paid for once.
+ */
+function planRungFor(lvl: PowerLevel, env: NodeJS.ProcessEnv): LadderRung {
+  if (nemotronAllowedFor('plan', lvl, env)) return { provider: 'NEMOTRON', model: 'nemotron-ultra' };
+  return PLAN_RUNG[lvl];
+}
+
 /** The plan chain: the tier's plan rung first, then its ladder as the fallback — nothing else. */
 export function planLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): LadderRung[] {
   const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
-  const first = PLAN_RUNG[lvl];
+  const first = planRungFor(lvl, env);
   const rest = tierLadder(lvl, env).rungs.filter((r) => !(r.provider === first.provider && r.model === first.model));
   return [first, ...rest];
 }
@@ -320,6 +348,7 @@ export function keyEnvFor(provider: LadderProvider): string {
     case 'GLM': return 'GLM_API_KEY';
     case 'KIMI': return 'KIMI_API_KEY';
     case 'OPENAI': return 'OPENAI_API_KEY';
+    case 'NEMOTRON': return 'NEMOTRON_API_KEY';
     default: return 'ANTHROPIC_API_KEY';
   }
 }

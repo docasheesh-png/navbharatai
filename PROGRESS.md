@@ -70513,3 +70513,374 @@ above is what proves the pixels.
 It is a no-op on every iOS this app supports (deprecated since iOS 13; Capacitor 8 requires newer), so
 putting it back would be cargo cult rather than a fix. Recorded because the removal was a silent side
 effect of that commit, not a decision anybody made.
+---
+
+## 2026-09-19 — One defect, three gate failures: 34 unlabelled fields (autopsy `a48d0f9e`, follow-up)
+
+The 09-19 autopsy of `a48d0f9e` recorded three findings as if they were unrelated:
+
+- `ACCESSIBILITY` 70/100 — *"34 form field(s) with no label … Worst: src/pages/Marksheets.tsx (12),
+  src/pages/ReportCards.tsx (11), src/pages/Students.tsx (10)"*
+- `JOURNEY_NOT_DERIVED` — *"the forms in this app have no field this check could address honestly"*
+- `RELEASE_GATE: YELLOW` — *"no user journey was proven, so whether it actually SAVES anything is untested"*
+
+**They are ONE defect.** `journeyDerivation` addresses a field by `data-testid` | `name` | `id` |
+`placeholder` | `aria-label`; the accessibility pass counts fields carrying none of them. The same
+missing attribute is why a screen reader cannot announce the field AND why the platform cannot prove
+the app saves anything — and the second is what holds the release gate at YELLOW for **any** app with
+a form.
+
+### Both halves of the 50/50 law
+
+**1 · PREVENTION — the contract now reaches EVERY tier.** 🔴 The rule existed and was **weak-only**:
+`weakBuildDisciplineBlock` returns `''` for a non-weak build, so a Normal or Strong build was never
+asked for a label at all. That is exactly why this looked covered on inspection — the weak block reads
+as though the builder is always told. The requirement now sits in the always-on architect prompt
+(`systemPrompt.ts`), beside the design-kit contract, and asks for a real `name` **and** a label,
+naming both consequences so it cannot be read as a cosmetic nicety. Placeholder text is explicitly not
+a label; it must be done as the field is written, never as a later pass.
+
+⚠️ It lengthens the static architect prompt, which is the cache prefix under `AGENTV3_CACHE_PREFIX` —
+one invalidation, then it re-stabilises. Stated rather than discovered on the next cost report.
+
+**2 · HONESTY — the report names the fix, not only the symptom** (fourth absolute rule, step 5).
+`noJourneyReason` stopped at *"no journey was derived"*, which reads like an environmental limit of the
+CHECK. It is a fixable defect in the generated app, and the same build had already counted the very
+fields. The sentence now adds: *"Give each field a `name` and a label and this check can prove the app
+really saves what is typed — the same fix a screen reader needs."* The other two reasons (no pages, no
+form at all) are untouched — a chat app is never told to add a `name` to fields it does not have.
+
+`tests/oneCauseNotTwoLines.test.ts` — 7 cases, proven by reversion twice (removing the always-on
+contract turns 4 red; restoring the symptom-only sentence turns 2 red).
+
+### Still open (rule 6)
+
+- **`IN_BUILD_GREEN_UNCHECKED`** — root cause located (it fires on a `preview` event, which means the
+  server is listening, not that the app painted; it opened the browser 640 ms after the first HTTP 200
+  and had no second trigger because its only retry signal is a `tool_result` from a loop that had
+  ended). **Still not fixed: PR #3134 is open in that file.** Not raced, per the concurrent-session rule.
+- **Why a recorded LESSON did not reach the model.** ⚠️ Do NOT build a "feed past findings into the
+  prompt" mechanism — `BuildLessons.ts` → `reflectMem` → `userLessonBrainStore` already does exactly
+  that, runs on every build, and includes WARNINGS (so the accessibility finding is in scope). The
+  report even says *"applied: preferences, decisions, lessons"*. The open question is why it did not
+  arrive in a usable form; the one measured clue is `grounding: 1 file, ~74 tokens (budget 4000)` —
+  1.85% of the available budget. Settling it needs the PREDECESSOR build's report and the context that
+  turn actually received. Recorded rather than guessed.
+## 2026-09-19 — NVIDIA Nemotron 3, only where it pays: the judge, the plan, and one backstop rung
+
+Admin, after reading the full evaluation: *"ok, kaha jahan hame fayda hai. banao."* — and then
+*"mai api kharid ke laga dunga."* So this ships **keyless-safe**: with no key and no flag, every build
+is byte-identical to the day before, and a test proves it.
+
+### 🔴 THE ONE FACT THAT DECIDED EVERYTHING, AND IT INVERTS THE STICKER PRICE
+
+Nemotron looks cheaper than our cheap lead rung — Super $0.085/$0.40 against glm-4.7-flashx
+$0.07/$0.40 — and **for us it is not**, because the route it is bought through does not honour
+prompt-cache markers (the OpenRouter path goes via DeepInfra; its dashboard shows a ~0.2% global
+cache-hit rate). Our builds are the opposite of cache-indifferent, measured from this repo's own
+autopsies:
+
+| build | input tokens | cache-read | ratio |
+|---|---|---|---|
+| Gita b6f88a72 | 1,520,722 | 1,427,968 | **93.9%** |
+| Build C | 721,982 | 654,848 | **90.7%** |
+| a weak/free build | 1,080,000 | — | 137 : 1 in:out |
+
+FlashX charges **$0.01/MTok** for that 92%. Nemotron charges full input rate for all of it. On the
+architect slice (480k in, 94% cached) that is **$0.0083 against $0.0426 — Super is 6.2× DEARER** than
+the rung it appeared to undercut, and 9× on the Bedrock listing.
+
+### 🔑 AND THE SAME ARITHMETIC FOUND WHERE THE MONEY ACTUALLY IS
+
+Because the cache rescues every tool loop and rescues nothing else, **the JUDGE is 78% of a cheap-lead
+build's entire real provider cost** — $0.0915 of $0.1176 on the measured profile. It is one call over
+the app, not a 70-call loop over a stable prefix. The builder was never the opportunity; the judge was,
+and nobody had looked.
+
+`selectReviewJudge`'s runner sends system + messages and reads back TEXT — **no tools at all** — so the
+judge is also the *safest* place for a vendor whose tool-calling nobody here has measured. Cheapest and
+safest turn out to be the same slot, which is why it is the first one taken.
+
+### What shipped
+
+| Role | Model | Gate |
+|---|---|---|
+| **Judge** (all tiers) | Ultra, $0.50/$2.20 | `AGENTV3_NEMOTRON` tier allowlist |
+| **Plan** (Weak/Normal) | Ultra | same flag — a plan call happens on EVERY build |
+| **Ladder rung** (Weak/Normal) | Super, in front of the Claude backstop | KEY only, like every other rung |
+
+**Rejected, each for a measured reason and each test-locked:** the architect, sub-agents, reviewer and
+heal passes (cached tool loops, 6.2× dearer, and where tool-calling accuracy is critical); **vision**
+(Nemotron 3 is text-only and cannot read an image); the **guards** — lint, typecheck, build, preview,
+journey, fuzz, CVE, the mutation and duplicate-import guards — which are deterministic CODE at ₹0, so a
+model there would raise cost *and* lose determinism; and the **cheap intent classifier**, which runs
+free today, so **Nemotron 3 Nano ($0.05/$0.20) is on no list here** — nothing is cheaper than nothing.
+
+### Three decisions worth not re-deriving
+
+1. **The flag is an ALLOWLIST, not a boolean.** `AGENTV3_NEMOTRON=weak` tries the judge only on the
+   tier NavBharatAI pays for itself, so an unmeasured judge verdict costs us and never a paying user.
+   `on` means every tier; an **unrecognised value means OFF, never everywhere** — somebody who wanted
+   all of them would type `on`, so a present-but-unreadable value cannot have meant that.
+2. **The rung is KEYED, the judge and plan are FLAGGED.** A rung is reached only after everything above
+   it failed, so it is insurance and gating insurance behind a second switch is how it comes to be
+   missing on the day it is needed. A judge or plan call happens on every build — letting a mere
+   credential start that is the `AGENTV3_FILE_EMBEDDINGS` defect this repo has already paid for once.
+   `AGENTV3_NEMOTRON=off` is the hard kill that removes all three.
+3. **Super goes IN FRONT of the Claude backstop, never in place of it.** An unproven vendor may reduce
+   how often we reach the insurance; it may not BE the insurance. Haiku is still last on Weak, Sonnet
+   still last on Normal, and **Strong is untouched** — a premium build never opens on a 12B-active
+   model. A test asserts Nemotron is the lead rung of no tier, which is exactly where it would lose.
+
+### ⚠️ A correction to my own evaluation, made before it could mislead
+
+My cost table put **Grok** on the Strong judge at $3.00/MTok. `resolveJudgeKind` is keyed to
+`mode`, and the only call site passes `onlyOpus ? 'power' : 'paid'` — so **Weak, Normal AND Strong all
+judge on glm-5.3 today**, and Grok judges only the Opus-toggle path. The −27% figure I quoted for
+Strong assumed Grok and is therefore wrong; the honest saving is the same **absolute** ~$0.048 per
+build on every tier, which is −41% of a Weak build and a smaller share of a dearer one. The placement
+does not change — the judge is still the slice worth taking — but the number I gave for Strong was
+built on a rung that does not run.
+
+### Honest gaps, recorded rather than discovered later (rule 6)
+
+1. **Judge QUALITY is unmeasured, and the judge is the worst place for that to bite** — a weak judge
+   passes a broken app quietly and no cost table shows it. Hence the flag defaults to OFF and the
+   rollout is Weak first, verdicts read by hand on the first builds.
+2. **Not one call has been made against a real Nemotron endpoint.** Every claim here is source-level
+   plus the published rates. The model ids and base URL are env-overridable precisely because each
+   host spells them differently and the purchase has not happened yet.
+3. **The rate defaults are deliberately the DEARER readings** — Super at Bedrock's $0.15/$0.65 rather
+   than the $0.085/$0.40 cheapest host, and no cache line at all. A rate that is too high inflates only
+   our own cost report; one that is too low eats margin on every build silently.
+4. **Sonnet has no cache line in the rate card** (found in passing), so every cached Sonnet token is
+   priced at the full $3.00 while Anthropic's real cache-read is $0.30. Margin-safe and wrong all the
+   same, on the panel used to judge spend — the `E2B_USD_PER_HOUR` shape again. **Open, separate item.**
+
+### Evidence
+
+`tests/nemotronWhereItPays.test.ts` — **36 cases**: the keyless identity (no key ⇒ no role, no rung, no
+change to the plan chain or the judge), whitespace-only key, the allowlist's six malformed values, the
+hard kill, the rung's position relative to the Claude backstop on both tiers, Strong untouched,
+Nemotron as no tier's lead rung, heal openers unchanged, both rate lines plus the real host ids and the
+`:free` suffix, the no-cache-line assertion, the unknown-model-bills-dearest rule, white-label scrubbing
+of the vendor and all four purchase hosts, the closed `NemotronRole` union, the two-gate cap in the
+route, and that the runner sends no vendor-specific thinking parameter (which would be a hard 400).
+
+**Proven by reversion, five ways** — each reverted, run, restored: a key alone switching the judge on;
+an unrecognised flag meaning everywhere; an unknown Nemotron billing at the cheapest family line; Super
+promoted to the lead rung; the vendor name dropped from the scrubber.
+
+Existing suites updated rather than weakened: `tests/tierLadder.test.ts` and
+`tests/tierChainFidelity.test.ts` pin the ladders rung-for-rung by design, so both gained the new rung
+with the reason written in place — and the keyless-variant cases now also re-prove the absolute rule
+(Weak reaches neither Sonnet nor Opus) *with a new vendor on the ladder*, and that
+`AGENTV3_CHEAP_FLOOR=off` remains the GLM/Kimi kill switch alone.
+
+### 🔴 SAME DAY, BEFORE ANY KEY WAS SET: the code was BROADER than the sentence describing it
+
+The admin asked the plain question — *"keys dalne ke baad, nvidia aapne kaha kaha lagaya?"* — and the
+answer was produced by RUNNING the policy for all three env states rather than from memory. That is
+what surfaced it: with `AGENTV3_NEMOTRON=on`, **Strong's plan rung also moved to Ultra**, while the
+evaluation put to the admin had said, in writing, *"Plan — Weak and Normal"*.
+
+Nothing failed. The flag is per-tier, so `weak,normal` had always kept Strong out; the defect was that
+`on` — the value somebody types to enable a feature broadly — reached a place the documentation
+promised it would not. A comment cannot be typechecked, and this is the third time in this file's
+history that a sentence and the code it described drifted apart in exactly that direction.
+
+**Fixed as a FLOOR, not a default** (`PLAN_FORBIDDEN_TIERS` in `nemotron.ts`): Strong can never take
+the Nemotron plan rung, whatever the flag says. Lifting it is a code change with an admin decision
+behind it.
+
+**Why Strong, and why the JUDGE is deliberately NOT treated the same way** — the admin chose this after
+being shown both options: a judge delivers a VERDICT on a finished app, so a wrong one means a wrong
+gate on a build that is still the build; a PLAN decides the app's whole shape before a line is written.
+Strong is the tier somebody paid premium for, so an unmeasured vendor may report on that build but may
+not design it. The judge stays on all three tiers, which is where the saving is.
+
+Test-locked in `nemotronWhereItPays.test.ts` (five flag spellings, including `on` and
+`weak,normal,strong`, all refused for Strong's plan while Strong's JUDGE stays allowed and Weak/Normal
+plans are unaffected) and proven by reversion — deleting the floor line fails that case.
+
+### 📋 And the answer itself, recorded because it is what an operator needs
+
+| env state | Weak | Normal | Strong |
+|---|---|---|---|
+| key only, no flag | rung only | rung only | nothing |
+| key + `AGENTV3_NEMOTRON=weak` | judge + plan + rung | nothing | nothing |
+| key + `AGENTV3_NEMOTRON=on` | judge + plan + rung | judge + plan + rung | **judge only** |
+
+**A key ALONE changes almost nothing** — only the Super backstop rung on Weak/Normal, which is reached
+only when the three rungs above it have failed.
+
+### 🚫 ASKED AND ANSWERED: Nemotron in free chat, Professional and the image generator
+
+The admin asked whether the free endpoints could serve those three surfaces while Nemotron is free.
+Answered from the code, not from the rate card:
+
+- **Image generator — NO, and not for a cost reason.** Nemotron 3 is text-in / text-out. It cannot
+  generate an image at any price.
+- **Free chat — possible, but it is a BUILD, not config,** and it should wait. `allowedOnFreeTier`
+  clears both sizes comfortably (Super index 1.85, Ultra 6.20, against the `kimi-k2.7` ceiling of
+  11.60), and the ladder would genuinely gain what its own entry says it lacks — a fourth INDEPENDENT
+  vendor, where today the one non-Google rung shares a key with the free leader and dies in the same
+  429 storm. But `src/server/AI/Router/providers/` has no Nemotron provider, so this is a build the
+  size of `OpenAiChatProvider.ts`.
+- **Professional / Doctor AI on a FREE endpoint — NO.** Free tiers carry data-training terms, and that
+  surface is where a user types their symptoms. A Privacy Policy that says otherwise is CI-locked
+  (`privacyPolicyTruth.test.ts`), so this is the 2026-09-02 shape exactly: the policy saying one thing
+  while the code does another.
+- **The general rule, restated:** a `:free` endpoint has no SLA, hard rate limits and can be withdrawn
+  without notice. In the build engine it is one rung behind a backstop; in CHAT it would be the leader
+  every user sees. Nemotron's PAID rate is cheap enough ($0.085 for Super) that chasing the free tier
+  trades real trust for very little money.
+
+**Recommended order, and the reason:** not one Nemotron call has been made against a real endpoint, so
+the build engine's judge on WEAK is the safest possible first test — a bad verdict there costs
+NavBharatAI, which pays for that tier itself, and reaches no paying user. Free chat is the opposite: it
+is the highest-volume surface and every failure is visible immediately.
+## 2026-09-19 — `জungle`: a label in the user's own language must not arrive broken
+
+The ❌ item this autopsy's first PR (#3134) recorded as open, now built — and built from **measurement**,
+because the honest position was that the rule had not been shown to be precise.
+
+**The defect:** build `3ce8459b` shipped `{ value: 'forest', label: 'জungle' }` — one Bengali letter
+then the Latin "ungle". The summary shown to the user said `জঙ্গল` (correct) while the running app
+showed the broken token. **Nothing caught it**: the design gate passed, accessibility scored 100/100,
+the reviewer returned PASS at 90/100. All three read STRUCTURE; **none of them reads the TEXT**.
+
+**`scriptIntegrity.ts`** — deterministic, zero model calls, advisory (it can never block, fail or heal
+a build). Recorded as `SCRIPT_INTEGRITY`, on a clean pass too, because a check only ever visible when
+it complains cannot be told apart from one that never ran (the `JOURNEY_NOT_RUN` lesson). It is also in
+`buildFindingSuggestions`, so the user is OFFERED the fix rather than it sitting in an admin report —
+a broken label is the one defect they can see and cannot explain.
+
+### The study changed the design twice, and that is the point
+
+Ran against this repository's own **1,092 real Indic lines** plus a hand-built corpus:
+
+1. **The first tokenizer MISSED `वीडियोdownload`.** Combining marks (ी, ो) are `\p{M}`, not `\p{L}`, so
+   `[^\p{L}\p{N}]` shredded the word at every matra. **`জungle` was caught only because `জ` happens to
+   carry no matra** — i.e. by luck. Marks are part of a word here.
+2. **Scanning raw SOURCE flagged `\bस्क्रीनशॉट\b` and `[A-Za-zऀ-ॿ]`** — a regex word boundary and a
+   character-class range, **6 of the 8 hits on the real corpus, not one of them a label**. So only
+   string LITERALS are read, and a literal that looks like a pattern is skipped.
+
+### And a third change, from my own reversion test
+
+The first version cut `${...}` holes before tokenising, with a comment calling it necessary. **The
+reversion proved it changed nothing** — `$`, `{` and `}` are already non-word characters, so
+`` `${count}টি` `` tokenises to `count` and `টি` either way. **Deleted rather than kept "for safety":**
+a guard that cannot fail is worse than none, and the comment justifying it stated a reason that was not
+true. The behavioural test cases stayed.
+
+**Final precision, measured after the simplification:** 6 flags across the whole repository outside the
+new files — 2 are this bug quoted in comments, 3 are a deliberate mixed-script *user-input* fixture
+(`"kितni files hai?"`), 1 is the Devanagari-detection test's own fixture. **Zero are UI labels.** And
+the analyzer runs on the GENERATED APP's files, never on NavBharatAI's own source.
+
+Test-locked and reversion-proven in `tests/aLabelMustNotArriveBroken.test.ts` (9 cases): dropping
+combining marks turns 1 red, removing the pattern guard turns a different one red, and removing the
+clean-pass record turns a third red.
+
+🔒 **It cannot change a build's verdict or its bill.** Same shape as the ACCESSIBILITY finding that has
+shipped for months — a `warning` through `obs()` — so it contributes to the report, never to `!ok`,
+which is what the "working app or free" billing rules gate on.
+
+### Why this is a moat and not a nicety
+
+The class only exists for an app whose UI is written in an Indic script — the case NavBharatAI is built
+for and the one Lovable / Bolt / v0 / Cursor have no reason to check. A user who asked for a Bengali app
+and got a word that reads as nonsense does not file a bug; they leave.
+
+---
+
+## 2026-09-20 — 🔴 AUTOPSY `31dc61fd` (UPSC app): the platform's own browser had NEVER run
+
+**Branch `claude/the-platforms-own-browser-never-ran`.** 15.9 min · 70 model calls · 2.6M input tokens ·
+10 files · free user billed ₹299.37 · `RELEASE_GATE` YELLOW.
+
+### The finding
+
+`IN_BUILD_GREEN_UNCHECKED` fired **13 times across 912 seconds**, every one of them *"the capture came
+back WITHOUT a real browser"* — while **in the same sandbox the agent's own `screenshot` and
+`browser_action` tools succeeded**. The browser was there; the platform could not use it.
+
+**Root cause, read from code, not inferred from the report.** Playwright installs into
+`${TOOLS_DIR}/node_modules` (`npm install playwright --prefix`). **Node resolves `require()` by walking
+up from the SCRIPT'S OWN DIRECTORY, never from `cwd`.** `browseUrl` and `scanUiElements` wrote their
+generated script to **`/tmp`**, so `require('playwright')` searched `/tmp/node_modules` and
+`/node_modules`, never found it, exited non-zero, and fell back to curl — **100% of the time, in every
+build, since the day the script moved into a file.** Passing `cwd: TOOLS_DIR` does nothing: `cwd`
+governs relative paths, not module resolution.
+
+Every browser path that WORKS runs a script that lives in `TOOLS_DIR` (`screenshot.js`,
+`screenshot-cdp.js`, `daemon.js`, `browser-action.js`). The only two that failed were the only two
+written to `/tmp`.
+
+### 🔴 The previous fix is what introduced it — the "never trade one problem for another" case
+
+These bodies used to run as `node -e "…"`, which had a real shell-quoting bug (the URL's own double
+quotes closed the string). Moving the body into a FILE fixed the quoting — and **silently moved the
+module-resolution root from `cwd` (which `node -e` DOES use, and which was already `TOOLS_DIR`) to the
+file's directory, `/tmp`.** One bug traded for another, and the curl fallback hid the new one exactly
+as it had hidden the old one. That function's own comment records the first bug and says *"THE BROWSER
+PATH HAS NEVER RUN"* — it still had not, for a different reason.
+
+### Why the existing sweep could not see it
+
+`tests/…/sandboxBrowsersPath.test.ts` already asserted that **every browser invocation carries
+`PLAYWRIGHT_BROWSERS_PATH`**. Both broken scripts carried it correctly, so that sweep passed for weeks.
+The env var says where the **browser binary** is; it says nothing about where the **playwright module**
+is found. One class, two properties, and only one was pinned.
+
+### The fix
+
+ONE shared rule — `toolsScriptPath(prefix)` beside `TOOLS_DIR` — used by both call sites. The unique
+per-run filename is KEPT (it is why these left a fixed path originally: one un-writable fixed name
+breaks every later run in a long-lived sandbox). `TOOLS_DIR` is guaranteed to exist at both call sites,
+because each is reached only after `_kickoffPlaywright` resolved true.
+
+🔎 **Siblings hunted, and one honest negative recorded:** `downloadDistFiles` also generates a `/tmp`
+script and is **NOT** moved — it requires only `fs` and `path`, Node built-ins that resolve from
+anywhere. A sweep that dragged it along would be a change with no evidence behind it. The second
+actuator (`src/server/EngineerAI/actuators/E2BActuator.ts`) was checked and is clean: all four of its
+scripts already live in `TOOLS_DIR`. **The test found that one, not I** — my first matcher flagged it
+and reading it proved it innocent.
+
+Four new cases in the existing file (never a second copy), **reversion-proven three ways**: `browseUrl`
+back to `/tmp` → 1 red · `scanUiElements` back to `/tmp` → 1 red · the helper itself pointing at `/tmp`
+→ 1 red.
+
+### What this unblocks
+
+The in-build green guard (shipped 2026-09-18 and blind since), the render rescue, the journey check's
+browser, and honest `PREVIEW_UNVERIFIED` verdicts. Until now every one of those read a curl snapshot of
+an un-hydrated SPA shell.
+
+### Also found in this report, NOT fixed here — open items
+
+- **NVIDIA/Nemotron ran ZERO times.** The rung is keyed and correctly priced but is last-resort
+  insurance that was never reached (KIMI answered all 70 calls — correct behaviour). The **judge** and
+  **plan** roles are off because `AGENTV3_NEMOTRON` is unset, which is deliberate (*a provider key must
+  not be a feature switch*). By `nemotron.ts`'s own measurement the judge is **78% of a cheap build's
+  real provider cost**; Ultra does it at $0.50/MTok against glm-5.3's $1.40, with no tools exposed.
+  **Recommended to the admin: `AGENTV3_NEMOTRON=weak`.** One Cloud Run value, no deploy.
+- **A false "app is complete" at t=302s** while the workspace held only `<h1>Hello World</h1>`. The
+  architect disbelieved it and checked — a model rescuing a platform signal is a RED FLAG, not a
+  self-heal. `READY_BEFORE_END` then measured 701s "after ready" from that bogus point, so its number
+  is polluted too.
+- **The fast lane spent 177s to produce 1 file**, then computed that the remaining 2 stages needed
+  292s against a 240s budget. It had that arithmetic available BEFORE spending the 177s.
+- **`evaluate` reported "Nothing here was ever proven to RUN — no preview"** 324 seconds after
+  `PREVIEW_PUBLISHED`, and simultaneously "READY 100/100" with "Build confidence 35%". Third sighting
+  of the missing **EVIDENCE LEDGER** (open since autopsy 697b38ee).
+- **The user-facing summary shipped truncated mid-sentence**, with two empty placeholders, offering to
+  "fix" a finding whose own text says nothing is wrong.
+- **The reviewer ran on `kimi-k2.7-code` — the same model that wrote the app**, while
+  `selectReviewJudge`'s own comment states the rule: *"A judge must be a DIFFERENT model from the one
+  that wrote the app."* The post-build reviewer (a tool-using sub-agent on the build chain) and the
+  judge (a tools-free single call) are genuinely two different things, and only one obeys the rule.
+- **The deterministic complexity scorer gave "Create a upsc preparation aap" score 5 and taskType
+  `chat`.** The model second-opinion rescued it to COMPLEX, which masked the defect.

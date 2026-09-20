@@ -36,7 +36,9 @@ import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepE
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
+import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
 import { tierLadder, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
+import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed } from '../AgentV3/nemotron';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
@@ -2789,7 +2791,7 @@ export function floorLeadReason(): string {
  * returns 'sonnet' as a signal that no non-Claude judge is available, and the free-ladder caller SKIPS
  * the judge rather than spend Claude. Exported for tests.
  */
-export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined, glmKey?: string): 'grok' | 'sonnet' | 'glm' {
+export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined, glmKey?: string, nemotronOk?: boolean): 'grok' | 'sonnet' | 'glm' | 'nemotron' {
   // THE JUDGE, UNDER THE ADMIN'S AUTHORITY GRANT (2026-09-14: "kam se kam kharcha; best app ek hi baar").
   // A judge must be a DIFFERENT model from the one that wrote the app, and it reads the whole app —
   // input-heavy, so its input price is the cost. Weak/Normal build on glm-5.3-flash, so their judge is
@@ -2798,15 +2800,58 @@ export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: strin
   // hatao mat". Opus is never the judge ($15 in for a verdict). `AGENTV3_REVIEWER=sonnet` forces Sonnet
   // everywhere; a missing key falls to the next honest choice, never to Opus.
   if ((reviewerEnv || '').trim().toLowerCase() === 'sonnet') return 'sonnet';
+  // 🔴 NEMOTRON ULTRA FIRST (2026-09-19) — THE JUDGE IS WHERE THE MONEY ACTUALLY IS, and that was the
+  // surprise of the evaluation. On the measured build profile (1.5M input tokens, 92% of it cache-read)
+  // the judge is **78% of a cheap-lead build's entire real provider cost** — $0.0915 of $0.1176 — for
+  // one reason: it is the single slice the prompt cache cannot rescue, being one call over the app
+  // rather than a 70-call loop over a stable prefix. Ultra does the same job at $0.50/MTok in against
+  // glm-5.3's $1.40 and Grok's $3.00.
+  //
+  // 🔑 AND IT IS THE SAFEST PLACE TO PUT AN UNPROVEN VENDOR, which is why it is also the FIRST place:
+  // the judge runner below sends system + messages and reads back TEXT. **No tools.** So none of
+  // Nemotron's unmeasured tool-calling accuracy is exposed here, and the cached tool loops that would
+  // have cost 6× more are untouched (see nemotron.ts for the measured comparison).
+  //
+  // ⚠️ `mode !== 'power'` is deliberately NOT repeated here: Opus-mode builds judge on Grok today at
+  // $3.00/MTok in, which is the single dearest judge on the card — it has the most to gain, not the
+  // least. Flag scoping is per TIER (`AGENTV3_NEMOTRON`), so an admin who wants premium builds left
+  // alone simply does not name that tier.
+  if (nemotronOk) return 'nemotron';
   if (mode !== 'power' && (glmKey || '').trim()) return 'glm';
   return selectReviewer({ reviewer: reviewerEnv, grokKey });
 }
 
-function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' | 'glm' } {
+function selectReviewJudge(
+  mode: 'free' | 'paid' | 'power' = 'paid',
+  // The tier the BUILD is running on, for the Nemotron flag's per-tier allowlist. `mode` cannot
+  // answer that: it is 'paid' for Weak, Normal AND Strong alike (only the Opus toggle makes it
+  // 'power'), so scoping a rollout by mode would switch three tiers on at once. Optional and
+  // defaulting to 'off' (Normal) so a caller that does not pass it can never widen the rollout.
+  tier: PowerLevel | string | boolean | null | undefined = 'off',
+): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' | 'glm' | 'nemotron' } {
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   const glmKey = parseKeyPool(process.env.GLM_API_KEY)[0];
-  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER, glmKey);
-  if (kind === 'glm') {
+  const nemotronOk = nemotronTierAllowed(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null));
+  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER, glmKey, nemotronOk);
+  if (kind === 'nemotron') {
+    try {
+      const client = new OpenAI({ apiKey: nemotronKey(), baseURL: nemotronBaseUrl(), timeout: 45_000, maxRetries: 1 });
+      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
+        const r = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
+          max_tokens: maxTokens,
+        });
+        return { text: r.choices?.[0]?.message?.content ?? '' };
+      };
+      return { runTurn, modelId: nemotronUltraModel(), kind: 'nemotron' };
+    } catch { /* client not constructable → fall through to the GLM / Grok / Claude judge below */ }
+  }
+  // ⚠️ THE FALL-THROUGH IS THE WHOLE SAFETY STORY, and it is why this reads as a sequence of `if`s
+  // rather than a switch. A Nemotron outage, a revoked key, an unconstructable client — each simply
+  // lands on the judge that is running in production today. Behaviour with the flag unset is
+  // byte-identical to before this existed.
+  if (kind === 'glm' || (kind === 'nemotron' && (glmKey || '').trim() && mode !== 'power')) {
     try {
       const client = new OpenAI({ apiKey: glmKey, baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', timeout: 45_000, maxRetries: 1 });
       const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
@@ -2820,7 +2865,9 @@ function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn:
       return { runTurn, modelId: process.env.AGENTV3_GLM_JUDGE_MODEL || 'glm-5.3', kind: 'glm' };
     } catch { /* client not constructable → fall through to Grok / Claude */ }
   }
-  if ((kind === 'grok' || kind === 'glm') && (grokKey || '').trim()) {
+  // 'nemotron' joins the two kinds that may land here: a Nemotron judge whose client could not be
+  // built, and whose GLM fall-through also failed, must still reach Grok before Claude.
+  if ((kind === 'grok' || kind === 'glm' || kind === 'nemotron') && (grokKey || '').trim()) {
     try {
       const client = new OpenAI({ apiKey: grokKey, baseURL: process.env.GROK_BASE_URL || 'https://api.x.ai/v1', timeout: 30_000, maxRetries: 1 });
       const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
@@ -2977,6 +3024,7 @@ export function fastLaneProviderLabel(used: string | undefined): string {
     case 'GLM': return 'glm';
     case 'KIMI': return 'kimi';
     case 'BEDROCK-GLM': return 'bedrock';
+    case 'NEMOTRON': return 'nemotron';
     case 'CLAUDE':
     case 'CLAUDE_HAIKU': return 'anthropic';
     case 'VERTEX':
@@ -3011,6 +3059,7 @@ export function deliveredStartTier(provider: string | undefined): StartTier | un
     case 'GLM':
     case 'KIMI':
     case 'BEDROCK-GLM':
+    case 'NEMOTRON':
     case 'VERTEX':
     case 'GEMINI': return 'gemini';
     default: return undefined;
@@ -3176,6 +3225,23 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
         // Same protocol, same runner. ⚠️ Untested against a real OpenAI response until the admin buys
         // the key — keyless today, so this rung yields nothing and changes no build.
         out.push(...openAiCompatRunners('OPENAI', process.env.OPENAI_API_KEY, process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', [rung.model], {}, openaiTimeoutMs, floorMaxPromptChars));
+        break;
+      case 'NEMOTRON':
+        // Same OpenAI-compatible protocol, same runner — no new adapter (2026-09-19). The rung's
+        // model is SYMBOLIC ('nemotron-super' / 'nemotron-ultra') exactly as Claude's rungs are,
+        // because each host spells the real id differently and nobody has bought a plan yet; the
+        // real id comes from nemotron.ts, env-overridable.
+        //
+        // ⚠️ KEYED, NOT FLAGGED, like every other ladder rung: a rung with no key yields nothing and
+        // is never substituted, so with no key every build is byte-identical to before this existed.
+        // `AGENTV3_NEMOTRON=off` is the extra hard kill that also removes it.
+        // ⚠️ THINKING CONTROL IS DELIBERATELY NOT PASSED. `thinkingControl` exists for GLM's
+        // `thinking: disabled` parameter; sending a vendor-specific field to a host that does not
+        // know it is a hard 400 — the exact failure class glmThinking.ts was written to prevent.
+        if (nemotronRungOk()) {
+          const nemoModel = rung.model === 'nemotron-ultra' ? nemotronUltraModel() : nemotronSuperModel();
+          out.push(...openAiCompatRunners('NEMOTRON', nemotronKey(), nemotronBaseUrl(), [nemoModel], {}, openaiTimeoutMs, floorMaxPromptChars));
+        }
         break;
       case 'CLAUDE':
         if (anthropicKey) out.push({ name: 'CLAUDE', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), sonnetModel()), modelId: sonnetModel() });
@@ -15947,7 +16013,7 @@ async function noteBuildOutcome(
             // Grok — BEFORE we ever spend Sonnet. Claude is touched only for the FINAL repair below.
             // This escalation loop only runs for a paid, non-power build (free/power skip escalation),
             // so the mode is 'paid' here; passed explicitly so the judge selection is mode-correct.
-            const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid');
+            const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid', powerLevelReqEffective);
             // ADMIN-ONLY label for the verdict record. It must never reach the user: the two narration
             // lines below used to print it ("🔎 Grok is reviewing…") — a White-Label Law breach fixed 2026-09-14.
             const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'glm' ? 'GLM' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
@@ -17092,6 +17158,20 @@ async function noteBuildOutcome(
                 // A clean pass is recorded too. A check that is only ever visible when it complains
                 // cannot be told apart from a check that never ran.
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'ACCESSIBILITY', message: a11yLintSummary(quality), autoResolved: true });
+              }
+            }
+            // A LABEL IN THE USER'S OWN LANGUAGE MUST NOT ARRIVE BROKEN (autopsy 3ce8459b).
+            // The three checks above read STRUCTURE; none of them reads the TEXT, which is how
+            // `label: 'জungle'` shipped past a 100/100 accessibility score and a PASS review.
+            // Deterministic and free — no model call — and advisory: it can never affect a build.
+            if (hasUserApp) {
+              const mixed = findMixedScriptText(integrityFiles);
+              if (mixed.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'SCRIPT_INTEGRITY', ...obs(scriptIntegritySummary(mixed)) });
+              } else {
+                // Recorded when clean too: a check only ever visible when it complains cannot be told
+                // apart from a check that never ran — the `JOURNEY_NOT_RUN` lesson.
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY', message: scriptIntegritySummary(mixed), autoResolved: true });
               }
             }
           } catch { /* the quality lint is advisory — it can never affect a build */ }

@@ -188,6 +188,26 @@ export function realRateCard(): Record<string, TokenRate> {
     // the admin's own brief says Nano is for classification/extraction, never an app-generation
     // engine — but if a helper role ever uses it, it must not be billed at the full-GPT bound above.
     'gpt-nano': { inputPerMTok: envRate('RATE_GPT_NANO_IN', 0.2), outputPerMTok: envRate('RATE_GPT_NANO_OUT', 1.25) },
+    // ── NVIDIA Nemotron 3 (added 2026-09-19) ──────────────────────────────────────────────────────
+    // 🔴 NO CACHE LINE, AND THAT IS THE TRUTH RATHER THAN AN OMISSION. The route these are bought
+    // through does not honour prompt-cache markers (the OpenRouter path goes via DeepInfra, whose
+    // dashboard reports a ~0.2% global cache-hit rate). `usageCostUsd` then prices cache-read tokens
+    // at the FULL input rate, which is exactly what will really be invoiced — so leaving the line out
+    // is the accurate entry here, not the conservative one. ⚠️ Do NOT "improve" this by copying a
+    // cache rate from another vendor: that would under-state our own cost on the one panel used to
+    // judge whether these rungs are worth keeping. If a host that DOES cache is bought later, add
+    // `cacheReadPerMTok` then, with the invoice that proves it.
+    //
+    // Prices verified against the hosts' own listings, 2026-09-19 (not from the model card):
+    //   Ultra 550B/A55B — $0.50 in / $2.20 out (OpenRouter). ⚠️ The admin's brief quoted ~$0.60/$2.40;
+    //     the real listing is cheaper, and the cheaper number is the one recorded.
+    //   Super 120B/A12B — $0.085 in / $0.40 out at the cheapest host; $0.15/$0.65 on Amazon Bedrock.
+    //     The DEARER (Bedrock) figure is the default, because a rate that is too high inflates only
+    //     OUR OWN cost report while a rate that is too low silently eats margin on every build — the
+    //     same asymmetry `realRateFor`'s unknown-model rule is built on. Set `RATE_NEMOTRON_SUPER_IN`
+    //     / `_OUT` to the real numbers of whichever host is actually bought.
+    'nemotron-ultra': { inputPerMTok: envRate('RATE_NEMOTRON_ULTRA_IN', 0.5), outputPerMTok: envRate('RATE_NEMOTRON_ULTRA_OUT', 2.2) },
+    'nemotron-super': { inputPerMTok: envRate('RATE_NEMOTRON_SUPER_IN', 0.15), outputPerMTok: envRate('RATE_NEMOTRON_SUPER_OUT', 0.65) },
   };
 }
 
@@ -246,6 +266,19 @@ export function realRateFor(provider: string, model?: string): TokenRate {
       if (m.includes('lite')) return card['gemini-lite'];
       return card.gemini;
     }
+    // NEMOTRON BEFORE EVERYTHING ELSE IN THIS BLOCK. The ids are hosted as `nvidia/nemotron-3-…`,
+    // so they contain a slash and a vendor prefix; nothing below would match them and they would fall
+    // through to the Sonnet default — a 6× over-statement of our own cost, on the exact screen used to
+    // decide whether to keep them. ULTRA is tested first because "super" and "ultra" are both present
+    // in neither id, but a future `…-ultra-super…` spelling must not resolve to the cheaper line.
+    if (m.includes('nemotron')) {
+      if (m.includes('ultra')) return card['nemotron-ultra'];
+      if (m.includes('super')) return card['nemotron-super'];
+      // An unrecognised Nemotron (Nano, a future size) bills at the DEAREST line we know for the
+      // family — never the cheapest. Same rule as the GLM/Kimi families: an unknown model may only
+      // ever over-state cost. Nano is on no ladder here, so this branch is a safety net, not a price.
+      return card['nemotron-ultra'];
+    }
     if (m.includes('grok')) return card.grok;
     if (m.startsWith('gpt') && m.includes('nano')) return card['gpt-nano'];
     if (m.startsWith('gpt') || /^o\d/.test(m)) return card.gpt; // gpt-5.4 and the o-series reasoning ids
@@ -261,6 +294,8 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     case 'GEMINI': return card.gemini;
     case 'GROK': return card.grok;
     case 'OPENAI': return card.gpt;
+    // A Nemotron aux call with no model id: the dearer of the two sizes, for the reason above.
+    case 'NEMOTRON': return card['nemotron-ultra'];
     default: return card.sonnet; // 'other'/unknown → conservative upper bound (never under-bill)
   }
 }

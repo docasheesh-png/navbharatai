@@ -1013,6 +1013,51 @@ the code (it is actually read somewhere) on 2026-07-11.
   Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
   GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
   (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
+- **🟩 NVIDIA Nemotron 3 — judge, plan and ONE backstop rung (built 2026-09-19; ⚠️ NOT live — no key
+  yet).** `NEMOTRON_API_KEY` (the plan's token — **nothing runs without it**), `AGENTV3_NEMOTRON` (the
+  role/tier gate — ⚠️ **unset means the judge and plan are OFF even with a key**; takes `off` as a HARD
+  kill that removes the ladder rung too, `on` for every tier, or a comma list of tiers: `weak` / `free`,
+  `normal` / `economy`, `strong` / `premium`), `NEMOTRON_BASE_URL` (default OpenRouter),
+  `NEMOTRON_ULTRA_MODEL` / `NEMOTRON_SUPER_MODEL` (the ids — **each host spells them differently**, so
+  set these to match whichever plan is bought), and the rate lines `RATE_NEMOTRON_ULTRA_IN` / `_OUT` /
+  `RATE_NEMOTRON_SUPER_IN` / `_OUT`. Read by `src/server/AgentV3/nemotron.ts`.
+  🔴 **WHY IT IS NOT A BUILD RUNG, AND THIS INVERTS THE STICKER PRICE.** Super ($0.085/$0.40) looks
+  cheaper than the lead rung `glm-4.7-flashx` ($0.07/$0.40) and **for us it is not**: the route does not
+  honour prompt-cache markers (OpenRouter → DeepInfra, ~0.2% global cache-hit rate), while our builds are
+  **91–94% cache-read** (measured: 1,427,968 of 1,520,722 input tokens on build b6f88a72). FlashX charges
+  $0.01/MTok for that share; Nemotron charges full input rate. On the architect slice that is $0.0083 vs
+  $0.0426 — **6.2× DEARER**. Never put it on a cached tool loop.
+  🔑 **WHERE IT PAYS, and the same arithmetic found it: the JUDGE is 78% of a cheap-lead build's real
+  cost** ($0.0915 of $0.1176) because it is the one slice the cache cannot rescue. Ultra does it at
+  $0.50/MTok in against glm-5.3's $1.40. The judge runner sends system + messages and reads back TEXT —
+  **no tools** — so it is also the safest slot for a vendor whose tool-calling is unmeasured here.
+  🔒 **Super sits IN FRONT of the Claude backstop on Weak/Normal, never in place of it** (Haiku still
+  last on Weak, Sonnet on Normal); **Strong is untouched**; Nemotron is the lead rung of no tier.
+  🔴 **STRONG NEVER TAKES THE PLAN RUNG, whatever the flag says** (admin 2026-09-19). `on` reaches
+  Strong's JUDGE but not its PLAN: a judge delivers a verdict on a finished app, a plan decides the
+  app's whole shape before a line is written, and Strong is the tier somebody paid premium for. It is
+  a FLOOR (`PLAN_FORBIDDEN_TIERS`), not a default — no env value lifts it.
+  📋 **What a key alone does, which is almost nothing:** with `NEMOTRON_API_KEY` set and the flag
+  unset, ONLY the Super backstop rung on Weak/Normal activates — reached solely when the three rungs
+  above it have failed. Judge and plan stay exactly as they are (`glm-5.3` / `glm-4.7-flashx`).
+  ⛔ **NOT for free chat, Professional/Doctor AI or the image generator today** (asked 2026-09-19).
+  The image generator is impossible at any price — Nemotron 3 is text-only. Free chat is affordable
+  (`allowedOnFreeTier` clears both sizes: Super index 1.85, Ultra 6.20, ceiling 11.60) and would add
+  the independent fourth vendor that ladder lacks, but there is no Nemotron provider in
+  `src/server/AI/Router/providers/`, so it is a build, not config — and it should wait until the
+  build-engine judge has produced real evidence. Professional on a **`:free` endpoint is refused on
+  privacy**, not cost: those terms allow training, and that surface carries symptoms.
+  ⛔ **Deliberately NOWHERE:** architect, sub-agents, reviewer, heals (cached tool loops); **vision**
+  (Nemotron 3 is text-only); the **guards** (deterministic code at ₹0); the cheap intent classifier
+  (free today) — so **Nemotron 3 Nano is on no list at all**.
+  ⚠️ **Rate defaults are the DEARER readings on purpose** (Super at Bedrock's $0.15/$0.65, and **no cache
+  line**, which is the truth for this route). An over-stated rate inflates only our own report; an
+  under-stated one eats margin silently on every build.
+  ⚠️ **NOT ONE CALL has been made against a real endpoint**, and **judge QUALITY is unmeasured** — a weak
+  judge passes a broken app quietly and no cost panel shows it. Rollout: set `AGENTV3_NEMOTRON=weak`
+  first (the tier NavBharatAI pays for itself), read the verdicts on the first builds, then widen.
+  **What to watch:** `NEMOTRON` in the admin build report's per-call log, and whether judged builds still
+  fail their gate as often as before.
 - **🆓 THE FREE CHAT LADDER — three vendors, cheapest-first (admin-decided 2026-09-15):**
   `GLM glm-4.7-flash (₹0)` → `Vertex gemini-2.5-flash-lite` → `OpenAI gpt-5-nano` → `Vertex
   gemini-2.5-flash`. The Gemini-DIRECT door and the `glm-4.7` last rung were removed. **The gain is

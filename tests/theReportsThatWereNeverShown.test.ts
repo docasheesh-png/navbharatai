@@ -194,6 +194,27 @@ describe('🔴 A FIELD NAME THE SERVER DOES NOT SEND IS A CARD THAT SHOWS NOTHIN
     expect(PANEL_CODE).not.toMatch(/d\?\.calls/);
   });
 
+  // 🔎 SIBLING SWEEP (rule 3). Two cards were found reading names the server never sends, so every
+  // OTHER card's fields were checked the same way rather than assumed. Eleven were already correct.
+  // The two whose shapes are least obvious are locked here; the rest read a single top-level key
+  // straight off the route (`history`, `events`, `deployments`, `rows`) and are covered by the
+  // endpoint assertions above.
+  it('the release gate reads the fields ReleaseGateConfig really declares', () => {
+    const GATE = read('src/server/lib/ReleaseGate.ts');
+    for (const field of ['frozen', 'freezeReason', 'approvalRequired']) {
+      expect(GATE, `ReleaseGateConfig no longer declares ${field}`).toContain(field);
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+
+  it('the feature-flag card reads the fields the flag config really declares', () => {
+    const FLAGS = read('src/server/FeatureFlagManager.ts');
+    for (const field of ['flags', 'rollout', 'overrides']) {
+      expect(FLAGS, `the flag config no longer declares ${field}`).toContain(field);
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+
   it('provider status reads what getProviderStats really returns, circuit state included', () => {
     for (const field of ['requestCount', 'errorCount', 'avgLatencyMs', 'circuitState']) {
       expect(ROUTER, `getProviderStats no longer returns ${field}`).toContain(field);

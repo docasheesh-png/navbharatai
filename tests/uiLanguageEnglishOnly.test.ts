@@ -62,6 +62,11 @@ const ALLOWED: Record<string, string> = {
   // address, "फ़ोन" before a number. Input parsing, exactly like `useChatEngine.ts` above: nothing
   // here is ever printed, and dropping the Hindi spellings would simply stop reading Hindi prompts.
   'src/lib/imageTextFromPrompt.ts': "input parsing of the user's own prompt, never rendered as UI",
+  // Patterns matched against a message the USER typed beside an attached picture — "बदल दो" meaning
+  // change it, "क्या" meaning they are asking about it. Input parsing, the same category as
+  // `useChatEngine.ts`: nothing here is ever printed, and removing the Hindi spellings would simply
+  // stop this recognising a Hindi request to change a picture.
+  'src/lib/imageEdit.ts': "input parsing of the user's own message, never rendered as UI",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

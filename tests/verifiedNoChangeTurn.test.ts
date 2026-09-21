@@ -129,7 +129,14 @@ describe('the wiring — the report\'s three false sentences cannot be produced 
   });
 
   it('it is fed the real browser evidence, not an assumption', () => {
-    expect(src).toContain('appRendered: previewVerifiedRendered,');
+    // ⚠️ SUPERSEDED 2026-09-21 — STRICTLY MORE evidence, not less. `previewVerifiedRendered` is one
+    // pass's local flag; `renderProvenNow()` returns it FIRST and then falls back to the evidence
+    // ledger, so every actor that proved a real-browser render answers too. That matters most
+    // exactly here: this argument IS autopsy 697b38ee's fix, and an app proven green only by
+    // `inBuildGreen` used to fall through it to *"The build produced no files"* — the sentence it
+    // exists to prevent. See `oneLedgerEveryVerdictReadsFrom.test.ts`.
+    expect(src).toContain('appRendered: renderProvenNow(),');
+    expect(src).not.toContain('appRendered: previewVerifiedRendered,');
   });
 
   it('🔒 a successful turn can never be handed a failure message underneath it', () => {

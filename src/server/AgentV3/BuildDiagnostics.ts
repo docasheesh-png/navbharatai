@@ -31,6 +31,7 @@ import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBui
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
+import { renderProvenByAnyActor } from './renderProof';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -3052,15 +3053,30 @@ export function severityOfOutcome(
  * records are what the failure panel reads today. Without this, a failure rate cannot be told apart
  * from a mislabelling rate.
  *
- * ⚠️ ONLY BROWSER-CONFIRMED EVIDENCE COUNTS, deliberately. `GREEN_GUARD_SAVE` is recorded only after
- * the app was opened in a real browser and seen rendering, and `PREVIEW_PUBLISHED` only after a URL
- * was really served. A clean typecheck or a green unit suite proves the CODE is fine and says nothing
- * about whether anything rendered, which is the distinction `deliveryProof.ts` was built on.
+ * ⚠️ RUNTIME EVIDENCE ONLY. A clean typecheck or a green unit suite proves the CODE is fine and says
+ * nothing about whether anything rendered, which is the distinction `deliveryProof.ts` was built on.
+ *
+ * 🔴 **CORRECTED 2026-09-21, AND THE CORRECTION IS THE POINT.** This paragraph used to read *"ONLY
+ * BROWSER-CONFIRMED EVIDENCE COUNTS, deliberately. `GREEN_GUARD_SAVE` is recorded only after the app
+ * was opened in a real browser and seen rendering"*. **The code does not honour that sentence.**
+ * `GREEN_GUARD_SAVE` is written from `previewGreen`, and both of that flag's producers set it on
+ * `verdict.rendered` alone — the `shot.source === 'browser'` test three lines below each of them
+ * guards the green-freeze latch and `markAppRendered`, NOT the flag. So a curl capture's empty-shell
+ * "render" reaches this function, and `PREVIEW_PUBLISHED` is weaker still: an address that is
+ * listening is not an app that painted.
+ *
+ * The two weak codes are KEPT rather than quietly removed, because this feeds the admin's
+ * failure-vs-mislabelling panel and dropping them would move that number on my own judgement. What is
+ * fixed here is the SENTENCE (it no longer claims a strength the code lacks) and the gap: every code
+ * in `RENDER_PROVEN_CODES` now answers too — genuinely browser-only proofs, `IN_BUILD_GREEN` among
+ * them, which no reader in the engine read at all. That can only ADD true positives.
  */
 export function appWasSeenRunning(
-  issues: ReadonlyArray<{ code: string }> | null | undefined,
+  issues: ReadonlyArray<{ code: string; severity?: string | null }> | null | undefined,
 ): boolean {
-  return (issues ?? []).some((i) => i?.code === 'GREEN_GUARD_SAVE' || i?.code === 'PREVIEW_PUBLISHED');
+  const list = issues ?? [];
+  if (renderProvenByAnyActor(list)) return true;   // the strong, browser-only half — renderProof.ts
+  return list.some((i) => i?.code === 'GREEN_GUARD_SAVE' || i?.code === 'PREVIEW_PUBLISHED');
 }
 
 /**

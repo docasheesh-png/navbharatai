@@ -3,6 +3,7 @@ import { ArrowUp, Download, ImagePlus, Loader2, RefreshCw, Sparkles, Type, Wand2
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
 import { TextOverlayEditor } from './TextOverlayEditor';
+import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 
 /**
  * NavBharatAI Pro — the PAID image studio (admin 2026-09-18).
@@ -381,6 +382,9 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
         return (
           <TextOverlayEditor
             imageUrl={target.url}
+            // From THAT result's own prompt, not the input bar's current contents: this surface keeps
+            // a whole run of images, and the bar has usually moved on to the next request by now.
+            initialLayers={layersFromExtracted(extractImageText(target.prompt || ''), () => `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`)}
             onClose={() => setTextOn(null)}
             onApply={(url) => {
               setResults((rs) => rs.map((r) => (r.id === textOn ? { ...r, url } : r)));

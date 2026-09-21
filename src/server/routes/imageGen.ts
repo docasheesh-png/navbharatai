@@ -10,6 +10,7 @@ import {
   pollinationsEnabled, fetchPollinationsImage,
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
+import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   IMAGE_PRO_PRICE_INR, IMAGE_PRO_TIMEOUT_MS, imageProConfigured, imageProEndpoint, imageProAuthHeaders,
@@ -148,7 +149,16 @@ export function registerImageGenRoutes(app: Express): void {
       });
       // Providers here take a single string, so the negatives ride inline — phrased as "Avoid:", never
       // a bare list, which some models read as a request FOR those things.
-      const prompt = withInlineNegative(crafted);
+      //
+      // 🔑 AND THE ENGINE IS TOLD TO LEAVE ALONE WHAT IT CANNOT DO. A phone number, an address and a
+      // price list are the three kinds of text no image engine renders correctly, and the overlay
+      // editor now draws them with a real font. Asking for them twice would put a plausible-looking
+      // WRONG number in the picture underneath the right one — so the brief asks for clean space
+      // instead. A shop NAME is deliberately NOT included: one to five words is what these engines
+      // are genuinely good at, and a name in the artwork beats a caption over it.
+      const userText = buildImagePrompt(req.body);
+      const leaveAlone = noTextDirection(extractImageText(userText));
+      const prompt = leaveAlone ? `${withInlineNegative(crafted)} ${leaveAlone}` : withInlineNegative(crafted);
       const timeout = <T,>(p: Promise<T>): Promise<T> => Promise.race([
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('image-generation timeout')), ROUTE_TIMEOUT_MS)),

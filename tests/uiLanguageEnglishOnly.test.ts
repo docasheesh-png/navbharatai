@@ -58,6 +58,10 @@ const ALLOWED: Record<string, string> = {
   // regex, and the letter goes to `measureText`, whose only output is a number. The Devanagari a
   // user actually sees from this module is what they themselves typed into the caption box.
   'src/lib/textOverlay.ts': 'a script-range regex and a font-probe glyph fed to measureText, never rendered as UI',
+  // Patterns matched against what the USER typed into their own prompt — "पता:" labelling an
+  // address, "फ़ोन" before a number. Input parsing, exactly like `useChatEngine.ts` above: nothing
+  // here is ever printed, and dropping the Hindi spellings would simply stop reading Hindi prompts.
+  'src/lib/imageTextFromPrompt.ts': "input parsing of the user's own prompt, never rendered as UI",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

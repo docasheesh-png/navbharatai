@@ -69,6 +69,14 @@ export interface TextLayer {
   align: 'left' | 'center' | 'right';
   bold: boolean;
   /**
+   * What this layer is FOR, when a template placed it — "Shop name", "Phone".
+   *
+   * ⚠️ UI ONLY, AND IT MUST STAY THAT WAY. It is never drawn, never measured and never exported; it
+   * exists so an empty slot from a template reads as "Phone" in the layer chips instead of as
+   * "Text 3". A label that could reach the canvas would be a caption nobody typed.
+   */
+  label?: string;
+  /**
    * The box's width, as a fraction of the image's width.
    *
    * Needed for two things that did not exist before: it is the width a long line WRAPS at, and it is

@@ -12,7 +12,7 @@
 // what they save, and nothing would fail to reveal it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Bold, Check, List, Plus, Trash2, Type, X } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, Check, LayoutTemplate, List, Plus, Trash2, Type, X } from 'lucide-react';
 import {
   MAX_LAYERS,
   MAX_SIZE_PCT,
@@ -20,13 +20,15 @@ import {
   MIN_SIZE_PCT,
   composeImage,
   defaultLayer,
-  type LayerKind,
   devanagariRendersHere,
   devanagariWarning,
   imagePixels,
   normalizeLayer,
+  type LayerKind,
   type TextLayer,
 } from '../../lib/textOverlay';
+import { BOARD_TEMPLATES, layersFromTemplate, type BoardTemplate } from '../../lib/imageBoardTemplates';
+import type { ExtractedText } from '../../lib/imageTextFromPrompt';
 
 interface Props {
   /** The generated image, as a data URL or an https URL. */
@@ -39,6 +41,14 @@ interface Props {
    * at something nearly right rather than at an empty box holding a number they already typed once.
    */
   initialLayers?: TextLayer[];
+  /**
+   * What was read out of the prompt, so a template can fill its slots from it.
+   *
+   * Passed separately from `initialLayers` on purpose: those are already PLACED, and a template's
+   * job is to place them differently. Handing it the findings rather than the finished layers is
+   * what stops "where does a phone go" existing in two places.
+   */
+  extracted?: ExtractedText[];
   /** Called with the composited PNG data URL when the user presses Done. */
   onApply: (dataUrl: string) => void;
   onClose: () => void;
@@ -68,7 +78,7 @@ const BAND_CHOICES: Array<{ id: string; label: string; value: string }> = [
 let nextId = 0;
 const newId = () => `t${++nextId}`;
 
-export function TextOverlayEditor({ imageUrl, initialLayers, onApply, onClose }: Props) {
+export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply, onClose }: Props) {
   const [layers, setLayers] = useState<TextLayer[]>(() =>
     (initialLayers && initialLayers.length > 0 ? initialLayers : [defaultLayer(newId(), '')]));
   const [activeId, setActiveId] = useState<string>(() => layers[0].id);
@@ -165,6 +175,21 @@ export function TextOverlayEditor({ imageUrl, initialLayers, onApply, onClose }:
     }
   };
 
+  /**
+   * Replace everything with a template's arrangement.
+   *
+   * It REPLACES rather than appends, which is what makes it one tap instead of one tap plus a
+   * clean-up: a board is a layout, and merging two layouts produces neither. Anything typed so far
+   * that the prompt also carried survives, because the template fills its slots from the SAME
+   * findings; anything typed by hand does not, which is why the button reads as a fresh start.
+   */
+  const applyTemplate = (template: BoardTemplate) => {
+    const next = layersFromTemplate(template, extracted ?? [], newId);
+    if (next.length === 0) return;
+    setLayers(next);
+    setActiveId(next[0].id);
+  };
+
   const addLayer = () => {
     if (layers.length >= MAX_LAYERS) return;
     const layer = defaultLayer(newId(), '');
@@ -236,6 +261,24 @@ export function TextOverlayEditor({ imageUrl, initialLayers, onApply, onClose }:
 
           {warning && <p className="text-[11px] text-warn leading-relaxed">{warning}</p>}
 
+          {/* One tap lays the whole board out. Shown above the chips because it REPLACES them — a
+              control that rearranges everything belongs before the thing it rearranges. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-muted flex items-center gap-1 mr-0.5">
+              <LayoutTemplate className="w-3 h-3" /> Layout
+            </span>
+            {BOARD_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => applyTemplate(t)}
+                title={t.hint}
+                className="px-2.5 py-1 rounded-lg text-[11px] bg-raised text-body border border-line hover:border-accent-text transition-colors"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           {/* Layer chips — which caption the controls below are editing. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {layers.map((l, i) => (
@@ -246,7 +289,7 @@ export function TextOverlayEditor({ imageUrl, initialLayers, onApply, onClose }:
                   l.id === active.id ? 'bg-accent text-on-accent border-transparent' : 'bg-raised text-body border-line'
                 }`}
               >
-                {l.text.trim().split('\n')[0].slice(0, 14) || `Text ${i + 1}`}
+                {l.text.trim().split('\n')[0].slice(0, 14) || l.label || `Text ${i + 1}`}
               </button>
             ))}
             <button

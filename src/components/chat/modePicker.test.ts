@@ -135,12 +135,14 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
     expect(app).toContain('if (resume) { toggleTab(resume as ViewType); return; }');
   });
 
-  it('a professional is ARCHIVED before its new chat, never dropped', () => {
-    // endProfessionalChat puts the transcript in Professional History and clears the live slot, so the
-    // next mount is fresh. Without this the "new chat" would either resurrect the old one on mount or
-    // delete it outright.
+  it('a professional\'s "New chat" opens a NEW WINDOW with a fresh conversation — the open one is neither archived nor dropped', () => {
+    // Until 2026-09-21 the live conversation was ENDED here (archived, then a fresh mount), because a
+    // professional could hold only one. Now it stays open beside the new window, which is minted with
+    // its own conversation id — the id the server keeps the two chats' memory apart by.
     expect(app).toContain('if (startsFreshOnPick(id)) {');
-    expect(app).toContain('if (store) endProfessionalChat(store, id);');
+    expect(app).toContain('toggleTab(id as ViewType, true, newConversationId());');
+    const pick = app.slice(app.indexOf('onPick={(id) =>'), app.indexOf('onPick={(id) =>') + 2500);
+    expect(pick).not.toContain('endProfessionalChat(');
   });
 
   it('the image row opens Other Tools\' OWN view — free and paid together, not a fork', () => {

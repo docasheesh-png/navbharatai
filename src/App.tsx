@@ -42,14 +42,17 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
-import { endProfessionalChat, browserStore as professionalStore } from './lib/professionalChatStore';
+import { endConversation, latestOpenConversationId, newConversationId, browserStore as professionalStore } from './lib/professionalChatStore';
+import {
+  openWindow, closeWindow, windowsOf, nextActiveAfterClose, windowLabel, capMessage, isWindowedProfessional, type ChatWindow,
+} from './lib/chatWindows';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { startFreshCase } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
-import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick, modeEmojiFor } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
 import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
@@ -782,6 +785,25 @@ export default function App() {
   // child→parent tab map: which tab opened each option, so ✕-closing Settings/Professionals also closes
   // the options launched from inside it (admin bug 2026-07-11). Populated in toggleTab, pruned in closeTab.
   const [tabOpeners, setTabOpeners] = useState<Partial<Record<ViewType, ViewType>>>({});
+  // CONVERSATION WINDOWS (admin 2026-09-21: *"ek sath ek bar me 5 modes me chat kar sakte hai"*). Up to
+  // five professional chats open at once, each its OWN conversation — two Teacher AI windows are two
+  // conversations, and the id minted here is what the server keeps their memory apart by. Held BESIDE
+  // `openTabs`, never inside it: the tab list is one slot per view id (see lib/chatWindows.ts). A
+  // professional's view is in `openTabs` while it has at least one window; `activeChatId` says which of
+  // its windows is on screen.
+  const [openChats, setOpenChats] = useState<ChatWindow[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  /**
+   * THE window on screen: the active view's window named by `activeChatId`, else that view's last
+   * window. The fallback is not decoration — `closeTab` lands on "the last remaining tab", which can be
+   * an expert whose window was never the focused one, and a professional view with no window on screen
+   * would be a tab with nothing behind it. Every reader (the render, the header chips, the Mode sheet's
+   * ✕) asks this one value, so they cannot disagree about which conversation is showing.
+   */
+  const activeChat = useMemo(() => {
+    const same = windowsOf(openChats, activeView);
+    return same.find((w) => w.id === activeChatId) ?? same[same.length - 1] ?? null;
+  }, [openChats, activeView, activeChatId]);
   // Fresh-open nonce: bumped by toggleTab ONLY when the user deliberately OPENS v5.0 from the menu/
   // sidebar (a plain open → start a NEW chat). A reload restores the v5.0 view WITHOUT toggleTab, so
   // the nonce stays 0 → AgentV3Panel takes the RESTORE path instead. A History reopen sets v3Resume
@@ -1414,16 +1436,25 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const toggleTab = useCallback((view: ViewType, pushToHistory = true) => {
+  /**
+   * Open (or focus) a view. Returns whether it navigated — false when a gate refused (Play compliance,
+   * a held-back tool, sign-in required) or, for a professional, when the window cap did.
+   *
+   * `conversationId` (2026-09-21) names WHICH conversation to show for a professional: a fresh id from
+   * the Mode picker's "New chat", a resumed one from History. Without it, a professional with no window
+   * open reopens its most recent ongoing conversation (or starts one), and one with windows open is
+   * simply focused — so every door into an expert leads to a window, by construction.
+   */
+  const toggleTab = useCallback((view: ViewType, pushToHistory = true, conversationId?: string): boolean => {
     // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
-    if (medicalViewBlocked(view, isNativeApp())) return;
+    if (medicalViewBlocked(view, isNativeApp())) return false;
     // HELD-BACK TOOLS (admin 2026-09-15): the Other page already renders these tiles disabled, but the
     // gate belongs HERE too, for the same reason the medical one does — this is the single path every
     // tab-open takes, so a tool the admin has not tested cannot be reached by any button, deep link or
     // future doorway that forgets to ask. Re-enabling is one line in lib/comingSoonTools.ts.
-    if (isComingSoonTool(view)) return;
+    if (isComingSoonTool(view)) return false;
     // Pre-warm server when user opens chat tabs (fire-and-forget)
     if (view === 'nbi_chat' || view === 'nbi_pro_chat') {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
@@ -1457,7 +1488,30 @@ export default function App() {
           : `${view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro'} is available for logged-in users only. Please sign in.`,
         'warn',
       );
-      return;
+      return false;
+    }
+
+    // A PROFESSIONAL IS ENTERED THROUGH A WINDOW (admin 2026-09-21). After every gate above, so a refused
+    // view never gets one. A named conversation is opened (or focused) as its own window; otherwise the
+    // expert's last ongoing conversation is reopened — the continuity a reload used to get from the one
+    // live slot — or a new one is minted. The cap refuses honestly, with a toast, and does NOT navigate:
+    // an expert tab with no window behind it would be the fake-window class. Repo Analyst is in the
+    // config map but has its own tool below, so it is not windowed (lib/chatWindows.ts says which).
+    if (isWindowedProfessional(view)) {
+      const existing = windowsOf(openChats, view);
+      const store = professionalStore();
+      const wanted = conversationId
+        ?? (existing.length === 0 ? ((store && latestOpenConversationId(store, view)) || newConversationId()) : null);
+      if (wanted) {
+        if (!existing.some((w) => w.id === wanted)) {
+          const opened = openWindow(openChats, { id: wanted, professionalId: view });
+          if (!opened.opened) { addToast(capMessage(), 'warning'); return false; }
+          setOpenChats(opened.windows);
+        }
+        setActiveChatId(wanted);
+      } else if (!existing.some((w) => w.id === activeChatId)) {
+        setActiveChatId(existing[existing.length - 1].id);
+      }
     }
 
     if (!openTabs.includes(view)) {
@@ -1486,7 +1540,8 @@ export default function App() {
     }
     
     setActiveView(view);
-  }, [user, openTabs, activeView, addLog, setShowAuth]);
+    return true;
+  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast]);
 
   // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
@@ -1746,6 +1801,9 @@ export default function App() {
 
     setOpenTabs(prev => prev.filter(t => !closingSet.has(t)));
     if (nextActiveView !== null) setActiveView(nextActiveView as ViewType);
+    // Every WINDOW of a closing professional goes with it (their transcripts are archived below).
+    setOpenChats(prev => prev.filter(w => !closingSet.has(w.professionalId)));
+    if (openChats.some(w => w.id === activeChatId && closingSet.has(w.professionalId))) setActiveChatId(null);
 
     setTabHistories(prevHistories => {
       const nextHistories = { ...prevHistories };
@@ -1806,12 +1864,38 @@ export default function App() {
         // tab alone left the conversation waiting to reappear on the next open. Doctor AI behaved
         // correctly only because of its hand-written branch above — which is why this is a RULE over
         // PROFESSIONAL_CHATS and not a 70th special case. The transcript is archived, not deleted: it
-        // stays in Professional History, where it can be reopened.
+        // stays in Professional History, where it can be reopened. Since 2026-09-21 a professional can
+        // hold several WINDOWS, and closing its tab ends every one of them — and only them: a
+        // conversation that is "ongoing" in storage but has no window on screen (opened before a reload,
+        // never closed) is not touched, because the user did not close it.
         const store = professionalStore();
-        if (store) endProfessionalChat(store, v);
+        if (store) for (const w of windowsOf(openChats, v)) endConversation(store, v, w.id);
       }
     }
-  }, [openTabs, activeView, tabOpeners, toggleTab, user, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
+  }, [openTabs, activeView, tabOpeners, toggleTab, user, openChats, activeChatId, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
+  /**
+   * Close ONE conversation window (admin 2026-09-21) — the header chip's ✕ and the Mode sheet's recent-row
+   * ✕. Its transcript is archived (it reappears under History); its sibling windows with the same expert
+   * stay open and the focus moves to the last of them. The LAST window of an expert closes the expert's
+   * tab through `closeTab`, so there is one teardown for a professional tab, not two.
+   */
+  const closeChatWindow = useCallback((e: React.MouseEvent | undefined, id: string) => {
+    e?.stopPropagation();
+    const { windows, closed } = closeWindow(openChats, id);
+    if (!closed) return;
+    const store = professionalStore();
+    if (store) endConversation(store, closed.professionalId, id);
+    setOpenChats(windows);
+    if (windowsOf(windows, closed.professionalId).length === 0) {
+      if (activeChatId === id) setActiveChatId(null);
+      closeTab(undefined, closed.professionalId as ViewType);
+      return;
+    }
+    if (activeChatId === id) {
+      const next = nextActiveAfterClose(windows, closed);
+      if (next) setActiveChatId(next.id);
+    }
+  }, [openChats, activeChatId, closeTab]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
@@ -3217,6 +3301,19 @@ export default function App() {
           toggleTab={toggleTab}
           closeTab={closeTab}
           menuItems={menuItems as any}
+          chatWindows={openChats.map((w) => ({
+            id: w.id,
+            label: windowLabel(openChats, w.id, PROFESSIONAL_CHATS[w.professionalId]?.name ?? w.professionalId),
+            emoji: modeEmojiFor(w.professionalId),
+            active: activeChat?.id === w.id,
+          }))}
+          onSelectChatWindow={(id) => {
+            const win = openChats.find((w) => w.id === id);
+            if (!win) return;
+            setActiveChatId(id);
+            setActiveView(win.professionalId as ViewType);
+          }}
+          onCloseChatWindow={closeChatWindow}
           hasGeneratedCode={hasGeneratedCode}
           canUndo={canUndo}
           canRedo={canRedo}
@@ -3623,372 +3720,22 @@ export default function App() {
             }} />
           )}
 
-          {/* ── Config-driven professionals (Teacher, Mentor, …) ── */}
-          {activeView === 'teacher_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.teacher_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'mentor_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.mentor_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'thesis_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.thesis_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'accountant_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.accountant_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'lawyer_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.lawyer_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'finance_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.finance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'astrologer_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.astrologer_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'govt_schemes_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.govt_schemes_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'kisan_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.kisan_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'nutritionist_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.nutritionist_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'wellness_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.wellness_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'fitness_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.fitness_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'vet_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.vet_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'parenting_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.parenting_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'cybersafety_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.cybersafety_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'insurance_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.insurance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'chef_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.chef_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'travel_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.travel_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'vastu_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.vastu_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'yoga_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.yoga_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'english_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.english_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'resume_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.resume_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'gardening_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'pharmacist_ai' && !medicalViewBlocked('pharmacist_ai', isNativeApp()) && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'business_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.business_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'homerepair_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.homerepair_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'realestate_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.realestate_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'driving_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.driving_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'petcare_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.petcare_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'beauty_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.beauty_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'music_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.music_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'sports_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.sports_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'photography_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.photography_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'speaking_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.speaking_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'events_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.events_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'eldercare_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.eldercare_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'interior_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.interior_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'studyabroad_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.studyabroad_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'disability_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.disability_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'fashion_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.fashion_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'productivity_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.productivity_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'relationship_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.relationship_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'vehicle_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.vehicle_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'stocks_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.stocks_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'techhelp_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.techhelp_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'mathscience_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.mathscience_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'coding_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'maternity_ai' && !medicalViewBlocked('maternity_ai', isNativeApp()) && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.maternity_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'firstaid_ai' && !medicalViewBlocked('firstaid_ai', isNativeApp()) && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.firstaid_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'environment_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.environment_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'gk_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.gk_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'safety_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.safety_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'translate_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.translate_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'civic_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.civic_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'sarkari_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.sarkari_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'spiritual_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.spiritual_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'crafts_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.crafts_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'festival_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.festival_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'writing_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.writing_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'aptitude_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.aptitude_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'disaster_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.disaster_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'nature_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.nature_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'freelance_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.freelance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'babynames_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.babynames_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'hygiene_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.hygiene_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'volunteer_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.volunteer_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'astronomy_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.astronomy_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'calligraphy_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.calligraphy_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'dance_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.dance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'games_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.games_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'techbuy_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.techbuy_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'adventure_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.adventure_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
-          {activeView === 'budget_ai' && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.budget_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
-            </div>
-          )}
+          {/* ── Config-driven professionals (Teacher, Mentor, …) — ONE render site for every expert, and
+              one mounted chat per OPEN CONVERSATION (admin 2026-09-21: five chats at once). This replaced
+              73 hand-written `activeView === 'x_ai'` blocks, which could only ever mount ONE conversation
+              per expert. A window that is not on screen stays mounted but hidden, so a reply arriving
+              while the user is in another window is not lost — it is a window, not a page. The medical
+              gate is the SAME rule toggleTab applies (defence in depth, exactly as the Doctor AI block). */}
+          {openChats.map((win) => {
+            const cfg = PROFESSIONAL_CHATS[win.professionalId];
+            if (!cfg || !isWindowedProfessional(win.professionalId) || medicalViewBlocked(win.professionalId, isNativeApp())) return null;
+            const onScreen = activeChat?.id === win.id;
+            return (
+              <div key={win.id} className={onScreen ? 'flex-1 overflow-hidden h-full min-h-0 max-h-full' : 'hidden'}>
+                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onOpenModePicker={modePickerOpener} />
+              </div>
+            );
+          })}
           {activeView === 'repo_analyst' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
               <RepoAnalystTool userId={user?.uid} />
@@ -4184,6 +3931,9 @@ export default function App() {
                 const view = viewFromRecentId(recentId);
                 if (!view) return;
                 setShowModePicker(false);
+                // For an expert the recent row names the WINDOW on screen — close that conversation
+                // only; its sibling windows with the same expert stay open (2026-09-21).
+                if (activeChat && activeChat.professionalId === view) { closeChatWindow(undefined, activeChat.id); return; }
                 closeTab(undefined, view as ViewType);
               }}
               onPick={(id) => {
@@ -4210,12 +3960,13 @@ export default function App() {
                   toggleTab(id as ViewType);
                   return;
                 }
-                // A professional restores itself from localStorage on mount, so a fresh chat means
-                // ENDING the live one first — which ARCHIVES it into Professional History rather than
-                // dropping it. See modePicker.ts.
+                // A professional's "New chat" opens a NEW WINDOW with a fresh conversation (admin
+                // 2026-09-21: five chats at once). It used to END the live one first, because a
+                // professional could hold only one conversation; now the one already open simply stays
+                // open beside it. See modePicker.ts.
                 if (startsFreshOnPick(id)) {
-                  const store = professionalStore();
-                  if (store) endProfessionalChat(store, id);
+                  toggleTab(id as ViewType, true, newConversationId());
+                  return;
                 }
                 toggleTab(id as ViewType);
               }}
@@ -4231,15 +3982,15 @@ export default function App() {
               onClose={() => setHistoryPopupOpen(false)}
               onRestoreSession={handleRestoreUci}
               onDeleteSession={deleteSession}
-              onOpenProfessional={(viewId) => toggleTab(viewId as ViewType)}
+              onOpenProfessional={(viewId, conversationId) => toggleTab(viewId as ViewType, true, conversationId)}
             />
           )}
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && (historyInitialFilter === 'professional'
-            ? <ProfessionalHistoryView onOpen={(id) => toggleTab(id as ViewType)} onBack={() => toggleTab('professionals')} />
+            ? <ProfessionalHistoryView onOpen={(id, conversationId) => toggleTab(id as ViewType, true, conversationId)} onBack={() => toggleTab('professionals')} />
             : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
                 includeProfessionals={historyInitialFilter === 'free'}
-                onOpenProfessional={(viewId) => toggleTab(viewId as ViewType)} />)}
+                onOpenProfessional={(viewId, conversationId) => toggleTab(viewId as ViewType, true, conversationId)} />)}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel

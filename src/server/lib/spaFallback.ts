@@ -22,6 +22,7 @@
 // keep receiving index.html so the React router can handle them — deferring one would 404 the app.
 
 import { ALL_PUBLIC_LEGAL_PATHS } from './legalPaths';
+import { CHECKOUT_HANDOFF_PATH } from './checkoutHandoff';
 
 /**
  * Path prefixes owned by real server route handlers registered AFTER the SPA catch-all. A request
@@ -38,6 +39,10 @@ export const SERVER_ROUTE_PREFIXES: readonly string[] = [
 export const SERVER_ROUTE_EXACT: readonly string[] = [
   '/guide',   // U-9 auto-generated docs site (routes/KnowledgeDocs.ts)
   '/status',  // U-15 public status page (routes/health.ts)
+  // The checkout hand-off page (routes/checkoutHandoff.ts). Forgetting it here would be the worst
+  // version of this module's own bug: the native app would open a payment link and be served the
+  // app shell with a 200, i.e. a blank-looking page instead of a checkout, with nothing failing.
+  CHECKOUT_HANDOFF_PATH,
   // PUBLIC LEGAL PAGES — the canonical documents, the Play-required deletion page, and the legacy
   // spellings that redirect to them. DERIVED from lib/legalPaths.ts rather than restated here: a
   // path listed by the route module but forgotten here would be swallowed by the catch-all and

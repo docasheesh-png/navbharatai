@@ -77702,3 +77702,50 @@ owner (comments stripped, so the old name may be history but may not be called).
   undocumented in what we have; not guessed at.
 - Carried from #3234: no platform-wide daily ceiling on free images; no image model in
   `providerRates.ts`.
+
+## 2026-09-21 — D: "font change not working" in Add text — the loader trusted `fonts.check()`, which is true for a font that is not there (Phase 2 item 3)
+
+**Admin:** *"text add kiya, text ka font change kiya par ho nahi raha hai, fix karo, sabhi font working
+me lane hai!"* My own #3224 defect.
+
+### Root cause — REPRODUCED in a real Chromium before a line was changed
+
+A local stylesheet served with a 1.5 s delay, a real font file behind it, and the exact calls
+`imageFontLoader.ts` made, in the order it made them:
+
+| phase | `fonts.load()` matched | `fonts.check()` | canvas `measureText("Hello World")` |
+|---|---|---|---|
+| right after the `<link>` is appended (stylesheet not arrived) | `[0, 0]`, resolved in **0 ms** | **true** | **423.8 px** (fallback) |
+| after the stylesheet arrived | faces exist, `unloaded` | false | — |
+| after a second `fonts.load()` | `[1, 1]`, `loaded` | true | **355 px** (the real face) |
+
+`check()` is true when NO face of the family exists yet — it means "nothing is pending", not "the
+face is here" — and it is equally true for `"NoSuchFamilyZZ"`. So the loader answered `true` at
+phase 1, the editor set the font `ready`, painted in the fallback, and had no reason to paint again
+when the font really landed. The same answer meant the *"could not be loaded"* warning could never
+fire either: a family Google refuses with a 400 also read as ready. The wiring, the CSP and the
+repaint dependency were all correct — the VERDICT was wrong, so everything downstream of it was
+honestly acting on a lie.
+
+### The fix (`src/lib/imageFontLoader.ts`) — the order, and the proof
+
+1. The **stylesheet first**, awaited on its own `load`/`error` — the event that decides whether the
+   family's faces exist at all. `error` (a 400, a blocked host, offline) ⇒ `false`, and the `<link>`
+   is REMOVED so choosing the font again really refetches.
+2. Then `fonts.load()` for both weights, and the verdict is the **faces it returned**: at least one,
+   every one `loaded`. `check()` is no longer consulted anywhere, and the suite asserts it cannot
+   creep back.
+
+### Tests
+
+`tests/theFontArrivesBeforeItIsTrusted.test.ts` (11) drives the loader with a fake document that
+behaves exactly as Chromium measured (`load()` matches nothing before the sheet). **Proven by
+reversion**: not awaiting the stylesheet → fails; verdict from `check()` → fails.
+`theFontIsRealAndHindiStillWorks.test.ts` had pinned `fonts.check(` as the honest verdict — the
+assertion encoded the bug — repointed with the reason written in.
+
+### Still open
+
+- Not reproduced on the admin's phone itself; the repro is the same sequence in desktop Chromium.
+  If a font STILL does not change after this ships, the next fact to collect is the `fontNote` line
+  under the picker — with this fix it can now genuinely say *"could not be loaded"*.

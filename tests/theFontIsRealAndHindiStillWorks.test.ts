@@ -353,11 +353,15 @@ describe('🔒 a font that has not arrived can never be measured with', () => {
 
   it('a font that could not be fetched is SAID, not silently swapped', () => {
     // The second absolute rule reaches a dropdown as much as a button: the option works, or it says
-    // it does not. `loadImageFont` returns the honest verdict from `document.fonts.check`.
+    // it does not. `loadImageFont` returns the honest verdict from the FACES `document.fonts.load`
+    // returned. ⚠️ This used to assert the verdict came from `fonts.check` — measured in a real
+    // Chromium on 2026-09-21, `check()` is TRUE for a family whose stylesheet has not arrived and for
+    // a family that does not exist at all, so it can never say "could not be loaded". The old
+    // assertion pinned the bug; `theFontArrivesBeforeItIsTrusted.test.ts` holds the fix.
     expect(src).toMatch(/fontNote/);
     expect(src).toContain('could not be loaded on this device');
     const loader = code(read('lib/imageFontLoader.ts'));
-    expect(loader).toMatch(/fonts\.check\(/);
+    expect(loader).not.toMatch(/fonts\.check\(/);
     expect(loader).toMatch(/fonts\.load\(/);
   });
 

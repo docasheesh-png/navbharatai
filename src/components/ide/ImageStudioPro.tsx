@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Download, ImagePlus, Loader2, RefreshCw, Sparkles, Wand2, X } from 'lucide-react';
+import { ArrowUp, Download, ImagePlus, Loader2, RefreshCw, Sparkles, Type, Wand2, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
+import { TextOverlayEditor } from './TextOverlayEditor';
 
 /**
  * NavBharatAI Pro — the PAID image studio (admin 2026-09-18).
@@ -83,6 +84,12 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState<Result[]>([]);
+  // Which result the text editor is open on — an id, not a boolean, because this surface shows a
+  // whole run of images and "add text" has to mean the one whose button was pressed. Applying
+  // REPLACES that result's url in place, so Save and "use as reference" both carry the text
+  // forward; appending a second copy would leave two near-identical images in the list and no way
+  // to tell which one has the right phone number on it.
+  const [textOn, setTextOn] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedEndRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -241,6 +248,15 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
                   >
                     <Download className="w-3 h-3" /> Save
                   </button>
+                  {/* Same editor as the free tier. A paying user must never be the one who loses a
+                      capability — and this is the tier whose text is most likely to be a real
+                      shop's name and number. */}
+                  <button
+                    onClick={() => setTextOn(r.id)}
+                    className="text-[11px] flex items-center gap-1.5 text-muted hover:text-ink border border-line hover:border-line rounded-lg px-2.5 py-1.5 transition-colors"
+                  >
+                    <Type className="w-3 h-3" /> Add text
+                  </button>
                   {/* The studio move a search page has no reason to offer: carry this result straight
                       back into the input as the next request's reference. */}
                   <button
@@ -358,6 +374,21 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
           </div>
         </div>
       </div>
+
+      {textOn && (() => {
+        const target = results.find((r) => r.id === textOn);
+        if (!target) return null;
+        return (
+          <TextOverlayEditor
+            imageUrl={target.url}
+            onClose={() => setTextOn(null)}
+            onApply={(url) => {
+              setResults((rs) => rs.map((r) => (r.id === textOn ? { ...r, url } : r)));
+              setTextOn(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

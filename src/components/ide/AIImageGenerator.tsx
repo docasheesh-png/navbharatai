@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { Wand2, Sparkles, Download, Palette, Copy, Trash2, Clock, Star, Check, Image as ImageIcon } from 'lucide-react';
+import { Wand2, Sparkles, Download, Palette, Copy, Trash2, Clock, Star, Check, Type, Image as ImageIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
@@ -9,6 +9,7 @@ import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../li
 import { auth } from '../../lib/firebase';
 import { ImageStudioPro } from './ImageStudioPro';
 import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
+import { TextOverlayEditor } from './TextOverlayEditor';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -233,6 +234,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       URL.revokeObjectURL(url);
     }
   };
+
+  // The text editor is opened on demand, never mounted with the panel: it loads the picture into a
+  // full-resolution canvas, which is real work to do for a user who never presses the button.
+  const [textEditorOpen, setTextEditorOpen] = useState(false);
 
   const flashNote = (msg: string) => {
     setActionNote(msg);
@@ -616,6 +621,13 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                   />
                   <div className="absolute bottom-2 right-2 flex gap-1.5">
                     <button
+                      onClick={() => setTextEditorOpen(true)}
+                      className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
+                      title="Add text (spelled correctly, Hindi too)"
+                    >
+                      <Type className="w-3.5 h-3.5 text-body" />
+                    </button>
+                    <button
                       onClick={handleCopyImage}
                       className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
                       title="Copy image"
@@ -696,6 +708,16 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           </div>
         </div>
       </div>
+      )}
+
+      {/* The typed text replaces the shown image, so Copy and Download then save the version WITH the
+          text on it — which is what someone who just pressed Done expects those buttons to mean. */}
+      {textEditorOpen && generatedUrl && (
+        <TextOverlayEditor
+          imageUrl={generatedUrl}
+          onClose={() => setTextEditorOpen(false)}
+          onApply={(url) => { setGeneratedUrl(url); setTextEditorOpen(false); flashNote('Text added \u2713  Now press Download to save it.'); }}
+        />
       )}
     </div>
   );

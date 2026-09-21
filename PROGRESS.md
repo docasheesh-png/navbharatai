@@ -76450,3 +76450,106 @@ desk and these two belong in one decision rather than two. A session meeting any
 the key without waiting for the Routine.
 
 Documentation only — no code path, no test and no build behaviour is touched by this change.
+
+## 2026-09-21 — 📊 THIRTEEN REPORTS WERE BEING WRITTEN AND SHOWN TO NOBODY, and a red mark on what is redundant
+
+**Branch `claude/vigilant-feynman-9aobjz`. PR #3221 (merged) and PR #3223.** The admin asked two
+things: *"13 endpoints par asli diagnostic data ban raha hai jo kisi screen par dikhta hi nahi. pahle
+yahi banao!"* and *"admin penal me bahut se card aise hai, jinki koi need nahi hai. identify karo! aur
+un par temporary red mark laga do!"*
+
+### The audit that preceded both (9 agents, 6 readers + 3 rankers)
+
+| | Number |
+|---|---|
+| Admin-panel cards | 84 |
+| Cards with their own Copy/Download | **5** |
+| Report-shaped GET endpoints | 65 |
+| Endpoints with **no client at all** | **13** |
+| Download endpoints in the whole server | **1** |
+
+### Part one — the thirteen, now on a Diagnostics tab
+
+`builder-scorecard` · `agentv3/losses` · `agentv3/usage-report` · `metrics/history` ·
+`assistant-spend` · `provider-status` · `release-gate` · `feature-flags` · `key-version` · `events` ·
+`deployments` · `takedowns` · `announcements`.
+
+🔑 **The one that matters most is the builder scorecard, and its own module says why.**
+`builderMetrics.ts` opens with *"We ship fix after fix without being able to say whether the engine is
+getting better."* It carries `healPressure` — how often the builder had to repair its OWN output,
+which is the fifth absolute rule's 50/50 law as a number — and that was computed on every call to a
+route **no file fetched**.
+
+🔒 **NULL IS NOT ZERO, and the renderer is where that lie would have re-entered.** Every module behind
+these numbers already states the rule; a card printing `0%` for an unmeasured rate would have undone
+it at the last step, looking exactly like a real result. `num`/`pct`/`mins`/`usd` return an em dash,
+every rate carries its sample size, and a test asserts no `?? 0` fallback exists.
+
+⚠️ **A shape the panel does not understand is still fully readable** — each card renders what it can
+and its Copy carries the raw response, so a route whose fields change degrades rather than lying.
+
+### Part two — the red marks, and the bar for one is PROOF
+
+Five cards marked on something checkable: DUPLICATE (same screen, same data), SUPERSEDED, or RESETS
+ON DEPLOY. A card that merely looks busy is not marked.
+
+🔒 **A deliberate duplicate is not a duplicate.** "Published Apps" repeats the Publish Capacity card
+below it and is NOT marked, because its own comment records why it was added (*the card "sits under
+four rows of tiles, and the admin did not know it existed"*) and states both read one source. Marking
+it from a count of cards would be agreeing against a written decision. A test keeps it off the list.
+
+### Part three — "kam information wali ko delete karo", and TWO OF THREE MARKS WERE WRONG
+
+The admin's rule is not "delete what was marked". Each pair was re-read side by side first, and that
+is what caught both errors:
+
+- **Platform Health Score — deleted, mark was right.** The live twin adds a subtitle naming what the
+  score is built from and an honest `Unavailable — <reason>` state; the deleted card rendered nothing
+  on failure. Its state, fetch and Monitor-effect call went with it.
+  ⚠️ `/api/admin/health-score` now has no client and that is **not** the class the Diagnostics tab was
+  built for — the score is still on screen, from `/api/admin/monitor`, on the same inputs.
+- **AI Insights — the mark was on the WRONG HALF, so the OTHER card went.** The live "Insights" panel
+  showed six findings; the marked card shows the full list **plus the ask-box that exists nowhere
+  else**. Deleting by the mark would have destroyed the ask-box.
+- **Provider Token Burn — the identification itself was FALSE, so nothing was deleted.** It reads
+  `analytics.providerWise` (TOKENS) while "API Usage Ranking" reads `analytics.providerRanking`
+  (REQUESTS + latency) — two fields, two questions. The real twin is "Engine cost split"; but this
+  card's footer (total cost, the `(at least)` label, the Cashfree gateway figure) is duplicated
+  nowhere. Entry corrected in place, card kept for the admin.
+
+🔒 **THE GUARD CAUGHT THE ONE MISTAKE MADE WHILE DOING THIS.** After the two register entries were
+removed, `tests/theReportsThatWereNeverShown.test.ts` failed on *"every mark on screen is really
+registered"* — the AI Insights card still carried a badge whose reason had gone. A dangling red mark
+on a card that is staying is exactly what makes the next review untrustworthy, and neither `tsc` nor
+any behavioural test can see it.
+
+### The export half
+
+`reportExport.ts` (pure) + `ReportExportButtons.tsx`. Every export travels in an envelope naming the
+report, the time, the window and the endpoint — the three facts every autopsy in this file establishes
+first, now travelling WITH the data. An empty card REFUSES rather than exporting `{"data":null}`; a
+real zero still exports.
+
+🔴 **DOWNLOAD IS HIDDEN INSIDE THE ANDROID APP, verified not assumed.** `MainActivity.java` registers
+three plugins and installs no `DownloadListener`, and Capacitor's WebView implements neither that nor
+the `download` attribute — so a blob click returns silently and nothing reaches storage. A button that
+does nothing is the state the second absolute rule forbids, so the native shell shows Copy alone,
+which genuinely works there. The admin reads this panel on a phone, so that is the common case.
+
+### Still open
+
+- **The 40-cap deletes the evidence an autopsy needs.** `trimChannel` keeps the NEWEST 40 `llmCalls`
+  and `commands` (`slice(len - cap)`), so on the 312-call build this file already records, calls
+  1–272 are gone — and first-turn starvation, plan-call timeouts and rung-1 ladder falls all live in
+  the EARLY calls. ⚠️ The fix is **not** "keep the head": `reportTruncation.ts` states a real reason
+  for keeping the tail (*"the end of a build is where its failure lives"*), and trading one loss for
+  another is what the 2026-09-13 rule forbids. The fix is **first N + last N inside the same cap**,
+  with the truncation fact declaring that the window has a GAP. Verified safe: the only two readers of
+  the stored ledger are aggregates (`modelPerformance`, `realCostFromCalls`), neither assumes
+  contiguity, and the cost reader already treats a capped list as a lower bound.
+- Marks the admin has not yet ruled on: **Since this server started** (resets on deploy) and **Recent
+  Token Purchases** (superseded by the Revenue purchases table).
+
+Verification both times: typecheck · server typecheck · unused imports · native guard · **28,125
+tests** · build · bundle · boot · deps. `AppKnowledgeBase.ts` carries the Diagnostics tab, per the
+sync rule.

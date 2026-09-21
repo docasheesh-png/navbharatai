@@ -12,6 +12,7 @@ import {
   effectiveFields,
   splitUpdate,
   combinedProfile,
+  userAskedToRemember,
   SHARED_MEMORY_FIELDS,
   SHARED_PROFILE_ID,
   type ClientProfile,
@@ -176,7 +177,7 @@ export async function runProfessionalChatWithUsage(
         clientProfileStore.load(verifiedUserId, SHARED_PROFILE_ID),
       ]);
     }
-    memoryBlock = [memoryLayer(!!verifiedUserId, memory), formatProfileBlock(combinedProfile(profile, sharedProfile), memory)]
+    memoryBlock = [memoryLayer(!!verifiedUserId, memory), formatProfileBlock(combinedProfile(profile, sharedProfile, memory), memory)]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -248,7 +249,11 @@ export async function runProfessionalChatWithUsage(
     // Validated against the professional's own fields PLUS the shared ones, then split: what this
     // expert declared goes to its profile (unchanged behaviour), what everyone shares goes to the
     // shared profile — a key in both (`name`) goes to both.
-    const { own, shared } = splitUpdate(sanitizeUpdate(rawUpdate, effectiveFields(memory)), memory);
+    const clean = sanitizeUpdate(rawUpdate, effectiveFields(memory));
+    // "Remember this" is the PERSON's to author: without a cue in their own message the model's
+    // `remember` entry is an inference, and an inferred memory is dropped before it is saved.
+    if (clean && 'remember' in clean && !userAskedToRemember(message)) delete clean.remember;
+    const { own, shared } = splitUpdate(clean, memory);
     if (own) {
       await clientProfileStore.save(verifiedUserId, config.id, mergeProfile(profile ?? {}, own, memory.fields));
     }

@@ -131,4 +131,18 @@ describe('🔒 source-level guards — what tsc and vitest cannot see', () => {
     const src = codeOnly(read('src/components/professionals/ProfessionalChat.tsx'));
     expect(src).toContain('conversationId: serverConversationId(conversationId)');
   });
+
+  // ── THE SIBLING LANE (review finding, same day): voice memory holds spoken turns verbatim ─────────
+  it('the VOICE lane carries the id too — into the init message, the load and the append', () => {
+    const chat = codeOnly(read('src/components/professionals/ProfessionalChat.tsx'));
+    expect(chat).toMatch(/<ProfessionalVoiceButton[\s\S]{0,120}?conversationId=\{serverConversationId\(conversationId\)\}/);
+    const btn = codeOnly(read('src/components/sonic/ProfessionalVoiceButton.tsx'));
+    expect(btn).toMatch(/<SonicChat[\s\S]{0,160}?conversationId=\{conversationId\}/);
+    const sonic = codeOnly(read('src/components/sonic/SonicChat.tsx'));
+    expect(sonic).toContain("{ type: 'init', professionalId, conversationId, history: history?.slice(-12) }");
+    const ws = codeOnly(read('src/server/sonic/sonicWs.ts'));
+    expect(ws).toContain('conversationId = conversationIdFromBody(msg.conversationId);');
+    expect(ws).toContain("voiceMemoryStore.load(uid || '', professionalId, conversationId)");
+    expect(ws).toContain('voiceMemoryStore.append(uid, professionalId, transcript.slice(), conversationId)');
+  });
 });

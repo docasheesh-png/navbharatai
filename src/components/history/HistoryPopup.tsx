@@ -14,6 +14,7 @@
 import React, { useEffect, useRef } from 'react';
 import { X, History as HistoryIcon } from 'lucide-react';
 import { HistoryView } from '../HistoryView';
+import type { ConversationRef } from '../../lib/chatWindows';
 
 export interface HistoryPopupProps {
   user: any;
@@ -21,7 +22,8 @@ export interface HistoryPopupProps {
   onClose: () => void;
   onRestoreSession?: (uci: string) => void;
   onDeleteSession?: (id: string) => void;
-  onOpenProfessional?: (viewId: string, conversationId: string) => void;
+  onOpenProfessional?: (viewId: string, ref: ConversationRef) => boolean | void;
+  onDeleteProfessional?: (viewId: string, conversationId: string) => void;
 }
 
 // NO `filter` PROP, DELIBERATELY. The popup serves the Free surface only (see historySurface.ts), so
@@ -36,6 +38,7 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
   onRestoreSession,
   onDeleteSession,
   onOpenProfessional,
+  onDeleteProfessional,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -52,7 +55,9 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
 
   // OPENING A ROW MUST ALSO CLOSE THE POPUP. Without this the chosen conversation loads UNDERNEATH a
   // list that is still covering it — the user taps, something happens, and they see the same list.
-  const closeAfter = <A extends unknown[],>(fn: ((...args: A) => void) | undefined) => (...args: A) => { fn?.(...args); onClose(); };
+  // A handler that answers `false` opened nothing (the window cap refused), so the popup stays open
+  // with the list still in front of the user rather than closing over a refusal they did not see.
+  const closeAfter = <A extends unknown[], R,>(fn: ((...args: A) => R) | undefined) => (...args: A) => { const r = fn?.(...args); if (r !== false) onClose(); };
 
   return (
     // `nb-sheet-overlay-flush` (admin 2026-09-06): z-130 is BELOW the global tab bar's z-150, so the
@@ -111,6 +116,7 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
                phone screen doing it (admin 2026-09-20). */
             embedded
             onOpenProfessional={closeAfter(onOpenProfessional)}
+            onDeleteProfessional={onDeleteProfessional}
           />
         </div>
       </div>

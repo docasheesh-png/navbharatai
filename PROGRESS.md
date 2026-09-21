@@ -75687,3 +75687,33 @@ Three reversions proven to bite.
 (their credit is safe either way — reconcile does it). Returning automatically needs Android App
 Links, which need `ANDROID_CERT_SHA256` set — currently unset — and that path added to the claimed
 allowlist. Left for a separate change rather than half-built.
+
+## 2026-09-21 — the checkout fix missed its own merge, and WHY no CI run appeared
+
+**Admin: "already merged".** True, and the timing is the whole story:
+
+| | |
+|---|---|
+| #3203 merged | 2026-09-20 **23:56:20Z**, at head `b56d5c76` |
+| the Android checkout fix pushed | 2026-09-21 **04:09:39Z** — **four hours later** |
+
+So `/refund` and `/contact` DID ship (verified with `git ls-tree origin/main`, not assumed), and the
+**checkout hand-off did not** — `src/server/lib/checkoutHandoff.ts` is absent from `main`.
+
+🔴 **AND THAT ALSO EXPLAINS THE MISSING CI RUN, which I had attributed to the wrong cause.** I told
+the admin GitHub had failed to create a run and invoked `ci.yml`'s documented workflow_dispatch
+escape hatch (written for a real 2026-08-15 GitHub incident). The escape hatch was harmless, but the
+diagnosis was wrong: **`ci.yml` runs on `pull_request`, and a push to a branch whose PR is already
+CLOSED creates no `pull_request` event.** There was no incident — the PR had merged while I was
+still pushing to its branch. *A plausible cause that matches the symptom is not the cause;* the
+merge timestamp settles it and the run list never could.
+
+✅ **Re-shipped exactly as CLAUDE.md's merged-PR rule requires** — a merged PR cannot track new work,
+and new commits are never stacked on merged history. Fresh branch from `origin/main` (which had moved
+on: #3202, #3206, #3208), the fix cherry-picked onto it, **full gate re-run on that state**:
+typecheck · typecheck:server · noUnusedImports · native:guard · build · test:bundle · boot:check ·
+deps:server-gate all green; `vitest run` **27,869 passed, 1 skipped, 0 failed**.
+
+⚠️ **The live consequence, stated plainly: the Android ₹1 test could not have passed** in the window
+between the merge and this PR — `/pay` does not exist on the deployed site, so the app still hits the
+`https://localhost` refusal. Nothing regressed; the fix simply never reached production.

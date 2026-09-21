@@ -2872,6 +2872,61 @@ the flag entries above promise.
   It goes stale exactly when a post-build pass writes AFTER the copy is taken, which is what
   `POST_GREEN_WRITES` measures.
 
+- **🎧 `AGENTV3_BROWSE_CONSOLE` — THE CONSOLE LISTENER LIVED ON ONE BROWSER LANE OF THREE (autopsy
+  2026-09-21). ⚠️ NOT set, and the code default is ON**; `off` is the instant, no-deploy revert and
+  emits the pre-change script byte for byte. Read by `browseConsoleCaptureEnabled()` in `E2BActuator`.
+  🔴 **WHY: `RUNTIME_UNCHECKED` was not a fault, it was the STRUCTURAL OUTCOME of an ordinary build.**
+  Two admin reports, five builds, that code on every one — beside `IN_BUILD_GREEN`, `GREEN_GUARD_SAVE`
+  and a preview opened in a real browser and seen rendering. `CONSOLE_LOG` is the only thing
+  `getConsoleErrors` reads, and three lanes could have filled it. All three were shut:
+  • **the CDP daemon** — the ONLY writer, and it starts solely when the MODEL calls `browser_action`.
+  An ordinary build never does. • **the page checks** (`runtimeRecordFromPageChecks`, the documented
+  *"second source of runtime truth"*, 2026-08-19) — needs `extractPageRoutes` to find a non-`/` route;
+  **MEASURED: 0 of this repo's 40 golden scaffolds yield one**, so for an app built from our own
+  templates that lane has never once answered. • **`browseUrl`** — the navigation the PLATFORM makes on
+  essentially every build (the render proof, the verify loop, GreenGuard, `verifyAfterFix`): it launched
+  a real browser, waited for paint, read the DOM, and **attached no listener at all**.
+  🔑 **The fix is the third lane, because it is already paid for** — the browser launches regardless, so
+  the four listeners cost nothing. They are now ONE definition (`CONSOLE_RECORDER_JS` + `attachConsoleJs`)
+  interpolated into both the daemon and `browsePageScript`, never copied: a second copy is the
+  drifted-copy class this repo has paid for four times (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot
+  guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2).
+  🔒 **THE SESSION MARKER IS GATED ON `painted`, AND THAT GATE IS A BUG THIS FIX WOULD OTHERWISE HAVE
+  CREATED.** `getConsoleErrors` reports `captured:true` when the log FILE exists, and `provenFromTimeline`
+  reads the resulting `RUNTIME_VERIFIED` as *"the app ran in a real browser"*. A browser that loaded a
+  dead preview has a perfectly clean console — so an unconditional marker would let a **404 earn a render
+  proof**. Painted ⇒ the app's own mount root had content. An ERROR is recorded either way, because a
+  crash that prevents paint is exactly what must be reported.
+  ⚠️ **IT IS NOT A REPORTING CHANGE — IT SPENDS MONEY, and that is the point.** With the console really
+  captured, a build carrying a REAL runtime error now reaches the auto-fix loop (`AGENTV3_AUTOFIX`, on)
+  and spends a repair pass it previously could not; on Weak, NavBharatAI pays. Bounded by
+  `AGENTV3_AUTOFIX_ATTEMPTS` (default 1) and wrapped in `verifyAfterFix`, so a repair that breaks a green
+  app is reverted. ✅ **It also wakes a guard that has been inert since it shipped**: `reRenderOk`'s
+  post-repair `afterCount` was `null` on almost every build (nothing to read), so `judgeRuntimeRepair`
+  could never see a repair that fixed one error and introduced two. Now it can.
+  ⚠️ **The script writes to a FILE and never to stdout** — `browseUrl` parses its stdout for the paint
+  marker and the page HTML, so one stray print would corrupt the DOM every caller reads (the preview
+  verdict, the feature probe, Green Freeze). And it APPENDS: two lanes now share one log.
+  🔒 **The generated script is PARSED by its test** (`node --check`, the real thing). This function has
+  shipped broken twice — a shell-quoting bug that handed `node` a fragment, and a path bug that hid
+  Playwright — and **neither failed loudly**, because the caller falls back to curl on any error. A
+  generated script is code; code nothing ever parses is code presumed to work.
+  🧬 **THE 50/50 HALF — a BROWSER-LANE CENSUS.** Six scripts in that one file launch or attach to a
+  browser, written eighteen months apart, and nothing knew how many there were. The census names each
+  lane, whether it records, and why — and fails when a seventh appears. It deliberately does NOT say
+  "every lane must record": the journey check drives hostile input and the page check already collects
+  its own errors, so forcing them would put pre-repair errors inside the verdict's 3-minute window and
+  report a fixed bug as surviving. Test-locked and **reversion-proven four ways** in
+  `tests/theConsoleListenerLivedOnOneLaneOfThree.test.ts` (19 cases).
+  **What to watch on the first real builds:** `RUNTIME_VERIFIED` and `RUNTIME_ERRORS_REMAIN` appearing
+  **at all**. A crop of `RUNTIME_ERRORS_REMAIN` is not a regression — it is the check working for the
+  first time, and each one is a real error that was reaching users unseen. Also watch the repair-pass
+  count on Weak; if it rises more than the errors justify, `AGENTV3_BROWSE_CONSOLE=off` reverts it.
+  🔴 **STILL OPEN (rule 6): lane B cannot see a state-routed SPA.** `extractPageRoutes` finds only
+  `<Route path=…>` and Next `app/x/page.tsx`, so every single-screen app — and our multi-screen
+  scaffolds that switch on state — yields nothing. Deriving "pages" for those is a separate problem and
+  is NOT guessed at here; lane C now covers them, which is why this is an upgrade rather than a breakage.
+
 - **🧭 IN THE ADMIN CONSOLE THE BOTTOM BAR *IS* THE TAB STRIP (admin 2026-09-20; no flag, no cost).**
   *"jab admin panel open hota hai, to footer me yeh home|ai|preview|studio|more etc jo dikh rahe hai —
   isko badalna hai!! is footer me MONITOR, USERS, ai engine, revenue … jo abhi header me hai, unko

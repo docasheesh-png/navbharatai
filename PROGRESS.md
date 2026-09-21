@@ -76795,3 +76795,71 @@ the preview is on screen AND the tab is visible, never while backgrounded, and i
 *"Thodi der chala le"* measured as attention rather than wall clock.
 
 Full gate green on the final state.
+
+---
+
+## 2026-09-21 — 🐢 FIVE TO TEN SECONDS ON OUR OWN PAGE: THE SDK WAS QUEUED BEHIND A ROUND TRIP
+
+**Admin, after the website top-up worked:** *"par bahut show hai, button prss aur cashfee page par
+jane me 5-10second lag rhe, **hamare page par hi**"*. The last clause is the whole finding — the wait
+was ours, not the gateway's.
+
+**THE CAUSE WAS AN ORDER OF OPERATIONS, NOT A SLOW NETWORK:**
+
+```
+click → await POST /api/payment/create-order   (our server → the gateway's orders API)
+      → THEN create <script src="https://sdk.cashfree.com/js/v3/cashfree.js">   (cold DNS + TLS + download)
+      → THEN checkout()
+```
+
+🔑 **The SDK does not need the session id.** Nothing about fetching a third-party script depends on
+the order existing, so it was queued behind a network round trip for no reason and the user waited
+for the SUM of the two. There was no `preconnect` either, so step two also paid for a cold DNS
+lookup and TLS handshake before the first byte arrived.
+
+**Fixed at the class, not the instance:**
+- `preloadCheckoutSdk()` (`paymentService.ts`) — the load, extracted and **idempotent**: repeated
+  callers share ONE promise and ONE `<script>`. `warmCheckout()` starts it when the purchase BEGINS,
+  beside the order call, so the download overlaps the round trip instead of following it.
+- `index.html` — `preconnect` + `dns-prefetch` to the SDK origin, with `crossorigin` (a script is
+  fetched in CORS mode; a preconnect without it opens a connection the script cannot reuse, and the
+  hint would look present while buying nothing). Deliberately NOT `preload`: every visitor would
+  then pay for a payment SDK they will probably never use.
+
+⚠️ **A FAILED load clears the memo, on purpose.** Caching "it failed" would turn one bad moment on a
+train into a permanently dead Purchase button for the rest of the session; a retry must be a real
+retry. A SUCCESSFUL load is cached for ever — the global is there.
+
+🔒 **The native shell downloads NOTHING** — it hands the checkout to the system browser and never
+runs this SDK, so fetching it inside the WebView would spend a mobile user's data on a script that
+cannot execute. The native/web decision lives inside `warmCheckout()` rather than at the call site,
+so the fifth screen that starts a top-up cannot get it wrong.
+
+**Test-locked and reversion-proven** in `theCheckoutSdkLoadsBesideTheOrder.test.ts` (11 cases).
+Three guards are SOURCE-level because `tsc` and `vitest` cannot see that a call sits BEFORE an
+`await` rather than after it — moving it back restores the 5-10 seconds and breaks no behavioural
+test in this repo, which is exactly how the serial order shipped in the first place. Both reversions
+were run and confirmed to fail.
+
+🔴 **AND THE FULL GATE CAUGHT A SIBLING THE TARGETED RUN DID NOT.**
+`theCheckoutCannotRunOnLocalhost.test.ts` anchored its reversion guard on the literal
+`if ((window as any).Cashfree)` — which this refactor moved INTO `preloadCheckoutSdk()`. The guard
+broke on a change that never touched the branch it protects. It is re-aimed **and made stricter**:
+scoped to the BODY of `triggerCashfreeCheckout`, because a file-wide `indexOf` would now find the
+`shouldHandOffCheckout(` inside `warmCheckout()` above it and pass while saying nothing about the
+function it names. Re-proven by deleting the hand-off branch.
+
+⚠️ **STILL OPEN, and it costs money rather than code: Cloud Run cold start.** Part of that 5-10 s may
+be our own server waking up (`min-instances` is 0). The SCALE PLAN's rule holds — that lever is a
+standing monthly bill and is not to be pulled without the admin's decision. Measure before buying:
+if the delay persists on a WARM second attempt, the remainder is the SDK/network and this fix is the
+whole of it; if only the FIRST purchase after an idle period is slow, that is the cold start.
+
+Full gate green on the final state (re-run after the last edit, safeguard #5): typecheck,
+typecheck:server, noUnusedImports, native:guard, vitest (**28,233 passed | 1 skipped | 0 FAIL**),
+build, test:bundle, boot:check, deps:server-gate.
+
+📌 **SEQUENCING NOTE FOR THE `.aab`:** this fix is CLIENT code, and the app is BUNDLED mode — so it
+reaches installed users only in a fresh bundle. It must merge BEFORE the `.aab` is built, or the
+build carries the Android hand-off (#3210) without the speed fix and a second versionCode is spent
+immediately.

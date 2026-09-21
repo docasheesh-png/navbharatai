@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { ModeButton } from '../chat/ModeButton';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2, Layers } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -1689,20 +1690,11 @@ export const AIChat: React.FC<AIChatProps> = ({
                 no box of its own and the layout is byte-for-byte what it was. It holds no mode; it asks
                 App.tsx to open the ONE picker sheet the bottom bar opens. */}
             <div className={showFreeModeButton ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}>
-            {showFreeModeButton && (
-              <button
-                type="button"
-                onClick={onOpenModePicker}
-                aria-label="Choose AI mode"
-                aria-haspopup="dialog"
-                title="Choose AI mode — NavBharatAI FREE, Image Generator AI or any expert"
-                className="h-12 shrink-0 flex items-center gap-1.5 px-3 rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-bg)] text-[11px] font-bold text-muted hover:text-ink hover:border-indigo-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                Mode
-                <ChevronDown className="w-3 h-3 text-faint" />
-              </button>
-            )}
+            {/* THE SHARED BUTTON (2026-09-21). This markup used to live here inline, and when the
+                admin asked for the same control on every other surface it would have become five
+                copies — the drifted-copy class this repo has paid for repeatedly. `showFreeModeButton`
+                still decides WHETHER, because only this surface has the Pro-mode carve-out below. */}
+            {showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}
             <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
                   {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}

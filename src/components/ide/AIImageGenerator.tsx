@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { ModeButton } from '../chat/ModeButton';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon } from 'lucide-react';
@@ -17,6 +18,8 @@ type GeneratedImage = ImageHistoryItem;
 
 interface Props {
   onImageGenerated?: (imageUrl: string, prompt: string) => void;
+  /** Open the ONE mode picker (admin 2026-09-21); undefined on a phone, where the bottom bar has it. */
+  onOpenModePicker?: (() => void) | undefined;
 }
 
 const STYLES = [
@@ -132,7 +135,7 @@ function readTier(): 'free' | 'pro' {
   }
 }
 
-export function AIImageGenerator({ onImageGenerated }: Props) {
+export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) {
   // The user's REMEMBERED choice, and what is actually shown, are two different things — see
   // `effectiveTier` below. Keeping them separate is what lets a dead paid tier be hidden WITHOUT
   // overwriting a preference the user really expressed: the day Pro is switched on, their choice
@@ -548,7 +551,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
       {effectiveTier === 'pro' ? (
         <div className="flex-1 min-h-0">
-          <ImageStudioPro onImageGenerated={onImageGenerated} />
+          <ImageStudioPro onImageGenerated={onImageGenerated} onOpenModePicker={onOpenModePicker} />
         </div>
       ) : (
       <div className="flex-1 min-h-0 flex flex-col">
@@ -761,7 +764,11 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
               />
             </div>
 
-            <div className="flex items-end gap-2 rounded-2xl border border-line bg-card pl-3 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
+            {/* Outside the pill, to its left — same placement and same shared button as every other
+                composer in the app (admin 2026-09-21). */}
+            <div className="flex items-end gap-2">
+            <ModeButton onOpen={onOpenModePicker} />
+            <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-3 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
               <label htmlFor="nbai-image-prompt" className="sr-only">Describe your image</label>
               <textarea
                 id="nbai-image-prompt"
@@ -798,6 +805,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
               >
                 {isLoading ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
               </button>
+            </div>
             </div>
 
             <p className="text-[10px] text-faint text-center flex items-center justify-center gap-1.5">

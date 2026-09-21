@@ -24,6 +24,8 @@
 // been bitten four times by a test that passed while the call site was gutted; a recording fake is
 // the answer to that, not a snapshot.
 
+import { DEFAULT_FONT_ID, FONT_STACK as DEFAULT_FONT_STACK, fontChoice, fontFamilyStack } from './imageFonts';
+
 // ⚠️ THE COLOURS BELOW ARE THE USER'S PICTURE, NOT OUR UI — so they are literals on purpose, and
 // the theme-token rule does not reach them. This is the precedent `inlineThemeColours.test.ts`
 // already sets for `MultiPageBuilder` and `DarkModeGenerator` ("the user's colours are not ours"):
@@ -38,6 +40,10 @@ const DEFAULT_BAND = 'rgba(0,0,0,0.55)';
 /** The two outline colours — one for light text, one for dark. Not themeable, for the reason above. */
 const OUTLINE_DARK = '#000000';
 const OUTLINE_LIGHT = '#ffffff';
+/** The default border, drawn only when a width is chosen — white reads against most photographs. */
+const DEFAULT_BORDER_COLOR = '#ffffff';
+/** The widest border we will draw, as a fraction of the font size. Past this it eats the letters. */
+export const MAX_BORDER_PCT = 0.2;
 
 /** Where a layer's box sits, as a fraction of the image. Percentages, so one layer fits every size. */
 /**
@@ -64,8 +70,35 @@ export interface TextLayer {
   color: string;
   /** A contrasting outline, so light text stays readable on a light photo. */
   outline: boolean;
-  /** A solid band behind the text — what a real banner does. Empty string = none. */
+  /**
+   * The BACKGROUND behind the text, as a finished CSS colour. Empty string = none.
+   *
+   * 🔒 ONE REPRESENTATION, DELIBERATELY. The editor shows it as a colour plus an opacity slider, but
+   * it is STORED as the single string that gets filled — `rgbaFrom` composes the two into it and
+   * `splitFill` reads them back out. Keeping a separate `bandColor` and `bandOpacity` beside this
+   * would be two sources for one fact, which is the drifted-copy class this repo has paid for four
+   * times; the pair that the UI needs is derived on demand instead.
+   */
   band: string;
+  /**
+   * Which face draws this layer — an id from `imageFonts.ts`, never a raw family name.
+   *
+   * An id rather than a family string because the family alone cannot say whether the face has to be
+   * FETCHED before the canvas can measure it, and a canvas that measures an unloaded font silently
+   * lays out in the fallback and then repaints in the real one — so the preview the user positioned
+   * is not the file they save.
+   */
+  fontId: string;
+  /**
+   * A border around the background box, as a fraction of the font size. 0 = none.
+   *
+   * Relative to the FONT rather than to the image, so a 2px-looking edge on a 1024 square is still a
+   * 2px-looking edge on a 1280 banner. An absolute pixel width would be a hairline on one and a slab
+   * on the other, and the user only ever sees one of them while choosing.
+   */
+  borderPct: number;
+  /** The border's colour. Kept separate from the text's: a border is most useful when it contrasts. */
+  borderColor: string;
   align: 'left' | 'center' | 'right';
   bold: boolean;
   /**
@@ -87,20 +120,18 @@ export interface TextLayer {
 }
 
 /**
- * The font stack, ordered by what actually ships on the platforms NavBharatAI runs on.
+ * The default stack and the catalogue behind the font picker.
  *
  * ⚠️ NAMED FAMILIES FIRST, AND THAT IS NOT DECORATION. A bare `sans-serif` DOES resolve Devanagari on
- * every OS below — but it picks the system's default UI face, which on Android is Roboto and falls
- * back per-glyph to Noto with a different vertical rhythm, so a line of mixed Hinglish and Hindi
+ * every OS — but it picks the system's default UI face, which on Android is Roboto and falls back
+ * per-glyph to Noto with a different vertical rhythm, so a line of mixed Hinglish and Hindi
  * ("Sharma जी") comes out on two visual baselines. Naming the Devanagari face first makes both halves
- * come from one family wherever that family exists.
+ * come from one family wherever that family exists. `imageFonts.ts` holds the reasoning in full.
  *
- * Android ships Noto Sans Devanagari (since 4.x), iOS/macOS Kohinoor and Devanagari Sangam MN,
- * Windows Nirmala UI. Desktop Linux is the one platform where none is guaranteed, which is exactly
- * what `devanagariRendersHere` is for.
+ * Re-exported here because this module was the stack's home before the picker existed, and a caller
+ * that imports it from here is not wrong — it is just one hop from the list that owns it.
  */
-export const FONT_STACK =
-  '"Noto Sans Devanagari", "Nirmala UI", "Kohinoor Devanagari", "Devanagari Sangam MN", "Mangal", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+export { FONT_STACK } from './imageFonts';
 
 /** Devanagari, including the Extended block — a range check, never a language guess. */
 const DEVANAGARI = /[ऀ-ॿ꣠-ꣿ]/;
@@ -164,6 +195,9 @@ export function defaultLayer(id: string, text = '', kind: LayerKind = 'text'): T
     align: kind === 'list' ? 'left' : 'center',
     bold: true,
     widthPct: kind === 'list' ? 0.7 : 0.86,
+    fontId: DEFAULT_FONT_ID,
+    borderPct: 0,
+    borderColor: DEFAULT_BORDER_COLOR,
   };
 }
 
@@ -185,6 +219,11 @@ export function normalizeLayer(layer: TextLayer): TextLayer {
     // Never 0 — a zero-width box would divide by nothing in the wrap and produce an endless loop of
     // one-character lines. 0.1 is narrow enough to be a deliberate choice and wide enough to draw.
     widthPct: clamp(layer.widthPct, 0.1, 1, 0.86),
+    // An id nothing matches falls back to the default face rather than to an empty family: a layer
+    // saved on a build that knew a font this build does not must still draw.
+    fontId: fontChoice(String(layer.fontId ?? '')).id,
+    borderPct: clamp(layer.borderPct, 0, MAX_BORDER_PCT, 0),
+    borderColor: typeof layer.borderColor === 'string' && layer.borderColor ? layer.borderColor : DEFAULT_BORDER_COLOR,
   };
 }
 
@@ -207,9 +246,69 @@ export function fontString(layer: TextLayer, w: number, h: number): string {
   return fontStringAt(layer, fontPx(layer, w, h));
 }
 
-/** The same shorthand at an explicit size — what auto-fit needs while it is still choosing one. */
+/**
+ * The same shorthand at an explicit size — what auto-fit needs while it is still choosing one.
+ *
+ * ⚠️ THE FAMILY COMES FROM THE LAYER, AND THE SAME STRING IS USED TO MEASURE AND TO DRAW. That is
+ * what keeps wrapping honest under a chosen font: `wrapLine` breaks where `measureText` says the box
+ * ends, so measuring in one face and drawing in another would put the break in the wrong place. One
+ * function, both jobs — which is also why the editor waits for a font to load before repainting.
+ */
 export function fontStringAt(layer: TextLayer, size: number): string {
-  return `${layer.bold ? '700 ' : '400 '}${Math.max(1, Math.round(size))}px ${FONT_STACK}`;
+  const family = fontFamilyStack(fontChoice(String(layer.fontId ?? '')).id);
+  return `${layer.bold ? '700 ' : '400 '}${Math.max(1, Math.round(size))}px ${family}`;
+}
+
+/**
+ * Compose a background fill from a colour and an opacity. Opacity at or below 0 means NO background,
+ * which is how "remove the background" is expressed — a separate on/off flag beside the slider would
+ * be a second way to say the same thing, and the two would drift.
+ *
+ * PURE.
+ */
+export function rgbaFrom(hex: string, alpha: number): string {
+  const a = Number(alpha);
+  if (!Number.isFinite(a) || a <= 0) return '';
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '';
+  const clamped = Math.min(1, a);
+  if (clamped >= 1) return `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${Math.round(clamped * 100) / 100})`;
+}
+
+/**
+ * Read a stored fill back into the colour and opacity the editor's two controls show.
+ *
+ * The inverse of `rgbaFrom`, and it must also read what earlier code wrote by hand
+ * (`rgba(0,0,0,0.55)`, `#000`), because those strings are on layers real users already have and in
+ * every template. Anything unreadable comes back as "no background" rather than as a guess.
+ *
+ * PURE.
+ */
+export function splitFill(css: string): { hex: string; alpha: number } {
+  const raw = String(css ?? '').trim();
+  if (!raw) return { hex: '#000000', alpha: 0 };
+  const rgba = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(raw);
+  if (rgba) {
+    const a = rgba[4] === undefined ? 1 : Number(rgba[4]);
+    return { hex: toHex(Number(rgba[1]), Number(rgba[2]), Number(rgba[3])), alpha: Number.isFinite(a) ? Math.min(1, Math.max(0, a)) : 1 };
+  }
+  const rgb = hexToRgb(raw);
+  if (rgb) return { hex: toHex(rgb.r, rgb.g, rgb.b), alpha: 1 };
+  return { hex: '#000000', alpha: 0 };
+}
+
+function hexToRgb(value: string): { r: number; g: number; b: number } | null {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(value ?? '').trim());
+  if (!m) return null;
+  let body = m[1];
+  if (body.length === 3) body = body.split('').map((c) => c + c).join('');
+  return { r: parseInt(body.slice(0, 2), 16), g: parseInt(body.slice(2, 4), 16), b: parseInt(body.slice(4, 6), 16) };
+}
+
+function toHex(r: number, g: number, b: number): string {
+  const part = (n: number) => Math.min(255, Math.max(0, Math.round(Number(n) || 0))).toString(16).padStart(2, '0');
+  return `#${part(r)}${part(g)}${part(b)}`;
 }
 
 /**
@@ -429,6 +528,11 @@ export function layoutLayer(layer: TextLayer, w: number, h: number, measure?: Me
  * ⚠️ A LIST'S BAND SPANS ITS WHOLE BOX, not the widest label. A rate card's right column is set
  * against the box's right edge, so a band sized to the text would stop short of the prices and leave
  * them sitting on the bare photograph — unreadable, and obviously wrong the first time anyone looks.
+ *
+ * 🔑 IT IS THE BORDER'S RECTANGLE TOO, which is why a layer with a border but NO fill still gets one.
+ * A border computed from its own geometry would be a second answer to "where is this text's box?",
+ * and the day the two disagreed the outline would sit a few pixels off the bar it is meant to frame.
+ * One rect, both jobs — the FILL is what is conditional, never the measurement.
  */
 export function bandRect(
   layer: TextLayer,
@@ -437,7 +541,7 @@ export function bandRect(
   measure: Measure,
 ): { x: number; y: number; w: number; h: number } | null {
   const l = normalizeLayer(layer);
-  if (!l.band) return null;
+  if (!l.band && !(l.borderPct > 0)) return null;
   const size = fittedFontPx(l, w, h, measure);
   const lines = renderedLines(l, w, h, measure, size);
   if (lines.length === 0) return null;
@@ -477,6 +581,7 @@ export interface TextContext {
   fillText(text: string, x: number, y: number): void;
   strokeText(text: string, x: number, y: number): void;
   fillRect(x: number, y: number, w: number, h: number): void;
+  strokeRect(x: number, y: number, w: number, h: number): void;
 }
 
 /**
@@ -509,8 +614,20 @@ export function drawTextLayers(ctx: TextContext, layers: TextLayer[], w: number,
     // A list sets its own two edges, so the context must not re-align underneath it.
     ctx.textAlign = layer.kind === 'list' ? 'left' : layer.align;
     if (rect) {
-      ctx.fillStyle = layer.band;
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      if (layer.band) {
+        ctx.fillStyle = layer.band;
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      }
+      if (layer.borderPct > 0) {
+        // Inset by half the stroke so the border sits INSIDE the rect. A canvas stroke straddles the
+        // path, so without this a thick border spills half its weight outside the bar it frames and
+        // reads as misaligned against the fill it is drawn on.
+        const lw = Math.max(1, size * layer.borderPct);
+        ctx.lineWidth = lw;
+        ctx.lineJoin = 'miter';
+        ctx.strokeStyle = layer.borderColor;
+        ctx.strokeRect(rect.x + lw / 2, rect.y + lw / 2, Math.max(0, rect.w - lw), Math.max(0, rect.h - lw));
+      }
     }
 
     const paint = (draw: (text: string, x: number, y: number) => void) => {
@@ -636,7 +753,7 @@ export function outlineFor(color: string): string {
  */
 export function devanagariRendersHere(ctx: Pick<TextContext, 'font' | 'measureText'>): boolean {
   try {
-    ctx.font = `64px ${FONT_STACK}`;
+    ctx.font = `64px ${DEFAULT_FONT_STACK}`;
     const glyph = ctx.measureText('क').width;
     // U+FFFF is permanently unassigned, so it is a notdef box in every font that exists.
     const notdef = ctx.measureText('￿').width;

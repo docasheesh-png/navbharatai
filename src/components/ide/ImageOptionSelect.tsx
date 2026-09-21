@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, X } from 'lucide-react';
 
 /**
@@ -18,6 +19,20 @@ import { Check, ChevronDown, X } from 'lucide-react';
  * `PLAYWRIGHT_BROWSERS_PATH` ×2). Four copies of a bottom sheet is four chances for the Escape key,
  * the scrim, the tick, or the tab-bar reservation to be right in three places and wrong in the
  * fourth. There is one sheet; every group gets the same one.
+ *
+ * 🔴 THE SHEET IS RENDERED INTO `document.body`, AND THAT IS A BUG FIX, NOT A STYLE CHOICE.
+ * Admin, 2026-09-21: *"pro (paid) image size/formate (1:1 default) change nahi ho raha"* — while the
+ * free tier's four selectors worked. The difference was one class: `ImageStudioPro`'s footer carries
+ * `backdrop-blur`, and an element with a `backdrop-filter` (like `transform` and `filter`) becomes
+ * the CONTAINING BLOCK for every `position: fixed` descendant. So `fixed inset-0` resolved to that
+ * ~100px footer strip instead of the viewport, the panel's `overflow-hidden` clipped what was left,
+ * and the sheet opened where nobody could see it. The value never changed because the list was never
+ * reachable — and nothing errored.
+ *
+ * Deleting the blur would have fixed today and left the trap armed: any ancestor gaining a transform,
+ * a filter or `contain` re-breaks it, silently, from a file nobody was editing. A portal takes the
+ * sheet out of the ancestor chain entirely, so the containing block cannot be stolen by ANY call
+ * site, present or future. That is the class, not the instance.
  *
  * 🔴 THE SHEET GEOMETRY IS THE SHARED ONE, NOT A `max-h-[80vh]`. On a phone `vh` is the LARGE
  * viewport, so a hand-written fraction puts the last rows under the browser toolbar AND under this
@@ -132,7 +147,7 @@ export function ImageOptionSelect({ label, heading, options, value, onChange, di
         <ChevronDown className="w-3.5 h-3.5 text-muted shrink-0" aria-hidden="true" />
       </button>
 
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal((
         <div
           className="nb-sheet-overlay-flush fixed inset-0 z-50 flex items-end justify-center bg-scrim"
           onClick={() => { setOpen(false); triggerRef.current?.focus(); }}
@@ -192,7 +207,7 @@ export function ImageOptionSelect({ label, heading, options, value, onChange, di
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </>
   );
 }

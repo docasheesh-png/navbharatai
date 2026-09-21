@@ -75362,6 +75362,104 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — A CANCELLATION TAKES OUR MARGIN, NEVER OUR COST (the double discount, closed)
+
+**Admin, after I raised the same open item three times and they asked for the fix rather than the
+risk: _"haan, floor + naya message bhej do."_**
+
+🔴 **AND A CORRECTION TO MY OWN THREE REPORTS FIRST, because it changes the urgency.** All three
+times I wrote that a stopped build *"can"* cost NavBharatAI money. Verified in code: it **always**
+does. This was never a rare composition — it is every stopped build with files saved.
+
+**WHY "ALWAYS": TWO MODULES READ ONE EXPRESSION.**
+
+```
+previewEarnsMarkup.ts     previewProven: buildObs.previewRendered === true
+cancelledBuildBilling.ts  appRendered:   buildObs.previewRendered === true
+```
+
+`decideCancelledBuildBill`'s `files-saved` branch (the 50%-off band) is reachable **only** when
+`appRendered` is false — and that is exactly the state in which `decideMarkupOnProof` has already
+waived the service margin. So the half was never cutting into margin; it was cutting into
+NavBharatAI's own out-of-pocket cost, on every occurrence.
+
+| a build costing us $1.20 · decided bill $4.80 · user presses Stop | charged | we spent | result |
+|---|---|---|---|
+| before 2026-09-18 | $4.80 → 50% → **$2.40** | $1.20 | **+$1.20** ← the designed trade |
+| after 2026-09-18 (markup waiver shipped) | $4.80 → margin waived → $1.20 → 50% → **$0.60** | $1.20 | **−$0.60 loss** |
+
+🔑 **NEITHER MODULE IS WRONG, AND THAT IS THE CLASS.** The 50% band (2026-09-14) was designed
+against a bill that INCLUDED margin. The waiver (2026-09-18) removed the very thing it was
+discounting, four days later. Each is locally correct; **nothing ever asked what happens when both
+fire.** Same shape as every composition defect this repo has paid for — and the reason it survived
+review is that reading either module alone shows nothing amiss.
+
+### THE FIX — a real-cost floor on the discount, not a second multiplication
+
+```
+billedUsd = min(decided, max(realCost, decided / 2))
+```
+
+Stated as a rule: **a cancellation discount may take our PROFIT and may never take our COST.**
+
+- **margin waived** (today's every Stop) ⇒ the floor IS the bill: the user pays exactly what the
+  build cost to run, we earn nothing and lose nothing. Both halves of the admin's own 2026-09-14
+  instruction — *"DONO ka nuksan na ho, na mera na user ka"* — hold for the first time.
+- **margin intact** (kill switch off, or a real cost already above the bill) ⇒ half, byte for byte
+  as before.
+- 🔒 **THE THREE ₹0 OUTCOMES ARE UNTOUCHED, and the ordering is asserted:** nothing written,
+  template-only (autopsy `2b0a3ed5`), and the unverified edit (autopsy `95598899`) each return
+  BEFORE the arithmetic. Those are admin rulings about *what the user is holding*, not discounts on
+  a bill — a floor under them would charge for a build that delivered nothing, which is the one
+  thing every rule above forbids. A `working-app` Stop is likewise still charged in full.
+- 🔒 **RULE 3 stays structural:** `min(decided, …)`, so the floor can never raise a charge.
+
+⚠️ **THE COST IS PASSED IN, NEVER ASSUMED.** `realCostUsd` / `sandboxUsd` are the SAME two numbers
+the waiver is given (`decidedRealCostUsd`, `decidedSandboxUsd`) — one measured cost, not two
+estimates. **Absent ⇒ floor 0 ⇒ the plain half, i.e. today's behaviour exactly**, which is what
+keeps the existing suite meaningful. A module that derived its own floor would be inventing a cost,
+which this repo's billing law forbids even when the guess flatters us; a test strips comments and
+asserts no cost computation exists in this module's code.
+
+### TWO SECOND-ORDER PROBLEMS THE FIX WOULD OTHERWISE HAVE CREATED
+
+Both caught before pushing, and both are the *"a fix must never trade one problem for another"* rule
+doing its job:
+
+1. **The user's message would have lied.** *"you have been charged HALF"* is false when the charge
+   was floored — and the number beside it on their bill would contradict the sentence. The floored
+   wording says what actually happened: *"charged only what the work done so far actually cost to
+   run — no service charge on top."* `costFloorApplied` is what selects it, so the arithmetic and
+   the sentence cannot drift.
+2. **The user would have been told twice.** When the floor decides the charge, the bill EQUALS
+   `markupDecision.billedUsd`, so the settle's waived-margin notice (`if … effectiveBilledUsd ===
+   markupDecision.billedUsd`) would ALSO have fired — two notices, seconds apart, saying nearly the
+   same thing about the same money. That is autopsy `586295b7`'s exact class. The cancellation
+   branch now clears `waivedMarkupNotice` before emitting, because it is the more specific of the
+   two statements and already says there is no service charge.
+
+`discountPct` widened from `0 | 50 | 100` to a **derived** number for the same honesty reason: a
+floored charge is genuinely somewhere between 0% and 50%, and printing a hardcoded `50%` beside a
+bill that was not halved would make the admin's `CANCELLED_BUILD_CHARGED` ledger line state
+something false — on the one line used to judge whether a Stop cost money. Its only consumer is
+that message string (grepped).
+
+**Files:** `src/server/AgentV3/cancelledBuildBilling.ts` (facts, floor, message, derived pct),
+`src/server/routes/agentv3.ts` (two numbers threaded in; the duplicate notice suppressed).
+**Test-locked and reversion-proven four ways** in `tests/aCancellationTakesOurMarginNotOurCost.test.ts`
+(23 cases): remove the floor → 4 fail; drop `realCostUsd` at the call site → the wiring guard fails;
+let the waived-margin notice fire too → the one-statement guard fails; move the floor above a ₹0
+return → the ordering guard fails. The first test runs BOTH modules in the route's own order, so the
+composition itself is pinned rather than each half separately — which is the only kind of test that
+would have caught this.
+
+**Kill switch unchanged:** `AGENTV3_BILL_CANCELLED=off` restores the whole rule's absence, floor and
+all.
+
+⚠️ **STILL OPEN, and deliberately not decided here:** whether the `files-saved` band should exist at
+all now that it is, in practice, always floored to cost. It is a pricing question (the user pays
+cost rather than half of cost — genuinely more than yesterday), the admin chose this shape when
+shown the trade, and re-opening it is theirs, not a session's.
 ## 2026-09-21 — APP MART OPENED AS A WINDOW WITH NO WINDOW (the third time this exact bug shipped)
 
 **Admin: _"app mart ko bhi multi window systm me add karo, slidebar menu me aur header me multi
@@ -76565,6 +76663,257 @@ the key without waiting for the Routine.
 
 Documentation only — no code path, no test and no build behaviour is touched by this change.
 
+---
+
+## 2026-09-21 — 🔤 45 FONTS, A REAL COLOUR PICKER, A BACKGROUND WITH AN OPACITY, AND A BORDER
+
+**Admin, verbatim:** *"image me text add karne ke samaya Width ki jagah background karo. opacity kam
+jyada karne ki line bhi add karo. clour picker bhi add karo, colour, bale golo ke age last me. font
+badalne ka bhi system add karo, kam se kam 25+ font chahiye. border add/remove bhi chahiye. abhi yeh
+kam karo professionally real aur working."* (with a screenshot of the Add-text sheet and one of a
+standard HSB colour picker).
+
+**🔴 THE ONE THING A FONT PICKER COULD HAVE BROKEN, AND MOST OF THIS CHANGE IS ABOUT IT.** This
+editor exists *because* an image model cannot spell Devanagari. A list of pretty Latin display faces
+that replaced the family stack would turn "शर्मा स्वीट्स" into empty boxes — and nothing would fail;
+the picture would simply be wrong, in the one script the whole feature was built for. So
+`fontFamilyStack` puts the chosen family FIRST and the Devanagari fallbacks after it, **for every
+choice including the Latin-only ones**: the browser resolves per GLYPH, so Bebas Neue draws the Latin
+and a face that has Devanagari draws the Hindi. `tests/theFontIsRealAndHindiStillWorks.test.ts`
+asserts that for all 45 entries, and it is the first case in the file.
+
+**THE CATALOGUE (`src/lib/imageFonts.ts`) is 45 against the admin's "25+", and 19 of them carry
+Devanagari themselves** — Poppins, Hind, Mukta, Rajdhani, Teko, Khand, Baloo 2, Kalam, Martel,
+Halant, Biryani, Laila, Eczar, Sarala, Amita, Tiro Devanagari, Yatra One, Modak, Noto Sans
+Devanagari. The Latin and the Devanagari halves are deliberately the same size: an India-first
+product whose Hindi users get four fonts and whose English users get thirty is the same quiet
+second-class treatment the 2026-09-14 language rule already forbids elsewhere.
+
+⚠️ **THE WEIGHT AXIS IS PER FAMILY, AND GETTING IT WRONG IS NOT A DEGRADATION.** Google's CSS2 API
+answers **HTTP 400** for a weight a family does not publish, so asking a single-weight display face
+(Anton, Bebas Neue, Lobster, Pacifico, Abril Fatface, Righteous, Archivo Black, Permanent Marker,
+Bungee, Satisfy, Tiro, Yatra One, Modak) for `wght@400;700` would make that font fail to load *at
+all*. Those carry no axis and have their bold synthesized, which is what a poster face wants anyway.
+A test asserts that the only axis ever requested is `:wght@400;700`.
+
+**🔴 AND THE CSP WOULD HAVE BLOCKED ALL 45, SILENTLY — found by reading `securityHeaders.ts` before
+shipping rather than from a user's screenshot.** That file shipped `style-src 'self' 'unsafe-inline'`.
+A Google Fonts `<link rel="stylesheet">` is governed by **style-src, not font-src** — and `font-src`
+already allowed `https:`, so the `.woff2` files from fonts.gstatic.com were never the problem; the
+stylesheet that NAMES them was blocked. Every `document.fonts.check` would have returned false, every
+family would have fallen back to the device default, and the picker would have looked perfect and
+changed nothing. `https://fonts.googleapis.com` is now on `style-src`, scoped to Google's own font
+host (it grants no script or frame rights), with the same kind of docblock the Cashfree and Apple
+allowances already carry. **The test DERIVES the origin from `googleFontHref`**, so pointing the
+loader at another CDN fails CI until the policy is told about it — a literal in the test would have
+been one more thing to keep in sync by hand.
+
+**🔑 A CANVAS DOES NOT WAIT FOR CSS, which is why this is a loader and not a `<link>`.**
+`measureText` with a family the document has not finished loading measures in the FALLBACK face — so
+the text would be wrapped at one set of widths and repainted at another the moment the real font
+arrived, and what the user positioned would not be what they saved. `imageFontLoader.ts` injects the
+stylesheet once per family, `await`s `document.fonts.load()` for BOTH weights (Bold switches between
+them at draw time), and returns the verdict of `document.fonts.check` — never the await, which
+resolves even when it matched nothing. The repaint depends on that state and Done awaits it.
+
+**A font that genuinely cannot be fetched is NAMED**, with what it means and how to retry. The second
+absolute rule reaches a dropdown as much as a button: the option works, or it says it does not. A
+failure is not cached, so selecting it again really retries — the commonest cause is a connection
+that has since come back.
+
+**BACKGROUND replaces the Width slider, and it is ONE stored string.** Where there were three fixed
+chips (None / Dark bar / Light bar) there is now any colour at any strength. The colour and the
+opacity are *derived* from the stored fill by `splitFill` and composed back by `rgbaFrom`, so there
+is no second representation to drift — the drifted-copy class this repo has paid for four times.
+**Opacity 0 IS "no background"**, which is what an empty fill already meant everywhere else in the
+module, so no on/off flag competes with the slider. `splitFill` also reads what earlier code and
+every template already wrote (`rgba(0,0,0,0.55)`, `rgba(255,255,255,0.82)`, `#000`) — a parser that
+only understood its own output would have shown every existing layer as "no background" the first
+time somebody opened the editor.
+
+**BORDER frames the SAME rectangle the background fills.** `bandRect` answers for both now (its guard
+was `if (!l.band) return null`, which would have drawn nothing for a border with no fill), so the two
+can never sit a few pixels apart. Widths are fractions of the FONT, not pixels, so a border chosen on
+a 1024 square looks the same on a 1280 banner. Inset by half the stroke, because a canvas stroke
+straddles its path and a thick border would otherwise spill half its weight outside the bar it frames.
+
+**THE COLOUR PICKER is the device's own**, at the END of the swatch row as asked, for the text, the
+background and the border. A native `<input type="color">` wearing a swatch: the OS already draws
+exactly the picker in the admin's second screenshot, it is the one they know from every other app,
+and it is keyboard- and screen-reader-reachable for free. A hand-built HSB square would be several
+hundred lines that work worse on a touch screen.
+
+⚠️ **WIDTH IS NOT DELETED, AND THAT IS A DELIBERATE DEPARTURE FROM THE LITERAL INSTRUCTION.** It is
+gone from captions, where the admin asked for background in its place. It survives for a **RATE LIST**
+as "Table width", because there it is the span the item column and the price column are set against —
+it decides where the prices line up. Removing it there would take away a real capability rather than
+a confusing control, which is the one thing the second absolute rule will not trade. Said plainly to
+the admin rather than done quietly.
+
+**`strokeRect` added to the three recording fakes**, and the reason is worth keeping: `tsconfig.json`
+includes only `src/**`, so **tests are not typechecked** — a fake missing a method the real interface
+requires compiles happily and throws only when that method is really called, which is exactly what a
+border does. Three separate copies of that recorder is itself the drifted-copy shape; they are noted
+rather than merged, because merging three live suites' fixtures in the same change as a feature is
+how a feature's failure becomes indistinguishable from a refactor's.
+
+Test-locked in `tests/theFontIsRealAndHindiStillWorks.test.ts` (35 cases) and **reversion-proven six
+ways** (each applied to the working tree, suite run, tree restored): a Latin face dropping the
+Devanagari fallback → 2 fail; opacity 0 ceasing to mean "no background" → 1; the border losing its own
+rect → 3; the CSP forgetting the font stylesheet → 1; the repaint no longer following the font state →
+1; the Width slider returning to every caption → 1.
+
+`AppKnowledgeBase.ts` updated in the same change, per the sync rule.
+
+---
+
+## 2026-09-21 — YOUR PICTURE COMES BACK AS YOUR PICTURE: image→image on both tiers, a crop frame with +/0/−, and the strength inversion that was the admin's reported fear
+
+**Admin, five asks in one message** (with a Pro screenshot): *"1. pro (paid) image size/format (1:1 default)
+change nahi ho raha / fix karo, (sath ek extra custom size bhi add karna) · 2. free image generator me ek
+watermark jaise chat box me hi likh dekha, image only for your app … to log real cinematic image na ban pane
+se nirash nahi honge · 3. free/paid dono image generator me image to image ka option bhi add karo, user apni
+photo dal kar usme kuch badalwana chahe to woh badala ja sake · 4. free chat me specially, image+text to
+image me image badaljane ka dar hai, isko acche se karna!!!!!! · 5. free/paid dono me custom size, me user
+kisi image ko apne hisab ke size me crop kar sake, image ko size se chota bada bhi kiya ja sake, +/0/- button
+add karna"*, and *"isko aur acche se karo, aap professionaly karna mai non technical hu"*.
+
+### 1 · The Pro size selector — root cause, not a workaround
+
+`ImageStudioPro.tsx:304` carries `backdrop-blur`. **`backdrop-filter` establishes a containing block for
+every `position: fixed` DESCENDANT**, so the selector's `fixed inset-0` overlay resolved against the ~100px
+footer instead of the viewport and `overflow-hidden` clipped it away. The free dock has no blur — which is
+exactly why the admin reported Pro and not Free, and the fact that identified the cause from the report
+alone. Fixed at the class: `ImageOptionSelect` now `createPortal`s its sheet to `document.body`, so no
+ancestor's filter, transform or `contain` can ever trap it again. **The blur is deliberately KEPT** — the fix
+is not "remove the thing that exposed the bug", and a test pins it. The eight sheets still not portalled are
+recorded as a RATCHET (`NOT_YET_PORTALLED`) whose number may only go down.
+
+### 1b · Custom size — one rule, shared by the picker and the generator
+
+`src/lib/imageSize.ts` (pure, client + server): sides rounded to 64, bounded 256–1536, and an AREA cap of
+1.6 MP because 1536×1536 passes every per-side check and is the commonest way an image request times out.
+
+🔴 **TWO REAL BUGS IN MY OWN CODE, CAUGHT BY MY OWN GUARDS BEFORE THEY SHIPPED, both worth recording.**
+(a) The area cap scaled both sides by `√(cap/area)` and then rounded each to the NEAREST step — which can
+push the pair back OVER the cap, and the recovery loop then stepped ONE side down, so **1536×1536 came back
+as 1216×1280**. A function whose own docblock promises "it never crops one" was changing the shape. Fixed by
+FLOORING to the step after scaling: `floor(w·s)·floor(h·s) ≤ w·h·s²` by construction, so there is no second
+pass to get wrong. (b) `clampCustomSide` used `Number(value)`, and **`Number(null)` and `Number('')` are both
+0, not NaN** — so a cleared field read as a deliberate zero and clamped to the 256px floor, turning a
+1024-wide request into a thumbnail. The same trap this file already records for a Cloud Run tunable.
+Both reversion-proven in `tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts`.
+
+The preset pixel table MOVED to `src/lib/imageSize.ts` as `PRESET_PIXELS`; `IMAGE_SIZE_PIXELS` is now a
+re-export of it. Both pickers run in the browser and cannot import server code, and a table typed on each
+side is precisely how the picker came to advertise sizes the server did not generate. `imageRealism.test.ts`
+still reads the free client's literal rows and compares them with that one table, so the guard still bites.
+
+### 2 · What the free tier is FOR, said where the user is typing
+
+A line under the free input: *"Free images are made for your app's artwork — logos, icons, banners,
+illustrations."* It is expectation, not an apology — the free engine is genuinely good at flat graphic work
+and genuinely weaker at cinematic scenes, and a user who asks for a film still was failed by nobody telling
+them which job the tool is for. The "use Pro" link is a REAL control on the same tier state, and it is hidden
+entirely when Pro cannot serve: advice pointing at a door that does not open is worse than none.
+
+### 3 + 5 · Change my own picture, and fit it first — on BOTH tiers
+
+`ReferenceImagePicker.tsx` (attach / show / adjust / remove) and `ImageCropEditor.tsx` (a sheet showing the
+picture inside the exact frame the request will be made at, with **− ⟲ +** and drag-to-move). Geometry is
+pure in `src/lib/imageCrop.ts`; the component only draws it.
+
+- **Every attached picture goes through the crop editor**, which is a safety property as much as a feature:
+  what comes out is a PNG at the request's own pixel size, so a 12 MP phone photo can never reach the 8 MB
+  request cap and the user has always SEEN what will be sent.
+- **`clampView` is the whole safety rule** — the picture always covers the frame. Without it the feature
+  quietly produces a transparent band down one side, which reads as a bug in our engine rather than as a drag
+  that went too far. Asserted across four aspect ratios × every zoom × extreme offsets.
+- **A drag is converted into FRAME pixels** (`dragToFrame`), or the same gesture feels stuck on a large size
+  and skittish on a small one.
+- Pro keeps its own paste/drag attach (worth keeping) and gains the pencil → the SAME crop component.
+
+**The free route now accepts `initImage`.** ⚠️ Declared in the `vobject` schema, because `vobject` DROPS an
+undeclared key — the attach button would have been a no-op with nothing failing anywhere.
+
+🔴 **THE FREE PROVIDER CANNOT SERVE AN EDIT, and that is a fact about the request rather than a policy.**
+Pollinations takes a prompt inside a URL; it has no way to receive a picture that exists only inside this
+request, and publishing a user's photograph somewhere it could fetch is not something we will do to make a
+feature work. So an edit is served by the multimodal rung the ladder already has, and it is metered as the
+PAID rung it is — `allowPaidRung()` before a rupee is spent, exactly like every other one. The xAI rung is
+skipped too: it is text-to-image only, and letting it answer would return a brand-new picture that has
+nothing to do with the one attached — a successful-looking response that IS the failure being fixed.
+
+### 4 · "Image badal jane ka dar" — the fear was the specification, and it had a real cause
+
+🔴 **THE TWO STRENGTH DEFAULTS WERE THE WRONG WAY ROUND, and a passing test had locked the inversion in.**
+`imageProGen.ts` shipped `image-to-image: 0.65` and `image-text-to-image: **0.85**`, justified in its own
+comment as *"a reference WITH words is a directed edit and needs ROOM to follow them"* — and
+`imageProTier.test.ts` asserted exactly that ordering, in the same words. It is backwards: `strength` is how
+far the result may move from the original, and words say WHAT to change, never HOW MUCH. At 0.85 the model
+is re-rolling most of the picture, which is precisely how a user's own photo comes back as somebody else's.
+The rule is now `editStrengthFor` in `src/lib/imageEdit.ts` — **directed 0.35, wordless re-imagining 0.6**,
+capped at 0.85 so even an explicit 1.0 cannot void the reference, and an out-of-range value falls back to the
+default rather than clamping (a 9 that clamped to the ceiling would be the function deciding a malformed
+field meant the most destructive edit it can make). The old test was corrected with the reason written into
+it, because that test is where the bug was preserved.
+
+🔴 **AND THE SECOND CAUSE WAS OUR OWN UI.** The free generator built its prompt as
+`"${imageType} — ${words}"`. Sent as the instruction for an EDIT that says *"turn this photograph into a
+logo"* — the admin's fear written into the prompt before any model is involved. An edit now sends the user's
+words ALONE; the image type, the style and the colour hint are a brief for a picture being invented.
+
+🔴 **THE THIRD: the art-direction layer.** `craftImagePrompt` adds composition, framing, margin and
+background rules. Every one of them is an instruction to RE-COMPOSE the photograph the user asked us to keep.
+An edit never goes through it.
+
+**The preservation brief itself** (`PRESERVE_DIRECTIVE`) is the FREE tier's only fidelity control — its
+editing rung is a multimodal model with no strength dial at all — so it is one shared constant naming the
+things a re-roll destroys: the same subject, the same identity, the same pose, the same framing, the same
+background.
+
+**Free chat now really changes the picture.** Attach a photo, say *"remove the background"* / *"background
+hata do"*, and the edited picture comes back. ⚠️ `looksLikeImageEdit` is PRECISION-FIRST in the DESCRIBING
+direction: an ask-word vetoes, so *"what is this?"*, *"isme kya likha hai"* and *"read this"* get exactly the
+answer they always got, and a message carrying both is answered rather than acted on. The costs are
+asymmetric in the way `IntentClassifier` already describes — describing when they wanted an edit costs one
+more message; editing when they wanted an answer replaces the picture they were asking about.
+⚠️ **This is free chat's FIRST paid rung**, so it is gated: a verified account, `gateToolAction(…, 'image')`
+before the call, and the allowance burned only on DELIVERY. It never silently falls back to describing —
+the user asked for a change, so the reply says whether a change can happen.
+
+**ONE implementation, not two.** `src/server/lib/imageEditRun.ts` is the single place that talks to an
+editing model; the route and free chat both call it. A second copy is the drifted-copy class this repo has
+paid for four times (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH`
+×2) — and here the drift would be invisible, because **both copies would return pictures**. A test asserts
+`inlineData` appears in that module and in no other.
+
+### Tests
+
+`tests/yourPictureComesBackAsYourPicture.test.ts` (39 cases) and the custom-size/portal half in
+`tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts` (25). Several are SOURCE-level deliberately:
+`tsc` and `vitest` cannot see that an art-direction layer is being applied to an edit, that a text-to-image
+rung is allowed to answer an edit request, or that a picker stopped rendering its crop control — every one of
+those fails silently by returning a picture. **Proven by reversion**: restoring the strength inversion → 2
+fail; dropping `!editing` from the free/Grok rung guards → 1; deleting the chat burn → 1; the nearest-step
+rounding → 2; `Number(null)` → 2.
+
+⚠️ **One test helper carried the same hazard and is guarded against it:** slicing free chat's edit branch on
+the bare name `runVisionChain` matches the IMPORT at the top of the file, slices backwards, and yields an
+empty string — on which every `toContain` fails and every `not.toContain` passes. `editBranch()` anchors on
+the CALL and asserts the slice is non-trivial before returning it.
+
+`AppKnowledgeBase.ts` updated in the same change, per the sync rule — both `ai_image_gen` and
+`free_chat_file_analysis`, since editing an attached photo is a new meaning for that screen's attach button.
+
+### Still open (rule 6)
+
+- **Eight sheets are still not portalled** (`NOT_YET_PORTALLED`). Any of them under a future
+  `backdrop-filter`, `transform` or `filter` ancestor reproduces the Pro bug exactly. Recorded as a ratchet
+  rather than swept inside a feature PR.
+- **No real edit has been made against a live provider from any session.** The strength values are reasoned
+  from the meaning of the knob, not measured; the first real edits are the first real evidence. What to
+  watch: whether an edited picture is recognisably the original.
 ## 2026-09-21 — 📊 THIRTEEN REPORTS WERE BEING WRITTEN AND SHOWN TO NOBODY, and a red mark on what is redundant
 
 **Branch `claude/vigilant-feynman-9aobjz`. PR #3221 (merged) and PR #3223.** The admin asked two

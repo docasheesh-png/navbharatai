@@ -39,13 +39,20 @@ import type { HelmetOptions } from 'helmet';
  *    — which `form-action 'self'` silently blocks, so browser Apple login never reaches Apple and fails.
  *    Google/GitHub use redirect GETs (not form_post) so they were unaffected; the phone app uses the
  *    NATIVE Apple sheet (no CSP) so it worked. Scoped to Apple's own auth host — no broad weakening.
+ *  - `styleSrc` allows `https://fonts.googleapis.com` — the image editor's font picker (2026-09-21)
+ *    loads a family's face on demand with a `<link rel="stylesheet">`, and a STYLESHEET is governed by
+ *    `style-src`, not by `font-src`. `fontSrc` already allowed `https:` so the .woff2 files from
+ *    fonts.gstatic.com were never the problem; without this line the stylesheet that NAMES them is
+ *    blocked, `document.fonts.check` comes back false for all 44 families, and every font silently
+ *    falls back to the device default. Found by reading this file before shipping rather than from a
+ *    user's screenshot, and scoped to Google's own font host — it grants no script or frame rights.
  */
 export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://esm.run", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com", "https://cdn.tailwindcss.com", "https://sdk.cashfree.com"],
-      styleSrc:   ["'self'", "'unsafe-inline'"],
+      styleSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc:     ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'", "https:", "wss:"],
       fontSrc:    ["'self'", "data:", "https:"],

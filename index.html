@@ -2,6 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- THE CHECKOUT SDK'S CONNECTION, WARMED BEFORE THE BUTTON IS PRESSED (admin 2026-09-21:
+         "button press aur cashfree page par jane me 5-10 second"). The gateway's JS SDK is fetched
+         from a THIRD-PARTY origin at the moment of purchase, so that click used to pay for a cold
+         DNS lookup + TCP + TLS handshake before a single byte of the script arrived. preconnect
+         does that handshake now, in parallel with everything else the page is doing.
+         It is a HINT, never a dependency: a browser that ignores it behaves exactly as before, and
+         nothing here downloads the script — that is `preloadCheckoutSdk()` in paymentService.ts. -->
+    <link rel="preconnect" href="https://sdk.cashfree.com" crossorigin />
+    <link rel="dns-prefetch" href="https://sdk.cashfree.com" />
     <!-- Theme (admin 2026-07-14): set data-theme on <html> BEFORE first paint so the app renders in the
          saved theme with no dark→theme flash (FOUC). React keeps it in sync afterwards (App.tsx). -->
     <script>

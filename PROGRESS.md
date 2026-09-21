@@ -75369,11 +75369,22 @@ complete" — carrying `FEATURE_COVERAGE: 1 requested feature(s) have NO visible
 app — Search. Present: List / items.` That finding also became the build's `rootCause`.
 
 **It was FALSE, and this is a fact rather than a reading.** `src/App.tsx` in the manifest hashes
-`38364d60…`, byte-identical to our own `quick-notes` golden scaffold (asserted in the new test), and
+`38364d60…`, byte-identical to our own `quick-notes` golden scaffold (see the correction below), and
 that file carries `aria-label="Search notes"`, `placeholder="Search notes"` and a real filter
 (`n.text.toLowerCase().includes(q)`). The build wrote ZERO files (`WRITE_TIME_TYPECHECK`), so nothing
 could have removed it. Running the real `checkFeaturePresence` over the DOM that scaffold renders
 reports **Search present** — so the search RULE was never the bug.
+
+⚠️ **CORRECTION, same day, before this ever merged — the hash is RECORDED, no longer ASSERTED.**
+The test first pinned that hash live. Within the hour commit `e2cd0e65a` (another session, running
+concurrently) legitimately added `aria-label="New note"` to that very scaffold as part of the a11y
+labelling sweep, so the hash moved and the assertion failed — on a correct change, with nothing wrong.
+**A pinned hash over a file that is SUPPOSED to improve fails on every legitimate edit, and its only
+remedy is to paste the new hash — which teaches the next session to paste hashes and verifies nothing.**
+So the hash now lives in the test's doc comment as dated evidence (it was true on 2026-09-21, and that
+is all a historical fact needs), and the live lock is the PROPERTY the argument actually rests on: this
+scaffold must keep a search field the probe can SEE, and `checkFeaturePresence` must still find it.
+Nothing about the finding's falseness changed — only what CI re-checks every run.
 
 🔑 **THE CAUSE WAS THE WITNESS, NOT THE RULE.** `checkFeaturePresence` already had a
 capture-corroboration guard, added after two earlier false findings, resting on one premise: *another

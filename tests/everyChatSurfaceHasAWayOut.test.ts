@@ -67,12 +67,17 @@ describe('EXACTLY ONE Mode control, on every device — never two, never none', 
 });
 
 describe('every surface that renders a chat composer receives it', () => {
-  it('all 70+ expert chats get the opener — not most of them', () => {
+  it('every expert chat gets the opener — through the ONE render site all 70+ experts share', () => {
+    // 73 hand-written `activeView === 'x_ai'` blocks became one map over the open conversation windows
+    // (2026-09-21). One site is strictly better for this rule: a prop cannot be missed on a block that
+    // does not exist. But it is ALSO the reason this must stay a source-level check — the component is
+    // lazy-loaded (`_lz`), so a missing prop here is invisible to the compiler.
     const total = (app.match(/<ProfessionalChat\b/g) ?? []).length;
-    // Sanity: if this ever reads 0 the regex has gone stale and the case below proves nothing.
-    expect(total).toBeGreaterThan(50);
-    const withoutProp = (app.match(/<ProfessionalChat(?![^>]*onOpenModePicker)[^>]*>/g) ?? []).length;
-    expect(withoutProp).toBe(0);
+    expect(total).toBe(1);
+    expect(app).toMatch(/openChats\.map\(\(win\) => \{[\s\S]{0,800}?<ProfessionalChat[^>]*onOpenModePicker=\{modePickerOpener\}/);
+    // …and the window it renders is told WHICH conversation it is (the isolation the admin asked for).
+    expect(app).toMatch(/<ProfessionalChat[^>]*conversationId=\{win\.id\}/);
+    expect(app).toMatch(/<div key=\{win\.id\}/);
   });
 
   it('Doctor AI, the free chat and the image studio get it too', () => {

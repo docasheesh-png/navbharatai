@@ -10,10 +10,22 @@
 // WHITE-LABEL: user-facing strings never name the underlying model/vendor — the engine is
 // "NavBharatAI". Model ids live here (env-tunable) and appear only in server logs.
 
+import { CUSTOM_SIZE_ID, PRESET_PIXELS, resolveCustomSize } from '../../lib/imageSize';
+
 export interface ImageGenRequest {
-  prompt: string;
+  /** Required for a fresh generation; optional when `initImage` is present (a picture is a request). */
+  prompt?: string;
   style?: string;
   size?: string;
+  /**
+   * The user's own width and height, in pixels — read ONLY when `size` is `custom`.
+   *
+   * Two plain numbers rather than a nested object because they travel through a request validator
+   * that drops undeclared keys, and a flat field is one thing to declare instead of a shape to keep
+   * in step. `imagePixelsFor` is the only reader, and it clamps them.
+   */
+  width?: number;
+  height?: number;
   /**
    * The selected image type ("App Icon", "Website banner", …), as a REAL field.
    *
@@ -23,6 +35,14 @@ export interface ImageGenRequest {
    * older shape still arrives and `detectPurpose` falls back to reading the prompt.
    */
   type?: string;
+  /**
+   * The user's OWN picture, as a `data:<mime>;base64,<...>` URL — present only when this request is
+   * an EDIT rather than a fresh generation (admin 2026-09-21).
+   *
+   * Its presence, not a separate mode field, is what makes this an edit: the same rule the paid tier
+   * already uses (`imageProMode`), so a user never has to set a control to match what they attached.
+   */
+  initImage?: string;
 }
 
 export interface GeneratedImage {
@@ -85,12 +105,27 @@ export const IMAGE_SIZE_RATIOS: Record<string, string> = {
  * user reads are generated from the same numbers, so the picker cannot advertise a size we do not
  * generate (it did exactly that before 2026-08-16).
  */
-export const IMAGE_SIZE_PIXELS: Record<string, { w: number; h: number }> = {
-  square: { w: 1024, h: 1024 },   // 1.05 MP — native
-  wide: { w: 1280, h: 720 },      // exactly 16:9, 0.92 MP
-  portrait: { w: 864, h: 1152 },  // exactly 3:4, 1.00 MP
-  icon: { w: 1024, h: 1024 },     // native, and exactly what Play/App Store require
-};
+// ⚠️ THE NUMBERS LIVE IN `src/lib/imageSize.ts` NOW, and this is a re-export rather than a copy.
+// Both image pickers run in the BROWSER and cannot import this module, so the table had to be
+// somewhere they could reach — and a table typed out on each side is precisely how the picker came
+// to advertise sizes the server did not generate. Everything documented above still governs it.
+export const IMAGE_SIZE_PIXELS = PRESET_PIXELS;
+
+/**
+ * The pixels ANY size request becomes — a preset id, or the user's own width and height.
+ *
+ * 🔑 ONE ENTRY POINT FOR BOTH ROUTES. The free route and the Pro route each used to write
+ * `IMAGE_SIZE_PIXELS[size] || IMAGE_SIZE_PIXELS.square` for themselves, which was fine while there
+ * were four fixed answers and is exactly how a custom size would have ended up understood by one
+ * route and ignored by the other. `resolveCustomSize` clamps and rounds, so an unreadable or absurd
+ * pair falls back rather than reaching a provider.
+ *
+ * PURE.
+ */
+export function imagePixelsFor(size?: string, width?: unknown, height?: unknown): { w: number; h: number } {
+  if (String(size || '') === CUSTOM_SIZE_ID) return resolveCustomSize(width, height);
+  return IMAGE_SIZE_PIXELS[size || ''] || IMAGE_SIZE_PIXELS.square;
+}
 
 /** Whether the FREE image provider (Pollinations) is enabled — default ON; kill switch IMAGE_GEN_POLLINATIONS=off. */
 export function pollinationsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -103,8 +138,13 @@ export function pollinationsEnabled(env: NodeJS.ProcessEnv = process.env): boole
  * user never talks to a third party and the result is branded NavBharatAI. `nologo=true` strips the
  * provider watermark. Pure + bounded. Model is env-tunable via IMAGE_GEN_POLLINATIONS_MODEL (default flux).
  */
-export function pollinationsImageUrl(prompt: string, size?: string, env: NodeJS.ProcessEnv = process.env): string {
-  const px = IMAGE_SIZE_PIXELS[size || ''] || IMAGE_SIZE_PIXELS.square;
+export function pollinationsImageUrl(
+  prompt: string,
+  size?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  custom?: { width?: unknown; height?: unknown },
+): string {
+  const px = imagePixelsFor(size, custom?.width, custom?.height);
   const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
   const p = encodeURIComponent(String(prompt || '').slice(0, MAX_PROMPT_CHARS));
   // `seed` is the second half of the 2026-09-18 sharpness work, and it is about VARIETY rather than
@@ -247,9 +287,22 @@ export const IMAGE_REFUSAL_MESSAGE =
 export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   if (!body || typeof body !== 'object') return false;
   const b = body as Record<string, unknown>;
-  if (typeof b.prompt !== 'string' || !b.prompt.trim()) return false;
+  // A picture on its own IS a request ("re-render this"), so words are required only when there is
+  // no picture — the same derivation `imageProMode` makes on the paid tier, where an attachment with
+  // no words is a re-imagining rather than an error.
+  const hasInit = typeof b.initImage === 'string' && b.initImage.trim().length > 0;
+  if (b.prompt !== undefined && typeof b.prompt !== 'string') return false;
+  if (!hasInit && (typeof b.prompt !== 'string' || !b.prompt.trim())) return false;
   if (b.style !== undefined && typeof b.style !== 'string') return false;
   if (b.size !== undefined && typeof b.size !== 'string') return false;
+  // A custom size arrives as two numbers beside the id. They are only READ when the id is `custom`,
+  // and `resolveCustomSize` clamps them there — so a hostile pair is bounded rather than rejected,
+  // which keeps a stale client that sends nonsense working instead of failing its whole request.
+  if (b.width !== undefined && typeof b.width !== 'number') return false;
+  if (b.height !== undefined && typeof b.height !== 'number') return false;
+  // The reference picture is checked for SHAPE here and for readability/size at the route, where
+  // `parseDataUrl` and `initImageTooLarge` can give the user a message naming the real problem.
+  if (b.initImage !== undefined && typeof b.initImage !== 'string') return false;
   return true;
 }
 
@@ -286,7 +339,7 @@ export function grokImageModel(env: NodeJS.ProcessEnv = process.env): string {
 export async function fetchPollinationsImage(
   prompt: string,
   size?: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv; custom?: { width?: unknown; height?: unknown } } = {},
 ): Promise<{ image?: GeneratedImage; error?: string; disabled?: boolean }> {
   const env = opts.env ?? process.env;
   if (!pollinationsEnabled(env)) return { disabled: true };
@@ -294,7 +347,7 @@ export async function fetchPollinationsImage(
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45_000);
   try {
-    const r = await fetchImpl(pollinationsImageUrl(prompt, size, env), { signal: ctl.signal });
+    const r = await fetchImpl(pollinationsImageUrl(prompt, size, env, opts.custom), { signal: ctl.signal });
     const ct = r.headers.get('content-type') || '';
     if (!r.ok) return { error: `HTTP ${r.status}` };
     if (!ct.startsWith('image/')) return { error: `non-image (${ct || 'unknown'})` };

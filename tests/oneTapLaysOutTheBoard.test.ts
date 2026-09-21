@@ -90,6 +90,9 @@ describe('🔴 nothing is ever silently lost', () => {
       fillText: (t: string) => { calls.push(t); },
       strokeText: (t: string) => { calls.push(t); },
       fillRect: () => {},
+      // Added with the border (2026-09-21): tests sit outside `tsconfig`'s include, so a fake
+      // missing an interface method compiles and only throws when that method is really called.
+      strokeRect: () => {},
     };
     drawTextLayers(ctx, layersFromTemplate(shop, [], id), 1000, 1000);
     expect(calls).toEqual([]);
@@ -125,6 +128,9 @@ describe('the label is a UI hint and must never reach the picture', () => {
       fillText: (t: string) => { drawn.push(t); },
       strokeText: () => {},
       fillRect: () => {},
+      // Added with the border (2026-09-21): tests sit outside `tsconfig`'s include, so a fake
+      // missing an interface method compiles and only throws when that method is really called.
+      strokeRect: () => {},
     };
     const layers = layersFromTemplate(shop, extractImageText('phone 98765 43210'), id);
     drawTextLayers(ctx, layers, 1000, 1000);

@@ -46,6 +46,91 @@ export interface ProfessionalMemory {
 /** A stored per-user profile: dynamic map of declared field key → scalar or list value. */
 export type ClientProfile = Record<string, string | string[]>;
 
+/**
+ * WHAT EVERY EXPERT KNOWS ABOUT A PERSON, WHICHEVER CHAT IT WAS LEARNED IN (admin 2026-09-21).
+ *
+ * The admin drew the line in one sentence: *"chat ki memory bhale hi other chat me chali jaye, par text
+ * reply idhar ka udhar na ho"* — with the examples *"user ka naam, profession, etc jo yaad karne layak
+ * cheeze hai"* and *"agar user bole isko yaad rakhna"*. So two things cross conversations, and only two:
+ * WHO the person is (name, language, where they are from, what they do), and what they EXPLICITLY asked
+ * to be remembered. A professional's own domain facts (a student's weak subjects, a client's turnover)
+ * stay with that professional, exactly as before; the transcript never crosses at all (see
+ * `MemoryChunk.conversationId`).
+ *
+ * These are stored under ONE extra profile id per user, `SHARED_PROFILE_ID`, in the same collection the
+ * per-professional profiles live in — so no new store, no new rules about availability, and a shared
+ * fact is written the moment any expert learns it. This is the "memory" every modern assistant has (a
+ * name said once is known everywhere) done the way this codebase already does memory: declared fields,
+ * a hidden block, validated before it is saved.
+ *
+ * ⚠️ `remember` is the one field whose value the PERSON authors. The instruction in `memoryLayer`
+ * therefore asks for their own words and only on an explicit request — an assistant that "remembers"
+ * its own inferences is an assistant nobody trusts with a memory.
+ */
+export const SHARED_MEMORY_FIELDS: readonly MemoryField[] = [
+  { key: 'name', label: 'Name' },
+  { key: 'language', label: 'Prefers to talk in' },
+  { key: 'location', label: 'From' },
+  { key: 'occupation', label: 'Does', hint: 'their work / profession / what they study' },
+  { key: 'remember', label: 'They asked you to remember', list: true, hint: 'ONLY what they explicitly asked you to remember, in their own words' },
+];
+
+/**
+ * The profile id the shared facts are stored under. Leading underscore so it can never collide with a
+ * real professional id (those are `<word>_ai` / `repo_analyst`), and `profileKey` keeps `_` intact.
+ */
+export const SHARED_PROFILE_ID = '_shared';
+
+/** Is this a key every expert shares? */
+export function isSharedKey(key: string): boolean {
+  return SHARED_MEMORY_FIELDS.some((f) => f.key === key);
+}
+
+/**
+ * The fields a professional actually works with: its OWN declaration plus the shared ones it did not
+ * declare. Deduped by key — where a professional declares a shared key itself (every one declares
+ * `name`), its own label and hint win, so nothing a config author wrote is overridden.
+ */
+export function effectiveFields(memory: ProfessionalMemory): MemoryField[] {
+  const own = new Set(memory.fields.map((f) => f.key));
+  return [...memory.fields, ...SHARED_MEMORY_FIELDS.filter((f) => !own.has(f.key))];
+}
+
+/**
+ * Split one sanitised update into what this professional keeps and what everyone shares.
+ *
+ * A key declared by the professional AND shared (typically `name`) goes to BOTH — the professional's
+ * own profile keeps working exactly as it did, and the shared one learns it too. Either half is null
+ * when it has nothing.
+ */
+export function splitUpdate(
+  update: Partial<ClientProfile> | null,
+  memory: ProfessionalMemory,
+): { own: Partial<ClientProfile> | null; shared: Partial<ClientProfile> | null } {
+  if (!update) return { own: null, shared: null };
+  const ownKeys = new Set(memory.fields.map((f) => f.key));
+  const own: Partial<ClientProfile> = {};
+  const shared: Partial<ClientProfile> = {};
+  for (const [k, v] of Object.entries(update)) {
+    if (v === undefined) continue;
+    if (ownKeys.has(k)) own[k] = v;
+    if (isSharedKey(k)) shared[k] = v;
+  }
+  return {
+    own: Object.keys(own).length > 0 ? own : null,
+    shared: Object.keys(shared).length > 0 ? shared : null,
+  };
+}
+
+/**
+ * What the persona is told it already knows: the shared identity, overlaid with the professional's own
+ * profile. The professional's own value wins where both hold a key — it was said to THIS expert and
+ * may be the more specific one (a student's "Does" is their class, not their weekend job).
+ */
+export function combinedProfile(own: ClientProfile | null | undefined, shared: ClientProfile | null | undefined): ClientProfile {
+  return { ...(shared ?? {}), ...(own ?? {}) };
+}
+
 // Bounds — a profile document must stay bounded (never grow forever) but hold as much as safely fits
 // (admin 2026-07-15: "grow professional memory as much as you can"). Raised well above the originals
 // while staying comfortably inside Firestore's 1 MiB doc limit even across many fields.
@@ -159,13 +244,18 @@ export function hasFacts(profile: ClientProfile | null | undefined, fields: Memo
   });
 }
 
-/** Render the stored profile as the "what you already know" system-prompt block ('' when empty). */
+/**
+ * Render the stored profile as the "what you already know" system-prompt block ('' when empty).
+ * Renders the EFFECTIVE fields — the professional's own plus the shared identity — so a name learned by
+ * the Lawyer is greeted with by the Teacher (admin 2026-09-21).
+ */
 export function formatProfileBlock(profile: ClientProfile | null | undefined, memory: ProfessionalMemory): string {
-  if (!hasFacts(profile, memory.fields)) return '';
+  const fields = effectiveFields(memory);
+  if (!hasFacts(profile, fields)) return '';
   const p = profile!;
   const subject = memory.subject || 'person';
   const lines: string[] = [];
-  for (const f of memory.fields) {
+  for (const f of fields) {
     const v = p[f.key];
     if (f.list) {
       if (Array.isArray(v) && v.length > 0) lines.push(`• ${f.label}: ${v.join(', ')}`);
@@ -191,8 +281,10 @@ export function memoryLayer(canPersist: boolean, memory: ProfessionalMemory): st
     return `${common}
 - This ${subject} is NOT signed in, so you cannot remember them after this conversation ends. Never claim permanent memory. You may mention once, naturally, that signing in lets you remember them across sessions. Do not output any <user_memory> block.`;
   }
-  const keyList = memory.fields.map((f) => `"${f.key}"${f.list ? ':[…]' : ':"…"'}${f.hint ? ` (${f.hint})` : ''}`).join(', ');
+  const keyList = effectiveFields(memory).map((f) => `"${f.key}"${f.list ? ':[…]' : ':"…"'}${f.hint ? ` (${f.hint})` : ''}`).join(', ');
   return `${common}
+- WHO THEY ARE IS SHARED: their name, language, location, occupation, and anything they ask you to remember are known to every NavBharatAI expert, whichever chat they said it in. Everything else you learn stays with you. What was SAID in another chat is never shown to you — only these facts.
+- "REMEMBER THIS": when the ${subject} explicitly asks you to remember something ("isko yaad rakhna", "remember that…"), save it under "remember" in their own words — only what they asked, never your own inference.
 - SAVING NEW FACTS: whenever the ${subject} tells you a NEW or CHANGED personal fact, append at the very END of your reply exactly one block on its own line:
 <user_memory>{${keyList}}</user_memory>
   Include ONLY the keys you newly learned or that changed this turn (omit everything already known and unchanged). The block is machine-read and INVISIBLE to the ${subject} — never mention it, never explain it, never put any text after it. When nothing new was learned, output no block at all.`;

@@ -9,6 +9,11 @@ import {
   mergeProfile,
   memoryLayer,
   sanitizeUpdate,
+  effectiveFields,
+  splitUpdate,
+  combinedProfile,
+  SHARED_MEMORY_FIELDS,
+  SHARED_PROFILE_ID,
   type ClientProfile,
 } from './clientMemory';
 import { clientProfileStore } from './ClientProfileStore';
@@ -113,9 +118,21 @@ export async function runProfessionalChat(
   history: ProfessionalTurn[] = [],
   verifiedUserId?: string,
   tier: ProfessionalTier = 'paid',
+  opts: ProfessionalChatOptions = {},
 ): Promise<string> {
-  const { reply } = await runProfessionalChatWithUsage(config, message, history, verifiedUserId, tier);
+  const { reply } = await runProfessionalChatWithUsage(config, message, history, verifiedUserId, tier, opts);
   return reply;
+}
+
+/** Per-turn options that are neither the message nor the identity. */
+export interface ProfessionalChatOptions {
+  /**
+   * The conversation this turn belongs to (admin 2026-09-21: five chats at once, and *"ek chat ki
+   * baat/memory 2nd me na jaye"*). Semantic memory recalls and writes ONLY this conversation's chunks.
+   * Absent ⇒ the legacy, id-less conversation — never every conversation. See
+   * `MemoryChunk.conversationId` and `professionals/conversationId.ts`.
+   */
+  conversationId?: string;
 }
 
 /** One professional turn, with what the model call cost — see ProfessionalAnswer / chatSpend.ts. */
@@ -137,16 +154,29 @@ export async function runProfessionalChatWithUsage(
   history: ProfessionalTurn[] = [],
   verifiedUserId?: string,
   tier: ProfessionalTier = 'paid',
+  opts: ProfessionalChatOptions = {},
 ): Promise<ProfessionalChatResult> {
+  const { conversationId } = opts;
   // Per-user memory (memory-enabled professionals): load what we remember about this
   // user and inject it + the memory behaviour layer. Anonymous users still get the
   // introduction behaviour, but with an honest "cannot remember you" constraint.
+  //
+  // TWO profiles since 2026-09-21: this professional's OWN (as before) and the SHARED identity every
+  // expert knows — name, language, location, occupation, and what the person asked to be remembered
+  // (clientMemory.ts, SHARED_MEMORY_FIELDS). A name told to the Lawyer greets them in the Teacher; the
+  // Lawyer's case notes do not. Both loads are best-effort and null when unavailable.
   const memory = config.memory;
   let profile: ClientProfile | null = null;
+  let sharedProfile: ClientProfile | null = null;
   let memoryBlock = '';
   if (memory) {
-    if (verifiedUserId) profile = await clientProfileStore.load(verifiedUserId, config.id);
-    memoryBlock = [memoryLayer(!!verifiedUserId, memory), formatProfileBlock(profile, memory)]
+    if (verifiedUserId) {
+      [profile, sharedProfile] = await Promise.all([
+        clientProfileStore.load(verifiedUserId, config.id),
+        clientProfileStore.load(verifiedUserId, SHARED_PROFILE_ID),
+      ]);
+    }
+    memoryBlock = [memoryLayer(!!verifiedUserId, memory), formatProfileBlock(combinedProfile(profile, sharedProfile), memory)]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -189,9 +219,13 @@ export async function runProfessionalChatWithUsage(
   // said long ago, not just the last 20 turns. Gated + best-effort (does nothing unless SEMANTIC_MEMORY
   // is on, an embedding key exists, and the user is signed in); `recentTurns` are excluded so nothing the
   // prompt already shows is re-injected. Never blocks/breaks the reply.
+  //
+  // 🔒 SCOPED TO THIS CONVERSATION (admin 2026-09-21). The scope is still per professional, but only the
+  // chunks carrying THIS conversation's id are eligible — a second Teacher AI window never sees what was
+  // said in the first. The chunks are verbatim text, which is exactly what must not cross.
+  const memoryScope = `professional:${config.id}`;
   try {
-    const memoryScope = `professional:${config.id}`;
-    const recalled = await retrieveMemoryBlock(verifiedUserId, memoryScope, message, recentTurns.map((m) => m.content));
+    const recalled = await retrieveMemoryBlock(verifiedUserId, memoryScope, message, recentTurns.map((m) => m.content), conversationId);
     if (recalled) prompt = `${recalled}\n\n---\n${prompt}`;
   } catch { /* semantic recall is best-effort */ }
 
@@ -211,16 +245,23 @@ export async function runProfessionalChatWithUsage(
   // after validating them against THIS professional's declared fields.
   const { reply, raw: rawUpdate } = extractMemory(raw);
   if (memory && verifiedUserId && rawUpdate) {
-    const update = sanitizeUpdate(rawUpdate, memory.fields);
-    if (update) {
-      await clientProfileStore.save(verifiedUserId, config.id, mergeProfile(profile ?? {}, update, memory.fields));
+    // Validated against the professional's own fields PLUS the shared ones, then split: what this
+    // expert declared goes to its profile (unchanged behaviour), what everyone shares goes to the
+    // shared profile — a key in both (`name`) goes to both.
+    const { own, shared } = splitUpdate(sanitizeUpdate(rawUpdate, effectiveFields(memory)), memory);
+    if (own) {
+      await clientProfileStore.save(verifiedUserId, config.id, mergeProfile(profile ?? {}, own, memory.fields));
+    }
+    if (shared) {
+      await clientProfileStore.save(verifiedUserId, SHARED_PROFILE_ID, mergeProfile(sharedProfile ?? {}, shared, [...SHARED_MEMORY_FIELDS]));
     }
   }
   // Semantic memory ingest (RAG): remember this turn (the user's message + the cleaned reply) so a
   // future, semantically-related question recalls it even after it leaves the recent window. Gated +
   // best-effort; awaited so a serverless instance isn't torn down mid-write, but it never throws.
+  // Stamped with THIS conversation's id, so only this conversation can recall it (see above).
   try {
-    await rememberTurn(verifiedUserId, `professional:${config.id}`, message, reply);
+    await rememberTurn(verifiedUserId, memoryScope, message, reply, conversationId);
   } catch { /* best-effort */ }
 
   // reply is empty only when the model's ENTIRE output was machine blocks — never

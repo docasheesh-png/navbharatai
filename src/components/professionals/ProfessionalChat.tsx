@@ -13,7 +13,9 @@ import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
-import { activeKey } from '../../lib/professionalChatStore';
+import {
+  browserStore, readConversation, saveConversation, deleteOpenConversation, serverConversationId,
+} from '../../lib/professionalChatStore';
 import { LinkedText } from '../../lib/linkify';
 
 /**
@@ -82,22 +84,34 @@ async function fileToAttachment(file: File): Promise<{ name: string; type: strin
   return { name: file.name, type: file.type || 'application/octet-stream', base64: await readRaw() };
 }
 
-export function ProfessionalChat({ config, userId, onOpenModePicker }: {
+export function ProfessionalChat({ config, userId, conversationId, onOpenModePicker }: {
   config: ProfessionalChatConfig;
   userId?: string;
+  /**
+   * WHICH conversation this window is (admin 2026-09-21: five chats at once, *"ek chat ki baat/memory
+   * 2nd me na jaye"*). Minted by App when the window opens (`professionalChatStore.newConversationId`),
+   * it selects the transcript this window reads and writes AND is sent with every turn, so the server
+   * keeps this window's memory and attachments to this window. Two windows of one expert are two
+   * conversations because they carry two of these — nothing else tells them apart.
+   *
+   * ⚠️ Mount with `key={conversationId}`: the transcript is read once, on mount.
+   */
+  conversationId: string;
   /**
    * Open the ONE mode picker (admin 2026-09-21). `undefined` on a phone, where the bottom bar already
    * carries Mode — App.tsx decides that once for every surface rather than each one guessing.
    */
   onOpenModePicker?: (() => void) | undefined;
 }) {
-  // ONE definition of where a professional's conversation lives (professionalChatStore) — this string
-  // used to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close now has to agree with
-  // both. Three hand-written copies of a key is how a close button ends up clearing the wrong thing.
-  const storeKey = activeKey(config.id);
+  // ONE definition of where a professional's conversation lives (professionalChatStore) — the key used
+  // to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close has to agree with both.
+  // Three hand-written copies of a key is how a close button ends up clearing the wrong thing. Since
+  // 2026-09-21 the store holds MANY conversations per professional, so this component never touches a
+  // key at all: it asks the store for ITS conversation.
   const [messages, setMessages] = useState<Msg[]>(() => {
-    try { const s = localStorage.getItem(storeKey); if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length) return p; } } catch { /* ignore */ }
-    return [{ role: 'assistant', content: config.welcome }];
+    const store = browserStore();
+    const saved = store ? readConversation(store, config.id, conversationId) : [];
+    return saved.length > 0 ? (saved as Msg[]) : [{ role: 'assistant', content: config.welcome }];
   });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -136,9 +150,10 @@ export function ProfessionalChat({ config, userId, onOpenModePicker }: {
   }, [refreshPass]);
 
   useEffect(() => {
-    try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-120))); } catch { /* ignore */ }
+    const store = browserStore();
+    if (store) saveConversation(store, config.id, conversationId, messages.slice(-120));
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, storeKey]);
+  }, [messages, config.id, conversationId]);
 
   // ROOT-CAUSE FIX (sibling of the same bug in AgentV3Panel.tsx, admin 2026-07-26): a file over the
   // limit used to vanish here with no feedback at all — the same silent-drop bug class. Now the user
@@ -194,6 +209,9 @@ export function ProfessionalChat({ config, userId, onOpenModePicker }: {
           message: content,
           history,
           userId,
+          // Which window is talking. The legacy (pre-ids) conversation is sent as no id at all — that
+          // IS its name on the server, where its memory was written id-less.
+          conversationId: serverConversationId(conversationId),
           ...(fileAttachments.length > 0 ? { fileAttachments } : {}),
         }),
       });
@@ -319,7 +337,11 @@ export function ProfessionalChat({ config, userId, onOpenModePicker }: {
           searchMatches={filterMessages(messages as any, chatSearchQuery).length}
           onClear={() => {
             setMessages([{ role: 'assistant', content: config.welcome }]);
-            try { localStorage.removeItem(storeKey); } catch { /* private mode — the screen is still cleared */ }
+            // The saved transcript of THIS conversation goes too (the effect above would otherwise
+            // write the welcome back, which is harmless — but a cleared chat should not linger in
+            // History as a real one either, and a welcome-only conversation is not "history").
+            const store = browserStore();
+            if (store) deleteOpenConversation(store, config.id, conversationId);
           }}
           charCount={input.length}
         />

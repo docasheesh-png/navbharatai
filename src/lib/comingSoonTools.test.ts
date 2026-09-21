@@ -84,7 +84,9 @@ describe('a held-back tool is really OFF, not just greyed out', () => {
     // Same choke point the Play medical gate uses, and for the same reason: every tab-open goes
     // through it, so a future button that forgets to ask still cannot reach the tool.
     const app = read('src/App.tsx');
-    expect(app).toContain('if (isComingSoonTool(view)) return;');
+    // `toggleTab` reports whether it navigated since 2026-09-21 (the window cap needs the answer), so the
+    // refusal is `return false` — the same gate, one line above the window logic, still before any open.
+    expect(app).toContain('if (isComingSoonTool(view)) return false;');
     expect(app).toContain("import { isComingSoonTool } from './lib/comingSoonTools'");
   });
 

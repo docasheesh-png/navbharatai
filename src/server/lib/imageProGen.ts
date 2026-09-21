@@ -128,6 +128,8 @@ export function imageProMarginWarning(usdInr: number, env: NodeJS.ProcessEnv = p
 /** The most images one request may ask for — a bound on both spend and wall-clock. */
 export const IMAGE_PRO_MAX_BATCH = 4;
 
+import { buildEditInstruction, editIntentFor, editStrengthFor } from '../../lib/imageEdit';
+
 /** How long one paid generation may take before we give up and charge nothing. */
 export const IMAGE_PRO_TIMEOUT_MS = 90_000;
 
@@ -284,11 +286,16 @@ export function buildImageProRequest(
   px: { w: number; h: number },
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, unknown> {
-  const prompt = String(req.prompt || '').slice(0, MAX_PROMPT_CHARS);
+  const said = String(req.prompt || '').slice(0, MAX_PROMPT_CHARS);
   const n = imageProCount(req);
   // Resolved ONCE and reused below, so the model named in the body and the fields describing the
   // request can never disagree about what kind of request this is.
   const mode = imageProMode(req);
+  const editing = mode === 'image-to-image' || mode === 'image-text-to-image';
+  // An EDIT carries the preservation brief; a fresh generation is the user's own words, untouched.
+  // `buildEditInstruction` is the shared rule (`src/lib/imageEdit.ts`) the free route and free chat
+  // read too — "keep my picture" cannot mean one thing on one tier and another on the next.
+  const prompt = editing ? buildEditInstruction(said, editIntentFor(said)) : said;
   const body: Record<string, unknown> = {
     prompt,
     model: imageProModel(env, mode ?? 'text-to-image'),
@@ -312,12 +319,11 @@ export function buildImageProRequest(
   if (mode === 'image-to-image' || mode === 'image-text-to-image') {
     body.image_url = req.initImage;
     body.image = req.initImage;
-    // A reference with NO words is a re-imagining and should stay close to the original; a reference
-    // WITH words is a directed edit and needs room to follow them. One sensible default each, and an
-    // explicit value always wins.
-    const dflt = mode === 'image-to-image' ? 0.65 : 0.85;
-    const s = Number(req.strength);
-    body.strength = Number.isFinite(s) && s > 0 && s <= 1 ? s : dflt;
+    // 🔴 THE TWO DEFAULTS USED TO BE THE WRONG WAY ROUND — a DIRECTED edit was given the MOST freedom
+    // (0.85) on the reasoning that words "need room to follow them". Words say WHAT to change; they
+    // never ask for more of the picture to change, and 0.85 is where a user's own photo comes back as
+    // somebody else's. The rule now lives in `editStrengthFor`, which clamps an explicit value too.
+    body.strength = editStrengthFor(editIntentFor(said), req.strength);
   }
   return body;
 }

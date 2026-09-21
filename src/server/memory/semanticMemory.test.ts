@@ -81,6 +81,53 @@ describe('selectRelevant', () => {
   });
 });
 
+// ── ONE CHAT'S WORDS STAY IN THAT CHAT (admin 2026-09-21: "ek chat ki baat/memory 2nd me na jaye") ──
+describe('selectRelevant — conversation isolation', () => {
+  const inA = { ...chunk('my landlord sent a notice', [1, 0, 0], 1), conversationId: 'conv-A' };
+  const inB = { ...chunk('my tenant stopped paying', [0.95, 0.05, 0], 2), conversationId: 'conv-B' };
+  const legacy = chunk('an old id-less memory', [0.9, 0.1, 0], 3);
+  const all = [inA, inB, legacy];
+
+  it('a conversation recalls ONLY its own chunks — however relevant the others score', () => {
+    const out = selectRelevant([1, 0, 0], all, { topK: 10, minScore: 0.1, conversationId: 'conv-A' });
+    expect(out.map((c) => c.text)).toEqual(['my landlord sent a notice']);
+  });
+
+  it('the other conversation sees only its own, and never the first one\'s words', () => {
+    const out = selectRelevant([1, 0, 0], all, { topK: 10, minScore: 0.1, conversationId: 'conv-B' });
+    expect(out.map((c) => c.text)).toEqual(['my tenant stopped paying']);
+  });
+
+  it('a legacy (id-less) chunk is recalled by an id-less caller only — a named conversation never inherits it', () => {
+    const byLegacyCaller = selectRelevant([1, 0, 0], all, { topK: 10, minScore: 0.1 });
+    expect(byLegacyCaller.map((c) => c.text)).toEqual(['an old id-less memory']);
+    const byNamed = selectRelevant([1, 0, 0], [legacy], { topK: 10, minScore: 0.1, conversationId: 'conv-C' });
+    expect(byNamed).toEqual([]);
+  });
+
+  it('a brand-new conversation with nothing of its own recalls NOTHING, not "everything"', () => {
+    expect(selectRelevant([1, 0, 0], all, { topK: 10, minScore: 0.1, conversationId: 'conv-new' })).toEqual([]);
+  });
+});
+
+describe('mergeChunks — the conversation is part of a chunk\'s identity', () => {
+  it('the same sentence said in two conversations is kept in BOTH, never deduped across them', () => {
+    const a = { ...chunk('mera naam Rahul hai', [1, 0], 1), conversationId: 'A' };
+    const b = { ...chunk('mera naam Rahul hai', [1, 0], 2), conversationId: 'B' };
+    const merged = mergeChunks([a], [b], 10);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((c) => c.conversationId).sort()).toEqual(['A', 'B']);
+  });
+
+  it('within ONE conversation an exact repeat still dedupes to its newest occurrence', () => {
+    const a1 = { ...chunk('mera naam Rahul hai', [1, 0], 1), conversationId: 'A' };
+    const a2 = { ...chunk('mera naam Rahul hai', [1, 0], 5), conversationId: 'A' };
+    const merged = mergeChunks([a1], [a2], 10);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].ts).toBe(5);
+  });
+});
+
 describe('formatMemoryBlock', () => {
   it('renders relevant chunks oldest-first with role-aware phrasing', () => {
     const block = formatMemoryBlock([

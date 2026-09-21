@@ -10,8 +10,10 @@ export interface ProfHistoryLike {
   id: string;
   name: string;
   preview: string;
-  /** Present for an ENDED (archived) conversation; absent for the live one. */
+  /** Present for an ENDED (archived) conversation; absent for an open one. */
   endedAt?: number;
+  /** Present for an OPEN conversation — a professional can hold several (2026-09-21). */
+  conversationId?: string;
 }
 
 export interface ProfessionalPseudoSession {
@@ -21,18 +23,21 @@ export interface ProfessionalPseudoSession {
   lastUpdated: string | null;
   profViewId: string;
   profEndedAt?: number;
+  /** The open conversation this row is — what "Open" must show. Absent on an ended row. */
+  profConversationId?: string;
   profName: string;
-  /** True for the conversation that is still open — it has no end time, it is simply "ongoing". */
+  /** True for a conversation that is still open — it has no end time, it is simply "ongoing". */
   profLive: boolean;
 }
 
 export function professionalRows(items: ProfHistoryLike[], _now: number): ProfessionalPseudoSession[] {
   return (items ?? []).map((it) => ({
-    id: `prof:${it.id}#${it.endedAt ?? 'live'}`,
+    id: `prof:${it.id}#${it.endedAt ?? it.conversationId ?? 'live'}`,
     title: it.preview?.trim() || it.name,
     lastUpdated: it.endedAt ? new Date(it.endedAt).toISOString() : null,
     profViewId: it.id,
     ...(it.endedAt ? { profEndedAt: it.endedAt } : {}),
+    ...(it.conversationId ? { profConversationId: it.conversationId } : {}),
     profName: it.name,
     profLive: !it.endedAt,
   }));

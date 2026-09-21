@@ -17,6 +17,12 @@ import {
   hasFacts,
   memoryLayer,
   profileKey,
+  effectiveFields,
+  splitUpdate,
+  combinedProfile,
+  isSharedKey,
+  SHARED_MEMORY_FIELDS,
+  SHARED_PROFILE_ID,
   type MemoryField,
   type ProfessionalMemory,
   type ClientProfile,
@@ -144,5 +150,66 @@ describe('prompt blocks', () => {
   it('profileKey is stable and Firestore-safe', () => {
     expect(profileKey('uid123', 'teacher_ai')).toBe('uid123__teacher_ai');
     expect(profileKey('uid123', 'weird/id!')).toBe('uid123__weird_id_');
+  });
+});
+
+// ── THE SHARED IDENTITY — facts cross chats, words do not (admin 2026-09-21) ─────────────────────────
+describe('shared identity (SHARED_MEMORY_FIELDS)', () => {
+  it('effectiveFields = own fields + the shared ones not declared, deduped by key, own label winning', () => {
+    const fields = effectiveFields(MEMORY);
+    const keys = fields.map((f) => f.key);
+    expect(keys.slice(0, 3)).toEqual(['name', 'goal', 'subjects']);
+    expect(keys).toEqual(expect.arrayContaining(['language', 'location', 'occupation', 'remember']));
+    // `name` appears ONCE, with the professional's own declaration.
+    expect(keys.filter((k) => k === 'name')).toHaveLength(1);
+    expect(fields.find((f) => f.key === 'name')?.label).toBe('Name');
+  });
+
+  it('splitUpdate: a declared key stays own, a shared key goes to shared, a key in both goes to both', () => {
+    const { own, shared } = splitUpdate({ name: 'Ravi', goal: 'fat loss', location: 'Pune', remember: ['call me Ravi ji'] }, MEMORY);
+    expect(own).toEqual({ name: 'Ravi', goal: 'fat loss' });
+    expect(shared).toEqual({ name: 'Ravi', location: 'Pune', remember: ['call me Ravi ji'] });
+  });
+
+  it('splitUpdate: nothing shared → shared is null; nothing own → own is null; null in → both null', () => {
+    expect(splitUpdate({ goal: 'x' }, MEMORY)).toEqual({ own: { goal: 'x' }, shared: null });
+    expect(splitUpdate({ occupation: 'nurse' }, MEMORY)).toEqual({ own: null, shared: { occupation: 'nurse' } });
+    expect(splitUpdate(null, MEMORY)).toEqual({ own: null, shared: null });
+  });
+
+  it('sanitizeUpdate against the effective fields accepts shared keys a professional never declared', () => {
+    const clean = sanitizeUpdate({ location: '  Lucknow ', remember: ['a', 'A', 'b'], bogus: 'x' }, effectiveFields(MEMORY));
+    expect(clean).toEqual({ location: 'Lucknow', remember: ['a', 'b'] });
+  });
+
+  it('combinedProfile: the professional\'s own value wins, shared fills the gaps', () => {
+    expect(combinedProfile({ name: 'Priya', goal: 'CA' }, { name: 'P. Sharma', location: 'Delhi' }))
+      .toEqual({ name: 'Priya', goal: 'CA', location: 'Delhi' });
+    expect(combinedProfile(null, null)).toEqual({});
+  });
+
+  it('formatProfileBlock renders a shared fact the professional did not declare', () => {
+    const block = formatProfileBlock({ name: 'Priya', occupation: 'nurse', remember: ['reply in Hinglish'] }, MEMORY);
+    expect(block).toMatch(/• Does: nurse/);
+    expect(block).toMatch(/• They asked you to remember: reply in Hinglish/);
+  });
+
+  it('the signed-in memory layer names the shared keys and the "remember this" rule; the anonymous one does not save', () => {
+    const signedIn = memoryLayer(true, MEMORY);
+    expect(signedIn).toMatch(/"remember":\[…\]/);
+    expect(signedIn).toMatch(/"occupation"/);
+    expect(signedIn).toMatch(/WHO THEY ARE IS SHARED/);
+    expect(signedIn).toMatch(/REMEMBER THIS/);
+    expect(signedIn).toMatch(/What was SAID in another chat is never shown to you/);
+    expect(memoryLayer(false, MEMORY)).not.toMatch(/"remember"/);
+  });
+
+  it('the shared profile id can never collide with a professional id, and survives profileKey intact', () => {
+    expect(SHARED_PROFILE_ID).toBe('_shared');
+    expect(profileKey('uid1', SHARED_PROFILE_ID)).toBe('uid1___shared');
+    expect(isSharedKey('remember')).toBe(true);
+    expect(isSharedKey('notes')).toBe(false);
+    // `remember` is authored by the PERSON — its hint must say so, in the instruction the model reads.
+    expect(SHARED_MEMORY_FIELDS.find((f) => f.key === 'remember')?.hint).toMatch(/explicitly/);
   });
 });

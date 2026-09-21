@@ -18060,6 +18060,31 @@ async function noteBuildOutcome(
           if (proof) buildDiag.record(proof);
         } catch { /* the ledger write is best-effort — it must never affect a build */ }
       };
+      /**
+       * 🔴 DID A REAL BROWSER SEE THIS APP RENDER? — THE ONE ANSWER, FOR EVERY VERDICT BELOW
+       * (autopsy 697b38ee, EIGHTH appearance, 2026-09-21).
+       *
+       * `markAppRendered` above made the WRITE single. The READ was still three different questions:
+       * the runtime verdict asked the ledger, while `claimAudit`'s `previewVerified` and
+       * `verifiedNoChangeSummary`'s `appRendered` asked the local flag — and the ledger read was
+       * declared `let renderProven` INSIDE one `else if` block, so the other two could not have used
+       * it even had they wanted to. **Three consumers of one fact, in one function, with two
+       * different sources.** That is the evidence-ledger root cause reproduced inside its own fix.
+       *
+       * ⚠️ `verifiedNoChangeSummary` is the sharpest case: it IS 697b38ee's own fix — the one that
+       * stops a check-and-finish turn being reported as *"The build produced no files"* — and it was
+       * reading the narrower source. An app proven green by `inBuildGreen` and by nothing else got
+       * that sentence, which is the exact failure that autopsy was written to end.
+       *
+       * Fill-only and monotonic: the local flag still answers first and fastest, the ledger can only
+       * ever turn an unproven render into a proven one, and nothing here can demote a proof or move a
+       * bill. Best-effort — a ledger read that throws falls back to exactly what this pass saw.
+       */
+      const renderProvenNow = (): boolean => {
+        if (previewVerifiedRendered) return true;
+        try { return provenFromTimeline(buildDiag.report().issues).preview === 'passed'; }
+        catch { return false; }
+      };
 
       // ── 🔴 DELIVERY PROOF: THE PLATFORM BRINGS THE PREVIEW UP ITSELF (autopsy 4efab9d7, 2026-09-15) ──
       //
@@ -19555,15 +19580,12 @@ async function noteBuildOutcome(
             // DOES IT RUN? — asked of the LEDGER, not of one pass's local memory. `previewVerifiedRendered`
             // is still the fast answer, but any actor that recorded the proof answers too, so this verdict
             // can never contradict a render the same report already shows (autopsy 697b38ee).
-            let renderProven = previewVerifiedRendered;
-            try { renderProven = renderProven || provenFromTimeline(buildDiag.report().issues).preview === 'passed'; }
-            catch { /* the ledger read is best-effort — fall back to what this pass saw */ }
             const fromPages = runtimeRecordFromPageChecks(
               pageConsoleEvidence?.routesChecked ?? 0,
               pageConsoleEvidence?.errors ?? [],
-              { previewRendered: renderProven },
+              { previewRendered: renderProvenNow() },
             );
-            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProven }));
+            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow() }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }
@@ -19590,7 +19612,10 @@ async function noteBuildOutcome(
           // that made `browseUrl` record its console is what makes this fact real.
           consoleErrorsFound: runtimeErrorsRemaining,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
-          previewVerified: previewVerifiedRendered,
+          // THE LEDGER, not this pass's local memory (2026-09-21). Three lines of this same function
+          // already asked `renderProvenNow()`; asking a narrower source here let the platform accuse
+          // the model of claiming a working preview in a report that itself proves one rendered.
+          previewVerified: renderProvenNow(),
           // The app's real source — a label it does not contain cannot have been on the screen.
           sourceText: Array.from(writtenFiles.values()).join('\n'),
           // …but ONLY when those written files ARE the app. An import/survey turn writes nothing (the
@@ -20153,7 +20178,10 @@ async function noteBuildOutcome(
           isEditMode: intent === 'edit_existing',
           existingProjectFiles: editFileTree?.length ?? 0,
           userAskedToBuildAnApp,
-          appRendered: previewVerifiedRendered,
+          // 697b38ee's OWN fix, finally reading 697b38ee's own ledger (2026-09-21). An app proven
+          // green by an actor other than this pass used to fall through to "the build produced no
+          // files" — the sentence this argument exists to prevent.
+          appRendered: renderProvenNow(),
           openFindings,
         });
         if (verifiedNoChange) {
@@ -20955,6 +20983,14 @@ async function noteBuildOutcome(
           // still charged in full.
           editingExistingApp: isEditMode,
           decidedBilledUsd: effectiveBilledUsd,
+          // 🔒 THE TWO DISCOUNTS DO NOT STACK (admin 2026-09-21). `effectiveBilledUsd` has already
+          // had the service margin WAIVED a few lines above whenever the app was never seen running
+          // — and that is the only state in which the half-off band is reachable at all, because
+          // both rules read the same `buildObs.previewRendered`. Halving a margin-free bill charges
+          // the user less than the build cost US, on every stopped build. These two numbers floor it
+          // at our real cost: a cancellation may take our margin, never our cost.
+          realCostUsd: decidedRealCostUsd,
+          sandboxUsd: decidedSandboxUsd,
         })
         : null;
       if (cancelBill?.applies && cancelBill.billedUsd > 0) {
@@ -20967,7 +21003,14 @@ async function noteBuildOutcome(
           message: `${cancelBill.reason} (discount ${cancelBill.discountPct}%, delivery: ${cancelBill.delivery}).`,
           autoResolved: true,
         });
-        if (cancelBill.userMessage) events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+        if (cancelBill.userMessage) {
+          // ONE MONEY STATEMENT, NOT TWO (the lesson of autopsy 586295b7). When the floor decides the
+          // charge, the bill equals the waiver's own figure, so the waived-margin notice below would
+          // ALSO fire and tell the user the same thing twice in different words. The cancellation
+          // message is the more specific of the two and already says there is no service charge.
+          waivedMarkupNotice = null;
+          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+        }
       } else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
         effectiveBilledUsd = 0;
         zeroBillReason = cancelBill?.applies

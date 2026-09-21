@@ -4,9 +4,10 @@ import { Briefcase, MessageSquare, LogIn, Trash2, Search, X } from 'lucide-react
 import { cn } from '../../lib/utils';
 import { PROFESSIONAL_CHATS } from './professionalConfigs';
 import {
-  browserStore, readOpenConversations, readArchive, hasRealExchange, resumeArchived, deleteArchived,
-  deleteOpenConversation, type ProfMsg,
+  browserStore, readOpenConversations, readArchive, hasRealExchange, deleteArchived, deleteOpenConversation,
+  type ProfMsg,
 } from '../../lib/professionalChatStore';
+import type { ConversationRef } from '../../lib/chatWindows';
 
 // PROFESSIONAL-SCOPED HISTORY (admin 2026-08-11: "Professional ki History sirf Professional ki dikhaye,
 // puri NavBharatAI ki nahi").
@@ -73,13 +74,21 @@ const rowId = (item: ProfHistoryItem) => `${item.id}#${item.conversationId ?? it
 
 export function ProfessionalHistoryView({
   onOpen,
+  onDelete,
   onBack,
 }: {
   /**
-   * Open a professional's conversation — `id` is that professional's ViewType, `conversationId` the
-   * conversation to show (an ended one has already been resumed under that id by the time this fires).
+   * Open a professional's conversation — `id` is that professional's ViewType; the ref names an OPEN
+   * conversation by id or an ENDED one by its archive stamp. The CALLER resumes an ended one, and only
+   * after it has secured a window: a resume that was then refused by the cap left the row "ongoing"
+   * with nothing behind it. `false` ⇒ nothing opened (the list re-reads to stay honest).
    */
-  onOpen: (id: string, conversationId: string) => void;
+  onOpen: (id: string, ref: ConversationRef) => boolean | void;
+  /**
+   * Delete an ONGOING conversation. The caller owns the windows, and a window left standing would
+   * re-save the transcript on its next message; without a handler the store alone is cleared.
+   */
+  onDelete?: (id: string, conversationId: string) => void;
   onBack?: () => void;
 }) {
   const [reloadKey, setReloadKey] = useState(0);
@@ -96,22 +105,22 @@ export function ProfessionalHistoryView({
     const store = browserStore();
     if (!store) return;
     if (item.endedAt === undefined) {
-      if (item.conversationId) deleteOpenConversation(store, item.id, item.conversationId);
+      if (item.conversationId) {
+        if (onDelete) onDelete(item.id, item.conversationId);
+        else deleteOpenConversation(store, item.id, item.conversationId);
+      }
     } else {
       deleteArchived(store, item.id, item.endedAt);
     }
     setReloadKey((k) => k + 1);
   };
 
-  // "Open" must open the conversation the user clicked, not a blank chat. An ENDED conversation is
-  // therefore made open again first, under the id it had (so its memory continues) — nothing else is
-  // disturbed, because with several windows there is no single live slot to protect.
+  // "Open" must open the conversation the user clicked, not a blank chat. An ENDED one is resumed by
+  // the caller under the id it had (so its memory continues), and only once a window is certain.
   const openOne = (item: ProfHistoryItem) => {
-    const store = browserStore();
-    let conversationId = item.conversationId ?? null;
-    if (store && item.endedAt !== undefined) conversationId = resumeArchived(store, item.id, item.endedAt);
-    if (!conversationId) { setReloadKey((k) => k + 1); return; } // gone from storage — refresh rather than open a blank chat
-    onOpen(item.id, conversationId);
+    const ref: ConversationRef = item.endedAt !== undefined ? { endedAt: item.endedAt } : { conversationId: item.conversationId };
+    if (!ref.endedAt && !ref.conversationId) { setReloadKey((k) => k + 1); return; }
+    if (onOpen(item.id, ref) === false) setReloadKey((k) => k + 1); // refused or gone — re-read, never a blank chat
   };
 
   return (

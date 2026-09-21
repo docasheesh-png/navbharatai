@@ -77499,3 +77499,62 @@ The ledger's vocabulary now covers **one fact** (a real browser saw the app rend
 third. That is defensible — they are genuinely different kinds of evidence — but it means "what has
 this build proven?" still has no single answer, and a NEW actor proving a NEW fact still has to be
 wired into whichever reader happens to cover it.
+
+## 2026-09-21 — 🔴 CORRECTION to the entry above, the same evening: the review found twelve defects, and one sentence up there was false
+
+The adversarial review of #3231 (three lenses, every finding independently refuted; 12 of 12 survived)
+finished AFTER the PR merged. All twelve are fixed in the follow-up PR, each locked to its exact failure.
+Recorded here because the entry above states, under "Still open", that voice *"neither leaks nor is
+scoped by the window"* — **the "neither leaks" half was wrong**, and the rest of this is what the first
+pass got wrong about its own migration.
+
+**The sibling lane, again (this repo's headline class, a38c6fef).** Voice memory (`sonic_voice_memory`)
+holds SPOKEN turns verbatim and was keyed `${uid}__${professional}` — so a call in Teacher window A
+seeded window B's next call with A's words. Exactly what the text lane had just closed. `memoryKey` now
+takes the conversation id (id-less ⇒ the old key, byte-identical, so Doctor AI and pre-id clients keep
+their memory), threaded `ProfessionalChat → ProfessionalVoiceButton → SonicChat init → sonicWs`
+(validated with the same `conversationIdFromBody`) into both `load` and `append`.
+
+**The legacy migration had four real bugs, two of them silent history loss:**
+- `deleteOpenConversation` filtered the legacy record out of EVERY write, so after migration (old key
+  gone) clearing, deleting or closing ANY sibling dropped the only copy of the pre-change chat. It now
+  operates on the stored list only.
+- The bare id `'legacy'` was shared by every professional; `openWindow` dedupes by id, so a user with
+  pre-change Teacher AND Lawyer chats opened Lawyer to a blank tab. It is `legacy:<professionalId>` now
+  (the colon also fails the server's id shape by construction).
+- A save of a DIFFERENT conversation copied the un-migrated legacy into the new key but left the old
+  key, so once the cap archived it, every read resurrected it and every save re-archived it until
+  copies of one chat had evicted every real closed conversation. The old key is removed whenever the
+  legacy record took part in a write.
+- `endedAt` is the archive's record id and two windows of one expert close in the same millisecond, so
+  "Open" on one resumed the first and deleted BOTH. `archiveOne` nudges a colliding stamp forward.
+
+**Cap before archive.** History resumed an ended row and THEN asked toggleTab, which refused at the cap:
+the row flipped to "ongoing" with no window, and with five windows of one expert the store's cap shed an
+ON-SCREEN window. `toggleTab(view, push, conversationId?, resumeEndedAt?)` checks the cap first and
+touches the archive only once a window is certain (`archivedResumeId` peeks without writing); neither
+history view calls `resumeArchived` any more, and a refused open keeps the popup open.
+
+**Delete an ongoing row.** The Free history's delete on an "Ongoing" professional row confirmed
+"cannot be undone" and did nothing; the professional view deleted storage but left the window mounted,
+whose next save brought the chat straight back. `deleteProfessionalConversation` in App: storage first,
+then the window (and the tab, if it was the last).
+
+**Share by meaning, not by key name.** Real-Estate AI's `location` is the PROPERTY's city; Business AI's
+is the market. By key name alone a Delhi user looking at a flat in Pune became "From: Pune" to every
+expert — and the home town landed under "City / area" in reverse. `MemoryField.shared: false` opts a key
+out in both directions (`sharedKeysFor`, `combinedProfile` takes the memory); the two configs carry it;
+`tests/sharedKeysMeanThePerson.test.ts` is a RATCHET over the whole registry — a shared-key field must
+carry a known person-meaning label or say `shared` explicitly.
+
+**"Remember" needs the person's cue.** The model's `remember` entry is dropped unless the user's own
+message asked (`userAskedToRemember`: remember / yaad / याद / note this down). An inferred memory is not
+a memory.
+
+**Minor:** a reply landing in a hidden window is now scrolled into view when it comes on screen
+(`onScreen` prop).
+
+Everything above is test-locked: `professionalChatStore.test.ts` (six new cases), `voiceMemory.test.ts`,
+`clientMemory.test.ts`, `teacherMemoryEngine.test.ts`, `aChatsWordsStayInThatChat.test.ts` (voice-lane
+source guards), `fiveChatsAtOnceEachItsOwnWindow.test.ts` (cap-before-resume, delete-closes-window,
+on-screen scroll), `sharedKeysMeanThePerson.test.ts`.

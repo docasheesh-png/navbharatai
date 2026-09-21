@@ -12,7 +12,7 @@ export const BUSINESS_AI: ProfessionalConfig = {
       { key: 'businessName', label: 'Business' },
       { key: 'stage', label: 'Stage', hint: 'idea / starting / running' },
       { key: 'sector', label: 'Sector / type' },
-      { key: 'location', label: 'Location / market' },
+      { key: 'location', label: 'Location / market', shared: false },
       { key: 'scale', label: 'Scale', hint: 'solo / small team / turnover band' },
       { key: 'goals', label: 'Goals / challenges', list: true },
       { key: 'language', label: 'Prefers' },

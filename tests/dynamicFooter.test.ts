@@ -67,7 +67,7 @@ describe('dynamic per-AI footer', () => {
     expect(src).toContain("lockFilter={historyInitialFilter === 'free'}");
     expect(src).toContain("includeProfessionals={historyInitialFilter === 'free'}");
     // Since 2026-09-21 History opens a professional BY CONVERSATION (a professional can hold several).
-    expect(src).toContain('onOpenProfessional={(viewId, conversationId) => toggleTab(viewId as ViewType, true, conversationId)}');
+    expect(src).toContain('onOpenProfessional={openProfessionalConversation}');
     // Professionals hub keeps the dedicated professional-only history.
     expect(src).toContain("historyInitialFilter === 'professional'");
     expect(src).toContain('<ProfessionalHistoryView');

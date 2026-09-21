@@ -63,4 +63,15 @@ describe('memoryKey', () => {
     expect(memoryKey('user1')).toBe('user1__default');
     expect(memoryKey('user1', 'weird/../id')).toBe('user1__weird____id');
   });
+
+  it('is PER CONVERSATION when one is named, and byte-identical to before when none is (2026-09-21)', () => {
+    // The leak the five-windows review found on the voice lane: two windows of one expert shared one
+    // voice memory, so a call in one seeded the other with its words. Two ids ⇒ two docs; no id ⇒ the
+    // old key, so Doctor AI and a client built before ids keep the memory they had.
+    expect(memoryKey('u', 'teacher_ai', 'c_A')).not.toBe(memoryKey('u', 'teacher_ai', 'c_B'));
+    expect(memoryKey('u', 'teacher_ai', 'c_A')).toBe('u__teacher_ai__c_A');
+    expect(memoryKey('u', 'teacher_ai')).toBe('u__teacher_ai');
+    expect(memoryKey('u', 'teacher_ai', undefined)).toBe('u__teacher_ai');
+    expect(memoryKey('u', 'teacher_ai', 'a/b')).toBe('u__teacher_ai__a_b');
+  });
 });

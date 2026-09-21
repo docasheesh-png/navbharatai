@@ -43,11 +43,11 @@ class VoiceMemoryStore {
   }
 
   /** The remembered turns for this user + professional (most recent last). Empty when none/unavailable. */
-  async load(userId: string, professionalId?: string): Promise<SonicTurn[]> {
+  async load(userId: string, professionalId?: string, conversationId?: string): Promise<SonicTurn[]> {
     const db = this.getDb();
     if (!db || !userId) return [];
     try {
-      const snap = await db.collection(COLLECTION).doc(memoryKey(userId, professionalId)).get();
+      const snap = await db.collection(COLLECTION).doc(memoryKey(userId, professionalId, conversationId)).get();
       if (!snap.exists) return [];
       const data = snap.data() as MemoryDoc | undefined;
       return Array.isArray(data?.turns) ? data!.turns : [];
@@ -57,11 +57,11 @@ class VoiceMemoryStore {
   }
 
   /** Fold the turns spoken in this session into the stored rolling memory (append, dedup, cap). */
-  async append(userId: string, professionalId: string | undefined, fresh: SonicTurn[]): Promise<void> {
+  async append(userId: string, professionalId: string | undefined, fresh: SonicTurn[], conversationId?: string): Promise<void> {
     const db = this.getDb();
     if (!db || !userId || !fresh || fresh.length === 0) return;
     const now = Date.now();
-    const ref = db.collection(COLLECTION).doc(memoryKey(userId, professionalId));
+    const ref = db.collection(COLLECTION).doc(memoryKey(userId, professionalId, conversationId));
     try {
       const snap = await ref.get();
       const existing = snap.exists ? ((snap.data() as MemoryDoc | undefined)?.turns ?? []) : [];

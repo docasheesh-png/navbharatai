@@ -178,6 +178,19 @@ describe('professional engine — generic per-user memory', () => {
     expect(saveMock).toHaveBeenCalledTimes(2);
   });
 
+  it('a `remember` entry is DROPPED when the user never asked — and kept when they did', async () => {
+    loadMock.mockResolvedValue(null);
+    getRouterMock.mockReturnValue(routerCapturing('Noted.\n<user_memory>{"remember":["likes cricket"],"college":"DAV"}</user_memory>'));
+    await runProfessionalChat(TEACHER, 'I play cricket on weekends', [], 'uid-1');
+    expect(saveMock).toHaveBeenCalledTimes(1);
+    expect(saveMock).toHaveBeenCalledWith('uid-1', 'teacher_ai', { college: 'DAV' });
+
+    saveMock.mockClear();
+    getRouterMock.mockReturnValue(routerCapturing('Done.\n<user_memory>{"remember":["I play cricket on weekends"]}</user_memory>'));
+    await runProfessionalChat(TEACHER, 'yaad rakhna: I play cricket on weekends', [], 'uid-1');
+    expect(saveMock).toHaveBeenCalledWith('uid-1', '_shared', { remember: ['I play cricket on weekends'] });
+  });
+
   it('a shared key the professional did NOT declare still reaches the shared profile, and not its own', async () => {
     loadMock.mockResolvedValue(null);
     getRouterMock.mockReturnValue(routerCapturing('Noted.\n<user_memory>{"location":"Lucknow"}</user_memory>'));

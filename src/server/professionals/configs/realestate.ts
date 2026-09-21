@@ -10,7 +10,7 @@ export const REALESTATE_AI: ProfessionalConfig = {
     fields: [
       { key: 'name', label: 'Name' },
       { key: 'role', label: 'Role', hint: 'buyer / seller / tenant / landlord / investor' },
-      { key: 'location', label: 'City / area' },
+      { key: 'location', label: 'City / area', shared: false },
       { key: 'propertyType', label: 'Property type' },
       { key: 'budget', label: 'Budget / price range' },
       { key: 'stage', label: 'Stage', hint: 'exploring / shortlisting / negotiating / paperwork' },

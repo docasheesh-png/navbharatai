@@ -35,6 +35,15 @@ export function isWindowedProfessional(view: string): boolean {
   return view in PROFESSIONAL_CHATS && !OWN_SURFACE_PROFESSIONALS.has(view);
 }
 
+/**
+ * What a History row knows about the conversation it wants opened: an OPEN one by id, an ENDED one by
+ * its archive stamp. App decides the window (and the cap) first and resumes second — never the reverse.
+ */
+export interface ConversationRef {
+  conversationId?: string;
+  endedAt?: number;
+}
+
 export interface ChatWindow {
   /** The conversation id — minted by `professionalChatStore.newConversationId`, sent with every turn. */
   id: string;

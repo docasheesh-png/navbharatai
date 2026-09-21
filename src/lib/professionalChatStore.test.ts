@@ -4,7 +4,7 @@ import { join } from 'path';
 import {
   activeKey, archiveKey, conversationsKey, endProfessionalChat, endConversation, readArchive, hasRealExchange,
   resumeArchived, deleteArchived, deleteOpenConversation, readOpenConversations, readConversation, saveConversation,
-  latestOpenConversationId, newConversationId, serverConversationId, LEGACY_CONVERSATION_ID,
+  latestOpenConversationId, newConversationId, serverConversationId, legacyConversationId, isLegacyConversationId, archivedResumeId,
   MAX_ARCHIVED_PER_PROFESSIONAL, MAX_OPEN_PER_PROFESSIONAL, type KeyValueStore, type ProfMsg,
 } from './professionalChatStore';
 
@@ -48,7 +48,13 @@ describe('professionalChatStore — one professional, MANY conversations (admin 
     expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
     expect(newConversationId()).not.toBe(newConversationId());
     expect(serverConversationId(id)).toBe(id);
-    expect(serverConversationId(LEGACY_CONVERSATION_ID)).toBeUndefined();
+    expect(serverConversationId(legacyConversationId('lawyer_ai'))).toBeUndefined();
+    expect(isLegacyConversationId(legacyConversationId('lawyer_ai'))).toBe(true);
+    expect(isLegacyConversationId(id)).toBe(false);
+    // The legacy id is per PROFESSIONAL — two experts' pre-change chats are two windows, never one.
+    expect(legacyConversationId('lawyer_ai')).not.toBe(legacyConversationId('teacher_ai'));
+    // …and it can never pass the server's id shape, even if it leaked.
+    expect(legacyConversationId('lawyer_ai')).not.toMatch(/^[A-Za-z0-9_-]{1,64}$/);
   });
 
   it('a chat that was live BEFORE this change is surfaced as the legacy conversation and migrated on its first save', () => {
@@ -56,13 +62,14 @@ describe('professionalChatStore — one professional, MANY conversations (admin 
     const before = chat(2);
     s.setItem(activeKey('lawyer_ai'), JSON.stringify(before));
 
-    expect(readOpenConversations(s, 'lawyer_ai').map((c) => c.id)).toEqual([LEGACY_CONVERSATION_ID]);
-    expect(readConversation(s, 'lawyer_ai', LEGACY_CONVERSATION_ID)).toEqual(before);
+    const legacy = legacyConversationId('lawyer_ai');
+    expect(readOpenConversations(s, 'lawyer_ai').map((c) => c.id)).toEqual([legacy]);
+    expect(readConversation(s, 'lawyer_ai', legacy)).toEqual(before);
 
-    saveConversation(s, 'lawyer_ai', LEGACY_CONVERSATION_ID, chat(3), 50);
+    saveConversation(s, 'lawyer_ai', legacy, chat(3), 50);
     expect(s.getItem(activeKey('lawyer_ai'))).toBeNull();                       // old key gone
     expect(s.getItem(conversationsKey('lawyer_ai'))).not.toBeNull();            // lives under the new one
-    expect(readConversation(s, 'lawyer_ai', LEGACY_CONVERSATION_ID)).toEqual(chat(3));
+    expect(readConversation(s, 'lawyer_ai', legacy)).toEqual(chat(3));
     // …and it is still ONE conversation, not a copy under each key.
     expect(readOpenConversations(s, 'lawyer_ai')).toHaveLength(1);
   });
@@ -72,7 +79,7 @@ describe('professionalChatStore — one professional, MANY conversations (admin 
     s.setItem(activeKey('lawyer_ai'), JSON.stringify(chat(2)));
     saveConversation(s, 'lawyer_ai', 'c-new', chat(1), 99);
     expect(latestOpenConversationId(s, 'lawyer_ai')).toBe('c-new');
-    expect(readOpenConversations(s, 'lawyer_ai').map((c) => c.id)).toEqual(['c-new', LEGACY_CONVERSATION_ID]);
+    expect(readOpenConversations(s, 'lawyer_ai').map((c) => c.id)).toEqual(['c-new', legacyConversationId('lawyer_ai')]);
   });
 
   it('over the open cap, the oldest REAL conversation is archived and a welcome-only one is let go', () => {
@@ -119,7 +126,7 @@ describe('professionalChatStore — ✕ actually ends the conversation', () => {
   it('a legacy conversation is archived WITHOUT a conversation id — resuming it starts a fresh one', () => {
     const s = memStore();
     s.setItem(activeKey('lawyer_ai'), JSON.stringify(chat(2)));
-    endConversation(s, 'lawyer_ai', LEGACY_CONVERSATION_ID, 5);
+    endConversation(s, 'lawyer_ai', legacyConversationId('lawyer_ai'), 5);
     expect(readArchive(s, 'lawyer_ai')[0].conversationId).toBeUndefined();
     expect(s.getItem(activeKey('lawyer_ai'))).toBeNull();
   });
@@ -150,7 +157,7 @@ describe('professionalChatStore — ✕ actually ends the conversation', () => {
     const s = memStore(10); // room for nothing
     s.data.set(activeKey('kisan_ai'), JSON.stringify(chat(2))); // seed past the budget
 
-    expect(endConversation(s, 'kisan_ai', LEGACY_CONVERSATION_ID, 7)).toBe(false);
+    expect(endConversation(s, 'kisan_ai', legacyConversationId('kisan_ai'), 7)).toBe(false);
     expect(s.getItem(activeKey('kisan_ai'))).toBeNull();
     expect(readOpenConversations(s, 'kisan_ai')).toEqual([]);
   });
@@ -237,6 +244,96 @@ describe('professionalChatStore — reopening an ended conversation', () => {
     deleteOpenConversation(s, 'yoga_ai', 'open-1');
     expect(readOpenConversations(s, 'yoga_ai').map((c) => c.id)).toEqual(['open-2']);
     expect(readArchive(s, 'yoga_ai')).toHaveLength(2); // a delete never archives
+  });
+});
+
+// ── THE REVIEW'S FINDINGS, each locked to its exact failure (2026-09-21, same day) ─────────────────
+describe('the migrated legacy conversation survives everything its siblings do', () => {
+  it('ending or deleting a SIBLING never drops the migrated legacy conversation, and closing the tab archives both', () => {
+    const s = memStore();
+    const legacy = legacyConversationId('teacher_ai');
+    const before = chat(3, 'pre-upgrade');
+    s.setItem(activeKey('teacher_ai'), JSON.stringify(before));
+    saveConversation(s, 'teacher_ai', legacy, before, 1000);          // the window's mount effect migrates it
+    saveConversation(s, 'teacher_ai', 'N1', chat(2, 'n1'), 2000);      // Mode picker → New chat
+
+    expect(endConversation(s, 'teacher_ai', 'N1', 3000)).toBe(true);   // ✕ on N1's chip
+    expect(readOpenConversations(s, 'teacher_ai').map((c) => c.id)).toEqual([legacy]);
+    expect(readConversation(s, 'teacher_ai', legacy)).toEqual(before);
+
+    deleteOpenConversation(s, 'teacher_ai', 'c_other');                // History delete / Clear on any sibling
+    expect(readConversation(s, 'teacher_ai', legacy)).toEqual(before);
+
+    expect(endConversation(s, 'teacher_ai', legacy, 4000)).toBe(true); // closing the tab
+    expect(readArchive(s, 'teacher_ai')).toHaveLength(2);
+    expect(readOpenConversations(s, 'teacher_ai')).toEqual([]);
+  });
+
+  it('a save of a DIFFERENT conversation carries the un-migrated legacy into the new key AND removes the old key', () => {
+    const s = memStore();
+    const legacy = legacyConversationId('teacher_ai');
+    s.setItem(activeKey('teacher_ai'), JSON.stringify(chat(2, 'old')));
+    saveConversation(s, 'teacher_ai', 'N1', [{ role: 'assistant', content: 'hi' }], 10);
+    expect(s.getItem(activeKey('teacher_ai'))).toBeNull();
+    expect(readOpenConversations(s, 'teacher_ai').map((c) => c.id)).toEqual(['N1', legacy]);
+    expect(readOpenConversations(s, 'teacher_ai').filter((c) => isLegacyConversationId(c.id))).toHaveLength(1);
+  });
+
+  it('once the cap archives the legacy record it is NOT resurrected from the old key on every read and save', () => {
+    const s = memStore();
+    s.setItem(activeKey('teacher_ai'), JSON.stringify(chat(2, 'old')));
+    s.setItem(archiveKey('teacher_ai'), JSON.stringify([{ endedAt: 5, conversationId: 'real-closed', messages: chat(1, 'closed') }]));
+    for (let i = 1; i <= MAX_OPEN_PER_PROFESSIONAL + 1; i++) saveConversation(s, 'teacher_ai', `c${i}`, chat(1), 100 + i);
+    const legacyArchived = readArchive(s, 'teacher_ai').filter((c) => c.conversationId === undefined || isLegacyConversationId(c.conversationId ?? ''));
+    expect(legacyArchived).toHaveLength(1);
+    expect(readOpenConversations(s, 'teacher_ai').some((c) => isLegacyConversationId(c.id))).toBe(false);
+    const archiveBefore = readArchive(s, 'teacher_ai').length;
+    for (let i = 0; i < 3; i++) saveConversation(s, 'teacher_ai', `c${MAX_OPEN_PER_PROFESSIONAL + 1}`, chat(2 + i), 500 + i);
+    expect(readArchive(s, 'teacher_ai')).toHaveLength(archiveBefore);
+    expect(readArchive(s, 'teacher_ai').some((c) => c.conversationId === 'real-closed')).toBe(true);
+  });
+});
+
+describe('the archive id is unique, so one row never speaks for its sibling', () => {
+  it('two windows of one expert closed in the SAME millisecond get distinct endedAt stamps', () => {
+    const s = memStore();
+    saveConversation(s, 'teacher_ai', 'W1', chat(2, 'w1'), 1);
+    saveConversation(s, 'teacher_ai', 'W2', chat(2, 'w2'), 2);
+    expect(endProfessionalChat(s, 'teacher_ai', 111)).toBe(true);
+    const stamps = readArchive(s, 'teacher_ai').map((c) => c.endedAt);
+    expect(new Set(stamps).size).toBe(2);
+    const [a, b] = stamps;
+    // Resuming ONE leaves the other in the archive; deleting ONE leaves the other too.
+    expect(resumeArchived(s, 'teacher_ai', a, 200)).toBeTruthy();
+    expect(readArchive(s, 'teacher_ai').map((c) => c.endedAt)).toEqual([b]);
+    deleteArchived(s, 'teacher_ai', b);
+    expect(readArchive(s, 'teacher_ai')).toEqual([]);
+    expect(readOpenConversations(s, 'teacher_ai')).toHaveLength(1);
+  });
+});
+
+describe('the window is decided BEFORE the archive is touched', () => {
+  it('archivedResumeId peeks without writing, and resumeArchived honours the pre-decided id', () => {
+    const s = memStore();
+    saveConversation(s, 'teacher_ai', 'c-first', chat(2), 1);
+    endConversation(s, 'teacher_ai', 'c-first', 100);
+    const open = s.getItem(conversationsKey('teacher_ai'));
+    const archive = s.getItem(archiveKey('teacher_ai'));
+    expect(archivedResumeId(s, 'teacher_ai', 100)).toBe('c-first');
+    expect(archivedResumeId(s, 'teacher_ai', 999)).toBeNull();
+    expect(s.getItem(conversationsKey('teacher_ai'))).toBe(open);   // byte-identical: nothing moved
+    expect(s.getItem(archiveKey('teacher_ai'))).toBe(archive);
+    expect(resumeArchived(s, 'teacher_ai', 100, 200, 'c-first')).toBe('c-first');
+    expect(readConversation(s, 'teacher_ai', 'c-first')).toEqual(chat(2));
+  });
+
+  it('a pre-id record peeks a FRESH id, and the same id is what the resume opens under', () => {
+    const s = memStore();
+    s.setItem(archiveKey('teacher_ai'), JSON.stringify([{ endedAt: 100, messages: chat(2) }]));
+    const id = archivedResumeId(s, 'teacher_ai', 100, 5);
+    expect(id).toMatch(/^c_/);
+    expect(resumeArchived(s, 'teacher_ai', 100, 5, id)).toBe(id);
+    expect(readConversation(s, 'teacher_ai', id!)).toEqual(chat(2));
   });
 });
 

@@ -84,9 +84,15 @@ async function fileToAttachment(file: File): Promise<{ name: string; type: strin
   return { name: file.name, type: file.type || 'application/octet-stream', base64: await readRaw() };
 }
 
-export function ProfessionalChat({ config, userId, conversationId, onOpenModePicker }: {
+export function ProfessionalChat({ config, userId, conversationId, onScreen = true, onOpenModePicker }: {
   config: ProfessionalChatConfig;
   userId?: string;
+  /**
+   * Is this window the one on screen? Windows stay mounted while hidden (`display: none`), where
+   * `scrollIntoView` is a no-op — so a reply that lands in a hidden window is scrolled to the moment it
+   * comes back (review finding 2026-09-21). Default true so a lone caller behaves as before.
+   */
+  onScreen?: boolean;
   /**
    * WHICH conversation this window is (admin 2026-09-21: five chats at once, *"ek chat ki baat/memory
    * 2nd me na jaye"*). Minted by App when the window opens (`professionalChatStore.newConversationId`),
@@ -152,8 +158,11 @@ export function ProfessionalChat({ config, userId, conversationId, onOpenModePic
   useEffect(() => {
     const store = browserStore();
     if (store) saveConversation(store, config.id, conversationId, messages.slice(-120));
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, config.id, conversationId]);
+  // Scroll on a new message while visible, AND on becoming visible — a hidden window has no layout box.
+  useEffect(() => {
+    if (onScreen) endRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, onScreen]);
 
   // ROOT-CAUSE FIX (sibling of the same bug in AgentV3Panel.tsx, admin 2026-07-26): a file over the
   // limit used to vanish here with no feedback at all — the same silent-drop bug class. Now the user
@@ -390,6 +399,7 @@ export function ProfessionalChat({ config, userId, conversationId, onOpenModePic
         />
         <ProfessionalVoiceButton
           professionalId={config.id}
+          conversationId={serverConversationId(conversationId)}
           getHistory={() => messages
             .filter((m) => m.content !== config.welcome)
             .slice(-12)

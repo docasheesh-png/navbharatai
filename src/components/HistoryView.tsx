@@ -5,7 +5,8 @@ import { MessageSquare, Clock, MoreVertical, Trash2, Search, X, Layers, Code2, Z
 import { cn } from '../lib/utils';
 import { Skeleton, SkeletonList } from './ui/Skeleton';
 import { readProfessionalHistory } from './professionals/ProfessionalHistoryView';
-import { browserStore, resumeArchived, deleteArchived } from '../lib/professionalChatStore';
+import { browserStore, deleteArchived, deleteOpenConversation } from '../lib/professionalChatStore';
+import type { ConversationRef } from '../lib/chatWindows';
 import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from '../lib/freeHistoryMerge';
 import { shapeSessions, messagesOf } from '../lib/sessionShape';
 import { readHistoryIndex, buildHistoryIndex, writeHistoryIndex } from '../lib/historyIndex';
@@ -48,6 +49,7 @@ export const HistoryView = ({
   lockFilter,
   includeProfessionals,
   onOpenProfessional,
+  onDeleteProfessional,
   embedded,
 }: {
   user: any;
@@ -67,8 +69,14 @@ export const HistoryView = ({
    */
   includeProfessionals?: boolean;
   /** Open a professional's chat (the row's conversation was already resumed if it was archived). */
-  /** Open a professional conversation — the view id and the conversation it is (or has been resumed as). */
-  onOpenProfessional?: (viewId: string, conversationId: string) => void;
+  /**
+   * Open a professional conversation — the view id and a ref naming an OPEN conversation by id or an
+   * ENDED one by its archive stamp. The caller secures a window FIRST and resumes second; `false` ⇒
+   * nothing opened.
+   */
+  onOpenProfessional?: (viewId: string, ref: ConversationRef) => boolean | void;
+  /** Delete an ONGOING professional conversation — the caller also closes its window, if open. */
+  onDeleteProfessional?: (viewId: string, conversationId: string) => void;
   /**
    * Rendered INSIDE something that already has a title (the Free chat's history popup), so this view
    * drops its own big heading and its outer padding (admin 2026-09-20). A popup titled "Chat history"
@@ -224,22 +232,27 @@ export const HistoryView = ({
       : { label: 'Free', dot: 'bg-amber-500' };
     const openRow = () => {
       if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
-      // An archived conversation is genuinely RESUMED (same rule as Professional History) so
-      // opening it continues that exact conversation rather than starting a fresh one — under the id
-      // it had, so the server continues the same memory. An open one is simply named.
-      const store = browserStore();
-      let conversationId = prof.profConversationId ?? null;
-      if (store && prof.profEndedAt) conversationId = resumeArchived(store, prof.profViewId, prof.profEndedAt);
-      if (!conversationId) { setProfItems(readProfessionalHistory()); return; } // gone — refresh, never open a blank chat
-      onOpenProfessional?.(prof.profViewId, conversationId);
+      // An archived conversation is genuinely RESUMED by the caller (same rule as Professional History)
+      // so opening it continues that exact conversation rather than starting a fresh one — under the id
+      // it had, so the server continues the same memory — and only once a window is certain. An open
+      // one is simply named.
+      const ref: ConversationRef = prof.profEndedAt ? { endedAt: prof.profEndedAt } : { conversationId: prof.profConversationId };
+      if (!ref.endedAt && !ref.conversationId) { setProfItems(readProfessionalHistory()); return; }
+      if (onOpenProfessional?.(prof.profViewId, ref) === false) setProfItems(readProfessionalHistory()); // refused or gone — re-read
     };
     const deleteRow = () => {
       if (!prof) { onDeleteSession && onDeleteSession(session.id); return; }
       const store = browserStore();
       if (store && prof.profEndedAt) {
         deleteArchived(store, prof.profViewId, prof.profEndedAt);
-        setProfItems(readProfessionalHistory());
+      } else if (prof.profConversationId) {
+        // An ONGOING row: the confirmation said "cannot be undone", and it used to do nothing at all
+        // (review finding 2026-09-21). The caller closes the window too, or the window's next save
+        // would bring the transcript straight back.
+        if (onDeleteProfessional) onDeleteProfessional(prof.profViewId, prof.profConversationId);
+        else if (store) deleteOpenConversation(store, prof.profViewId, prof.profConversationId);
       }
+      setProfItems(readProfessionalHistory());
     };
 
     // THE CONFIRMATION IS INLINE AND COMPACT, and it still names what is about to go. A destructive

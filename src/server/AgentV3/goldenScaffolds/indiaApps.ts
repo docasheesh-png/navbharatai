@@ -133,6 +133,7 @@ function App() {
           <input
             style={{ flex: 1, minWidth: 180 }}
             value={customer}
+            aria-label="Customer name"
             placeholder="Customer name (optional)"
             onChange={(e) => setCustomer(e.target.value)}
           />

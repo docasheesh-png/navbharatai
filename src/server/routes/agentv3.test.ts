@@ -2437,7 +2437,16 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      construction: it leaves an unparseable tsconfig untouched, leaves a Vite-style config that
     //      builds only `src/` byte-identical, and writes nothing when the entries are already there.
     //      Considered ✓.
-    expect(count).toBe(20);
+    //   1× the HTML ENTRY guard (autopsy 53d43c18, 2026-09-21) — gated on `result.ok && expectsArtifacts`,
+    //      and `expectsArtifacts` is literally `… && !isImportTurn`, so it cannot write on a read-only
+    //      import/survey turn by construction rather than by a second rule. It repairs an `index.html`
+    //      that could not have booted the app (no module script and/or no mount node) — the defect a
+    //      user paid ₹113 and 21 minutes for the engine to rediscover, in a file the ENGINE owns. It
+    //      writes exactly ONE file, only when that file already exists AND a real entry module exists in
+    //      the file set, and only when the content genuinely changes; `ensureHtmlEntryScript` is pure and
+    //      additive (it never rewrites a page that already boots). Kill switch `AGENTV3_HTML_ENTRY_GUARD`.
+    //      Considered ✓.
+    expect(count).toBe(21);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

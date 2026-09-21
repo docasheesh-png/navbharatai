@@ -534,6 +534,8 @@ import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary'
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
+import { ensureHtmlEntryScript } from '../AgentV3/HtmlEntryGuard';
+import { withoutPreviewBridge } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
@@ -21332,6 +21334,49 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* the vite-config ensure is best-effort — never affects the build result */ }
+      // 🔴 THE BOOT GUARD RAN ON ONE LANE OF TWO (autopsy 53d43c18, 2026-09-21).
+      //
+      // `ensureHtmlEntryScript` exists precisely so an `index.html` cannot ship without the module
+      // script that boots the app — a page that renders BLANK because React never runs. It is pure,
+      // unit-tested, and until now had exactly ONE call site: `SimpleBuilder.ts`, the FAST LANE. Every
+      // build that goes through the architect loop — which is most of them — had no such check at all.
+      //
+      // What that cost, in the admin's own report: a finished memory-match game came back an hour later
+      // with `Cannot read properties of null (reading 'useState')`, the user typed **"Fix bugs"**, and a
+      // 21-minute build was spent discovering that `index.html` had "no `<div id=\"root\">` and no
+      // `<script>`" — `npm run build` transforming **1 module**. The user paid ₹113 for the engine to
+      // repair an entry file the engine is responsible for.
+      //
+      // This is the repo's own headline class (autopsy a38c6fef): the instance fixed in one of the two
+      // lanes that carry it, the sibling never hunted. Same block, same shape and same narration as the
+      // vite-config guard above, which is the precedent for a deterministic post-build repair.
+      //
+      // 🔒 It can only ADD, and only when there IS an index.html AND a real entry module in the file
+      // set — it never guesses an entry that does not exist, and never rewrites a page that already
+      // boots. Best-effort: a failure here can never affect the build's result.
+      try {
+        if (result.ok && expectsArtifacts && (process.env.AGENTV3_HTML_ENTRY_GUARD ?? '').trim().toLowerCase() !== 'off') {
+          const full = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const htmlKey = Object.keys(full).find((k) => /(^|\/)index\.html$/i.test(k));
+          if (htmlKey) {
+            const guarded = ensureHtmlEntryScript(full);
+            if (guarded.injected && guarded.files[htmlKey] !== full[htmlKey]) {
+              const fixed = guarded.files[htmlKey];
+              try {
+                await actuator.writeFile(workspaceId, htmlKey, fixed);
+                writtenFiles.set(htmlKey, fixed);
+                try { getWorkspaceMemory(workspaceId).indexFile(htmlKey, fixed); } catch { /* index best-effort */ }
+                await saveWorkspaceFiles(workspaceId, { [htmlKey]: fixed }).catch(() => {});
+                buildDiag.record({
+                  phase: 'build', severity: 'warning', code: 'HTML_ENTRY_REPAIRED', autoResolved: true,
+                  message: `${htmlKey} could not have booted the app — the entry script and/or the mount node were missing and were restored deterministically.`,
+                });
+                events.emit({ type: 'narration', agent: 'architect', text: `🧩 Repaired ${htmlKey} — it was missing what the app needs to start.`, ts: Date.now() });
+              } catch { /* best-effort — a write failure must never affect the build result */ }
+            }
+          }
+        }
+      } catch { /* the entry guard is best-effort — never affects the build result */ }
       // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
       // deterministically ensure SEO/OG meta, viewport, html lang, theme-color, a web manifest + a real
       // installable icon, robots.txt, and an offline-first service worker (+ its registration) — the same
@@ -21343,7 +21388,21 @@ async function noteBuildOutcome(
           const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
           let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
           if (indexHtml == null) {
-            try { indexHtml = await actuator.readFile(workspaceId, idxPath); } catch { indexHtml = null; }
+            // 🔴 `actuator.readFile` IS THE SANDBOX, AND THE SANDBOX'S index.html CARRIES OUR BRIDGE.
+            //
+            // `withoutPreviewBridge`'s own docblock names this class: *"What neither guard covered is
+            // the third consumer of the same files: OUR OWN ANALYSERS. They read the sandbox directly
+            // (`actuator.readFile`), which is not the `read_file` tool and therefore not stripped …
+            // Apply it wherever sandbox content enters the analysis corpus."* Here it is worse than an
+            // analyser: this path READS the document and then WRITES it back, to the sandbox AND to the
+            // durable store — so NavBharatAI's console mirror was being saved into the user's own
+            // source and shipped with their app. Measured on the real document from autopsy 53d43c18:
+            // a 299-byte entry file became **18,546 bytes** bridged, and the defaults pass persisted
+            // 19,224 — which is exactly the `dist/index.html 18.46 kB` that report carries.
+            //
+            // ⚠️ Stripping here does NOT turn the live console off: `E2BActuator` re-injects the bridge
+            // into the sandbox copy every time the dev server starts, which is the one place it belongs.
+            try { indexHtml = withoutPreviewBridge(idxPath, await actuator.readFile(workspaceId, idxPath)); } catch { indexHtml = null; }
           }
           const appName = deriveTitle(prompt) || 'App';
           const defaults = planAppDefaults(indexHtml, appName);

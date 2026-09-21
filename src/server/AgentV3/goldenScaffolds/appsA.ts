@@ -66,6 +66,7 @@ function App() {
           <input
             style={{ flex: 1, minWidth: 160 }}
             value={text}
+            aria-label="What needs doing?"
             placeholder="What needs doing?"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
@@ -100,6 +101,7 @@ function App() {
               {editingId === t.id ? (
                 <input
                   autoFocus
+                  aria-label="Edit task"
                   style={{ flex: 1 }}
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
@@ -541,6 +543,7 @@ function App() {
             type="number"
             min={0}
             inputMode="decimal"
+            aria-label="Bill amount"
             placeholder="0.00"
             value={bill}
             onChange={(e) => setBill(e.target.value)}
@@ -563,6 +566,7 @@ function App() {
             <input
               type="number"
               min={0}
+              aria-label="Custom tip percentage"
               placeholder="Custom %"
               value={custom}
               onChange={(e) => setCustom(e.target.value)}

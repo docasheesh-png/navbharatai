@@ -26,6 +26,7 @@ import { registerAppLockRoutes } from './src/server/routes/appLock';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
+import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
 import { verifyFirebaseToken as verifyFirebaseTokenForIntegrations } from './src/server/lib/authMiddleware';
@@ -725,6 +726,10 @@ setInterval(() => {
   // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
   // SPA catch-all defers to these handlers instead of returning index.html.
   registerLegalRoutes(app);
+  // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native
+  // Android shell opens this in the system browser because its own WebView origin (https://localhost)
+  // can never be whitelisted. Declared in spaFallback.ts, or the catch-all would swallow it.
+  registerCheckoutHandoffRoute(app);
   registerBuildAnalyticsRoutes(app);
   // ROADMAP #1 Phase 1 — one-click database (connect the user's OWN Supabase account).
   registerSupabaseIntegrationRoutes(app, verifyFirebaseTokenForIntegrations);

@@ -23,6 +23,7 @@ import { reportParts, partJson, partsSummary, ordinal } from './adminReportParts
 import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
+import { ReportExportButtons } from './admin/ReportExportButtons';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { PushHealthCard } from './admin/PushHealthCard';
@@ -3858,6 +3859,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     <div className="flex items-center gap-2 flex-wrap">
                       <Shield className={`w-4 h-4 ${icon}`} />
                       <h4 className="text-sm font-black text-ink tracking-tight">Sign in with Apple — is it us?</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Sign in with Apple — is it us?" data={appleDiag} tab="Build Reports" source="/api/admin/apple-signin" onStatus={toast} />
+                      </span>
                       <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${ring} ${text}`}>
                         {appleDiag.verdict.replace(/-/g, ' ')}
                       </span>
@@ -3905,6 +3909,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="flex items-center gap-2 flex-wrap">
                     <Server className="w-4 h-4 text-warn" />
                     <h4 className="text-sm font-black text-ink tracking-tight">Did these apps need a server?</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Did these apps need a server?" data={necessity} tab="Build Reports" source="/api/admin/server-necessity" onStatus={toast} />
+                      </span>
                   </div>
                   <p className="text-[12px] text-warn font-bold leading-relaxed">{necessity.headline}</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -3965,6 +3972,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="flex items-center gap-2 flex-wrap">
                     <Clock className="w-4 h-4 text-accent-text" />
                     <h4 className="text-sm font-black text-ink tracking-tight">Where does a sandbox's billed time go?</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Where does a sandbox's billed time go?" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
+                      </span>
                   </div>
                   <p className="text-[12px] text-accent-text font-bold leading-relaxed">{handover.headline}</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -4260,6 +4270,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
                     <Target className="w-4 h-4 text-accent-text" />
                     <h4 className="text-sm font-black text-ink tracking-tight">First-pass quality</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="First-pass quality" data={firstPass} tab="Build Reports" source="/api/admin/first-pass-quality" onStatus={toast} />
+                      </span>
                     <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
                       firstPass.cleanRate >= FIRST_PASS_TARGET
                         ? 'bg-emerald-500/15 text-success border-emerald-500/30'
@@ -4329,6 +4342,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="flex items-center gap-2 mb-3">
                     <AlertTriangle className="w-4 h-4 text-warn" />
                     <h4 className="text-sm font-black text-ink tracking-tight">Top failure patterns</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Top failure patterns" data={failureSummary} tab="Build Reports" source="/api/admin/build-reports" onStatus={toast} />
+                      </span>
                     <span className="text-[11px] text-muted font-bold">
                       {failureSummary.totalFailed} failed of {failureSummary.totalReports} report(s)
                     </span>
@@ -4356,6 +4372,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="flex items-center gap-2 mb-3">
                     <Activity className="w-4 h-4 text-info" />
                     <h4 className="text-sm font-black text-ink tracking-tight">Build speed</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Build speed" data={buildTimeSummary} tab="Build Reports" source="/api/admin/build-reports" onStatus={toast} />
+                      </span>
                     <span className="text-[11px] text-muted font-bold">across {buildTimeSummary.counted} build(s)</span>
                   </div>
                   <div className="flex flex-wrap gap-6">

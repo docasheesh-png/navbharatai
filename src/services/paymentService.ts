@@ -62,6 +62,83 @@ export function shouldHandOffCheckout(nativeShell: boolean, currentOrigin: strin
   return nativeShell && currentOrigin !== apiOrigin;
 }
 
+/** The gateway's own SDK. A third-party origin, so `index.html` preconnects to it. */
+const SDK_URL = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+
+/** One in-flight load, shared. `null` again after a FAILURE so a retry is really a retry. */
+let sdkLoad: Promise<boolean> | null = null;
+/** True when the last attempt failed to ARRIVE (network/blocked), as against arriving broken. */
+let sdkFailedToArrive = false;
+
+/**
+ * LOAD THE CHECKOUT SDK, ONCE — and off the critical path.
+ *
+ * 🔴 WHY THIS IS SEPARATE FROM `triggerCashfreeCheckout` (admin 2026-09-21: *"button press aur
+ * cashfree page par jane me 5-10 second lag rhe, hamare page par hi"*). The purchase used to be
+ * strictly SERIAL and needlessly so:
+ *
+ *     click → await POST /api/payment/create-order   (our server → the gateway's orders API)
+ *           → THEN create <script src=sdk…>          (cold DNS + TLS + download)
+ *           → THEN checkout()
+ *
+ * **The SDK does not need the session id.** Nothing about downloading it depends on the order
+ * existing, so it was queued behind a network round trip for no reason and the user watched our
+ * own page for the sum of the two. `warmCheckout()` starts this at the moment the purchase begins,
+ * so the download overlaps the order call instead of following it.
+ *
+ * 🔒 IDEMPOTENT BY CONSTRUCTION, which is what makes it safe to call from anywhere: repeated calls
+ * share ONE promise and ONE `<script>` tag. Calling it and then pressing Purchase does not fetch
+ * twice, and a second press while the first is still in flight joins the same load.
+ *
+ * ⚠️ A FAILED load clears the memo, deliberately. Caching "it failed" would turn one bad moment on
+ * a train into a permanently dead Purchase button for the rest of the session; the user's retry
+ * must be allowed to be a real retry. A SUCCESSFUL load is cached for ever — the global is there.
+ */
+export function preloadCheckoutSdk(): Promise<boolean> {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return Promise.resolve(false);
+  if (typeof (window as any).Cashfree === 'function') return Promise.resolve(true);
+  if (sdkLoad) return sdkLoad;
+
+  sdkLoad = new Promise<boolean>((resolve) => {
+    const script = document.createElement('script');
+    script.src = SDK_URL;
+    script.async = true;
+    script.onload = () => {
+      const ok = typeof (window as any).Cashfree === 'function';
+      sdkFailedToArrive = false;
+      if (!ok) sdkLoad = null;   // arrived broken — let a retry try again
+      resolve(ok);
+    };
+    script.onerror = () => {
+      sdkFailedToArrive = true;
+      sdkLoad = null;
+      resolve(false);
+    };
+    document.body.appendChild(script);
+  });
+  return sdkLoad;
+}
+
+/**
+ * Start warming the checkout the moment a purchase begins, in PARALLEL with creating the order.
+ *
+ * 🔒 It deliberately does nothing on the native shell: there the checkout is handed to the system
+ * browser (`shouldHandOffCheckout`), which never touches this SDK — so downloading it inside the
+ * WebView would spend a mobile user's data on a script that can never run. The native/web decision
+ * lives HERE rather than at the call site, so a fifth screen that starts a top-up cannot get it
+ * wrong; the caller only has to say "a purchase is starting".
+ *
+ * Fire-and-forget on purpose: a warm-up that could reject would make a caller handle an error for
+ * an optimisation, and the real load is awaited later by `triggerCashfreeCheckout` anyway.
+ */
+export function warmCheckout(): void {
+  const native = (() => {
+    try { return isNativeShell(window as any); } catch { return false; }
+  })();
+  if (native && shouldHandOffCheckout(native, window.location.origin)) return;
+  void preloadCheckoutSdk();
+}
+
 export const triggerCashfreeCheckout = (sessionId: string, environment?: string) => {
   const native = (() => {
     try { return isNativeShell(window as any); } catch { return false; }
@@ -78,27 +155,17 @@ export const triggerCashfreeCheckout = (sessionId: string, environment?: string)
     return;
   }
 
-  if ((window as any).Cashfree) {
-    startCheckout(sessionId, environment);
-  } else {
-    const script = document.createElement('script');
-    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
-    script.async = true;
-    script.onload = () => {
-      // Guard: if the script tag resolved but the global still isn't a function (blocked/partial
-      // load), don't call into `undefined` and die silently — surface an honest error instead.
-      if (typeof (window as any).Cashfree === 'function') {
-        startCheckout(sessionId, environment);
-      } else {
-        window.alert('Payment gateway could not initialize. Please retry, or disable any script blocker and try again.');
-      }
-    };
-    // Without onerror a blocked/failed SDK load (CSP, network, ad-blocker) fails SILENTLY — the
-    // "Purchase" button appears to do nothing. Surface the real reason so it is never a silent dead-end.
-    script.onerror = () => {
+  void preloadCheckoutSdk().then((ready) => {
+    if (ready) {
+      startCheckout(sessionId, environment);
+    } else if (sdkFailedToArrive) {
+      // Without this a blocked/failed SDK load (CSP, network, ad-blocker) fails SILENTLY — the
+      // "Purchase" button appears to do nothing. Surface the real reason, never a dead end.
       console.error('Payment SDK failed to load from the gateway (blocked or offline).');
       window.alert('Could not load the secure payment gateway. Check your connection or any content/script blocker, then try again.');
-    };
-    document.body.appendChild(script);
-  }
+    } else {
+      // The script tag resolved but the global is not a function (a partial or tampered load).
+      window.alert('Payment gateway could not initialize. Please retry, or disable any script blocker and try again.');
+    }
+  });
 };

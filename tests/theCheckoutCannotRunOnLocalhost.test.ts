@@ -129,10 +129,20 @@ describe('🔒 REVERSION GUARD — the native branch must stay in the source', (
   const src = readFileSync(join(process.cwd(), 'src/services/paymentService.ts'), 'utf8');
 
   it('triggerCashfreeCheckout still consults shouldHandOffCheckout before the in-page SDK', () => {
-    const handOffAt = src.indexOf('shouldHandOffCheckout(');
-    const inPageAt = src.indexOf("if ((window as any).Cashfree)");
-    expect(handOffAt).toBeGreaterThan(-1);
-    expect(inPageAt).toBeGreaterThan(-1);
+    // ⚠️ RE-AIMED 2026-09-21, and made STRICTER in the same edit. This used to anchor on the literal
+    // `if ((window as any).Cashfree)`, which moved into `preloadCheckoutSdk()` when the SDK load was
+    // taken off the critical path — so the guard broke on a refactor that did not touch the branch
+    // it protects. The INTENT is unchanged: the hand-off decision must come first.
+    //
+    // It is now scoped to the BODY of triggerCashfreeCheckout. A file-wide `indexOf` would find the
+    // `shouldHandOffCheckout(` inside `warmCheckout()`, which sits above it — the guard would then
+    // pass while saying nothing at all about the function it names.
+    const body = src.slice(src.indexOf('export const triggerCashfreeCheckout'));
+    expect(body, 'triggerCashfreeCheckout not found').not.toBe('');
+    const handOffAt = body.indexOf('shouldHandOffCheckout(');
+    const inPageAt = body.indexOf('preloadCheckoutSdk()');
+    expect(handOffAt, 'the native hand-off branch is gone').toBeGreaterThan(-1);
+    expect(inPageAt, 'the in-page SDK path is gone').toBeGreaterThan(-1);
     expect(handOffAt).toBeLessThan(inPageAt);
   });
 

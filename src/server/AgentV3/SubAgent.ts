@@ -289,6 +289,19 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     const verification = mem.verificationStatus();
     const contextBlocks = [
       projectMap ? `Current project context:\n${projectMap}` : '',
+      // 🔴 THE FACT THE ACTOR WAS NEVER TOLD (autopsy c5fd6ad1, 2026-09-21). The architect's own
+      // context carries `[APP IMPORT — already completed] … Work WITH these existing files … and
+      // NEVER scaffold a new app over them`. This spawn passed `projectMap()` and
+      // `verificationStatus()` and nothing else — so a sub-agent asked to survey a freshly-imported
+      // project was told it had 175 files and was NOT told those files were on its own disk. It ran
+      // `git clone <the same repo> workspace/mitrify` and put a second copy of the user's app inside
+      // their app. One line closes the gap, and it is true by construction: it is emitted only when
+      // the project graph actually holds files, so a from-scratch build never sees it.
+      projectMap
+        ? 'These files are ALREADY in your workspace, at the workspace root — read them with '
+          + '`read_file`, `glob` and `grep`. Never `git clone` this project: every command runs from '
+          + 'the workspace root, so a clone puts a second copy of the app inside the app.'
+        : '',
       verification,
     ].filter(Boolean);
     const fullInstruction = contextBlocks.length

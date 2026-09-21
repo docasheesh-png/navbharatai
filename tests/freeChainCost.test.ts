@@ -169,20 +169,34 @@ describe('image generation — the paid rungs are metered by who SERVES, not by 
   });
 
   it('🔒 EVERY paid rung checks the allowance BEFORE it is called', () => {
-    // Both paid providers, each guarded, and each guard ahead of its own network call.
-    const gem = img.indexOf('if (geminiImageConfigured()) {');
-    const grok = img.indexOf('const gKey = grokImageKey();');
-    expect(gem).toBeGreaterThan(-1);
-    expect(grok).toBeGreaterThan(-1);
+    // Every paid provider, each guarded, and each guard ahead of its own network call.
+    //
+    // ⚠️ THE ANCHORS CARRY `&& !editing` / `editing ? null :` SINCE 2026-09-21, and that is not
+    // cosmetic: an EDIT of the user's own picture must never be answered by a text-to-image rung,
+    // which would return a brand-new picture with nothing to do with the one attached. Matching the
+    // bare old strings would silently slice nothing and pass — so the anchors are the real ones.
+    const gem = img.indexOf('if (geminiImageConfigured() && !editing) {');
+    const grok = img.indexOf('const gKey = editing ? null : grokImageKey();');
+    expect(gem, 'the Gemini rung anchor has moved').toBeGreaterThan(-1);
+    expect(grok, 'the xAI rung anchor has moved').toBeGreaterThan(-1);
     expect(img.slice(gem, img.indexOf('generateContent', gem))).toContain('await allowPaidRung()');
     expect(img.slice(grok, img.indexOf('api.x.ai', grok))).toContain('await allowPaidRung()');
+
+    // 🔴 THE THIRD PAID RUNG, added 2026-09-21: editing a picture the user supplied. The free
+    // provider cannot serve it at all (it receives a prompt in a URL, not a picture), so an edit is
+    // ALWAYS paid — which makes it exactly the shape this suite exists to catch.
+    const at = img.indexOf('runImageEdit(rawInit');
+    expect(at, 'the edit rung anchor has moved').toBeGreaterThan(-1);
+    expect(img.slice(img.lastIndexOf('if (editing) {', at), at)).toContain('await allowPaidRung()');
   });
 
   it('🔒 only a PAID delivery burns an allowance — a free image still costs the user nothing', () => {
     expect(img).toContain('if (paidRung && gate && gate.allow && gate.countsAgainstFree)');
     // The free rung delivers without the paid flag; both paid rungs pass it.
     expect(img).toContain('deliver(pr.image); return;');
+    // Three paid deliveries now: Gemini, xAI, and the edit rung.
     expect((img.match(/deliver\(img, true\); return;/g) || []).length).toBe(2);
+    expect(img).toContain('deliver(out.image, true); return;');
   });
 
   it('sign-in is still required regardless of any flag — an anonymous caller can never spend', () => {

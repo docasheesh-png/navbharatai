@@ -12,6 +12,7 @@
 // what they save, and nothing would fail to reveal it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlignCenter, AlignLeft, AlignRight, Bold, Check, LayoutTemplate, List, Plus, Trash2, Type, X } from 'lucide-react';
 import {
   MAX_LAYERS,
@@ -315,7 +316,14 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
 
   const hasText = layers.some((l) => l.text.trim().length > 0);
 
-  return (
+  // 🔒 PORTALLED TO `document.body`, for the reason `ImageOptionSelect` records in full: an ancestor
+  // with `backdrop-filter`, `transform` or `filter` becomes the containing block for a `fixed`
+  // child, and the sheet then opens inside that element rather than over the screen. This editor
+  // happens to work from where it is mounted today — it is portalled anyway, because "works from
+  // where it happens to be mounted" is not a property a full-screen sheet should have, and the
+  // sibling that did NOT have it was found by a user rather than by us.
+  if (typeof document === 'undefined') return null;
+  return createPortal((
     // `nb-sheet-overlay` / `nb-sheet` (index.css) rather than a bare `vh` cap: on a phone `vh` is the
     // LARGE viewport, so a 95vh panel is taller than the screen the moment the browser chrome is
     // showing and its own footer becomes unreachable. That bug reached the admin twice from two
@@ -628,5 +636,5 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }

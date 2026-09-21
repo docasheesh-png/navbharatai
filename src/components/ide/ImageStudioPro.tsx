@@ -385,6 +385,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
             // From THAT result's own prompt, not the input bar's current contents: this surface keeps
             // a whole run of images, and the bar has usually moved on to the next request by now.
             initialLayers={layersFromExtracted(extractImageText(target.prompt || ''), () => `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`)}
+          extracted={extractImageText(target.prompt || '')}
             onClose={() => setTextOn(null)}
             onApply={(url) => {
               setResults((rs) => rs.map((r) => (r.id === textOn ? { ...r, url } : r)));

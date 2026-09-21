@@ -719,6 +719,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           // Read from the prompt the user actually typed, at the moment they open the editor — not
           // stored at generation time, so editing the prompt and reopening picks up the change.
           initialLayers={layersFromExtracted(extractImageText(prompt), () => `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`)}
+          extracted={extractImageText(prompt)}
           onClose={() => setTextEditorOpen(false)}
           onApply={(url) => { setGeneratedUrl(url); setTextEditorOpen(false); flashNote('Text added \u2713  Now press Download to save it.'); }}
         />

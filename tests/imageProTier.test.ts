@@ -1,3 +1,4 @@
+import { EDIT_STRENGTH, MAX_EDIT_STRENGTH, PRESERVE_DIRECTIVE } from '../src/lib/imageEdit';
 import { describe, it, expect } from 'vitest';
 import {
   IMAGE_PRO_PRICE_INR, IMAGE_PRO_MAX_BATCH,
@@ -93,19 +94,35 @@ describe('the request body', () => {
     expect(i2i.image_url).toBe(DATA_URL);
   });
 
-  it('🔒 a bare reference stays CLOSER to the original than a directed edit does', () => {
-    // A reference with no words is a re-imagining and should stay recognisable; a reference WITH
-    // words has instructions to follow and needs room to follow them. If these two are ever equal,
-    // one of the two jobs is being done badly.
+  it('🔴 a DIRECTED edit stays closer to the original than a wordless re-imagining', () => {
+    // ⚠️ THIS ASSERTION USED TO RUN THE OTHER WAY, with a comment reasoning that a reference WITH
+    // words "has instructions to follow and needs room to follow them". That is the bug the admin
+    // reported on 2026-09-21 — "image+text to image me image badal jane ka dar hai" — and this test
+    // is where it was locked in. Words say WHAT to change; they never ask for MORE of the picture to
+    // change, and at 0.85 a user's own photo comes back as somebody else's. The wordless case is the
+    // one that asked for no specific thing, so a re-render is the whole request there.
     const reimagine = buildImageProRequest({ initImage: DATA_URL }, PX).strength as number;
     const directed = buildImageProRequest({ prompt: 'make it night', initImage: DATA_URL }, PX).strength as number;
-    expect(reimagine).toBeLessThan(directed);
+    expect(directed).toBeLessThan(reimagine);
+    expect(directed).toBe(EDIT_STRENGTH.directed);
+    expect(reimagine).toBe(EDIT_STRENGTH.reimagine);
   });
 
-  it('an explicit strength always wins, and a junk one falls back to the default', () => {
+  it('an explicit strength wins inside the range, is capped, and junk falls back', () => {
     expect(buildImageProRequest({ initImage: DATA_URL, strength: 0.3 }, PX).strength).toBe(0.3);
-    expect(buildImageProRequest({ initImage: DATA_URL, strength: 9 }, PX).strength).toBe(0.65);
-    expect(buildImageProRequest({ initImage: DATA_URL, strength: NaN }, PX).strength).toBe(0.65);
+    // Capped: "keep my picture" is the promise, so even an explicit 1.0 may not void the reference.
+    expect(buildImageProRequest({ initImage: DATA_URL, strength: 1 }, PX).strength).toBe(MAX_EDIT_STRENGTH);
+    expect(buildImageProRequest({ initImage: DATA_URL, strength: 9 }, PX).strength).toBe(EDIT_STRENGTH.reimagine);
+    expect(buildImageProRequest({ initImage: DATA_URL, strength: NaN }, PX).strength).toBe(EDIT_STRENGTH.reimagine);
+  });
+
+  it('🔒 an edit carries the preservation brief; a fresh generation carries only the words', () => {
+    const fresh = buildImageProRequest({ prompt: 'a tiger' }, PX).prompt as string;
+    expect(fresh).toBe('a tiger');
+    expect(fresh).not.toContain('SAME image');
+    const edit = buildImageProRequest({ prompt: 'make the shirt red', initImage: DATA_URL }, PX).prompt as string;
+    expect(edit).toContain('make the shirt red');
+    expect(edit).toContain(PRESERVE_DIRECTIVE);
   });
 
   it('asks for the exact pixels it was given', () => {

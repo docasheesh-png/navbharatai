@@ -53,6 +53,11 @@ function recorder(charWidth = 10) {
     fillText(text: string, x: number, y: number) { calls.push({ op: 'fillText', args: [text, x, y], font: this.font, fill: this.fillStyle, stroke: this.strokeStyle, align: this.textAlign }); },
     strokeText(text: string, x: number, y: number) { calls.push({ op: 'strokeText', args: [text, x, y], font: this.font, fill: this.fillStyle, stroke: this.strokeStyle, align: this.textAlign }); },
     fillRect(x: number, y: number, w: number, h: number) { calls.push({ op: 'fillRect', args: [x, y, w, h], font: this.font, fill: this.fillStyle, stroke: this.strokeStyle, align: this.textAlign }); },
+    // ⚠️ ADDED 2026-09-21 WITH THE BORDER, AND ITS ABSENCE WOULD NOT HAVE FAILED TYPECHECK.
+    // `tsconfig.json` includes only `src/**`, so a fake missing a method the real interface
+    // requires compiles happily and throws only when that method is really called — which is
+    // exactly what a border does. Adding a method to `TextContext` means adding it here too.
+    strokeRect(x: number, y: number, w: number, h: number) { calls.push({ op: 'strokeRect', args: [x, y, w, h], font: this.font, fill: this.fillStyle, stroke: this.strokeStyle, align: this.textAlign }); },
   };
   return ctx;
 }

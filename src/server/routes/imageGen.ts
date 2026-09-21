@@ -2,7 +2,8 @@ import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
-import { validateBody, vobject, vstring } from '../lib/validate';
+import { validateBody, vnumber, vobject, vstring } from '../lib/validate';
+import { MAX_CUSTOM_PX, MIN_CUSTOM_PX } from '../../lib/imageSize';
 import {
   buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
@@ -10,6 +11,7 @@ import {
   pollinationsEnabled, fetchPollinationsImage,
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
+import { runImageEdit } from '../lib/imageEditRun';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
@@ -19,7 +21,7 @@ import {
   imageProFailureMessage, initImageTooLarge, parseDataUrl, imageProMargin, imageProMarginWarning,
 } from '../lib/imageProGen';
 import { usdInrRate } from '../lib/UsdInrRate';
-import { IMAGE_SIZE_PIXELS } from '../lib/imageGen';
+import { imagePixelsFor } from '../lib/imageGen';
 import { getServerDb } from '../lib/serverDb';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { walletTooEmptyForTurn } from '../professionals/passGate';
@@ -46,10 +48,20 @@ const schema = vobject({
   prompt: vstring({ max: 2_000 }),
   style: vstring({ optional: true, max: 40 }),
   size: vstring({ optional: true, max: 40 }),
+  // ⚠️ `vobject` DROPS a key it does not declare, so a width sent by the client and missing from
+  // this schema would vanish silently between the picker and the generator — the exact shape of the
+  // "the picker advertised a size we do not generate" bug `IMAGE_SIZE_PIXELS` already warns about.
+  width: vnumber({ optional: true, int: true, min: MIN_CUSTOM_PX, max: MAX_CUSTOM_PX }),
+  height: vnumber({ optional: true, int: true, min: MIN_CUSTOM_PX, max: MAX_CUSTOM_PX }),
   // The image TYPE as a real field. The client historically mashed it into the prompt string
   // ("App Icon — coffee shop"), which left the server unable to tell the selected type from the
   // user's own words — and therefore unable to apply the per-purpose art direction.
   type: vstring({ optional: true, max: 60 }),
+  // The user's OWN picture, as a data URL — what makes image→image real on the free tier too
+  // (admin 2026-09-21: "free/paid dono image generator me image to image ka option bhi add karo").
+  // Same generous max and same by-BYTES rejection as the Pro schema; ⚠️ `vobject` drops a key it does
+  // not declare, so leaving this out would make the attach button a no-op with nothing failing.
+  initImage: vstring({ optional: true, max: 14_000_000 }),
 });
 
 // Image generation is costlier than text — its own tighter bucket, separate from the workspace one.
@@ -66,6 +78,11 @@ const imageGenLimiter = () => rateLimiter({
 const proSchema = vobject({
   prompt: vstring({ optional: true, max: 2_000 }),
   size: vstring({ optional: true, max: 40 }),
+  // ⚠️ `vobject` DROPS a key it does not declare, so a width sent by the client and missing from
+  // this schema would vanish silently between the picker and the generator — the exact shape of the
+  // "the picker advertised a size we do not generate" bug `IMAGE_SIZE_PIXELS` already warns about.
+  width: vnumber({ optional: true, int: true, min: MIN_CUSTOM_PX, max: MAX_CUSTOM_PX }),
+  height: vnumber({ optional: true, int: true, min: MIN_CUSTOM_PX, max: MAX_CUSTOM_PX }),
   // A reference image as a data URL — this is what makes image→image and image+text→image real
   // rather than a label. Generous max because a phone photo base64s large; the route rejects
   // anything over 8 MB by BYTES (initImageTooLarge) rather than by string length.
@@ -85,13 +102,41 @@ const proLimiter = () => rateLimiter({
 export function registerImageGenRoutes(app: Express): void {
   app.post('/api/image/generate', imageGenLimiter(), validateBody(schema), async (req: Request, res: Response) => {
     if (!isValidImageGenRequest(req.body)) {
-      res.status(400).json({ error: 'A non-empty "prompt" is required.' });
+      res.status(400).json({ error: 'Describe the image you want, or attach a picture to change.' });
       return;
     }
     if (!imageGenConfigured()) {
       // Honest not-available state (rule 2): the capability needs the image key in the environment.
       res.status(503).json({ error: 'Image generation is not configured on this server yet — please try again later.' });
       return;
+    }
+
+    // ── IS THIS AN EDIT OF THE USER'S OWN PICTURE? ────────────────────────────────────────────
+    // Resolved once, here, because it changes three things at once: which rungs can serve it, what
+    // the prompt is, and whether the free provider is even a candidate.
+    const rawInit = typeof req.body.initImage === 'string' ? req.body.initImage.trim() : '';
+    const editing = rawInit.length > 0;
+    if (editing) {
+      const parsed = parseDataUrl(rawInit);
+      if (!parsed) {
+        res.status(400).json({ error: 'That picture could not be read. Please attach a JPG or PNG.' });
+        return;
+      }
+      if (initImageTooLarge(rawInit)) {
+        res.status(413).json({ error: 'That picture is too large. Please use one under 8 MB.' });
+        return;
+      }
+      // 🔴 THE FREE PROVIDER CANNOT DO THIS, AND SAYING SO IS THE HONEST STATE. Pollinations takes a
+      // prompt in a URL — it has no way to receive a picture that lives only in this request, and
+      // publishing the user's photo somewhere it could fetch is not something we will do to get a
+      // feature working. So an edit is served by the same multimodal rung the ladder already has,
+      // and it is a PAID rung: metered by `allowPaidRung()` below exactly like every other one.
+      if (!geminiImageConfigured()) {
+        res.status(503).json({
+          error: 'Editing your own picture is not available on this server yet. You can still create a new image from a description.',
+        });
+        return;
+      }
     }
 
     // Real money per image → a real account to bill it to. This runs REGARDLESS of any feature flag:
@@ -147,6 +192,13 @@ export function registerImageGenRoutes(app: Express): void {
         size: typeof req.body?.size === 'string' ? req.body.size : undefined,
         type: typeof req.body?.type === 'string' ? req.body.type : undefined,
       });
+      // 🔴 AN EDIT MUST NOT GO THROUGH THE LAYER ABOVE, and it does not: `runImageEdit` builds its
+      // own instruction from the user's words and the shared preservation brief. Every rule the
+      // craft layer adds — composition, framing, margins, a background that suits the purpose — is
+      // an instruction to RE-COMPOSE, which is the one thing somebody editing their own photograph
+      // did not ask for. It is right for a picture being invented and harmful for one being
+      // changed, and it is the free tier's half of the admin's "image badal jane ka dar".
+      const editWords = String(req.body?.prompt || '').trim();
       // Providers here take a single string, so the negatives ride inline — phrased as "Avoid:", never
       // a bare list, which some models read as a request FOR those things.
       //
@@ -176,7 +228,9 @@ export function registerImageGenRoutes(app: Express): void {
         res.json({
           image: `data:${img.mimeType};base64,${img.base64}`,
           mimeType: img.mimeType,
-          ...(crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
+          // An edit's notes would be art direction for a picture that is not being invented — the
+          // style chip was never applied and saying it was overruled would be noise.
+          ...(!editing && crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
         });
       };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
@@ -188,12 +242,29 @@ export function registerImageGenRoutes(app: Express): void {
       // Provider/model names to an admin are allowed (White-Label §3); a normal user never sees this.
       const diag: string[] = [];
 
+      // ── AN EDIT IS ITS OWN LADDER, AND IT IS ONE RUNG LONG ────────────────────────────────
+      // `runImageEdit` is the shared implementation free chat also calls, so "what is an edit told,
+      // and what counts as a refusal" has exactly one answer on this server. It is a PAID rung, so
+      // it passes the same allowance check every other paid rung does — before a rupee is spent.
+      if (editing) {
+        if (!(await allowPaidRung())) return;
+        const out = await runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS });
+        if (out.image) { deliver(out.image, true); return; }
+        if (out.refusal) { res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE }); return; }
+        diag.push(...(out.diag || []));
+        // Falls through to the honest transient failure below. Deliberately NOT to the text-to-image
+        // rungs: they would return a brand-new picture that has nothing to do with the one attached.
+      }
+
       // FREE provider — Pollinations, tried FIRST (admin choice 2026-08-01: "free wala chalu karo"). Costs
       // ₹0 (no key, no per-image charge), so it removes the paid-provider margin problem entirely. Unlike
       // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
       // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
-      if (pollinationsEnabled()) {
-        const pr = await fetchPollinationsImage(prompt, req.body.size, { timeoutMs: ROUTE_TIMEOUT_MS });
+      if (pollinationsEnabled() && !editing) {
+        const pr = await fetchPollinationsImage(prompt, req.body.size, {
+          timeoutMs: ROUTE_TIMEOUT_MS,
+          custom: { width: req.body.width, height: req.body.height },
+        });
         if (pr.image) { deliver(pr.image); return; }
         if (pr.error) {
           diag.push(`pollinations: ${pr.error}`);
@@ -202,7 +273,7 @@ export function registerImageGenRoutes(app: Express): void {
       }
 
       // PRIMARY (paid) provider — Gemini image models (skipped entirely when no Gemini key is present).
-      if (geminiImageConfigured()) {
+      if (geminiImageConfigured() && !editing) {
         // First paid rung: the allowance is checked HERE, before a rupee is spent.
         if (!(await allowPaidRung())) return;
         const { GoogleGenAI } = await import('@google/genai');
@@ -235,7 +306,10 @@ export function registerImageGenRoutes(app: Express): void {
       // FALLBACK provider — xAI/Grok text-to-image (OpenAI-compatible /v1/images/generations). This is what
       // keeps the feature ALIVE when the Gemini project is denied image access (the live 403). Uses the
       // already-configured GROK_API_KEY/XAI_API_KEY; invisible to the user (still "NavBharatAI").
-      const gKey = grokImageKey();
+      // ⚠️ SKIPPED FOR AN EDIT, deliberately: this endpoint is text-to-image only. Letting it serve
+      // an edit request would return a brand-new picture that has nothing to do with the one the
+      // user attached — a successful-looking response that is the exact failure being fixed.
+      const gKey = editing ? null : grokImageKey();
       if (gKey) {
         // Also a PAID rung — reached when Gemini is absent or failed, so it needs the same check.
         if (!(await allowPaidRung())) return;
@@ -301,6 +375,8 @@ export function registerImageGenRoutes(app: Express): void {
       prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
       size: typeof body.size === 'string' ? body.size : undefined,
       initImage: typeof body.initImage === 'string' ? body.initImage : undefined,
+      width: typeof body.width === 'number' ? body.width : undefined,
+      height: typeof body.height === 'number' ? body.height : undefined,
       strength: body.strength !== undefined ? Number(body.strength) : undefined,
       count: body.count !== undefined ? Number(body.count) : undefined,
     };
@@ -356,7 +432,7 @@ export function registerImageGenRoutes(app: Express): void {
     }
 
     // STEP 2 — generate.
-    const px = IMAGE_SIZE_PIXELS[proReq.size || ''] || IMAGE_SIZE_PIXELS.square;
+    const px = imagePixelsFor(proReq.size, proReq.width, proReq.height);
     // The same art direction the free tier gets. A paid image is a better MODEL, not a worse brief —
     // dropping the craft layer here would have made Pro sharper and less well composed at once.
     const crafted = craftImagePrompt({

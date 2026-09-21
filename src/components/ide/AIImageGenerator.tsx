@@ -4,6 +4,9 @@ import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
+import { CustomSizeFields } from './CustomSizeFields';
+import { ReferenceImagePicker, type ReferencePicture } from './ReferenceImagePicker';
+import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, describeSize, resolveCustomSize } from '../../lib/imageSize';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
@@ -45,6 +48,10 @@ const SIZES = [
   { id: 'wide', label: 'Wide / OG', w: 1280, h: 720, desc: '1280×720' },
   { id: 'portrait', label: 'Portrait', w: 864, h: 1152, desc: '864×1152' },
   { id: 'icon', label: 'App Icon', w: 1024, h: 1024, desc: '1024×1024' },
+  // The user's own width and height. Its `w`/`h` here are only the placeholder the picker shows
+  // before anything is typed — the real pair lives in state and is sent as its own two fields,
+  // because a size the SERVER has never heard of cannot be carried by an id alone.
+  { id: CUSTOM_SIZE_ID, label: 'Custom', w: DEFAULT_CUSTOM_SIZE.w, h: DEFAULT_CUSTOM_SIZE.h, desc: 'Your own width and height' },
 ];
 
 // Image types — a compulsory selector (exactly one is always active). The chosen type is
@@ -147,6 +154,12 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const [style, setStyle] = useState('minimal');
   const [size, setSize] = useState('square');
   const [colorHint, setColorHint] = useState('none');
+  // The user's own picture, when they are CHANGING one instead of inventing one. Its presence is
+  // what makes this request an edit — the same derivation the paid tier makes, so nobody has to
+  // set a mode control to match what they attached.
+  const [reference, setReference] = useState<ReferencePicture | null>(null);
+  const [customW, setCustomW] = useState(DEFAULT_CUSTOM_SIZE.w);
+  const [customH, setCustomH] = useState(DEFAULT_CUSTOM_SIZE.h);
   const [isLoading, setIsLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -181,21 +194,35 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   }, []);
 
   /** What each sent request says it was, in the user's own terms — never a model or vendor name. */
-  const requestSummary = () => [
-    imageType,
-    labelOf(STYLES, style),
-    labelOf(SIZES, size),
-    colorHint === 'none' ? '' : labelOf(COLOR_HINTS, colorHint),
-  ].filter(Boolean).join(' \u00b7 ');
+  const requestSummary = () => (reference
+    // An edit's summary must not read like a brief for a new picture: the type, the style and the
+    // colour hint were not applied to it, and printing them would describe work that never happened.
+    ? ['Changing your picture', labelOf(SIZES, size)].filter(Boolean).join(' \u00b7 ')
+    : [
+      imageType,
+      labelOf(STYLES, style),
+      labelOf(SIZES, size),
+      colorHint === 'none' ? '' : labelOf(COLOR_HINTS, colorHint),
+    ].filter(Boolean).join(' \u00b7 '));
 
+  /**
+   * The words the engine receives.
+   *
+   * 🔴 AN EDIT SENDS THE USER'S WORDS AND NOTHING ELSE. For a NEW picture the image type is the
+   * brief ("Modern app logo — coffee shop"), and that is right. Sent as the instruction for an EDIT
+   * it says "turn this photograph into a logo" — which is the admin's "image badal jane ka dar"
+   * written into the prompt by our own UI, before any model is even involved.
+   */
   const buildEffectivePrompt = () => {
+    if (reference) return prompt.trim();
     const tint = colorHint === 'none' ? '' : ` in ${labelOf(COLOR_HINTS, colorHint).toLowerCase()} tones`;
     return `${imageType}${prompt.trim() ? ` \u2014 ${prompt.trim()}` : ''}${tint}`;
   };
 
   const handleGenerate = async () => {
     const effectivePrompt = buildEffectivePrompt();
-    if (!effectivePrompt.trim() || isLoading) return;
+    // A picture on its own IS a request ("re-render this"), so words are required only without one.
+    if ((!effectivePrompt.trim() && !reference) || isLoading) return;
     setImageError(false);
     setErrorMsg('');
     setCraftNotes([]);
@@ -219,7 +246,20 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
         // prompt string, so the server could not tell the selected type from the user's own words —
         // and that is precisely the signal the art-direction layer needs to know whether this must
         // read at 48px, leave room for a headline, or survive a circular crop.
-        body: JSON.stringify({ prompt: effectivePrompt, style, size, type: imageType }),
+        body: JSON.stringify({
+          prompt: effectivePrompt,
+          style,
+          size,
+          type: imageType,
+          // Sent ONLY for a custom size, and already through the server's own clamp — so the number
+          // in the request is the number the picker printed, and the server cannot quietly make
+          // something else. For a preset these are absent and nothing downstream changes.
+          ...(size === CUSTOM_SIZE_ID ? resolveCustomSize(customW, customH) : {}),
+          // Present ONLY when the user attached their own picture — and its presence is what turns
+          // this into an edit on the server, which skips the art-direction layer and the free
+          // provider (neither of which can serve a picture that exists only inside this request).
+          ...(reference ? { initImage: reference.dataUrl } : {}),
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || typeof data.image !== 'string') {
@@ -472,6 +512,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const proOff = proAvailable === false;
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
+  /** The pixels this request will really be made at — the custom pair, or the preset's own numbers. */
+  const willMakeAt = size === CUSTOM_SIZE_ID ? resolveCustomSize(customW, customH) : { w: selectedSize.w, h: selectedSize.h };
 
   /**
    * Oldest at the top, newest against the input — chat order.
@@ -686,7 +728,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 <div className="flex items-center gap-3 rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 w-fit">
                   <TirangaLoader className="w-5 h-5" />
                   <span className="text-xs text-muted">
-                    Painting your image at {selectedSize.w}x{selectedSize.h}...
+                    {reference
+                      ? 'Changing your picture — keeping everything you did not ask to change...'
+                      : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
                   </span>
                 </div>
               )}
@@ -764,12 +808,36 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
               />
             </div>
 
+            {/* Only when it is chosen: four selectors plus two number fields on every build would be
+                the crowded screen the dropdowns were introduced to clear. */}
+            {size === CUSTOM_SIZE_ID && (
+              <CustomSizeFields
+                width={customW}
+                height={customH}
+                onChange={(w, h) => { setCustomW(w); setCustomH(h); }}
+                className="rounded-xl border border-line bg-card px-2.5 py-2"
+              />
+            )}
+
+            {/* ── CHANGE MY OWN PICTURE ────────────────────────────────────────────────────
+                Sits directly above the input because it changes what the input MEANS: with a
+                picture attached the words are an instruction about that picture ("make the awning
+                blue"), not a description of a new one. The placeholder below says so too. */}
+            <ReferenceImagePicker
+              value={reference}
+              onChange={setReference}
+              frame={willMakeAt}
+              disabled={isLoading}
+            />
+
             {/* Outside the pill, to its left — same placement and same shared button as every other
                 composer in the app (admin 2026-09-21). */}
             <div className="flex items-end gap-2">
             <ModeButton onOpen={onOpenModePicker} />
             <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-3 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
-              <label htmlFor="nbai-image-prompt" className="sr-only">Describe your image</label>
+              <label htmlFor="nbai-image-prompt" className="sr-only">
+                {reference ? 'Describe the change you want' : 'Describe your image'}
+              </label>
               <textarea
                 id="nbai-image-prompt"
                 ref={taRef}
@@ -781,7 +849,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   // this app uses, and the reason the box grows rather than scrolls.
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleGenerate(); }
                 }}
-                placeholder="Describe your image..."
+                placeholder={reference ? 'What should change? e.g. make the background blue' : 'Describe your image...'}
                 className="flex-1 min-w-0 bg-transparent resize-none text-sm text-ink placeholder-faint focus:outline-none py-2 leading-6"
               />
               {/* Enhance is DISABLED when the chosen style has no keywords to add, rather than
@@ -790,8 +858,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
               <button
                 type="button"
                 onClick={handleEnhance}
-                disabled={!styleEnhancer}
-                title={styleEnhancer ? 'Add this style’s keywords to your words' : 'This style adds no extra keywords'}
+                disabled={!styleEnhancer || !!reference}
+                title={reference
+                  ? 'Style keywords are for a new picture — they would restyle the one you attached'
+                  : styleEnhancer ? 'Add this style’s keywords to your words' : 'This style adds no extra keywords'}
                 className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <Sparkles className="w-4 h-4" />
@@ -808,8 +878,41 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
             </div>
             </div>
 
-            <p className="text-[10px] text-faint text-center flex items-center justify-center gap-1.5">
-              <Wand2 className="w-2.5 h-2.5" /> Free tier, no charge for these images
+            {/* ── WHAT THE FREE TIER IS FOR, said where the user is typing ───────────────────
+                Admin, 2026-09-21: *"free image generator me, ek watermark jaise chat box me hi likh
+                dekha, image only for your app … jisse log real cinematic image na ban pane se
+                nirash nahi honge"*.
+
+                🔑 IT IS EXPECTATION, NOT AN APOLOGY. The free engine is genuinely good at flat,
+                graphic work — a logo, an icon, a banner, an illustration — and genuinely weaker at
+                photographic and cinematic scenes. A user who asks it for a film still and is
+                disappointed was not failed by the picture; they were failed by nobody telling them
+                which job this tool is for. Saying it BEFORE they press send costs one line and
+                turns a bad result into an informed choice.
+
+                ⚠️ It never says "you cannot" and it never names a vendor. The Pro button is a REAL
+                control (the same tier state the toggle above uses), and it is hidden entirely when
+                Pro cannot serve — advice pointing at a door that does not open is worse than none. */}
+            <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5 flex-wrap">
+              <Wand2 className="w-2.5 h-2.5 shrink-0" />
+              <span>
+                {reference
+                  ? 'Only what you ask for changes — the rest of your picture is kept.'
+                  : 'Free images are made for your app’s artwork — logos, icons, banners, illustrations.'}
+              </span>
+              {!proOff && !reference && (
+                <>
+                  <span>For photo-real or cinematic pictures,</span>
+                  <button
+                    type="button"
+                    onClick={() => setChosenTier('pro')}
+                    className="underline text-accent-text hover:text-ink transition-colors"
+                  >
+                    use Pro
+                  </button>
+                  <span>— this tier stays free.</span>
+                </>
+              )}
             </p>
           </div>
         </div>

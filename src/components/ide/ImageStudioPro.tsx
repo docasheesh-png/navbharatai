@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModeButton } from '../chat/ModeButton';
-import { ArrowUp, Download, ImagePlus, Loader2, RefreshCw, Sparkles, Type, Wand2, X } from 'lucide-react';
+import { ArrowUp, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, Wand2, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
+import { CustomSizeFields } from './CustomSizeFields';
+import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, pixelsForSize, resolveCustomSize } from '../../lib/imageSize';
+import { ImageCropEditor } from './ImageCropEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 
 /**
@@ -43,6 +46,7 @@ const SIZES: ImageOption[] = [
   { id: 'wide', label: '16:9', desc: 'Wide, 1280×720' },
   { id: 'portrait', label: '3:4', desc: 'Portrait, 864×1152' },
   { id: 'icon', label: 'Icon', desc: 'App icon, 1024×1024' },
+  { id: CUSTOM_SIZE_ID, label: 'Custom', desc: 'Your own width and height' },
 ];
 
 /**
@@ -96,6 +100,12 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
   const [prompt, setPrompt] = useState('');
   const [ref, setRef] = useState<string | null>(null);
   const [size, setSize] = useState('square');
+  // Which picture the crop sheet is open on. The ORIGINAL is what it re-opens with, so adjusting
+  // twice never cuts a cut — the same rule the free tier's picker follows.
+  const [cropping, setCropping] = useState<string | null>(null);
+  const [refOriginal, setRefOriginal] = useState<string | null>(null);
+  const [customW, setCustomW] = useState(DEFAULT_CUSTOM_SIZE.w);
+  const [customH, setCustomH] = useState(DEFAULT_CUSTOM_SIZE.h);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState<Result[]>([]);
@@ -136,7 +146,7 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
       return;
     }
     const fr = new FileReader();
-    fr.onload = () => { setRef(String(fr.result || '')); setError(''); };
+    fr.onload = () => { const u = String(fr.result || ''); setRef(u); setRefOriginal(u); setError(''); };
     fr.onerror = () => setError('That image could not be read. Please try another one.');
     fr.readAsDataURL(file);
   }, []);
@@ -164,7 +174,14 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
       const res = await fetch('/api/image/pro/generate', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ prompt: prompt.trim(), size, ...(ref ? { initImage: ref } : {}) }),
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          size,
+          // Already through the server's own clamp, so the picker's number and the generated
+          // picture are the same number. Absent for a preset — nothing downstream changes.
+          ...(size === CUSTOM_SIZE_ID ? resolveCustomSize(customW, customH) : {}),
+          ...(ref ? { initImage: ref } : {}),
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || typeof data.image !== 'string') {
@@ -275,7 +292,7 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
                   {/* The studio move a search page has no reason to offer: carry this result straight
                       back into the input as the next request's reference. */}
                   <button
-                    onClick={() => { setRef(r.url); taRef.current?.focus(); }}
+                    onClick={() => { setRef(r.url); setRefOriginal(r.url); taRef.current?.focus(); }}
                     className="text-[11px] flex items-center gap-1.5 text-muted hover:text-ink border border-line hover:border-line rounded-lg px-2.5 py-1.5 transition-colors"
                   >
                     <ImagePlus className="w-3 h-3" /> Use as reference
@@ -324,7 +341,22 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
                   {prompt.trim() ? 'Your words will direct the edit' : 'Add words to direct it, or send as-is'}
                 </div>
               </div>
-              <button onClick={() => setRef(null)} className="shrink-0 text-faint hover:text-ink p-1"><X className="w-3.5 h-3.5" /></button>
+              {/* Crop and resize, the same control the free tier has — admin 2026-09-21: the +/0/−
+                  arrangement is asked for on BOTH tiers, so it is one component used twice. */}
+              <button
+                onClick={() => setCropping(refOriginal || ref)}
+                aria-label="Adjust the picture"
+                className="shrink-0 text-faint hover:text-ink p-1"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => { setRef(null); setRefOriginal(null); }}
+                aria-label="Remove the picture"
+                className="shrink-0 text-faint hover:text-ink p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 
@@ -343,6 +375,15 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
             </div>
             {mode && <span className="text-[11px] text-muted truncate">{MODE_LABEL[mode]}</span>}
           </div>
+
+          {size === CUSTOM_SIZE_ID && (
+            <CustomSizeFields
+              width={customW}
+              height={customH}
+              onChange={(w, h) => { setCustomW(w); setCustomH(h); }}
+              className="rounded-xl border border-line bg-raised px-2.5 py-2"
+            />
+          )}
 
           {/* OUTSIDE the pill, to its left (admin 2026-09-21: "input box se pahle mode button").
               Inside it the button would read as part of the message box; the free chat's composer
@@ -393,6 +434,15 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
           </p>
         </div>
       </div>
+
+      {cropping && (
+        <ImageCropEditor
+          image={cropping}
+          frame={pixelsForSize(size, customW, customH)}
+          onClose={() => setCropping(null)}
+          onDone={(url) => { setRef(url); setCropping(null); }}
+        />
+      )}
 
       {textOn && (() => {
         const target = results.find((r) => r.id === textOn);

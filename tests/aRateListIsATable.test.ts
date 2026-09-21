@@ -48,6 +48,9 @@ function recorder(charWidth = 10) {
     fillText(text: string, x: number, y: number) { calls.push({ op: 'fillText', args: [text, x, y], align: this.textAlign, fill: this.fillStyle }); },
     strokeText(text: string, x: number, y: number) { calls.push({ op: 'strokeText', args: [text, x, y], align: this.textAlign, fill: this.fillStyle }); },
     fillRect(x: number, y: number, w: number, h: number) { calls.push({ op: 'fillRect', args: [x, y, w, h], align: this.textAlign, fill: this.fillStyle }); },
+    // Added with the border (2026-09-21). Tests are outside `tsconfig`'s include, so a fake
+    // missing a method the interface requires compiles and throws only when it is called.
+    strokeRect(x: number, y: number, w: number, h: number) { calls.push({ op: 'strokeRect', args: [x, y, w, h], align: this.textAlign, fill: this.fillStyle }); },
   };
   return ctx;
 }

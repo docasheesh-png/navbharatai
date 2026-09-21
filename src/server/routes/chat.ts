@@ -15,7 +15,10 @@ import { answerShapeFor } from '../AI/answerShape';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
 import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
-import { fetchPollinationsImage, imageMarkdown } from '../lib/imageGen';
+import { fetchPollinationsImage, imageMarkdown, IMAGE_REFUSAL_MESSAGE } from '../lib/imageGen';
+import { looksLikeImageEdit } from '../../lib/imageEdit';
+import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
+import { gateToolAction, burnToolAction } from '../tools/toolGate';
 
 /**
  * Chat routes (the general/FREE chat) extracted from the server.ts monolith
@@ -423,6 +426,72 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // path only supported an API-key Gemini client and passed the bogus literal
     // `apiKey: 'vertex'` when no key was set, so a Vertex-based deployment could not
     // read images/PDFs in Free chat at all — this is the root-cause fix.
+    // ── "CHANGE MY PICTURE" IN FREE CHAT (admin 2026-09-21) ─────────────────────────────────
+    // An attached picture has always meant "read this for me", and it still does: the detection
+    // below is precision-first in the DESCRIBING direction, so anything that is not clearly an
+    // instruction to change the picture gets exactly the answer it has always got. The costs are
+    // asymmetric — describing when they wanted an edit costs one more message; editing when they
+    // wanted an answer replaces the very picture they were asking about.
+    //
+    // ⚠️ THIS IS A PAID RUNG, and free chat had never had one. The free provider cannot receive a
+    // picture that exists only inside this request, so an edit is served by the multimodal rung
+    // through the SHARED `runImageEdit` — which means it must be metered exactly like the image
+    // tool's paid rungs, on the same daily allowance and the same wallet. A free-first ladder whose
+    // paid rungs are ungoverned is the class the 2026-09-12 money audit named twice.
+    const loneImage = visionAttachments.length === 1 && visionAttachments[0].type.startsWith('image/')
+      ? visionAttachments[0]
+      : null;
+    if (loneImage && looksLikeImageEdit(message)) {
+      const streamOut = req.body.stream === true;
+      const sendEdit = (reply: string) => {
+        if (streamOut) {
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+          }
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
+          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+        } else {
+          res.json({ reply });
+        }
+      };
+      const dataUrl = `data:${loneImage.type};base64,${loneImage.base64}`;
+      const { checkEditable, runImageEdit } = await import('../lib/imageEditRun');
+      const editable = checkEditable(dataUrl);
+      if (!editable.ok) {
+        // Honest, and it does NOT quietly fall back to describing the picture: the user asked for a
+        // change, so the reply says whether a change can happen. Never a vendor name (white-label).
+        sendEdit(editable.outcome.badInput
+          ? `${editable.outcome.badInput}\n\n${imageGenGuidance()}`
+          : `Abhi picture badalna available nahi hai 😔 — aap nayi image bana sakte hain.\n\n${imageGenGuidance()}`);
+        return;
+      }
+      const account = await requireAccountForCostlyAi(req, 'picture editing');
+      if (!account.ok) {
+        sendEdit(`Apni picture badalne ke liye sign in karein — har badlaav asli engine par banta hai.\n\n${imageGenGuidance()}`);
+        return;
+      }
+      const gate = await gateToolAction(account.uid, account.email, 'image');
+      if (!gate.allow) {
+        sendEdit(`Aaj ke liye aapki picture-editing limit poori ho gayi hai — kal phir se try karein.\n\n${imageGenGuidance()}`);
+        return;
+      }
+      console.log(`[CHAT/IMAGE-EDIT] tier=${tier} editing an attached picture`);
+      const out = await runImageEdit(dataUrl, message);
+      if (out.image) {
+        if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+        sendEdit(`Ye rahi aapki badli hui picture 🎨\n\n${imageMarkdown(out.image, 'edited image')}\n\nAur kuch badalna ho to bata dein.\n\n${imageGenToolPointer()}`);
+      } else if (out.refusal) {
+        sendEdit(`${IMAGE_REFUSAL_MESSAGE}\n\n${imageGenGuidance()}`);
+      } else {
+        sendEdit(`Abhi picture badal nahi paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
+      }
+      return;
+    }
+
     if (visionAttachments.length > 0) {
       const visionResult = await runVisionChain(visionAttachments, {
         prompt: contextualMessage,

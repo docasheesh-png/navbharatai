@@ -1500,6 +1500,40 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
+- **🖼️ AI IMAGE STUDIO PRO — the ₹1/image paid tier. ✅ THE ADMIN SET ALL THREE IN CLOUD RUN
+  2026-09-21:** `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, and `IMAGE_PRO_AUTH_SCHEME` = **`bearer`**.
+  Read by `src/server/lib/imageProGen.ts`; the route is `POST /api/image/pro` (`routes/imageGen.ts`).
+  Recorded hand-to-hand, the same session it was said, per this registry's own rule.
+  🔴 **THE THIRD KEY IS THE ONE THAT LOOKS OPTIONAL AND IS NOT.** `imageProAuthHeaders` defaults to
+  `Authorization: Key <token>`; the host this tier was priced around wants `Bearer <token>`, so
+  without it every call is a 401 and the toggle looks broken rather than misconfigured. The other two
+  accepted values are `key` and `x-key` — one word, three hosts, which is why it is an env and not
+  three code paths.
+  ⚠️ **SETTING THE KEYS IS NOT ENOUGH ON ITS OWN, and this was found by reading the vendor's API docs
+  BEFORE telling the admin to buy anything.** The host is **ASYNCHRONOUS by default**: the POST answers
+  with a prediction id and the picture appears later at a separate result URL, and even in sync mode a
+  task slower than its wait window comes back **HTTP 200** carrying `status: processing`. Every one of
+  its documented response shapes returned `null` from `parseImageProResponse` — verified by running
+  our own parser over them, not reasoned about — so a correctly-configured Pro tier would have
+  produced an honest *"could not finish"* on every single press. Fixed in PR #3215 (`enable_sync_mode`,
+  `data.outputs`, `pendingResultUrl`, `jobFailed`, and a poll loop bounded by the SAME
+  `IMAGE_PRO_TIMEOUT_MS` clock). **Until that PR is merged the keys change nothing** — which is the
+  order to follow: merge, then test.
+  📌 Optional, all with working code defaults: `IMAGE_PRO_ENABLED` (`off` is the kill switch),
+  `IMAGE_PRO_COST_USD` (what one image really costs us — **$0.005**, invoice-anchored, and the basis
+  of `imageProMarginWarning`), `IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` (a family, not one
+  model: a fresh-generation model handed an image and an instruction quietly ignores one of them),
+  and `IMAGE_PRO_MODEL` (overrides BOTH — the escape hatch for a host serving one endpoint, not the
+  normal path).
+  ⚠️ **NOT ONE REAL CALL has been made against the host from any session** — its site is refused by
+  the execution environment's egress policy, so every shape above comes from its published
+  documentation. The first real request is the first real evidence. When it fails, the server log
+  names the cause rather than degrading in silence: `[IMAGE PRO] host returned HTTP 401` (the key or
+  the auth scheme), `HTTP 404` (the endpoint or the model id), `polling returned HTTP …`, or
+  `no image in a 200 response` (a response shape we do not yet read).
+  🔒 **A failure costs the user ₹0** — nothing is charged unless an image is delivered, which is the
+  same "working result or free" law a build obeys, and it is untouched by any of this.
+
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

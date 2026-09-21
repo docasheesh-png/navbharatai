@@ -14,9 +14,23 @@
 // 🔒 So the fix is not 19 aria-labels; it is that a new template with an unlabelled control can no
 // longer reach `main`. This runs the REAL `scanAccessibility` — the same function, not a copy of its
 // rules — over every registered scaffold. A copy would drift; asking the production module cannot.
+//
+// 🔴 AND THAT PROMISE WAS NOT KEPT FOR ONE DAY (autopsy 8a92e5ed, 2026-09-20). The very next report
+// told a free user their working password generator had *"3 form field(s) with no label"*. This file
+// was green throughout — because **`scanAccessibility` is not what writes the `ACCESSIBILITY` line in
+// a build report.** `AppMakerLab/intelligence/A11yLinter.ts` is, by way of `buildQualityLint.ts`, and
+// nothing had ever pointed a lock at it. The instance was fixed and the sibling was never hunted; the
+// lock was aimed at the analyzer that does not judge builds.
+//
+// So both are asked here now, and the second one found ELEVEN genuinely unlabelled controls the first
+// cannot see: `scanAccessibility` reads a tag only when it CLOSES ON ITS OWN LINE, and a generated
+// React input is routinely written over six. `<label>Email</label>` beside an `<input>` with no
+// `htmlFor`/`id` is not a label to a screen reader, and NavBharatAI's login template shipped three of
+// them. A `placeholder` is not one either — it vanishes the moment the user types.
 
 import { describe, it, expect } from 'vitest';
 import { scanAccessibility } from '../src/server/AgentV3/AccessibilityAnalysis';
+import { lintA11y } from '../src/server/AppMakerLab/intelligence/A11yLinter';
 import { GOLDEN_SCAFFOLDS } from '../src/server/AgentV3/goldenScaffolds/registry';
 
 /** What the gate says about one scaffold's App.tsx, as `id: kind — snippet` lines. */
@@ -50,6 +64,25 @@ describe('every golden scaffold passes the gate its own apps are judged by', () 
         .map((i) => `${s.id}: ${i.kind} — ${i.snippet.replace(/\s+/g, ' ').slice(0, 100)}`),
     );
     expect(high, `Fix in the scaffold source:\n${high.join('\n')}`).toEqual([]);
+  });
+
+  it('🔒 the linter that writes the BUILD REPORT is clean on every scaffold too', () => {
+    // THE SIBLING. `buildQualityLint.ts` → `lintA11y` is what produced the false finding in autopsy
+    // 8a92e5ed and what produces every real one. Asking only `scanAccessibility` above left this
+    // module — the one a user actually meets — locked by nothing at all.
+    const bad = GOLDEN_SCAFFOLDS.flatMap((s) =>
+      lintA11y(s.appTsx).violations
+        .filter((v) => v.severity === 'warn')
+        .map((v) => `${s.id}: ${v.type} ×${v.count} — ${v.message}`),
+    );
+    expect(bad, `The build report's own linter would flag these:\n${bad.join('\n')}`).toEqual([]);
+  });
+
+  it('⚠️ and THAT check is really running — a deliberately broken template is caught', () => {
+    // The same canary as below, for the second linter: a rule that silently counted nothing would
+    // make the lock above pass for ever while proving nothing.
+    const broken = 'export default function App() {\n  return (\n    <input\n      value={x}\n      onChange={(e) => set(e.target.value)}\n    />\n  );\n}';
+    expect(lintA11y(broken).violations.some((v) => v.type === 'input-label')).toBe(true);
   });
 
   it('⚠️ the check is really running — a deliberately broken template is caught', () => {

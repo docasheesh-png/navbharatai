@@ -75440,3 +75440,272 @@ Pharmacist, First Aid and Maternity on every native shell).
 It is labelled a DRAFT, dated, and carries the instruction to re-grep before filing — because the
 2026-09-02 incident in `CLAUDE.md` is precisely a store declaration and a policy page drifting apart,
 and a confident sheet that goes stale is how that happens a second time.
+## 2026-09-21 — AUTOPSY 56f0c645: a SENTENCE vouched for a control nobody captured, and a working app was told its search was missing
+
+**The report:** a Quick Notes build, free tier, 3.2 min, ₹9.38, `ok: true`, reviewer 90/100 "App looks
+complete" — carrying `FEATURE_COVERAGE: 1 requested feature(s) have NO visible control in the running
+app — Search. Present: List / items.` That finding also became the build's `rootCause`.
+
+**It was FALSE, and this is a fact rather than a reading.** `src/App.tsx` in the manifest hashes
+`38364d60…`, byte-identical to our own `quick-notes` golden scaffold (see the correction below), and
+that file carries `aria-label="Search notes"`, `placeholder="Search notes"` and a real filter
+(`n.text.toLowerCase().includes(q)`). The build wrote ZERO files (`WRITE_TIME_TYPECHECK`), so nothing
+could have removed it. Running the real `checkFeaturePresence` over the DOM that scaffold renders
+reports **Search present** — so the search RULE was never the bug.
+
+⚠️ **CORRECTION, same day, before this ever merged — the hash is RECORDED, no longer ASSERTED.**
+The test first pinned that hash live. Within the hour commit `e2cd0e65a` (another session, running
+concurrently) legitimately added `aria-label="New note"` to that very scaffold as part of the a11y
+labelling sweep, so the hash moved and the assertion failed — on a correct change, with nothing wrong.
+**A pinned hash over a file that is SUPPOSED to improve fails on every legitimate edit, and its only
+remedy is to paste the new hash — which teaches the next session to paste hashes and verifies nothing.**
+So the hash now lives in the test's doc comment as dated evidence (it was true on 2026-09-21, and that
+is all a historical fact needs), and the live lock is the PROPERTY the argument actually rests on: this
+scaffold must keep a search field the probe can SEE, and `checkFeaturePresence` must still find it.
+Nothing about the finding's falseness changed — only what CI re-checks every run.
+
+🔑 **THE CAUSE WAS THE WITNESS, NOT THE RULE.** `checkFeaturePresence` already had a
+capture-corroboration guard, added after two earlier false findings, resting on one premise: *another
+requested feature probed PRESENT, so the rendered DOM really was captured.* **That premise is false for
+a probe satisfied by PROSE.** The `list` rule counts an honest empty-state sentence, and
+`hasControlMatching` tests the page's entire visible-text blob — it cannot tell a button's label from a
+word in a paragraph. So a partial capture (the heading and "No notes yet - your notes stay on this
+device." painted, the controls not yet) let `list` vouch for a DOM with no controls in it at all, and
+the `search` verdict was released against a working app.
+
+**Reproduced byte-for-byte before anything was changed** — that 130-character partial capture returns
+`present ["List / items"], missing ["Search"]`, exactly the report's words. Its 44 characters of copy
+also carried it past `isUnrenderedSpaShell`'s 40-character floor, which is why the honesty guard stayed
+silent and why the fix could not live in that threshold.
+
+**Fixed at the class:** every probe now reports WHAT its verdict rests on — `control` (an `<input>`,
+`<button>`, `type="checkbox"`, `type="password"`, `<ul>`/`<li>`, `<form>`, or a `placeholder`/
+`aria-label` on a field) or `text` (prose only) — and **a feature may be called missing only when some
+present probe rests on a real element.** `hasControlMatching` returns which kind it matched, checking
+attributes first so a page with both is credited with the control.
+
+🔒 **IT GATES THE ACCUSATION, NOT THE WHOLE RESULT — and this repo's own suite established that.** The
+first version returned `empty` whenever no control-backed witness existed, which also silenced results
+where NOTHING was missing; "an honest empty-state counts the list surface as present" failed, correctly.
+An all-present result accuses nobody, so there is nothing in it to be wrong about. The false-verdict
+risk lives entirely in the missing list.
+
+⚠️ **THE TRADE, STATED:** an app that really lacks a control, whose only present feature is
+prose-matched, now stays SILENT instead of reporting the gap. Deliberate — the check is advisory, a
+missed advisory costs one line in a report, and a false "your feature is missing" tells a user their
+working app is broken. Inside the `AGENTV3_FEATURE_HEAL` cohort (on, 20%) it would also have spent an
+extra model pass adding a search box that was already there; this workspace was out of the cohort, by
+luck rather than design.
+
+**The 50/50 half — why it was possible AND unauditable.** The report recorded the verdict and none of
+the evidence, so overturning one line meant hashing the scaffold, re-running the probe against a
+reconstructed DOM, and finally reproducing the capture. `featurePresenceEvidence()` now prints what each
+probe rested on, and the call site records the capture beside it (`source=`, `painted=`, html bytes,
+input and button counts). A finding nobody can check is re-litigated every time it appears.
+
+**Sibling hunt (rule 3) — and it names a real asymmetry.** Every other consumer of that browser capture
+is handed its PROVENANCE: `analyzePreviewHtml` takes `painted` and `source` at all four call sites, and
+Green Freeze latches only when `shot.source === 'browser'`. The one probe that ACCUSES the user's app
+was handed bare `html`. `RequirementCoverage` and `DesignCoverage` judge file bodies, not a capture, so
+they cannot hit this class.
+
+**Tests:** `tests/aSentenceIsNotAControl.test.ts` (16), plus all 22 existing `FeaturePresence` tests
+still green. **Reversion-proven twice** — letting prose vouch again fails 2, relabelling the empty-state
+sentence as a control fails 3.
+
+**Also wrong in that report, recorded because each is a claim a later session would reason from:**
+- **`FE_BE_PARTITION` said "Of the 12 file(s) THIS TURN wrote"** — the turn wrote ZERO. Those 12 are the
+  pre-seeded scaffold. The line is honest about not surveying the project and then miscounts what it did.
+- **`requestAnalysis.startTier: "gemini"`** — Gemini has been on no build ladder since the three-tier
+  change (2026-09-14). A stale label on live telemetry.
+- **The narration promised "adding search"** and then added nothing, and the summary called the app
+  "fully built and working" while the report warned a requested feature was missing.
+- **`PREVIEW_SNAPSHOT_STALE` with ZERO writes** — "Both sides hold the same 14 file(s), so a file's
+  CONTENT changed between them." Nothing in the build wrote a file; what changed is not established.
+- **No `JOURNEY_*` code appears at all**, yet `RELEASE_GATE` says "no user journey could be derived or
+  run". The 2026-09-17 fix added `JOURNEY_NOT_RUN` precisely so that state is visible; it is absent here.
+
+**OPEN, recorded not patched (rule 6):**
+- **Nothing reconciles the engine's own claims with the platform's own findings.** Three verdicts stood
+  side by side — summary "fully built and working", reviewer 90/100 "complete", report "a requested
+  feature is missing" — with no arbiter. `CLAIM_UNSUPPORTED` exists for exactly this and did not fire.
+- **The probe still judges a capture whose quality it cannot see.** The honest completion is to hand it
+  `painted`/`source` like every other reader. Not built yet on purpose: the capture fingerprint now in
+  the report is the evidence that would justify it, and no report has yet shown a `painted=false` case.
+  Same posture as `POST_GREEN_WRITES` — measure first, then protect.
+- **`PREVIEW_SNAPSHOT_STALE` on a zero-write build** is unexplained and stays open.
+- **The lead rung crawled again:** `glm-4.7-flashx` was abandoned mid-answer at 16.2 s and benched, so
+  the build fell to rung 2 (`LADDER_DEPTH`). That is the throughput bench working, and it is also the
+  second report in which FlashX's real-world speed is the thing that moved a build off rung 1.
+## 2026-09-21 — AUTOPSY `8a92e5ed` + `01037e20`: two builds, and the engine was wrong about both apps
+
+Admin sent one session's report: a **password generator** (204 s, weak/free, ok) and a **Free Fire–style
+3D battle royale** (386 s, weak/free, ok). Both rendered, both typechecked, both built for production.
+Neither app was broken. **The engine's account of them was.**
+
+### Step 1 — the five-bucket ledger (19 items)
+
+**✅ Self-healed (2)** — GLM `glm-4.7-flashx` crawled and was benched mid-answer at 15.7 s, ladder moved
+to KIMI and the build completed (build 1); the `three`/`@react-three/fiber` peer conflict was retried
+with pinned majors and `--legacy-peer-deps` and succeeded (build 2).
+
+**🔀 Worked around / alternative used (3)** — that dependency pin is a deferred root cause, not a win
+(fiber@9 needs `react >=19 <19.3`, our scaffold is newer, so the scaffold's React pin and the 3D stack
+disagree and every 3D build will hit it); `BUILD_ORDER_READ_AS_EDIT` turned an explicit "build a game"
+into an edit of the previous app, leaving `src/theme.tsx` orphaned; `APP_SCOPE` announced *"the mega-app
+roadmap planner is asked for a step-by-step plan next (recorded as `MEGA_ROADMAP_*`)"* and **no
+`MEGA_ROADMAP_*` line appears anywhere in the report**.
+
+**⏭️ Skipped / ignored (4)** — `RUNTIME_UNCHECKED` on BOTH builds (the console could not be captured, so
+console errors were never checked, twice); `PREVIEW_SNAPSHOT_STALE` on BOTH builds (the free saved copy
+was discarded each time); the 1,092 kB bundle warning in build 2 reached no gate; the reviewer's real
+suggestions were suggest-only under Green Stop and nothing carried them.
+
+**❌ Still broken / shipped imperfect (5)** — **`ACCESSIBILITY` reported 3 unlabelled form fields that
+are labelled**; **`FEATURE_COVERAGE` reported a missing "Mark complete / toggle" and a present
+"Login / authentication" in an app asked for neither, and it became the build's `rootCause`**;
+`GREEN_FREEZE_DEFERRED` refused `playwright.config.ts` in both builds and `docs/decisions/ADR-001.md` in
+one, while the same report's `RELEASE_GATE` complained the app *"has no test suite that could be run
+here"*; `requestAnalysis.startTier` read `gemini` / `sonnet`, neither of which is on any weak ladder;
+`etaAccuracy.evidenced: false` on both — the estimator landed inside its own band twice and showed the
+user no figure either time.
+
+**🥵 Struggle points (5)** — `READY_BEFORE_END`: build 1 was judged finished at step 10 and ran 5 more
+steps over 47 s; build 2 ran **14 more steps over 227 s**, i.e. 59% of its wall clock after the app was
+done. Build 1's first write-time typecheck took **28.4 s** (cold `node_modules`), inside a 31-second
+`edit_file` for a two-character en-dash change. The GLM lead rung crawled. The reviewer re-read
+`src/game/runtime.ts` three times and `scene.tsx` three times and overran its 45 s budget. Build 1 billed
+**₹46.74** for verifying a pre-seeded template and changing two dashes.
+
+### Step 2 — the missing subsystem
+
+**There is no single reader for the app's own markup.** Every rule that wants to know something about a
+generated file writes its own regex, and JSX is not HTML: `<input\b[^>]*>` ends at the `>` of an arrow
+function. Seven modules carry that shape. The two accessibility analyzers had drifted so far apart that
+one was CI-locked against our templates while the other — the one that writes the build report — was
+locked by nothing and had been reporting false defects against those same templates.
+
+### Step 3–5 — DNA-level fixes shipped (and the 50/50 other half)
+
+1. **`src/server/AgentV3/jsxTags.ts` (new, pure)** — one reader. `tagsOnLine` moved verbatim from
+   `AccessibilityAnalysis.ts` (its 46-test suite proves the move changed nothing); `scanMarkup` adds
+   cross-line wrapping-`<label>` depth, multi-line tags, absolute index, and the element-vs-component
+   distinction JSX makes DECIDABLE. `hasAttr` / `hasAttrOrBareBoolean` name the two real attribute
+   conventions in one place instead of one copy per analyzer.
+2. **`A11yLinter.ts`** — `inputsMissingLabel`, `imagesMissingAlt` and `controlsMissingName` rebuilt on
+   it. Also fixed there: each `<button>` was judged by `indexOf(tag)`, so three plain `<button>` tags
+   all inherited the FIRST one's inner text.
+3. **The other 50%: eleven GENUINELY unlabelled controls in our own scaffolds** (todo ×2, tip-split ×2,
+   qr-generator, quick-notes, gst-bill, social-feed, **login-page ×3**) — invisible to
+   `scanAccessibility` because it reads a tag only when it closes on its own line. Fixed at the source
+   (`htmlFor`/`id` where a visible label exists, `aria-label` otherwise).
+4. **`tests/ourOwnTemplatesPassOurOwnGate.test.ts` now asks BOTH linters**, each with its own canary —
+   the promise its docblock already made.
+5. **`FeaturePresence.ts`** — a keyword must arrive with the company that fixes its sense. `password`
+   is out of the auth list; the completion keywords no longer accept a bare `toggle` / `complete` /
+   `done`. Recall is pinned: TaskLite and a real login page still probe.
+
+Reversion-proven four ways in `tests/theAnalyzerLiedAboutOurOwnTemplate.test.ts` (13 cases), including a
+source-level guard, because `tsc` and `vitest` cannot see that a regex reads the wrong dialect.
+
+### 🔴 OPEN ROOT CAUSES (rule 6) — named, not silently deferred
+
+- **`PREVIEW_SNAPSHOT_STALE` on every build.** Both builds: *"Both sides hold the same N file(s), so a
+  file's CONTENT changed"*, while `POST_GREEN_WRITES` said nothing wrote after green. Strong hypothesis,
+  NOT yet verified: the preview bridge rewrites `index.html` **in the sandbox** (`[preview-bridge]
+  index.html now reports its console…` appears in build 1's own dev-server output), so the snapshot's
+  source hash can never equal the persisted hash. If so the free saved copy is discarded on every build
+  and every preview wake pays for a live E2B machine — real money. The one check that settles it: whether
+  `snapshotTaken.filesHash` is computed from sandbox files or from the durable set.
+- **`RUNTIME_UNCHECKED` on every build** — the browser console could not be captured on either run, so
+  console errors are checked on no build at all. Not investigated here.
+- **`READY_BEFORE_END` — 227 s (59%) of build 2 ran after the app was judged finished at 92/100.**
+  `#3084` shipped the measurement; nothing yet acts on it.
+- **Green Freeze vs the release gate.** The freeze refused `playwright.config.ts` and an ADR markdown
+  file while the gate complained the app has no test suite. A `.md` provably cannot affect a running
+  app; a `.ts` config can break the production typecheck, so this is NOT a safe blanket carve-out and
+  was deliberately not built today.
+- **`requestAnalysis.startTier` is stale** — it names `gemini`/`sonnet`, from before the three-tier
+  ladders. Cosmetic in the admin report; misleading to the next reader.
+- **The 3D dependency pin.** `@react-three/fiber@9` requires `react >=19 <19.3`; our scaffold ships
+  newer, so every 3D build pays a failed install, a retry and `--legacy-peer-deps`.
+- **A piped sandbox command reports the PIPE's exit code.** `npm install … 2>&1 | tail -20` recorded
+  `exitCode: 0` for an install that printed a wall of `npm error`. The same shape (`npm run build 2>&1 |
+  head -40`) is how a failing production build would be recorded as exit 0.
+- **Six more modules read JSX with `<input\b[^>]*>`** — `authFlowSpec.ts` and `journeyDerivation.ts` are
+  source-fed and carry the same truncation (both feed the journey check, which reported
+  `JOURNEY_NOT_DERIVED` in build 1). Left untouched deliberately: correcting them changes which
+  Playwright selector is chosen, which needs its own evidence. `FuzzProbe.ts` and `siteImport.ts` read
+  RENDERED HTML, where the regex is correct.
+
+---
+
+## 2026-09-21 (2) — AUTOPSY `e4d27bde` + `53d43c18` + `ad1596fc`: "Fix bugs", and the bug was ours
+
+Three builds, one workspace (a memory-match game). Two from 2026-09-15, one from **this morning**.
+
+### Step 1 — ledger (16 items)
+
+**✅ Self-healed (3)** — GLM benched twice on timeouts and the ladder reached KIMI (builds 2 and 3);
+write-time typecheck caught 7 undefined names the moment the file was written and the next write fixed
+them (build 3) — that feature worked exactly as designed.
+
+**🔀 Worked around (3)** — build 2's whole existence: the engine repaired its own broken entry file and
+billed the user for it; build 3 invented a "Game history" list because the prompt said "the main list"
+and a memory game has none; `GRAPH_RESTORED_STUBS` — 8 of 20 files carried placeholder facts from a cold
+resume, so recall, evaluate, the architecture analysis and the readiness score all ran on a third of the
+project being blank.
+
+**⏭️ Skipped (3)** — `RUNTIME_UNCHECKED` on builds 1 and 2 (console never captured, and build 1's summary
+CLAIMED "zero console errors", corrected by `CLAIM_UNSUPPORTED`); `REVIEW_INCOMPLETE` on both (the
+post-build review timed out at 94 s and 122 s and its findings were lost); build 1's `TEST_SUITE_UNVERIFIED`.
+
+**❌ Still broken (4)** — **`index.html` lost its mount node and entry script between build 1 and build
+2**; **our preview bridge was being persisted into the user's source**; **`FEATURE_COVERAGE` reported a
+missing "Add / create" for the instruction "Add pagination…"**, and it became build 3's `rootCause`;
+`DESIGN_CONSISTENCY` 60/100 on builds 1–2 (22 colours, 15 off-grid spacings) — largely our own scaffold's
+stylesheet.
+
+**🥵 Struggle (3)** — build 1 spent **87 s** on one `tsc` and **78 s** on a `cat`, both blocked behind a
+failing dev-server auto-start, and reported `OUTCOME_STOPPED`; build 2 ran **21.5 minutes** and its two
+GLM timeouts cost 150 s each; `REPEATED_READS` on build 2 — 17 reads over 11 files, 35% re-reads.
+
+### Step 2 — the missing subsystem
+
+**A deterministic repair that exists but is wired to one lane is not a repair.** `ensureHtmlEntryScript`
+is pure, unit-tested and has guaranteed since 2026-07-13 that an app can boot — from `SimpleBuilder.ts`
+only. The architect loop, which is where most builds run, never asked it. The same shape as
+`a38c6fef`'s zombie write and `c847b523`'s accessibility analyzer.
+
+### Step 3–5 — fixes shipped (into PR #3205)
+
+1. **`ensureHtmlEntryScript` on the architect path**, beside `ensureViteConfig` — the existing precedent
+   for a post-build deterministic repair. Adds only what is missing, only when an `index.html` AND a real
+   entry module exist, never rewrites a page that boots, and can never affect the build's result. Reports
+   `HTML_ENTRY_REPAIRED`, registered in `PROCESS_ONLY_CODES`.
+2. **`withoutPreviewBridge` on the app-defaults read.** Measured: 299 bytes → 18,546 bridged → 19,224
+   persisted, matching that report's own `dist/index.html 18.46 kB`. The live console is unaffected —
+   `E2BActuator` re-injects on every dev-server start.
+3. **`BUILDER_INSTRUCTION_OBJECT` in `FeaturePresence.ts`** — the third false finding of one class in two
+   days. `add pagination` / `add dark mode` / `add tests` / `add karo` are orders to the builder; `add a
+   task` is a control. Suppressed per OCCURRENCE, so `add a button to add a task` still counts.
+
+Reversion-proven in `tests/theBootGuardRanOnOneLaneOfTwo.test.ts` (8 cases, two source-level guards) and
+`tests/theAnalyzerLiedAboutOurOwnTemplate.test.ts` (16 cases).
+
+### 🔴 OPEN ROOT CAUSES (rule 6)
+
+- **What removed the mount node and entry script from `index.html` between build 1 and build 2 is NOT
+  known.** The app-defaults pass was the obvious suspect and is measurably NOT the culprit (it preserves
+  both — pinned by a test so the next reader does not re-investigate it). Build 1 wrote `index.html` only
+  through post-build passes that fired AFTER `endedAt`, which is where to look next. The boot guard above
+  means the next occurrence is repaired instead of being sold back to the user as a bug fix.
+- **`REVIEW_INCOMPLETE` on both 2026-09-15 builds** — the post-build review timed out at 94 s/122 s and
+  its findings were discarded. Build 3 (today, after `AGENTV3_GREEN_REVIEW_LEAN`) completed in 45 s, so
+  this may already be closed; it needs a real not-green build to confirm.
+- **`GRAPH_RESTORED_STUBS`** — a cold resume leaves 40% of the project graph as placeholders and every
+  reader silently degrades. Nothing warns the user or the engine that recall is running half-blind.
+- **The 87-second `tsc` and the 78-second `cat`** in build 1: both were queued behind the dev server's
+  own failing auto-start, so ordinary commands paid for an unrelated retry loop.
+- ✅ **CORRECTION to 2026-09-21 (1):** `PREVIEW_SNAPSHOT_STALE` is NOT universal — build 3 reports
+  `PREVIEW_SNAPSHOT_CURRENT`. It goes stale exactly when a post-build pass writes after the copy.

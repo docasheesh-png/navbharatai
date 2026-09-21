@@ -14,6 +14,22 @@ interface MenuItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
+/**
+ * A CONVERSATION window in the strip (admin 2026-09-21: five professional chats at once). These are not
+ * tabs: `openTabs` is one slot per view id and stays that way. A window is one conversation with one
+ * expert, so two Teacher AI windows are two chips, each closing only ITS conversation.
+ */
+export interface ChatWindowChip {
+  /** The conversation id — the chip's identity and what select/close act on. */
+  id: string;
+  /** "Teacher AI", or "Teacher AI (2)" when that expert has more than one window open. */
+  label: string;
+  /** The expert's emoji, from the same table the Mode picker draws. */
+  emoji: string;
+  /** True for the window on screen right now. */
+  active: boolean;
+}
+
 export interface TopNavProps {
   effectiveDeviceMode: string;
   isSidebarCollapsed: boolean;
@@ -25,6 +41,10 @@ export interface TopNavProps {
   toggleTab: (view: ViewType) => void;
   closeTab: (e: React.MouseEvent, tabId: string) => void;
   menuItems: MenuItem[];
+  /** The open professional conversations, in the order they were opened. Absent ⇒ none rendered. */
+  chatWindows?: ChatWindowChip[];
+  onSelectChatWindow?: (id: string) => void;
+  onCloseChatWindow?: (e: React.MouseEvent, id: string) => void;
   hasGeneratedCode: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -54,6 +74,7 @@ export function TopNav({
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
   onOpenProfile, onOpenSettings, isAdmin, onOpenReports,
+  chatWindows = [], onSelectChatWindow, onCloseChatWindow,
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -161,6 +182,42 @@ export function TopNav({
                 </motion.div>
               );
             })}
+            {/* CONVERSATION WINDOWS (admin 2026-09-21). A professional was never in `menuItems` — the
+                `if (!item) return null` above is deliberate, it is a child surface — so until now an
+                open expert chat had NO chip here at all, and a second chat with the same expert had
+                nowhere to exist. These chips are keyed by CONVERSATION, so "Teacher AI" and
+                "Teacher AI (2)" are two windows of one expert, and ✕ closes exactly that conversation. */}
+            {chatWindows.map((win) => (
+              <motion.div
+                layout
+                initial={{ opacity: 0, scale: 0.8, x: -10 }}
+                animate={{ opacity: 1, scale: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.8, x: 10 }}
+                key={`chat:${win.id}`}
+                role="tab"
+                aria-selected={win.active}
+                className={`flex items-center shrink-0 h-9 rounded-xl px-3 gap-2 border transition-all cursor-pointer group ${
+                  win.active
+                    ? 'bg-indigo-600 border-indigo-500 text-on-accent shadow-lg shadow-indigo-600/20'
+                    : 'bg-surface border-line text-muted hover:border-line'
+                }`}
+                onClick={() => onSelectChatWindow?.(win.id)}
+              >
+                <span aria-hidden className="text-[13px] leading-none">{win.emoji}</span>
+                <span className="text-[11px] font-bold whitespace-nowrap">{win.label}</span>
+                {onCloseChatWindow && (
+                  <button
+                    onClick={(e) => onCloseChatWindow(e, win.id)}
+                    aria-label={`Close ${win.label}`}
+                    className={`p-0.5 rounded-md transition-all ${
+                      win.active ? 'hover:bg-raised text-muted hover:text-ink' : 'hover:bg-raised text-faint hover:text-ink'
+                    }`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </motion.div>
+            ))}
           </AnimatePresence>
         </div>
       </div>

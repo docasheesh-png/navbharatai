@@ -24,6 +24,23 @@ export interface MemoryChunk {
   embedding: number[];
   role: 'user' | 'assistant';
   ts: number;
+  /**
+   * WHICH CONVERSATION this chunk came from (admin 2026-09-21: *"ek chat ki baat/memory 2nd me na
+   * jaye … text reply idhar ka udhar na ho"*).
+   *
+   * 🔴 THE LEAK THIS CLOSES. A chunk is the user's sentence or the assistant's reply, VERBATIM, and
+   * memory was scoped per PROFESSIONAL — so with two Teacher AI chats open, chat B's prompt recalled
+   * chat A's actual words ("They said: …"). That is precisely what the admin forbids: FACTS may cross
+   * chats (the shared profile does that, see clientMemory.ts), TEXT may not. So a chunk carries the
+   * conversation it belongs to, and recall is filtered to the conversation asking.
+   *
+   * ⚠️ THE RULE IS UNIFORM, AND "NO ID" IS ITSELF ONE CONVERSATION: the one that existed before
+   * conversations had ids — every chunk written before this date, and every caller that names none
+   * (a client built before this change). A legacy chunk is therefore recalled by legacy callers and
+   * by nobody who names a conversation; handing it to a new chat would be the leak in its first form.
+   * A conversation that names itself recalls exactly its own chunks and nothing else.
+   */
+  conversationId?: string;
 }
 
 /** A chunk paired with its similarity to the current query (retrieval result). */
@@ -104,7 +121,7 @@ export function quantizeEmbedding(vec: number[], decimals = 5): number[] {
 export function selectRelevant(
   queryEmbedding: number[],
   chunks: MemoryChunk[],
-  opts?: { topK?: number; minScore?: number; excludeTexts?: Iterable<string> },
+  opts?: { topK?: number; minScore?: number; excludeTexts?: Iterable<string>; conversationId?: string },
 ): ScoredChunk[] {
   if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0 || !Array.isArray(chunks) || chunks.length === 0) {
     return [];
@@ -113,10 +130,15 @@ export function selectRelevant(
   const minScore = opts?.minScore ?? memoryMinScore();
   const excluded = new Set<string>();
   for (const t of opts?.excludeTexts ?? []) excluded.add(normalizeText(t));
+  const conversationId = opts?.conversationId;
 
   const scored: ScoredChunk[] = [];
   for (const c of chunks) {
     if (!c || !Array.isArray(c.embedding) || typeof c.text !== 'string') continue;
+    // A chunk is recalled ONLY by the conversation it was written in — see `MemoryChunk.conversationId`.
+    // This is the isolation filter, ahead of similarity on purpose: a chunk from another chat must not
+    // be eligible however relevant it scores, because relevance is exactly how a leak would look natural.
+    if (c.conversationId !== conversationId) continue;
     if (excluded.has(normalizeText(c.text))) continue;
     const score = cosineSimilarity(queryEmbedding, c.embedding);
     if (score >= minScore) scored.push({ ...c, score });
@@ -146,7 +168,10 @@ export function mergeChunks(existing: MemoryChunk[], incoming: MemoryChunk[], ca
   const deduped: MemoryChunk[] = [];
   // Walk newest-first so a duplicate keeps its NEWEST occurrence, then cap, then restore chronological order.
   for (const c of [...all].sort((a, b) => b.ts - a.ts)) {
-    const key = `${c.role}:${normalizeText(c.text)}`;
+    // The conversation is PART of the identity of a chunk. Without it, the same sentence said in two
+    // chats ("mera naam Rahul hai") would dedupe to its newest occurrence — which lives in the OTHER
+    // conversation — and the first chat would silently lose its own memory of it.
+    const key = `${c.conversationId ?? ''}|${c.role}:${normalizeText(c.text)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(c);

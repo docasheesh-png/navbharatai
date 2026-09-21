@@ -34,6 +34,10 @@ const sidebar = readFileSync(join(root, 'src/components/panels/SidebarNav.tsx'),
 const home = readFileSync(join(root, 'src/components/home/HomeView.tsx'), 'utf8');
 const viewPanels = readFileSync(join(root, 'src/components/panels/ViewPanels.tsx'), 'utf8');
 
+/** Block and line comments removed, so a rule about CODE is never satisfied or broken by prose. */
+const stripComments = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
 /** The `menuItems` array as written in App.tsx, parsed into id → { label, icon }. */
 function menuEntries(): Array<{ id: string; label: string; icon: string }> {
   const start = app.indexOf('const menuItems = useMemo');
@@ -134,32 +138,30 @@ describe('the registry itself', () => {
 });
 
 /**
- * 🔒 THE RATCHET — a NEW window with no chip cannot be added (the 50/50 half).
+ * 🔒 THE RATCHET — a window with no chip cannot exist (the 50/50 half).
  *
- * Fixing App Mart is the first 50%. The other 50% is that this bug has now happened three times to
- * three different ids, each found by a user rather than by CI, because nothing anywhere connects "an
- * id `toggleTab` is called with" to "an id `menuItems` knows about".
+ * Fixing App Mart was the first 50%. The other 50% is that this bug had happened three times to three
+ * different ids, each found by a user rather than by CI, because nothing anywhere connected "an id
+ * `toggleTab` is called with" to "an id `menuItems` knows about".
  *
  * A tab legitimately has no chip when it is somebody's CHILD: a professional AI chat is closed by
  * closing the surface it was opened through (`tabParenting.ts`), and the 75 professional ids are
- * therefore exempt BY DERIVATION from `professionalConfigs.ts` — never by a hand-kept copy.
+ * therefore exempt BY DERIVATION from `professionalConfigs.ts` — never by a hand-kept copy, so a new
+ * professional is covered without anybody remembering this file exists.
  *
- * FOUR ids are neither, and they are listed rather than fixed: adding them to `menuItems` would also
- * add four rows to a sidebar the admin has repeatedly and deliberately trimmed, and the correct
- * treatment (register them AND add them to `SIDEBAR_HIDDEN`, the pattern `git` / `preview` / `files` /
- * `history` / `professionals` already use) changes UI that was not asked for. Recorded as debt, raised
- * to the admin, and **this list may only ever shrink** — a fifth one fails CI.
+ * ✅ AND THE DEBT LIST IS EMPTY (admin 2026-09-21, "haan" — ship all four). `about`, `apk`, `diff` and
+ * `imagegen` had the identical defect and are now registered, each paired with an entry in
+ * `SIDEBAR_HIDDEN` so four chips appeared without four sidebar rows appearing with them. The allowlist
+ * stays as the MECHANISM — it is what lets a future reader record a genuine exception instead of
+ * deleting the ratchet — but it may only ever be empty or shrinking.
  */
 const KNOWN_UNREGISTERED: Readonly<Record<string, string>> = {
-  // Opened from the sidebar drawer's System Matrix. From Home its opener is not a parent surface, so
-  // it becomes a top-level tab with no chip — the App Mart bug exactly.
-  about: 'sidebar drawer → System Matrix',
-  // Opened from Settings' tool directory, which IS a parent surface, so closing Settings closes it.
-  apk: 'Settings → tool directory (parented to settings)',
-  // Opened from inside another panel; whether it gets an opener depends on the view in front of it.
-  diff: 'ViewPanels → Diff button',
-  imagegen: 'ViewPanels → "Make icon" (parented when opened from other_ai)',
+  // Empty on purpose. An id added here must carry the reason it cannot be registered, and the test
+  // below fails the moment that reason stops being true.
 };
+
+/** The four registered on 2026-09-21 — chip yes, sidebar row no. */
+const CHIP_ONLY: readonly string[] = ['about', 'apk', 'diff', 'imagegen'];
 
 /**
  * Every `toggleTab('x')` in the WHOLE client tree.
@@ -174,7 +176,10 @@ function clientSources(): string[] {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, e.name);
       if (e.isDirectory()) { if (e.name !== 'server') walk(full); continue; }
-      if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) out.push(readFileSync(full, 'utf8'));
+      // ⚠️ COMMENTS STRIPPED. The first run of this found a target called `x` — from a `toggleTab('x')`
+      // written inside a comment in App.tsx explaining this very test. A guard that reads prose reports
+      // ids that do not exist, and the next reader goes looking for a window nobody ever opened.
+      if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) out.push(stripComments(readFileSync(full, 'utf8')));
     }
   };
   walk(join(root, 'src'));
@@ -218,7 +223,46 @@ describe('the ratchet — no new window without a chip', () => {
     }
   });
 
-  it('🔒 App Mart is NOT on that list — it is fixed, not exempted', () => {
-    expect('appstore' in KNOWN_UNREGISTERED).toBe(false);
+  it('🔒 nothing is exempted — App Mart and all four siblings are FIXED, not listed', () => {
+    for (const id of ['appstore', ...CHIP_ONLY]) {
+      expect(id in KNOWN_UNREGISTERED, `${id} must be registered, not exempted`).toBe(false);
+    }
+    expect(Object.keys(KNOWN_UNREGISTERED)).toEqual([]);
+  });
+
+  it('🔴 the four siblings are registered, so each one now has a chip and a ✕', () => {
+    const registered = new Set(menuEntries().map((e) => e.id));
+    for (const id of CHIP_ONLY) expect(registered.has(id), id).toBe(true);
+  });
+
+  it('🔒 …and NOT ONE of them added a sidebar row — the pairing is the whole point', () => {
+    // Registering an id gives TopNav a chip AND gives SidebarNav a menu row. Only the first was
+    // wanted: this sidebar has been deliberately trimmed more than once, so four new rows would be a
+    // fix trading one problem for another. Without this assertion the regression is invisible — the
+    // chips would work and the sidebar would quietly grow.
+    const hidden = /const SIDEBAR_HIDDEN = new Set\(\[([^\]]*)\]\)/.exec(sidebar);
+    expect(hidden).not.toBeNull();
+    for (const id of CHIP_ONLY) expect(hidden![1], id).toContain(`'${id}'`);
+    // The rail and the drawer both filter by this set, so one entry covers both halves.
+    expect(sidebar).toMatch(/visibleItems = menuItems\.filter\(item => !SIDEBAR_HIDDEN\.has\(item\.id\)/);
+  });
+
+  it('🔒 each sibling chip is recognisable as the surface it opens', () => {
+    const byId = new Map(menuEntries().map((e) => [e.id, e]));
+    expect(byId.get('about')!.icon).toBe('Info');          // the drawer row's own icon
+    expect(byId.get('diff')!.icon).toBe('FileDiff');       // AgentV3Panel's own Diff tab pill
+    expect(byId.get('imagegen')!.icon).toBe('Wand2');      // its tool-grid tile
+    // APK Builder's tile uses Smartphone, which Code Studio already owns in this same list — two
+    // identical chips in one strip defeat the recognisability the rule serves, so it takes Package.
+    expect(byId.get('apk')!.icon).toBe('Package');
+    expect(byId.get('studio')!.icon).toBe('Smartphone');
+    // Uniqueness is asserted over the ids that can actually RENDER a chip. TopNav does
+    // `openTabs.filter(id => id !== 'home')`, so Home never draws one — which is why `home` and
+    // `nbi_pro_chat` have both carried `Bot` since long before this change without ever colliding on
+    // screen. Asserting over the whole list would fail on that pair and invite a "fix" to an icon
+    // nobody can see, i.e. a change to a shipped surface for no reason.
+    expect(topNav).toMatch(/openTabs\.filter\(id => id !== 'home'\)/);
+    const chipIcons = menuEntries().filter((e) => e.id !== 'home').map((e) => e.icon);
+    expect(new Set(chipIcons).size, `two chips must not share one icon: ${chipIcons.join(', ')}`).toBe(chipIcons.length);
   });
 });

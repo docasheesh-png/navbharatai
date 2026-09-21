@@ -75420,24 +75420,44 @@ closing the surface it was opened through (`tabParenting.ts`). The 75 profession
 derivation from `professionalConfigs.ts`**, never by a hand-kept copy, so a new professional is covered
 without anybody remembering this test exists.
 
-🔎 **FOUR SIBLINGS FOUND, LISTED RATHER THAN FIXED, and the reason is not laziness.** Computed rather
+✅ **FOUR SIBLINGS FOUND AND ALL FOUR SHIPPED (admin: _"haan"_ — in the same PR).** Computed rather
 than guessed — a first pass by eye said five and was wrong (`repo_analyst` turned out to be a
 professional id):
 
-| id | opened from |
-|---|---|
-| `about` | sidebar drawer → System Matrix |
-| `apk` | Settings → tool directory (parented to `settings`) |
-| `diff` | ViewPanels → Diff button |
-| `imagegen` | ViewPanels → "Make icon" |
+| id | opened from | chip |
+|---|---|---|
+| `about` | sidebar drawer → System Matrix | About Us · `Info` |
+| `apk` | Settings → tool directory | APK Builder · `Package` |
+| `diff` | ViewPanels → Diff button | Diff · `FileDiff` |
+| `imagegen` | ViewPanels → "Make icon" | AI Image Gen · `Wand2` |
 
-Registering them would ALSO add four rows to a sidebar the admin has repeatedly and deliberately
-trimmed (*"inko need nahi hai"*, *"sidebar menu me se bhi isko hata do"*). The correct treatment is to
-register them **and** add them to `SIDEBAR_HIDDEN` — the exact pattern `git` / `preview` / `files` /
-`history` / `professionals` already use — which changes header UI that was not asked for. So it is
-raised to the admin as a one-line follow-up instead of shipped unilaterally. **The ratchet blocks a
-fifth**, and a second test asserts every listed id is still genuinely unregistered, so the list cannot
-rot into a permanent exemption nobody re-checks.
+🔒 **EACH IS PAIRED WITH A `SIDEBAR_HIDDEN` ENTRY, AND THAT PAIRING IS THE WHOLE FIX.** Registering an
+id does TWO things at once — it gives TopNav a chip AND gives SidebarNav a menu row — and only the
+first was wanted. This sidebar has been trimmed repeatedly and on purpose (*"inko need nahi hai"*,
+*"sidebar menu me se bhi isko hata do"*), so four new rows would have been a fix trading one problem
+for another. It is the exact pattern `git` / `preview` / `files` / `history` / `professionals` already
+use. A test asserts all four are in that set AND that the rail and drawer both filter by it — without
+that assertion the regression is invisible: the chips would work while the sidebar quietly grew.
+⚠️ **App Mart itself is deliberately NOT hidden** — a sidebar row was half of what was asked for there.
+
+⚠️ **APK Builder is the one icon deviation, and it is deliberate.** Its tool-grid tile uses
+`Smartphone`, which **Code Studio already owns in this same list** — two identical chips in one strip
+defeat the recognisability the consistency rule exists to serve, so it takes `Package`. A test pins
+both, and pins chip-icon uniqueness across the registry.
+
+**The debt list is now EMPTY**, and the allowlist is kept as the MECHANISM rather than deleted: it is
+what lets a future reader record a genuine exception instead of removing the ratchet. A second test
+asserts every listed id is still genuinely unregistered, so it can never rot into an exemption nobody
+re-checks.
+
+🔴 **MY OWN TEST CAUGHT TWO DEFECTS IN MY OWN TEST, and both are worth recording.** (1) The ratchet
+reported a tab target called **`x`** — from a `toggleTab('x')` inside a comment *in App.tsx explaining
+this very test*. A guard that reads prose reports ids that do not exist and sends the next reader
+hunting a window nobody ever opened; the corpus now strips comments. (2) A blanket icon-uniqueness
+assertion failed on `home` and `nbi_pro_chat` both carrying `Bot` — long-standing, shipped, and **not
+a collision at all**, because TopNav does `openTabs.filter(id => id !== 'home')` so Home never draws a
+chip. The assertion was wrong, not the code: it is now scoped to the ids that can actually render one,
+rather than "fixing" an icon nobody can see.
 
 ⚠️ **The first draft of the ratchet scanned four files and missed `apk`** (SettingsPanel opens it) —
 safeguard #6's own lesson, caught by the test failing rather than by review. The corpus is the tree.

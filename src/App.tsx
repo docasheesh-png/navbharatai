@@ -32,7 +32,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Minimize2, Briefcase, LayoutGrid, Layers, Store } from 'lucide-react';
+import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Minimize2, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -2472,6 +2472,35 @@ export default function App() {
     { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
     { id: 'donation',     label: 'Donate',            icon: Heart },
     { id: 'settings',     label: 'Settings',          icon: Settings },
+    // 🔎 THE FOUR SIBLINGS OF THE APP MART BUG (admin 2026-09-21, "haan" — ship all four).
+    //
+    // Each of these opens a tab through `toggleTab` and, until now, had no `menuItems` entry — so
+    // each was a window that rendered no chip and no ✕, exactly as App Mart was. They were found by
+    // COMPUTING the set (every `toggleTab('x')` in the client tree, minus this registry, minus the
+    // professional child surfaces) rather than by reading: a first pass by eye said five and was
+    // wrong, because `repo_analyst` turned out to be a professional id.
+    //
+    // 🔒 ALL FOUR ARE ALSO IN `SIDEBAR_HIDDEN`, AND THAT PAIRING IS THE WHOLE POINT. Registering an
+    // id here does two things at once — it gives TopNav a chip AND gives SidebarNav a menu row — and
+    // only the first was wanted. The admin has trimmed that sidebar repeatedly and on purpose
+    // ("inko need nahi hai", "sidebar menu me se bhi isko hata do"), so four new rows would have been
+    // a fix trading one problem for another. This is the pattern `git` / `preview` / `files` /
+    // `history` / `professionals` already use, and `SidebarNav`'s own comment explains why it hides
+    // rather than deletes: the entry is what makes the window exist.
+    //
+    // ⚠️ App Mart itself is deliberately NOT in that set — a sidebar row is half of what was asked
+    // for there. These four were never asked for in the sidebar, only closable.
+    //
+    // Labels and icons match each surface's OWN door, so a chip is recognisable as the thing it
+    // opens: About Us carries the `Info` of its drawer row, Diff the `FileDiff` of AgentV3Panel's own
+    // Diff tab pill, AI Image Gen the `Wand2` of its tool-grid tile.
+    // ⚠️ APK Builder is the ONE deviation: its tool-grid tile uses `Smartphone`, which Code Studio
+    // already owns four lines above in this very list. Two identical chips in one strip defeats the
+    // recognisability the consistency rule exists to serve, so it takes `Package` — an app bundle.
+    { id: 'about',        label: 'About Us',          icon: Info },
+    { id: 'apk',          label: 'APK Builder',       icon: Package },
+    { id: 'diff',         label: 'Diff',              icon: FileDiff },
+    { id: 'imagegen',     label: 'AI Image Gen',      icon: Wand2 },
   ], []);
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---

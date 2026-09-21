@@ -111,10 +111,50 @@ function matchedAControl(m: PresenceEvidence | false): boolean {
   return m === 'control';
 }
 
+/**
+ * What follows "add" when it is an INSTRUCTION TO THE BUILDER rather than a request for an Add control.
+ *
+ * 🔴 WHY (autopsy `ad1596fc`, 2026-09-21). The prompt was *"**Add** pagination or infinite scroll to the
+ * main list so long lists stay fast and easy to browse."* The very first word tripped the `add` probe,
+ * no Add button was found in a memory game, and **"Add / create has no visible control" became the
+ * build's reported root cause** — for a build that did exactly what was asked.
+ *
+ * This is the third occurrence of one class, and `featureRequest.ts` already names the other two: a
+ * NEGATED mention ("no settings") and a DEFERRED one ("login in stage 3"). This is the present tense:
+ * the word is there, affirmative and undeferred, and means something else. `add` is the worst offender
+ * because it is also the commonest word an English sentence starts an instruction with.
+ *
+ * 🔑 The object decides. `add a task` names a thing the USER will add, so an Add control must exist.
+ * `add pagination`, `add dark mode`, `add tests` name a CAPABILITY the builder is being told to build —
+ * and the second half of report `1682cd03` is the Hinglish form of the same thing, *"…bhi **add karo**"*,
+ * where `add karo` is simply "please make this change".
+ *
+ * ⚠️ A BLOCKLIST, DELIBERATELY, and only after a determiner. The opposite shape — an allowlist of data
+ * nouns — has no end (`add a recipe`, `add a song`, `add a patient`), and being wrong there SILENCES a
+ * real missing-control finding. Being wrong here only leaves today's false positive in place, which is
+ * the safe direction. The known residual: `add a contact page` is not suppressed, because allowing
+ * arbitrary words before the noun would swallow `add task and filter`.
+ */
+const BUILDER_INSTRUCTION_OBJECT =
+  '(?:a\\s+|an\\s+|the\\s+|some\\s+|more\\s+|proper\\s+|basic\\s+)*' +
+  '(?:pagination|infinite\\s+scroll(?:ing)?|lazy\\s+load(?:ing)?|search(?:ing)?|filter(?:s|ing)?|' +
+  'sort(?:s|ing)?|dark\\s+mode|light\\s+mode|theme|login|log\\s*in|sign\\s*up|auth(?:entication)?|' +
+  'tests?|validation|animations?|transitions?|charts?|graphs?|responsive(?:ness)?|offline|footer|header|' +
+  'nav\\s*bar|navigation|sidebar|menu|pages?|screens?|routes?|tabs?|buttons?|icons?|loading|spinner|' +
+  'empty\\s+state|error\\s+handling|modal|dialog|toast|notifications?|shortcuts?|accessibility|seo|' +
+  'meta|service\\s+worker|analytics|cach(?:e|ing)|database|api|endpoints?|backend|styling|css|polish|' +
+  'features?|functionality|support|ability|option)s?\\b' +
+  // The instruction with no object at all: "add it", "add this", and the Hinglish "add karo".
+  '|(?:it|this|that|them|these|those)\\b|(?:karo|kar\\s*do|kar\\s*dijiye|kijiye|kare)\\b';
+
 const FEATURES: FeatureDef[] = [
   {
     feature: 'add', label: 'Add / create',
-    requested: /\b(add|create|new (?:task|item|note|todo|entry|record)|insert)\b/,
+    // See BUILDER_INSTRUCTION_OBJECT above: `add a task` is a control, `add pagination` is an order.
+    requested: new RegExp(
+      `\\b(?:add|create|insert)\\b(?!\\s+(?:${BUILDER_INSTRUCTION_OBJECT}))` +
+      '|\\bnew\\s+(?:task|item|note|todo|entry|record)\\b',
+    ),
     // Needs an input to type into AND a control to submit it (button text or a form).
     present: (h, t) => (inputCount(h) >= 1 && (hasControlMatching(h, t, /\b(add|create|save|submit|new|\+)\b/) !== false || /<form\b/.test(h)))
       ? 'control' // an <input> was captured — that is a real affordance, whatever matched the verb
@@ -132,7 +172,15 @@ const FEATURES: FeatureDef[] = [
   },
   {
     feature: 'complete', label: 'Mark complete / toggle',
-    requested: /\b(mark (?:as )?complete|complete|done|check(?:box)?|toggle)\b/,
+    // 🔴 SENSE, NOT JUST PRESENCE (autopsy 8a92e5ed, 2026-09-20). The old pattern accepted a BARE
+    // `toggle`, `complete` or `done`. A password generator asked to *"toggle uppercase, numbers and
+    // symbols"* was therefore recorded as requesting a task-completion control, found none, and that
+    // false finding became the whole build's reported root cause. `toggle` there is a verb taking a
+    // SETTING as its object; the feature this probe means always concerns an ITEM being finished. So
+    // the keyword must arrive with the company that fixes its sense — which is the same lesson
+    // `featureRequest.ts` already encodes for negation ("no settings") and deferral ("login in stage
+    // 3"), in a third tense.
+    requested: /\bmark\b[^.]{0,20}\b(?:complete|completed|done)\b|\b(?:complete|completed|done)\s+(?:task|item|todo|to-?do|entry|entries|chore)s?\b|\b(?:task|item|todo|to-?do|entry|entries|chore)s?\s+(?:as\s+)?(?:complete|completed|done)\b|\bcheckbox(?:es)?\b|\bchecklist\b|\btick\b[^.]{0,15}\boff\b|\btoggle\b[^.]{0,15}\b(?:complete|completed|done|task|item|todo)s?\b/,
     present: (h, t) => (/type=["']checkbox["']/.test(h) || /role=["']checkbox["']/.test(h))
       ? 'control'
       : hasControlMatching(h, t, /\b(complete|done|✓|✔)\b/),
@@ -167,7 +215,17 @@ const FEATURES: FeatureDef[] = [
   },
   {
     feature: 'auth', label: 'Login / authentication',
-    requested: /\b(login|log in|sign in|sign-in|auth|authentication|password|register|sign up)\b/,
+    // `password` is GONE from this list, for the same reason (autopsy 8a92e5ed). It is the SUBJECT of
+    // a password generator, a password manager and a strength meter, none of which is a login — and
+    // in that report it probed PRESENT (the app has a `type="password"` field), which is worse than
+    // a harmless extra line: the guard below only lets a "missing" finding through once some OTHER
+    // probe is present, so this false POSITIVE is what certified the false NEGATIVE above as real.
+    // (Since 56f0c645 that witness must rest on a real ELEMENT, so a `type="password"` field would
+    // still have certified it — dropping the keyword is what closes this one, not the stricter guard.)
+    // Nothing is lost by dropping it. An app that genuinely asks for a password field almost always
+    // says login / sign in / sign up / register / account somewhere, and one that says only
+    // "password" has the field, so it would have probed present and reported nothing either way.
+    requested: /\b(login|log in|log-in|sign in|sign-in|signin|sign up|sign-up|signup|auth|authentication|authenticate|register|registration|user account)\b/,
     present: (h, t) => /type=["']password["']/.test(h)
       ? 'control'
       : hasControlMatching(h, t, /\b(login|log in|sign in|sign up|register|logout)\b/),

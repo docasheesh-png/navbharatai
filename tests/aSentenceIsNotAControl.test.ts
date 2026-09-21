@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { createHash } from 'crypto';
 import {
   checkFeaturePresence,
   featurePresenceEvidence,
@@ -14,9 +13,17 @@ import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from '../src/server/AgentV3/gol
  *
  * 🔴 WHAT HAPPENED. A quick-notes build reported `FEATURE_COVERAGE: 1 requested feature(s) have NO
  * visible control in the running app — Search. Present: List / items.` The app's search box was
- * present, carried `aria-label="Search notes"`, and was wired to a real filter — the `src/App.tsx`
- * that ran hashes identical to our own golden scaffold (asserted below, so this is a fact and not a
- * recollection).
+ * present, carried `aria-label="Search notes"`, and was wired to a real filter.
+ *
+ * 📌 HOW WE KNOW, RECORDED RATHER THAN ASSERTED. That build's manifest hashed `src/App.tsx` at
+ * `38364d60a1cd1803eb4d338cd445f4e48c8158991914d4a9a636a3fe90eb25ac`, which on 2026-09-21 was
+ * byte-identical to our own `quick-notes` golden scaffold — the app was the scaffold, unmodified, and
+ * the build wrote zero files (`WRITE_TIME_TYPECHECK` said so). Commit `e2cd0e65a` then legitimately
+ * added `aria-label="New note"` to that scaffold, so the hash has moved and is history now.
+ * ⚠️ It is deliberately NOT asserted here. A pinned hash over a file that is SUPPOSED to improve
+ * fails on every legitimate edit, and its only remedy is to paste the new hash — which teaches the
+ * next session to paste hashes and verifies nothing. The forward-looking lock is the PROPERTY below:
+ * this scaffold must keep a search field the probe can actually see.
  *
  * 🔑 THE CAUSE WAS NOT THE SEARCH RULE — it was the WITNESS. `checkFeaturePresence` already had a
  * capture-corroboration guard resting on one premise: *another feature probed PRESENT, so the DOM
@@ -45,26 +52,20 @@ const FULL_CAPTURE = '<div id="root"><div class="row"><h1>Quick Notes</h1>'
   + '<p class="muted">No notes yet - your notes stay on this device.</p><ul></ul></div></div>';
 
 describe('the app in the report really did have search', () => {
-  it('the App.tsx that ran is byte-identical to our own quick-notes scaffold', () => {
-    // The manifest in build 56f0c645 recorded this hash for src/App.tsx. If it matches ours, the app
-    // was the scaffold, unmodified — which is what makes "the finding was false" a fact rather than a
-    // theory. (The build wrote zero files; WRITE_TIME_TYPECHECK said so.)
+  it('the app the report named is still OUR scaffold, and still has a search field', () => {
+    // The identity half of the autopsy. The hash is history (see the note above); what must hold for
+    // ever is that this scaffold keeps a search affordance the probe can SEE — a labelled field, not
+    // a bare box — because the whole finding turned on whether one existed.
     const g = GOLDEN_SCAFFOLDS.find((x) => x.id === 'quick-notes');
     expect(g, 'the quick-notes scaffold must still exist').toBeTruthy();
-    const files = goldenScaffoldFiles(g as never) as Record<string, string>;
-    const app = files['src/App.tsx'];
-    expect(createHash('sha256').update(app).digest('hex'))
-      .toBe('38364d60a1cd1803eb4d338cd445f4e48c8158991914d4a9a636a3fe90eb25ac');
-  });
-
-  it('that scaffold has a LABELLED search field wired to a real filter', () => {
-    const g = GOLDEN_SCAFFOLDS.find((x) => x.id === 'quick-notes');
     const files = goldenScaffoldFiles(g as never) as Record<string, string>;
     const app = files['src/App.tsx'];
     expect(app).toContain('aria-label="Search notes"');
     expect(app).toContain('placeholder="Search notes"');
     // Not just a box: it actually filters.
     expect(app).toContain('n.text.toLowerCase().includes(q)');
+    // And the probe's own rule agrees, run against the real attribute rather than a hand-written DOM.
+    expect(checkFeaturePresence('search by text', app).present).toContain('Search');
   });
 
   it('and the rules find it correctly on the rendered DOM — the SEARCH RULE was never the bug', () => {

@@ -10,6 +10,8 @@
 // route + UI are thin. Checks are deliberately CONSERVATIVE (regex on the HTML string, not a parser) so
 // a real issue is flagged but false positives are rare — a linter that cries wolf gets ignored.
 
+import { scanMarkup, hasAttr } from '../../AgentV3/jsxTags';
+
 export type A11yViolationType = 'img-alt' | 'input-label' | 'control-name' | 'html-lang' | 'positive-tabindex';
 
 export interface A11yViolation {
@@ -43,17 +45,13 @@ function textContent(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function hasAttr(tag: string, attr: string): boolean {
-  // `(?<![-\w])` (NOT `\b`) so a different attribute ending in `attr` — e.g. `data-alt` for `alt` —
-  // isn't mistaken for it: `\b` matches after a hyphen, so `<img data-alt="x">` was wrongly read as
-  // HAVING alt and the missing-alt count silently skipped it.
-  return new RegExp(`(?<![-\\w])${attr}\\s*=`, 'i').test(tag);
-}
+// The attribute reader is shared now (autopsy 8a92e5ed): `hasAttr` lives in `AgentV3/jsxTags.ts`
+// beside the scanner, so the two accessibility analyzers cannot drift apart again.
 
 /** `<img>` tags with no `alt` attribute (WCAG 1.1.1). Returns [total, missing]. Pure. */
 export function imagesMissingAlt(code: string): [number, number] {
-  const tags = code.match(/<img\b[^>]*>/gi) || [];
-  const missing = tags.filter((t) => !hasAttr(t, 'alt')).length;
+  const tags = scanMarkup(code).filter((t) => t.isElement && t.name === 'img');
+  const missing = tags.filter((t) => !hasAttr(t.tag, 'alt')).length;
   return [tags.length, missing];
 }
 
@@ -64,19 +62,25 @@ export function imagesMissingAlt(code: string): [number, number] {
  * inputs. Returns [total, unlabelled]. Pure.
  */
 export function inputsMissingLabel(code: string): [number, number] {
-  const tags = [
-    ...(code.match(/<input\b[^>]*>/gi) || []),
-    ...(code.match(/<textarea\b[^>]*>/gi) || []),
-    ...(code.match(/<select\b[^>]*>/gi) || []),
-  ];
+  const CONTROLS = new Set(['input', 'textarea', 'select']);
   let total = 0;
   let missing = 0;
-  for (const t of tags) {
-    const typeMatch = /\btype\s*=\s*["']?([a-z]+)/i.exec(t);
+  for (const t of scanMarkup(code)) {
+    // A COMPONENT is not an HTML control (autopsy 8a92e5ed / c847b523). `<Select label="Category" />`
+    // has a real, working label; judging it by the rules for HTML `<select>` is a false finding
+    // against anybody using a design system, and we cannot know a component's contract.
+    if (!t.isElement || !CONTROLS.has(t.name)) continue;
+    const typeMatch = /\btype\s*=\s*["']?([a-z]+)/i.exec(t.tag);
     const type = typeMatch ? typeMatch[1].toLowerCase() : '';
     if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) continue;
     total++;
-    const labelled = hasAttr(t, 'aria-label') || hasAttr(t, 'aria-labelledby') || hasAttr(t, 'id') || hasAttr(t, 'title');
+    const labelled =
+      // A WRAPPING `<label>` names the control by its own text — the commonest React form shape
+      // there is, and the reason a correct golden scaffold was reported as having three unlabelled
+      // fields in autopsy 8a92e5ed.
+      t.insideLabel ||
+      hasAttr(t.tag, 'aria-label') || hasAttr(t.tag, 'aria-labelledby') ||
+      hasAttr(t.tag, 'id') || hasAttr(t.tag, 'title');
     if (!labelled) missing++;
   }
   return [total, missing];
@@ -90,18 +94,25 @@ export function inputsMissingLabel(code: string): [number, number] {
 export function controlsMissingName(code: string): [number, number] {
   let total = 0;
   let unnamed = 0;
-  const re = /<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(code)) !== null) {
-    const attrs = m[2];
+  for (const t of scanMarkup(code)) {
+    if (!t.isElement || (t.name !== 'button' && t.name !== 'a')) continue;
+    if (/\/\s*>$/.test(t.tag)) continue;  // self-closing: there is no inner text to judge
     // A bare <a> with no href isn't an interactive control — skip anchors without href.
-    if (m[1].toLowerCase() === 'a' && !hasAttr(attrs, 'href')) continue;
+    if (t.name === 'a' && !hasAttr(t.tag, 'href')) continue;
+    // The control's own text: from the end of its opening tag to its matching closer. Read from the
+    // source rather than from a paired regex, whose `[^>]*` for the attributes ended at the first
+    // `>` — which in JSX belongs to an arrow function, not to the tag.
+    // `t.index` — never `indexOf(t.tag)`: three plain `<button>` tags share one text, so a search
+    // returns the FIRST one every time and every later button is judged by the first one's content.
+    const after = code.slice(t.index + t.tag.length);
+    const close = after.search(new RegExp(`</\\s*${t.name}\\s*>`, 'i'));
+    const inner = close < 0 ? after : after.slice(0, close);
     total++;
     const named =
-      textContent(m[3]).length > 0 ||
-      hasAttr(attrs, 'aria-label') ||
-      hasAttr(attrs, 'aria-labelledby') ||
-      hasAttr(attrs, 'title');
+      textContent(inner).length > 0 ||
+      hasAttr(t.tag, 'aria-label') ||
+      hasAttr(t.tag, 'aria-labelledby') ||
+      hasAttr(t.tag, 'title');
     if (!named) unnamed++;
   }
   return [total, unnamed];

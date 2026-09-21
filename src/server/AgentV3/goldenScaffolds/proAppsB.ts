@@ -463,6 +463,7 @@ export default function App() {
           <Field label="What's happening?" value={text} onChange={setText} placeholder="Say something…" />
           <input
             ref={fileRef}
+            aria-label="Choose an image"
             type="file"
             accept="image/*"
             onChange={(e) => pickImage(e.target.files ? e.target.files[0] : undefined)}

@@ -11,6 +11,8 @@
 // line, tag-local) so the precision is high and the agent isn't sent chasing
 // false positives.
 
+import { tagsOnLine, hasAttrOrBareBoolean } from './jsxTags';
+
 export type AccessibilitySeverity = 'high' | 'medium' | 'low';
 
 export interface AccessibilityIssue {
@@ -35,14 +37,10 @@ function countOccurrences(s: string, re: RegExp): number {
 }
 
 /** Does a tag's attribute text contain a given boolean/any-value attribute? */
-function hasAttr(tag: string, attr: string): boolean {
-  // matches `attr=`, `attr =`, or a bare boolean `attr` followed by space/>/end.
-  // `(?<![-\w])` (NOT the old `\b`) so a DIFFERENT attribute that merely ENDS in `attr` — e.g.
-  // `data-alt` for `alt`, `formaction` for `action` — is not mistaken for it (the `\b` after a
-  // hyphen matched `alt` inside `data-alt`, so `<img data-alt="x">` was wrongly read as HAVING alt
-  // and the missing-alt finding was silently skipped).
-  return new RegExp(`(?<![-\\w])${attr}\\s*=`, 'i').test(tag) || new RegExp(`(?<![-\\w])${attr}(\\s|>|/|$)`, 'i').test(tag);
-}
+// The attribute reader lives in `jsxTags.ts` now (autopsy 8a92e5ed). This module wants the form
+// that ALSO accepts a bare boolean (`<input required>`), which is why the shared file names both
+// rather than having each analyzer keep its own copy to drift from.
+const hasAttr = hasAttrOrBareBoolean;
 
 /** The element name of an opening tag like `<input ...>` → "input" (lowercased). */
 function tagName(tag: string): string {
@@ -89,28 +87,10 @@ function isHtmlElement(tag: string): boolean {
  * A tag that does not close on its own line is still skipped, exactly as before — an incomplete
  * attribute set must never produce a "missing attribute" finding.
  */
-function tagsOnLine(line: string): Array<{ tag: string; index: number }> {
-  const out: Array<{ tag: string; index: number }> = [];
-  for (let i = 0; i < line.length; i++) {
-    if (line[i] !== '<') continue;
-    if (!/[a-zA-Z]/.test(line[i + 1] ?? '')) continue; // `</div>` and stray `<` are not opening tags
-    let depth = 0;
-    let quote: string | null = null;
-    let closed = -1;
-    for (let j = i + 1; j < line.length; j++) {
-      const c = line[j];
-      if (quote) { if (c === quote) quote = null; continue; }
-      if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
-      if (c === '{') { depth++; continue; }
-      if (c === '}') { if (depth > 0) depth--; continue; }
-      if (depth > 0) continue;        // a `>` in here belongs to an arrow, not to the tag
-      if (c === '<') break;           // a new tag opened: this one never closed on this line
-      if (c === '>') { closed = j; break; }
-    }
-    if (closed >= 0) { out.push({ tag: line.slice(i, closed + 1), index: i }); i = closed; }
-  }
-  return out;
-}
+// MOVED to `jsxTags.ts` (autopsy 8a92e5ed): the SAME defect was found in the OTHER accessibility
+// analyzer — `AppMakerLab/intelligence/A11yLinter.ts`, which is the one that actually writes the
+// `ACCESSIBILITY` line in a build report. A scanner this subtle must exist once, not twice.
+// `tagsOnLine` is imported below; its behaviour here is unchanged (this file's suite proves it).
 
 /** Form controls that need an accessible name. */
 const LABELLED_CONTROLS = new Set(['input', 'select', 'textarea']);

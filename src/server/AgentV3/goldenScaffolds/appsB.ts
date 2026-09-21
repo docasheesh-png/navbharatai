@@ -137,6 +137,7 @@ function App() {
           <label>Text or link</label>
           <textarea
             rows={3}
+            aria-label="Text or link to encode"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Type any text or paste a link - the QR updates instantly"
@@ -222,6 +223,7 @@ function App() {
         <div className="row">
           <input
             style={{ flex: 1 }}
+            aria-label="New note"
             value={text}
             placeholder="Jot something down..."
             onChange={(e) => setText(e.target.value)}
@@ -405,8 +407,9 @@ function App() {
           <button className={mode === 'signup' ? 'primary' : ''} onClick={() => { setMode('signup'); setErrors({}); }} style={{ flex: 1 }}>Sign up</button>
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
-          <label>Email</label>
+          <label htmlFor="email">Email</label>
           <input
+            id="email"
             type="email"
             autoComplete="email"
             value={email}
@@ -417,9 +420,10 @@ function App() {
           {errors.email && <small style={{ color: 'var(--danger)' }}>{errors.email}</small>}
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
-          <label>Password</label>
+          <label htmlFor="password">Password</label>
           <div className="row">
             <input
+              id="password"
               type={showPw ? 'text' : 'password'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               value={password}
@@ -435,8 +439,9 @@ function App() {
         </div>
         {mode === 'signup' && (
           <div className="field" style={{ marginBottom: 0 }}>
-            <label>Confirm password</label>
+            <label htmlFor="confirm-password">Confirm password</label>
             <input
+              id="confirm-password"
               type={showPw ? 'text' : 'password'}
               autoComplete="new-password"
               value={confirm}

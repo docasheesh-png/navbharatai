@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ModeButton } from '../chat/ModeButton';
 import { ArrowUp, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, Wand2, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
@@ -91,7 +92,11 @@ const MODE_LABEL: Record<Mode, string> = {
   'image-text-to-image': 'Image + Text → Image',
 };
 
-export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: string, prompt: string) => void }) {
+export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
+  onImageGenerated?: (url: string, prompt: string) => void;
+  /** Open the ONE mode picker; undefined on a phone, where the bottom bar carries Mode. */
+  onOpenModePicker?: (() => void) | undefined;
+}) {
   const [prompt, setPrompt] = useState('');
   const [ref, setRef] = useState<string | null>(null);
   const [size, setSize] = useState('square');
@@ -380,7 +385,12 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
             />
           )}
 
-          <div className="flex items-end gap-2 bg-raised border border-line focus-within:border-amber-400/40 rounded-[26px] pl-2 pr-2 py-2 transition-colors">
+          {/* OUTSIDE the pill, to its left (admin 2026-09-21: "input box se pahle mode button").
+              Inside it the button would read as part of the message box; the free chat's composer
+              already places it this way, and this is that same shared control. */}
+          <div className="flex items-end gap-2">
+          <ModeButton onOpen={onOpenModePicker} />
+          <div className="flex-1 min-w-0 flex items-end gap-2 bg-raised border border-line focus-within:border-amber-400/40 rounded-[26px] pl-2 pr-2 py-2 transition-colors">
             <button
               onClick={() => fileRef.current?.click()}
               title="Attach an image to work from"
@@ -416,6 +426,7 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
             </button>
+          </div>
           </div>
 
           <p className="text-[11px] text-faint flex items-center justify-center gap-1.5">

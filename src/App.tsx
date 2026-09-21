@@ -47,6 +47,8 @@ import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav
 import { startFreshCase } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
+import { ActionDot } from './components/ActionDot';
+import type { ActionTone } from './lib/actionNavigator';
 import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
@@ -3102,6 +3104,19 @@ export default function App() {
     effectiveDeviceMode === 'mobile' && !focusMode && activeView !== 'botbuilder' && activeView !== 'studio';
 
   /**
+   * THE ONE ANSWER TO "can this surface open the mode picker?" (admin 2026-09-21).
+   *
+   * Every chat surface gets the same value, so a phone never shows two Mode controls (the bottom bar
+   * already carries one) and no surface re-derives the device question for itself. `undefined` is
+   * what hides the button — `ModeButton` renders nothing rather than rendering something inert.
+   *
+   * ⚠️ It is defined ONCE and passed down deliberately: the free chat, Doctor AI, the image studio and
+   * all 70-odd expert chats read it, and a condition spelled out at each call site is a condition that
+   * disagrees with itself the first time this rule changes.
+   */
+  const modePickerOpener = showsGlobalMobileNav ? undefined : () => setShowModePicker(true);
+
+  /**
    * …and publish that same answer to CSS, for the THIRD consumer of it.
    *
    * The bar is `fixed bottom-0` at z-150, so it paints over every dialog below that z-index. Two
@@ -3364,7 +3379,7 @@ export default function App() {
               // button opens it; that bar is not rendered on desktop, so the composer carries the
               // button instead — gated on the SAME condition that renders the bar, so exactly one of
               // the two exists on any screen, and both open the one `showModePicker` sheet below.
-              onOpenModePicker={showsGlobalMobileNav ? undefined : () => setShowModePicker(true)}
+              onOpenModePicker={modePickerOpener}
             />
           )}
 
@@ -3502,7 +3517,7 @@ export default function App() {
           {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
           {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} />
+              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} onOpenModePicker={modePickerOpener} />
             </div>
           )}
 
@@ -3592,367 +3607,367 @@ export default function App() {
           {/* ── Config-driven professionals (Teacher, Mentor, …) ── */}
           {activeView === 'teacher_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.teacher_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.teacher_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'mentor_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.mentor_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.mentor_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'thesis_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.thesis_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.thesis_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'accountant_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.accountant_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.accountant_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'lawyer_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.lawyer_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.lawyer_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'finance_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.finance_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.finance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'astrologer_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.astrologer_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.astrologer_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'govt_schemes_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.govt_schemes_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.govt_schemes_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'kisan_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.kisan_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.kisan_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'nutritionist_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.nutritionist_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.nutritionist_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'wellness_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.wellness_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.wellness_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'fitness_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.fitness_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.fitness_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'vet_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.vet_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.vet_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'parenting_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.parenting_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.parenting_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'cybersafety_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.cybersafety_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.cybersafety_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'insurance_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.insurance_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.insurance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'chef_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.chef_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.chef_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'travel_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.travel_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.travel_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'vastu_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.vastu_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.vastu_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'yoga_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.yoga_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.yoga_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'english_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.english_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.english_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'resume_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.resume_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.resume_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'gardening_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.gardening_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'pharmacist_ai' && !medicalViewBlocked('pharmacist_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.pharmacist_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'business_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.business_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.business_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'homerepair_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.homerepair_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.homerepair_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'realestate_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.realestate_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.realestate_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'driving_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.driving_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.driving_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'petcare_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.petcare_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.petcare_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'beauty_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.beauty_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.beauty_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'music_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.music_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.music_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'sports_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.sports_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.sports_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'photography_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.photography_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.photography_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'speaking_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.speaking_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.speaking_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'events_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.events_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.events_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'eldercare_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.eldercare_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.eldercare_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'interior_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.interior_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.interior_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'studyabroad_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.studyabroad_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.studyabroad_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'disability_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.disability_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.disability_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'fashion_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.fashion_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.fashion_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'productivity_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.productivity_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.productivity_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'relationship_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.relationship_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.relationship_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'vehicle_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.vehicle_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.vehicle_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'stocks_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.stocks_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.stocks_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'techhelp_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.techhelp_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.techhelp_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'mathscience_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.mathscience_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.mathscience_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'coding_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.coding_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'maternity_ai' && !medicalViewBlocked('maternity_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.maternity_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.maternity_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'firstaid_ai' && !medicalViewBlocked('firstaid_ai', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.firstaid_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.firstaid_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'environment_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.environment_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.environment_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'gk_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.gk_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.gk_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'safety_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.safety_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.safety_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'translate_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.translate_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.translate_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'civic_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.civic_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.civic_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'sarkari_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.sarkari_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.sarkari_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'spiritual_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.spiritual_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.spiritual_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'crafts_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.crafts_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.crafts_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'festival_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.festival_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.festival_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'writing_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.writing_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.writing_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'aptitude_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.aptitude_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.aptitude_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'disaster_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.disaster_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.disaster_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'nature_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.nature_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.nature_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'freelance_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.freelance_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.freelance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'babynames_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.babynames_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.babynames_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'hygiene_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.hygiene_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.hygiene_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'volunteer_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.volunteer_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.volunteer_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'astronomy_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.astronomy_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.astronomy_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'calligraphy_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.calligraphy_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.calligraphy_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'dance_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.dance_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.dance_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'games_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.games_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.games_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'techbuy_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.techbuy_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.techbuy_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'adventure_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.adventure_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.adventure_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'budget_ai' && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <ProfessionalChat config={PROFESSIONAL_CHATS.budget_ai} userId={user?.uid} />
+              <ProfessionalChat config={PROFESSIONAL_CHATS.budget_ai} userId={user?.uid} onOpenModePicker={modePickerOpener} />
             </div>
           )}
           {activeView === 'repo_analyst' && (
@@ -4142,6 +4157,16 @@ export default function App() {
               activeView={activeView}
               hideMedical={medicalFeaturesHidden(isNativeApp())}
               onClose={() => setShowModePicker(false)}
+              // ✕ ON THE RECENT ROW (admin 2026-09-21). It closes the conversation that row names —
+              // the SAME `closeTab` the header tab's ✕ calls, so there is one way to close a chat
+              // rather than a second copy of the rule (which is what would decide, differently, what
+              // happens to the preview, the draft and the session id).
+              onCloseRecent={(recentId) => {
+                const view = viewFromRecentId(recentId);
+                if (!view) return;
+                setShowModePicker(false);
+                closeTab(undefined, view as ViewType);
+              }}
               onPick={(id) => {
                 setShowModePicker(false);
                 // ROW 1 — the only row that starts nothing. It names the AI already open and takes the
@@ -4206,6 +4231,7 @@ export default function App() {
           )}
 
           <ViewPanels
+            onOpenModePicker={modePickerOpener}
             effectiveDeviceMode={effectiveDeviceMode}
             storeInitialTab={storeTarget?.tab}
             storePublishWorkspaceId={storeTarget?.workspaceId ?? null}
@@ -4472,8 +4498,10 @@ export default function App() {
               // v5.0 builds into (files state + workspace syncer), so this is one feature reached from
               // two places — not a second editor.
               { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => toggleTab('studio'), active: false },
-              { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history' },
-            ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number }) => (
+              // The Action Navigator's roll-up (admin 2026-09-21). A TONE, not a boolean: the colour
+              // decision lives in ActionDot alone, so this row cannot invent a third meaning for a dot.
+              { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history', badgeTone: v3FooterApi.moreBadge, badgeLabel: v3FooterApi.moreBadgeLabel },
+            ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count, badgeTone, badgeLabel }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number; badgeTone?: ActionTone | null; badgeLabel?: string | null }) => (
               <button
                 key={key}
                 onClick={onTap}
@@ -4487,6 +4515,13 @@ export default function App() {
                     : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
                   {/* Admin 2026-07-07: green dot = the app is genuinely viewable (real state, never a timer). */}
                   {dot && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_5px_rgba(52,211,153,0.9)]" aria-label="Preview ready" />}
+                  {/* The Action Navigator's dot — same corner as the green one above, and the two
+                      never coexist: green rides Preview, this rides More. */}
+                  {badgeTone && (
+                    <span className="absolute -top-0.5 -right-1">
+                      <ActionDot tone={badgeTone} label={badgeLabel ?? null} />
+                    </span>
+                  )}
                   {/* Admin 2026-07-07: the REAL built-file count on the Files item. */}
                   {typeof count === 'number' && count > 0 && (
                     <span className="absolute -top-1.5 -right-2.5 min-w-[14px] px-0.5 h-3.5 rounded-full bg-indigo-600 text-white text-[8px] font-black leading-[14px] text-center" aria-label={`${count} files`}>{count > 99 ? '99+' : count}</span>

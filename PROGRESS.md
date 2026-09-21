@@ -76702,3 +76702,60 @@ the CALL and asserts the slice is non-trivial before returning it.
 - **No real edit has been made against a live provider from any session.** The strength values are reasoned
   from the meaning of the knob, not measured; the first real edits are the first real evidence. What to
   watch: whether an edited picture is recognisably the original.
+## 2026-09-21 — 🧭 THE ACTION NAVIGATOR: what is left to do, and where it lives
+
+Admin, verbatim: *"mujhe ek nevigator chahiye … jaise user ne app banaya -> preview par green dot 🟢 ->
+user ne apna app/game test kiya, ab 3 dot more par red dot … publish ho gaya = publish on navbharatai
+wala red dot gayab … aise hi aap pura flow analysis karo"*, and — asked directly — *"is system ko sirf
+navbharatai pro me hi nahi lagana, age chal kar aur bhi option me lagana hai"*.
+
+**What it is called, since that was the first question.** There is no single industry name: the mark is
+a **dot badge**, the way it climbs a menu is **badge propagation** (iPhone Settings does exactly this),
+the brain deciding what is pending is a **Next Best Action** engine, and the closest everyday analogy
+is a game's **quest marker**. Built here as the **Action Navigator**.
+
+🔵🔴 **TWO TONES, AND THE SPLIT IS THE DESIGN (admin approved: *"do rang theek hai"*).** The ask said
+"red dot" throughout. Red on Publish would mean *publishing is broken* — it is not. Red on a failed
+build means *something IS broken* — it is. One colour for both teaches people within a week that red
+means nothing, which is the lesson `monitorAlerts.ts` already paid for (*"yeh alert to user ko bhaga
+dega"*). So blue = an invitation, red = a fault. The mechanic is unchanged; only the harmless half's
+colour is.
+
+🔴 **AND IT RESOLVES A CONTRADICTION ALREADY IN THE CODE, rather than overruling it.**
+`publishFreshness.ts` carries the admin's OWN 2026-08-21 ask (*"publish (\*) → connect your own domain
+(\*) → publish (green)(\*)"*) and deliberately refuses to fire on `never_published`, in writing: *"an
+app the user has not chosen to publish is not a problem to nag about, and a dot that never clears is a
+dot people stop seeing"*. Today's ask is precisely that case. Both are right, and the colour split is
+why: `changed` stays RED (real visitors are seeing the wrong thing), `never_published` becomes BLUE and
+— the other half of that old objection — **only after the preview has actually been watched**, so it is
+earned rather than permanent. The old module's verdict is untouched; `theNavigatorPointsAtWhatIsLeft`
+asserts the two agree for all four freshness values, so the sheet and the menu cannot drift apart.
+
+**FOUR LAWS, each a real bug avoided** (`src/lib/actionNavigator.ts`, pure, no React, no I/O):
+1. **A dot clears on the FACT, never on the click.** There is deliberately no "opened" field to pass.
+   A dot that cleared on a tap would report success it did not measure.
+2. **A parent's dot is COUNTED, never stored** (`badgeAt` walks the path). No "More has a dot" flag
+   exists, so none can be left switched on.
+3. **A fact we do not know produces NO dot.** Every optional field means "we did not look", not "no" —
+   `publishFreshness`'s own rule (*"a dot is a claim and we do not make claims we did not measure"*).
+4. **An opportunity can be dismissed; an attention cannot** — enforced inside `pendingActions`, so no
+   caller can pass a dismissal that silences a fault. **Reversion-proven**: delete that one clause and
+   exactly one named test fails.
+
+**Wired today, and only what can honestly light:** the More button's roll-up (`v3FooterApi.moreBadge`,
+a TONE not a boolean, so the colour decision stays in `ActionDot` alone), the More sheet's Publish and
+Report rows, the desktop Publish button, and the Publish sheet's own dot. `ActionDot` uses
+`text-danger`/`text-info` with `bg-current` — the old dot's `bg-red-500` is invisible on Light and is
+counted by the colour ratchet, whose baseline for a new file is zero.
+
+⚠️ **NOT wired, and stated rather than faked: App Mart, APK and required-keys.** The rules exist and
+are tested; the panel holds no signal for `appMartPublished`, `apkBuilt` or `missingRequiredKeys`, so
+under law 3 those dots never light. That is the design working, not an omission — the day a real
+signal exists, it is one field, with no change to any surface. **Dotting "Keys & Secrets" whenever
+keys are merely absent was considered and rejected**: it would nag every app that needs none.
+
+📏 **The trail starts at 20 seconds of real attention** (`usePreviewDwell`) — accumulated only while
+the preview is on screen AND the tab is visible, never while backgrounded, and it only ever goes up.
+*"Thodi der chala le"* measured as attention rather than wall clock.
+
+Full gate green on the final state.

@@ -11,6 +11,7 @@ export function ModePickerSheet({
   activeView,
   hideMedical,
   onPick,
+  onCloseRecent,
   onClose,
 }: {
   /** The current view id — decides which row carries the ✓. */
@@ -25,6 +26,14 @@ export function ModePickerSheet({
    * restated fact is a fact that goes stale where no compiler can see it.
    */
   onPick: (id: string) => void;
+  /**
+   * Close the conversation the RECENT row refers to. Receives that row's prefixed id (the caller
+   * already owns `viewFromRecentId` to turn it back into a view), so this sheet never has to know
+   * what closing means on any particular surface.
+   *
+   * Optional: without it the ✕ is not rendered at all, rather than rendered and inert.
+   */
+  onCloseRecent?: (recentId: string) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -86,29 +95,48 @@ export function ModePickerSheet({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
-          {visible.map((e, i) => (
+          {visible.map((e) => (
             <div key={e.id}>
-              {/* One divider between the FREE rows and the experts — the list reads as two groups. */}
-              {e.kind === 'professional' && i > 0 && visible[i - 1].kind !== 'professional' && (
-                <div className="mx-2 my-1.5 flex items-center gap-2">
-                  <span className="h-px flex-1 bg-raised" />
-                  <span className="text-[9px] font-black uppercase tracking-widest text-faint">Experts</span>
-                  <span className="h-px flex-1 bg-raised" />
-                </div>
-              )}
-              <button
-                onClick={() => onPick(e.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${current === e.id ? 'bg-indigo-600/15 border border-indigo-500/30' : 'hover:bg-raised border border-transparent'}`}
+              {/* THE ROW IS A ROW, NOT A BUTTON (admin 2026-09-21: the recent chat gains its own ✕).
+                  A button inside a button is invalid HTML and the inner one's click does not reliably
+                  reach it, so the highlight moved out here and the tap target became a sibling of the
+                  close control rather than its parent. */}
+              <div
+                className={`flex items-center rounded-xl transition-colors ${current === e.id ? 'bg-indigo-600/15 border border-indigo-500/30' : 'hover:bg-raised border border-transparent'}`}
               >
-                {rowIcon(e)}
-                <span className="flex-1 min-w-0 truncate">{rowLabel(e)}</span>
-                {/* THE TAGS ARE WHAT SEPARATE THE TWO ROWS OF ONE AI. With Teacher AI open the list holds
-                    "Teacher AI · Recent" (go back) and "Teacher AI · New chat" (start over) — identical
-                    names, opposite actions, so an unlabelled pair would be a coin flip. */}
-                {e.kind === 'recent' && <span className="text-[9px] font-bold uppercase tracking-wider text-accent-text shrink-0">Recent</span>}
-                {(e.kind === 'free' || e.kind === 'professional') && <span className="text-[9px] font-bold uppercase tracking-wider text-muted shrink-0">New chat</span>}
-                {current === e.id && <Check className="w-4 h-4 text-accent-text shrink-0" aria-label="Current mode" />}
-              </button>
+                <button
+                  onClick={() => onPick(e.id)}
+                  className="flex-1 min-w-0 flex items-center gap-3 px-3 py-2.5 rounded-xl text-left"
+                >
+                  {rowIcon(e)}
+                  <span className="flex-1 min-w-0 truncate">{rowLabel(e)}</span>
+                  {/* THE TAGS ARE WHAT SEPARATE THE TWO ROWS OF ONE AI. With Teacher AI open the list holds
+                      "Teacher AI · Recent" (go back) and "Teacher AI · New chat" (start over) — identical
+                      names, opposite actions, so an unlabelled pair would be a coin flip. */}
+                  {e.kind === 'recent' && <span className="text-[9px] font-bold uppercase tracking-wider text-accent-text shrink-0">Recent</span>}
+                  {(e.kind === 'free' || e.kind === 'professional') && <span className="text-[9px] font-bold uppercase tracking-wider text-muted shrink-0">New chat</span>}
+                  {current === e.id && <Check className="w-4 h-4 text-accent-text shrink-0" aria-label="Current mode" />}
+                </button>
+                {/* CLOSE THE OPEN CHAT, from the one row that refers to it. Only the recent row gets it:
+                    every other row STARTS something, and there is nothing yet to close. Absent when the
+                    caller supplies no handler, so a surface that cannot close a chat shows no control
+                    that pretends it can. */}
+                {e.kind === 'recent' && onCloseRecent && (
+                  <button
+                    onClick={() => onCloseRecent(e.id)}
+                    aria-label={`Close ${e.name}`}
+                    title={`Close ${e.name}`}
+                    className="p-2 mr-1 rounded-lg text-faint hover:text-ink hover:bg-raised shrink-0"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              {/* ONE PLAIN LINE, UNDER THE RECENT ROW (admin 2026-09-21: "recent chat aur niche new chat
+                  ke bich me line bana do", and "Experts wali line hatao"). The old divider sat lower and
+                  carried the word "Experts"; the split that actually matters is between WHERE YOU ARE and
+                  everything that STARTS something, which is exactly this line. */}
+              {e.kind === 'recent' && <div className="mx-3 my-1.5 h-px bg-raised" />}
             </div>
           ))}
           {visible.every((e) => e.kind !== 'professional') && (

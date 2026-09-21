@@ -297,6 +297,11 @@ import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/lane
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
+import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
+// The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
+// `safeRelPath` centralisation). Five files carry a private copy of this string; the probe takes the
+// shared one so it can never search a root the actuator is not using.
+import { SANDBOX_WORKSPACE_ROOT } from '../lib/workspacePath';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
@@ -17133,7 +17138,33 @@ async function noteBuildOutcome(
             }
           }
         }
-        const integrity = analyzeProjectIntegrity(integrityFiles);
+        // 🔴 IS THERE A SECOND REPOSITORY INSIDE THIS PROJECT? (autopsy c5fd6ad1 — the open root
+        // cause `gitCloneGuard.ts` recorded and could not close). `.git` is pruned by
+        // `buildListFilesCommand` INSIDE the sandbox, so the file list cannot tell a nested repository
+        // from an ordinary folder; this is the dedicated probe that docblock asks for. One `find`,
+        // pruned the same way — no model call, and the skip list is untouched.
+        //
+        // 🔒 It only ever REGROUPS the analysis. Nothing is deleted, nothing is dropped from the
+        // durable copy, and a nested repository is not assumed to be our mistake — a submodule or a
+        // vendored example app produces the identical duplicates with nobody at fault.
+        let nestedRepoRoots: string[] = [];
+        if (Object.keys(integrityFiles).length > 0 && actuator.runCommand) {
+          try {
+            const probe = await actuator.runCommand(workspaceId, buildNestedRepoCommand(SANDBOX_WORKSPACE_ROOT));
+            nestedRepoRoots = parseNestedRepoRoots(probe.stdout ?? '', SANDBOX_WORKSPACE_ROOT);
+            if (nestedRepoRoots.length > 0) {
+              const counts: Record<string, number> = {};
+              for (const r of nestedRepoRoots) {
+                counts[r] = Object.keys(integrityFiles).filter((f) => f.startsWith(`${r}/`)).length;
+              }
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'NESTED_REPO_FOUND', autoResolved: true,
+                message: nestedRepoNote(nestedRepoRoots, counts),
+              });
+            }
+          } catch { /* the probe is best-effort — no answer means today's behaviour exactly */ }
+        }
+        const integrity = analyzeProjectIntegrity(integrityFiles, nestedRepoRoots);
         // Advisory-only import-cycle detection (never blocks/fails a build — most JS/TS cycles are
         // benign; ES modules tolerate them and type-only cycles are harmless). Surfaced so the
         // reviewer/repair pass and the admin diagnostics can see a genuine runtime-hazard loop; never

@@ -76885,3 +76885,79 @@ The ledger's vocabulary now covers **one fact** (a real browser saw the app rend
 third. That is defensible — they are genuinely different kinds of evidence — but it means "what has
 this build proven?" still has no single answer, and a NEW actor proving a NEW fact still has to be
 wired into whichever reader happens to cover it.
+
+---
+
+## 2026-09-21 — 🔍 THE NESTED-REPO PROBE: the signal was destroyed before the collector ran
+
+The second item of the admin's list, and the one open root cause that came with its own written
+prescription. `gitCloneGuard.ts` closed the door in the morning and recorded why the tidier fix was
+unavailable, in as many words:
+
+> *"`IGNORED_LIST_DIRS` in `E2BActuator` prunes `.git` **inside the sandbox**, so `listFiles` never
+> returns a single `.git` path and `collectWorkspaceFiles` therefore cannot tell a nested repository
+> from an ordinary subdirectory. The one signal that would identify it is destroyed before the
+> collector runs. … Whoever re-opens this needs a dedicated nested-repo probe (`find . -name .git -not
+> -path ./.git`), **not a change to the collector's skip list**."*
+
+Built to that instruction, and the skip list is untouched — widening it would put every `.git` blob
+back on the wire and reverse the 226-second fix `buildListFilesCommand` exists for (report a876b7bb).
+
+### What it costs and what it buys
+
+One extra `find`, pruned the same way the file listing is pruned. **No model call.** It answers one
+question — *is there a second git repository inside this workspace, and where?* — and
+`analyzeProjectIntegrity` then judges each project on its own.
+
+That regrouping is correct in general rather than a patch for one autopsy: **every check in that
+module pairs files with other files** (two root mounts, one stylesheet imported twice, one module
+under two convention roots), and **across a repository boundary every one of those pairings is false
+by construction.** Two independent projects legitimately each have a root mount, their own global
+stylesheet and their own `src/components/Button.tsx`. A user's own submodule or vendored example app
+produces the identical false findings with nobody at fault — which is what made the autopsy's
+`INTEGRITY_DUPLICATE_ENTRY` / `_STYLESHEET` / `INTEGRITY_FOCUS_CONFLICT` inevitable once a second copy
+existed, and what made the heal spend **~3.5 minutes and 10 model calls editing the copy the engine
+had itself created**.
+
+### 🔒 What it is NOT allowed to do
+
+It finds and it reports. **It never deletes, never excludes a file from the durable copy, and never
+edits anything** — a source-level test asserts the module contains no such call. `PROGRESS.md` rejects
+the deleting alternatives by name (a nested `package.json` is how every monorepo is laid out; *"a
+subtree that duplicates the root"* would throw away a user's real files), and this module cannot tell
+a legitimate nested repository from our own mistake. So it makes the fact KNOWN — `NESTED_REPO_FOUND`,
+admin-only, naming the path, the file count, and saying plainly that nothing was removed.
+
+**Nothing is dropped from the analysis either.** Files are GROUPED, not filtered, so a real duplicate
+*inside* one project is still reported exactly as before.
+
+### Three decisions worth not re-deriving
+
+- **The root's own `.git` is excluded in the PARSER, not with `find -not -path`.** The recorded cure
+  spells it `find . -name .git -not -path ./.git`, which works only when the root is literally `.`;
+  interpolating a real absolute root into a `-path` pattern makes the answer depend on trailing
+  slashes and shell quoting. The parser already holds the root, so it answers exactly — and the
+  decision is unit-testable instead of living in a string.
+- **`ok` is ANDed per project, never recomputed over the merged arrays.** Two projects with one focus
+  owner each would fail a `focusOwners.length <= 1` test over the union — the exact false finding the
+  split exists to remove. Reversion-proven.
+- **The probe takes `SANDBOX_WORKSPACE_ROOT` from `lib/workspacePath`, not a sixth private copy.**
+  Five files already carry `const WORKSPACE_ROOT = '/home/user/workspace'`. A probe searching a root
+  the actuator is not using would return nothing, for ever, with nothing failing.
+
+### Verification
+
+`tests/theNestedRepoLooksLikeAFolder.test.ts` — 26 cases, **reversion-proven both ways**: recomputing
+`ok` over the merged arrays fails 2, putting `.git` back in the probe's prune list fails 1. The prune
+list is asserted against the actuator's exported `isIgnoredListPath`, so the two cannot drift; and the
+file listing is asserted to STILL prune `.git`, because widening that list is the rejected fix.
+
+Full gate: typecheck · server typecheck · unused imports · native guard · **28,268 tests** · build ·
+bundle · boot · deps. No user-facing surface changed.
+
+### ⚠️ Honest limit
+
+The probe runs where the integrity analysis runs, so it sees the sandbox as it is at that moment. A
+nested repository created *after* that point is not seen until the next turn — acceptable, because
+`gitCloneGuard` is what stops one being created at all, and this is the detection half for the ones
+that already exist.

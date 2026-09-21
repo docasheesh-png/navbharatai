@@ -75359,3 +75359,84 @@ or (3); none arriving ⇒ our own gating. **And after this change the build repo
 
 That is the 50/50 law applied: the reported symptom is repaired, and the condition that made the
 symptom undiagnosable — an error path that deleted its own evidence — is gone.
+
+---
+
+## 2026-09-21 — 🔴 CORRECTION: the "second iOS risk" was never a risk, and the runbook still told the next session to rebuild #3202 the wrong way
+
+### Part 1 — retracting yesterday's open item (rule 6 cuts both ways)
+
+The entry above headed **"⚠️ STILL OPEN — the second iOS risk, NOT fixed here"** is **WRONG and is
+retracted here rather than edited away**, per this file's append-only rule. It claimed
+*"`metaPixel.ts` has no native gate … disabling the pixel on iOS is one line"* and it was reported to
+the admin as a decision they had to take. **There was nothing to decide.**
+
+The gate has existed since the pixel shipped on 2026-08-31:
+
+- `shouldLoadPixel()` — `if (input.isNative) return false;`, with the comment *"rule 2: the Android
+  SDK owns the app's own events"*.
+- `initMetaPixel()` checks it **twice** — once cheaply before the network call, once after the async
+  fetch in case consent changed.
+- Wired at `src/main.tsx` with `isNative: () => isNativeShell(window as never)`.
+
+**And this file already said so.** The 2026-08-31 entry, eight lines of it, reads *"Loads only on:
+production + analytics consent + **NOT the native app** + a valid configured id."* I wrote a
+contradiction of my own project log and did not notice.
+
+🔎 **HOW THE WRONG ANSWER WAS REACHED, because the method matters more than the fact:** I grepped
+`metaPixel.ts` for `Capacitor` and `isNative`, saw no `Capacitor` import, and concluded there was no
+gate. **The gate is INJECTED, not imported** — `initMetaPixel(deps)` takes `isNative: () => boolean`,
+which is this repo's own house pattern for keeping decisions pure and testable (`purchaseRail` takes
+its platform the same way, and I had just written that one). So the very convention I had spent the
+day applying is what made my search miss.
+
+That is safeguard #6's vocabulary failure in its purest form, and it adds one rule worth naming:
+**in a codebase that injects its dependencies, a grep for the dependency's NAME cannot answer "is this
+gated?" — the answer is at the call site, not in the module.** Read the function's parameters and
+follow them outward. `grep -n 'isNative' src/lib/metaPixel.ts` returns the answer in one line; I
+searched for the vendor instead of the concept.
+
+⚠️ **The cost was not zero even though nothing was broken.** The admin was told, twice, that an open
+privacy risk sat on their iOS submission and that a decision about ad measurement was theirs to make.
+Reporting a phantom risk spends the same trust as missing a real one.
+
+**So the App Privacy consequence is the opposite of what was reported:** no third-party advertising
+runs in the iOS app, nothing links activity to third-party data, and therefore **no App Tracking
+Transparency prompt and no `NSUserTrackingUsageDescription` are needed**. That is now written into
+the runbook (§6.1) where it will be read at filing time, instead of living in a session's memory.
+
+### Part 2 — `MOBILE_PUBLISHING.md` §5 was a trap, and it was aimed at the next session
+
+PR #3202 closed the Apple 3.1.1 blocker in code. The runbook that a session reads *before* touching
+mobile still described that work as an un-built plan, in the same paragraph I had quoted in the PR
+body as *"decided long ago and never built"* — and it gave two instructions that are now actively
+harmful:
+
+1. **"Detect the app via `Capacitor.isNativePlatform()` and hide the buy buttons."** Following that
+   literally removes the **working, revenue-earning Android top-up**. The shipped gate is on the
+   PLATFORM (`isApplePlatform`), because Android is a Play-billing problem with a Play-billing answer
+   and iOS is a *no rail exists yet* problem. Two different problems, one sentence conflating them.
+2. **"The app can say 'add credits on the web' and link out to the website's account page."** That is
+   **anti-steering, which Apple forbids** — a second, independent rejection reason. The runbook was
+   instructing a future session to write the exact copy the shipped notice deliberately omits, on an
+   account that has already taken one policy strike.
+
+§5 now describes what the code does, in a table, with the platform-vs-`isNative` distinction stated as
+the load-bearing fact and the anti-steering ban given its own subsection. §5.3 records what a real
+StoreKit v2 would need, so "hide it" is legible as a first move rather than a permanent answer.
+
+**Nothing in this change touches `src/`** — it is documentation plus the retraction above. The code
+shipped yesterday; this is the half that stops it being un-shipped by somebody reading a stale page.
+
+### Part 3 — the App Privacy sheet exists before it is needed (§6.1)
+
+The old checklist said *"declare what data the app collects (auth email, usage). Be accurate."* —
+which is advice, not an answer. §6.1 is now a row-per-category draft in which **every row names the
+code that decides it**, so the admin can re-verify rather than trust it, plus the two findings that
+surprise people: **Purchases — not collected** (the app cannot take a payment on iOS at all) and
+**Health & Fitness — not collected** (`medicalFeaturesHidden(isNativeApp())` hides Doctor AI,
+Pharmacist, First Aid and Maternity on every native shell).
+
+It is labelled a DRAFT, dated, and carries the instruction to re-grep before filing — because the
+2026-09-02 incident in `CLAUDE.md` is precisely a store declaration and a policy page drifting apart,
+and a confident sheet that goes stale is how that happens a second time.

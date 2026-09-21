@@ -53,6 +53,11 @@ const ALLOWED: Record<string, string> = {
   'src/hooks/useChatEngine.ts': 'input parsing of what the user typed',
   // A "WRONG: const userName = …" example inside an instruction to the model.
   'src/lib/appUtils.ts': 'a negative code example inside an AI prompt',
+  // A character RANGE used to detect the script, and one letter MEASURED against the notdef box to
+  // find out whether this device has a Hindi font at all. Neither is ever rendered: the range is a
+  // regex, and the letter goes to `measureText`, whose only output is a number. The Devanagari a
+  // user actually sees from this module is what they themselves typed into the caption box.
+  'src/lib/textOverlay.ts': 'a script-range regex and a font-probe glyph fed to measureText, never rendered as UI',
 };
 
 function walk(dir: string, out: string[] = []): string[] {

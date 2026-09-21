@@ -277,7 +277,13 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
     // Never pretend this works. Every image model mangles words; saying so is the honest thing, and a
     // user who knows can shorten the text or add it themselves afterwards.
     parts.push(`If any text appears it must read exactly "${wantedText}", spelled correctly, in a clean legible typeface.`);
-    notes.push(`Image engines are unreliable at spelling — check that "${wantedText}" came out right, and keep it short. For a logo you will get a cleaner result adding the text yourself afterwards.`);
+    // ⚠️ THIS NOTE NOW NAMES A BUTTON THAT EXISTS (2026-09-21). It used to end "adding the text
+    // yourself afterwards" with nowhere to do it, which made honest advice read as an apology. The
+    // "Add text" editor is that afterwards: typed text is drawn by the device's font engine, so it
+    // is spelled right every time — and it is the ONLY way to get Devanagari, which no image model
+    // renders reliably at any price. Keep the two in step: if the button is ever renamed, this
+    // sentence sends users looking for a control that is not there.
+    notes.push(`Image engines are unreliable at spelling — check that "${wantedText}" came out right, and keep it short. For text that must be exact (a shop name, a phone number, anything in Hindi), press "Add text" on the finished image and type it — that text is always spelled correctly.`);
   }
 
   const negative = [

@@ -1249,6 +1249,23 @@ the code (it is actually read somewhere) on 2026-07-11.
   covers a commercial product — and that search has to end in the LICENCE, since the two obvious
   free candidates (waqi.info's free token, and the no-key provider this change moved AQI off) are
   both non-commercial tiers, and swapping one grey source for another is not a fix.
+  ✅ **RE-OPENED AS A *FUTURE* ITEM BY THE ADMIN 2026-09-21, AND THE PARKING ABOVE STAYS AS WRITTEN**
+  (verbatim: *"DATA_GOV_IN_API_KEY — future me lena hai, aisa mujhe baad me yad dilwana"*). This is the
+  re-open condition the parking itself named, exercised by the admin rather than by a session: they DO
+  want the key, later, and they asked to be reminded. **Nothing about today changes** — the key is still
+  unset, `cpcbAirQuality.ts` is untouched, AQI still falls through to web search, and it is still NOT an
+  instruction sitting on their queue. What changed is the STATUS: a deliberate future item, not a dead end.
+  ⏰ **THE REMINDER IS SCHEDULED, not a sentence in a file** — Routine `trig_0171RbmfL7S5hYbmY6wJ2Wyn`,
+  one-shot, **2026-10-21, 11:00 IST**, push + email. It does no work: it re-reads THIS block first and
+  stands down if a later session has recorded the key as obtained. **To move or cancel it use that id**
+  (`update_trigger` / `delete_trigger`) — never create a second reminder for the same thing.
+  ⚠️ **THE DATE IS A GUESS AND IS LABELLED AS ONE.** Nobody can predict when a government portal's
+  verification starts working, so the horizon is evidence of nothing; a month was picked as long enough
+  not to nag and short enough to still matter. **The real triggers are these three, and a session that meets
+  one should raise the key WITHOUT waiting for the Routine:** the admin asks what is still pending in
+  Cloud Run; a report shows an AQI question falling through to web search; or the Open-Meteo commercial
+  plan is bought — at that moment the whole live-data licence question is already open on their desk, and
+  these two belong in one decision rather than two.
   ⚠️ **UNSET ⇒ AQI questions fall through to web search, and NEVER back to the old source** — a
   silent fallback would re-open the exposure with nothing on any screen saying so.
   ⚠️ **IT IS ON ITS OWN GATE, NOT `LIVE_WEATHER_SOURCE`**, deliberately: that switch exists to pause

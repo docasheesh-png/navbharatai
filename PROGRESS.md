@@ -76314,3 +76314,139 @@ build, test:bundle, boot:check, deps:server-gate.
 ⚠️ **STILL THE ADMIN'S TO DECIDE (not a defect):** whether a duplicate charge returned as MONEY
 should be the net we received rather than the gross. They were shown the chargeback arithmetic and
 chose the credit-or-cash choice instead; the net-only option remains open if they want it.
+
+---
+
+## 2026-09-21 — 🎚️ FOUR CHIP ROWS BECAME FOUR DROPDOWNS, AND THE FREE IMAGE SCREEN BECAME A CHAT
+
+**Admin, verbatim:** *"navbharatai free, me mode me ai images generate free wala hai, iska ui aur
+other ke ai image gen ka ui (actually dono same hi hai) kya isko thoda badal sakte ho? . images type
+. style .size/formate .colour hint yeh sab ko dropdown selector bana do! jisse ui clear lage. aur
+pure chat box ka ui bhi sabhi ai ke jaise banao. sabse niche input box. uske upar 4 selector."*
+
+A design preview was published first (*"abhi bas artificial bana ke do"*) and approved — *"done!
+bana do!!"* — so this is that preview built for real.
+
+**"DONO SAME HI HAI" IS LITERALLY TRUE, AND THAT IS WHY ONE CHANGE WAS ENOUGH.** `AIImageGenerator`
+is mounted twice: by the Mode surface and by Other Tools' `imagegen`. Verified from
+`ViewPanels.tsx`, not assumed from the admin's wording.
+
+**WHAT WAS WRONG.** The free tier drew every option group in full above the prompt box — 8 image
+types, 7 styles, 4 sizes, 6 colour dots — inside a two-column desktop layout (`w-[60%]` of controls,
+the result on the right) that stacks on a phone into one long form with the Generate button below
+about twenty-five controls. The paid studio has had the chat shape since it shipped; the free one
+never did.
+
+**THE SHAPE NOW:** images above, the box pinned at the very bottom, the four selectors directly
+above it. `flex-1 min-h-0` on the thread and `shrink-0` on the dock are what pin the input — without
+the `min-h-0` a long thread pushes the dock off the bottom of the panel instead of scrolling inside
+itself, which is the same flex fact `ImageStudioPro.render.test.tsx` already pins for the paid side.
+
+**🔒 ONE SELECTOR, NOT FOUR** (`ImageOptionSelect.tsx`). A trigger showing the group and its current
+value; a bottom sheet with the whole list, a short description per choice, and a tick on the one in
+force. Four hand-rolled sheets would be four chances for the Escape key, the scrim, the tick or the
+tab-bar reservation to be right in three places and wrong in the fourth — the drifted-copy class
+this repo has already paid for four separate times. The paid studio's size chips became the same
+component, so the shared control is genuinely shared.
+
+⚠️ **The sheet uses the SHARED geometry** (`nb-sheet-overlay-flush` / `nb-sheet` /
+`nb-sheet-partial`), never a `max-h-[Nvh]`: on a phone `vh` is the LARGE viewport, and a
+hand-written fraction puts the last rows under the browser toolbar AND under this app's own tab bar,
+where there is no scroll left to reach them. It sits at `z-50`, below the bar's 150, which is what
+pairs it with RESERVING rather than opting out (`sheetOverlayGeometry.test.ts` checks that pairing
+mechanically).
+
+**🔴 THE COLOUR HINT WAS A BUG WEARING A CONTROL.** The old dots did
+`setPrompt(p => p + ' in indigo tones')` on every press — so two presses wrote the phrase twice, and
+a user who changed their mind had to find and delete their own text. It is a SELECTED value now,
+folded in at send time, which is what the other three groups always did. `No preference` is the
+default, so the prompt is untouched unless a colour is actually asked for.
+
+**🔴 "ADD TEXT" NOW READS THAT IMAGE'S OWN REQUEST, and this is a strengthening rather than a
+port.** #3212's pre-fill read the COMPOSER (`extractImageText(prompt)`), which was the same thing
+only while the screen showed exactly one image. A thread's box is cleared on a successful send, so a
+user scrolling up to put a phone number on their FIRST image would have been offered the words of
+their third request, or nothing. It now follows the rule the paid studio already used:
+`extractImageText(target.prompt)`.
+
+**Also real, not decoration:** per-image delete (the store already had `remove(id)`; the old grid
+never offered it), the request bubble is a real `<button>` that puts its settings back in the box,
+the press is answered before the image arrives (`setPending`), and Enter sends. Paging survived —
+`LoadMore` now reveals OLDER images upward, which is what a conversation does.
+
+**THEME RATCHET 4 → 2** on `AIImageGenerator.tsx`. Stated plainly because a falling number deserves
+a reason: the two remaining hexes are PICTURE colours — the colour the user's image leans toward —
+now carried as a `swatch` data field rather than an inline style declaration, which is the same
+exemption `textOverlay.ts` records for its own defaults. Our surfaces on this screen are all tokens.
+
+**THREE EXISTING GUARDS REPOINTED, each with its reason written into the test, and one of them is a
+root-cause fix rather than a repoint.** `tests/mobileScrollGeometry.test.ts` reported the NEW
+component as an offender because its docblock QUOTES `max-h-[80vh]` in order to forbid it — prose,
+not behaviour. It now strips comments before scanning, with a canary proving the stripper does not
+blank a file, which is the discipline `sheetOverlayGeometry.test.ts` already applies to the
+nav-height literal. The other two (`oneTapLaysOutTheBoard`, `thePromptAlreadySaidIt`) asserted a
+CALL SHAPE (`extracted={extractImageText(`) that the thread hoists into one `const`; they now assert
+the property that actually matters — the findings come from that image's own prompt, and both props
+are fed the same extraction.
+
+**`AppKnowledgeBase.ts` updated in the same change**, per the sync rule: the free flow, the four
+dropdowns, per-image actions, "Load more"/"Clear all", and the stale *"the T button on the free
+tier's image"*.
+
+Test-locked in `src/components/ide/ImageOptionSelect.render.test.tsx` (33 cases: the pure fallback
+rule, the closed trigger's rendered markup — including that the unchosen options are NOT on screen,
+which is the whole change — the sheet's geometry and roles, and source-level guards for the layout
+order, since `renderToStaticMarkup` produces no layout at all and `AIImageGenerator.tsx` cannot even
+be imported in a node test because it pulls in Firebase and Capacitor). Every element assertion
+carries a tag boundary: a bare `toContain('<ImageOptionSelect')` still passes when the element is
+renamed, and this repo has now paid for that weak-assertion shape five times.
+
+**Reversion-proven five ways** (each applied to the working tree, suite run, tree restored): drop one
+selector → 2 fail; move a selector below the input → 1 fails; read the composer again → 3 fail across
+two suites; swap the shared sheet geometry for `max-h-[80vh]` → 4 fail across two suites; re-add a
+`{STYLES.map(` chip row → 1 fails.
+
+⚠️ **NOT changed, and said plainly:** the paid studio has ONE selector (Size/format), not four. Its
+mode is DERIVED from what you attach rather than chosen, and it has no image-type, style or colour
+groups — adding them would mean changing what `/api/image/pro/generate` receives, which is a
+different decision. The default style is still `minimal` rather than the `photo` that now leads the
+list; changing a default is a behaviour change this PR deliberately did not make. And `reuse()`
+restores prompt/type/style/size but not the colour hint, which is not stored on a history row.
+
+Full gate green on the final state — re-run AFTER the last edit, per safeguard #5: typecheck,
+typecheck:server, noUnusedImports, native:guard, vitest (**28,077 passed | 1 skipped | 0 FAIL**),
+build, test:bundle, boot:check, deps:server-gate.
+## 2026-09-21 — ⏰ `DATA_GOV_IN_API_KEY` RE-OPENED AS A FUTURE ITEM, with a real reminder rather than a sentence
+
+Admin, verbatim: *"DATA_GOV_IN_API_KEY —future me lena hai, aisa mujhe baad me yad dilwana."*
+
+Yesterday this key was **parked** in `CLAUDE.md`, with an explicit instruction not to put it back on
+the admin's queue — they had tried to register on data.gov.in and the portal's own account
+verification would not complete, so re-issuing the instruction would have been the wasted-instruction
+class #3196 was written about. That entry named its own re-open condition. **The admin has now
+exercised it themselves**: they do want the key, later, and they asked to be reminded.
+
+**What changed, and what deliberately did not.** Only the STATUS changed — from a dead end to a
+deliberate future item. The key is still unset, `src/server/lib/cpcbAirQuality.ts` is untouched, AQI
+questions still fall through to web search, and nothing is on the admin's queue today. **The parking
+text was NOT deleted**, because this file's own convention is that a change of instruction must stay
+legible: a later session reading only the new paragraph would not know why the key was ever hard to
+get, and one reading only the old one would re-park something the admin has re-opened.
+
+🔴 **A REMINDER THAT LIVES ONLY IN A DOC IS NOT A REMINDER — IT IS A SENTENCE NOBODY IS SCHEDULED TO
+READ.** The admin asked to be reminded, so the reminder is a real scheduled Routine
+(`trig_0171RbmfL7S5hYbmY6wJ2Wyn`, one-shot, 2026-10-21 11:00 IST, push + email) and its id is written
+into `CLAUDE.md` so it can be moved or cancelled rather than duplicated. It does **no work**: it
+re-reads the `CLAUDE.md` block first and stands down if a later session has recorded the key as
+obtained, and it says plainly if it could not verify — an unconditional reminder would eventually
+tell the admin to do something already done.
+
+⚠️ **THE DATE IS A GUESS AND IS LABELLED AS ONE, in both files.** Nobody can predict when a
+government portal's verification starts working, so a month is a horizon, not evidence. The three
+triggers that actually mean something are recorded beside it: the admin asks what is still pending in
+Cloud Run; a report shows an AQI question falling through to web search; or the Open-Meteo commercial
+plan ($29/month) is bought — at which point the live-data licence question is already open on their
+desk and these two belong in one decision rather than two. A session meeting any of them should raise
+the key without waiting for the Routine.
+
+Documentation only — no code path, no test and no build behaviour is touched by this change.

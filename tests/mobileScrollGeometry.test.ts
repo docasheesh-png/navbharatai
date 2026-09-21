@@ -50,13 +50,34 @@ describe('mobile scroll geometry — a scroll container may never be taller than
     expect(css).toMatch(/\.nb-sheet\s*\{[^}]*max-height:\s*100%;[^}]*min-height:\s*0;/);
   });
 
+  /**
+   * Strip comments before scanning. A note that QUOTES the forbidden pattern is prose, not
+   * behaviour — and on 2026-09-21 that stopped being hypothetical: a new bottom sheet whose docblock
+   * explains *"the shared geometry, NOT a `max-h-[80vh]`"* was reported by this case as the
+   * offender, while the component itself uses `nb-sheet` correctly. The same discipline
+   * `sheetOverlayGeometry.test.ts` already applies to the nav-height literal, and the `//` rule is
+   * written so a `https://` inside a string is not mistaken for a comment.
+   */
+  const codeOnly = (s: string) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split('\n')
+      .map((l) => l.replace(/(^|[^:'"`\\])\/\/.*$/, '$1'))
+      .join('\n');
+
+  it('the comment stripper does not simply blank a file', () => {
+    // Without this, a bug in `codeOnly` would make the scan below vacuously pass on empty strings.
+    const stripped = codeOnly(read('src/components/ide/ImageOptionSelect.tsx'));
+    expect(stripped).toContain('nb-sheet-overlay-flush');
+    expect(stripped).not.toContain('max-h-[80vh]');
+  });
+
   it('never caps a container with a bare `vh` fraction anywhere in the UI', () => {
     // `vh` on its own is the large-viewport trap. Every occurrence must carry a `dvh` companion
     // (or be replaced by `nb-sheet`). Scanning the whole tree is deliberate: this bug reached the
     // admin twice from two different files, so the rule has to be repo-wide to actually hold.
     const offenders: string[] = [];
     for (const file of walk('src')) {
-      const src = read(file);
+      const src = codeOnly(read(file));
       const re = /max-h-\[(\d+)vh\]/g;
       let m: RegExpExecArray | null;
       while ((m = re.exec(src))) {

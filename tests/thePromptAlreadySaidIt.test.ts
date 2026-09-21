@@ -229,8 +229,21 @@ describe('the extraction is actually wired to both tiers and to the brief', () =
   const ROUTE = 'src/server/routes/imageGen.ts';
   const EDITOR = 'src/components/ide/TextOverlayEditor.tsx';
 
-  it('the free generator pre-fills the editor from the prompt', () => {
-    expect(/initialLayers=\{layersFromExtracted\(extractImageText\(/.test(code(FREE))).toBe(true);
+  it('the free generator pre-fills the editor from THAT image\'s prompt', () => {
+    const src = code(FREE);
+    // 🔴 REPOINTED 2026-09-21, and this is a STRENGTHENING, not a loosening. The free tier used to
+    // read the COMPOSER (`extractImageText(prompt)`), which was the same thing only while the screen
+    // showed exactly one image. It is now a thread whose box is cleared on a successful send, so a
+    // user scrolling up to put a phone number on their FIRST image would have been offered the text
+    // of their third request, or nothing at all. It now follows the Pro rule below: the words that
+    // asked for an image are the words offered on it.
+    expect(src).toContain('extractImageText(target.prompt)');
+    expect(src).not.toMatch(/extractImageText\(prompt\)/);
+    // Both props must be fed the SAME findings — a template lays out what the extraction found, so
+    // two independent extractions could disagree about what is on the board.
+    const named = src.match(/extracted=\{(\w+)\}/);
+    expect(named, 'the extracted prop is not fed a named value').toBeTruthy();
+    expect(src).toContain(`layersFromExtracted(${named![1]}`);
   });
 
   it('the Pro studio pre-fills from THAT result\'s prompt', () => {

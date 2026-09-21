@@ -440,6 +440,8 @@ import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolve
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
+import { connectActions } from '../AgentV3/connectActions';
+import { saveUserActions } from '../AgentV3/UserActionStore';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
@@ -21698,6 +21700,35 @@ async function noteBuildOutcome(
             if (asks.length > 0) {
               emit({ type: 'secret_request', agent: 'architect', callId: `postbuild-${buildStartedAt}`, prompt: postBuildKeyPrompt(asks.length), secrets: asks, ts: Date.now() });
             }
+            // 🔴 "CONNECT A DATABASE" REACHED NO SURFACE — the tray's PR 2 (see connectActions.ts).
+            //
+            // The keys above already become tray rows, because they ride the `secret_request` event the
+            // recorder listens to. The CONNECT half did not: `databaseReadiness` has always known that
+            // this app's own files save data and no database is connected, and it answered only an
+            // endpoint the user has to go looking for. In the build's own summary it was prose.
+            //
+            // Zero model cost — the app's files and the vault are already in hand here, and the only
+            // extra read is the user's Supabase grant, which decides the WORDING ("one press" vs
+            // "connect your own"), never whether the row appears. Best-effort by construction: a
+            // failure leaves the tray exactly as it is today.
+            try {
+              const supabaseConnected = !!(await getConnection(userId).catch(() => null))?.orgId;
+              // The DURABLE copy, not `writtenFiles`: on an EDIT turn the written set is the diff, and
+              // `appNeedsDatabase` reads the app's own source for persistence signals — judging a
+              // two-file edit would report "no database needed" about an app full of them. The build's
+              // own save has already run by this point, so this read IS the app. Same source the
+              // readiness endpoint uses, so the tray and that screen cannot disagree.
+              const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+              const rows = connectActions({
+                database: databaseReadiness({
+                  files: appFiles,
+                  vaultSecrets,
+                  dbEnvNames: ALL_DB_ENV_VARS,
+                  supabaseConnected,
+                }),
+              }, buildId, Date.now());
+              if (rows.length > 0) await saveUserActions(workspaceId, rows);
+            } catch { /* a task row must never affect a finished build */ }
           }
         } catch {
           // A notice is never worth failing a successful build over — stay silent and ship the app.

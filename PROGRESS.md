@@ -77491,3 +77491,81 @@ the guarded one — on the line that decides whether the welcome gift can buy a 
 
 Full gate: typecheck · server typecheck · unused imports · native guard · **28,408 tests** · build ·
 bundle · boot · deps.
+
+---
+
+## 2026-09-21 — 🔔 THE TRAY'S PR 2: one honest row, and two that would have been guesses
+
+Fourth item. `PROGRESS.md` (2026-09-20) shipped PR 1 and named this as the bigger half:
+
+> *"The tray shows what the engine already emits. The larger category — 'connect GitHub', 'connect a
+> database', 'point your domain' — is still prose inside the model's summary and reaches no
+> structured surface. PR 2 derives those from facts the server already holds … at zero model cost."*
+
+`userActions.ts` had reserved the shape in as many words: *"PR 2 adds 'connect' (GitHub / database /
+domain)"*. That kind now exists — and **only one of the three categories has a fact behind it.**
+
+### ⚠️ The three, checked one at a time rather than assumed (rule 6)
+
+| category | the fact | verdict |
+|---|---|---|
+| **database** | `databaseReadiness` — the app's OWN files save data, the vault has no database | ✅ complete, tested, zero cost |
+| **GitHub** | **no durable per-user connection record exists at all.** The token arrives per request (`githubTokenFromRequest`) and the build reads a CLIENT-SUPPLIED `githubConnected` hint | ❌ a row would be a guess |
+| **domain** | `DomainLink` records that a domain is linked and stores the DNS records to add — but carries **no verified status**, so "still not pointed" needs a live DNS probe | ❌ a propagating answer would nag someone who already did it |
+
+**Shipping one honest row beats shipping three, two of which are guesses.** A row derived from a
+client hint is a row that tells a user to connect something they connected last week. Both gaps are
+named in `connectActions.ts` so the next session re-opens them with the missing fact rather than a
+heuristic.
+
+### What the database row is, and what it cannot do
+
+`databaseReadiness` has always known this — the app's own files save data, the vault has no database —
+and it answered **only an endpoint the user has to go looking for**. In the build's own summary it was
+prose. Now it is a row.
+
+- 🔒 **It never blocks.** `blocking` is what makes the tray open ITSELF, and that is reserved for a
+  build genuinely stopped at a gate; using it for "do this before you publish" is exactly how a user
+  learns to dismiss the tray without reading it. It lights the badge and sits under *"Your app needs
+  this to work"*.
+- 🔒 **It cannot nag.** `connected` accepts EITHER the provider marker OR any real credential, so
+  somebody who pasted a `DATABASE_URL` by hand and never opened the Database screen is not told they
+  have no database. That rule already existed; this change adds no new judgement.
+- 🔒 **One row, not one per build** — the id is derived from the THING (`actionKey('connect', …)`).
+- ⚠️ **Neither wording names the provider.** The row is read by somebody who may never have chosen
+  one; the screen it sends them to names it there. The wording does follow `canProvision`, because an
+  offer we cannot fulfil is worse than no offer.
+- **Zero model cost.** The app's files and the vault are already in hand; the only extra read decides
+  the wording, never whether the row appears.
+
+### 🔴 The durable copy, not this turn's diff
+
+`appNeedsDatabase` reads the app's own source, so judging `writtenFiles` on an EDIT turn — the diff —
+would report *"no database needed"* about an app full of persistence. The route loads the durable
+copy, which is the same source the readiness endpoint uses, so the tray and that screen cannot
+disagree.
+
+### 🔒 The mirrored union is now test-locked, and TypeScript cannot do it
+
+The browser may not import server code, so `userActionView.ts` keeps its **own copy** of
+`UserActionKind`. Adding a kind on one side and forgetting the other produces **no error at all** —
+the row falls through every branch and the tray hands the user a generic sentence. The suite reads
+both unions out of their sources and fails when they differ.
+
+⚠️ Worth recording because it cost real time: the first version of that check failed on its own
+comment. The comment contained `src/server/` followed by a wildcard, whose `/**` the test's
+comment-stripper read as the start of a block comment — swallowing the very line it was meant to
+assert on. **A source-level guard can be defeated by prose.**
+
+### Verification
+
+`tests/theTrayKnowsWhatIsNotConnected.test.ts` — 17 cases, **reversion-proven both ways**: letting the
+client mirror fall behind fails 2, making the row blocking fails 2. Full gate: typecheck · server
+typecheck · unused imports · native guard · **28,481 tests** · build · bundle · boot · deps.
+
+### 🔴 Still open — PR 3, and the two facts above
+
+PR 3 gives the builder a tool to raise and resolve rows itself, and feeds the open list into the
+per-turn context — deliberately the per-turn message, not the cached prefix, or every build's prompt
+cache breaks. The GitHub and domain rows wait on a durable connection record and a stored
+verification status respectively; neither is invented here.

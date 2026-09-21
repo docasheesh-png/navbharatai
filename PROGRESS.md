@@ -75362,6 +75362,100 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — APP MART OPENED AS A WINDOW WITH NO WINDOW (the third time this exact bug shipped)
+
+**Admin: _"app mart ko bhi multi window systm me add karo, slidebar menu me aur header me multi
+tab/window (x=close) me bhi add karo"_.**
+
+🔴 **WHAT WAS WRONG, AND IT WAS ONE MISSING LINE.** `toggleTab('appstore')` pushed App Mart into
+`openTabs` exactly like every other destination. `TopNav` then did:
+
+```
+const item = menuItems.find(m => m.id === tabId);
+if (!item) return null;
+```
+
+App Mart had no `menuItems` entry, so **the tab existed in state, rendered no chip, and had no ✕.**
+Getting out of it meant navigating somewhere else and leaving it open behind you. Nothing failed,
+nothing logged, and no test could see it.
+
+⚠️ **THE SAME BUG, THE SAME FILE, THE SAME LINE OF `TopNav`, FOR THE THIRD TIME.** `App.tsx`'s own
+`other_ai` entry records it verbatim for Other AI (2026-07-23: *"without a menuItems entry, TopNav's
+`if (!item) return null` silently dropped the tab, so opening Other AI showed no header window"*), and
+`SidebarNav`'s `SIDEBAR_HIDDEN` block warns about that same `return null` a third time. Each occurrence
+was found by a **user**, never by CI.
+
+**The class, named so it is recognised: `menuItems` is the REGISTRY FOR A WINDOW.** An id that opens a
+tab without being in it is a window nobody can see or shut.
+
+### The fix — one entry, both surfaces, by construction
+
+```
+{ id: 'appstore', label: 'App Mart', icon: Store },
+```
+
+That single line delivers both things the admin asked for, rather than two edits that could drift:
+`TopNav` renders the header chip **and its ✕** (the close button is unconditional per tab), and
+`SidebarNav`'s `visibleItems` renders the menu row. App Mart was in **neither** `SIDEBAR_HIDDEN` nor
+`DRAWER_HIDDEN` and had no door in the rail, the drawer list or the System Matrix — so this adds
+exactly one door per half and no duplicate (the thing `oneDoorPerThingInTheSidebar` exists to protect).
+`Store` is the icon its own Home tile already carries, for the consistency reason the `other_ai` entry
+states.
+
+**Verified, not assumed:** the App Mart panel is an ordinary in-layout `flex-1 h-full overflow-hidden`
+block in `ViewPanels` — not a full-screen overlay — so the header stays above it and the new ✕ is
+actually reachable. `menuItems`' other consumers were traced before the edit: the mobile footer uses
+targeted `.find` calls by id (unaffected), and `SettingsPanel` destructures the prop and never uses it,
+so no module-toggle surface is generated from this list.
+
+### 🔒 THE 50/50 HALF — a ratchet, so a FOURTH occurrence cannot ship
+
+Fixing App Mart is the first 50%. The other 50% is that nothing anywhere connected *"an id `toggleTab`
+is called with"* to *"an id `menuItems` knows about"*. `tests/appMartIsAWindowLikeEveryOtherWindow.test.ts`
+now does: every `toggleTab('x')` in the **whole client tree** must be registered, or be a professional
+child, or be on a listed-debt allowlist that may only shrink.
+
+⚠️ **A tab legitimately has no chip when it is somebody's CHILD** — a professional AI chat is closed by
+closing the surface it was opened through (`tabParenting.ts`). The 75 professional ids are exempt **by
+derivation from `professionalConfigs.ts`**, never by a hand-kept copy, so a new professional is covered
+without anybody remembering this test exists.
+
+🔎 **FOUR SIBLINGS FOUND, LISTED RATHER THAN FIXED, and the reason is not laziness.** Computed rather
+than guessed — a first pass by eye said five and was wrong (`repo_analyst` turned out to be a
+professional id):
+
+| id | opened from |
+|---|---|
+| `about` | sidebar drawer → System Matrix |
+| `apk` | Settings → tool directory (parented to `settings`) |
+| `diff` | ViewPanels → Diff button |
+| `imagegen` | ViewPanels → "Make icon" |
+
+Registering them would ALSO add four rows to a sidebar the admin has repeatedly and deliberately
+trimmed (*"inko need nahi hai"*, *"sidebar menu me se bhi isko hata do"*). The correct treatment is to
+register them **and** add them to `SIDEBAR_HIDDEN` — the exact pattern `git` / `preview` / `files` /
+`history` / `professionals` already use — which changes header UI that was not asked for. So it is
+raised to the admin as a one-line follow-up instead of shipped unilaterally. **The ratchet blocks a
+fifth**, and a second test asserts every listed id is still genuinely unregistered, so the list cannot
+rot into a permanent exemption nobody re-checks.
+
+⚠️ **The first draft of the ratchet scanned four files and missed `apk`** (SettingsPanel opens it) —
+safeguard #6's own lesson, caught by the test failing rather than by review. The corpus is the tree.
+
+**Files:** `src/App.tsx` (the entry + the `Store` import), `src/server/AppContext/AppKnowledgeBase.ts`
+(the navigation path now names the sidebar row, the header tab and the ✕ — the sync rule, and the only
+surface that can answer *"app mart band kaise karu"*, which until now had no honest answer).
+**Test-locked and reversion-proven four ways** (14 cases): remove the entry → 4 fail; introduce a brand
+new orphan tab → the ratchet names it with the remedy; hide it from the sidebar → the two-hide-set
+assertion fails; change the icon → the Home-tile consistency assertion fails.
+
+⚠️ **Shipped on its own branch (`claude/app-mart-multi-window`) off `main`, NOT on the designated
+branch**, because that branch carries PR #3225 (the billing floor) open and green awaiting the admin's
+merge word. Adding unrelated work to it would have grown that PR and invalidated the CI result already
+reported.
+
+---
+
 ## 2026-09-21 — A CHAIN IS NOT A REFUSAL: our own PORT injection failed silently on `cd x && npm run dev`
 
 **The admin asked the question that settled it** (verbatim): *"preview port 5000 par tha, navbharatai

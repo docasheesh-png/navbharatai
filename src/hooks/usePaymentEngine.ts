@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { triggerCashfreeCheckout } from '../services/paymentService';
+import { triggerCashfreeCheckout, warmCheckout } from '../services/paymentService';
 import { authedHeaders } from '../lib/authHeaders';
 import { trackEvent } from '../lib/analytics';
 import { decideReportOnce } from '../lib/conversionOnce';
@@ -180,6 +180,12 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     if (storeRail === 'none') return;
     setIsRecharging(true);
     setRechargeStatus('Requesting Cashfree checkout protocol...');
+    // START THE GATEWAY SDK DOWNLOADING NOW, beside the order call rather than after it (admin
+    // 2026-09-21, a 5-10 s wait on our own page). The SDK needs no session id, so the two are
+    // independent; running them in series meant the user paid for both, one after the other.
+    // No `await` — this is an optimisation, and `triggerCashfreeCheckout` awaits the same shared
+    // promise below. A warm-up that failed must never be able to fail the purchase.
+    warmCheckout();
     try {
       // The server derives the order's owner from this token (it no longer trusts a body `userId`).
       // 🔒 The app-lock ticket rides along when one is held (admin 2026-09-13). The SERVER decides whether

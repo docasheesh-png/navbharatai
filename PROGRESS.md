@@ -75613,5 +75613,11 @@ trips on its own documentation is a guard someone deletes. They match syntax now
   here. Lane C now covers them, which is why this is an upgrade rather than a breakage.
 - **What actually removed the mount node in `e4d27bde`** — still open from yesterday's autopsy; measured
   *not* to be the app-defaults pass.
-- **`claimAudit` checks only `!consoleCaptured`.** A summary claiming a clean console while the captured
-  console shows errors is not flagged. Not introduced here, but newly reachable now that capture works.
+- ✅ **CLOSED in the same change — `claimAudit` checked only `!consoleCaptured`.** A summary claiming a
+  clean console while the captured console showed errors was not flagged. It had never been reachable
+  (an ordinary build captured nothing), and making the capture work is precisely what makes it
+  reachable — so `console-clean-but-errors` ships with it instead of waiting for a report to prove it.
+  It reads the FINAL count after the repair budget, because a mid-build number would accuse a summary
+  of hiding an error the build had already fixed; an omitted count accuses nobody (the discipline
+  `typecheckRan` already states); and the two rules are chained `else if`, so one claim can never
+  produce two contradictions in the user's own correction. Reversion-proven twice.

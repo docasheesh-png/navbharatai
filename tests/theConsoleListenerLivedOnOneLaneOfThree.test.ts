@@ -40,6 +40,7 @@ import {
   browseConsoleCaptureEnabled,
   BROWSER_DAEMON_SCRIPT,
 } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
+import { auditSummaryClaims } from '../src/server/AgentV3/claimAudit';
 
 const ACTUATOR_SRC = readFileSync(
   fileURLToPath(new URL('../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url)),
@@ -261,5 +262,74 @@ describe('the kill switch is a real revert', () => {
       if (prev === undefined) delete process.env['AGENTV3_BROWSE_CONSOLE'];
       else process.env['AGENTV3_BROWSE_CONSOLE'] = prev;
     }
+  });
+});
+
+// ── The honesty half: the door this change opened, and the rule that guards it ────────────────────
+//
+// Until the listeners reached lane C, `auditSummaryClaims` could only catch "you said clean and nobody
+// looked" — because on an ordinary build nobody ever did. The WORSE sentence, *we looked, we saw
+// errors, and the summary said clean*, had no rule at all and could not be reached. Making the capture
+// work is what makes it reachable, so its guard ships in the same change rather than waiting for a
+// report to prove it. Same discipline as `POST_GREEN_WRITES`, inverted: there was nothing to measure
+// first, because the measurement itself is what was missing.
+describe('a console we DID read is held to what it said', () => {
+  const CLEAN = 'Build complete. No console errors in the browser.';
+
+  it('flags a clean-console claim when the captured console still held errors', () => {
+    const [c] = auditSummaryClaims(CLEAN, {
+      consoleCaptured: true, consoleErrorsFound: 2,
+      screenshotTaken: false, previewVerified: true, filesWritten: 3,
+    });
+    expect(c?.kind).toBe('console-clean-but-errors');
+    expect(c?.measured).toContain('2 errors');
+  });
+
+  it('says "1 error", not "1 errors"', () => {
+    const [c] = auditSummaryClaims(CLEAN, {
+      consoleCaptured: true, consoleErrorsFound: 1,
+      screenshotTaken: false, previewVerified: true, filesWritten: 3,
+    });
+    expect(c?.measured).toContain('1 error ');
+  });
+
+  // The whole point of capturing: a build that really is clean must not be accused.
+  it('a genuinely clean captured console is never a contradiction', () => {
+    const out = auditSummaryClaims(CLEAN, {
+      consoleCaptured: true, consoleErrorsFound: 0,
+      screenshotTaken: false, previewVerified: true, filesWritten: 3,
+    });
+    expect(out.map((c) => c.kind)).not.toContain('console-clean-but-errors');
+    expect(out.map((c) => c.kind)).not.toContain('console-clean');
+  });
+
+  // ⚠️ SILENCE IS NEVER AN ACCUSATION — the discipline `typecheckRan` already states in this module.
+  // A caller that cannot tell us the count must not have a claim invented against it.
+  it('an omitted count accuses nobody', () => {
+    const out = auditSummaryClaims(CLEAN, {
+      consoleCaptured: true,
+      screenshotTaken: false, previewVerified: true, filesWritten: 3,
+    });
+    expect(out.map((c) => c.kind)).not.toContain('console-clean-but-errors');
+  });
+
+  // The original rule is untouched, and the two are mutually exclusive: one claim, one contradiction.
+  it('the never-looked rule still fires, and only one of the two ever does', () => {
+    const out = auditSummaryClaims(CLEAN, {
+      consoleCaptured: false, consoleErrorsFound: 5,
+      screenshotTaken: false, previewVerified: true, filesWritten: 3,
+    });
+    const kinds = out.map((c) => c.kind);
+    expect(kinds).toContain('console-clean');
+    expect(kinds).not.toContain('console-clean-but-errors');
+  });
+
+  // A summary that claims nothing about the console is not audited about the console, however dirty it is.
+  it('no claim, no contradiction', () => {
+    const out = auditSummaryClaims('Built your notes app with add, edit and delete.', {
+      consoleCaptured: true, consoleErrorsFound: 9,
+      screenshotTaken: false, previewVerified: true, filesWritten: 3,
+    });
+    expect(out.map((c) => c.kind)).not.toContain('console-clean-but-errors');
   });
 });

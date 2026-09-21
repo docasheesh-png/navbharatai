@@ -2922,6 +2922,13 @@ the flag entries above promise.
   **at all**. A crop of `RUNTIME_ERRORS_REMAIN` is not a regression — it is the check working for the
   first time, and each one is a real error that was reaching users unseen. Also watch the repair-pass
   count on Weak; if it rises more than the errors justify, `AGENTV3_BROWSE_CONSOLE=off` reverts it.
+  ✅ **AND THE DOOR IT OPENED IS CLOSED IN THE SAME CHANGE.** `auditSummaryClaims` could only catch
+  *"you said clean and nobody looked"*; the worse sentence — **we looked, we saw errors, and the summary
+  said clean** — had no rule at all, because an ordinary build captured nothing so it was unreachable.
+  Making the capture work is what makes it reachable, so `console-clean-but-errors` ships beside it
+  rather than waiting for a report to prove it. It reads the FINAL count (after the repair budget), an
+  omitted count accuses nobody, and the two rules are `else if` — one claim can never produce two
+  contradictions in the user's correction.
   🔴 **STILL OPEN (rule 6): lane B cannot see a state-routed SPA.** `extractPageRoutes` finds only
   `<Route path=…>` and Next `app/x/page.tsx`, so every single-screen app — and our multi-screen
   scaffolds that switch on state — yields nothing. Deriving "pages" for those is a separate problem and

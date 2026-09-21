@@ -77749,3 +77749,31 @@ assertion encoded the bug — repointed with the reason written in.
 - Not reproduced on the admin's phone itself; the repro is the same sequence in desktop Chromium.
   If a font STILL does not change after this ships, the next fact to collect is the `fontNote` line
   under the picker — with this fix it can now genuinely say *"could not be loaded"*.
+
+## 2026-09-21 — B + E + F + G: the free image composer is one box (Phase 2 item 4)
+
+**Admin, four small asks on one screenshot:** B *"change my own picture wala button, sirf attach button
+bana kar, input box ke andar karo"* · E *"jo 4 dropdown selector hai … in charo ko bhi hide/expand ka
+button do"* · F *"[free-tier line] is line ko, niche nahi. upar likhna hai. jahan 'no image yet' likh ke
+ata hai"* · G *"₹1 per image, charged only if it arrives (pro mode me already yah likha hai!) … hatao!!"*
+
+- **B** — the attach control is an `ImagePlus` button INSIDE the input pill, left of the words — the
+  same button in the same place as the Pro studio and every other composer. `ReferenceImagePicker`
+  keeps the chooser, the 25 MB rule, the attached-picture card and the crop editor (one rule for what a
+  picture may be, both tiers); it now takes an `openRef` the composer's button presses, and no longer
+  draws its own full-width dashed bar on every build.
+- **E** — a `Hide` / `Options` toggle folds the four selectors (and the custom-size fields with them).
+  **Folded, one line still names every setting in force** (`Photograph · Realistic · Square · No
+  preference`), read from the same state the selectors hold, so hiding the controls never hides what
+  they will do. Remembered per device (`nbai.imagegen.options`); an unreadable store means open.
+- **F** — the "free images are for your app's artwork … use Pro" line moved UP into the *No images yet*
+  state, shown once before the first send; the Pro pointer there is still a real control and still
+  hidden when Pro cannot serve. Under the input only the attached-picture hint remains, and only while
+  a picture is attached.
+- **G** — the studio's second "₹1 per image, charged only if it arrives" line under the box is gone. The
+  price stays on the toggle chip and in the Pro empty state (`theProPriceIsOneNumber.test.ts` still
+  holds all three copies to one number); "nothing was charged" is still said on the failure card.
+
+Tests: `tests/theFreeComposerIsOneBox.test.ts` (12) — placement guards, since where a control or a
+sentence sits is exactly what `tsc` cannot see. The colour-literal ratchet baseline was regenerated
+(the studio lost a literal) and committed.

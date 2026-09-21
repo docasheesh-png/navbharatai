@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModeButton } from '../chat/ModeButton';
-import { ArrowUp, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, Wand2, X } from 'lucide-react';
+import { ArrowUp, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
 import { TextOverlayEditor } from './TextOverlayEditor';
@@ -428,10 +428,10 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
             </button>
           </div>
           </div>
-
-          <p className="text-[11px] text-faint flex items-center justify-center gap-1.5">
-            <Wand2 className="w-3 h-3" /> ₹{PRICE_INR} per image, charged only if it arrives
-          </p>
+          {/* The price is on the toggle chip ("Pro ₹1") and in the empty state; a third copy under the
+              box only cost a line of a phone screen (admin 2026-09-21: "pro mode me already yah likha
+              hai … space khatam ho raha hai, hatao"). "Charged only if it arrives" is still true, and
+              still said — on the failure card, where a user who was not charged is the one reading. */}
         </div>
       </div>
 

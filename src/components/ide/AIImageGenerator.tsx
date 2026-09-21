@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon } from 'lucide-react';
+import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
 import { ReferenceImagePicker, type ReferencePicture } from './ReferenceImagePicker';
@@ -147,6 +147,20 @@ const STYLE_ENHANCERS: Record<string, string> = {
  * read that throws must never silently land somebody on the paid tier.
  */
 const TIER_KEY = 'nbai.imagegen.tier';
+/**
+ * Whether the four selectors are shown or folded (admin 2026-09-21: "in charo ko bhi hide/expand ka
+ * button do"). Remembered per device: somebody who folds them wants them folded next time too. The
+ * settings themselves are untouched by folding — a folded row still SAYS what is in force, so a
+ * user can never be surprised by a setting they cannot see.
+ */
+const OPTIONS_KEY = 'nbai.imagegen.options';
+function readOptionsOpen(): boolean {
+  try {
+    return localStorage.getItem(OPTIONS_KEY) !== 'closed';
+  } catch {
+    return true;
+  }
+}
 
 /**
  * What one Pro image costs, in ₹ — shown on the toggle so the switch names its own price.
@@ -171,6 +185,12 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   // overwriting a preference the user really expressed: the day Pro is switched on, their choice
   // returns by itself.
   const [chosenTier, setChosenTier] = useState<'free' | 'pro'>(readTier);
+  const [optionsOpen, setOptionsOpen] = useState<boolean>(readOptionsOpen);
+  useEffect(() => {
+    try { localStorage.setItem(OPTIONS_KEY, optionsOpen ? 'open' : 'closed'); } catch { /* a private window; the fold simply is not remembered */ }
+  }, [optionsOpen]);
+  /** Filled by the picker below the selectors; pressed by the attach button inside the input pill. */
+  const attachRef = useRef<(() => void) | null>(null);
   const [proAvailable, setProAvailable] = useState<ImageProAvailability>(null);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
@@ -722,6 +742,41 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 <p className="text-sm font-semibold text-ink">No images yet</p>
                 <p className="text-xs text-muted mt-1">Your images appear here, newest at the bottom.</p>
               </div>
+              {/* ── WHAT THE FREE TIER IS FOR, said before the first send ────────────────────
+                  Admin, 2026-09-21: *"free image generator me, ek watermark jaise chat box me hi
+                  likh dekha, image only for your app … jisse log real cinematic image na ban pane
+                  se nirash nahi honge"* — and, the same day: *"is line ko, niche nahi. upar likhna
+                  hai. jahan 'no image yet' likh ke ata hai"*. So it lives HERE, in the empty state,
+                  and not under the input on every send.
+
+                  🔑 IT IS EXPECTATION, NOT AN APOLOGY. The free engine is genuinely good at flat,
+                  graphic work — a logo, an icon, a banner, an illustration — and genuinely weaker
+                  at photographic and cinematic scenes. A user who asks it for a film still and is
+                  disappointed was not failed by the picture; they were failed by nobody telling
+                  them which job this tool is for. Saying it once, where they start, turns a bad
+                  result into an informed choice.
+
+                  ⚠️ It never says "you cannot" and it never names a vendor. The Pro button is a REAL
+                  control (the same tier state the toggle above uses), and it is hidden entirely
+                  when Pro cannot serve — advice pointing at a door that does not open is worse
+                  than none. */}
+              <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
+                <Wand2 className="w-2.5 h-2.5 shrink-0" />
+                <span>Free images are made for your app’s artwork — logos, icons, banners, illustrations.</span>
+                {!proOff && (
+                  <>
+                    <span>For photo-real or cinematic pictures,</span>
+                    <button
+                      type="button"
+                      onClick={() => setChosenTier('pro')}
+                      className="underline text-accent-text hover:text-ink transition-colors"
+                    >
+                      use Pro
+                    </button>
+                    <span>— this tier stays free.</span>
+                  </>
+                )}
+              </p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {EXAMPLES.map((e) => (
                   <button
@@ -886,7 +941,27 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
               <p className="text-[11px] text-warn leading-relaxed">{actionNote}</p>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* ── THE FOUR SELECTORS, foldable (admin 2026-09-21: "hide/expand ka button do") ──
+                Folded, ONE line still names every setting in force, so hiding the controls never
+                hides what they will do to the next image. */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] text-faint truncate min-w-0">
+                {optionsOpen
+                  ? 'Options'
+                  : [imageType, labelOf(STYLES, style), labelOf(SIZES, size), labelOf(COLOR_HINTS, colorHint)].filter(Boolean).join(' · ')}
+              </p>
+              <button
+                type="button"
+                onClick={() => setOptionsOpen((o) => !o)}
+                aria-expanded={optionsOpen}
+                aria-controls="nbai-image-options"
+                className="shrink-0 text-[10px] text-muted hover:text-ink flex items-center gap-1 transition-colors"
+              >
+                {optionsOpen ? <>Hide <ChevronDown className="w-3 h-3" /></> : <>Options <ChevronUp className="w-3 h-3" /></>}
+              </button>
+            </div>
+            {optionsOpen && (
+            <div id="nbai-image-options" className="grid grid-cols-2 gap-2">
               <ImageOptionSelect
                 label="Image type"
                 heading="What are you making?"
@@ -916,10 +991,12 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 onChange={setColorHint}
               />
             </div>
+            )}
 
-            {/* Only when it is chosen: four selectors plus two number fields on every build would be
-                the crowded screen the dropdowns were introduced to clear. */}
-            {size === CUSTOM_SIZE_ID && (
+            {/* Only when it is chosen, and only while the options are open: four selectors plus two
+                number fields on every build would be the crowded screen the dropdowns were
+                introduced to clear. */}
+            {optionsOpen && size === CUSTOM_SIZE_ID && (
               <CustomSizeFields
                 width={customW}
                 height={customH}
@@ -937,13 +1014,29 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
               onChange={setReference}
               frame={willMakeAt}
               disabled={isLoading}
+              openRef={attachRef}
             />
 
             {/* Outside the pill, to its left — same placement and same shared button as every other
                 composer in the app (admin 2026-09-21). */}
             <div className="flex items-end gap-2">
             <ModeButton onOpen={onOpenModePicker} />
-            <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-3 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
+            <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-1.5 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
+              {/* ATTACH, inside the pill — the same button, in the same place, as the Pro studio and
+                  every other composer here (admin 2026-09-21: "sirf attach button bana kar, input
+                  box ke andar karo"). It opens the picker's chooser; the crop rule stays there. */}
+              <button
+                type="button"
+                onClick={() => attachRef.current?.()}
+                disabled={isLoading}
+                aria-label="Attach your own picture to change"
+                title={reference ? 'Your picture is attached — tap the pencil above to adjust it' : 'Change my own picture'}
+                className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 ${
+                  reference ? 'text-accent-text' : 'text-muted hover:text-ink hover:bg-raised'
+                }`}
+              >
+                <ImagePlus className="w-4 h-4" />
+              </button>
               <label htmlFor="nbai-image-prompt" className="sr-only">
                 {reference ? 'Describe the change you want' : 'Describe your image'}
               </label>
@@ -987,42 +1080,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
             </div>
             </div>
 
-            {/* ── WHAT THE FREE TIER IS FOR, said where the user is typing ───────────────────
-                Admin, 2026-09-21: *"free image generator me, ek watermark jaise chat box me hi likh
-                dekha, image only for your app … jisse log real cinematic image na ban pane se
-                nirash nahi honge"*.
-
-                🔑 IT IS EXPECTATION, NOT AN APOLOGY. The free engine is genuinely good at flat,
-                graphic work — a logo, an icon, a banner, an illustration — and genuinely weaker at
-                photographic and cinematic scenes. A user who asks it for a film still and is
-                disappointed was not failed by the picture; they were failed by nobody telling them
-                which job this tool is for. Saying it BEFORE they press send costs one line and
-                turns a bad result into an informed choice.
-
-                ⚠️ It never says "you cannot" and it never names a vendor. The Pro button is a REAL
-                control (the same tier state the toggle above uses), and it is hidden entirely when
-                Pro cannot serve — advice pointing at a door that does not open is worse than none. */}
-            <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5 flex-wrap">
-              <Wand2 className="w-2.5 h-2.5 shrink-0" />
-              <span>
-                {reference
-                  ? 'Only what you ask for changes — the rest of your picture is kept.'
-                  : 'Free images are made for your app’s artwork — logos, icons, banners, illustrations.'}
-              </span>
-              {!proOff && !reference && (
-                <>
-                  <span>For photo-real or cinematic pictures,</span>
-                  <button
-                    type="button"
-                    onClick={() => setChosenTier('pro')}
-                    className="underline text-accent-text hover:text-ink transition-colors"
-                  >
-                    use Pro
-                  </button>
-                  <span>— this tier stays free.</span>
-                </>
-              )}
-            </p>
+            {/* With a picture attached the words mean something different — say so where they are
+                typed. The "what the free tier is for" line moved UP into the empty state (admin
+                2026-09-21: "upar likhna hai, jahan 'no image yet' likh ke ata hai"). */}
+            {reference && (
+              <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5">
+                <Wand2 className="w-2.5 h-2.5 shrink-0" />
+                <span>Only what you ask for changes — the rest of your picture is kept.</span>
+              </p>
+            )}
           </div>
         </div>
       </div>

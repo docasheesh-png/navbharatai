@@ -58,7 +58,7 @@
   "src/components/ide/DesignSystem.tsx": 8,
   "src/components/ide/FigmaImporter.tsx": 8,
   "src/components/ide/GitPanel.tsx": 12,
-  "src/components/ide/ImageStudioPro.tsx": 4,
+  "src/components/ide/ImageStudioPro.tsx": 3,
   "src/components/ide/MentionInbox.tsx": 18,
   "src/components/ide/ModeSelector.tsx": 13,
   "src/components/ide/MonetizationWizard.tsx": 2,

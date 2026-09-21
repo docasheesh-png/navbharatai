@@ -76170,6 +76170,87 @@ trips on its own documentation is a guard someone deletes. They match syntax now
 
 ---
 
+## 2026-09-21 — 🔓 OPEN ROOT CAUSE: the App Store anti-steering gap is in the AI's ANSWER, not in any screen — deliberately NOT fixed (admin's call)
+
+**Found by the admin, by asking the right question rather than by reading code.** After #3202 removed
+the Cashfree checkout from the iPhone app and #3204 took the steering copy out of the runbook, they
+asked: *"par ai ke response me agar aisa aye ki payment ke liye website visit karo to?"*
+
+It was not hypothetical. It is **written into the knowledge base the assistants are given**, and both
+quotations below are live in `src/server/AppContext/AppKnowledgeBase.ts` today:
+
+- the billing entry: *"On the website nothing changes: **you can still enter any amount you like**"*,
+  and *"when you add credit **on the website**…"*
+- the power-selector entry: *"recharging (adding credits to the wallet) instantly unlocks Normal and
+  Strong"*, with the navigation steps.
+
+So an iPhone user asking *"credit kaise daalein?"* is answered by a model that has been **taught the
+external purchase path**. Apple Guideline 3.1.1 forbids *"buttons, external links, **or other calls to
+action** that direct customers to purchasing mechanisms other than in-app purchase"* — and a sentence
+generated at runtime is exactly such a call to action.
+
+🔴 **WHY THIS CLASS IS WORSE THAN THE TWO ALREADY FIXED, stated so nobody re-derives it:**
+
+| | #3202 (the checkout) | #3204 (the runbook line) | THIS |
+|---|---|---|---|
+| Where it lives | a component | a doc | **generated per request** |
+| Can a diff review catch it? | yes | yes | **no — there is no string to grep** |
+| Who meets it | anyone who taps Top-up | the next session | **a reviewer testing the app's MAIN feature, which IS the AI** |
+| Ends at approval? | — | — | **no.** Every iOS user, for ever |
+
+The first two were found by reading code. This one could only be found by asking what the product
+*says*, which is why it took the admin's question and not a grep.
+
+### The decision, and whose it is
+
+**The admin chose to ship without fixing it** (verbatim: *"Kuch na karein, abhi bhej dein, reject hua
+to tab theek karein"*), after being shown the plan, the risks and the recommendation to fix it first.
+That is recorded here as their decision rather than as an oversight, and it is defensible: an Apple
+rejection **names the guideline it failed**, so if this is what bites, the diagnosis arrives with the
+rejection and the fix below is half a day — while building it now carries its own risk of a new bug in
+the chat path days before a submission.
+
+### The fix, already scoped — so nobody investigates this twice
+
+1. **The app tells the server its platform.** Reuse the header that already exists — **`X-NBAI-Platform`**,
+   sent today by `UpdateBanner.tsx` and read at `routes/health.ts:218`. Do NOT invent a second name for
+   this; a second vocabulary for one concept is the drift this repo has paid for repeatedly. Send it
+   from the ONE place that already wraps every native fetch — `installNativeApiRewrite` in
+   `src/lib/apiBase.ts`.
+2. **A caller-platform zone**, the same AsyncLocalStorage idiom as `noClaudeZone` / `aiSpendZone`, so no
+   call site can forget to thread it. THE ONE-WALLET LAW's own words apply: *"do not re-thread costs
+   through call sites by hand — that is the fragility this replaced."*
+3. **`AppContextInjector.getRelevantContext` is the single chokepoint** — verified, not assumed: all
+   **seven** AI surfaces reach the knowledge base through it (`routes/chat.ts`, `routes/sda.ts`,
+   `routes/warm.ts`, `professionals/engine.ts`, `EngineerAI/EngineerAgentLoop.ts`,
+   `AgentV3/systemPrompt.ts`, and the module itself). On an Apple caller the purchase-direction text is
+   replaced with an honest "not available inside the app", naming no external destination.
+4. **A deterministic net** for the sentences a prompt rule misses: a sentence carrying BOTH a purchase
+   call to action AND an external destination is removed on the Apple path.
+
+✅ **THE ONE FACT WORTH KEEPING FROM THE INVESTIGATION, because it was the deciding risk and it is
+VERIFIED rather than assumed.** A custom header forces a CORS **preflight** on a cross-origin request,
+and the native shell calls `https://navbharatai.com` from origin `https://localhost` — so a server that
+did not allow `X-NBAI-Platform` would have made **every API call from the app fail**, i.e. the whole app
+dead. It does allow it: `src/server/lib/cors.ts:83` **echoes back whatever the preflight asks for**
+(`req.headers['access-control-request-headers'] || 'Authorization, Content-Type'`). The only real cost
+is one extra OPTIONS round trip on native GETs that carried no custom header before.
+
+⚠️ **AND THE HONEST CEILING, recorded so it is not promised away later: step 3 is a PROMPT RULE, not a
+guarantee.** A model can phrase its way around one ("hamari site par…"), which is why step 4 exists and
+why this must never be described as "closed" on the strength of step 3 alone.
+
+### What is NOT affected, so the scope of this open item stays legible
+
+Android and the web are untouched by the gap and would be untouched by the fix: the platform signal
+defaults to **not Apple** when absent, the same safe direction `purchaseRail` already takes, because a
+wrong "yes" removes a real user's working top-up while a wrong "no" only keeps today's behaviour. No
+payment, wallet or billing code is involved at any point.
+
+### What would close it
+
+Either the fix above, or **StoreKit** — at which point the question disappears, because there would be a
+legitimate in-app purchase path for the assistant to describe.
 ## 2026-09-21 — 🔴 THE REFUND POLICY WAS A SESSION'S ASSUMPTION, AND THE ADMIN REVERSED IT
 
 **What happened.** `/refund` shipped on 2026-09-20 promising a refund of UNUSED purchased credit

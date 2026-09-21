@@ -30,6 +30,8 @@ import { needsPublishDot } from '../../lib/publishFreshness';
 import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, shouldAutoDeployBackend } from '../../lib/backendDeployOffer';
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
+import { badgeAt, badgeLabelAt, type PendingAction } from '../../lib/actionNavigator';
+import { ActionDot } from '../ActionDot';
 import { advancedPublishStartsOpen, ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
 import { FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
 import {
@@ -70,6 +72,13 @@ export interface HostingChooserProps {
   workspaceId?: string;
   /** Whether the Firebase-native "connect your own domain" surface is live (server flag). */
   customDomainsEnabled?: boolean;
+  /**
+   * The Action Navigator's pending list, computed ONCE by the panel and handed down (admin
+   * 2026-09-21: *"user ne publish par click kiya, andar sabhi option par red dot"*). Passed rather
+   * than recomputed so this sheet's dots and the More menu's can never disagree about the same app.
+   * Omitted (this sheet's own tests) ⇒ the pre-2026-09-21 behaviour exactly.
+   */
+  navActions?: readonly PendingAction[];
   /**
    * What connecting a domain costs THIS user per month, or null when they would not be charged
    * (plans off, or a free-list account). Comes from the server so an env price change is reflected
@@ -225,7 +234,7 @@ export interface SiteConfigView { redirects: Array<{ from: string; to: string; c
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
 export function HostingChooser({
-  providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr,
+  providers, onDeploy, onClose, busy, publishStatus, workspaceId, customDomainsEnabled, customDomainPriceInr, navActions,
   liveUrl, onUnpublish, onRollback, onLoadMyApps, onUnpublishApp, siteAnalytics, onLoadSiteAnalytics, onLoadRollbackChoices, onLoadSiteConfig, onSaveSiteConfig,
   ownRepo, githubConnected, onConnectGitHub, onRepoPushed, authedFetch, onOpenDatabaseSettings, onOpenApkBuilder,
   publishRefusalCode, backendKeySource, deployRepo,
@@ -579,6 +588,16 @@ export function HostingChooser({
   // by hand is a dot that eventually lies.
   const publishState = usePublishState(workspaceId, busy);
   const showPublishDot = needsPublishDot(publishState?.freshness);
+  // The navigator when the panel supplied it, else this sheet's own long-standing verdict. The two
+  // agree by construction — `publish.stale` is emitted for exactly `freshness === 'changed'`, which
+  // is what `needsPublishDot` returns — and `theNavigatorPointsAtWhatIsLeft.test.ts` asserts that
+  // agreement, so the fallback can never drift away from the rule it stands in for.
+  const publishTone = navActions
+    ? badgeAt(navActions, ['more', 'publish', 'navbharatai'])
+    : (showPublishDot ? 'attention' as const : null);
+  const publishToneLabel = navActions
+    ? badgeLabelAt(navActions, ['more', 'publish', 'navbharatai'])
+    : (showPublishDot ? 'You have unpublished changes' : null);
   const hasOurHosting = providers.some((p) => p.id === NBAI_HOST_ID && p.configured);
   const byo = providers.filter((p) => p.configured && p.id !== NBAI_HOST_ID);
   // THE BRING-YOUR-OWN PATHS ARE COLLAPSED BY DEFAULT (ROADMAP §11 slice 5 — one Publish button), but
@@ -1020,7 +1039,7 @@ export function HostingChooser({
                 {/* THE MIDDLE STEP OF THE DOT TRAIL (admin 2026-08-21). The dot on the v5 Publish
                     button brought the user here; this one tells them the trail continues inward
                     rather than ending on this screen. Same source of truth as both its neighbours. */}
-                {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500 text-on-accent" aria-label="You have unpublished changes" />}
+                <ActionDot tone={publishTone} label={publishToneLabel} size="sm" />
               </button>
             )}
 

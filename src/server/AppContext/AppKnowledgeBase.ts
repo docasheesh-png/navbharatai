@@ -1801,11 +1801,13 @@ What happens if it is NOT renewed (honest answer): you get in-app reminders 5 da
 • CONVERSATION — discuss ideas, plan features, ask questions (use the Plan/Advise modes for read-only planning).
 • BUILD — describe an app and it plans, codes, previews and ships a complete real project (not just a single HTML canvas).
 • EDIT — once an app exists, ask to change it and it patches precisely, preserving everything you didn't ask to change.
-Also supports: file attachments (text, code, .zip project import), image analysis (vision), and PDF reading.`,
+Also supports: file attachments (text, code, .zip project import), image analysis (vision), and PDF reading.
+
+THE DOTS THAT SHOW WHAT IS LEFT TO DO (2026-09-21). Once your app is built and you have actually opened the preview and watched it run for a few seconds, a small coloured dot appears on the "More" button in the bottom bar, and the same dot repeats inside — on Publish, and on the exact button that finishes the job. Follow the dots and you never have to hunt for the next step. There are only TWO colours and they mean different things. BLUE = something you CAN do next, nothing is wrong: put your app online, put it on App Mart, use your own web address. RED = something NEEDS you: your live site is older than your app (visitors are seeing the previous version), or your build did not finish and has not been reported, or your app needs a key you have not saved. A dot disappears only when the job is REALLY done — publishing clears the publish dot, sending the report clears the report dot — never just because you tapped it, so a dot is always telling you the truth. Nothing is shown while a build is still running, and nothing is shown before you have looked at your own app. You can dismiss a blue dot if you are not interested; a red one stays until the problem is actually fixed.`,
     howToUse: 'From Home, open the "NavBharatAI Pro" card and tap "Open Pro Builder" (or pick "NavBharatAI Pro" from the sidebar menu). Type your app idea and send to build; once it appears, ask follow-up changes directly.',
     relatedFeatures: ['free_chat', 'ide', 'engineer_ai'],
     aiSurface: 'pro_chat',
-    keywords: ['pro chat', 'pro', 'app builder', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo'],
+    keywords: ['pro chat', 'pro', 'app builder', 'build mode', 'canvas', 'app maker', 'make app', 'generate app', 'html app', 'generate code', 'app generate karo', 'red dot', 'blue dot', 'laal nishan', 'neela nishan', 'dot kya hai', 'notification dot', 'red dot kyu', 'nishan', 'badge', 'more par dot', 'publish par dot', 'next step', 'aage kya karu', 'kya baki hai'],
   },
   {
     id: 'unified-workspace',

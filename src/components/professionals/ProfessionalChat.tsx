@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { ModeButton } from '../chat/ModeButton';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
@@ -81,7 +82,15 @@ async function fileToAttachment(file: File): Promise<{ name: string; type: strin
   return { name: file.name, type: file.type || 'application/octet-stream', base64: await readRaw() };
 }
 
-export function ProfessionalChat({ config, userId }: { config: ProfessionalChatConfig; userId?: string }) {
+export function ProfessionalChat({ config, userId, onOpenModePicker }: {
+  config: ProfessionalChatConfig;
+  userId?: string;
+  /**
+   * Open the ONE mode picker (admin 2026-09-21). `undefined` on a phone, where the bottom bar already
+   * carries Mode — App.tsx decides that once for every surface rather than each one guessing.
+   */
+  onOpenModePicker?: (() => void) | undefined;
+}) {
   // ONE definition of where a professional's conversation lives (professionalChatStore) — this string
   // used to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close now has to agree with
   // both. Three hand-written copies of a key is how a close button ends up clearing the wrong thing.
@@ -317,6 +326,9 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       </div>
 
       <div className="px-3 py-2 border-t border-line flex items-end gap-2 shrink-0">
+        {/* BEFORE the input box, so an expert is never a one-way door (admin 2026-09-21). Same shared
+            button and same sheet the free chat opens — this surface holds no list of its own. */}
+        <ModeButton onOpen={onOpenModePicker} />
         <AttachMenu
           onFiles={(fl) => addFiles(fl)}
           fileAccept={ACCEPTED_TYPES}

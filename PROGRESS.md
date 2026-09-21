@@ -75362,6 +75362,84 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — 🔴 CORRECTION: the "second iOS risk" was never a risk, and the runbook still told the next session to rebuild #3202 the wrong way
+
+### Part 1 — retracting yesterday's open item (rule 6 cuts both ways)
+
+The entry above headed **"⚠️ STILL OPEN — the second iOS risk, NOT fixed here"** is **WRONG and is
+retracted here rather than edited away**, per this file's append-only rule. It claimed
+*"`metaPixel.ts` has no native gate … disabling the pixel on iOS is one line"* and it was reported to
+the admin as a decision they had to take. **There was nothing to decide.**
+
+The gate has existed since the pixel shipped on 2026-08-31:
+
+- `shouldLoadPixel()` — `if (input.isNative) return false;`, with the comment *"rule 2: the Android
+  SDK owns the app's own events"*.
+- `initMetaPixel()` checks it **twice** — once cheaply before the network call, once after the async
+  fetch in case consent changed.
+- Wired at `src/main.tsx` with `isNative: () => isNativeShell(window as never)`.
+
+**And this file already said so.** The 2026-08-31 entry, eight lines of it, reads *"Loads only on:
+production + analytics consent + **NOT the native app** + a valid configured id."* I wrote a
+contradiction of my own project log and did not notice.
+
+🔎 **HOW THE WRONG ANSWER WAS REACHED, because the method matters more than the fact:** I grepped
+`metaPixel.ts` for `Capacitor` and `isNative`, saw no `Capacitor` import, and concluded there was no
+gate. **The gate is INJECTED, not imported** — `initMetaPixel(deps)` takes `isNative: () => boolean`,
+which is this repo's own house pattern for keeping decisions pure and testable (`purchaseRail` takes
+its platform the same way, and I had just written that one). So the very convention I had spent the
+day applying is what made my search miss.
+
+That is safeguard #6's vocabulary failure in its purest form, and it adds one rule worth naming:
+**in a codebase that injects its dependencies, a grep for the dependency's NAME cannot answer "is this
+gated?" — the answer is at the call site, not in the module.** Read the function's parameters and
+follow them outward. `grep -n 'isNative' src/lib/metaPixel.ts` returns the answer in one line; I
+searched for the vendor instead of the concept.
+
+⚠️ **The cost was not zero even though nothing was broken.** The admin was told, twice, that an open
+privacy risk sat on their iOS submission and that a decision about ad measurement was theirs to make.
+Reporting a phantom risk spends the same trust as missing a real one.
+
+**So the App Privacy consequence is the opposite of what was reported:** no third-party advertising
+runs in the iOS app, nothing links activity to third-party data, and therefore **no App Tracking
+Transparency prompt and no `NSUserTrackingUsageDescription` are needed**. That is now written into
+the runbook (§6.1) where it will be read at filing time, instead of living in a session's memory.
+
+### Part 2 — `MOBILE_PUBLISHING.md` §5 was a trap, and it was aimed at the next session
+
+PR #3202 closed the Apple 3.1.1 blocker in code. The runbook that a session reads *before* touching
+mobile still described that work as an un-built plan, in the same paragraph I had quoted in the PR
+body as *"decided long ago and never built"* — and it gave two instructions that are now actively
+harmful:
+
+1. **"Detect the app via `Capacitor.isNativePlatform()` and hide the buy buttons."** Following that
+   literally removes the **working, revenue-earning Android top-up**. The shipped gate is on the
+   PLATFORM (`isApplePlatform`), because Android is a Play-billing problem with a Play-billing answer
+   and iOS is a *no rail exists yet* problem. Two different problems, one sentence conflating them.
+2. **"The app can say 'add credits on the web' and link out to the website's account page."** That is
+   **anti-steering, which Apple forbids** — a second, independent rejection reason. The runbook was
+   instructing a future session to write the exact copy the shipped notice deliberately omits, on an
+   account that has already taken one policy strike.
+
+§5 now describes what the code does, in a table, with the platform-vs-`isNative` distinction stated as
+the load-bearing fact and the anti-steering ban given its own subsection. §5.3 records what a real
+StoreKit v2 would need, so "hide it" is legible as a first move rather than a permanent answer.
+
+**Nothing in this change touches `src/`** — it is documentation plus the retraction above. The code
+shipped yesterday; this is the half that stops it being un-shipped by somebody reading a stale page.
+
+### Part 3 — the App Privacy sheet exists before it is needed (§6.1)
+
+The old checklist said *"declare what data the app collects (auth email, usage). Be accurate."* —
+which is advice, not an answer. §6.1 is now a row-per-category draft in which **every row names the
+code that decides it**, so the admin can re-verify rather than trust it, plus the two findings that
+surprise people: **Purchases — not collected** (the app cannot take a payment on iOS at all) and
+**Health & Fitness — not collected** (`medicalFeaturesHidden(isNativeApp())` hides Doctor AI,
+Pharmacist, First Aid and Maternity on every native shell).
+
+It is labelled a DRAFT, dated, and carries the instruction to re-grep before filing — because the
+2026-09-02 incident in `CLAUDE.md` is precisely a store declaration and a policy page drifting apart,
+and a confident sheet that goes stale is how that happens a second time.
 ## 2026-09-21 — AUTOPSY 56f0c645: a SENTENCE vouched for a control nobody captured, and a working app was told its search was missing
 
 **The report:** a Quick Notes build, free tier, 3.2 min, ₹9.38, `ok: true`, reviewer 90/100 "App looks
@@ -75717,3 +75795,104 @@ deps:server-gate all green; `vitest run` **27,869 passed, 1 skipped, 0 failed**.
 ⚠️ **The live consequence, stated plainly: the Android ₹1 test could not have passed** in the window
 between the merge and this PR — `/pay` does not exist on the deployed site, so the app still hits the
 `https://localhost` refusal. Nothing regressed; the fix simply never reached production.
+---
+
+## 2026-09-21 — 🎧 AUTOPSY: `RUNTIME_UNCHECKED` was the structural outcome of an ordinary build
+
+**Trigger.** Not a single report but a pattern across the two the admin sent: `RUNTIME_UNCHECKED` on
+**all five builds**, beside `IN_BUILD_GREEN`, `GREEN_GUARD_SAVE` and previews that had been opened in a
+real browser and seen rendering. Announced as the next task after #3205 merged, on the reasoning that
+this is the one check that would have caught the `useState` null crash the "Fix bugs" build (`53d43c18`)
+was paid ₹113 to rediscover an hour after the app shipped.
+
+### What was actually wrong
+
+`CONSOLE_LOG` is the only thing `getConsoleErrors` reads. Three lanes could fill it; all three were shut.
+
+| lane | why it could not answer |
+|---|---|
+| **A · the CDP daemon** | the ONLY writer of that file, and it starts solely when the MODEL calls the `browser_action` tool. An ordinary build never does. |
+| **B · the page checks** (`runtimeRecordFromPageChecks`, the documented *"second source of runtime truth"*, 2026-08-19) | needs `extractPageRoutes` to find a route that is not `/`. **MEASURED: 0 of 40 golden scaffolds yield one, and not one uses a router.** |
+| **C · `browseUrl`** | the navigation the PLATFORM makes on essentially every build. Launched a real browser, waited for paint, read the DOM — and attached **no listener of any kind**. |
+
+Both facts were **measured, not read**: a throwaway probe printed the generated `browseUrl` script
+(no `page.on('console')`, no `pageerror`, no write to the log) and ran the real `extractPageRoutes` over
+the real `GOLDEN_SCAFFOLDS` registry (0/40, including `saas-dashboard`, `crm`, `school-erp` — they switch
+none of which uses a router).
+
+🔴 **AND THE FIRST VERSION OF THAT MEASUREMENT WAS WORTHLESS — recorded because the lesson is this
+repo's own.** The probe read `s.files`, a key `GoldenScaffold` does not have, so every scaffold reached
+`extractPageRoutes` as `{}` and it **could not have returned anything except 0**. By the time I went
+back to re-check it a different way, the claim was already published in three documents and a commit
+message. The conclusion HELD on the re-measurement — real field `appTsx`, 40 non-empty sources, 0
+routes, 0 routers — but the original derivation proved nothing: *a derivation is only verified once it
+predicts something it could have got wrong* (the same sentence this file already records for the E2B
+rate). The number now lives in CI, with a control case proving `extractPageRoutes` really does find
+routes when they exist, instead of in a paragraph that can go stale.
+
+⚠️ One clause was also WRONG and is withdrawn: I wrote that the multi-screen scaffolds "switch screens
+on state". The no-router half is verified; the state half is not — my probe found zero matches for it,
+which means my heuristic was narrow, not that the mechanism was confirmed. What is measured is that
+they do not use a router; how they do navigate is unexamined and is not claimed.
+
+### The fix — lane C, because lane C is already paid for
+
+The browser launches regardless, so the four listeners cost nothing. They are now ONE definition
+(`CONSOLE_RECORDER_JS` + `attachConsoleJs`) interpolated into both the daemon and the new pure
+`browsePageScript`, never copied — a second copy is the class this repo has paid for four times
+(`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2).
+
+🔒 **A bug this fix would otherwise have CREATED, caught before writing it.** `getConsoleErrors` reports
+`captured:true` when the log FILE exists, and `provenFromTimeline` reads the resulting `RUNTIME_VERIFIED`
+as *"the app ran in a real browser"*. A browser that loaded a dead preview has a perfectly clean console,
+so an unconditional session marker would have let a **404 earn a render proof**. The marker is gated on
+`painted`; an ERROR is recorded either way, because a crash that prevents paint is the thing worth
+reporting.
+
+⚠️ **It spends money, and that is the point.** A build carrying a real runtime error now reaches the
+auto-fix loop and spends a repair pass it previously could not; on Weak, NavBharatAI pays. Bounded at
+one attempt and wrapped in `verifyAfterFix`. It also wakes `judgeRuntimeRepair`'s `afterCount`, which
+has been `null` on essentially every build since it shipped — the guard against a repair that fixes one
+error and introduces two could never fire, and now can.
+
+🧬 **The 50/50 half — a browser-lane census.** Six scripts in that one file launch or attach to a
+browser, written eighteen months apart, and nothing knew how many there were; the recorder landing on
+exactly one of them was not an oversight anybody could have caught. The census names each lane, whether
+it records and why, and fails when a seventh appears. It deliberately does **not** demand that every
+lane record: the journey check drives hostile input and the page check already collects its own errors,
+so forcing them would put pre-repair errors inside the verdict's 3-minute window and report a fixed bug
+as surviving — trading this problem for a worse one.
+
+🔒 **Honesty half (rule 5).** `AutoFix.ts`'s docblock claimed the page check *"had loaded every page of
+the same app"*. For an app built from our own templates it loads none. Corrected in place with the
+measurement, so the next session is not sent to the wrong lane.
+
+### Tests
+
+`tests/theConsoleListenerLivedOnOneLaneOfThree.test.ts` — 19 cases. The generated scripts are **parsed
+with `node --check`**, because this function has shipped broken twice (a shell-quoting bug that handed
+`node` a fragment; a path bug that hid Playwright) and **neither failed loudly** — the caller falls back
+to curl on any error. Reversion-proven four ways: strip the recorder (7 fail), attach the listeners
+after `goto` (1), make the marker unconditional (1), paste a second copy of the listeners (2).
+
+⚠️ Two assertions in the first draft were wrong and are recorded because the lesson generalises: they
+matched the WORDS `console.log` and `truncate`, and both hit prose — the log file is itself *named*
+`console.log`, and "truncate" appears in the comment explaining why the write appends. A guard that
+trips on its own documentation is a guard someone deletes. They match syntax now.
+
+### OPEN ROOT CAUSES (rule 6 — recorded, not patched)
+
+- **Lane B cannot see a state-routed SPA.** `extractPageRoutes` finds only `<Route path=…>` and Next
+  `app/x/page.tsx`. Every single-screen app, and our own multi-screen scaffolds, yield nothing. Deriving
+  "pages" for those is a separate problem with its own evidence requirement and is **not** guessed at
+  here. Lane C now covers them, which is why this is an upgrade rather than a breakage.
+- **What actually removed the mount node in `e4d27bde`** — still open from yesterday's autopsy; measured
+  *not* to be the app-defaults pass.
+- ✅ **CLOSED in the same change — `claimAudit` checked only `!consoleCaptured`.** A summary claiming a
+  clean console while the captured console showed errors was not flagged. It had never been reachable
+  (an ordinary build captured nothing), and making the capture work is precisely what makes it
+  reachable — so `console-clean-but-errors` ships with it instead of waiting for a report to prove it.
+  It reads the FINAL count after the repair budget, because a mid-build number would accuse a summary
+  of hiding an error the build had already fixed; an omitted count accuses nobody (the discipline
+  `typecheckRan` already states); and the two rules are chained `else if`, so one claim can never
+  produce two contradictions in the user's own correction. Reversion-proven twice.

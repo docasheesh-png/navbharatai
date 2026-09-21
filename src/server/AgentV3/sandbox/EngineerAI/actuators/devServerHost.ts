@@ -150,6 +150,84 @@ export function canPrefixEnv(command: string, isServer: (segment: string) => boo
   return isServer(first);                          // only if the server is what the prefix attaches to
 }
 
+/**
+ * 🔴 A CHAIN IS NOT A REFUSAL (autopsy `bff0bf23`, 2026-09-21; the admin's own question: *"preview
+ * port 5000 par tha, navbharatai ne 3000 par chalaya is liye nahi chala"*).
+ *
+ * `canPrefixEnv` above is CORRECT and INCOMPLETE. It refuses `&&`/`;` because `PORT=3000 cd x && npm
+ * run dev` gives the variable to `cd` — real shell semantics, and a wrong prefix would be worse than
+ * none. But refusing leaves the command with NO port at all, and for a plain Node server that is not
+ * a neutral outcome: it falls back to its own hardcoded default.
+ *
+ * Measured on the user's own repository (`aashishcpmt093-ui/mitrify`, `server/index.ts`):
+ *
+ *     const port = parseInt(process.env.PORT || "5000", 10);
+ *
+ * and its dev script is `NODE_ENV=development tsx server/index.ts` — which takes no `--port` flag and
+ * could not honour one. So when the model ran `cd workspace/mitrify && npm run dev`, the prefix was
+ * (rightly) withheld, the app bound **5000**, that port was already held, and the health check spent
+ * **94 seconds** over two failed restarts before the app came up where the preview was watching.
+ * `DevServerRecovery.ts`'s `conflictPort` field already records the same class from an earlier mitrify
+ * report — *"an Express server ignoring the `--port` flag we appended and taking
+ * `process.env.PORT || 5000`"*.
+ *
+ * So the prefix is placed on the segment that actually starts the server: `cd x && PORT=3000 npm run
+ * dev`. Returns null whenever it cannot be done safely, and the caller then keeps today's behaviour
+ * exactly — this helper can only ever ADD a correct prefix, never move or remove one.
+ *
+ * PURE.
+ */
+export function prefixEnvOnChainedServer(
+  command: string,
+  prefix: string,
+): string | null {
+  if (!command || !prefix) return null;
+  if (!/&&|;/.test(command)) return null;          // not a chain — `canPrefixEnv` owns this case
+  if (/\bPORT=/.test(command) && /^PORT=/.test(prefix)) return null; // already pinned somewhere
+  if (hasSeparatorInsideQuotes(command)) return null;                 // cannot be split by text
+  const parts = command.split(/(\s*(?:&&|;)\s*)/);                   // separators kept at odd indices
+  let target = -1;
+  for (let i = 0; i < parts.length; i += 2) {
+    if (startsADevServer(parts[i] ?? '')) target = i;                 // the LAST one wins: `npm
+  }                                                                    // install && npm run dev`
+  if (target === -1) return null;
+  parts[target] = `${prefix} ${parts[target]}`;
+  return parts.join('');
+}
+
+/**
+ * Does this ONE chain segment start the dev server? Deliberately narrower than the loose
+ * `/(?:npm|pnpm|yarn|bun)\b/` the un-chained path passes to `canPrefixEnv`: in a chain the wrong
+ * choice is reachable, and `npm install && npm run dev` must put the port on the SERVER, never on the
+ * install. PURE.
+ */
+export function startsADevServer(segment: string): boolean {
+  const seg = (segment || '').trim();
+  if (!seg) return false;
+  if (isNodeServerCommand(seg)) return true;
+  // A package-manager RUN form, excluding the ones that install or test rather than serve.
+  return /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?!install\b|ci\b|add\b|audit\b|test\b|i\b|exec\b)[a-zA-Z0-9:_-]+/.test(seg);
+}
+
+/**
+ * Is an `&&` or `;` sitting INSIDE a quoted string (`node -e 'a && b'`)? Splitting such a command on
+ * text would cut a literal in half, so the helper above stands down instead of guessing. PURE.
+ */
+export function hasSeparatorInsideQuotes(command: string): boolean {
+  let quote: string | null = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      // A separator INSIDE a quoted literal is the case this exists for.
+      if (ch === ';' || (ch === '&' && command[i + 1] === '&')) return true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;       // a separator out in the open is fine
+  }
+  return false;
+}
+
 export function isNodeServerCommand(command: string): boolean {
   if (!command) return false;
   // A real bundler/dev-CLI invocation is not a bare node server — let the framework branches own it.
@@ -224,9 +302,13 @@ export function ensureHostBinding(command: string, framework?: DevFramework, res
     // A PREFIX is safe on a pipeline where an appended flag is not — `HOST=0.0.0.0 npm run dev |
     // head` gives the host to the server, not to `head`. See `canPrefixEnv`. Without this, a piped
     // Node server binds localhost only and the public preview is blank.
-    return canPrefixEnv(command, (seg) => isNodeServerCommand(seg) || /(?:npm|pnpm|yarn|bun)\b/.test(seg))
-      ? `HOST=0.0.0.0 ${command}`
-      : command;
+    if (canPrefixEnv(command, (seg) => isNodeServerCommand(seg) || /(?:npm|pnpm|yarn|bun)\b/.test(seg))) {
+      return `HOST=0.0.0.0 ${command}`;
+    }
+    // SIBLING OF THE PORT CASE (rule 3). A chained command got no HOST either, so a server that
+    // reads HOST from the env (CRA, and any plain Node app that does) bound localhost and was
+    // unreachable through the preview URL — the same refusal, the same silent cost.
+    return prefixEnvOnChainedServer(command, 'HOST=0.0.0.0') ?? command;
   }
   // Beyond this point every branch APPENDS A FLAG, which a pipeline or chain would land on the wrong
   // program (report 7773b4b0: `npm run dev | head` got `--host` appended onto `head`).
@@ -697,9 +779,13 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
     // 2>&1 | head -60` gives the port to the server, not to `head`, and skipping it is precisely
     // what left the app on 5000 while the health-check watched 5173.
     if (/\bPORT=/.test(command)) return command;
-    return canPrefixEnv(command, (seg) => isNodeServerCommand(seg) || /(?:npm|pnpm|yarn|bun)\b/.test(seg))
-      ? `PORT=${port} ${command}`
-      : command;
+    if (canPrefixEnv(command, (seg) => isNodeServerCommand(seg) || /(?:npm|pnpm|yarn|bun)\b/.test(seg))) {
+      return `PORT=${port} ${command}`;
+    }
+    // A CHAIN IS NOT A REFUSAL — see prefixEnvOnChainedServer. `cd x && npm run dev` used to come
+    // back unprefixed, so a plain Node server took its own hardcoded default (5000 on the app in
+    // autopsy bff0bf23) instead of the port the preview was watching. Null ⇒ today's behaviour.
+    return prefixEnvOnChainedServer(command, `PORT=${port}`) ?? command;
   }
   // Beyond this point every branch APPENDS A FLAG, which a pipeline or chain would land on the wrong
   // program (report 7773b4b0: `npm run dev | head` got `--port 3000 --strictPort` put onto `head`).

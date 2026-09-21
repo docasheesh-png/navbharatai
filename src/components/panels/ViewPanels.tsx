@@ -128,6 +128,8 @@ export interface ViewPanelsProps {
   activeIntent: string;
   handleSendForTab: (tabId: ViewType, overrideMessage?: string) => void;
   toggleTab: (view: ViewType) => void;
+  /** Open the ONE mode picker (admin 2026-09-21); undefined on a phone, where the bottom bar has it. */
+  onOpenModePicker?: (() => void) | undefined;
   updatePreview: (files: any) => void;
   addLog: (msg: string, level: string) => void;
   addToast: (msg: string, type: string) => void;
@@ -191,7 +193,7 @@ export function ViewPanels({
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
-  handleSendForTab, toggleTab, updatePreview, addLog, addToast,
+  handleSendForTab, toggleTab, onOpenModePicker, updatePreview, addLog, addToast,
   handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
   pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
   pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
@@ -641,7 +643,7 @@ export function ViewPanels({
       {/* Phase 9 — AI Image Generator */}
       {activeView === 'imagegen' && (
         <div className="flex-1 h-full overflow-hidden">
-          <AIImageGenerator onImageGenerated={(url: string, prompt: string) => {
+          <AIImageGenerator onOpenModePicker={onOpenModePicker} onImageGenerated={(url: string, prompt: string) => {
             setGeneratedCode(generatedCode + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
           }} />
         </div>

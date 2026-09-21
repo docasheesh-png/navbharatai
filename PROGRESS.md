@@ -75460,6 +75460,97 @@ all.
 all now that it is, in practice, always floored to cost. It is a pricing question (the user pays
 cost rather than half of cost — genuinely more than yesterday), the admin chose this shape when
 shown the trade, and re-opening it is theirs, not a session's.
+## 2026-09-21 — APP MART OPENED AS A WINDOW WITH NO WINDOW (the third time this exact bug shipped)
+
+**Admin: _"app mart ko bhi multi window systm me add karo, slidebar menu me aur header me multi
+tab/window (x=close) me bhi add karo"_.**
+
+🔴 **WHAT WAS WRONG, AND IT WAS ONE MISSING LINE.** `toggleTab('appstore')` pushed App Mart into
+`openTabs` exactly like every other destination. `TopNav` then did:
+
+```
+const item = menuItems.find(m => m.id === tabId);
+if (!item) return null;
+```
+
+App Mart had no `menuItems` entry, so **the tab existed in state, rendered no chip, and had no ✕.**
+Getting out of it meant navigating somewhere else and leaving it open behind you. Nothing failed,
+nothing logged, and no test could see it.
+
+⚠️ **THE SAME BUG, THE SAME FILE, THE SAME LINE OF `TopNav`, FOR THE THIRD TIME.** `App.tsx`'s own
+`other_ai` entry records it verbatim for Other AI (2026-07-23: *"without a menuItems entry, TopNav's
+`if (!item) return null` silently dropped the tab, so opening Other AI showed no header window"*), and
+`SidebarNav`'s `SIDEBAR_HIDDEN` block warns about that same `return null` a third time. Each occurrence
+was found by a **user**, never by CI.
+
+**The class, named so it is recognised: `menuItems` is the REGISTRY FOR A WINDOW.** An id that opens a
+tab without being in it is a window nobody can see or shut.
+
+### The fix — one entry, both surfaces, by construction
+
+```
+{ id: 'appstore', label: 'App Mart', icon: Store },
+```
+
+That single line delivers both things the admin asked for, rather than two edits that could drift:
+`TopNav` renders the header chip **and its ✕** (the close button is unconditional per tab), and
+`SidebarNav`'s `visibleItems` renders the menu row. App Mart was in **neither** `SIDEBAR_HIDDEN` nor
+`DRAWER_HIDDEN` and had no door in the rail, the drawer list or the System Matrix — so this adds
+exactly one door per half and no duplicate (the thing `oneDoorPerThingInTheSidebar` exists to protect).
+`Store` is the icon its own Home tile already carries, for the consistency reason the `other_ai` entry
+states.
+
+**Verified, not assumed:** the App Mart panel is an ordinary in-layout `flex-1 h-full overflow-hidden`
+block in `ViewPanels` — not a full-screen overlay — so the header stays above it and the new ✕ is
+actually reachable. `menuItems`' other consumers were traced before the edit: the mobile footer uses
+targeted `.find` calls by id (unaffected), and `SettingsPanel` destructures the prop and never uses it,
+so no module-toggle surface is generated from this list.
+
+### 🔒 THE 50/50 HALF — a ratchet, so a FOURTH occurrence cannot ship
+
+Fixing App Mart is the first 50%. The other 50% is that nothing anywhere connected *"an id `toggleTab`
+is called with"* to *"an id `menuItems` knows about"*. `tests/appMartIsAWindowLikeEveryOtherWindow.test.ts`
+now does: every `toggleTab('x')` in the **whole client tree** must be registered, or be a professional
+child, or be on a listed-debt allowlist that may only shrink.
+
+⚠️ **A tab legitimately has no chip when it is somebody's CHILD** — a professional AI chat is closed by
+closing the surface it was opened through (`tabParenting.ts`). The 75 professional ids are exempt **by
+derivation from `professionalConfigs.ts`**, never by a hand-kept copy, so a new professional is covered
+without anybody remembering this test exists.
+
+🔎 **FOUR SIBLINGS FOUND, LISTED RATHER THAN FIXED, and the reason is not laziness.** Computed rather
+than guessed — a first pass by eye said five and was wrong (`repo_analyst` turned out to be a
+professional id):
+
+| id | opened from |
+|---|---|
+| `about` | sidebar drawer → System Matrix |
+| `apk` | Settings → tool directory (parented to `settings`) |
+| `diff` | ViewPanels → Diff button |
+| `imagegen` | ViewPanels → "Make icon" |
+
+Registering them would ALSO add four rows to a sidebar the admin has repeatedly and deliberately
+trimmed (*"inko need nahi hai"*, *"sidebar menu me se bhi isko hata do"*). The correct treatment is to
+register them **and** add them to `SIDEBAR_HIDDEN` — the exact pattern `git` / `preview` / `files` /
+`history` / `professionals` already use — which changes header UI that was not asked for. So it is
+raised to the admin as a one-line follow-up instead of shipped unilaterally. **The ratchet blocks a
+fifth**, and a second test asserts every listed id is still genuinely unregistered, so the list cannot
+rot into a permanent exemption nobody re-checks.
+
+⚠️ **The first draft of the ratchet scanned four files and missed `apk`** (SettingsPanel opens it) —
+safeguard #6's own lesson, caught by the test failing rather than by review. The corpus is the tree.
+
+**Files:** `src/App.tsx` (the entry + the `Store` import), `src/server/AppContext/AppKnowledgeBase.ts`
+(the navigation path now names the sidebar row, the header tab and the ✕ — the sync rule, and the only
+surface that can answer *"app mart band kaise karu"*, which until now had no honest answer).
+**Test-locked and reversion-proven four ways** (14 cases): remove the entry → 4 fail; introduce a brand
+new orphan tab → the ratchet names it with the remedy; hide it from the sidebar → the two-hide-set
+assertion fails; change the icon → the Home-tile consistency assertion fails.
+
+⚠️ **Shipped on its own branch (`claude/app-mart-multi-window`) off `main`, NOT on the designated
+branch**, because that branch carries PR #3225 (the billing floor) open and green awaiting the admin's
+merge word. Adding unrelated work to it would have grown that PR and invalidated the CI result already
+reported.
 
 ---
 
@@ -76551,3 +76642,234 @@ desk and these two belong in one decision rather than two. A session meeting any
 the key without waiting for the Routine.
 
 Documentation only — no code path, no test and no build behaviour is touched by this change.
+
+## 2026-09-21 — 📊 THIRTEEN REPORTS WERE BEING WRITTEN AND SHOWN TO NOBODY, and a red mark on what is redundant
+
+**Branch `claude/vigilant-feynman-9aobjz`. PR #3221 (merged) and PR #3223.** The admin asked two
+things: *"13 endpoints par asli diagnostic data ban raha hai jo kisi screen par dikhta hi nahi. pahle
+yahi banao!"* and *"admin penal me bahut se card aise hai, jinki koi need nahi hai. identify karo! aur
+un par temporary red mark laga do!"*
+
+### The audit that preceded both (9 agents, 6 readers + 3 rankers)
+
+| | Number |
+|---|---|
+| Admin-panel cards | 84 |
+| Cards with their own Copy/Download | **5** |
+| Report-shaped GET endpoints | 65 |
+| Endpoints with **no client at all** | **13** |
+| Download endpoints in the whole server | **1** |
+
+### Part one — the thirteen, now on a Diagnostics tab
+
+`builder-scorecard` · `agentv3/losses` · `agentv3/usage-report` · `metrics/history` ·
+`assistant-spend` · `provider-status` · `release-gate` · `feature-flags` · `key-version` · `events` ·
+`deployments` · `takedowns` · `announcements`.
+
+🔑 **The one that matters most is the builder scorecard, and its own module says why.**
+`builderMetrics.ts` opens with *"We ship fix after fix without being able to say whether the engine is
+getting better."* It carries `healPressure` — how often the builder had to repair its OWN output,
+which is the fifth absolute rule's 50/50 law as a number — and that was computed on every call to a
+route **no file fetched**.
+
+🔒 **NULL IS NOT ZERO, and the renderer is where that lie would have re-entered.** Every module behind
+these numbers already states the rule; a card printing `0%` for an unmeasured rate would have undone
+it at the last step, looking exactly like a real result. `num`/`pct`/`mins`/`usd` return an em dash,
+every rate carries its sample size, and a test asserts no `?? 0` fallback exists.
+
+⚠️ **A shape the panel does not understand is still fully readable** — each card renders what it can
+and its Copy carries the raw response, so a route whose fields change degrades rather than lying.
+
+### Part two — the red marks, and the bar for one is PROOF
+
+Five cards marked on something checkable: DUPLICATE (same screen, same data), SUPERSEDED, or RESETS
+ON DEPLOY. A card that merely looks busy is not marked.
+
+🔒 **A deliberate duplicate is not a duplicate.** "Published Apps" repeats the Publish Capacity card
+below it and is NOT marked, because its own comment records why it was added (*the card "sits under
+four rows of tiles, and the admin did not know it existed"*) and states both read one source. Marking
+it from a count of cards would be agreeing against a written decision. A test keeps it off the list.
+
+### Part three — "kam information wali ko delete karo", and TWO OF THREE MARKS WERE WRONG
+
+The admin's rule is not "delete what was marked". Each pair was re-read side by side first, and that
+is what caught both errors:
+
+- **Platform Health Score — deleted, mark was right.** The live twin adds a subtitle naming what the
+  score is built from and an honest `Unavailable — <reason>` state; the deleted card rendered nothing
+  on failure. Its state, fetch and Monitor-effect call went with it.
+  ⚠️ `/api/admin/health-score` now has no client and that is **not** the class the Diagnostics tab was
+  built for — the score is still on screen, from `/api/admin/monitor`, on the same inputs.
+- **AI Insights — the mark was on the WRONG HALF, so the OTHER card went.** The live "Insights" panel
+  showed six findings; the marked card shows the full list **plus the ask-box that exists nowhere
+  else**. Deleting by the mark would have destroyed the ask-box.
+- **Provider Token Burn — the identification itself was FALSE, so nothing was deleted.** It reads
+  `analytics.providerWise` (TOKENS) while "API Usage Ranking" reads `analytics.providerRanking`
+  (REQUESTS + latency) — two fields, two questions. The real twin is "Engine cost split"; but this
+  card's footer (total cost, the `(at least)` label, the Cashfree gateway figure) is duplicated
+  nowhere. Entry corrected in place, card kept for the admin.
+
+🔒 **THE GUARD CAUGHT THE ONE MISTAKE MADE WHILE DOING THIS.** After the two register entries were
+removed, `tests/theReportsThatWereNeverShown.test.ts` failed on *"every mark on screen is really
+registered"* — the AI Insights card still carried a badge whose reason had gone. A dangling red mark
+on a card that is staying is exactly what makes the next review untrustworthy, and neither `tsc` nor
+any behavioural test can see it.
+
+### The export half
+
+`reportExport.ts` (pure) + `ReportExportButtons.tsx`. Every export travels in an envelope naming the
+report, the time, the window and the endpoint — the three facts every autopsy in this file establishes
+first, now travelling WITH the data. An empty card REFUSES rather than exporting `{"data":null}`; a
+real zero still exports.
+
+🔴 **DOWNLOAD IS HIDDEN INSIDE THE ANDROID APP, verified not assumed.** `MainActivity.java` registers
+three plugins and installs no `DownloadListener`, and Capacitor's WebView implements neither that nor
+the `download` attribute — so a blob click returns silently and nothing reaches storage. A button that
+does nothing is the state the second absolute rule forbids, so the native shell shows Copy alone,
+which genuinely works there. The admin reads this panel on a phone, so that is the common case.
+
+### Still open
+
+- **The 40-cap deletes the evidence an autopsy needs.** `trimChannel` keeps the NEWEST 40 `llmCalls`
+  and `commands` (`slice(len - cap)`), so on the 312-call build this file already records, calls
+  1–272 are gone — and first-turn starvation, plan-call timeouts and rung-1 ladder falls all live in
+  the EARLY calls. ⚠️ The fix is **not** "keep the head": `reportTruncation.ts` states a real reason
+  for keeping the tail (*"the end of a build is where its failure lives"*), and trading one loss for
+  another is what the 2026-09-13 rule forbids. The fix is **first N + last N inside the same cap**,
+  with the truncation fact declaring that the window has a GAP. Verified safe: the only two readers of
+  the stored ledger are aggregates (`modelPerformance`, `realCostFromCalls`), neither assumes
+  contiguity, and the cost reader already treats a capped list as a lower bound.
+- Marks the admin has not yet ruled on: **Since this server started** (resets on deploy) and **Recent
+  Token Purchases** (superseded by the Revenue purchases table).
+
+Verification both times: typecheck · server typecheck · unused imports · native guard · **28,125
+tests** · build · bundle · boot · deps. `AppKnowledgeBase.ts` carries the Diagnostics tab, per the
+sync rule.
+
+---
+
+## 2026-09-21 — 🔴 A COUNT IS NOT A WINDOW: two caps pulled opposite ways and kept a window from the MIDDLE
+
+Acting on the open root cause recorded above (*"the 40-cap deletes the evidence an autopsy needs"*).
+Reading the code to implement it found the problem was **worse and differently shaped than that note
+said**, so the note is superseded here rather than simply closed.
+
+**What the previous entry got right, and the one thing it got wrong.** It said storage keeps the last
+40 calls, so "calls 1–272 are gone". The first half is true. The second assumed the stored 40 were
+the build's LAST 40. They were not. `BuildDiagnostics` — the recorder, one layer up — caps the same
+channel at 300 and was written `if (this.llmCalls.length < MAX_LLM_CALLS) push(...)`: past the cap it
+**stopped recording entirely**, keeping the build's FIRST 300. The store then kept the LAST 40 *of
+those*, on its own written reasoning that *"the end of a build is where its failure lives"*.
+
+| layer | cap | which end it kept |
+|---|---|---|
+| `BuildDiagnostics` (recorder) | 300 calls / 300 commands / 200 errors / 2000 issues | the **FIRST** |
+| `DiagnosticsStore` (storage) | 40 / 40 / 50 / 500 | the **LAST** |
+
+On a 312-call build the stored window is calls **261–300**. Not the head — the first-turn starvation,
+the plan-call timeout and the rung-1 ladder fall are gone. **Not the tail either** — the twelve calls
+the build actually died on were never written down at all, so the store was preserving an ending that
+did not exist in its input. And `{ kept: 40, total: 312 }`, the truncation fact shipped the day
+before, is perfectly true and perfectly unusable: it states how many survived and nothing about
+*which*, while the store's docblock told the reader they were the last forty.
+
+🔑 **THE CLASS, named so it is recognised again: two caps that disagree about which end matters
+compose into a window neither one intended, and a layer downstream believes a promise the layer
+upstream already broke.** This is the fourth time this repo has paid for a cap or a guard that was
+right where it was written and wrong in composition (`safeRelPath` ×4, the zombie-write lane, the HTML
+boot guard, `tagsOnLine` ×2).
+
+**The fix is one rule at both layers, and it costs zero bytes.** `boundedWindow(length, cap)` in
+`reportTruncation.ts`: keep the first `floor(cap/2)` and the last `cap - floor(cap/2)`. The recorder's
+four capped channels now `pushBounded(...)` (evicting the oldest MIDDLE entry, so the array stays
+chronological and the opening is preserved) instead of refusing everything past the cap; the store's
+`trimChannel` keeps both ends within the same cap. Because it is the SAME rule at both layers they
+compose instead of fighting — the store's first 20 of the recorder's first 150 really are the build's
+first 20. `ChannelTruncation` gains `head`, so the record *states* the window, and `truncationNote`
+now reads *"40 of 312 model calls (the first 20 and the last 20 — 272 from the middle are gone)"*.
+
+⚠️ **IT IS A REAL TRADE AND IS SAID SO IN THE CODE.** A 40-call tail gave 40 consecutive calls before
+the failure; 20 + 20 gives 20. Worth paying because the head was being lost with **certainty** on
+every build over the cap while the tail still keeps 20 consecutive calls of the ending — and because
+the recorder half means long builds now keep a real ending for the first time. Raising the cap instead
+was **rejected**: the caps exist to stay clear of Firestore's 1 MB limit without a size-measuring
+loop, and a report that breaches it falls to `dropHeavyChannelsForStorage`, which destroys the channel
+outright. A byte-neutral change cannot make that worse.
+
+**Honesty half (rule 5).** Three sentences described the retired behaviour and were corrected with
+it: the store's *"keeping the most recent, most useful detail"*, `STORED_LLM_CALLS_MAX`'s *"the newest
+ones"*, and the timeline's own `TIMELINE_TRUNCATED` line, which said *"earlier detail retained, later
+activity omitted"* — true of the old cap, a lie on a timeline built by the new one.
+
+**Test-locked and reversion-proven both ways** in `tests/aCountIsNotAWindow.test.ts` (30 cases). The
+headline cases drive the **real** recorder and the **real** store end to end on a 312-call build and
+assert that call #1 and call #312 both survive — deliberately not two unit halves that could each pass
+while the pair stayed broken, which is exactly how this survived a fix to the same module one day
+earlier. Reverting the recorder to its prefix cap fails 4 cases; reverting the store to tail-only
+fails 5. Source-level guards catch the return of either shape, because `tsc` and `vitest` cannot see
+that a bounded push is written as a prefix cap — the old code compiled and passed every test.
+
+⚠️ One fixture in `DiagnosticsStore.test.ts` moved: it had put the entry it expected to be dropped at
+index 0, because the head was what used to fall out. The invariant it tests (problems is recomputed
+from the trimmed issues) is unchanged; the entry now sits in the middle, which is where an entry has
+to be to fall out of a both-ends window.
+
+Verification: typecheck · server typecheck · unused imports · native guard · **28,163 tests** · build
+· bundle · boot · deps. No user-facing surface changed, so no `AppKnowledgeBase.ts` entry is due.
+## 2026-09-21 — 🧭 THE ACTION NAVIGATOR: what is left to do, and where it lives
+
+Admin, verbatim: *"mujhe ek nevigator chahiye … jaise user ne app banaya -> preview par green dot 🟢 ->
+user ne apna app/game test kiya, ab 3 dot more par red dot … publish ho gaya = publish on navbharatai
+wala red dot gayab … aise hi aap pura flow analysis karo"*, and — asked directly — *"is system ko sirf
+navbharatai pro me hi nahi lagana, age chal kar aur bhi option me lagana hai"*.
+
+**What it is called, since that was the first question.** There is no single industry name: the mark is
+a **dot badge**, the way it climbs a menu is **badge propagation** (iPhone Settings does exactly this),
+the brain deciding what is pending is a **Next Best Action** engine, and the closest everyday analogy
+is a game's **quest marker**. Built here as the **Action Navigator**.
+
+🔵🔴 **TWO TONES, AND THE SPLIT IS THE DESIGN (admin approved: *"do rang theek hai"*).** The ask said
+"red dot" throughout. Red on Publish would mean *publishing is broken* — it is not. Red on a failed
+build means *something IS broken* — it is. One colour for both teaches people within a week that red
+means nothing, which is the lesson `monitorAlerts.ts` already paid for (*"yeh alert to user ko bhaga
+dega"*). So blue = an invitation, red = a fault. The mechanic is unchanged; only the harmless half's
+colour is.
+
+🔴 **AND IT RESOLVES A CONTRADICTION ALREADY IN THE CODE, rather than overruling it.**
+`publishFreshness.ts` carries the admin's OWN 2026-08-21 ask (*"publish (\*) → connect your own domain
+(\*) → publish (green)(\*)"*) and deliberately refuses to fire on `never_published`, in writing: *"an
+app the user has not chosen to publish is not a problem to nag about, and a dot that never clears is a
+dot people stop seeing"*. Today's ask is precisely that case. Both are right, and the colour split is
+why: `changed` stays RED (real visitors are seeing the wrong thing), `never_published` becomes BLUE and
+— the other half of that old objection — **only after the preview has actually been watched**, so it is
+earned rather than permanent. The old module's verdict is untouched; `theNavigatorPointsAtWhatIsLeft`
+asserts the two agree for all four freshness values, so the sheet and the menu cannot drift apart.
+
+**FOUR LAWS, each a real bug avoided** (`src/lib/actionNavigator.ts`, pure, no React, no I/O):
+1. **A dot clears on the FACT, never on the click.** There is deliberately no "opened" field to pass.
+   A dot that cleared on a tap would report success it did not measure.
+2. **A parent's dot is COUNTED, never stored** (`badgeAt` walks the path). No "More has a dot" flag
+   exists, so none can be left switched on.
+3. **A fact we do not know produces NO dot.** Every optional field means "we did not look", not "no" —
+   `publishFreshness`'s own rule (*"a dot is a claim and we do not make claims we did not measure"*).
+4. **An opportunity can be dismissed; an attention cannot** — enforced inside `pendingActions`, so no
+   caller can pass a dismissal that silences a fault. **Reversion-proven**: delete that one clause and
+   exactly one named test fails.
+
+**Wired today, and only what can honestly light:** the More button's roll-up (`v3FooterApi.moreBadge`,
+a TONE not a boolean, so the colour decision stays in `ActionDot` alone), the More sheet's Publish and
+Report rows, the desktop Publish button, and the Publish sheet's own dot. `ActionDot` uses
+`text-danger`/`text-info` with `bg-current` — the old dot's `bg-red-500` is invisible on Light and is
+counted by the colour ratchet, whose baseline for a new file is zero.
+
+⚠️ **NOT wired, and stated rather than faked: App Mart, APK and required-keys.** The rules exist and
+are tested; the panel holds no signal for `appMartPublished`, `apkBuilt` or `missingRequiredKeys`, so
+under law 3 those dots never light. That is the design working, not an omission — the day a real
+signal exists, it is one field, with no change to any surface. **Dotting "Keys & Secrets" whenever
+keys are merely absent was considered and rejected**: it would nag every app that needs none.
+
+📏 **The trail starts at 20 seconds of real attention** (`usePreviewDwell`) — accumulated only while
+the preview is on screen AND the tab is visible, never while backgrounded, and it only ever goes up.
+*"Thodi der chala le"* measured as attention rather than wall clock.
+
+Full gate green on the final state.

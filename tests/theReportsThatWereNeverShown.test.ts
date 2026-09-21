@@ -136,3 +136,89 @@ describe('the cards proposed for deletion', () => {
     expect(mark).not.toMatch(/\breturn null\b[\s\S]{0,40}entry\b/);
   });
 });
+
+describe('🔴 A FIELD NAME THE SERVER DOES NOT SEND IS A CARD THAT SHOWS NOTHING', () => {
+  // The first version of this panel guessed three shapes and got two of them wrong: the usage report
+  // returns `perProvider` / `baselineCostUsd` (not `providers` / `realCostUsd`) and assistant spend
+  // returns `days` + `today.freeShare` (not `totalInr` / `freeShare` / `calls`). Both cards rendered
+  // a full frame with every value an em dash — built, shipped, and showing nothing, which is exactly
+  // the state the second absolute rule forbids. `tsc` cannot catch it: the payloads are `any`.
+  //
+  // So each field the panel reads is asserted against the module that DECLARES it. A rename on the
+  // server now fails here instead of silently emptying a card nobody is watching.
+  /**
+   * The panel WITHOUT its comments. The header of each fixed card deliberately NAMES the wrong field
+   * it used to read, so a raw scan matches that explanation and asserts the opposite of what it means
+   * — this suite's own first draft did exactly that, twice.
+   */
+  const PANEL_CODE = PANEL
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const TELEMETRY = read('src/server/AgentV3/AgentV3CostTelemetry.ts');
+  const SPEND = read('src/server/lib/assistantSpendRollup.ts');
+  const ROUTER = read('src/server/AI/Router/AIRouter.ts');
+
+  it('the usage report reads the fields UsageReport really declares', () => {
+    for (const field of ['perProvider', 'totalBilledUsd', 'totalBaselineCostUsd', 'marginUsd', 'lossBuilds']) {
+      expect(TELEMETRY, `UsageReport no longer declares ${field}`).toContain(`${field}`);
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+
+  it('its per-provider rows read the fields UsageReportRow really declares', () => {
+    for (const field of ['inputTokens', 'outputTokens', 'baselineCostUsd']) {
+      expect(TELEMETRY).toContain(field);
+      expect(PANEL_CODE).toContain(field);
+    }
+  });
+
+  it('it does NOT read the names the first version guessed', () => {
+    expect(PANEL_CODE).not.toContain('realCostUsd');
+    // `d?.rows` is NOT asserted against: the takedowns card legitimately reads `rows`, which is what
+    // that route really returns. Forbidding a field name globally because one card once misused it
+    // would ban a correct reading elsewhere.
+    expect(PANEL_CODE).not.toMatch(/Array\.isArray\(d\?\.providers\)/);
+  });
+
+  it('assistant spend reads the fields the rollup really declares', () => {
+    for (const field of ['freeTurns', 'unmeasuredTurns', 'realUsd', 'freeShare']) {
+      expect(SPEND, `the rollup no longer declares ${field}`).toContain(field);
+    }
+    for (const field of ['unmeasuredTurns', 'realUsd', 'freeShare', 'days']) {
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+
+  it('assistant spend does NOT read the names the first version guessed', () => {
+    expect(PANEL_CODE).not.toContain('totalInr');
+    expect(PANEL_CODE).not.toMatch(/d\?\.calls/);
+  });
+
+  // 🔎 SIBLING SWEEP (rule 3). Two cards were found reading names the server never sends, so every
+  // OTHER card's fields were checked the same way rather than assumed. Eleven were already correct.
+  // The two whose shapes are least obvious are locked here; the rest read a single top-level key
+  // straight off the route (`history`, `events`, `deployments`, `rows`) and are covered by the
+  // endpoint assertions above.
+  it('the release gate reads the fields ReleaseGateConfig really declares', () => {
+    const GATE = read('src/server/lib/ReleaseGate.ts');
+    for (const field of ['frozen', 'freezeReason', 'approvalRequired']) {
+      expect(GATE, `ReleaseGateConfig no longer declares ${field}`).toContain(field);
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+
+  it('the feature-flag card reads the fields the flag config really declares', () => {
+    const FLAGS = read('src/server/FeatureFlagManager.ts');
+    for (const field of ['flags', 'rollout', 'overrides']) {
+      expect(FLAGS, `the flag config no longer declares ${field}`).toContain(field);
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+
+  it('provider status reads what getProviderStats really returns, circuit state included', () => {
+    for (const field of ['requestCount', 'errorCount', 'avgLatencyMs', 'circuitState']) {
+      expect(ROUTER, `getProviderStats no longer returns ${field}`).toContain(field);
+      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
+    }
+  });
+});

@@ -158,11 +158,15 @@ export function redactReportSecrets(report: BuildDiagnosticsReport): BuildDiagno
 /**
  * Bound a report so its JSON fits comfortably under the 1 MB Firestore doc limit. Deterministic
  * caps (no size-measuring loop): trims the heavy channels (issues / commands / llm previews /
- * errors) to safe sizes while keeping the most recent, most useful detail. Pure + exported + tested.
+ * errors) to safe sizes while keeping BOTH ENDS of each channel — the build's first entries and its
+ * last, with the middle dropped and the gap declared (`trimChannel` / reportTruncation.ts). It used to
+ * keep only the most recent; see that module's header for why a tail alone was the wrong window.
+ * Pure + exported + tested.
  * SECURITY 2.1: secrets are redacted first, so every persisted/downloaded copy is clean.
  */
 /**
- * How many per-call LLM records the STORED report keeps (the newest ones). Exported because the admin
+ * How many per-call LLM records the STORED report keeps — the build's first half and its last half,
+ * never a plain tail (`boundedWindow`). Exported because the admin
  * cost card recomputes an old build's cost from this list, and a list that has hit the cap is a
  * lower bound, not a measurement — the reader must know the cap to say so.
  */

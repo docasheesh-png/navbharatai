@@ -45,32 +45,24 @@ export interface UnusedCard {
 
 export const UNUSED_CARDS: readonly UnusedCard[] = [
   {
-    id: 'health-score-duplicate',
-    title: 'Platform Health Score',
-    tab: 'Monitor',
-    reason: 'duplicate',
-    why: 'The live "Platform health" panel higher up this same page shows the same grade and the same '
-      + 'Health / Reliability / Risk numbers. That panel\'s own comment says it is built "from the same '
-      + 'inputs as /api/admin/health-score", which is the endpoint this card calls.',
-  },
-  {
-    id: 'ai-insights-duplicate',
-    title: 'AI Insights',
-    tab: 'Monitor',
-    reason: 'duplicate',
-    why: 'The live "Insights" panel higher up this same page already lists the same findings with the '
-      + 'same severity chips.',
-    caveat: 'This card ALSO carries the ask-box that answers a typed question about the telemetry. '
-      + 'That box exists nowhere else, so deleting the whole card would remove it. Keeping the box and '
-      + 'dropping the duplicated list is the smaller change.',
-  },
-  {
+    // 🔴 CORRECTED 2026-09-21, AND THE CORRECTION IS THE USEFUL PART. The first version of this entry
+    // said this card "draws the same providerRanking array as the API Usage Ranking card beside it".
+    // That is FALSE and was a misreading: `API Usage Ranking` reads `analytics.providerRanking`
+    // (REQUESTS and latency) while this card reads `analytics.providerWise` (TOKENS) — two different
+    // fields answering two different questions, so those two are not duplicates at all. The real twin
+    // is the live "Engine cost split" panel, which shows ₹ AND tokens AND share per provider where
+    // this card shows tokens alone.
     id: 'provider-token-burn-duplicate',
     title: 'Provider Token Burn',
     tab: 'Monitor',
     reason: 'duplicate',
-    why: 'It draws the same providerRanking array as the "API Usage Ranking" card directly beside it, '
-      + 'and the live "Engine cost split" donut higher up the page is a third view of the same split.',
+    why: 'Its per-provider token bars are already in the live "Engine cost split" panel higher up this '
+      + 'page, which shows the rupees, the tokens AND the share for each engine. (It is NOT a duplicate '
+      + 'of "API Usage Ranking" beside it — that card counts requests and latency, a different question.)',
+    caveat: 'Its FOOTER is not duplicated anywhere: the total provider cost, the "(at least)" label that '
+      + 'appears when some calls could not be priced, and the Cashfree gateway figure. Deleting the whole '
+      + 'card loses those three. Deleting only the token bars and keeping the footer is the smaller change, '
+      + 'which is why this one was not deleted with the other two.',
   },
   {
     id: 'since-boot-not-durable',

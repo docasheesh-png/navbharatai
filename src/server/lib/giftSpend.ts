@@ -52,8 +52,31 @@ function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
-/** True when this wallet has never received real money — the one thing we can know for certain. */
-export function hasEverPaid(w: GiftWalletView | null | undefined): boolean {
+/**
+ * MAY THIS WALLET'S BALANCE BE TREATED AS THE USER'S OWN MONEY? — the question `giftRemaining` asks
+ * of a wallet written before gift tracking existed, and NOT the same question as *"is this a paying
+ * customer?"*.
+ *
+ * 🔴 **RENAMED FROM `hasEverPaid` ON 2026-09-21, because that name belongs to a different answer.**
+ * `AgentV3/FreeTierBuildRouting.hasEverPaid` exports the same name and deliberately does NOT accept
+ * a bare `lastRechargeAt`; `adminUserListQuery.ts` recorded the pair as an open root cause and had to
+ * spell out which one it was importing. Two exported functions with one name and two meanings is a
+ * wrong import waiting to happen — on the money path.
+ *
+ * ⚠️ **THE TIMESTAMP IS ACCEPTED HERE ON PURPOSE, and the asymmetry is the whole point.** This
+ * predicate decides whether a LEGACY balance may buy a plan, and its two errors are not equal: a
+ * wrong `false` tells somebody who really paid us that their money is not real, which this module's
+ * own docblock calls far worse than letting a little old gift money through once. So where the money
+ * figure is missing but the wallet carries a real recharge stamp, the user is trusted.
+ *
+ * 🔒 That generosity was only ever safe because the stamp meant something. Until 2026-09-21
+ * `payments.ts` wrote `lastRechargeAt` **unconditionally**, including on a ₹0 credit — so a wallet
+ * could say *"they recharged"* and *"they have paid us nothing"* at once, and this predicate would
+ * have let the welcome gift buy a hosting plan, the one thing the admin banned in capitals. That line
+ * is now gated on money actually arriving; a wallet already carrying a false stamp keeps it, which is
+ * exactly the legacy case this generosity exists for.
+ */
+export function walletMayBuyWithItsBalance(w: GiftWalletView | null | undefined): boolean {
   const wallet = w || {};
   if (lifetimeMoneySpentInr(wallet) > 0) return true;
   const last = wallet.lastRechargeAt;
@@ -89,7 +112,7 @@ export function giftRemaining(w: GiftWalletView | null | undefined): number {
     // an older or partially-written document happens to say.
     return Math.min(balance, Math.max(0, tracked));
   }
-  return hasEverPaid(wallet) ? 0 : balance;
+  return walletMayBuyWithItsBalance(wallet) ? 0 : balance;
 }
 
 /** The part of the balance a plan may be bought with. Never negative, never above the balance. */

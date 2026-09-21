@@ -77310,3 +77310,82 @@ The probe runs where the integrity analysis runs, so it sees the sandbox as it i
 nested repository created *after* that point is not seen until the next turn — acceptable, because
 `gitCloneGuard` is what stops one being created at all, and this is the detection half for the ones
 that already exist.
+
+---
+
+## 2026-09-21 — 💰 TWO `hasEverPaid`s DISAGREED, AND NEITHER OF THEM WAS THE BUG
+
+Third item of the admin's list. `adminUserListQuery.ts` had recorded the pair honestly rather than
+picking one, and left the question open in exactly these words:
+
+> *"They disagree about a wallet carrying `lastRechargeAt` with no `totalMoneySpent`. … Unifying them
+> is a MONEY-SEMANTICS decision (does a recharge timestamp alone make somebody a customer?)"*
+
+### 🔴 Reading the WRITER answers it — the predicates were arguing about a false fact
+
+`payments.ts` has one real-money credit path, and it wrote:
+
+```
+const amountPaid = n(txData.amountPaid);   // n() returns 0 for anything non-finite
+…
+update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
+update.lastRechargeAt  = now;              // ← unconditional
+```
+
+So a transaction row whose `amountPaid` is absent, a string or NaN — a legacy row, a hand-fixed one,
+a provider payload that changed shape — **and the promo branch above it**, all added **₹0** and still
+stamped the wallet. The wallet then said *"they recharged"* and *"they have paid us nothing"* at the
+same time, and both sentences were read as the answer to "is this a paying customer?":
+
+- **`FreeTierBuildRouting.hasEverPaid`** reads the money ⇒ *not* a customer — routed to the cheap
+  engines, shown as **Free** on the admin Users list.
+- **`giftSpend.hasEverPaid`** also accepts the stamp ⇒ a customer, so on an untracked wallet
+  `giftRemaining` returns 0 and **the welcome gift buys a hosting plan** — the one thing the admin
+  banned in capitals (*"gift … plan purchase me kam nahi ayenge!!!!!"*).
+
+**A recharge stamp alone does not make somebody a customer, because the one writer set it when nobody
+paid.** That is the money-semantics answer, and it comes from the code rather than a preference.
+`lastRechargeAt` is also shown to the USER (`routes/profile.ts`), where a stamp for a recharge that
+never happened is its own dishonesty. It is now gated on money actually arriving; a wallet already
+carrying a false stamp keeps it, which is precisely the legacy case the generosity below exists for.
+
+### 🔎 The sibling found while doing it (rule 3)
+
+**`FreeTierBuildRouting.hasEverPaid` was still bypassing `walletLifetime.ts`** — reading
+`totalMoneySpent` alone, not the snake_case spelling. That module exists because the money lives
+under two names (`accountMerge.ts` writes both), and its own docblock says *"a new READER that
+bypasses this file is the only way the bug comes back"* — the bug being the admin Users page showing
+₹0 for every account. Here it is the predicate that decides whether somebody is routed to the cheap
+engines. It goes through the shared reader now, taking the MAX so a merged wallet is not double-counted.
+
+### 🔒 They are NOT unified into one function, and that is the honest answer
+
+The task said "centralise to one". Reading them says otherwise: they answer **two different
+questions**, and their errors are not equal.
+
+| | reads | a wrong answer costs |
+|---|---|---|
+| `FreeTierBuildRouting.hasEverPaid` | money only, both spellings | spending Claude on a non-customer |
+| `giftSpend.walletMayBuyWithItsBalance` | money, **or** a legacy bare stamp | telling a real payer their money is not real |
+
+The second is deliberately generous, and `giftSpend`'s own docblock already argued why. What WAS a
+hazard is that both were exported under **one name** on the money path — a wrong import waiting to
+happen, and `adminUserListQuery` had to spell out in prose which one it meant. **One name, one
+meaning:** the gift predicate is renamed, the asymmetry is asserted in a test instead of described in
+a comment, and the open root cause is closed where it was recorded.
+
+### Honesty half (rule 5)
+
+Three comments described the retired state and were corrected with it: `adminUserListQuery.ts`'s open
+root cause, `refundPolicy.ts`'s formula, and `walletLifetime.ts`'s note — which now records that the
+build router was found still bypassing it, the exact return that docblock warns about.
+
+### Verification
+
+`tests/aRechargeStampWithoutMoney.test.ts` — 15 cases, **reversion-proven both ways**: restoring the
+unconditional stamp fails 5, returning the router to one spelling fails 2. A source-level guard holds
+the gated write, because a behavioural test cannot see an unconditional assignment re-added beside
+the guarded one — on the line that decides whether the welcome gift can buy a plan.
+
+Full gate: typecheck · server typecheck · unused imports · native guard · **28,408 tests** · build ·
+bundle · boot · deps.

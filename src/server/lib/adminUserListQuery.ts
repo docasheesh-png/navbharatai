@@ -11,14 +11,18 @@
 // and the engine can never disagree about who is a paying user." A second definition here would put
 // two answers on one screen — the filter saying paid and the account sheet saying free.
 //
-// 🔴 AND THERE ARE ALREADY TWO OF THEM IN THIS REPO, WHICH IS RECORDED RATHER THAN QUIETLY PICKED:
-//   • `AgentV3/FreeTierBuildRouting.hasEverPaid` → `Number(totalMoneySpent) > 0`
-//   • `lib/giftSpend.hasEverPaid`                → `lifetimeMoneySpentInr(w) > 0 || lastRechargeAt`
-// They disagree about a wallet carrying `lastRechargeAt` with no `totalMoneySpent`. This module takes
-// the FIRST, because that is the one the admin surface and the build router already share — making
-// the panel self-consistent. Unifying them is a MONEY-SEMANTICS decision (does a recharge timestamp
-// alone make somebody a customer?) with the build router and the gift plan downstream of it, so it is
-// an OPEN root cause in PROGRESS.md, not a change smuggled into a filter.
+// ✅ THE TWO-PREDICATE ROOT CAUSE THIS BLOCK RECORDED IS CLOSED (2026-09-21), AND THE ANSWER CAME
+// FROM THE WRITER RATHER THAN FROM A PREFERENCE. The open question was *"does a recharge timestamp
+// alone make somebody a customer?"* — and `payments.ts` wrote `lastRechargeAt` UNCONDITIONALLY, three
+// lines below an `amountPaid` that is 0 for anything non-finite. So a wallet could say *"they
+// recharged"* and *"they have paid us nothing"* at once: the predicates were arguing about a false
+// fact. That line is now gated on money actually arriving.
+//
+// What remains is deliberate and no longer a name collision:
+//   • `AgentV3/FreeTierBuildRouting.hasEverPaid`   → money only (both spellings, via walletLifetime)
+//   • `lib/giftSpend.walletMayBuyWithItsBalance`   → money, OR a legacy bare stamp, in the user's favour
+// Two questions, two names. This module still imports the FIRST — it is the one the admin surface and
+// the build router share, so the panel cannot contradict itself.
 
 import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import type { PaidFilter } from '../../lib/adminUserSort';

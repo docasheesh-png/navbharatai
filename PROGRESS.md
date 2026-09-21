@@ -75362,6 +75362,103 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — AUTOPSY 56f0c645: a SENTENCE vouched for a control nobody captured, and a working app was told its search was missing
+
+**The report:** a Quick Notes build, free tier, 3.2 min, ₹9.38, `ok: true`, reviewer 90/100 "App looks
+complete" — carrying `FEATURE_COVERAGE: 1 requested feature(s) have NO visible control in the running
+app — Search. Present: List / items.` That finding also became the build's `rootCause`.
+
+**It was FALSE, and this is a fact rather than a reading.** `src/App.tsx` in the manifest hashes
+`38364d60…`, byte-identical to our own `quick-notes` golden scaffold (see the correction below), and
+that file carries `aria-label="Search notes"`, `placeholder="Search notes"` and a real filter
+(`n.text.toLowerCase().includes(q)`). The build wrote ZERO files (`WRITE_TIME_TYPECHECK`), so nothing
+could have removed it. Running the real `checkFeaturePresence` over the DOM that scaffold renders
+reports **Search present** — so the search RULE was never the bug.
+
+⚠️ **CORRECTION, same day, before this ever merged — the hash is RECORDED, no longer ASSERTED.**
+The test first pinned that hash live. Within the hour commit `e2cd0e65a` (another session, running
+concurrently) legitimately added `aria-label="New note"` to that very scaffold as part of the a11y
+labelling sweep, so the hash moved and the assertion failed — on a correct change, with nothing wrong.
+**A pinned hash over a file that is SUPPOSED to improve fails on every legitimate edit, and its only
+remedy is to paste the new hash — which teaches the next session to paste hashes and verifies nothing.**
+So the hash now lives in the test's doc comment as dated evidence (it was true on 2026-09-21, and that
+is all a historical fact needs), and the live lock is the PROPERTY the argument actually rests on: this
+scaffold must keep a search field the probe can SEE, and `checkFeaturePresence` must still find it.
+Nothing about the finding's falseness changed — only what CI re-checks every run.
+
+🔑 **THE CAUSE WAS THE WITNESS, NOT THE RULE.** `checkFeaturePresence` already had a
+capture-corroboration guard, added after two earlier false findings, resting on one premise: *another
+requested feature probed PRESENT, so the rendered DOM really was captured.* **That premise is false for
+a probe satisfied by PROSE.** The `list` rule counts an honest empty-state sentence, and
+`hasControlMatching` tests the page's entire visible-text blob — it cannot tell a button's label from a
+word in a paragraph. So a partial capture (the heading and "No notes yet - your notes stay on this
+device." painted, the controls not yet) let `list` vouch for a DOM with no controls in it at all, and
+the `search` verdict was released against a working app.
+
+**Reproduced byte-for-byte before anything was changed** — that 130-character partial capture returns
+`present ["List / items"], missing ["Search"]`, exactly the report's words. Its 44 characters of copy
+also carried it past `isUnrenderedSpaShell`'s 40-character floor, which is why the honesty guard stayed
+silent and why the fix could not live in that threshold.
+
+**Fixed at the class:** every probe now reports WHAT its verdict rests on — `control` (an `<input>`,
+`<button>`, `type="checkbox"`, `type="password"`, `<ul>`/`<li>`, `<form>`, or a `placeholder`/
+`aria-label` on a field) or `text` (prose only) — and **a feature may be called missing only when some
+present probe rests on a real element.** `hasControlMatching` returns which kind it matched, checking
+attributes first so a page with both is credited with the control.
+
+🔒 **IT GATES THE ACCUSATION, NOT THE WHOLE RESULT — and this repo's own suite established that.** The
+first version returned `empty` whenever no control-backed witness existed, which also silenced results
+where NOTHING was missing; "an honest empty-state counts the list surface as present" failed, correctly.
+An all-present result accuses nobody, so there is nothing in it to be wrong about. The false-verdict
+risk lives entirely in the missing list.
+
+⚠️ **THE TRADE, STATED:** an app that really lacks a control, whose only present feature is
+prose-matched, now stays SILENT instead of reporting the gap. Deliberate — the check is advisory, a
+missed advisory costs one line in a report, and a false "your feature is missing" tells a user their
+working app is broken. Inside the `AGENTV3_FEATURE_HEAL` cohort (on, 20%) it would also have spent an
+extra model pass adding a search box that was already there; this workspace was out of the cohort, by
+luck rather than design.
+
+**The 50/50 half — why it was possible AND unauditable.** The report recorded the verdict and none of
+the evidence, so overturning one line meant hashing the scaffold, re-running the probe against a
+reconstructed DOM, and finally reproducing the capture. `featurePresenceEvidence()` now prints what each
+probe rested on, and the call site records the capture beside it (`source=`, `painted=`, html bytes,
+input and button counts). A finding nobody can check is re-litigated every time it appears.
+
+**Sibling hunt (rule 3) — and it names a real asymmetry.** Every other consumer of that browser capture
+is handed its PROVENANCE: `analyzePreviewHtml` takes `painted` and `source` at all four call sites, and
+Green Freeze latches only when `shot.source === 'browser'`. The one probe that ACCUSES the user's app
+was handed bare `html`. `RequirementCoverage` and `DesignCoverage` judge file bodies, not a capture, so
+they cannot hit this class.
+
+**Tests:** `tests/aSentenceIsNotAControl.test.ts` (16), plus all 22 existing `FeaturePresence` tests
+still green. **Reversion-proven twice** — letting prose vouch again fails 2, relabelling the empty-state
+sentence as a control fails 3.
+
+**Also wrong in that report, recorded because each is a claim a later session would reason from:**
+- **`FE_BE_PARTITION` said "Of the 12 file(s) THIS TURN wrote"** — the turn wrote ZERO. Those 12 are the
+  pre-seeded scaffold. The line is honest about not surveying the project and then miscounts what it did.
+- **`requestAnalysis.startTier: "gemini"`** — Gemini has been on no build ladder since the three-tier
+  change (2026-09-14). A stale label on live telemetry.
+- **The narration promised "adding search"** and then added nothing, and the summary called the app
+  "fully built and working" while the report warned a requested feature was missing.
+- **`PREVIEW_SNAPSHOT_STALE` with ZERO writes** — "Both sides hold the same 14 file(s), so a file's
+  CONTENT changed between them." Nothing in the build wrote a file; what changed is not established.
+- **No `JOURNEY_*` code appears at all**, yet `RELEASE_GATE` says "no user journey could be derived or
+  run". The 2026-09-17 fix added `JOURNEY_NOT_RUN` precisely so that state is visible; it is absent here.
+
+**OPEN, recorded not patched (rule 6):**
+- **Nothing reconciles the engine's own claims with the platform's own findings.** Three verdicts stood
+  side by side — summary "fully built and working", reviewer 90/100 "complete", report "a requested
+  feature is missing" — with no arbiter. `CLAIM_UNSUPPORTED` exists for exactly this and did not fire.
+- **The probe still judges a capture whose quality it cannot see.** The honest completion is to hand it
+  `painted`/`source` like every other reader. Not built yet on purpose: the capture fingerprint now in
+  the report is the evidence that would justify it, and no report has yet shown a `painted=false` case.
+  Same posture as `POST_GREEN_WRITES` — measure first, then protect.
+- **`PREVIEW_SNAPSHOT_STALE` on a zero-write build** is unexplained and stays open.
+- **The lead rung crawled again:** `glm-4.7-flashx` was abandoned mid-answer at 16.2 s and benched, so
+  the build fell to rung 2 (`LADDER_DEPTH`). That is the throughput bench working, and it is also the
+  second report in which FlashX's real-world speed is the thing that moved a build off rung 1.
 ## 2026-09-21 — AUTOPSY `8a92e5ed` + `01037e20`: two builds, and the engine was wrong about both apps
 
 Admin sent one session's report: a **password generator** (204 s, weak/free, ok) and a **Free Fire–style

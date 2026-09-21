@@ -316,7 +316,7 @@ import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
@@ -18363,6 +18363,11 @@ async function noteBuildOutcome(
                   severity: coverage.missing.length > 0 ? 'warning' : 'info',
                   code: 'FEATURE_COVERAGE',
                   message: featurePresenceSummary(coverage),
+                  // THE EVIDENCE, BESIDE THE VERDICT (autopsy 56f0c645): what each probe rested on, and
+                  // what the capture it judged actually was. Without these two lines a false "your
+                  // feature is missing" is unauditable from the report — which is how one cost a full
+                  // investigation to overturn.
+                  detail: `${featurePresenceEvidence(coverage)} · capture: source=${shot.source ?? 'unknown'} painted=${shot.painted ?? 'unknown'} html=${html.length}B inputs=${(html.match(/<input\b/gi) || []).length} buttons=${(html.match(/<button\b/gi) || []).length}`,
                   autoResolved: coverage.missing.length === 0,
                 });
               }

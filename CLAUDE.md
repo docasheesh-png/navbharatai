@@ -2882,8 +2882,13 @@ the flag entries above promise.
   • **the CDP daemon** — the ONLY writer, and it starts solely when the MODEL calls `browser_action`.
   An ordinary build never does. • **the page checks** (`runtimeRecordFromPageChecks`, the documented
   *"second source of runtime truth"*, 2026-08-19) — needs `extractPageRoutes` to find a non-`/` route;
-  **MEASURED: 0 of this repo's 40 golden scaffolds yield one**, so for an app built from our own
-  templates that lane has never once answered. • **`browseUrl`** — the navigation the PLATFORM makes on
+  **MEASURED: 0 of this repo's 40 golden scaffolds yield one — and not one of them uses a router at
+  all**, so for an app built from our own templates that lane has never once answered.
+  ⚠️ **That number is held by CI, not by this paragraph**, and it is the SECOND measurement of it: the
+  first read a `files` key `GoldenScaffold` does not have, so every scaffold reached the function as
+  `{}` and the probe could not have returned anything but 0. The conclusion survived; the derivation
+  proved nothing. It now reads `appTsx`, asserts the sources are really non-empty, and carries a
+  control case proving `extractPageRoutes` does find routes when they exist. • **`browseUrl`** — the navigation the PLATFORM makes on
   essentially every build (the render proof, the verify loop, GreenGuard, `verifyAfterFix`): it launched
   a real browser, waited for paint, read the DOM, and **attached no listener at all**.
   🔑 **The fix is the third lane, because it is already paid for** — the browser launches regardless, so
@@ -2931,7 +2936,7 @@ the flag entries above promise.
   contradictions in the user's correction.
   🔴 **STILL OPEN (rule 6): lane B cannot see a state-routed SPA.** `extractPageRoutes` finds only
   `<Route path=…>` and Next `app/x/page.tsx`, so every single-screen app — and our multi-screen
-  scaffolds that switch on state — yields nothing. Deriving "pages" for those is a separate problem and
+  scaffolds, none of which uses a router — yields nothing. Deriving "pages" for those is a separate problem and
   is NOT guessed at here; lane C now covers them, which is why this is an upgrade rather than a breakage.
 
 - **🧭 IN THE ADMIN CONSOLE THE BOTTOM BAR *IS* THE TAB STRIP (admin 2026-09-20; no flag, no cost).**

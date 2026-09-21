@@ -75649,13 +75649,28 @@ was paid ₹113 to rediscover an hour after the app shipped.
 | lane | why it could not answer |
 |---|---|
 | **A · the CDP daemon** | the ONLY writer of that file, and it starts solely when the MODEL calls the `browser_action` tool. An ordinary build never does. |
-| **B · the page checks** (`runtimeRecordFromPageChecks`, the documented *"second source of runtime truth"*, 2026-08-19) | needs `extractPageRoutes` to find a route that is not `/`. **MEASURED: 0 of 40 golden scaffolds yield one.** |
+| **B · the page checks** (`runtimeRecordFromPageChecks`, the documented *"second source of runtime truth"*, 2026-08-19) | needs `extractPageRoutes` to find a route that is not `/`. **MEASURED: 0 of 40 golden scaffolds yield one, and not one uses a router.** |
 | **C · `browseUrl`** | the navigation the PLATFORM makes on essentially every build. Launched a real browser, waited for paint, read the DOM — and attached **no listener of any kind**. |
 
 Both facts were **measured, not read**: a throwaway probe printed the generated `browseUrl` script
 (no `page.on('console')`, no `pageerror`, no write to the log) and ran the real `extractPageRoutes` over
 the real `GOLDEN_SCAFFOLDS` registry (0/40, including `saas-dashboard`, `crm`, `school-erp` — they switch
-screens on state, not on a router).
+none of which uses a router).
+
+🔴 **AND THE FIRST VERSION OF THAT MEASUREMENT WAS WORTHLESS — recorded because the lesson is this
+repo's own.** The probe read `s.files`, a key `GoldenScaffold` does not have, so every scaffold reached
+`extractPageRoutes` as `{}` and it **could not have returned anything except 0**. By the time I went
+back to re-check it a different way, the claim was already published in three documents and a commit
+message. The conclusion HELD on the re-measurement — real field `appTsx`, 40 non-empty sources, 0
+routes, 0 routers — but the original derivation proved nothing: *a derivation is only verified once it
+predicts something it could have got wrong* (the same sentence this file already records for the E2B
+rate). The number now lives in CI, with a control case proving `extractPageRoutes` really does find
+routes when they exist, instead of in a paragraph that can go stale.
+
+⚠️ One clause was also WRONG and is withdrawn: I wrote that the multi-screen scaffolds "switch screens
+on state". The no-router half is verified; the state half is not — my probe found zero matches for it,
+which means my heuristic was narrow, not that the mechanism was confirmed. What is measured is that
+they do not use a router; how they do navigate is unexamined and is not claimed.
 
 ### The fix — lane C, because lane C is already paid for
 

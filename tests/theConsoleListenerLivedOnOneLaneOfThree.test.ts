@@ -41,6 +41,8 @@ import {
   BROWSER_DAEMON_SCRIPT,
 } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 import { auditSummaryClaims } from '../src/server/AgentV3/claimAudit';
+import { extractPageRoutes } from '../src/server/AgentV3/PageRouteCheck';
+import { GOLDEN_SCAFFOLDS } from '../src/server/AgentV3/goldenScaffolds/registry';
 
 const ACTUATOR_SRC = readFileSync(
   fileURLToPath(new URL('../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url)),
@@ -331,5 +333,36 @@ describe('a console we DID read is held to what it said', () => {
       screenshotTaken: false, previewVerified: true, filesWritten: 3,
     });
     expect(out.map((c) => c.kind)).not.toContain('console-clean-but-errors');
+  });
+});
+
+// ── The number this whole autopsy rests on, held by CI instead of by a paragraph ──────────────────
+//
+// 🔴 AND IT IS HERE BECAUSE MY FIRST MEASUREMENT OF IT WAS WORTHLESS. The claim "0 of 40 golden
+// scaffolds yield a page route" was first produced by a throwaway probe that read `s.files` — a key
+// `GoldenScaffold` does not have. Every scaffold therefore reached `extractPageRoutes` as `{}`, and
+// the probe could not have returned anything except 0. The conclusion happened to be right; the
+// derivation proved nothing, which is this repo's own standard — a derivation is only verified once
+// it predicts something it could have got wrong.
+//
+// So the measurement lives here now, reading the real field (`appTsx`), with a control case proving
+// `extractPageRoutes` genuinely FINDS routes when they exist. If someone adds a router-based scaffold
+// the count changes and this fails — which is the point: the docs quote this number, and a number in
+// prose goes stale silently.
+describe('lane B: why the page checks cannot answer for our own apps', () => {
+  it('extractPageRoutes WORKS — so the finding is about the scaffolds, not a broken function', () => {
+    expect(extractPageRoutes({
+      'src/App.tsx': '<Routes><Route path="/" element={<H/>} /><Route path="/dashboard" element={<D/>} /></Routes>',
+    })).toEqual(['/dashboard']); // '/' is dropped: the preview verifier already proved it
+    expect(extractPageRoutes({ 'app/settings/page.tsx': 'export default function P(){}' })).toEqual(['/settings']);
+  });
+
+  it('and not one golden scaffold yields a route, because not one uses a router', () => {
+    const real = GOLDEN_SCAFFOLDS.filter((s) => (s.appTsx || '').length > 100);
+    expect(real.length).toBe(GOLDEN_SCAFFOLDS.length); // the guard my first probe lacked: the source is really there
+    const withRoutes = real.filter((s) => extractPageRoutes({ 'src/App.tsx': s.appTsx }).length > 0);
+    const withRouter = real.filter((s) => /react-router|<Routes|<Route\b/.test(s.appTsx));
+    expect(withRoutes).toEqual([]);
+    expect(withRouter).toEqual([]);
   });
 });

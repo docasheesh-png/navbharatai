@@ -62,6 +62,8 @@
  * PURE. No I/O, no clock, never throws.
  */
 
+import { IN_BUILD_GREEN_CODE } from './inBuildGreen';
+
 /**
  * The one code that means *"a real browser opened this app and it rendered"*.
  *
@@ -70,6 +72,79 @@
  * complex-app detectors) — one constant, two sides.
  */
 export const APP_RENDERED_CODE = 'APP_RENDERED' as const;
+
+/**
+ * 🔴 EVERY CODE THAT, ON ITS OWN, MEANS *"a real browser opened this app and it rendered"*.
+ *
+ * ## Why a SET, when this module already had one code (2026-09-21, EIGHTH appearance)
+ *
+ * The docblock above promises that a recorded fact is *"written once, by one function, and read by
+ * everyone"*. Half of that was true and the half that was not is the bug: `appRenderedRecord` is
+ * indeed the only writer of `APP_RENDERED` — and it is called from exactly TWO places, both inside
+ * `markAppRendered`, which sets the local `previewVerifiedRendered` flag **first**. So
+ * `provenFromTimeline(…).preview === 'passed'` could never be true while that flag was false: **the
+ * ledger could not answer a question the local boolean could not already answer.** It looked like a
+ * ledger and behaved like a mirror.
+ *
+ * Meanwhile `inBuildGreen` — a pass that opens the app in a real browser, refuses a curl capture
+ * outright, and records *"The app rendered in a real browser Ns into this build"* — wrote its proof
+ * to its own private code and **no verdict in the engine read it**. That is the root cause in one
+ * sentence: not a missing store, but a missing shared VOCABULARY. One actor proves the app renders;
+ * another verdict, reading a different code-set, says it never did.
+ *
+ * ## The bar for membership, and it is not negotiable
+ *
+ * A code belongs here only when its producer is **structurally incapable** of recording it for a
+ * non-browser capture — verified by reading that producer, never by reading its message:
+ *
+ * | code | the guard that makes it browser-only |
+ * |---|---|
+ * | `APP_RENDERED` | `appRenderedRecord`: `if (source !== 'browser') return null` |
+ * | `IN_BUILD_GREEN` | `inBuildGreen`: `if (input.shot.source !== 'browser') return { kind: 'no-browser' }` |
+ *
+ * ⚠️ **TWO CODES WERE CONSIDERED AND REFUSED, and the reasons matter more than the list.**
+ *
+ * - **`PREVIEW_PUBLISHED`** — an address that is listening is not an app that painted. That is
+ *   `provenFromTimeline`'s own distinction and it stands.
+ * - **`GREEN_GUARD_SAVE`** — and this one is a CORRECTION. `BuildDiagnostics.appWasSeenRunning`
+ *   states in writing that it *"is recorded only after the app was opened in a real browser and seen
+ *   rendering"*. **The code does not honour that.** It is written from `previewGreen`, which both of
+ *   its producers set on `verdict.rendered` alone — the `shot.source === 'browser'` test sitting
+ *   three lines below guards the green-freeze latch and `markAppRendered`, not this flag. A curl
+ *   capture's empty-shell "render" therefore reaches it. It stays out of this set, and the false
+ *   sentence is corrected where it is written.
+ */
+export const RENDER_PROVEN_CODES: ReadonlySet<string> = new Set<string>([
+  APP_RENDERED_CODE,
+  IN_BUILD_GREEN_CODE,
+]);
+
+/** The one shape this reader needs. Structural, so any recorded issue list fits. */
+export interface RecordedRenderFact {
+  code?: string | null;
+  severity?: string | null;
+}
+
+/**
+ * Did any actor record that a real browser saw this app render?
+ *
+ * ⚠️ **`severity === 'info'` is required, and it is not ceremony.** Both producers write these codes
+ * as `info`. A future WARNING carrying the same code would be some new, weaker sense of the word, and
+ * the safe answer to a shape we do not recognise is to say nothing — the discipline
+ * `provenFromTimeline` already established for exactly these two codes.
+ *
+ * `false` means *"the timeline does not settle this"*, never *"the app did not render"*. A caller
+ * fills a gap from this; it must not demote evidence it already holds.
+ */
+export function renderProvenByAnyActor(
+  facts: ReadonlyArray<RecordedRenderFact> | null | undefined,
+): boolean {
+  for (const f of facts || []) {
+    const code = typeof f?.code === 'string' ? f.code : '';
+    if (code && RENDER_PROVEN_CODES.has(code) && f.severity === 'info') return true;
+  }
+  return false;
+}
 
 /** Shape matches `BuildDiagnostics.record`'s `BuildIssue`; structural, to avoid a circular import. */
 export interface RenderProofRecord {

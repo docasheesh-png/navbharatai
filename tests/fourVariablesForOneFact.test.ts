@@ -152,12 +152,18 @@ describe('the consumers', () => {
   });
 
   it('the runtime verdict asks the ledger, not one pass’s local memory', () => {
-    const at = ROUTE.indexOf('let renderProven = previewVerifiedRendered;');
+    // ⚠️ SUPERSEDED 2026-09-21, and this case is STRONGER than it was, not weaker. It used to pin
+    // `let renderProven = previewVerifiedRendered;` — a ledger read declared INSIDE one `else if`
+    // block, so the two neighbouring verdicts (`claimAudit`, `verifiedNoChangeSummary`) could not
+    // have used it even had they wanted to. Three consumers of one fact, two sources. The answer is
+    // now one hoisted function every consumer calls, and `oneLedgerEveryVerdictReadsFrom.test.ts`
+    // holds all three of them.
+    const at = ROUTE.indexOf('const renderProvenNow = (): boolean =>');
     expect(at).toBeGreaterThan(-1);
     const near = ROUTE.slice(at, at + 700);
     expect(near).toContain("provenFromTimeline(buildDiag.report().issues).preview === 'passed'");
-    expect(near).toContain('{ previewRendered: renderProven }');
-    expect(near).toContain('runtimeUncheckedRecord({ previewRendered: renderProven })');
+    expect(ROUTE).toContain('{ previewRendered: renderProvenNow() }');
+    expect(ROUTE).toContain('runtimeUncheckedRecord({ previewRendered: renderProvenNow() })');
   });
 
   it('WHAT THE MISSING COPY COST: the failure card needs `appRendered` true to stand down', () => {

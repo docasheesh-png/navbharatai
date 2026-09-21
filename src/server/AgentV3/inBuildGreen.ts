@@ -164,6 +164,23 @@ export function attemptOutcome(input: {
 export const IN_BUILD_PROOF_BUDGET_MS = 35_000;
 
 /**
+ * The code that says *"a real browser opened this app and it rendered"* — written HERE, read by the
+ * evidence ledger (`renderProof.ts`).
+ *
+ * 🔴 It is a shared constant rather than a literal in two files because until 2026-09-21 this proof
+ * reached NO reader at all. `provenFromTimeline` answered "did the app render?" from `APP_RENDERED`
+ * alone, and this pass — which refuses a curl capture outright (`shot.source !== 'browser'` ⇒
+ * `no-browser`), so its `proven` outcome is exactly as strong — recorded its proof and was never
+ * asked. One actor proving a fact and another verdict denying it, in the same report, is the whole of
+ * the EVIDENCE LEDGER root cause.
+ *
+ * ⚠️ ONLY the `proven` outcome carries it. `raced` also saw a render, but a file changed while the
+ * browser was open, so the tree that rendered is not the tree on disk — the distinction this pass
+ * exists to make, and it must not be blurred by the ledger.
+ */
+export const IN_BUILD_GREEN_CODE = 'IN_BUILD_GREEN' as const;
+
+/**
  * The admin-only timeline line for each outcome. Only `proven` is worth a user-facing word.
  *
  * 🔴 `autoResolved` IS NOT DECORATION, AND IT USED TO BE WRONG ON EVERY FAILURE. It was `true` for
@@ -180,7 +197,7 @@ export function inBuildGreenNote(outcome: AttemptOutcome, facts: { elapsedMs: nu
   switch (outcome.kind) {
     case 'proven':
       return {
-        code: 'IN_BUILD_GREEN', severity: 'info', autoResolved: true,
+        code: IN_BUILD_GREEN_CODE, severity: 'info', autoResolved: true,
         message: `The app rendered in a real browser ${secs}s into this build — ${facts.fileCount ?? 0} file(s) recorded as the last known good. If a later step breaks the app, this version is what comes back.`,
       };
     case 'raced':

@@ -39,7 +39,7 @@
  * PURE. No I/O, no clock, never throws.
  */
 import type { CheckOutcome } from './releaseGate';
-import { APP_RENDERED_CODE } from './renderProof';
+import { RENDER_PROVEN_CODES } from './renderProof';
 
 /** The one shape of a recorded fact this reader needs. Structural, so any issue list fits. */
 export interface RecordedFact {
@@ -101,10 +101,13 @@ export function provenFromTimeline(
     // code would be some new, weaker sense of the word, and must not silently count as proof — the
     // safe answer to a shape we do not recognise is to say nothing.
     if (code === APP_RAN_IN_A_BROWSER && f.severity === 'info') out.pages = 'passed';
-    // Same discipline as the line above: `APP_RENDERED` is written as `info` by its one producer, and
-    // a future warning carrying the code would be a weaker sense of the word that must not pass as
-    // proof.
-    if (code === APP_RENDERED_CODE && f.severity === 'info') out.preview = 'passed';
+    // 🔴 EVERY actor that proves a real-browser render answers here, not just one (2026-09-21).
+    // This read `code === APP_RENDERED_CODE`, whose ONLY writer sets the route's local
+    // `previewVerifiedRendered` flag first — so this branch could never be true while that flag was
+    // false, and the ledger could not answer a question the boolean could not. `RENDER_PROVEN_CODES`
+    // owns the vocabulary and states the browser-only bar each member must clear; the `info`
+    // discipline below is unchanged and lives in `renderProvenByAnyActor`.
+    if (RENDER_PROVEN_CODES.has(code) && f.severity === 'info') out.preview = 'passed';
     if (PREVIEW_ADDRESS_CODES.has(code)) out.previewUrlPublished = true;
   }
   return out;

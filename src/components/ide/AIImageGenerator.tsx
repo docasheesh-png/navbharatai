@@ -127,19 +127,6 @@ function labelOf(options: ImageOption[], id: string): string {
   return (options.find((o) => o.id === id) || options[0])?.label ?? '';
 }
 
-const STYLE_ENHANCERS: Record<string, string> = {
-  minimal: 'minimalist, clean white background, simple shapes, ',
-  vibrant: 'vibrant colors, high contrast, bold, colorful, ',
-  dark: 'dark background, neon accents, moody, cinematic, ',
-  gradient: 'smooth gradient, colorful gradient background, ',
-  flat: 'flat design, 2D, vector style, no shadows, ',
-  '3d': '3D render, isometric, depth, shadows, realistic, ',
-  // Realistic and Cinematic deliberately add NOTHING here. The Enhance button pastes words into the
-  // user's own box, and these two styles are carried by camera language the server applies in full —
-  // pasting a shortened copy of it would put a weaker version of the same instruction in front of
-  // the real one, and `freshTerms` would then drop the real one as "already written".
-};
-
 /**
  * Which tier the user is on. Persisted, because the toggle is a PREFERENCE — the admin's words were
  * "user uske kabhi bhi free aur paid me convert kar sake", and a preference that resets on every
@@ -191,6 +178,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   }, [optionsOpen]);
   /** Filled by the picker below the selectors; pressed by the attach button inside the input pill. */
   const attachRef = useRef<(() => void) | null>(null);
+  const [enhancing, setEnhancing] = useState(false);
+  /** The words the star replaced, so one tap puts them back. Cleared on the next send or edit. */
+  const [enhanceUndo, setEnhanceUndo] = useState<string | null>(null);
   const [proAvailable, setProAvailable] = useState<ImageProAvailability>(null);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
@@ -376,10 +366,45 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     }
   };
 
-  const handleEnhance = () => {
-    const enhancer = STYLE_ENHANCERS[style] || '';
-    if (!prompt.startsWith(enhancer)) {
-      setPrompt(enhancer + prompt);
+  /**
+   * ⭐ — rewrite the brief into a peak-level prompt, on request (admin 2026-09-21: "usko peak level
+   * promt banwana sikhao!"). It used to paste six style keywords in front of the words — a
+   * shortened copy of direction the server already applies in full. Now one short call on the
+   * free ladder rewrites the user's OWN words and puts the result in the box, where they can read
+   * it, change it, and undo it. The server refuses a rewrite that lost a name or a number, so what
+   * lands here never drops a fact the user typed.
+   */
+  const handleEnhance = async () => {
+    const original = prompt.trim();
+    if (!original || enhancing) return;
+    setEnhancing(true);
+    try {
+      const res = await fetch('/api/image/enhance-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        body: JSON.stringify({
+          prompt: original,
+          type: imageType,
+          style: labelOf(STYLES, style),
+          colorHint: labelOf(COLOR_HINTS, colorHint),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        flashNote(typeof data.error === 'string' ? data.error : 'NavBharatAI could not improve the prompt just now — your words are kept.');
+        return;
+      }
+      if (data.ok && typeof data.prompt === 'string') {
+        setEnhanceUndo(original);
+        setPrompt(data.prompt);
+        flashNote('Prompt improved — read it, change anything, then send. Undo puts your words back.');
+      } else {
+        flashNote(typeof data.note === 'string' ? data.note : 'NavBharatAI could not improve the prompt just now — your words are kept.');
+      }
+    } catch {
+      flashNote('NavBharatAI could not improve the prompt just now — your words are kept.');
+    } finally {
+      setEnhancing(false);
     }
   };
 
@@ -648,7 +673,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
    * URL, and fifty of them in the DOM at once is the thing `usePagedList` exists to prevent.
    */
   const thread = [...pagedHistory.visible].reverse();
-  const styleEnhancer = STYLE_ENHANCERS[style] || '';
 
   return (
     <div className={`h-full flex flex-col text-ink overflow-hidden ${effectiveTier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
@@ -1045,7 +1069,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 ref={taRef}
                 rows={1}
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => { setPrompt(e.target.value); if (enhanceUndo !== null) setEnhanceUndo(null); }}
                 onKeyDown={(e) => {
                   // Enter sends, Shift+Enter breaks the line — the convention every chat input in
                   // this app uses, and the reason the box grows rather than scrolls.
@@ -1059,14 +1083,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   have. Realistic is exactly that case — it adds none. */}
               <button
                 type="button"
-                onClick={handleEnhance}
-                disabled={!styleEnhancer || !!reference}
+                onClick={() => void handleEnhance()}
+                disabled={enhancing || !!reference || prompt.trim().length < 3}
+                aria-label="Improve my prompt"
                 title={reference
-                  ? 'Style keywords are for a new picture — they would restyle the one you attached'
-                  : styleEnhancer ? 'Add this style’s keywords to your words' : 'This style adds no extra keywords'}
+                  ? 'The star writes a brief for a NEW picture — it would restyle the one you attached'
+                  : prompt.trim().length < 3 ? 'Write a few words first' : 'Rewrite my words as a professional prompt'}
                 className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <Sparkles className="w-4 h-4" />
+                {enhancing ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
               </button>
               <button
                 type="button"
@@ -1083,6 +1108,19 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
             {/* With a picture attached the words mean something different — say so where they are
                 typed. The "what the free tier is for" line moved UP into the empty state (admin
                 2026-09-21: "upar likhna hai, jahan 'no image yet' likh ke ata hai"). */}
+            {enhanceUndo !== null && (
+              <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5">
+                <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                <span>Prompt improved.</span>
+                <button
+                  type="button"
+                  onClick={() => { setPrompt(enhanceUndo); setEnhanceUndo(null); }}
+                  className="underline text-accent-text hover:text-ink transition-colors"
+                >
+                  Undo
+                </button>
+              </p>
+            )}
             {reference && (
               <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5">
                 <Wand2 className="w-2.5 h-2.5 shrink-0" />

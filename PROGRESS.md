@@ -77800,3 +77800,28 @@ loudly in the log — never a refusal it cannot justify.
 
 Tests: `tests/theImageRoutesRunTheTriage.test.ts`. Source-level for the ORDER (the triage before the
 account gate and before any provider or link), because the order is the point.
+
+## 2026-09-21 — A4: the ⭐ star writes a peak-level prompt, and never invents a fact (Phase 2 item 5)
+
+**Admin:** *"send button ke left me jo star hai, usko peak level promt banwana sikhao!"* — named as the
+biggest realism lever for the free tier.
+
+- **What it was:** the star pasted six style keywords in front of the user's words — a shortened copy
+  of direction the server's craft layer already applies in full on every send, and nothing for
+  Realistic or Cinematic at all.
+- **What it is:** `POST /api/image/enhance-prompt` → ONE short call on the FREE chat ladder
+  (`'navbharat'`, glm-4.7-flash led, ₹0 on the ordinary path, no history, no tools) with an
+  art-director system prompt (`src/server/lib/imagePromptEnhancer.ts`); the rewrite lands IN THE
+  USER'S BOX with an Undo, so they read it, learn from it, and can change it. The craft layer still
+  runs on top of whatever they send. It is a REQUEST, never automatic — a call nobody asked for is
+  spend nobody agreed to. The same safety triage as a generation runs before the call; an account
+  is required (the fallback rungs cost the platform).
+- 🔒 **Drift is the one thing a rewrite can do wrong, so it is CHECKED, not trusted.** `factsToKeep`
+  (digit runs of 3+, ALL-CAPS words, Devanagari words — deliberately narrow, so a sentence-initial
+  capital is not a "fact") must all survive into the rewrite; a rewrite that dropped the phone number
+  is refused and the user keeps their own words with an honest note. Empty, unchanged and busy each
+  have their own branded sentence; no vendor is ever named.
+
+Tests: `tests/theStarWritesAPeakPrompt.test.ts` (16) — pure decision logic plus source guards for the
+route's order (triage → account → free-universe call) and the client's replace-with-Undo. **Proven by
+reversion**: the facts check removed → fails; the Undo removed → fails.

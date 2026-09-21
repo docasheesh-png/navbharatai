@@ -13,6 +13,8 @@ import {
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
 import { triageImageRequest } from '../lib/imageSafety';
+import { enhanceImagePrompt, ENHANCE_MAX_INPUT } from '../lib/imagePromptEnhancer';
+import { aiRouter } from '../lib/aiRouter';
 import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
 import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
@@ -101,6 +103,20 @@ let marginWarned = false;
 
 const proLimiter = () => rateLimiter({
   name: 'imagegenpro', authed: 30, anon: 0, anonGlobalPerHour: 0, noun: 'Pro image generations',
+});
+
+// ── THE ⭐ PROMPT ENHANCER ──────────────────────────────────────────────────────────────────────
+// One short text call on the FREE chat ladder per press. Bounded like every other AI call here:
+// an account (the fallback rungs cost the platform), and its own bucket, generous because a user
+// may press it a few times while shaping a brief.
+const enhanceSchema = vobject({
+  prompt: vstring({ max: ENHANCE_MAX_INPUT }),
+  type: vstring({ optional: true, max: 60 }),
+  style: vstring({ optional: true, max: 40 }),
+  colorHint: vstring({ optional: true, max: 60 }),
+});
+const enhanceLimiter = () => rateLimiter({
+  name: 'imageenhance', authed: 60, anon: 0, anonGlobalPerHour: 0, noun: 'prompt improvements',
 });
 
 export function registerImageGenRoutes(app: Express): void {
@@ -490,6 +506,47 @@ export function registerImageGenRoutes(app: Express): void {
       }
     },
   );
+
+  app.post('/api/image/enhance-prompt', enhanceLimiter(), validateBody(enhanceSchema), async (req: Request, res: Response) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) {
+      res.status(400).json({ error: 'Write a few words first, then press the star.' });
+      return;
+    }
+    // The same triage as a generation: a banned brief is not improved, it is refused.
+    const safety = await triageImageRequest(req, prompt);
+    if (safety.blocked) {
+      res.status(422).json({ error: safety.message, code: 'blocked' });
+      return;
+    }
+    const account = await requireAccountForCostlyAi(req, 'prompt improvement');
+    if (!account.ok) {
+      res.status(account.status).json(account.body);
+      return;
+    }
+    // 'navbharat' is the FREE universe — glm-4.7-flash led, ₹0 on the ordinary path — and the call
+    // carries no history and no tools. The router's own timeout applies as well as ours.
+    const out = await enhanceImagePrompt(
+      {
+        prompt,
+        type: typeof body.type === 'string' ? body.type : undefined,
+        style: typeof body.style === 'string' ? body.style : undefined,
+        colorHint: typeof body.colorHint === 'string' ? body.colorHint : undefined,
+      },
+      async (system, user) => {
+        const r = await aiRouter.routeDetailed(user, [], 'navbharat', undefined, system);
+        return { content: r.content, ok: r.ok };
+      },
+    );
+    if (!out.ok) {
+      // 200 with a note, not an error: the user's words are intact and the star simply had nothing
+      // better to offer. The words say so; a red error card would say something worse happened.
+      res.json({ ok: false, note: out.message, reason: out.reason });
+      return;
+    }
+    res.json({ ok: true, prompt: out.prompt });
+  });
 
   app.post('/api/image/pro/generate', proLimiter(), validateBody(proSchema), async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;

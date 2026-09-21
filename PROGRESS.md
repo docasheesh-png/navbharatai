@@ -77853,3 +77853,22 @@ bypassing the local-bytes door → fails.
 
 ⚠️ `lucide-react` in this install exports neither `Crop` nor `Scaling` (both appear in the d.ts under
 other names); `Move` and `Maximize2`, already imported elsewhere in the repo, are used instead.
+
+## 2026-09-21 — the platform has a day too: a ceiling on images the FREE tier gets from a PAID engine
+
+The number PR #3234 left open, built as the first proactive item after the admin's list was done.
+
+- **`src/server/lib/imageFreePaidBudget.ts`** — `AI_IMAGE_FREE_PAID_DAILY_CAP`, default **300/day
+  platform-wide**, a COUNT (no image model is on the rate card, and a rupee figure would be invented).
+  One Firestore document per UTC day (server clock), `increment(1)` on every PAID delivery to a free-tier
+  user; ~hundreds of writes a day at most, far below the hot-document line (§SCALE-PLAN item 1 is for a
+  cap two orders of magnitude higher). Unreadable env → the default, never unlimited; `0` → the free
+  provider or nothing; only `off` lifts it.
+- **Fails CLOSED**: a counter that cannot be read refuses the paid rungs (the free provider is still
+  tried first on every press). Free-listed accounts are neither counted nor refused.
+- **One reader**: `allowPaidRung()` in the FREE route, after the user's own allowance and before the
+  first paid rung; the count moves inside `deliver()` for a paid rung only. The Pro route does not
+  consult it — the wallet is that tier's bound. The refusal is branded and names no engine or number.
+
+Tests: `tests/thePlatformHasADayToo.test.ts` — the env parsing, the decision, the wording, and the
+ORDER at source level; proven by reversion.

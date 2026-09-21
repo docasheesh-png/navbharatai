@@ -13,6 +13,7 @@ import {
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
 import { triageImageRequest } from '../lib/imageSafety';
+import { imageFreePaidBudget, FREE_PAID_CAP_MESSAGE } from '../lib/imageFreePaidBudget';
 import { enhanceImagePrompt, ENHANCE_MAX_INPUT } from '../lib/imagePromptEnhancer';
 import { aiRouter } from '../lib/aiRouter';
 import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
@@ -205,6 +206,18 @@ export function registerImageGenRoutes(app: Express): void {
           if (!res.headersSent) res.status(gate.status).json(gate.body);
           return false;
         }
+        // 🔒 THE PLATFORM'S OWN DAY, after the user's own allowance: a per-user cap bounds one account
+        // and nothing bounded the whole platform (PR #3234's open item). Read once per request, before
+        // the first paid rung, and never for a free-provider image. Free-listed users (the admin's own
+        // test accounts) are not counted against it — they are how the paid rungs get verified at all.
+        if (!gate.isFreeListed) {
+          const budget = await imageFreePaidBudget.decide();
+          if (!budget.allow) {
+            gateRefused = true;
+            if (!res.headersSent) res.status(503).json({ error: FREE_PAID_CAP_MESSAGE, code: 'free_paid_cap' });
+            return false;
+          }
+        }
       }
       return true;
     };
@@ -255,6 +268,8 @@ export function registerImageGenRoutes(app: Express): void {
         // Only a PAID rung spends an allowance. A free Pollinations image never counts against a quota,
         // and a failed rung never spends anything — the burn happens on delivery, not on attempt.
         if (paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+        // The platform's count moves on DELIVERY, like the user's — never on an attempt that failed.
+        if (paidRung && gate && gate.allow && !gate.isFreeListed) void imageFreePaidBudget.record();
         // `notes` carries the honest caveats (a style chip that was overruled, or the warning that
         // image engines cannot spell). Surfacing them is the point: a user who knows their shop name
         // may come out garbled can shorten it, where a silent bad spelling just wastes their time.

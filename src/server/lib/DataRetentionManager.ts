@@ -185,6 +185,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   // generous; the per-visitor collection is the one that actually grows with an app's audience.
   { collection: 'app_ai_usage', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
   { collection: 'app_ai_visitors', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  // `updatedAt: Date.now()` — imageFreePaidBudget. ONE document per UTC day: the platform-wide count of
+  // images the FREE tier got from a PAID engine. It enforces that day's cap and is read afterwards
+  // only to judge whether the cap is right, which 90 days of history answers.
+  { collection: 'image_free_paid_daily', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
 
   /**
    * Visitor counts for published apps — the ONE window this registry promised in PUBLIC and did not keep.

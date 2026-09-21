@@ -50,6 +50,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   monitor_alert_state: { kind: 'platform', why: 'a single document holding alert episodes' },
   web_risk_budget:     { kind: 'platform', why: 'one doc per calendar month, replaced in place' },
   agentv3_engine_use:  { kind: 'platform', why: 'one doc per day of engine use' },
+  image_free_paid_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier images a PAID engine served; no person in it' },
   fleet_mistakes_v3:   { kind: 'platform', why: 'cross-fleet learning, keyed by the mistake, not a person' },
 
   site_analytics:      { kind: 'retained', why: 'visitor day-counts; the policy promises 30 days' },

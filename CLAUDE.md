@@ -1632,6 +1632,27 @@ the code (it is actually read somewhere) on 2026-07-11.
   in the shared `pollinationsSeed`, with a test that reads the seed back.
   Test-locked and reversion-proven four ways in `tests/thePaidTierAsksPollinationsFirst.test.ts`.
 
+- **🧮 `AI_IMAGE_FREE_PAID_DAILY_CAP` — the PLATFORM-WIDE daily ceiling on images the FREE tier gets
+  from a PAID engine (built 2026-09-21; the number PR #3234 left open). ⚠️ NOT set, and the code default
+  is **300 a day across the whole platform**.** Read by `src/server/lib/imageFreePaidBudget.ts`; its
+  single reader is `allowPaidRung()` in `routes/imageGen.ts` (the FREE route only — Pro's bound is the
+  wallet). `0` ⇒ the free tier never touches a paid engine (the free provider or nothing); an unreadable
+  value ⇒ the default, **never unlimited** (the `AGENTV3_FEATURE_HEAL_PCT` lesson); only the explicit
+  word `off` lifts it.
+  🔴 **WHY:** the free tier costs ₹0 while the free provider serves; its paid rungs (Gemini, Grok) and an
+  EDIT of the user's own picture are paid by NavBharatAI. The only bound was PER USER
+  (`AI_IMAGE_FREE_DAILY_LIMIT`, default 3) — at 10,000 users a bad hour at the free provider was 30,000
+  paid images with nothing to stop it, at a price `providerRates.ts` still does not carry. **A COUNT, not
+  a rupee figure**, because THE ONE-WALLET LAW forbids inventing a cost and no image model is on the rate
+  card; a count is a number that is true.
+  🔒 **FAILS CLOSED** (like `webRiskBudget.ts`, unlike the wallet gate): a counter that cannot be read
+  refuses the paid rungs — one user re-presses in a minute (the free provider is still tried first, every
+  time), whereas opening paid rungs on a counter nobody can read is the unbounded bill itself. The count
+  moves on DELIVERY only, never on a failed attempt; free-listed accounts (the admin's own) are neither
+  counted nor refused, because they are how the paid rungs get verified at all.
+  **What to watch:** `[IMAGE_GEN] free-tier PAID image cap reached` in the server log (once per process
+  per day) — the number that says whether 300 is right, and how often the free provider is really failing.
+
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

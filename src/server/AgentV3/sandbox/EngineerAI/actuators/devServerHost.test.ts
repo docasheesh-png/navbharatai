@@ -989,13 +989,27 @@ describe('env prefixes survive a pipeline (autopsy debc468c — the 5173-vs-5000
       .toBe('HOST=0.0.0.0 npm run dev 2>&1 | head -60');
   });
 
-  it('still refuses to prefix a CHAIN, where the prefix would land on the wrong command', () => {
-    // `PORT=5173 cd app && npm run dev` would give the port to `cd`. A chain is genuinely unsafe —
-    // this is the half that keeps the fix from being a different bug.
+  it('a CHAIN is not FRONT-prefixed — the prefix goes on the SERVER segment instead', () => {
+    // ⚠️ THIS EXPECTATION CHANGED ON 2026-09-21 (autopsy bff0bf23), and the reason the test was
+    // written is PRESERVED rather than weakened. It read: "`PORT=5173 cd app && npm run dev` would
+    // give the port to `cd`. A chain is genuinely unsafe — this is the half that keeps the fix from
+    // being a different bug." Both sentences are still true. The first is now asserted DIRECTLY at
+    // the end of this test, instead of being implied by doing nothing at all.
+    //
+    // WHAT THE NEW REPORT SHOWED: doing nothing is not neutral. The agent ran
+    // `cd workspace/mitrify && npm run dev`, the command came back unprefixed, and the app took
+    // `process.env.PORT || 5000` — measured in the user's own repository, `server/index.ts:71`. 5000
+    // was already held, and the health check spent 94 seconds over two failed restarts. That is the
+    // IDENTICAL cascade this describe block's first test quotes for the pipeline case; chains were
+    // simply the half left refused.
     expect(pinDevServerPort('cd app && npm run dev', 5173, undefined, NODE_SCRIPT))
-      .toBe('cd app && npm run dev');
+      .toBe('cd app && PORT=5173 npm run dev');
     expect(ensureHostBinding('cd app; npm run dev', undefined, NODE_SCRIPT))
-      .toBe('cd app; npm run dev');
+      .toBe('cd app; HOST=0.0.0.0 npm run dev');
+    // 🔒 The invariant the old expectation existed for, now stated positively: whatever else happens,
+    // the prefix must never attach to the front of the chain, where `cd` would consume it.
+    expect(pinDevServerPort('cd app && npm run dev', 5173, undefined, NODE_SCRIPT)).not.toMatch(/^PORT=/);
+    expect(ensureHostBinding('cd app; npm run dev', undefined, NODE_SCRIPT)).not.toMatch(/^HOST=/);
   });
 
   it('refuses to prefix when something else FEEDS the server', () => {

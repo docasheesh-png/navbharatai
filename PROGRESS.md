@@ -75362,6 +75362,121 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — A CHAIN IS NOT A REFUSAL: our own PORT injection failed silently on `cd x && npm run dev`
+
+**The admin asked the question that settled it** (verbatim): *"preview port 5000 par tha, navbharatai
+ne 3000 par chalaya is liye nahi chala, aisi isthiti me ya to navharatai ko 5000 par chalana chahiye
+ya app me edit kar ke 3000 kar dena chahiye?"* — and then, decisively: *"yeh repo dekho batao kon se
+port par chalegi?"*
+
+### The answer, MEASURED in their own repository, not inferred
+
+`aashishcpmt093-ui/mitrify`, `server/index.ts:71` (read from a real clone):
+
+```ts
+const port = parseInt(process.env.PORT || "5000", 10);
+```
+
+and `package.json`'s dev script is `NODE_ENV=development tsx server/index.ts`.
+
+**So the port is whatever `PORT` says, and 5000 when nothing says anything.** Two consequences worth
+recording because both were guessed wrongly earlier in the session:
+
+- ⚠️ **`--port` is inert on this app.** `tsx server/index.ts` never reads argv, so the flag the
+  platform appends can change nothing. `DevServerRecovery.ts`'s `conflictPort` field already records
+  exactly this from an earlier mitrify report — *"an Express server ignoring the `--port` flag we
+  appended and taking `process.env.PORT || 5000`"*.
+- ⚠️ **It is ONE process, not two.** `setupVite(httpServer, app)` — Express serves the Vite client
+  itself. So the two-port hypothesis (*"web page on one port, API on another"*, which
+  `isSecondaryAppPort` exists for) does NOT apply to this app, and the suggestion that it might was
+  withdrawn.
+
+### 🔴 THE DEFECT: the guard was RIGHT and INCOMPLETE
+
+Build 1 was correct end to end: the managed launch composes `PORT=3000 HOST=0.0.0.0 npm run dev`
+(`devScript.ts`), the app bound 3000, logged `serving on port 3000`, the preview published 3000, and a
+real browser rendered it.
+
+Build 2's command came from the sub-agent instead: **`cd workspace/mitrify && npm run dev`**. And
+`canPrefixEnv` (`devServerHost.ts:147`) says:
+
+```ts
+if (/&&|;/.test(command)) return false;   // the prefix would land on the chain's FIRST command
+```
+
+That refusal is **correct** — `PORT=3000 cd x && npm run dev` gives the variable to `cd`, real shell
+semantics, and a wrong prefix is worse than none. But the refusal returned the command with **no port
+at all**, and for a plain Node server that is not a neutral outcome: it fell back to its own 5000,
+that port was already held, and the health check spent **94 seconds** over two failed restarts
+(`EADDRINUSE 0.0.0.0:5000`, "attempt 1 … attempt 2 — Port 5000 is already in use").
+
+🔑 **So neither of the admin's two options is the fix, and one of them is forbidden.** Running the
+app's own port is already the design (`PortDiscovery` ranks the app's boot log first). **Editing the
+user's app to change its port must never happen** — it is the engine rewriting a user's code to suit
+our infrastructure (the class autopsy `c5fd6ad1` was written about), and it would break their app on
+Render, on their own machine and in their own `.env`. Our sandbox can publish any port, so "we need
+3000" was never a real constraint.
+
+### Fixed
+
+`prefixEnvOnChainedServer` (`devServerHost.ts`, pure) places the prefix on the segment that actually
+starts the server: `cd workspace/mitrify && PORT=3000 npm run dev`. It returns **null** whenever it
+cannot be done safely and the caller then keeps today's behaviour exactly — so it can only ever ADD a
+correct prefix, never move or remove one.
+
+- `startsADevServer` is deliberately **narrower** than the loose `/(?:npm|pnpm|yarn|bun)\b/` the
+  un-chained path passes to `canPrefixEnv`: in a chain the wrong choice is reachable, and
+  `npm install && npm run dev` must put the port on the SERVER, never on the install.
+- `hasSeparatorInsideQuotes` stands the helper down when an `&&` sits inside a quoted literal
+  (`node -e 'a && b'`), because splitting on text would cut the program in half.
+- The **LAST** qualifying segment wins, which is what makes `npm install && npm run dev` land right.
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE (rule 3):** the `HOST=0.0.0.0` injection has the identical
+  shape and the identical gap, so a chained command also got no HOST — and a server that reads HOST
+  from the env (CRA, and any plain Node app that does) bound localhost and was unreachable through the
+  preview URL. Same refusal, same silent cost.
+
+### ⚠️ Corrections to claims made earlier in this session
+
+- **"The cloned copy had no `.env`, so PORT was missing" — WRONG.** `mitrify` has **no `dotenv`
+  dependency at all** and never reads a `.env` itself; `process.env.PORT` can only come from the real
+  process environment. The cause is the `&&`, not a missing file. The wrong explanation was reported
+  to the admin and is corrected here rather than quietly dropped.
+- **The two-port / `isSecondaryAppPort` theory does not apply to this app** (one process — see above).
+
+### Still open, and NOT guessed at
+
+**Nothing records what the USER'S PREVIEW SURFACE was showing.** Build 1 proved the app rendered on
+3000 by every means the platform has; 94 seconds later the user said the preview had not run, and the
+server was still listening (build 2's own `EADDRINUSE` proves it). Every proof we hold is about the
+SERVER and the SANDBOX; not one is about the pane the user is looking at. This fix removes a real
+94-second stall and a real silent HOST gap — **it is not claimed to be the whole of "preview nahi
+chala"**, and a fix built on a theory of that would be the surface patch the fourth rule forbids.
+
+**Also considered and NOT done:** asking the user which port to use, via the header help control. A
+port number is our plumbing, not a product decision a non-technical user can answer, and that control
+is a HELP surface — turning it into a configuration prompt would change what it is. Where an app
+genuinely has two ports, `isSecondaryAppPort` (2026-09-18) already TELLS rather than asks, which is
+the right shape.
+
+### ⚠️ ONE PRE-EXISTING TEST DELIBERATELY PINNED THE OLD BEHAVIOUR — and it was STRENGTHENED, not weakened
+
+`devServerHost.test.ts` carried *"still refuses to prefix a CHAIN, where the prefix would land on the
+wrong command"* (autopsy `debc468c`, the 5173-vs-5000 cascade), whose comment called the refusal *"the
+half that keeps the fix from being a different bug."* The full suite caught it — a targeted run would
+not have.
+
+**It was not changed to match new behaviour; its own stated reason was preserved and is now asserted
+directly.** That reason is about ONE placement: *"`PORT=5173 cd app && npm run dev` would give the
+port to `cd`"* — front-prefixing. This change does not front-prefix, and the test now asserts
+positively that the result never starts with `PORT=`/`HOST=`, which the old expectation only implied
+by doing nothing. What was incomplete was the CONCLUSION drawn from the reason ("therefore do
+nothing"), and the same describe block's FIRST test quotes the identical cascade for pipelines — so
+chains were simply the half left refused by the fix that block records.
+
+Tests: `tests/aChainIsNotARefusal.test.ts` (17), **reversion-proven three ways** — reverting the
+wiring fails 1, using the loose predicate in the chain fails 3, dropping the quoted-separator
+stand-down fails 1.
+
 ## 2026-09-21 — AUTOPSY c5fd6ad1 + bff0bf23: the engine cloned the user's project INTO their project, on a turn that said "do not change any files"
 
 **The two builds.** `c5fd6ad1` — *"Import this app from my GitHub repository and give me a short survey

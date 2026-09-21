@@ -2839,6 +2839,24 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['revenue', 'purchases', 'who paid', 'kisne kharida', 'kisne payment ki', 'transactions', 'transaction id', 'refund', 'tokens purchased', 'user wise purchase', 'admin revenue', 'payments list', 'paid users', 'free users', 'paid free filter', 'kaun paid user hai', 'paid user list', 'ascending', 'descending', 'asc desc', 'sort order', 'reverse sort'],
   },
   {
+    id: 'admin-diagnostics',
+    name: 'Diagnostics (admin) — the engine reports that had no screen',
+    path: 'Admin Dashboard \u2192 Diagnostics',
+    description: `Admin-only page carrying the thirteen report endpoints that the server had always computed and never shown anywhere:
+\u2022 BUILDER SCORECARD \u2014 build success rate, how often the builder had to repair its OWN output (heal pressure), whether edits to an existing app survive, median build time and median cost. Every rate states the sample it rests on, and an unmeasured value shows an em dash rather than 0
+\u2022 ABSORBED LOSSES \u2014 builds that were not charged under "working app or free", and what their provider cost us
+\u2022 ENGINE USAGE AND MARGIN \u2014 tokens per engine against what was billed
+\u2022 DAILY METRICS HISTORY \u2014 the stored daily snapshots, the only record that survives a deploy
+\u2022 ASSISTANT SPEND \u2014 what the Professionals and the other assistants cost, and the share served free
+\u2022 PLATFORM STATE \u2014 engine status, release gate, persisted feature flags, encryption key version, the build event log, the published-app registry, the removal record and recent announcements
+\u2022 Every card has its own Copy and Download, so a report can be sent into a chat as JSON. Download is hidden inside the Android app because its WebView cannot save a file; Copy works everywhere
+\u2022 Some cards on other tabs now carry a red "proposed for deletion" badge \u2014 tap one to read why it is a duplicate, superseded or resets on every deploy. A badge hides nothing and deletes nothing`,
+    howToUse: 'Admin login required. Open the admin panel and choose Diagnostics (on a phone it is in the bottom bar). Press Copy on any card to put that whole report on the clipboard as JSON, then paste it into the chat. "Reload all" re-reads every card.',
+    relatedFeatures: ['admin-monitor', 'admin-metrics'],
+    keywords: ['diagnostics', 'builder scorecard', 'heal pressure', 'engine quality', 'is the engine getting better', 'losses', 'margin', 'provider status', 'release gate', 'feature flags', 'takedowns', 'deployments', 'event log', 'copy report', 'download report', 'report json', 'admin diagnostics', 'engine report', 'red mark', 'proposed for deletion', 'duplicate card'],
+    aiSurface: undefined,
+  },
+  {
     id: 'admin-monitor',
     name: 'Live Monitor (admin home)',
     path: 'Admin Dashboard → Monitor (the page that opens on login)',

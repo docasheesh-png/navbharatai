@@ -76314,3 +76314,38 @@ build, test:bundle, boot:check, deps:server-gate.
 ⚠️ **STILL THE ADMIN'S TO DECIDE (not a defect):** whether a duplicate charge returned as MONEY
 should be the net we received rather than the gross. They were shown the chargeback arithmetic and
 chose the credit-or-cash choice instead; the net-only option remains open if they want it.
+
+## 2026-09-21 — ⏰ `DATA_GOV_IN_API_KEY` RE-OPENED AS A FUTURE ITEM, with a real reminder rather than a sentence
+
+Admin, verbatim: *"DATA_GOV_IN_API_KEY —future me lena hai, aisa mujhe baad me yad dilwana."*
+
+Yesterday this key was **parked** in `CLAUDE.md`, with an explicit instruction not to put it back on
+the admin's queue — they had tried to register on data.gov.in and the portal's own account
+verification would not complete, so re-issuing the instruction would have been the wasted-instruction
+class #3196 was written about. That entry named its own re-open condition. **The admin has now
+exercised it themselves**: they do want the key, later, and they asked to be reminded.
+
+**What changed, and what deliberately did not.** Only the STATUS changed — from a dead end to a
+deliberate future item. The key is still unset, `src/server/lib/cpcbAirQuality.ts` is untouched, AQI
+questions still fall through to web search, and nothing is on the admin's queue today. **The parking
+text was NOT deleted**, because this file's own convention is that a change of instruction must stay
+legible: a later session reading only the new paragraph would not know why the key was ever hard to
+get, and one reading only the old one would re-park something the admin has re-opened.
+
+🔴 **A REMINDER THAT LIVES ONLY IN A DOC IS NOT A REMINDER — IT IS A SENTENCE NOBODY IS SCHEDULED TO
+READ.** The admin asked to be reminded, so the reminder is a real scheduled Routine
+(`trig_0171RbmfL7S5hYbmY6wJ2Wyn`, one-shot, 2026-10-21 11:00 IST, push + email) and its id is written
+into `CLAUDE.md` so it can be moved or cancelled rather than duplicated. It does **no work**: it
+re-reads the `CLAUDE.md` block first and stands down if a later session has recorded the key as
+obtained, and it says plainly if it could not verify — an unconditional reminder would eventually
+tell the admin to do something already done.
+
+⚠️ **THE DATE IS A GUESS AND IS LABELLED AS ONE, in both files.** Nobody can predict when a
+government portal's verification starts working, so a month is a horizon, not evidence. The three
+triggers that actually mean something are recorded beside it: the admin asks what is still pending in
+Cloud Run; a report shows an AQI question falling through to web search; or the Open-Meteo commercial
+plan ($29/month) is bought — at which point the live-data licence question is already open on their
+desk and these two belong in one decision rather than two. A session meeting any of them should raise
+the key without waiting for the Routine.
+
+Documentation only — no code path, no test and no build behaviour is touched by this change.

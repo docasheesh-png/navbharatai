@@ -5,6 +5,7 @@ import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDis
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import type { ToolUse } from '../src/server/AgentV3/ClaudeClient';
+import { BROWSER_DAEMON_SCRIPT } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 
 /**
  * 🔴 A CLEAN APP AND A BROWSER THAT NEVER RAN WERE THE SAME OBSERVABLE
@@ -33,15 +34,20 @@ import type { ToolUse } from '../src/server/AgentV3/ClaudeClient';
 // ── Half 1: the daemon makes the flag mean something ─────────────────────────────────────────────
 
 describe('🔴 the browser daemon creates its console log when the browser really launches', () => {
-  const E2B = readFileSync(
-    fileURLToPath(new URL('../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url)),
-    'utf8',
-  );
-  const daemonRaw = (() => {
-    const at = E2B.indexOf('const BROWSER_DAEMON_SCRIPT = `');
-    expect(at, 'the daemon script must be findable').toBeGreaterThan(-1);
-    return E2B.slice(at, E2B.indexOf('`.trim();', at));
-  })();
+
+  // ⚠️ RETARGETED 2026-09-21, NOT WEAKENED — and the reason is this suite's own subject matter.
+  //
+  // This used to slice the daemon's SOURCE text out of the actuator. The 2026-09-21 autopsy found that
+  // the daemon was the ONLY browser lane recording anything — `browseUrl`, the navigation the platform
+  // makes on essentially every build, attached no listener at all — so the recorder moved into one
+  // shared definition both lanes interpolate. The source slice stopped containing the literal touch
+  // while the EMITTED script still did exactly what these four cases require.
+  //
+  // So they now read the emitted `BROWSER_DAEMON_SCRIPT`, which is what the sandbox really runs. Every
+  // assertion below is the same claim; only the spelling of the identifiers changed (`fs` → `__nbaiFs`,
+  // `LOG` → `__nbaiLog`), and the touch is now a named `recSessionExisted()` whose whole body is the
+  // try/catch these cases demand.
+  const daemonRaw = BROWSER_DAEMON_SCRIPT;
   /**
    * ⚠️ COMMENTS STRIPPED, and this is the FOURTH guard in one day to need it.
    *
@@ -53,25 +59,35 @@ describe('🔴 the browser daemon creates its console log when the browser reall
   const daemon = daemonRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
   it('it touches the log file at all — otherwise "the file is missing" can never mean anything', () => {
-    expect(daemon).toContain("fs.appendFileSync(LOG,'')");
+    // ⚠️ THE CALL, NOT THE HELPER. The first retarget asserted only that the shared recorder DEFINES
+    // `recSessionExisted` — which stayed true with the daemon's call deleted, so the guard passed on a
+    // daemon that touched nothing. Caught by reverting the call and seeing this case survive. The
+    // helper's existence is a fact about the shared module; what this suite is about is the daemon
+    // invoking it.
+    expect(daemon).toMatch(/^\s*recSessionExisted\(\);/m);
+    expect(daemon).toContain("appendFileSync(__nbaiLog,'')");
   });
 
   it('🔒 AFTER the browser launches, never before — the file must mean "a session existed"', () => {
     const launch = daemon.indexOf('chromium.launch(');
-    const touch = daemon.indexOf("fs.appendFileSync(LOG,'')");
+    // The CALL, not the declaration: `recSessionExisted` is now a named function defined in the shared
+    // recorder ABOVE the launch, and invoked below it. Matching the bare name would find the
+    // definition and assert nothing — the trap this comment exists to stop someone falling into.
+    const touch = daemon.search(/^\s*recSessionExisted\(\);/m);
     expect(launch).toBeGreaterThan(-1);
     expect(touch).toBeGreaterThan(launch);
   });
 
   it('🔒 APPEND, never write — a resumed daemon must not erase what the previous one recorded', () => {
-    expect(daemon).not.toContain('fs.writeFileSync(LOG');
+    expect(daemon).not.toMatch(/writeFileSync\(__nbaiLog/);
     // The error recorder is still an append too; nothing in this script may truncate the log.
     expect(daemon).not.toMatch(/truncate|\{\s*flag:\s*'w'\s*\}/);
   });
 
   it('🔒 and it cannot take the daemon down — the browser matters more than the bookkeeping', () => {
-    const at = daemon.indexOf("fs.appendFileSync(LOG,'')");
-    expect(daemon.slice(at - 10, at + 40)).toContain('try{');
+    const at = daemon.indexOf("appendFileSync(__nbaiLog,'')");
+    expect(at).toBeGreaterThan(-1);
+    expect(daemon.slice(at - 20, at + 40)).toContain('try{');
     expect(daemon.slice(at, at + 60)).toContain('catch');
   });
 });

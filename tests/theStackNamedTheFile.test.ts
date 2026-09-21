@@ -12,6 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { BROWSER_DAEMON_SCRIPT, browsePageScript } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 import { appSourceFrame, siteTag, siteTagFromStack } from '../src/server/AgentV3/runtimeErrorSite';
 import {
   filterActionableErrors, formatRuntimeErrors, runtimeErrorsRemainRecord, type RuntimeError,
@@ -177,8 +178,16 @@ describe('REVERSION GUARDS - the capture is a sandbox script string no test can 
   const actuator = readFileSync('src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts', 'utf8');
   const autofix = readFileSync('src/server/AgentV3/AutoFix.ts', 'utf8');
 
-  it('the browser daemon passes the stack to its recorder', () => {
-    expect(actuator).toContain("page.on('pageerror',e=>rec('pageerror',e&&e.message||e,e&&e.stack));");
+  // ⚠️ RETARGETED 2026-09-21, NOT WEAKENED. This matched the listener's literal SOURCE spelling, and
+  // the 2026-09-21 autopsy moved those four listeners into ONE shared definition (`attachConsoleJs`)
+  // so that `browseUrl` could carry them too — the daemon was the only browser lane recording anything.
+  // The invariant is unchanged and is now asserted against the EMITTED script, which is strictly
+  // stronger: it proves what the sandbox will actually run rather than how this file happens to be
+  // written, and it covers BOTH lanes, so a future edit cannot drop the stack from one of them.
+  it('every recording lane passes the stack to its recorder', () => {
+    for (const script of [BROWSER_DAEMON_SCRIPT, browsePageScript('https://x.e2b.app/')]) {
+      expect(script).toContain("on('pageerror',e=>rec('pageerror',e&&e.message||e,e&&e.stack));");
+    }
   });
 
   it('the recorder writes it, bounded', () => {

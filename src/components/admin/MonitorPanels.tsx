@@ -20,6 +20,7 @@
  * surface (White-Label Law §3). None of it may ever be rendered on a user-facing screen.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { UnusedCardMark } from './UnusedCardMark';
 import { Activity, AlertTriangle, RefreshCw, Cpu, IndianRupee, CheckCircle2, Clock, Server, Eye, Bell, Scale } from 'lucide-react';
 import { stackedBarLayout, linePoints, donutSegments, axisTickIndices } from '../ui/charts/chartGeometry';
 import {
@@ -799,6 +800,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         <div className={PANEL}>
           <div className="mb-3">
             <h3 className={PANEL_TITLE}>Since this server started</h3>
+            <UnusedCardMark id="since-boot-not-durable" />
             <p className={PANEL_SUB}>
               Resets on every deploy — a drop here is a restart, not an outage
             </p>

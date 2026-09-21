@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight, Wrench} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
@@ -24,6 +24,8 @@ import { MonitorPanels } from './admin/MonitorPanels';
 import { LoadBoard } from './admin/LoadBoard';
 import { AudienceCard } from './admin/AudienceCard';
 import { ReportExportButtons } from './admin/ReportExportButtons';
+import { EngineReportsPanel } from './admin/EngineReportsPanel';
+import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { PushHealthCard } from './admin/PushHealthCard';
@@ -59,7 +61,7 @@ interface AdminDashboardProps {
   onFooterApi?: (api: AdminFooterApi | null) => void;
 }
 
-type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'apkreports' | 'security' | 'settings';
+type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'apkreports' | 'diagnostics' | 'security' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   // HOME = the live Monitor (2026-08-23). The old Overview content was not removed — it is rendered
@@ -81,6 +83,12 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
   // pipeline, different failure shape (Gradle/Xcode/npm, not an AI build turn), so it gets its own page
   // rather than being squeezed into either existing inbox's fields.
   { id: 'apkreports', label: 'APK Reports', icon: Smartphone },
+  // DIAGNOSTICS (admin 2026-09-21): *"13 endpoints par asli diagnostic data ban raha hai jo kisi
+  // screen par dikhta hi nahi. pahle yahi banao!"* — the audit found thirteen report routes that
+  // compute a real answer on every call and had no client at all. They get their own page rather
+  // than being scattered: what they have in common is that they answer "is the ENGINE getting
+  // better", which is a different question from any existing tab's.
+  { id: 'diagnostics', label: 'Diagnostics', icon: Wrench },
   { id: 'security',  label: 'Security',     icon: Shield },
   { id: 'settings',  label: 'Settings',     icon: Settings },
 ];
@@ -1969,6 +1977,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-card border border-line rounded-[1.5rem] p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-black text-ink uppercase tracking-tight">Platform Health Score</h3>
+                    <UnusedCardMark id="health-score-duplicate" />
                     <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
                       healthScore.score.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
                       : healthScore.score.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-info'
@@ -2006,6 +2015,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-card border border-line rounded-[1.5rem] p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-black text-ink uppercase tracking-tight">AI Insights</h3>
+                    <UnusedCardMark id="ai-insights-duplicate" />
                     <span className="text-[9px] text-faint font-bold uppercase tracking-widest">Derived from live metrics — not projected</span>
                   </div>
                   <div className="space-y-2">
@@ -2086,6 +2096,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                   <div>
                     <h3 className="text-sm font-black text-ink uppercase tracking-tight">Provider Token Burn</h3>
+                    <UnusedCardMark id="provider-token-burn-duplicate" />
                     <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Chat token consumption by provider' : 'Token consumption by provider'}</p>
                   </div>
                   <div className="space-y-3">
@@ -2123,6 +2134,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* Recent Purchases */}
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
                 <h3 className="text-sm font-black text-ink uppercase tracking-tight">Recent Token Purchases</h3>
+                    <UnusedCardMark id="recent-token-purchases-superseded" />
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
@@ -4658,6 +4670,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               )}
             </div>
+          )}
+
+          {/* ── DIAGNOSTICS TAB (admin 2026-09-21) ── */}
+          {activeTab === 'diagnostics' && (
+            <EngineReportsPanel adminToken={adminToken} onStatus={toast} />
           )}
 
           {/* ── SECURITY TAB ── */}

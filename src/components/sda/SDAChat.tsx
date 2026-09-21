@@ -32,6 +32,7 @@ import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { ModeButton } from '../chat/ModeButton';
 import { AttachMenu } from '../AttachMenu';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { MessageEditActions } from '../chat/MessageEditActions';
@@ -73,6 +74,12 @@ interface SDAChatProps {
    * that would be a list where every entry led to the same place.
    */
   openCaseId?: string;
+  /**
+   * Open the ONE mode picker (admin 2026-09-21). `undefined` on a phone, where the bottom bar already
+   * carries Mode. Doctor AI needs it as much as any expert: `isModeSurface` has always named this
+   * view, but on a desktop there was no control here that led anywhere else.
+   */
+  onOpenModePicker?: (() => void) | undefined;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -277,7 +284,7 @@ const buildCasePDF = (
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
+export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenModePicker }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1325,6 +1332,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId }) => {
             layout is what the admin asked to align, not the meaning.
           */}
           <div className="flex items-end gap-2">
+            {/* Before the input box, same shared button and same sheet as every other surface. */}
+            <ModeButton onOpen={onOpenModePicker} />
             <AttachMenu
               onFiles={handleFiles}
               fileAccept={ACCEPTED_TYPES}

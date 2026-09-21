@@ -37,6 +37,35 @@ describe('the opener is decided ONCE', () => {
   });
 });
 
+describe('EXACTLY ONE Mode control, on every device — never two, never none', () => {
+  // The admin asked outright: "mobile me kaam karega???" It does, and not through this button — the
+  // bottom bar has carried Mode since 2026-08-25. The two are complementary BY CONSTRUCTION, and that
+  // is the property worth pinning: the bar renders only when `showsGlobalMobileNav` is true, and the
+  // composer's opener is `undefined` in exactly that case. Break either half and a real user is left
+  // with two Mode buttons stacked on a phone, or a chat with no way out at all — and nothing else in
+  // this repo would notice, because both halves type-check perfectly either way.
+
+  it('the bottom bar offers Mode on the same surfaces this button serves', () => {
+    // One list decides both: `isModeSurface` names the free chat, the hub, Doctor AI, the image
+    // studio and every expert, and it is what the footer branches on.
+    expect(app).toContain('isModeSurface(activeView) ?');
+    expect(app).toMatch(/key: 'mode',[^\n]*label: 'Mode'/);
+    expect(app).toContain("if (key === 'mode') { setShowModePicker(true); return; }");
+  });
+
+  it('the bar and the button are gated on the SAME condition, in opposite directions', () => {
+    // The bar: rendered while the condition holds.
+    expect(app).toContain('{showsGlobalMobileNav && (\n        <nav');
+    // The button: available while it does NOT.
+    expect(app).toContain('const modePickerOpener = showsGlobalMobileNav ? undefined : () => setShowModePicker(true)');
+  });
+
+  it('both doors open the one picker — there is no second mode state anywhere', () => {
+    expect(app.match(/const \[showModePicker, setShowModePicker\] = useState/g)?.length).toBe(1);
+    expect(app.match(/<ModePickerSheet/g)?.length).toBe(1);
+  });
+});
+
 describe('every surface that renders a chat composer receives it', () => {
   it('all 70+ expert chats get the opener — not most of them', () => {
     const total = (app.match(/<ProfessionalChat\b/g) ?? []).length;

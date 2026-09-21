@@ -76775,3 +76775,93 @@ the preview is on screen AND the tab is visible, never while backgrounded, and i
 *"Thodi der chala le"* measured as attention rather than wall clock.
 
 Full gate green on the final state.
+
+---
+
+## 2026-09-21 — 🧬 THE EVIDENCE LEDGER: it was never a missing store, it was a missing VOCABULARY
+
+Admin: *"fir yeh ek ek kar ke pura karro"*, starting with the ledger. Reading the code first found that
+**`CLAUDE.md` and this file are both wrong about it**: this is recorded as a wholly OPEN root cause —
+*"there is no shared EVIDENCE LEDGER … until one ledger exists that any actor writes a proven fact
+into and every verdict reads from, this class returns"* — and it is not open. It is **half built, and
+the built half is what made the rest invisible.**
+
+### What was actually there
+
+| reader | reads | answers |
+|---|---|---|
+| `provenFromTimeline` | `APP_RENDERED`, `RUNTIME_VERIFIED`, `PREVIEW_PUBLISHED` | preview / pages |
+| `appWasSeenRunning` | `GREEN_GUARD_SAVE`, `PREVIEW_PUBLISHED` | was the app seen running |
+| `agentRunEvidence` | the shell command log | typecheck / tests |
+
+Three readers of one build, three different code-sets, and **not one of them read `IN_BUILD_GREEN`** —
+a pass that opens the app in a real browser, refuses a curl capture outright (`shot.source !==
+'browser'` ⇒ `no-browser`), and records *"The app rendered in a real browser Ns into this build"*. An
+actor proved the fact, wrote it down, and no verdict in the engine asked.
+
+### 🔴 The finding that explains six autopsies: the ledger was a MIRROR
+
+`APP_RENDERED`'s only writer is `appRenderedRecord`, called from exactly two places, both inside
+`markAppRendered` — which sets the route's local `previewVerifiedRendered` flag **first**. So
+`provenFromTimeline(…).preview === 'passed'` could never be true while that flag was false. **The
+ledger could not answer a question the local boolean could not already answer.** `renderProof.ts`'s
+own docblock promises a fact *"written once, by one function, and read by everyone"*; the first half
+was true and the second was not.
+
+And the READ was three questions, not one: the runtime verdict asked the ledger, while `claimAudit`'s
+`previewVerified` and `verifiedNoChangeSummary`'s `appRendered` asked the local flag — the ledger read
+being declared `let renderProven` **inside one `else if` block**, where its two neighbours could not
+reach it. ⚠️ `verifiedNoChangeSummary` is the sharpest case: it **is** autopsy 697b38ee's own fix, the
+one that stops a check-and-finish turn being told *"The build produced no files"* — and it was reading
+the narrower source. An app proven green by `inBuildGreen` and nothing else got that exact sentence.
+
+### The fix
+
+- **`renderProof.ts` owns the vocabulary**: `RENDER_PROVEN_CODES` = `{ APP_RENDERED, IN_BUILD_GREEN }`,
+  plus `renderProvenByAnyActor`. Membership requires the producer to be **structurally incapable** of
+  recording the code for a non-browser capture — verified by reading each producer's guard, never its
+  message. `IN_BUILD_GREEN_CODE` is a shared constant now (one constant, two sides).
+- **`provenFromTimeline` asks the set** instead of testing one literal.
+- **One hoisted `renderProvenNow()`** in the route; all three consumers call it. Fill-only and
+  monotonic: the local flag still answers first, the ledger can only turn an unproven render into a
+  proven one, and a read that throws falls back to what the pass saw. It cannot move a bill.
+
+### 🔴 Two codes considered and REFUSED — and the second is a correction
+
+`PREVIEW_PUBLISHED` stays out: an address that is listening is not an app that painted.
+**`GREEN_GUARD_SAVE` stays out because `BuildDiagnostics.appWasSeenRunning` says something false about
+it in writing** — *"recorded only after the app was opened in a real browser and seen rendering"*. It
+is written from `previewGreen`, and **both** producers set that flag on `verdict.rendered` alone; the
+`shot.source === 'browser'` test three lines below each of them guards the green-freeze latch and
+`markAppRendered`, not the flag. A curl capture's empty-shell "render" reaches it.
+
+⚠️ **The two weak codes were KEPT rather than quietly removed.** That function feeds the admin's
+failure-vs-mislabelling panel, and dropping them would move that number on a session's own judgement.
+What changed is the SENTENCE (it no longer claims a strength the code lacks) and the gap — the
+browser-only set now answers there too, which can only add true positives. **Whether
+`appWasSeenRunning` should stop counting curl-possible evidence is the admin's call, and is raised
+rather than taken.**
+
+### Verification
+
+`tests/oneLedgerEveryVerdictReadsFrom.test.ts` — 20 cases, **reversion-proven both ways**: dropping
+`IN_BUILD_GREEN` from the vocabulary fails 5, returning the two consumers to the local flag fails 2.
+The `IN_BUILD_GREEN` case asserts against the **real producer's output** (`inBuildGreenNote`), not a
+hand-typed string, and `IN_BUILD_GREEN_RACED` is locked OUT — that attempt saw a render, but a file
+changed while the browser was open, so the tree that rendered is not the tree on disk.
+
+⚠️ Two existing source guards were superseded and are now **stronger, not weaker** —
+`fourVariablesForOneFact.test.ts` pinned the block-local `let renderProven`, and
+`verifiedNoChangeTurn.test.ts` pinned `appRendered: previewVerifiedRendered`. Both now pin the shared
+answer, and the second also asserts the narrow spelling is gone.
+
+Full gate on the final state: typecheck · server typecheck · unused imports · native guard ·
+**28,239 tests** · build · bundle · boot · deps. No user-facing surface changed.
+
+### 🔴 STILL OPEN (rule 6) — named so it is not re-discovered as "the ledger"
+
+The ledger's vocabulary now covers **one fact** (a real browser saw the app render). `typecheck` and
+`tests` are answered by a different reader over a different source (the shell log), and `pages` by a
+third. That is defensible — they are genuinely different kinds of evidence — but it means "what has
+this build proven?" still has no single answer, and a NEW actor proving a NEW fact still has to be
+wired into whichever reader happens to cover it.

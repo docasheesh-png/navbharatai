@@ -45,7 +45,7 @@ function formatEmail(email: string | null): string {
 /** One of the three verification badges. `Icon` covers both lucide icons and the vendored Github mark. */
 function StepBadge({ label, done, Icon }: { label: string; done: boolean; Icon: React.ComponentType<{ className?: string }> }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-[10px] font-bold ${done ? 'text-emerald-400' : 'text-[#484f58]'}`}>
+    <span className={`inline-flex items-center gap-1 text-[10px] font-bold ${done ? 'text-success' : 'text-faint'}`}>
       {done ? <CheckCircle2 className="w-3 h-3 shrink-0" /> : <Circle className="w-3 h-3 shrink-0" />}
       <Icon className="w-3 h-3 shrink-0" />
       {label}
@@ -92,26 +92,26 @@ export const ReferralEarningsSheet: React.FC<ReferralEarningsSheetProps> = ({ us
       // `nb-sheet-over-nav`: z-[400] sits ABOVE the global tab bar's z-150, so this card paints OVER
       // the bar rather than being covered by it — it must NOT reserve a strip for a bar it already
       // covers (`tests/sheetOverlayGeometry.test.ts`, same pairing PublishCelebration uses at z-300).
-      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[400] flex items-center justify-center bg-black/70"
+      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[400] flex items-center justify-center bg-scrim"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog"
       aria-modal="true"
       aria-label="Who used your referral code"
     >
-      <div className="nb-sheet flex w-full flex-col rounded-2xl border border-white/10 bg-[#0d1117] shadow-2xl overflow-hidden sm:max-w-lg">
-        <div className="shrink-0 flex items-start justify-between gap-3 border-b border-white/5 p-5">
+      <div className="nb-sheet flex w-full flex-col rounded-2xl border border-line bg-surface shadow-2xl overflow-hidden sm:max-w-lg">
+        <div className="shrink-0 flex items-start justify-between gap-3 border-b border-line p-5">
           <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-amber-400" />
+            <Users className="h-4 w-4 text-warn" />
             <div>
-              <h3 className="text-sm font-bold text-white">Who used your code</h3>
+              <h3 className="text-sm font-bold text-ink">Who used your code</h3>
               {state === 'ready' && enabled && friends.length > 0 && (
-                <p className="text-[10px] font-semibold text-[#8b949e]">
+                <p className="text-[10px] font-semibold text-muted">
                   {friends.length} {friends.length === 1 ? 'person has' : 'people have'} used your referral code
                 </p>
               )}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-zinc-500 hover:text-white">
+          <button onClick={onClose} aria-label="Close" className="text-faint hover:text-ink">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -120,25 +120,25 @@ export const ReferralEarningsSheet: React.FC<ReferralEarningsSheetProps> = ({ us
             `min-h-0` so it can actually shrink instead of pushing the card past the cap. */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
           {state === 'loading' && (
-            <div className="flex items-center justify-center gap-2 py-8 text-xs text-[#8b949e]">
+            <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
           )}
 
           {state === 'error' && (
-            <p className="py-8 text-center text-xs font-semibold text-red-400">
+            <p className="py-8 text-center text-xs font-semibold text-danger">
               Could not load this right now. Please try again.
             </p>
           )}
 
           {state === 'ready' && !enabled && (
-            <p className="py-8 text-center text-xs font-semibold text-[#8b949e]">
+            <p className="py-8 text-center text-xs font-semibold text-muted">
               Referral rewards are not available right now.
             </p>
           )}
 
           {state === 'ready' && enabled && friends.length === 0 && (
-            <p className="py-8 text-center text-xs font-semibold text-[#8b949e]">
+            <p className="py-8 text-center text-xs font-semibold text-muted">
               Nobody has used your referral code yet. Share it and check back here.
             </p>
           )}
@@ -146,10 +146,10 @@ export const ReferralEarningsSheet: React.FC<ReferralEarningsSheetProps> = ({ us
           {state === 'ready' && enabled && friends.length > 0 && (
             <ul className="space-y-2.5">
               {friends.map((f, i) => (
-                <li key={i} className="rounded-xl border border-white/5 bg-[#161b22] p-3.5">
+                <li key={i} className="rounded-xl border border-line bg-card p-3.5">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-xs font-semibold text-white">{formatEmail(f.email)}</span>
-                    <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-amber-400">
+                    <span className="truncate text-xs font-semibold text-ink">{formatEmail(f.email)}</span>
+                    <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-warn">
                       {f.completedCount} of 3
                     </span>
                   </div>

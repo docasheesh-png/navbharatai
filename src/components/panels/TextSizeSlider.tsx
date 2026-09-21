@@ -31,16 +31,16 @@ export function TextSizeSlider() {
     <div className="px-1">
       <div className="flex items-center justify-between mb-2 px-2">
         <div className="flex items-center gap-2">
-          <Type className="w-4 h-4 text-indigo-400" />
+          <Type className="w-4 h-4 text-accent-text" />
           <span className="text-sm font-bold tracking-tight">Text Size</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-black text-indigo-300 tabular-nums">{pct}%</span>
+          <span className="text-xs font-black text-accent-text tabular-nums">{pct}%</span>
           {/* A one-tap way back to normal — at 50 % or 200 % the slider itself can be hard to aim. */}
           {scale !== FONT_SCALE_DEFAULT && (
             <button
               onClick={() => set(FONT_SCALE_DEFAULT)}
-              className="text-[10px] font-bold uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors"
+              className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-ink transition-colors"
             >
               Reset
             </button>
@@ -57,7 +57,7 @@ export function TextSizeSlider() {
         aria-label={`Text size, ${pct} percent`}
         className="w-full accent-indigo-500 cursor-pointer"
       />
-      <div className="flex justify-between px-1 mt-0.5 text-[10px] text-[#8b949e] tabular-nums">
+      <div className="flex justify-between px-1 mt-0.5 text-[10px] text-muted tabular-nums">
         <span>{Math.round(FONT_SCALE_MIN * 100)}%</span>
         <span>{Math.round(FONT_SCALE_MAX * 100)}%</span>
       </div>

@@ -42,13 +42,13 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
             onClick={() => onScreenChange(item.id)}
             className={cn(
               "flex-1 flex flex-col items-center justify-center gap-1 transition-all relative",
-              isItemActive(item.id) ? "text-indigo-400" : "text-[#484f58] hover:text-[#8b949e]"
+              isItemActive(item.id) ? "text-accent-text" : "text-faint hover:text-muted"
             )}
           >
             <item.icon className={cn("w-5 h-5", isItemActive(item.id) && "animate-pulse")} />
             <span className="text-[8px] font-black uppercase tracking-tighter">{item.label.split(' ')[0]}</span>
             {isItemActive(item.id) && (
-              <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full" />
+              <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-indigo-500 rounded-full text-on-accent" />
             )}
           </button>
         ))}
@@ -76,7 +76,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
             aria-label={item.label}
             className={cn(
               "p-2.5 transition-colors",
-              isItemActive(item.id) ? "text-white" : "text-[#858585] group-hover:text-white"
+              isItemActive(item.id) ? "text-ink" : "text-muted group-hover:text-ink"
             )}
             title={item.label}
           >
@@ -84,7 +84,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
           </button>
           
           {/* Tooltip emulation */}
-          <div className="absolute left-full ml-2 px-2 py-1 bg-[#252526] text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-[100] border border-white/10 shadow-xl ml-4">
+          <div className="absolute left-full ml-2 px-2 py-1 bg-card text-ink text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-[100] border border-line shadow-xl ml-4">
             {item.label}
           </div>
         </div>
@@ -97,7 +97,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
            title="Settings"
            className={cn(
              "p-2.5 transition-colors",
-             activeScreen === 'settings' ? "text-white" : "text-[#858585] hover:text-white"
+             activeScreen === 'settings' ? "text-ink" : "text-muted hover:text-ink"
            )}
         >
           <Settings className="w-6 h-6" />

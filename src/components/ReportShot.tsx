@@ -45,19 +45,19 @@ export function ReportShot({ src, headers, alt }: ReportShotProps) {
 
   if (state.failed) {
     return (
-      <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-amber-300/80">
+      <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-warn">
         <AlertTriangle className="w-3 h-3" /> The screenshot could not be loaded.
       </span>
     );
   }
   if (!state.url) {
     return (
-      <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-zinc-500">
+      <span className="mt-1.5 flex items-center gap-1.5 text-[10px] text-faint">
         <Loader2 className="w-3 h-3 animate-spin" /> Loading screenshot…
       </span>
     );
   }
-  return <img src={state.url} alt={alt} className="mt-1.5 w-full rounded-lg border border-white/10" />;
+  return <img src={state.url} alt={alt} className="mt-1.5 w-full rounded-lg border border-line" />;
 }
 
 export default ReportShot;

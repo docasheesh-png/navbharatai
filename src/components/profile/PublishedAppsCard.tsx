@@ -61,7 +61,7 @@ export const PublishedAppsCard: React.FC<PublishedAppsCardProps> = ({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
-        <p className={`font-bold text-white ${dense ? 'text-[12px]' : 'text-sm'}`}>
+        <p className={`font-bold text-ink ${dense ? 'text-[12px]' : 'text-sm'}`}>
           {/* The NUMBER is the thing the admin asked to see, so it leads rather than sitting in a
               corner. "Live" is said out loud because the list below can also contain apps that are
               not — and a count that silently means something different from its label is how the
@@ -69,37 +69,37 @@ export const PublishedAppsCard: React.FC<PublishedAppsCardProps> = ({
           {live} published app{live === 1 ? '' : 's'} live
         </p>
         {typeof used === 'number' && typeof cap === 'number' && cap > 0 && (
-          <span className="text-[11px] text-[#8b949e]">
+          <span className="text-[11px] text-muted">
             {used} of {cap} {planName ? `${planName} slots` : 'free slots'} used
           </span>
         )}
       </div>
 
-      {error && <p className="text-[11.5px] text-amber-300 leading-relaxed">{error}</p>}
-      {loading && !error && <p className="text-[11.5px] text-[#8b949e]">Loading…</p>}
+      {error && <p className="text-[11.5px] text-warn leading-relaxed">{error}</p>}
+      {loading && !error && <p className="text-[11.5px] text-muted">Loading…</p>}
       {!loading && !error && rows.length === 0 && (
-        <p className="text-[11.5px] text-[#8b949e] leading-relaxed">{emptyText}</p>
+        <p className="text-[11.5px] text-muted leading-relaxed">{emptyText}</p>
       )}
 
       <ul className="flex flex-col gap-1.5" role="list">
         {rows.map((app) => (
           <li
             key={app.workspaceId}
-            className={`rounded-xl border border-white/10 bg-white/[0.03] flex items-center gap-2.5 ${dense ? 'px-2.5 py-2' : 'px-3 py-2.5'}`}
+            className={`rounded-xl border border-line bg-raised flex items-center gap-2.5 ${dense ? 'px-2.5 py-2' : 'px-3 py-2.5'}`}
           >
             <span className="shrink-0 rounded-lg border border-emerald-500/25 bg-emerald-500/15 p-1.5">
-              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <Globe className="w-3.5 h-3.5 text-success" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block text-[12px] font-semibold text-white truncate">{app.label}</span>
-              <span className="block text-[10.5px] text-[#8b949e] truncate">
+              <span className="block text-[12px] font-semibold text-ink truncate">{app.label}</span>
+              <span className="block text-[10.5px] text-muted truncate">
                 {showStatus ? statusWords(app.status) : null}
                 {showStatus && (app.sizeMb !== null || app.updatedAt !== null) ? ' · ' : ''}
                 {app.sizeMb !== null ? `${app.sizeMb.toFixed(1)} MB` : 'size unknown'}
                 {app.updatedAt !== null ? ` · updated ${whenWords(app.updatedAt)}` : ''}
               </span>
               {app.orphaned && (
-                <span className="flex items-center gap-1 text-[10.5px] text-amber-300/90 mt-0.5">
+                <span className="flex items-center gap-1 text-[10.5px] text-warn mt-0.5">
                   <AlertTriangle className="w-3 h-3 shrink-0" />
                   Its chat was deleted — still live, but it cannot be reopened for editing
                 </span>
@@ -112,14 +112,14 @@ export const PublishedAppsCard: React.FC<PublishedAppsCardProps> = ({
                 // The address is in the label, but a screen reader lands on the button alone — so it
                 // has to say WHICH app it opens, not just "Open".
                 aria-label={`Open ${app.label} in a new tab`}
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 hover:border-emerald-400/60 hover:bg-emerald-500/20 transition-colors touch-manipulation"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-bold text-success hover:border-emerald-400/60 hover:bg-emerald-500/20 transition-colors touch-manipulation"
               >
                 Open <ExternalLink className="w-3 h-3" />
               </button>
             ) : (
               // An app that is not live has no working address. A greyed-out control that SAYS why
               // is honest; a button that opens a dead page is not.
-              <span className="shrink-0 text-[10.5px] text-[#8b949e] px-2">
+              <span className="shrink-0 text-[10.5px] text-muted px-2">
                 {app.status === 'active' ? 'No link' : statusWords(app.status)}
               </span>
             )}
@@ -128,7 +128,7 @@ export const PublishedAppsCard: React.FC<PublishedAppsCardProps> = ({
       </ul>
 
       {truncated && (
-        <p className="text-[10.5px] text-[#8b949e]">Showing the {rows.length} most recent of {totalCount} records.</p>
+        <p className="text-[10.5px] text-muted">Showing the {rows.length} most recent of {totalCount} records.</p>
       )}
     </div>
   );

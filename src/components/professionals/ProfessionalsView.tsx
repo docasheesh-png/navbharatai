@@ -99,10 +99,10 @@ export function ProfessionalsView({ onSelect }: ProfessionalsViewProps) {
   // assistants are hidden entirely, so the Play Console health declarations stay truthful. Web shows all.
   const cards = visibleProfessionals(CARDS, medicalFeaturesHidden(isNativeApp()));
   return (
-    <div className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-10 bg-[#0d1117]">
+    <div className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-10 bg-surface">
       <div className="max-w-3xl mx-auto">
-        <h1 className="text-xl font-black text-white tracking-tight mb-1">Professionals</h1>
-        <p className="text-sm text-[#8b949e] mb-8">Domain-expert AI assistants — pick a profession to get started.</p>
+        <h1 className="text-xl font-black text-ink tracking-tight mb-1">Professionals</h1>
+        <p className="text-sm text-muted mb-8">Domain-expert AI assistants — pick a profession to get started.</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {cards.map((card) => (
@@ -112,22 +112,22 @@ export function ProfessionalsView({ onSelect }: ProfessionalsViewProps) {
               onClick={() => card.active && onSelect(card.id)}
               className={`text-left p-4 rounded-2xl border transition-all ${
                 card.active
-                  ? 'bg-[#161b22] border-white/10 hover:border-indigo-500/40 hover:bg-[#1c222b]'
-                  : 'bg-[#161b22]/50 border-white/5 opacity-40 grayscale cursor-not-allowed'
+                  ? 'bg-card border-line hover:border-indigo-500/40 hover:bg-[#1c222b]'
+                  : 'bg-raised border-line opacity-40 grayscale cursor-not-allowed'
               }`}
             >
               <div className="flex items-start justify-between gap-2 mb-2">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-accent-text flex items-center justify-center">
                   <card.icon className="w-5 h-5" />
                 </div>
                 {!card.active && (
-                  <span className="text-[9px] font-black uppercase tracking-widest bg-white/5 text-white/40 border border-white/10 px-2 py-0.5 rounded-full">
+                  <span className="text-[9px] font-black uppercase tracking-widest bg-raised text-faint border border-line px-2 py-0.5 rounded-full">
                     Coming Soon
                   </span>
                 )}
               </div>
-              <h3 className="text-sm font-bold text-white mb-1">{card.label}</h3>
-              <p className="text-[11px] text-[#8b949e] leading-snug">{card.description}</p>
+              <h3 className="text-sm font-bold text-ink mb-1">{card.label}</h3>
+              <p className="text-[11px] text-muted leading-snug">{card.description}</p>
             </button>
           ))}
         </div>

@@ -77732,3 +77732,75 @@ PR 3 gives the builder a tool to raise and resolve rows itself, and feeds the op
 per-turn context — deliberately the per-turn message, not the cached prefix, or every build's prompt
 cache breaks. The GitHub and domain rows wait on a durable connection record and a stored
 verification status respectively; neither is invented here.
+
+---
+
+## 2026-09-21 — 🎨 THE THEME SWEEP: 896 → 342, and the floor is NOT zero
+
+Fifth and last item. The ratchet's number across the whole client: **896 colour literals in 106 files
+→ 342 in 70.** Run with the existing codemod, heaviest first, in two batches with the full suite
+between them.
+
+### What the number now means, because "342 left" is not one thing
+
+| | literals | what they are |
+|---|---|---|
+| migrated | **554** | table-driven, every row either EXACT (the token emits the same value `theme-compat.css` already remapped) or a named readability FIX |
+| **irreducible** | **132** | 7 skip-listed files — see below. These can never go |
+| still migratable | **210** | the codemod left them because it could not classify them as EXACT or FIX. Hand decisions, not a rerun |
+
+🔴 **`CLAUDE.md` says `theme-compat.css` "is deleted when the baseline reaches zero". As written, that
+day cannot come** — 132 literals belong to files that must keep them. The honest target is
+**zero MIGRATABLE literals**, at which point the compat layer covers only the irreducible set and can
+be narrowed to exactly those files rather than deleted.
+
+### The seven files that must keep their literals, each for a different reason
+
+Four were already skip-listed; **three were added today**, after the full sweep left them at 100% with
+nothing in the codemod saying why — so the next session would have re-attempted them:
+
+- **`previewUtils.ts` (32)** — a CSS string injected into the PREVIEW IFRAME, which is the *user's app
+  document*. Our `var(--…)` tokens do not exist there. Same TRAP 2 as `MultiPageBuilder`.
+- **`SEOOptimizer.tsx` (25)** — Google's and Facebook's own result/card colours (`#1a0dab`,
+  `#006621`, `#f0f2f5`). Repainting them makes the mockup stop looking like the thing it mocks.
+  CLAUDE.md already states this policy for third-party previews; the codemod had no record of it.
+- **`frameworkOptions.ts` (21)** — each framework's OWN brand colour (`#61DAFB` React, `#FF3E00`
+  Svelte, `#E34F26` HTML5). Theming them would make a logo's colour follow the user's theme.
+
+### 🔴 ONE REAL REGRESSION, CAUGHT BY A PINNED TEST — a status dot is not a surface
+
+`agentV3History.ts` was migrated and **broken by it**, exactly as CLAUDE.md warns by example (*"a
+status dot whose `bg-emerald-500` a test names … must not be migrated as a side effect"*):
+
+- `bg-zinc-600` → **`bg-raised`** — a SURFACE token, so the neutral dot took the colour of the card it
+  sits on and all but disappeared;
+- `bg-zinc-500` → **`bg-faint`** — a TEXT token used as a background;
+- `bg-emerald-500` → `bg-emerald-500 **text-on-accent**` — a label colour added to an element that
+  carries no text.
+
+**Reverted in full and skip-listed with the reason.** The codemod's table reads a `bg-*` as a fill; a
+semantic swatch needs a hand decision, and there is no rule that distinguishes the two automatically.
+
+### Three pinned tests were SUPERSEDED, and each was checked rather than re-baselined
+
+- **`uiVariants`** — asserted the raw `bg-[#161b22]` under the heading *"card uses the shared surface
+  token"*. The change is what made that heading literally true; the pin moved to `bg-card`. The
+  input case keeps a new assertion that invalid still differs visibly from valid.
+- **`androidBack`** — the exit dialog's `bg-white/10` → `bg-raised`. The invariant is *Exit
+  destructive, Cancel calm*, and it holds: `bg-red-600` is untouched and `bg-raised` IS the calm
+  surface, now themed instead of a white wash that only worked on a dark ground.
+- **`visualRegression`** snapshots — regenerated and **read back**, not accepted blind: every solid
+  fill carries `text-on-accent` (white on indigo), every themed surface carries a themed ink.
+
+### Verification
+
+Full gate on the final state: typecheck · server typecheck · unused imports · native guard ·
+**28,511 tests** · build · bundle · boot · deps. The ratchet itself is the proof the number only went
+down; `themeTokensOnly`, `themeSystem`, `inlineThemeColours`, `themeMigrate` and `theme` all pass.
+
+### 🔴 Still open
+
+The **210 migratable literals** are hand work the codemod deliberately refuses to guess at — its own
+rule is that a row is EXACT or FIX or it is left and listed. That is a slice for a later session, and
+the file-by-file rule still applies: a pinned literal is a decision somebody made, and the test that
+names it is the warning.

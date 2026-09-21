@@ -71,14 +71,14 @@ export function AdultContentToggle(): React.ReactElement | null {
   const on = pref.optedIn;
 
   return (
-    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-surface border border-line rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 mb-3">
         <div className="w-10 h-10 shrink-0 bg-rose-500/10 rounded-xl flex items-center justify-center">
-          <ShieldAlert className="w-5 h-5 text-rose-400" />
+          <ShieldAlert className="w-5 h-5 text-danger" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-bold text-white">Adult content (18+)</div>
-          <div className="text-[11px] text-[#8b949e] mt-0.5">
+          <div className="text-sm font-bold text-ink">Adult content (18+)</div>
+          <div className="text-[11px] text-muted mt-0.5">
             Off by default. Turn it on to allow mature content in apps you build, and to see 18+ apps on App Mart.
           </div>
         </div>
@@ -92,19 +92,19 @@ export function AdultContentToggle(): React.ReactElement | null {
           aria-label="Adult content (18+)"
           disabled={busy}
           onClick={() => (on ? void save(false) : setConfirming(true))}
-          className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl border bg-[#161b22] border-white/5 hover:border-white/20 transition-colors text-left disabled:opacity-60"
+          className="w-full flex items-center gap-3 p-3 min-h-[44px] rounded-xl border bg-card border-line hover:border-line transition-colors text-left disabled:opacity-60"
         >
           <span className="flex-1 min-w-0">
-            <span className="block text-[11px] font-black text-white uppercase tracking-widest">
+            <span className="block text-[11px] font-black text-ink uppercase tracking-widest">
               {on ? 'On' : 'Off'}
             </span>
-            <span className="block text-[10px] text-[#586069] leading-relaxed mt-0.5">
+            <span className="block text-[10px] text-faint leading-relaxed mt-0.5">
               {on
                 ? `Turned on${pref.optedInAt ? ` on ${pref.optedInAt.slice(0, 10)}` : ''}. Tap to turn it off.`
                 : 'Tap to turn it on — you will be asked to confirm your age first.'}
             </span>
           </span>
-          <span aria-hidden="true" className={`w-10 h-6 rounded-full shrink-0 p-0.5 transition-colors ${on ? 'bg-rose-600' : 'bg-[#30363d]'}`}>
+          <span aria-hidden="true" className={`w-10 h-6 rounded-full shrink-0 p-0.5 transition-colors ${on ? 'bg-rose-600 text-on-accent' : 'bg-raised'}`}>
             <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${on ? 'translate-x-4' : ''}`} />
           </span>
         </button>
@@ -114,8 +114,8 @@ export function AdultContentToggle(): React.ReactElement | null {
               the gate does not actually do — the same discipline the hosting agreement follows. */}
           <ul className="space-y-1.5">
             {ADULT_CONFIRMATIONS.map((line) => (
-              <li key={line} className="text-[11px] text-[#c9d1d9] leading-relaxed flex gap-2">
-                <span className="text-rose-400 shrink-0">•</span><span>{line}</span>
+              <li key={line} className="text-[11px] text-body leading-relaxed flex gap-2">
+                <span className="text-danger shrink-0">•</span><span>{line}</span>
               </li>
             ))}
           </ul>
@@ -126,22 +126,22 @@ export function AdultContentToggle(): React.ReactElement | null {
               onChange={(e) => setTicked(e.target.checked)}
               className="mt-0.5 w-4 h-4 shrink-0 accent-rose-600"
             />
-            <span className="text-[11px] font-semibold text-white leading-relaxed">
+            <span className="text-[11px] font-semibold text-ink leading-relaxed">
               I have read all of the above and I agree.
             </span>
           </label>
-          {error && <p className="text-[11px] text-rose-300" role="alert">{error}</p>}
+          {error && <p className="text-[11px] text-danger" role="alert">{error}</p>}
           <div className="flex gap-2 justify-end pt-1">
             <button
               type="button"
               onClick={() => { setConfirming(false); setTicked(false); setError(''); }}
-              className="px-3 py-1.5 rounded-lg text-[11px] text-white/60 hover:text-white transition-colors"
+              className="px-3 py-1.5 rounded-lg text-[11px] text-muted hover:text-ink transition-colors"
             >Cancel</button>
             <button
               type="button"
               disabled={!ticked || busy}
               onClick={() => void save(true)}
-              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-white font-bold transition-colors inline-flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-on-accent font-bold transition-colors inline-flex items-center gap-1.5"
             >
               {busy && <Loader2 className="w-3 h-3 animate-spin" />} Turn it on
             </button>
@@ -149,7 +149,7 @@ export function AdultContentToggle(): React.ReactElement | null {
         </div>
       )}
 
-      {error && !confirming && <p className="mt-2 text-[11px] text-rose-300" role="alert">{error}</p>}
+      {error && !confirming && <p className="mt-2 text-[11px] text-danger" role="alert">{error}</p>}
     </div>
   );
 }

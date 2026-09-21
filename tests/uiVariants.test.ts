@@ -28,11 +28,17 @@ describe('variants — buttonClasses', () => {
 // though Card.tsx itself went.
 describe('variants — cardClasses / inputClasses', () => {
   it('card uses the shared surface token', () => {
-    expect(cardClasses()).toContain('bg-[#161b22]');
+    // ⚠️ SUPERSEDED 2026-09-21 — this case's own NAME is what the change made true. It asserted the
+    // raw literal `bg-[#161b22]`, which `theme-compat.css` remapped per theme; the token is the
+    // shared surface itself, so the pin is now on the thing the name always described. Same for the
+    // input's `border-zinc-700` → `border-line` below.
+    expect(cardClasses()).toContain('bg-card');
     expect(cardClasses()).toContain('rounded-2xl');
   });
   it('input reflects validity', () => {
-    expect(inputClasses(false)).toContain('border-zinc-700');
+    expect(inputClasses(false)).toContain('border-line');
     expect(inputClasses(true)).toContain('border-red-500/60');
+    // The invalid state must still be VISIBLY different from the valid one — the point of the case.
+    expect(inputClasses(false)).not.toContain('border-red-500/60');
   });
 });

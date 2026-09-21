@@ -159,7 +159,7 @@ export function LinkedText({ text, linkClassName }: { text: string; linkClassNam
             target="_blank"
             rel="noopener noreferrer"
             onClick={openInRealBrowser(p.href)}
-            className={linkClassName ?? 'text-indigo-400 underline underline-offset-2 break-all hover:text-indigo-300'}
+            className={linkClassName ?? 'text-accent-text underline underline-offset-2 break-all hover:text-accent-text'}
           >
             {p.label}
           </a>

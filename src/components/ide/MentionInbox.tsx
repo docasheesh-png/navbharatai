@@ -86,39 +86,39 @@ export const MentionInbox: React.FC = () => {
         type="button"
         onClick={() => setOpen((o) => !o)}
         title="Mentions"
-        className="relative inline-flex items-center justify-center w-8 h-8 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
+        className="relative inline-flex items-center justify-center w-8 h-8 rounded-md text-muted hover:text-body hover:bg-raised"
       >
         <Bell className="w-4 h-4" />
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-on-accent text-[10px] font-semibold flex items-center justify-center">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto rounded-lg border border-white/10 bg-zinc-900 shadow-xl z-50">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
-            <span className="text-xs font-semibold text-zinc-300">Mentions</span>
+        <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto rounded-lg border border-line bg-card shadow-xl z-50">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-line">
+            <span className="text-xs font-semibold text-muted">Mentions</span>
             {items.some((i) => !i.read) && (
-              <button type="button" onClick={markAllRead} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200">
+              <button type="button" onClick={markAllRead} className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-body">
                 <Check className="w-3 h-3" /> Mark all read
               </button>
             )}
           </div>
           {items.length === 0 ? (
-            <div className="px-3 py-6 text-center text-[11px] text-zinc-500">No mentions yet.</div>
+            <div className="px-3 py-6 text-center text-[11px] text-faint">No mentions yet.</div>
           ) : (
-            <ul className="divide-y divide-white/5">
+            <ul className="divide-y divide-line">
               {pagedItems.visible.map((n) => (
-                <li key={n.id} className={`px-3 py-2 ${n.read ? 'opacity-60' : 'bg-white/[0.03]'}`}>
-                  <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-                    <AtSign className="w-3 h-3 text-blue-400" />
-                    <span className="font-medium text-zinc-300">{n.fromEmail || 'A teammate'}</span>
+                <li key={n.id} className={`px-3 py-2 ${n.read ? 'opacity-60' : 'bg-raised'}`}>
+                  <div className="flex items-center gap-1 text-[11px] text-muted">
+                    <AtSign className="w-3 h-3 text-info" />
+                    <span className="font-medium text-muted">{n.fromEmail || 'A teammate'}</span>
                     <span>mentioned you</span>
-                    <span className="ml-auto text-zinc-500">{timeAgo(n.createdAt)}</span>
+                    <span className="ml-auto text-faint">{timeAgo(n.createdAt)}</span>
                   </div>
-                  <p className="mt-0.5 text-xs text-zinc-400 line-clamp-2">{n.text}</p>
+                  <p className="mt-0.5 text-xs text-muted line-clamp-2">{n.text}</p>
                 </li>
               ))}
               <LoadMore list={pagedItems} label="mentions" />

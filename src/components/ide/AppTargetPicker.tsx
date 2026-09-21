@@ -218,7 +218,7 @@ export const AppTargetPicker: React.FC<AppTargetPickerProps> = ({
 
   if (appsLoading) {
     return (
-      <div className="flex items-center gap-2 px-3 py-3 text-xs text-gray-500">
+      <div className="flex items-center gap-2 px-3 py-3 text-xs text-faint">
         <Loader2 size={13} className="animate-spin" /> Loading your apps…
       </div>
     );
@@ -226,7 +226,7 @@ export const AppTargetPicker: React.FC<AppTargetPickerProps> = ({
 
   if (apps.length === 0) {
     return (
-      <div className="flex items-start gap-2 px-3 py-3 text-xs text-amber-300 leading-relaxed">
+      <div className="flex items-start gap-2 px-3 py-3 text-xs text-warn leading-relaxed">
         <AlertTriangle size={13} className="mt-0.5 shrink-0" />
         <span>
           No saved apps found on this account. Build an app with NavBharatAI Pro first — then this tool
@@ -239,8 +239,8 @@ export const AppTargetPicker: React.FC<AppTargetPickerProps> = ({
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
       <label className="flex flex-col gap-1.5">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-          <FolderOpen size={11} className="text-indigo-400" /> Your app
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+          <FolderOpen size={11} className="text-accent-text" /> Your app
         </span>
         <select value={sessionId} onChange={(e) => onSessionChange(e.target.value)} style={selectStyle}>
           {apps.map((a) => (
@@ -251,15 +251,15 @@ export const AppTargetPicker: React.FC<AppTargetPickerProps> = ({
 
       {onPathChange && (
         <label className="flex flex-col gap-1.5">
-          <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-            <FileCode size={11} className="text-indigo-400" /> {fileLabel}
+          <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+            <FileCode size={11} className="text-accent-text" /> {fileLabel}
           </span>
           {filesLoading ? (
-            <span className="flex items-center gap-2 text-xs text-gray-500 py-2">
+            <span className="flex items-center gap-2 text-xs text-faint py-2">
               <Loader2 size={12} className="animate-spin" /> Opening files…
             </span>
           ) : choices.existing.length === 0 && choices.extra.length === 0 ? (
-            <span className="text-xs text-gray-500 py-2">This app has no file this tool can change.</span>
+            <span className="text-xs text-faint py-2">This app has no file this tool can change.</span>
           ) : (
             <select value={selectedPath || ''} onChange={(e) => onPathChange(e.target.value)} style={selectStyle}>
               <option value="" disabled>Choose a file…</option>

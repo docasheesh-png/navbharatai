@@ -134,7 +134,14 @@ export function SidebarNav({
   // `const item = menuItems.find(m => m.id === tabId); if (!item) return null` — so removing the entry
   // would make opening Professionals render NO header window at all, silently. That exact bug is already
   // recorded one file over, in App.tsx, next to the `other_ai` entry that was added to fix it.
-  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history', 'professionals']);
+  // About Us / APK Builder / Diff / AI Image Gen joined `menuItems` on 2026-09-21 so that opening one
+  // renders a closable header tab — they were four more windows with no ✕, the App Mart bug's
+  // siblings. They are hidden HERE because a chip was the whole point and a sidebar row was not: each
+  // already has its own door (About Us is a System Matrix row in the drawer below; APK Builder is in
+  // Settings' tool directory; Diff and AI Image Gen are reached from inside the panels that use
+  // them), and this sidebar has been deliberately trimmed more than once. Same hide-not-delete
+  // reasoning as the ids above it.
+  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history', 'professionals', 'about', 'apk', 'diff', 'imagegen']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
   // Settings and Donate each appeared TWICE in the mobile drawer — once in this list, once as a System

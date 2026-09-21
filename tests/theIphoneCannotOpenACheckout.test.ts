@@ -14,6 +14,12 @@
  * buttons."* A grep of every `isNativeApp()` call site returned ZERO purchase gates. A decision
  * written in a runbook and never implemented reads exactly like a decision that was implemented.
  *
+ * ⚠️ That quotation is HISTORICAL — §5 was rewritten on 2026-09-21 to describe what this file
+ * actually does, so grepping the runbook for those words now finds nothing. It was rewritten
+ * because it did not merely go stale: it told the next reader to gate on `isNative` (which would
+ * delete Android's working top-up) and to add "add credits on the web" copy (anti-steering, a second
+ * rejection reason). This test is the lock; the runbook is no longer a competing instruction.
+ *
  * 🔑 **AND IT IS DELIBERATELY NARROWER THAN THE RUNBOOK SAID.** Hiding on `isNative` would have
  * removed the working, revenue-earning top-up from ANDROID too — a fix that trades one problem for
  * another, which this repo's own core rule forbids. The gate is the PLATFORM, not the flag.

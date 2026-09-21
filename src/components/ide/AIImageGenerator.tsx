@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
+import { ImageResizeEditor } from './ImageResizeEditor';
 import { ReferenceImagePicker, type ReferencePicture } from './ReferenceImagePicker';
 import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, describeSize, resolveCustomSize } from '../../lib/imageSize';
 import { Capacitor } from '@capacitor/core';
@@ -123,6 +124,12 @@ const IMAGE_TYPE_OPTIONS: ImageOption[] = IMAGE_TYPES.map((t) => ({ id: t, label
 const EXAMPLES = ['Tea shop banner', 'Clinic logo', 'Festival poster'];
 
 /** A group's chosen option, by id — for the one-line summary printed on each sent request. */
+/** The preset id whose pixels these are, or the custom id — so a resized picture's row reads right. */
+function sizeIdFor(px: { w: number; h: number }): string | undefined {
+  const hit = SIZES.find((o) => o.id !== CUSTOM_SIZE_ID && o.w === px.w && o.h === px.h);
+  return hit ? hit.id : CUSTOM_SIZE_ID;
+}
+
 function labelOf(options: ImageOption[], id: string): string {
   return (options.find((o) => o.id === id) || options[0])?.label ?? '';
 }
@@ -446,6 +453,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   // the panel: it loads the picture into a full-resolution canvas, which is real work to do for a
   // user who never presses the button.
   const [textOn, setTextOn] = useState<string | null>(null);
+  /** The image whose Resize/Crop sheet is open — the same shape as `textOn`. */
+  const [resizeOn, setResizeOn] = useState<string | null>(null);
 
   const flashNote = (msg: string) => {
     setActionNote(msg);
@@ -870,6 +879,13 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                       </button>
                       <button
                         type="button"
+                        onClick={() => void ensureLocalImage(item.id).then((ok) => { if (ok) setResizeOn(item.id); })}
+                        className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
+                      >
+                        <Move className="w-3 h-3" /> Resize
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void ensureLocalImage(item.id).then((url) => { if (url) void handleCopyImage(item.id, url); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
                       >
@@ -1134,6 +1150,29 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
 
       {/* The typed text replaces that image in the thread, so Copy and Save then mean the version
           WITH the text on it — which is what someone who just pressed Done expects. */}
+      {resizeOn && (() => {
+        const target = history.find((h) => h.id === resizeOn);
+        if (!target) return null;
+        return (
+          <ImageResizeEditor
+            image={target.url}
+            initialSize={target.size || SIZES[0].id}
+            initialCustom={target.width && target.height ? { w: target.width, h: target.height } : undefined}
+            sizes={SIZES}
+            onClose={() => setResizeOn(null)}
+            onDone={(url, made) => {
+              // Replace IN PLACE and remember the new size, so Add text and a later Resize open on
+              // the picture as it now is, and Copy / Save mean this version.
+              const updated = { ...target, url, size: sizeIdFor(made) ?? target.size, width: made.w, height: made.h };
+              setHistory((h) => h.map((x) => (x.id === resizeOn ? updated : x)));
+              void imageHistoryStore.save(updated).catch(() => { /* best-effort, as every save here is */ });
+              setResizeOn(null);
+              flashNote(`Resized to ${describeSize(made.w, made.h)} \u2713  Now press Save to keep it.`);
+            }}
+          />
+        );
+      })()}
+
       {textOn && (() => {
         const target = history.find((h) => h.id === textOn);
         if (!target) return null;

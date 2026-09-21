@@ -21,6 +21,9 @@ export interface ImageHistoryItem {
   type: string;
   style: string;
   size: string;
+  /** The real pixels, kept after a Resize so the row and a later Resize open on the truth. Optional: older records have none. */
+  width?: number;
+  height?: number;
   timestamp: number;
   /**
    * The signed provider link this picture came from, kept ONLY when the browser could not read its

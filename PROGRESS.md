@@ -77825,3 +77825,31 @@ biggest realism lever for the free tier.
 Tests: `tests/theStarWritesAPeakPrompt.test.ts` (16) — pure decision logic plus source guards for the
 route's order (triage → account → free-universe call) and the client's replace-with-Undo. **Proven by
 reversion**: the facts check removed → fails; the Undo removed → fails.
+
+## 2026-09-21 — C: resize or crop a FINISHED picture into any frame, black where it does not reach (Phase 2 item 6, the last on the admin's list)
+
+**Admin:** *"image generate ho jane ke bad image ka size badalne / crop karne ka option do … agar user
+image ko frame se chota kar de, to bahat kala background a jaye."*
+
+- **`src/lib/imageResize.ts` (pure)** — a SECOND geometry, deliberately the opposite of the attach-side
+  `imageCrop.ts`: that one keeps an attached picture COVERING its frame (zoom floor 1 — a black band
+  there would look like our engine broke); this one exists to produce the black band the admin asked
+  for (floor 0.25). Two modes: **Crop** keeps the picture's proportions, zooms and moves it, slack
+  `|drawn − frame| / 2` in both directions so a small picture may sit anywhere inside the frame but
+  never half out of it; **Resize** stretches to the whole frame. `fitZoom` letterboxes exactly (not
+  rounded — a rounded zoom left a 3 px sliver of black beside a picture that was meant to fit).
+  `showsBackground` says on screen when black will be in the output.
+- **`ImageResizeEditor.tsx`** — the sheet (portalled to the body like every sheet on these screens):
+  Crop / Resize toggle, the composer's own size rows plus custom fields, − Fit ⟲ +, drag; the canvas
+  is filled with `RESIZE_BACKGROUND` before the picture is drawn and exported as PNG at the frame's
+  real pixels. **Done replaces the picture IN PLACE** and the history record learns its real pixels
+  (`width`/`height`, optional — older records have none), so Add text and a later Resize open on the
+  truth. The button goes through `ensureLocalImage` like the other three, so a link-only free picture
+  is fetched first.
+
+Tests: `tests/theGeneratedPictureFitsAnyFrame.test.ts` (11) — geometry plus source guards. **Proven by
+reversion**: the black fill dropped → fails; the floor set back to 1 → fails; the Resize button
+bypassing the local-bytes door → fails.
+
+⚠️ `lucide-react` in this install exports neither `Crop` nor `Scaling` (both appear in the d.ts under
+other names); `Move` and `Maximize2`, already imported elsewhere in the repo, are used instead.

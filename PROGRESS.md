@@ -75359,3 +75359,106 @@ or (3); none arriving ⇒ our own gating. **And after this change the build repo
 
 That is the 50/50 law applied: the reported symptom is repaired, and the condition that made the
 symptom undiagnosable — an error path that deleted its own evidence — is gone.
+
+---
+
+## 2026-09-21 — AUTOPSY `8a92e5ed` + `01037e20`: two builds, and the engine was wrong about both apps
+
+Admin sent one session's report: a **password generator** (204 s, weak/free, ok) and a **Free Fire–style
+3D battle royale** (386 s, weak/free, ok). Both rendered, both typechecked, both built for production.
+Neither app was broken. **The engine's account of them was.**
+
+### Step 1 — the five-bucket ledger (19 items)
+
+**✅ Self-healed (2)** — GLM `glm-4.7-flashx` crawled and was benched mid-answer at 15.7 s, ladder moved
+to KIMI and the build completed (build 1); the `three`/`@react-three/fiber` peer conflict was retried
+with pinned majors and `--legacy-peer-deps` and succeeded (build 2).
+
+**🔀 Worked around / alternative used (3)** — that dependency pin is a deferred root cause, not a win
+(fiber@9 needs `react >=19 <19.3`, our scaffold is newer, so the scaffold's React pin and the 3D stack
+disagree and every 3D build will hit it); `BUILD_ORDER_READ_AS_EDIT` turned an explicit "build a game"
+into an edit of the previous app, leaving `src/theme.tsx` orphaned; `APP_SCOPE` announced *"the mega-app
+roadmap planner is asked for a step-by-step plan next (recorded as `MEGA_ROADMAP_*`)"* and **no
+`MEGA_ROADMAP_*` line appears anywhere in the report**.
+
+**⏭️ Skipped / ignored (4)** — `RUNTIME_UNCHECKED` on BOTH builds (the console could not be captured, so
+console errors were never checked, twice); `PREVIEW_SNAPSHOT_STALE` on BOTH builds (the free saved copy
+was discarded each time); the 1,092 kB bundle warning in build 2 reached no gate; the reviewer's real
+suggestions were suggest-only under Green Stop and nothing carried them.
+
+**❌ Still broken / shipped imperfect (5)** — **`ACCESSIBILITY` reported 3 unlabelled form fields that
+are labelled**; **`FEATURE_COVERAGE` reported a missing "Mark complete / toggle" and a present
+"Login / authentication" in an app asked for neither, and it became the build's `rootCause`**;
+`GREEN_FREEZE_DEFERRED` refused `playwright.config.ts` in both builds and `docs/decisions/ADR-001.md` in
+one, while the same report's `RELEASE_GATE` complained the app *"has no test suite that could be run
+here"*; `requestAnalysis.startTier` read `gemini` / `sonnet`, neither of which is on any weak ladder;
+`etaAccuracy.evidenced: false` on both — the estimator landed inside its own band twice and showed the
+user no figure either time.
+
+**🥵 Struggle points (5)** — `READY_BEFORE_END`: build 1 was judged finished at step 10 and ran 5 more
+steps over 47 s; build 2 ran **14 more steps over 227 s**, i.e. 59% of its wall clock after the app was
+done. Build 1's first write-time typecheck took **28.4 s** (cold `node_modules`), inside a 31-second
+`edit_file` for a two-character en-dash change. The GLM lead rung crawled. The reviewer re-read
+`src/game/runtime.ts` three times and `scene.tsx` three times and overran its 45 s budget. Build 1 billed
+**₹46.74** for verifying a pre-seeded template and changing two dashes.
+
+### Step 2 — the missing subsystem
+
+**There is no single reader for the app's own markup.** Every rule that wants to know something about a
+generated file writes its own regex, and JSX is not HTML: `<input\b[^>]*>` ends at the `>` of an arrow
+function. Seven modules carry that shape. The two accessibility analyzers had drifted so far apart that
+one was CI-locked against our templates while the other — the one that writes the build report — was
+locked by nothing and had been reporting false defects against those same templates.
+
+### Step 3–5 — DNA-level fixes shipped (and the 50/50 other half)
+
+1. **`src/server/AgentV3/jsxTags.ts` (new, pure)** — one reader. `tagsOnLine` moved verbatim from
+   `AccessibilityAnalysis.ts` (its 46-test suite proves the move changed nothing); `scanMarkup` adds
+   cross-line wrapping-`<label>` depth, multi-line tags, absolute index, and the element-vs-component
+   distinction JSX makes DECIDABLE. `hasAttr` / `hasAttrOrBareBoolean` name the two real attribute
+   conventions in one place instead of one copy per analyzer.
+2. **`A11yLinter.ts`** — `inputsMissingLabel`, `imagesMissingAlt` and `controlsMissingName` rebuilt on
+   it. Also fixed there: each `<button>` was judged by `indexOf(tag)`, so three plain `<button>` tags
+   all inherited the FIRST one's inner text.
+3. **The other 50%: eleven GENUINELY unlabelled controls in our own scaffolds** (todo ×2, tip-split ×2,
+   qr-generator, quick-notes, gst-bill, social-feed, **login-page ×3**) — invisible to
+   `scanAccessibility` because it reads a tag only when it closes on its own line. Fixed at the source
+   (`htmlFor`/`id` where a visible label exists, `aria-label` otherwise).
+4. **`tests/ourOwnTemplatesPassOurOwnGate.test.ts` now asks BOTH linters**, each with its own canary —
+   the promise its docblock already made.
+5. **`FeaturePresence.ts`** — a keyword must arrive with the company that fixes its sense. `password`
+   is out of the auth list; the completion keywords no longer accept a bare `toggle` / `complete` /
+   `done`. Recall is pinned: TaskLite and a real login page still probe.
+
+Reversion-proven four ways in `tests/theAnalyzerLiedAboutOurOwnTemplate.test.ts` (13 cases), including a
+source-level guard, because `tsc` and `vitest` cannot see that a regex reads the wrong dialect.
+
+### 🔴 OPEN ROOT CAUSES (rule 6) — named, not silently deferred
+
+- **`PREVIEW_SNAPSHOT_STALE` on every build.** Both builds: *"Both sides hold the same N file(s), so a
+  file's CONTENT changed"*, while `POST_GREEN_WRITES` said nothing wrote after green. Strong hypothesis,
+  NOT yet verified: the preview bridge rewrites `index.html` **in the sandbox** (`[preview-bridge]
+  index.html now reports its console…` appears in build 1's own dev-server output), so the snapshot's
+  source hash can never equal the persisted hash. If so the free saved copy is discarded on every build
+  and every preview wake pays for a live E2B machine — real money. The one check that settles it: whether
+  `snapshotTaken.filesHash` is computed from sandbox files or from the durable set.
+- **`RUNTIME_UNCHECKED` on every build** — the browser console could not be captured on either run, so
+  console errors are checked on no build at all. Not investigated here.
+- **`READY_BEFORE_END` — 227 s (59%) of build 2 ran after the app was judged finished at 92/100.**
+  `#3084` shipped the measurement; nothing yet acts on it.
+- **Green Freeze vs the release gate.** The freeze refused `playwright.config.ts` and an ADR markdown
+  file while the gate complained the app has no test suite. A `.md` provably cannot affect a running
+  app; a `.ts` config can break the production typecheck, so this is NOT a safe blanket carve-out and
+  was deliberately not built today.
+- **`requestAnalysis.startTier` is stale** — it names `gemini`/`sonnet`, from before the three-tier
+  ladders. Cosmetic in the admin report; misleading to the next reader.
+- **The 3D dependency pin.** `@react-three/fiber@9` requires `react >=19 <19.3`; our scaffold ships
+  newer, so every 3D build pays a failed install, a retry and `--legacy-peer-deps`.
+- **A piped sandbox command reports the PIPE's exit code.** `npm install … 2>&1 | tail -20` recorded
+  `exitCode: 0` for an install that printed a wall of `npm error`. The same shape (`npm run build 2>&1 |
+  head -40`) is how a failing production build would be recorded as exit 0.
+- **Six more modules read JSX with `<input\b[^>]*>`** — `authFlowSpec.ts` and `journeyDerivation.ts` are
+  source-fed and carry the same truncation (both feed the journey check, which reported
+  `JOURNEY_NOT_DERIVED` in build 1). Left untouched deliberately: correcting them changes which
+  Playwright selector is chosen, which needs its own evidence. `FuzzProbe.ts` and `siteImport.ts` read
+  RENDERED HTML, where the regex is correct.

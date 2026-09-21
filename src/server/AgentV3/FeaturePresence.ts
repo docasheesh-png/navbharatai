@@ -97,7 +97,15 @@ const FEATURES: FeatureDef[] = [
   },
   {
     feature: 'complete', label: 'Mark complete / toggle',
-    requested: /\b(mark (?:as )?complete|complete|done|check(?:box)?|toggle)\b/,
+    // 🔴 SENSE, NOT JUST PRESENCE (autopsy 8a92e5ed, 2026-09-20). The old pattern accepted a BARE
+    // `toggle`, `complete` or `done`. A password generator asked to *"toggle uppercase, numbers and
+    // symbols"* was therefore recorded as requesting a task-completion control, found none, and that
+    // false finding became the whole build's reported root cause. `toggle` there is a verb taking a
+    // SETTING as its object; the feature this probe means always concerns an ITEM being finished. So
+    // the keyword must arrive with the company that fixes its sense — which is the same lesson
+    // `featureRequest.ts` already encodes for negation ("no settings") and deferral ("login in stage
+    // 3"), in a third tense.
+    requested: /\bmark\b[^.]{0,20}\b(?:complete|completed|done)\b|\b(?:complete|completed|done)\s+(?:task|item|todo|to-?do|entry|entries|chore)s?\b|\b(?:task|item|todo|to-?do|entry|entries|chore)s?\s+(?:as\s+)?(?:complete|completed|done)\b|\bcheckbox(?:es)?\b|\bchecklist\b|\btick\b[^.]{0,15}\boff\b|\btoggle\b[^.]{0,15}\b(?:complete|completed|done|task|item|todo)s?\b/,
     present: (h, t) => /type=["']checkbox["']/.test(h) || /role=["']checkbox["']/.test(h) || hasControlMatching(h, t, /\b(complete|done|✓|✔)\b/),
   },
   {
@@ -119,7 +127,15 @@ const FEATURES: FeatureDef[] = [
   },
   {
     feature: 'auth', label: 'Login / authentication',
-    requested: /\b(login|log in|sign in|sign-in|auth|authentication|password|register|sign up)\b/,
+    // `password` is GONE from this list, for the same reason (autopsy 8a92e5ed). It is the SUBJECT of
+    // a password generator, a password manager and a strength meter, none of which is a login — and
+    // in that report it probed PRESENT (the app has a `type="password"` field), which is worse than
+    // a harmless extra line: the guard below only lets a "missing" finding through once some OTHER
+    // probe is present, so this false POSITIVE is what certified the false NEGATIVE above as real.
+    // Nothing is lost by dropping it. An app that genuinely asks for a password field almost always
+    // says login / sign in / sign up / register / account somewhere, and one that says only
+    // "password" has the field, so it would have probed present and reported nothing either way.
+    requested: /\b(login|log in|log-in|sign in|sign-in|signin|sign up|sign-up|signup|auth|authentication|authenticate|register|registration|user account)\b/,
     present: (h, t) => /type=["']password["']/.test(h) || hasControlMatching(h, t, /\b(login|log in|sign in|sign up|register|logout)\b/),
   },
   {

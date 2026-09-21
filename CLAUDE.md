@@ -2795,6 +2795,43 @@ the flag entries above promise.
   and admin-mandated; their composition was never decided. Raised to the admin — billing is not a
   session's call.
 
+- **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
+  2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates
+  failing our own gate, the very next report told a free user their working password generator had
+  **"3 form field(s) with no label"**. All three are labelled — each checkbox sits inside its own
+  wrapping `<label>` — and the app is NavBharatAI's OWN golden scaffold.
+  🔴 **`tests/ourOwnTemplatesPassOurOwnGate.test.ts` was green throughout, and its docblock promises
+  "a new template with an unlabelled control can no longer reach `main`".** It asked
+  `AccessibilityAnalysis.ts`. **The `ACCESSIBILITY` line in a build report is written by
+  `AppMakerLab/intelligence/A11yLinter.ts`**, through `buildQualityLint.ts`. The instance was fixed,
+  the sibling was never hunted, and the lock was aimed at the analyzer that does not judge builds.
+  🔑 **The class, in that module's own words: *"regex on the HTML string, not a parser"* — it was
+  written for HTML and `lintBuiltApp` feeds it JSX.** In JSX the first `>` of
+  `onChange={(e) => …}` belongs to the arrow, so `<input\b[^>]*>` ends there and **every attribute
+  after the first handler is invisible**, `aria-label` included. One reader now: `AgentV3/jsxTags.ts`
+  (`tagsOnLine` moved verbatim from the analyzer whose suite proves it, plus `scanMarkup`, which
+  carries the two facts a regex cannot — an enclosing `<label>`, and whether the tag is an HTML
+  element at all, since `<Select label="Category" />` has a real working label we cannot see).
+  ✅ **AND THE SIBLING FOUND ELEVEN REAL ONES THE FIRST ANALYZER CANNOT SEE.** `scanAccessibility`
+  reads a tag only when it **closes on its own line**, and a generated React input is routinely
+  written over six. `<label>Email</label>` beside an `<input>` with no `htmlFor`/`id` is not a label
+  to a screen reader, and our login template shipped three; a `placeholder` is not one either. All
+  fixed in the scaffold source, and the gate now asks BOTH linters with a canary each.
+  ⚠️ **SAME REPORT, SECOND FALSE FINDING, AND IT BECAME THE BUILD'S `rootCause`:** `FEATURE_COVERAGE`
+  said *"Mark complete / toggle"* had no control and *"Login / authentication"* was present — in an
+  app asked for neither. `toggle uppercase, numbers and symbols` tripped a bare `toggle`, and
+  `password` was an auth keyword. **The false POSITIVE is what certified the false NEGATIVE**: the
+  corroboration guard only lets a "missing" through once some OTHER probe is present. `password` is
+  gone from the auth list (nothing is lost — an app that only says "password" HAS the field, so it
+  probed present and reported nothing either way), and the completion keywords now need the company
+  that fixes their sense. Same lesson `featureRequest.ts` already encodes for negation ("no
+  settings") and deferral ("login in stage 3"), in a third tense.
+  🔒 Test-locked and **reversion-proven four ways** in `tests/theAnalyzerLiedAboutOurOwnTemplate.test.ts`,
+  including a SOURCE-level guard — `tsc` and `vitest` cannot see that a regex reads the wrong
+  dialect, which is exactly how this shipped and passed review.
+  **What to watch:** `ACCESSIBILITY` scores on real builds. A sudden crop of genuine `input-label`
+  findings on multi-line inputs is the check working for the first time, not a regression.
+
 - **🧭 IN THE ADMIN CONSOLE THE BOTTOM BAR *IS* THE TAB STRIP (admin 2026-09-20; no flag, no cost).**
   *"jab admin panel open hota hai, to footer me yeh home|ai|preview|studio|more etc jo dikh rahe hai —
   isko badalna hai!! is footer me MONITOR, USERS, ai engine, revenue … jo abhi header me hai, unko

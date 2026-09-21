@@ -32,7 +32,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Minimize2, Briefcase, LayoutGrid, Layers } from 'lucide-react';
+import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Minimize2, Briefcase, LayoutGrid, Layers, Store } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -2445,6 +2445,25 @@ export default function App() {
     // entry, TopNav's `if (!item) return null` silently dropped the tab, so opening Other AI showed no
     // header window. Same LayoutGrid icon as its Home card, for consistency.
     { id: 'other_ai',     label: 'Other',              icon: LayoutGrid },
+    // 🔴 APP MART HAD NO ENTRY HERE, SO IT OPENED AS A WINDOW WITH NO WINDOW (admin 2026-09-21:
+    // "app mart ko bhi multi window system me add karo, slidebar menu me aur header me multi
+    // tab/window (x=close) me bhi add karo"). `toggleTab('appstore')` pushed it into `openTabs`
+    // correctly, and TopNav then did `menuItems.find(m => m.id === tabId); if (!item) return null` —
+    // so the tab existed in state, rendered no chip, and had no ✕ to close it with. Getting out meant
+    // navigating somewhere else and leaving it open behind you.
+    //
+    // ⚠️ THIS IS THE `other_ai` BUG ABOVE, VERBATIM, TWO YEARS OF ENTRIES LATER — same file, same
+    // line of TopNav, same silent outcome. Its comment records the identical symptom for Other AI on
+    // 2026-07-23, and SidebarNav's `SIDEBAR_HIDDEN` block warns about the same `return null` a third
+    // time. The class is: THIS LIST IS THE REGISTRY FOR A WINDOW, and an id that opens a tab without
+    // being in it is a window nobody can see or shut.
+    //
+    // ONE ENTRY SERVES BOTH SURFACES THE ADMIN ASKED FOR, by construction rather than by two edits:
+    // TopNav renders the header chip with its ✕, and SidebarNav's `visibleItems` renders the menu row
+    // (App Mart is in neither `SIDEBAR_HIDDEN` nor `DRAWER_HIDDEN`, and had no door in the rail, the
+    // drawer list or the System Matrix — so this adds exactly one door per half, never a duplicate).
+    // `Store` is the same icon its own Home tile carries, for the reason the `other_ai` entry gives.
+    { id: 'appstore',     label: 'App Mart',          icon: Store },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },

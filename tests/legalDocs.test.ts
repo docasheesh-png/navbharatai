@@ -67,7 +67,11 @@ describe('Terms of Service — the sections that make it real', () => {
     expect(t).toMatch(/failed build is never charged|a build that was supposed to produce an app and did not succeed is not charged/i);
     expect(t).toMatch(/prepaid usage credit/i);
     expect(t).toMatch(/Refunds/);
-    expect(t).toMatch(/7 days/);
+    // Was /7 days/ until 2026-09-21. The window was a session's assumption; the admin's ruling is
+    // finality plus a re-credit remedy, so the Terms must carry BOTH halves — a "non-refundable"
+    // term with no stated remedy for our OWN defect is the version worth objecting to.
+    expect(t).toMatch(/non-refundable/i);
+    expect(t).toMatch(/re-?credit/i);
   });
   it('gives users ownership of their apps, and the BYO-database reality', () => {
     expect(t).toMatch(/You own what you make/i);
@@ -89,14 +93,18 @@ describe('Refund & Cancellation Policy — the sections a payment aggregator che
   const r = byId.legal_refund;
   it('answers the four questions any refund policy has to answer', () => {
     expect(r).toMatch(/cancel/i);                       // how to cancel
-    expect(r).toMatch(/7 days/);                        // the eligibility window
-    expect(r).toMatch(/7 working days/);                // how long the money takes
+    // The four questions are the same; two of the ANSWERS changed on 2026-09-21. There is no
+    // eligibility window and no "how long the money takes" because money does not come back —
+    // so the policy must instead be unambiguous about the rule and about the remedy that replaces it.
+    expect(r).toMatch(/final and non-refundable|is non-refundable/i);   // what the rule is
+    expect(r).toMatch(/re-?credit|put that credit back/i);              // the remedy when we are at fault
+    expect(r).toMatch(/5 working days/);                // how long WE take to answer
     expect(r).toMatch(/info@navbharatai\.com/);         // where to ask
   });
 
   it('🔒 says the SAME things the Terms say — the two may never drift apart', () => {
     const t = byId.legal_terms;
-    for (const claim of [/7 days/, /unused/i]) {
+    for (const claim of [/non-refundable/i, /re-?credit/i]) {
       expect(r, 'refund policy').toMatch(claim);
       expect(t, 'terms').toMatch(claim);
     }

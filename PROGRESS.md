@@ -76167,3 +76167,69 @@ trips on its own documentation is a guard someone deletes. They match syntax now
   of hiding an error the build had already fixed; an omitted count accuses nobody (the discipline
   `typecheckRan` already states); and the two rules are chained `else if`, so one claim can never
   produce two contradictions in the user's own correction. Reversion-proven twice.
+
+---
+
+## 2026-09-21 — 🔴 THE REFUND POLICY WAS A SESSION'S ASSUMPTION, AND THE ADMIN REVERSED IT
+
+**What happened.** `/refund` shipped on 2026-09-20 promising a refund of UNUSED purchased credit
+within **7 days**, refunded **in full including the platform fee** (*"we absorb our own processing
+cost"*). **Neither term was ever the admin's decision.** The session that wrote it recorded them
+honestly — as a code comment reading *"assumed defaults the admin can change"* — and that is the
+defect worth naming: **a money commitment was published to a live legal page, and the only disclosure
+of its uncertainty was in a file the admin does not read.** It surfaced only because they asked
+*"non refundable likha ya nahii?"* — a day later, and by their own initiative rather than ours.
+
+**THE RULE THIS ESTABLISHES: an assumption that costs money, or that a customer can hold us to, is
+not disclosed by a comment. It is put to the admin in the reply, in the turn that ships it.** A
+docblock is the right place for the REASONING; it is never the right place for the ASKING.
+
+**The admin's ruling, verbatim:**
+- *"jab cashfree wapas nahi karta to ham kyu kare"* — we do not absorb the gateway's fee.
+- *"agar kisi user ke credit khatam ho gaye, navbharatai ki galti se to credit/token wapas milenge? ₹ nahi."*
+- *"agar user ne ek bar navbharatai me payment kar diya to woh non refundable hai."*
+- *"paise dete hi, user paid user ban jayega, navbharatai pro, ke sabhi teeno tier unlock ho jayenge."*
+- *"koi kahe galti se payment ho gaya, woh bhi non refundable hai."*
+
+🔒 **THE JUSTIFICATION WAS VERIFIED IN CODE BEFORE IT WAS PUBLISHED**, because a legal page may not
+assert a behaviour the Platform does not have:
+`powerUnlocked = isAgentV3FreeUser || (!!uid && !isFreeTierUser(wallet))` →
+`isFreeTierUser(w) = !hasEverPaid(w)` → `hasEverPaid(w) = lifetimeMoneySpentInr(w) > 0 || lastRechargeAt`.
+`totalMoneySpent` is a LIFETIME gross total with exactly one writer (`computeCreditedWallet`, on a
+verified purchase) and is **never decremented** — so one payment unlocks all three tiers
+**permanently**, surviving a zero balance. That is real consideration delivered at the instant of
+payment, and it is what makes finality fair rather than merely convenient.
+
+⚠️ **THREE THINGS KEPT AGAINST THE GRAIN OF "NON-REFUNDABLE", each argued to the admin and accepted:**
+1. **A duplicate charge** is not a refund — the customer made one purchase. Refusing it invites a
+   CHARGEBACK, which costs the aggregator's dispute fee *on top of* the disputed amount and blocks
+   the money for weeks: **risking ₹500+ to keep ₹100.** The policy gives the customer the CHOICE —
+   the full amount as wallet credit (immediate, and costs us nothing, since the gateway's cut is not
+   returned to us on a refund either way) or the full amount back to the card. The admin approved
+   this shape explicitly (*"yeh theek h"*).
+2. **Money taken with no credit delivered** is not a refund either — the remedy is to COMPLETE the
+   delivery, which the reconciler already does on the next sign-in. ₹0 leaves the business.
+3. **An UNAUTHORISED payment is not "a payment made by mistake."** The admin's mistake ruling covers
+   a customer's own error about an AMOUNT; collapsing fraud into it would put a fraud victim and a
+   careless typist under one sentence. The policy states the mistake rule and points at section 5.
+
+✅ **IT ALSO CLOSED A CONTRADICTION THAT WAS ALREADY LIVE.** `DangerZone.tsx` has told users
+*"your unused token balance is not refundable"* on account deletion, and App Mart's player says
+*"Non-refundable"* — both contradicted the 7-day page while it stood. Found by grepping every
+`refund` mention outside `content/legal/`, not assumed.
+
+**Changed in one commit, because two published documents may never disagree:** `refundPolicy.ts`
+(rewritten), `termsOfService.ts` (Section 4's Refunds bullet, the §3 cross-reference that still said
+*"(refunds) applies to the unused part"* — a third place the old promise lived and the easiest to
+miss — and the Last-updated date). Test-locked and reversion-proven in
+`theRefundPolicyHasItsOwnUrl.test.ts` (the 7-day agreement test REPLACED by one that asserts
+finality, forbids a cash-refund window in BOTH documents, and holds the fraud carve-out) and
+`legalDocs.test.ts` (four assertions that pinned the old window).
+
+Full gate green on the final state — re-run AFTER the last edit, per safeguard #5: typecheck,
+typecheck:server, noUnusedImports, native:guard, vitest (**27,923 passed | 1 skipped | 0 FAIL**),
+build, test:bundle, boot:check, deps:server-gate.
+
+⚠️ **STILL THE ADMIN'S TO DECIDE (not a defect):** whether a duplicate charge returned as MONEY
+should be the net we received rather than the gross. They were shown the chargeback arithmetic and
+chose the credit-or-cash choice instead; the net-only option remains open if they want it.

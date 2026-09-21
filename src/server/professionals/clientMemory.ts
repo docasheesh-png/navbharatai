@@ -27,6 +27,15 @@ export interface MemoryField {
   list?: boolean;
   /** Short guidance shown to the model in the save instruction, e.g. 'topics they find hard'. */
   hint?: string;
+  /**
+   * For a key that is ALSO a shared identity key (`SHARED_MEMORY_FIELDS`): does this professional's
+   * declaration mean the same thing as the shared one? Default true — a `name` is a name. Set `false`
+   * where the key carries a DOMAIN meaning: Real-Estate AI's `location` is the property's city, not
+   * where the person is from, and sharing it would have told every other expert "From: Pune" about a
+   * Delhi user looking at a flat (review finding 2026-09-21). A `shared: false` key neither writes to
+   * the shared profile nor reads from it.
+   */
+  shared?: boolean;
 }
 
 /** A professional's memory declaration (on ProfessionalConfig.memory). */
@@ -87,6 +96,16 @@ export function isSharedKey(key: string): boolean {
 }
 
 /**
+ * The shared keys THIS professional actually shares: every shared key, minus any it declares with
+ * `shared: false` because its own meaning for that key is a domain fact.
+ */
+export function sharedKeysFor(memory: ProfessionalMemory): Set<string> {
+  const out = new Set(SHARED_MEMORY_FIELDS.map((f) => f.key));
+  for (const f of memory.fields) if (f.shared === false) out.delete(f.key);
+  return out;
+}
+
+/**
  * The fields a professional actually works with: its OWN declaration plus the shared ones it did not
  * declare. Deduped by key — where a professional declares a shared key itself (every one declares
  * `name`), its own label and hint win, so nothing a config author wrote is overridden.
@@ -94,6 +113,19 @@ export function isSharedKey(key: string): boolean {
 export function effectiveFields(memory: ProfessionalMemory): MemoryField[] {
   const own = new Set(memory.fields.map((f) => f.key));
   return [...memory.fields, ...SHARED_MEMORY_FIELDS.filter((f) => !own.has(f.key))];
+}
+
+/**
+ * Only the keys a person EXPLICITLY asked to be remembered may reach `remember` — and the model cannot
+ * be the judge of that, because it is the party being judged. The user's own message must carry the
+ * cue ("remember", "yaad rakhna", "याद"); without one the `remember` entry is dropped before it is
+ * saved (review finding 2026-09-21). Precision-first: a missed cue costs one saved note, an invented
+ * memory costs the user's trust in every expert at once.
+ */
+const REMEMBER_CUE_RE = /\b(remember|yaad|yad)\b|याद|note (this|that|it) down|save (this|that) for later/i;
+
+export function userAskedToRemember(message: string): boolean {
+  return REMEMBER_CUE_RE.test(message || '');
 }
 
 /**
@@ -109,12 +141,13 @@ export function splitUpdate(
 ): { own: Partial<ClientProfile> | null; shared: Partial<ClientProfile> | null } {
   if (!update) return { own: null, shared: null };
   const ownKeys = new Set(memory.fields.map((f) => f.key));
+  const sharedKeys = sharedKeysFor(memory);
   const own: Partial<ClientProfile> = {};
   const shared: Partial<ClientProfile> = {};
   for (const [k, v] of Object.entries(update)) {
     if (v === undefined) continue;
     if (ownKeys.has(k)) own[k] = v;
-    if (isSharedKey(k)) shared[k] = v;
+    if (sharedKeys.has(k)) shared[k] = v;
   }
   return {
     own: Object.keys(own).length > 0 ? own : null,
@@ -125,10 +158,19 @@ export function splitUpdate(
 /**
  * What the persona is told it already knows: the shared identity, overlaid with the professional's own
  * profile. The professional's own value wins where both hold a key — it was said to THIS expert and
- * may be the more specific one (a student's "Does" is their class, not their weekend job).
+ * may be the more specific one (a student's "Does" is their class, not their weekend job). Only the
+ * keys this professional SHARES are taken from the shared profile: a home town must never land under
+ * Real-Estate AI's "City / area".
  */
-export function combinedProfile(own: ClientProfile | null | undefined, shared: ClientProfile | null | undefined): ClientProfile {
-  return { ...(shared ?? {}), ...(own ?? {}) };
+export function combinedProfile(
+  own: ClientProfile | null | undefined,
+  shared: ClientProfile | null | undefined,
+  memory: ProfessionalMemory,
+): ClientProfile {
+  const keys = sharedKeysFor(memory);
+  const fromShared: ClientProfile = {};
+  for (const [k, v] of Object.entries(shared ?? {})) if (keys.has(k)) fromShared[k] = v;
+  return { ...fromShared, ...(own ?? {}) };
 }
 
 // Bounds — a profile document must stay bounded (never grow forever) but hold as much as safely fits

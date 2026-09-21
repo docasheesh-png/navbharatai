@@ -40,8 +40,12 @@ const SonicChat = lazy(() => import('./SonicChat').then((m) => ({ default: m.Son
  * `getHistory` = a live getter for the current text conversation, read at open time so voice
  * CONTINUES the chat from where the text left off (admin 2026-07-14).
  */
-export function ProfessionalVoiceButton({ professionalId, getHistory, className, icon, title }: {
+export function ProfessionalVoiceButton({ professionalId, conversationId, getHistory, className, icon, title }: {
   professionalId?: string;
+  /** The text conversation this call continues (2026-09-21) — the voice memory is keyed by it, so a
+   *  call from one window of an expert never seeds another window's call. Absent ⇒ the expert-wide
+   *  memory (Doctor AI, which is one window). */
+  conversationId?: string;
   getHistory?: () => SonicTurn[];
   /** Override the trigger button styling (e.g. the emerald SDA theme). */
   className?: string;
@@ -124,7 +128,7 @@ export function ProfessionalVoiceButton({ professionalId, getHistory, className,
           consent card — a flash of a spinner would read as a second, unexplained loading step. */}
       {open && (
         <Suspense fallback={null}>
-          <SonicChat onClose={() => setOpen(false)} professionalId={professionalId} history={history} />
+          <SonicChat onClose={() => setOpen(false)} professionalId={professionalId} conversationId={conversationId} history={history} />
         </Suspense>
       )}
     </>

@@ -42,8 +42,19 @@ export function appendMemory(existing: SonicTurn[], fresh: SonicTurn[], cap = 30
   return merged.slice(-Math.max(0, cap));
 }
 
-/** Stable Firestore doc key for a user's memory with a given professional (default when none). */
-export function memoryKey(userId: string, professionalId?: string): string {
+/**
+ * Stable Firestore doc key for a user's voice memory with a given professional (default when none).
+ *
+ * 🔒 PER CONVERSATION since 2026-09-21 (review finding on the five-windows change): voice memory holds
+ * spoken turns VERBATIM and was keyed per professional only, so a call from one Teacher AI window
+ * seeded the other window's next call with its actual words — the exact class the text lane had just
+ * closed, surviving on the sibling lane. With a conversation id the doc is that conversation's own;
+ * without one (Doctor AI, a client built before ids) the key is byte-identical to before, so an
+ * existing memory keeps working and is reachable only by an id-less caller — the same uniform rule as
+ * `MemoryChunk.conversationId`.
+ */
+export function memoryKey(userId: string, professionalId?: string, conversationId?: string): string {
   const prof = (professionalId || 'default').replace(/[^\w-]/g, '_');
-  return `${userId}__${prof}`;
+  if (!conversationId) return `${userId}__${prof}`;
+  return `${userId}__${prof}__${conversationId.replace(/[^\w-]/g, '_')}`;
 }

@@ -23,7 +23,7 @@
 // under `prof_<id>_conversations`.
 //
 // ⚠️ THE OLD KEY IS STILL READ, NEVER WRITTEN. A conversation that was live before this change sits in
-// `prof_<id>_messages`; it is surfaced as the open conversation `LEGACY_CONVERSATION_ID` and moved to
+// `prof_<id>_messages`; it is surfaced as the open conversation `legacyConversationId(id)` and moved to
 // the new key the first time it is saved. It is sent to the server WITHOUT an id (`serverConversationId`)
 // because its memory chunks were written id-less, and the server's rule is that the id-less chunks
 // belong to the id-less conversation — so an upgraded user's ongoing chat keeps its own memory, and no
@@ -88,11 +88,19 @@ export const MAX_ARCHIVED_PER_PROFESSIONAL = 5;
 export const MAX_OPEN_PER_PROFESSIONAL = 5;
 
 /**
- * The id under which the pre-2026-09-21 live conversation is surfaced locally. It is never SENT to the
- * server: `serverConversationId` maps it to `undefined`, which is the server's own name for the same
+ * The local id of a professional's pre-2026-09-21 live slot. It is never SENT to the server:
+ * `serverConversationId` maps it to `undefined`, which is the server's own name for the same
  * conversation (its memory chunks were written without an id).
+ *
+ * 🔴 NAMESPACED PER PROFESSIONAL (review finding, same day). A window id is globally unique — every
+ * surface relies on it (`openWindow` dedupes by id, React keys, the header chips) — and a single bare
+ * `'legacy'` for every professional broke that: a user with pre-change chats with Teacher AND Lawyer
+ * opened Lawyer to a BLANK tab, because "a window with id 'legacy' is already open" (the Teacher one).
+ * The colon also guarantees the server's id shape check can never accept it if it ever leaked.
  */
-export const LEGACY_CONVERSATION_ID = 'legacy';
+const LEGACY_CONVERSATION_PREFIX = 'legacy:';
+export const legacyConversationId = (professionalId: string): string => `${LEGACY_CONVERSATION_PREFIX}${professionalId}`;
+export const isLegacyConversationId = (conversationId: string): boolean => conversationId.startsWith(LEGACY_CONVERSATION_PREFIX);
 
 /** Mint a conversation id. Matches the server's accepted shape (`[A-Za-z0-9_-]{1,64}`). */
 export function newConversationId(now = Date.now()): string {
@@ -108,7 +116,7 @@ export function newConversationId(now = Date.now()): string {
 
 /** What the server is told this conversation is called. The legacy conversation is the id-less one. */
 export function serverConversationId(id: string): string | undefined {
-  return id === LEGACY_CONVERSATION_ID ? undefined : id;
+  return isLegacyConversationId(id) ? undefined : id;
 }
 
 /** localStorage, or null where it is unavailable (private mode, SSR) — callers degrade, never throw. */
@@ -136,7 +144,7 @@ const isMsgList = (v: unknown): v is ProfMsg[] => Array.isArray(v);
 function readLegacy(store: KeyValueStore, id: string): OpenConversation | null {
   const parsed = readJson<ProfMsg[]>(store, activeKey(id));
   if (!isMsgList(parsed) || parsed.length === 0) return null;
-  return { id: LEGACY_CONVERSATION_ID, messages: parsed, startedAt: 0, updatedAt: 0 };
+  return { id: legacyConversationId(id), messages: parsed, startedAt: 0, updatedAt: 0 };
 }
 
 function readStoredOpen(store: KeyValueStore, id: string): OpenConversation[] {
@@ -152,7 +160,7 @@ function readStoredOpen(store: KeyValueStore, id: string): OpenConversation[] {
  */
 export function readOpenConversations(store: KeyValueStore, id: string): OpenConversation[] {
   const stored = readStoredOpen(store, id);
-  const legacy = stored.some((c) => c.id === LEGACY_CONVERSATION_ID) ? null : readLegacy(store, id);
+  const legacy = stored.some((c) => isLegacyConversationId(c.id)) ? null : readLegacy(store, id);
   const all = legacy ? [...stored, legacy] : stored;
   return [...all].sort((a, b) => b.updatedAt - a.updatedAt);
 }
@@ -207,9 +215,19 @@ function writeArchive(store: KeyValueStore, id: string, conversations: ArchivedC
   return false;
 }
 
-/** Put one conversation into the archive (newest first, capped). Returns whether it was stored. */
+/**
+ * Put one conversation into the archive (newest first, capped). Returns whether it was stored.
+ *
+ * `endedAt` is the archive's record id, and two windows of one expert are closed in the SAME
+ * millisecond when their tab closes (review finding, same day): identical ids meant "Open" on one
+ * resumed the first and deleted BOTH, and History drew two rows with one key. So a colliding stamp is
+ * nudged forward until it is unique — a millisecond nobody can see, for an id every reader depends on.
+ */
 function archiveOne(store: KeyValueStore, id: string, record: ArchivedConversation): boolean {
-  const next = [record, ...readArchive(store, id)].slice(0, MAX_ARCHIVED_PER_PROFESSIONAL);
+  const existing = readArchive(store, id);
+  const rec: ArchivedConversation = { ...record };
+  while (existing.some((c) => c.endedAt === rec.endedAt)) rec.endedAt += 1;
+  const next = [rec, ...existing].slice(0, MAX_ARCHIVED_PER_PROFESSIONAL);
   return writeArchive(store, id, next);
 }
 
@@ -274,17 +292,30 @@ export function saveConversation(store: KeyValueStore, id: string, conversationI
     list = list.slice(0, -1);
   }
   const ok = writeOpen(store, id, list, conversationId, now);
-  if (ok && conversationId === LEGACY_CONVERSATION_ID) {
+  // Once the write succeeded the legacy record is either stored under the new key, archived by the cap
+  // above, or archived by the quota shed — so the old key is redundant WHENEVER the legacy record took
+  // part in this save, not only when it was the one being saved. Leaving it behind resurrected the
+  // legacy chat from the old key on every read after the cap had archived it, and re-archived it on
+  // every later save until copies of one chat had pushed every real closed conversation out.
+  if (ok && (isLegacyConversationId(conversationId) || open.some((c) => isLegacyConversationId(c.id)))) {
     try { store.removeItem(activeKey(id)); } catch { /* the copy under the new key is the one read first */ }
   }
   return ok;
 }
 
-/** Remove an open conversation without archiving it (History's delete on an ongoing row, or Clear). */
+/**
+ * Remove an open conversation without archiving it (History's delete on an ongoing row, or Clear).
+ *
+ * Operates on the STORED list only: an un-migrated legacy conversation lives under the old key and is
+ * never in that list, so it is untouched here; a MIGRATED one is a stored record like any other and
+ * must survive a sibling's deletion. (The first version filtered the legacy record out of every write,
+ * which after migration dropped the only copy of the user's pre-change chat whenever ANY other
+ * conversation of that expert was cleared, deleted or closed — review finding, same day.)
+ */
 export function deleteOpenConversation(store: KeyValueStore, id: string, conversationId: string): void {
-  const open = readOpenConversations(store, id).filter((c) => c.id !== conversationId);
-  writeOpen(store, id, open.filter((c) => c.id !== LEGACY_CONVERSATION_ID), '', Date.now());
-  if (conversationId === LEGACY_CONVERSATION_ID) {
+  const stored = readStoredOpen(store, id).filter((c) => c.id !== conversationId);
+  writeOpen(store, id, stored, '', Date.now());
+  if (isLegacyConversationId(conversationId)) {
     try { store.removeItem(activeKey(id)); } catch { /* ignore */ }
   }
 }
@@ -309,7 +340,7 @@ export function endConversation(store: KeyValueStore, id: string, conversationId
       endedAt: now,
       messages: conv.messages,
       // A resumed legacy conversation gets a fresh id (its memory was id-less; a fresh id starts clean).
-      ...(conversationId !== LEGACY_CONVERSATION_ID ? { conversationId } : {}),
+      ...(!isLegacyConversationId(conversationId) ? { conversationId } : {}),
     });
   }
   deleteOpenConversation(store, id, conversationId);
@@ -336,15 +367,31 @@ export function endProfessionalChat(store: KeyValueStore, id: string, now = Date
  * fresh one when the record predates ids. Nothing else is parked: with several windows there is no
  * single live slot to protect. Returns null when the record does not exist or cannot be stored.
  */
-export function resumeArchived(store: KeyValueStore, id: string, endedAt: number, now = Date.now()): string | null {
+export function resumeArchived(
+  store: KeyValueStore,
+  id: string,
+  endedAt: number,
+  now = Date.now(),
+  conversationId: string | null = archivedResumeId(store, id, endedAt, now),
+): string | null {
   const wanted = readArchive(store, id).find((c) => c.endedAt === endedAt);
-  if (!wanted) return null;
-  const conversationId = wanted.conversationId && wanted.conversationId !== LEGACY_CONVERSATION_ID
-    ? wanted.conversationId
-    : newConversationId(now);
+  if (!wanted || !conversationId) return null;
   if (!saveConversation(store, id, conversationId, wanted.messages, now)) return null;
   writeArchive(store, id, readArchive(store, id).filter((c) => c.endedAt !== endedAt));
   return conversationId;
+}
+
+/**
+ * The id an ended conversation WOULD resume under — without writing anything. The window cap is decided
+ * by App, which must be asked BEFORE the archive is touched: a resume that was then refused left the row
+ * "ongoing" with no window behind it (review finding, same day). Null when there is no such record.
+ */
+export function archivedResumeId(store: KeyValueStore, id: string, endedAt: number, now = Date.now()): string | null {
+  const wanted = readArchive(store, id).find((c) => c.endedAt === endedAt);
+  if (!wanted) return null;
+  return wanted.conversationId && !isLegacyConversationId(wanted.conversationId)
+    ? wanted.conversationId
+    : newConversationId(now);
 }
 
 /** Delete one ended conversation for good. */

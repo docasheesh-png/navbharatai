@@ -28,7 +28,13 @@ const OUT_RATE = 24000;
 
 export interface SonicTurn { role: 'user' | 'assistant'; content: string }
 
-export function SonicChat({ onClose, professionalId, history }: { onClose?: () => void; professionalId?: string; history?: SonicTurn[] } = {}) {
+export function SonicChat({ onClose, professionalId, conversationId, history }: {
+  onClose?: () => void;
+  professionalId?: string;
+  /** The text conversation this call continues (2026-09-21) — keys the voice memory per window. */
+  conversationId?: string;
+  history?: SonicTurn[];
+} = {}) {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -210,7 +216,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       ws.onopen = () => {
         // Send the persona + prior text conversation FIRST so the server starts the session as
         // this professional and CONTINUES the chat (before any audio is streamed).
-        try { ws.send(JSON.stringify({ type: 'init', professionalId, history: history?.slice(-12) })); } catch { /* will retry via audio */ }
+        try { ws.send(JSON.stringify({ type: 'init', professionalId, conversationId, history: history?.slice(-12) })); } catch { /* will retry via audio */ }
         setStatus('live');
       };
       ws.onerror = () => { setError('Connection error.'); setStatus('error'); };
@@ -263,7 +269,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       setStatus('error');
       stop();
     }
-  }, [playChunk, flushPlayback, stop, voice, boli, professionalId, history]);
+  }, [playChunk, flushPlayback, stop, voice, boli, professionalId, conversationId, history]);
 
   // Toggle mic mute mid-call. Mirrored into a ref so the audio callback sees it without re-binding.
   const toggleMute = useCallback(() => {

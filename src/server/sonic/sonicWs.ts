@@ -22,6 +22,7 @@ import { SonicSession, type SonicVoice, type SonicTurn } from './SonicBridge';
 import { parseBoli, type SonicBoli } from './sonicBoli';
 import { mergeSeed } from './voiceMemory';
 import { voiceMemoryStore } from './VoiceMemoryStore';
+import { conversationIdFromBody } from '../professionals/conversationId';
 import { isSonicEnabled } from './featureFlag';
 import { sonicPersonaFor } from './sonicPersona';
 import { verifyIdentityWithReason, adminAppOptions } from '../lib/authMiddleware';
@@ -77,13 +78,17 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
   // so it can be folded into the user's persistent memory when the call ends — keyed per user +
   // professional. Best-effort: with no uid (should not happen post-verify) memory is simply skipped.
   let professionalId: string | undefined;
+  // WHICH WINDOW is calling (2026-09-21): the voice memory is that conversation's own, so a call from
+  // one Teacher AI window never seeds another window's call with its words. Validated with the SAME
+  // rule as the text route; absent ⇒ the id-less (legacy / Doctor AI) memory, exactly as before.
+  let conversationId: string | undefined;
   const transcript: SonicTurn[] = [];
   let persisted = false;
 
   const persistMemory = () => {
     if (persisted || !uid || transcript.length === 0) return;
     persisted = true;
-    void voiceMemoryStore.append(uid, professionalId, transcript.slice());
+    void voiceMemoryStore.append(uid, professionalId, transcript.slice(), conversationId);
   };
 
   // ── THE METER (admin 2026-08-10: voice is a paid service) ────────────────────────────────────
@@ -197,10 +202,11 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
   };
 
   ws.on('message', (raw) => {
-    let msg: { type?: string; data?: string; professionalId?: string; history?: SonicTurn[] };
+    let msg: { type?: string; data?: string; professionalId?: string; conversationId?: unknown; history?: SonicTurn[] };
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'init') {
       professionalId = typeof msg.professionalId === 'string' ? msg.professionalId : undefined;
+      conversationId = conversationIdFromBody(msg.conversationId);
       // Server-side persona lookup — the client only names WHICH professional; a raw prompt is never
       // trusted from the client (prompt-injection guard). Resolves the config-driven professionals AND
       // the bespoke Doctor AI (SDA) clinical voice persona. Unknown/absent id → default voice.
@@ -209,7 +215,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage, uid?: string) => {
       // Load this user's remembered turns for this professional and seed them BEFORE the live text
       // chat, so voice continues across calls (not just within the current text thread). Best-effort
       // and bounded (mergeSeed dedups + caps); a load failure just means no persisted memory.
-      voiceMemoryStore.load(uid || '', professionalId)
+      voiceMemoryStore.load(uid || '', professionalId, conversationId)
         .then((remembered) => startSession(persona, mergeSeed(remembered, clientHistory)))
         .catch(() => startSession(persona, mergeSeed([], clientHistory)));
     } else if (msg.type === 'audio' && typeof msg.data === 'string') { if (!session) startSession(); session?.sendAudio(msg.data); }

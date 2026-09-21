@@ -61,7 +61,40 @@ describe('every door into an expert leads to a window', () => {
 
   it('"New chat" in the Mode sheet mints a fresh conversation; History opens BY conversation', () => {
     expect(app).toContain('toggleTab(id as ViewType, true, newConversationId());');
-    expect(app.match(/toggleTab\((viewId|id) as ViewType, true, conversationId\)/g)?.length).toBe(3);
+    // Every History door goes through ONE App handler, which secures the window BEFORE resuming.
+    expect(app.match(/onOpen(Professional)?=\{openProfessionalConversation\}/g)?.length).toBe(3);
+    expect(app.match(/onDelete(Professional)?=\{deleteProfessionalConversation\}/g)?.length).toBe(3);
+    expect(app).toContain('toggleTab(professionalId as ViewType, true, ref.conversationId, ref.endedAt)');
+  });
+
+  it('an ENDED row is resumed only AFTER the cap is checked, and never by a history view itself (review finding)', () => {
+    const at = app.indexOf('const toggleTab = useCallback');
+    const body = app.slice(at, app.indexOf('const closeTab', at));
+    const capAt = body.indexOf("if (openChats.length >= MAX_OPEN_CHATS) { addToast(capMessage(), 'warning'); return false; }");
+    const resumeAt = body.indexOf('resumeArchived(store, view, resumeEndedAt)');
+    expect(capAt).toBeGreaterThan(0);
+    expect(resumeAt).toBeGreaterThan(capAt);
+    for (const f of ['src/components/professionals/ProfessionalHistoryView.tsx', 'src/components/HistoryView.tsx']) {
+      expect(codeOnly(read(f)), f).not.toContain('resumeArchived(');
+    }
+    // A refusal keeps the popup open (nothing happened), rather than closing over it.
+    expect(codeOnly(read('src/components/history/HistoryPopup.tsx'))).toContain('if (r !== false) onClose();');
+  });
+
+  it('deleting an ONGOING row closes its window too, storage first (review finding)', () => {
+    const at = app.indexOf('const deleteProfessionalConversation');
+    const body = app.slice(at, app.indexOf('const openProfessionalConversation', at));
+    expect(body.indexOf('deleteOpenConversation(store, professionalId, conversationId)')).toBeLessThan(body.indexOf('closeWindow(openChats, conversationId)'));
+    expect(body).toContain('closeTab(undefined, closed.professionalId as ViewType)');
+    const hv = codeOnly(read('src/components/HistoryView.tsx'));
+    expect(hv).toContain('onDeleteProfessional(prof.profViewId, prof.profConversationId)');
+  });
+
+  it('a hidden window is told when it comes on screen, so its newest reply is scrolled into view', () => {
+    expect(app).toMatch(/<ProfessionalChat[^>]*onScreen=\{onScreen\}/);
+    const chat = codeOnly(read('src/components/professionals/ProfessionalChat.tsx'));
+    expect(chat).toContain("if (onScreen) endRef.current?.scrollIntoView({ behavior: 'smooth' });");
+    expect(chat).toContain('}, [messages, onScreen]);');
   });
 });
 

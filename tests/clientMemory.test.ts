@@ -21,6 +21,8 @@ import {
   splitUpdate,
   combinedProfile,
   isSharedKey,
+  sharedKeysFor,
+  userAskedToRemember,
   SHARED_MEMORY_FIELDS,
   SHARED_PROFILE_ID,
   type MemoryField,
@@ -183,9 +185,9 @@ describe('shared identity (SHARED_MEMORY_FIELDS)', () => {
   });
 
   it('combinedProfile: the professional\'s own value wins, shared fills the gaps', () => {
-    expect(combinedProfile({ name: 'Priya', goal: 'CA' }, { name: 'P. Sharma', location: 'Delhi' }))
+    expect(combinedProfile({ name: 'Priya', goal: 'CA' }, { name: 'P. Sharma', location: 'Delhi' }, MEMORY))
       .toEqual({ name: 'Priya', goal: 'CA', location: 'Delhi' });
-    expect(combinedProfile(null, null)).toEqual({});
+    expect(combinedProfile(null, null, MEMORY)).toEqual({});
   });
 
   it('formatProfileBlock renders a shared fact the professional did not declare', () => {
@@ -211,5 +213,48 @@ describe('shared identity (SHARED_MEMORY_FIELDS)', () => {
     expect(isSharedKey('notes')).toBe(false);
     // `remember` is authored by the PERSON — its hint must say so, in the instruction the model reads.
     expect(SHARED_MEMORY_FIELDS.find((f) => f.key === 'remember')?.hint).toMatch(/explicitly/);
+  });
+});
+
+// ── SHARE BY MEANING, NOT BY KEY NAME (review finding 2026-09-21) ────────────────────────────────────
+describe('a domain key that merely spells like a shared key stays with the professional', () => {
+  const REALESTATE: ProfessionalMemory = {
+    subject: 'client',
+    intake: 'Learn the city.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'location', label: 'City / area', shared: false }, // the PROPERTY's city, not where they live
+    ],
+  };
+
+  it('sharedKeysFor drops a key the professional declares with shared: false', () => {
+    expect([...sharedKeysFor(REALESTATE)].sort()).toEqual(['language', 'name', 'occupation', 'remember']);
+    expect([...sharedKeysFor(MEMORY)].sort()).toEqual(['language', 'location', 'name', 'occupation', 'remember']);
+  });
+
+  it('forward: the property city never reaches the shared profile — but the name still does', () => {
+    const { own, shared } = splitUpdate({ name: 'Ravi', location: 'Pune, Hinjewadi' }, REALESTATE);
+    expect(own).toEqual({ name: 'Ravi', location: 'Pune, Hinjewadi' });
+    expect(shared).toEqual({ name: 'Ravi' });
+  });
+
+  it('reverse: the shared home town never lands under the professional\'s "City / area"', () => {
+    const combined = combinedProfile({ name: 'Ravi' }, { name: 'Ravi', location: 'Delhi', occupation: 'nurse' }, REALESTATE);
+    expect(combined).toEqual({ name: 'Ravi', occupation: 'nurse' });
+    // A professional that shares the key still receives it.
+    expect(combinedProfile({}, { location: 'Delhi' }, MEMORY)).toEqual({ location: 'Delhi' });
+  });
+});
+
+describe('"remember this" needs the person\'s own cue', () => {
+  it('recognises the ways people actually ask, in English and Hinglish/Hindi', () => {
+    for (const m of ['please remember that I am vegetarian', 'isko yaad rakhna', 'yad rakh lena bhai', 'ये याद रखना', 'note this down: exam on 3rd']) {
+      expect(userAskedToRemember(m), m).toBe(true);
+    }
+  });
+  it('a plain statement is not a request to remember — the model may not decide that for them', () => {
+    for (const m of ['I am vegetarian', 'my exam is on the 3rd', '', 'remembrance day is coming']) {
+      expect(userAskedToRemember(m), m).toBe(false);
+    }
   });
 });

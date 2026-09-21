@@ -42,9 +42,13 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
-import { endConversation, latestOpenConversationId, newConversationId, browserStore as professionalStore } from './lib/professionalChatStore';
 import {
-  openWindow, closeWindow, windowsOf, nextActiveAfterClose, windowLabel, capMessage, isWindowedProfessional, type ChatWindow,
+  endConversation, latestOpenConversationId, newConversationId, resumeArchived, deleteOpenConversation,
+  browserStore as professionalStore,
+} from './lib/professionalChatStore';
+import {
+  openWindow, closeWindow, windowsOf, nextActiveAfterClose, windowLabel, capMessage, isWindowedProfessional, MAX_OPEN_CHATS,
+  type ChatWindow, type ConversationRef,
 } from './lib/chatWindows';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { startFreshCase } from './lib/sdaCaseStore';
@@ -1441,11 +1445,13 @@ export default function App() {
    * a held-back tool, sign-in required) or, for a professional, when the window cap did.
    *
    * `conversationId` (2026-09-21) names WHICH conversation to show for a professional: a fresh id from
-   * the Mode picker's "New chat", a resumed one from History. Without it, a professional with no window
-   * open reopens its most recent ongoing conversation (or starts one), and one with windows open is
-   * simply focused — so every door into an expert leads to a window, by construction.
+   * the Mode picker's "New chat", an ongoing one from History. `resumeEndedAt` names an ENDED one to
+   * bring back — the cap is checked FIRST and the archive touched only once a window is certain, so a
+   * refused open never leaves a row "ongoing" with nothing behind it. Without either, a professional
+   * with no window open reopens its most recent ongoing conversation (or starts one), and one with
+   * windows open is simply focused — so every door into an expert leads to a window, by construction.
    */
-  const toggleTab = useCallback((view: ViewType, pushToHistory = true, conversationId?: string): boolean => {
+  const toggleTab = useCallback((view: ViewType, pushToHistory = true, conversationId?: string, resumeEndedAt?: number): boolean => {
     // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
@@ -1500,8 +1506,16 @@ export default function App() {
     if (isWindowedProfessional(view)) {
       const existing = windowsOf(openChats, view);
       const store = professionalStore();
-      const wanted = conversationId
-        ?? (existing.length === 0 ? ((store && latestOpenConversationId(store, view)) || newConversationId()) : null);
+      let wanted: string | null = conversationId ?? null;
+      if (resumeEndedAt !== undefined) {
+        // Cap BEFORE the archive is touched (review finding 2026-09-21): a resume that is then refused
+        // would leave the row "ongoing" with no window, and could shed an on-screen window's own
+        // conversation from the store's open list.
+        if (openChats.length >= MAX_OPEN_CHATS) { addToast(capMessage(), 'warning'); return false; }
+        wanted = store ? resumeArchived(store, view, resumeEndedAt) : null;
+        if (!wanted) return false; // the record is gone — the view re-reads rather than opening a blank chat
+      }
+      if (!wanted && existing.length === 0) wanted = (store && latestOpenConversationId(store, view)) || newConversationId();
       if (wanted) {
         if (!existing.some((w) => w.id === wanted)) {
           const opened = openWindow(openChats, { id: wanted, professionalId: view });
@@ -1896,6 +1910,36 @@ export default function App() {
       if (next) setActiveChatId(next.id);
     }
   }, [openChats, activeChatId, closeTab]);
+
+  /**
+   * DELETE an ongoing conversation (History's delete on an "Ongoing" row): the transcript goes — never
+   * archived — and so does its window if one is open. Windows stay mounted while hidden, so a delete
+   * that left the window standing was undone by that window's own next save (review finding
+   * 2026-09-21). Storage first, then the window, so the tab teardown finds nothing to archive.
+   */
+  const deleteProfessionalConversation = useCallback((professionalId: string, conversationId: string) => {
+    const store = professionalStore();
+    if (store) deleteOpenConversation(store, professionalId, conversationId);
+    const { windows, closed } = closeWindow(openChats, conversationId);
+    if (!closed) return;
+    setOpenChats(windows);
+    if (windowsOf(windows, closed.professionalId).length === 0) {
+      if (activeChatId === conversationId) setActiveChatId(null);
+      closeTab(undefined, closed.professionalId as ViewType);
+      return;
+    }
+    if (activeChatId === conversationId) {
+      const next = nextActiveAfterClose(windows, closed);
+      if (next) setActiveChatId(next.id);
+    }
+  }, [openChats, activeChatId, closeTab]);
+
+  /** One History row → one window (see toggleTab): open by id, or resume by archive stamp. */
+  const openProfessionalConversation = useCallback(
+    (professionalId: string, ref: ConversationRef): boolean =>
+      toggleTab(professionalId as ViewType, true, ref.conversationId, ref.endedAt),
+    [toggleTab],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);
@@ -3761,7 +3805,7 @@ export default function App() {
             const onScreen = activeChat?.id === win.id;
             return (
               <div key={win.id} className={onScreen ? 'flex-1 overflow-hidden h-full min-h-0 max-h-full' : 'hidden'}>
-                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onOpenModePicker={modePickerOpener} />
+                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onScreen={onScreen} onOpenModePicker={modePickerOpener} />
               </div>
             );
           })}
@@ -4011,15 +4055,16 @@ export default function App() {
               onClose={() => setHistoryPopupOpen(false)}
               onRestoreSession={handleRestoreUci}
               onDeleteSession={deleteSession}
-              onOpenProfessional={(viewId, conversationId) => toggleTab(viewId as ViewType, true, conversationId)}
+              onOpenProfessional={openProfessionalConversation}
+              onDeleteProfessional={deleteProfessionalConversation}
             />
           )}
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && (historyInitialFilter === 'professional'
-            ? <ProfessionalHistoryView onOpen={(id, conversationId) => toggleTab(id as ViewType, true, conversationId)} onBack={() => toggleTab('professionals')} />
+            ? <ProfessionalHistoryView onOpen={openProfessionalConversation} onDelete={deleteProfessionalConversation} onBack={() => toggleTab('professionals')} />
             : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
                 includeProfessionals={historyInitialFilter === 'free'}
-                onOpenProfessional={(viewId, conversationId) => toggleTab(viewId as ViewType, true, conversationId)} />)}
+                onOpenProfessional={openProfessionalConversation} onDeleteProfessional={deleteProfessionalConversation} />)}
 
           {activeView === 'deploy' && (
             <DeploySuccessPanel

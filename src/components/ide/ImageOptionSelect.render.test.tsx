@@ -237,10 +237,26 @@ describe('🔒 each image in the thread carries its OWN actions', () => {
     // The old screen showed one image, so `handleCopyImage()` could mean "the image". In a thread
     // that is ambiguous, and an action that silently picks the newest is a wrong answer, not a bug
     // anyone would see.
-    expect(src).toMatch(/handleCopyImage\(item\.id, item\.url\)/);
-    expect(src).toMatch(/handleDownload\(item\.url, item\.prompt\)/);
-    expect(src).toMatch(/setTextOn\(item\.id\)/);
-    expect(src).toMatch(/handleDeleteOne\(item\.id\)/);
+    //
+    // ⚠️ THIS USED TO PIN THE EXACT CALL SHAPE (`handleCopyImage(item.id, item.url)`), and on
+    // 2026-09-21 a legitimate change broke it without breaking the property: a free picture may now
+    // arrive as a link rather than as bytes, so Copy, Save and Add text first pass through
+    // `ensureLocalImage(item.id)` and hand on what it returns. The property is "every action is
+    // parameterised by the row it sits on, never by ambient state" — so that is what is asserted,
+    // per handler, rather than one spelling of it.
+    const handlers = [...src.matchAll(/onClick=\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g)].map((m) => m[1]);
+    const rowHandlers = handlers.filter((h) => /handleCopyImage|handleDownload|setTextOn|handleDeleteOne/.test(h));
+    expect(rowHandlers.length, 'the four per-image actions must still be there').toBeGreaterThanOrEqual(4);
+    for (const h of rowHandlers) {
+      expect(h, `an action that does not name its image: ${h}`).toMatch(/item\./);
+    }
+    // And each of the four is present by name, wherever it now sits in the chain.
+    for (const fn of ['handleCopyImage(', 'handleDownload(', 'setTextOn(', 'handleDeleteOne(']) {
+      expect(src, `${fn} disappeared`).toContain(fn);
+    }
+    // The ambiguous form the original guard existed to forbid stays forbidden.
+    expect(src).not.toMatch(/handleCopyImage\(\)/);
+    expect(src).not.toMatch(/handleDeleteOne\(\)/);
   });
 
   it('🔴 "Add text" reads the words that asked for THAT image, not the composer', () => {

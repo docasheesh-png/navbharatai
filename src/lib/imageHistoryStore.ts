@@ -22,6 +22,19 @@ export interface ImageHistoryItem {
   style: string;
   size: string;
   timestamp: number;
+  /**
+   * The signed provider link this picture came from, kept ONLY when the browser could not read its
+   * bytes (admin 2026-09-21 — free pictures are fetched from the user's own connection).
+   *
+   * 🔑 WHY IT IS SAFE TO KEEP A LINK INSTEAD OF BYTES. The link is deterministic: the same prompt,
+   * seed and size return the same picture, so the item still shows the right image tomorrow. The
+   * ticket is what lets "Add text", "Crop", "Copy" and "Download" get the real pixels later,
+   * through our relay, on the press — and only then.
+   *
+   * Absent on every ordinary item, where `url` is already the bytes.
+   */
+  ticket?: string;
+  exp?: number;
 }
 
 /** Pluggable store so the generator's persistence is testable without a real IndexedDB. */

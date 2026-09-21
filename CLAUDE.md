@@ -1423,6 +1423,39 @@ the code (it is actually read somewhere) on 2026-07-11.
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
 
+- **🌐 `IMAGE_GEN_CLIENT_FETCH` — a FREE image is fetched by the USER'S BROWSER, not by this server
+  (admin-mandated 2026-09-21: *"free wale me user ki ip, paid me hamari"*). ⚠️ NOT set, and the code
+  default is ON**; `off` is the instant, no-deploy revert to the previous behaviour exactly. Read by
+  `src/server/lib/imageTicket.ts`; applied in the free Pollinations branch of `routes/imageGen.ts`.
+  🔑 **THE PROBLEM IS A RATE LIMIT, NOT A BILL.** The free provider allows **one request every 15
+  seconds PER IP ADDRESS**, and this server is ONE address — so every free user on the platform
+  shared a single bucket. Ceiling: ~5,760 images/day for the whole product, and only if perfectly
+  spread. Worse, a throttled request was read as a FAILURE and fell through to the **paid** Gemini
+  rung — so at scale the "free" tier quietly became a paid one, at a price this repo has never
+  measured (there is still no image rate in `providerRates.ts`). From the browser each user has
+  their own address.
+  ⚠️ **CGNAT MEANS THIS IS AN IMPROVEMENT, NOT A FIX.** Indian carriers put many phones behind one
+  public address, so a busy tower still shares a bucket. The admin asked for that to be fixed and it
+  cannot be — the only techniques are rotating proxies, i.e. deliberately evading a free provider's
+  rate limit, which would get NavBharatAI blocked outright. What absorbs the remainder is the
+  browser's retry, bounded by the admin's own budget (*"1 min baad bhi mile chalega"*).
+  🔴 **THE RELAY IS AN SSRF SURFACE AND HAS TWO LOCKS.** `POST /api/image/relay` exists so Add text,
+  Crop, Copy and Download keep working when a browser may not read another site's pixels — it takes
+  a URL **from the client**. Locks: (1) `isAllowedImageHost` — an EXACT host allowlist, because a
+  substring check passes `image.pollinations.ai.evil.com`; (2) our HMAC over that exact URL, because
+  an allowed host with a free path is a way to fetch a prompt our safety triage never saw. Neither
+  is relied on alone. A forged and an expired ticket return the SAME words, so a prober cannot tell
+  which lock they tripped.
+  🔒 **THE TRIAGE DID NOT MOVE.** The pornography ban, the craft layer and the India-map directive
+  all still run on this server before a link is minted; the link carries a FINISHED prompt.
+  ⚠️ **And the provider's own `safe` parameter is NOT a substitute** — their docs say safety is OFF
+  unless asked for, and it is documented on their NEW keyed endpoint, not the keyless one this uses.
+  ⚠️ **An EDIT of the user's own photo is never handed to the browser** (`!editing`): it carries
+  their photograph, and those bytes must not end up in a URL anybody could hold.
+  **What to watch on the first real days:** whether the countdown appears often (the shared-address
+  case), and whether pictures still open in "Add text" — if a browser cannot read them the relay
+  covers it, but a rise in relay calls means we are paying the address cost after all.
+
 - **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
   `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and
   writes an admin line, and charges **₹0** — NavBharatAI absorbs it, exactly as slice 2's admin route

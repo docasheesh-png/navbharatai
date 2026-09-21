@@ -8,10 +8,12 @@ import {
   imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, fetchPollinationsImage,
+  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl,
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
+import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
+import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
@@ -263,6 +265,27 @@ export function registerImageGenRoutes(app: Express): void {
       // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
       // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
       if (pollinationsEnabled() && !editing) {
+        // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip").
+        // The provider allows one request every 15 seconds PER ADDRESS, and this server is ONE
+        // address — so at any real scale every free user on the platform queues behind every other
+        // one. Handing the browser a link puts each user on their own connection. Nothing else
+        // moves: the prompt was triaged, crafted and bounded HERE, seconds ago, and the link
+        // carries that finished prompt. `IMAGE_GEN_CLIENT_FETCH=off` reverts it with no deploy.
+        if (clientImageFetchEnabled()) {
+          const url = pollinationsImageUrl(prompt, req.body.size, process.env, {
+            width: req.body.width,
+            height: req.body.height,
+          });
+          const exp = Date.now() + IMAGE_TICKET_TTL_MS;
+          res.json({
+            mode: 'client-fetch',
+            url,
+            ticket: signImageTicket(url, exp, imageTicketSecret()),
+            exp,
+            ...(crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
+          });
+          return;
+        }
         const pr = await fetchPollinationsImage(prompt, req.body.size, {
           timeoutMs: ROUTE_TIMEOUT_MS,
           custom: { width: req.body.width, height: req.body.height },
@@ -371,6 +394,90 @@ export function registerImageGenRoutes(app: Express): void {
    * Charging first would risk billing a request that then failed; charging for a batch that
    * half-delivered would bill for pictures nobody got.
    */
+  /**
+   * POST /api/image/relay — fetch back a picture the BROWSER could not read.
+   *
+   * 🔑 WHY IT EXISTS. A free picture is fetched by the user's own browser, from their own address,
+   * so the provider's one-request-per-15-seconds-per-address limit stops being shared by everybody
+   * on the platform. But a browser may not read the BYTES of another site's image unless that site
+   * allows it — and "Add text", "Crop", "Copy" and "Download" all need the real pixels. The admin's
+   * instruction was that those four keep working on the free tier ("yeh sab user ke ip par kaam kar
+   * jaye, kisi bhi tarah"), so when the browser cannot read them, this fetches them once.
+   *
+   * ⚠️ ONLY WHEN A BUTTON NEEDS THEM. The picture is DISPLAYED straight from the user's connection;
+   * this runs on a press, not on every generation. Most pictures are never edited, so the address
+   * our server spends stays a small fraction of the traffic.
+   *
+   * 🔴 THIS ENDPOINT TAKES A URL FROM THE CLIENT, so it is locked twice, and it is worth being
+   * explicit about why one lock is not enough:
+   *   • the HOST must be on an exact allowlist — otherwise a caller could ask our server to fetch
+   *     an internal address and read the answer back (SSRF), and a substring check would pass
+   *     `image.pollinations.ai.evil.com`;
+   *   • the URL must carry OUR signature — otherwise a caller could point us at any path on an
+   *     allowed host, including a prompt our safety triage never saw.
+   */
+  app.post(
+    '/api/image/relay',
+    rateLimiter({ name: 'imagerelay', authed: 80, anon: 0, anonGlobalPerHour: 0, noun: 'image fetches' }),
+    validateBody(vobject({
+      url: vstring({ max: 4_000 }),
+      ticket: vstring({ max: 120 }),
+      exp: vnumber({ int: true }),
+    })),
+    async (req: Request, res: Response) => {
+      // An account, for the same reason the generate route needs one: this spends our address and
+      // our bandwidth, and an anonymous caller is nobody we can rate-limit meaningfully.
+      const account = await requireAccountForCostlyAi(req, 'image download');
+      if (!account.ok) {
+        res.status(account.status).json(account.body);
+        return;
+      }
+      const url = String(req.body?.url || '');
+      if (!isAllowedImageHost(url)) {
+        res.status(400).json({ error: 'That picture link is not one NavBharatAI created.' });
+        return;
+      }
+      if (!verifyImageTicket(url, req.body?.exp, req.body?.ticket, imageTicketSecret(), Date.now())) {
+        // One message for a forged signature and for an expired one: telling them apart would say
+        // which lock they tripped. Re-generating the picture mints a fresh link either way.
+        res.status(403).json({ error: 'That picture link has expired. Please make the image again.' });
+        return;
+      }
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), ROUTE_TIMEOUT_MS);
+      try {
+        const r = await fetch(url, { signal: ctl.signal });
+        const ct = r.headers.get('content-type') || '';
+        if (!r.ok) {
+          // A rate limit here is the provider's, not ours — and it is transient, so the user is told
+          // to try again rather than that something is broken.
+          res.status(r.status === 429 ? 429 : 502).json({
+            error: r.status === 429
+              ? 'NavBharatAI’s engine is busy right now — please try again in a moment.'
+              : 'That picture could not be downloaded right now — please try again.',
+          });
+          return;
+        }
+        if (!ct.startsWith('image/')) {
+          res.status(502).json({ error: 'That picture could not be downloaded right now — please try again.' });
+          return;
+        }
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length === 0) {
+          res.status(502).json({ error: 'That picture could not be downloaded right now — please try again.' });
+          return;
+        }
+        res.json({ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[IMAGE_RELAY] fetch failed: ${msg.slice(0, 160)}`);
+        res.status(502).json({ error: 'That picture could not be downloaded right now — please try again.' });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  );
+
   app.post('/api/image/pro/generate', proLimiter(), validateBody(proSchema), async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const proReq = {

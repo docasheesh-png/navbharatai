@@ -77558,3 +77558,103 @@ Everything above is test-locked: `professionalChatStore.test.ts` (six new cases)
 `clientMemory.test.ts`, `teacherMemoryEngine.test.ts`, `aChatsWordsStayInThatChat.test.ts` (voice-lane
 source guards), `fiveChatsAtOnceEachItsOwnWindow.test.ts` (cap-before-resume, delete-closes-window,
 on-screen scroll), `sharedKeysMeanThePerson.test.ts`.
+
+---
+
+## 2026-09-21 (later still) — THE USER'S OWN CONNECTION FETCHES THEIR PICTURE
+
+**Admin:** *"free wale me user ki ip, paid me hamari"*, and — after being told the four editing
+features depend on reading the bytes — *"yeh sab user ke ip par kaam kar jaye, kisi bhi tarah to isko
+rahne do, image background me download karo, user ke free image generator me edit karwao."*
+
+### The problem was a RATE LIMIT, and nobody had noticed it
+
+The free provider allows **one request every 15 seconds PER IP ADDRESS**. This server is ONE address.
+So every free user on the platform shared a single bucket: a ceiling of roughly **5,760 images a day
+for the whole product**, and only if traffic were perfectly spread — which it is not.
+
+🔴 **And the overflow was not a queue, it was a silent bill.** A throttled request reads as a FAILURE
+in `routes/imageGen.ts`, and the next rung is **paid** (Gemini). So at 10,000 users the "free" tier
+would quietly become a paid one — at a price **this repo has never measured**: there is still no
+image rate in `providerRates.ts`, only a comment. That is the money audit's own class, a third time.
+
+### The change
+
+A free generation now returns a **signed link** instead of bytes; the browser fetches it, so the
+provider sees the user's address. Nothing else moved — the prompt was triaged, crafted and bounded
+on this server seconds earlier, and the link carries that finished prompt.
+
+⚠️ **CGNAT MEANS THIS IS AN IMPROVEMENT, NOT THE FIX THE ADMIN ASKED FOR.** Indian carriers put many
+phones behind one public address, so a busy tower still shares a bucket. I told them I could not fix
+it: the only techniques are rotating proxies — deliberately evading a free provider's rate limit,
+which is abuse of a service a commercial product depends on, and would get NavBharatAI blocked
+outright. What absorbs the remainder is the browser's retry, bounded by the admin's own budget
+(*"1 min baad bhi mile chalega"*): four waits summing to 58 s, the first of which clears the
+provider's 15-second window.
+
+### Keeping Add text, Crop, Copy and Download — the part that needed care
+
+All four need the picture's real **pixels**, and a browser may not read another site's pixels unless
+that site allows it (CORS). **Whether this provider allows it could not be checked from here** — both
+its hosts are refused by this execution environment's egress policy — so nothing assumes an answer:
+
+- The client **tries** a direct read. If it works, the bytes came from the user's connection and
+  every feature behaves exactly as before.
+- If it does not, the picture is still shown **from the user's connection** (an `<img>` load needs no
+  permission) and the bytes come through `POST /api/image/relay` **on the press**, not per picture.
+  Most pictures are never edited, so the address cost stays a small share.
+- `ensureLocalImage` is the ONE function all four call. Four call sites each doing their own version
+  is how three end up subtly different and one ends up broken.
+
+🔴 **A REAL BUG IN MY OWN CODE, CAUGHT BY MY OWN TEST BEFORE IT SHIPPED.** The first version treated
+any throw as "this browser may not read these bytes" — including a throw from *decoding* a picture
+that had already arrived. One undecodable picture would then have routed the **whole session**
+through our relay. A resolved response in default (`cors`) mode is proof on its own that the read is
+allowed; nothing after it can un-prove that. `directReadWorks` is now set the moment the response
+resolves, and a later throw is reported as a decode failure.
+
+### The relay is an SSRF surface, and it has two locks
+
+`/api/image/relay` takes a URL **from the client**. Both locks, and why one is not enough:
+
+1. **`isAllowedImageHost`** — an EXACT host allowlist. A substring or regex check passes
+   `image.pollinations.ai.evil.com`, and `https://image.pollinations.ai@evil.com/` has hostname
+   `evil.com`. Tested against both, plus the addresses an SSRF is actually aimed at (cloud metadata,
+   loopback, RFC1918, `file:`).
+2. **Our HMAC over that exact URL** — an allowed host with a free path is a way to make our server
+   fetch a prompt the safety triage never saw.
+
+A forged ticket and an expired one return the **same words**, so a prober cannot tell which lock they
+tripped.
+
+⚠️ **The provider's own `safe` parameter is NOT a substitute for our triage**, and the admin's
+assumption that *"pornography Pollinations ke server se ruk jayega"* was corrected before any code
+was written: their docs say safety is **off unless asked for**, and the parameter is documented on
+their NEW keyed endpoint, not the keyless one this path uses. The ban's enforcement is, as before,
+`triagePrompt` on our server.
+
+⚠️ **An EDIT of the user's own photo is never handed to the browser** (`!editing`): it carries their
+photograph, and those bytes must not end up in a URL anybody could hold.
+
+### Tests
+
+`tests/theUsersOwnConnectionFetchesTheirPicture.test.ts` (32), including the client fetcher exercised
+against a fake `fetch` rather than a snapshot of it. **Proven by reversion**: the host allowlist
+turned into a substring check → 2 fail; the signature check disabled → 1; the CORS/decode conflation
+restored → 1.
+
+⚠️ **And one of those guards was VACUOUS until the reversion proved it.**
+`expect(relay).toContain('verifyImageTicket(')` passes for `if (false && !verifyImageTicket(...))` —
+the reversion stayed green. It now asserts `if (!verifyImageTicket(` and that each refusal really
+returns. **A guard's presence is not a guard**; only running the reversion showed the difference.
+
+### Still open
+
+- **Not one real fetch has been made against the provider from any session** — both hosts are
+  egress-blocked here. Whether a browser may read those bytes is the single biggest unknown, and the
+  design works either way by construction rather than by assumption. The first real days answer it.
+- **What a fallback image costs us is still unmeasured.** `providerRates.ts` prices no image model.
+  Until it does, "the free tier fell through to a paid rung" has no rupee figure attached to it.
+- **There is still no platform-wide daily ceiling on free images** — only a per-user limit
+  (`AI_IMAGE_FREE_DAILY_LIMIT`, default 3). At 10,000 users that is 30,000 images a day with nothing
+  in the code to stop it. Recorded as the next thing to build.

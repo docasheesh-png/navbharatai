@@ -13,6 +13,8 @@ import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageEx
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
 import { ImageStudioPro } from './ImageStudioPro';
+import { fetchImageFromUser, relayImage, type ClientFetchTicket } from '../../lib/clientImageFetch';
+import { imageWaitMessage } from '../../lib/imageDelivery';
 import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
@@ -191,6 +193,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const pagedHistory = usePagedList(history);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [craftNotes, setCraftNotes] = useState<string[]>([]);
+  // The countdown shown while the browser waits out the provider's rate limit. Blank the rest of
+  // the time. A visible wait is the difference between "busy" and "broken" — the blank-screen
+  // failure this repo already root-caused once on the chat path.
+  const [waitNote, setWaitNote] = useState('');
   const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
   /**
    * The request currently in flight, shown as the user's own message the instant they press send.
@@ -258,11 +264,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
       // so WITHOUT this header the server saw an anonymous caller and asked the (already logged-in) user
       // to sign in. Root-caused 2026-07-31: the fetch previously sent no Authorization header.
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      try {
-        const tok = await auth.currentUser?.getIdToken();
-        if (tok) headers.Authorization = `Bearer ${tok}`;
-      } catch { /* token optional here — the server still returns an honest sign-in prompt if truly anon */ }
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeaders()) };
       const res = await fetch('/api/image/generate', {
         method: 'POST',
         headers,
@@ -286,8 +288,39 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
         }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data || typeof data.image !== 'string') {
+      if (!res.ok || !data) {
         throw new Error((data && typeof data.error === 'string' && data.error)
+          || 'Image generation failed — please try again.');
+      }
+
+      // ── THE BROWSER FETCHES IT, FROM THE USER'S OWN CONNECTION ────────────────────────────────
+      // A free picture now comes back as a signed link rather than as bytes (admin 2026-09-21:
+      // "free wale me user ki ip"). The provider's limit is one request every 15 seconds PER
+      // ADDRESS, and our server is one address — so this is the only way a free tier survives real
+      // numbers without a key. Everything before this point is unchanged: the prompt was triaged,
+      // crafted and bounded on our server seconds ago.
+      let imageUrl: string;
+      let ticket: ClientFetchTicket | null = null;
+      if (data.mode === 'client-fetch' && typeof data.url === 'string') {
+        ticket = { url: data.url, ticket: String(data.ticket || ''), exp: Number(data.exp) };
+        const got = await fetchImageFromUser(ticket, {
+          onWait: (msLeft) => setWaitNote(imageWaitMessage(msLeft)),
+        });
+        setWaitNote('');
+        if (got.error) throw new Error(got.error);
+        if (got.dataUrl) {
+          imageUrl = got.dataUrl;
+          ticket = null; // the bytes are here; nothing will ever need the relay for this one
+        } else {
+          // This browser is not allowed to read another site's pixels. The picture still arrives
+          // from the USER's connection — it is simply shown from the link — and the bytes are
+          // fetched through our relay the moment a button actually needs them.
+          imageUrl = ticket.url;
+        }
+      } else if (typeof data.image === 'string') {
+        imageUrl = data.image;
+      } else {
+        throw new Error((typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
       }
       // Honest caveats from the server — a style chip that was overruled, or the warning that image
@@ -296,7 +329,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       setCraftNotes(Array.isArray(data.notes) ? data.notes.filter((n: unknown) => typeof n === 'string') : []);
       const newItem: GeneratedImage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        url: data.image,
+        url: imageUrl,
+        ...(ticket ? { ticket: ticket.ticket, exp: ticket.exp } : {}),
         prompt: prompt.trim(),
         type: imageType,
         style,
@@ -310,7 +344,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       // request keeps the words, because retyping a brief you already wrote is the worst possible
       // answer to "that did not work".
       setPrompt('');
-      if (onImageGenerated) onImageGenerated(data.image, effectivePrompt);
+      if (onImageGenerated) onImageGenerated(imageUrl, effectivePrompt);
     } catch (e) {
       // Honest failure — the real reason from the server, never a placeholder image.
       setImageError(true);
@@ -318,6 +352,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     } finally {
       setIsLoading(false);
       setPending(null);
+      setWaitNote('');
     }
   };
 
@@ -370,6 +405,51 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const flashNote = (msg: string) => {
     setActionNote(msg);
     setTimeout(() => setActionNote(''), 3500);
+  };
+
+  /** The Firebase bearer, for the routes that need a real account. Optional by design. */
+  const authHeaders = async (): Promise<Record<string, string>> => {
+    try {
+      const tok = await auth.currentUser?.getIdToken();
+      return tok ? { Authorization: `Bearer ${tok}` } : {};
+    } catch {
+      return {};
+    }
+  };
+
+  /**
+   * Guarantee we hold the picture's real BYTES before anything that needs them.
+   *
+   * 🔑 THIS IS THE ONE PLACE THE FOUR FEATURES ARE KEPT ALIVE (admin 2026-09-21: "yeh sab user ke ip
+   * par kaam kar jaye, kisi bhi tarah"). "Add text", "Crop", "Copy" and "Download" all need real
+   * pixels, and a browser may not read another site's pixels unless that site allows it. When it
+   * does — the ordinary case — the bytes were already taken from the USER's connection at generation
+   * time and this returns immediately. When it does not, our relay fetches them ONCE, on the press,
+   * and the result is written back into history so the second press costs nothing.
+   *
+   * ⚠️ One function, every caller. Four call sites each doing their own version of this is exactly
+   * how three of them would end up subtly different and one of them broken.
+   */
+  const ensureLocalImage = async (id: string): Promise<string | null> => {
+    const item = history.find((h) => h.id === id);
+    if (!item) return null;
+    if (item.url.startsWith('data:')) return item.url;
+    if (!item.ticket || !item.exp) {
+      flashNote('This picture could not be opened for editing. Please make it again.');
+      return null;
+    }
+    setActionNote('Getting the picture ready…');
+    const got = await relayImage({ url: item.url, ticket: item.ticket, exp: item.exp }, await authHeaders());
+    setActionNote('');
+    if (!got.dataUrl) {
+      flashNote(got.error || 'That picture could not be downloaded right now — please try again.');
+      return null;
+    }
+    // Written back so the next press is instant, and so the saved history holds the real picture.
+    const updated: GeneratedImage = { ...item, url: got.dataUrl, ticket: undefined, exp: undefined };
+    setHistory((h) => h.map((x) => (x.id === id ? updated : x)));
+    void imageHistoryStore.save(updated).catch(() => { /* persistence is best-effort */ });
+    return got.dataUrl;
   };
 
   // COPY THE ACTUAL IMAGE (not the URL). Puts a real PNG on the clipboard so it pastes as a picture
@@ -704,14 +784,14 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                     <div className="flex items-center gap-1.5 p-2">
                       <button
                         type="button"
-                        onClick={() => setTextOn(item.id)}
+                        onClick={() => void ensureLocalImage(item.id).then((ok) => { if (ok) setTextOn(item.id); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-on-accent bg-violet-600 hover:bg-violet-500 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
                       >
                         <Type className="w-3 h-3" /> Add text
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleCopyImage(item.id, item.url)}
+                        onClick={() => void ensureLocalImage(item.id).then((url) => { if (url) void handleCopyImage(item.id, url); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
                       >
                         {copiedId === item.id
@@ -720,7 +800,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleDownload(item.url, item.prompt)}
+                        onClick={() => void ensureLocalImage(item.id).then((url) => { if (url) void handleDownload(url, item.prompt); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
                       >
                         <Download className="w-3 h-3" /> Save
@@ -752,9 +832,14 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 <div className="flex items-center gap-3 rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 w-fit">
                   <TirangaLoader className="w-5 h-5" />
                   <span className="text-xs text-muted">
-                    {reference
-                      ? 'Changing your picture — keeping everything you did not ask to change...'
-                      : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
+                    {waitNote
+                      // The provider allows one picture every 15 seconds per connection, and on a
+                      // shared mobile network several people can be behind one. Counting down is what
+                      // makes that read as "busy" rather than "broken".
+                      ? waitNote
+                      : reference
+                        ? 'Changing your picture — keeping everything you did not ask to change...'
+                        : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
                   </span>
                 </div>
               )}

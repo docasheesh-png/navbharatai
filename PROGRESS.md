@@ -76450,3 +76450,105 @@ desk and these two belong in one decision rather than two. A session meeting any
 the key without waiting for the Routine.
 
 Documentation only — no code path, no test and no build behaviour is touched by this change.
+
+---
+
+## 2026-09-21 — 🔤 45 FONTS, A REAL COLOUR PICKER, A BACKGROUND WITH AN OPACITY, AND A BORDER
+
+**Admin, verbatim:** *"image me text add karne ke samaya Width ki jagah background karo. opacity kam
+jyada karne ki line bhi add karo. clour picker bhi add karo, colour, bale golo ke age last me. font
+badalne ka bhi system add karo, kam se kam 25+ font chahiye. border add/remove bhi chahiye. abhi yeh
+kam karo professionally real aur working."* (with a screenshot of the Add-text sheet and one of a
+standard HSB colour picker).
+
+**🔴 THE ONE THING A FONT PICKER COULD HAVE BROKEN, AND MOST OF THIS CHANGE IS ABOUT IT.** This
+editor exists *because* an image model cannot spell Devanagari. A list of pretty Latin display faces
+that replaced the family stack would turn "शर्मा स्वीट्स" into empty boxes — and nothing would fail;
+the picture would simply be wrong, in the one script the whole feature was built for. So
+`fontFamilyStack` puts the chosen family FIRST and the Devanagari fallbacks after it, **for every
+choice including the Latin-only ones**: the browser resolves per GLYPH, so Bebas Neue draws the Latin
+and a face that has Devanagari draws the Hindi. `tests/theFontIsRealAndHindiStillWorks.test.ts`
+asserts that for all 45 entries, and it is the first case in the file.
+
+**THE CATALOGUE (`src/lib/imageFonts.ts`) is 45 against the admin's "25+", and 19 of them carry
+Devanagari themselves** — Poppins, Hind, Mukta, Rajdhani, Teko, Khand, Baloo 2, Kalam, Martel,
+Halant, Biryani, Laila, Eczar, Sarala, Amita, Tiro Devanagari, Yatra One, Modak, Noto Sans
+Devanagari. The Latin and the Devanagari halves are deliberately the same size: an India-first
+product whose Hindi users get four fonts and whose English users get thirty is the same quiet
+second-class treatment the 2026-09-14 language rule already forbids elsewhere.
+
+⚠️ **THE WEIGHT AXIS IS PER FAMILY, AND GETTING IT WRONG IS NOT A DEGRADATION.** Google's CSS2 API
+answers **HTTP 400** for a weight a family does not publish, so asking a single-weight display face
+(Anton, Bebas Neue, Lobster, Pacifico, Abril Fatface, Righteous, Archivo Black, Permanent Marker,
+Bungee, Satisfy, Tiro, Yatra One, Modak) for `wght@400;700` would make that font fail to load *at
+all*. Those carry no axis and have their bold synthesized, which is what a poster face wants anyway.
+A test asserts that the only axis ever requested is `:wght@400;700`.
+
+**🔴 AND THE CSP WOULD HAVE BLOCKED ALL 45, SILENTLY — found by reading `securityHeaders.ts` before
+shipping rather than from a user's screenshot.** That file shipped `style-src 'self' 'unsafe-inline'`.
+A Google Fonts `<link rel="stylesheet">` is governed by **style-src, not font-src** — and `font-src`
+already allowed `https:`, so the `.woff2` files from fonts.gstatic.com were never the problem; the
+stylesheet that NAMES them was blocked. Every `document.fonts.check` would have returned false, every
+family would have fallen back to the device default, and the picker would have looked perfect and
+changed nothing. `https://fonts.googleapis.com` is now on `style-src`, scoped to Google's own font
+host (it grants no script or frame rights), with the same kind of docblock the Cashfree and Apple
+allowances already carry. **The test DERIVES the origin from `googleFontHref`**, so pointing the
+loader at another CDN fails CI until the policy is told about it — a literal in the test would have
+been one more thing to keep in sync by hand.
+
+**🔑 A CANVAS DOES NOT WAIT FOR CSS, which is why this is a loader and not a `<link>`.**
+`measureText` with a family the document has not finished loading measures in the FALLBACK face — so
+the text would be wrapped at one set of widths and repainted at another the moment the real font
+arrived, and what the user positioned would not be what they saved. `imageFontLoader.ts` injects the
+stylesheet once per family, `await`s `document.fonts.load()` for BOTH weights (Bold switches between
+them at draw time), and returns the verdict of `document.fonts.check` — never the await, which
+resolves even when it matched nothing. The repaint depends on that state and Done awaits it.
+
+**A font that genuinely cannot be fetched is NAMED**, with what it means and how to retry. The second
+absolute rule reaches a dropdown as much as a button: the option works, or it says it does not. A
+failure is not cached, so selecting it again really retries — the commonest cause is a connection
+that has since come back.
+
+**BACKGROUND replaces the Width slider, and it is ONE stored string.** Where there were three fixed
+chips (None / Dark bar / Light bar) there is now any colour at any strength. The colour and the
+opacity are *derived* from the stored fill by `splitFill` and composed back by `rgbaFrom`, so there
+is no second representation to drift — the drifted-copy class this repo has paid for four times.
+**Opacity 0 IS "no background"**, which is what an empty fill already meant everywhere else in the
+module, so no on/off flag competes with the slider. `splitFill` also reads what earlier code and
+every template already wrote (`rgba(0,0,0,0.55)`, `rgba(255,255,255,0.82)`, `#000`) — a parser that
+only understood its own output would have shown every existing layer as "no background" the first
+time somebody opened the editor.
+
+**BORDER frames the SAME rectangle the background fills.** `bandRect` answers for both now (its guard
+was `if (!l.band) return null`, which would have drawn nothing for a border with no fill), so the two
+can never sit a few pixels apart. Widths are fractions of the FONT, not pixels, so a border chosen on
+a 1024 square looks the same on a 1280 banner. Inset by half the stroke, because a canvas stroke
+straddles its path and a thick border would otherwise spill half its weight outside the bar it frames.
+
+**THE COLOUR PICKER is the device's own**, at the END of the swatch row as asked, for the text, the
+background and the border. A native `<input type="color">` wearing a swatch: the OS already draws
+exactly the picker in the admin's second screenshot, it is the one they know from every other app,
+and it is keyboard- and screen-reader-reachable for free. A hand-built HSB square would be several
+hundred lines that work worse on a touch screen.
+
+⚠️ **WIDTH IS NOT DELETED, AND THAT IS A DELIBERATE DEPARTURE FROM THE LITERAL INSTRUCTION.** It is
+gone from captions, where the admin asked for background in its place. It survives for a **RATE LIST**
+as "Table width", because there it is the span the item column and the price column are set against —
+it decides where the prices line up. Removing it there would take away a real capability rather than
+a confusing control, which is the one thing the second absolute rule will not trade. Said plainly to
+the admin rather than done quietly.
+
+**`strokeRect` added to the three recording fakes**, and the reason is worth keeping: `tsconfig.json`
+includes only `src/**`, so **tests are not typechecked** — a fake missing a method the real interface
+requires compiles happily and throws only when that method is really called, which is exactly what a
+border does. Three separate copies of that recorder is itself the drifted-copy shape; they are noted
+rather than merged, because merging three live suites' fixtures in the same change as a feature is
+how a feature's failure becomes indistinguishable from a refactor's.
+
+Test-locked in `tests/theFontIsRealAndHindiStillWorks.test.ts` (35 cases) and **reversion-proven six
+ways** (each applied to the working tree, suite run, tree restored): a Latin face dropping the
+Devanagari fallback → 2 fail; opacity 0 ceasing to mean "no background" → 1; the border losing its own
+rect → 3; the CSP forgetting the font stylesheet → 1; the repaint no longer following the font state →
+1; the Width slider returning to every caption → 1.
+
+`AppKnowledgeBase.ts` updated in the same change, per the sync rule.

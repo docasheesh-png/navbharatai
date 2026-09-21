@@ -31,6 +31,20 @@ export interface MeasuredFacts {
   /** Did the console capture actually run and return? */
   consoleCaptured: boolean;
   /**
+   * How many actionable console errors the capture actually found — the OTHER half of the claim.
+   *
+   * 🔴 Until 2026-09-21 this auditor could only catch "you said clean and nobody looked". The worse
+   * sentence — **we looked, we saw errors, and the summary said clean** — had no rule at all, because
+   * it was unreachable: the console listener lived on the agent-driven CDP daemon alone, so an
+   * ordinary build never captured anything and `consoleCaptured` was false almost every time. The
+   * same-day fix that made `browseUrl` record its console is what opened that door, so the rule that
+   * guards it ships with it rather than waiting for a report to prove it.
+   *
+   * `undefined` means the caller could not tell us, and silence is never an accusation — the same
+   * discipline `typecheckRan` already states.
+   */
+  consoleErrorsFound?: number;
+  /**
    * Did a typecheck actually run on this build?
    *
    * Added after build 7bc15e40, where the summary claimed *"TypeScript type-check passes cleanly"*
@@ -81,7 +95,7 @@ export interface MeasuredFacts {
   buildWasRequested?: boolean;
 }
 
-export type ClaimKind = 'console-clean' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered';
+export type ClaimKind = 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered';
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -285,6 +299,16 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'console-clean',
       claimed: 'that there are no console errors',
       measured: 'the browser console could not be captured on this run, so it was never checked',
+    });
+  } else if (facts.consoleCaptured && (facts.consoleErrorsFound ?? 0) > 0 && CONSOLE_CLEAN.test(text)) {
+    // ⚠️ `else if`, NOT a second `if`: the two are mutually exclusive by construction (the first needs
+    // the console unread, this one needs it read), and chaining them says so rather than relying on a
+    // reader to notice. One claim must never produce two contradictions in the user's correction.
+    const n = facts.consoleErrorsFound ?? 0;
+    out.push({
+      kind: 'console-clean-but-errors',
+      claimed: 'that there are no console errors',
+      measured: `the browser console WAS read on this run and ${n} error${n === 1 ? '' : 's'} remained in it`,
     });
   }
   // Only when the caller actually told us — an omitted fact must never become an accusation.

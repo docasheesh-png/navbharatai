@@ -22,6 +22,7 @@ import {
   pendingResultUrl, jobFailed, IMAGE_PRO_POLL_MS,
   imageProFailureMessage, initImageTooLarge, parseDataUrl, imageProMargin, imageProMarginWarning,
 } from '../lib/imageProGen';
+import { fetchPollinationsPaidImage, imageProAvailable } from '../lib/pollinationsPaid';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { imagePixelsFor } from '../lib/imageGen';
 import { getServerDb } from '../lib/serverDb';
@@ -503,10 +504,20 @@ export function registerImageGenRoutes(app: Express): void {
       res.status(413).json({ error: 'That image is too large — please attach one under 8 MB.' });
       return;
     }
-    if (!imageProConfigured()) {
+    // 🔑 TWO ENGINES SERVE PRO (admin 2026-09-21: "paid pahle pollination use ho, fallback me
+    // IMAGE_PRO_KEY"), and ONE function says whether either can — the same owner `/api/public-config`
+    // asks, so the chip and this 503 can never disagree about whether Pro is on.
+    if (!imageProAvailable()) {
       // Honest not-available (rule 2). Never a silent fall back to the FREE provider: that would
       // charge the Pro price for a picture the user could have had for nothing, on the tier they chose
       // precisely because they wanted something better.
+      res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
+      return;
+    }
+    // An EDIT needs the Pro host: the first engine takes words only, and the user's own photograph is
+    // never turned into a link (the free tier's rule, kept here). Without the host, editing on Pro is
+    // honestly "not switched on" — never a fresh picture that quietly ignores the attachment.
+    if (mode !== 'text-to-image' && !imageProConfigured()) {
       res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
       return;
     }
@@ -551,82 +562,110 @@ export function registerImageGenRoutes(app: Express): void {
     const finalPrompt = proReq.prompt ? withInlineNegative(crafted) : '';
 
     let delivered: Array<{ image: string; mimeType: string }> = [];
-    try {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), IMAGE_PRO_TIMEOUT_MS);
-      try {
-        const r = await fetch(imageProEndpoint(), {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...imageProAuthHeaders() },
-          body: JSON.stringify(buildImageProRequest({ ...proReq, prompt: finalPrompt }, px)),
-          signal: ctl.signal,
-        });
-        if (!r.ok) {
-          // The vendor's own status and body stay in the SERVER log and never reach the user.
-          console.error(`[IMAGE PRO] host returned HTTP ${r.status}`);
-          res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-          return;
-        }
-        // 🔴 A 200 IS NOT AN IMAGE. The host this tier was priced around is ASYNC by default: the POST
-        // answers with a prediction id, and even in sync mode a task slower than its wait window comes
-        // back HTTP **200** with `code: 5004, status: processing`. A caller that stops at `r.ok` would
-        // report a failure for a job that was about to succeed — and the user would be told their
-        // picture could not be made while it was being made.
-        let payload: unknown = await r.json();
-        let parsed = parseImageProResponse(payload);
-        let next = parsed ? null : pendingResultUrl(payload);
-        while (!parsed && next && !ctl.signal.aborted) {
-          await new Promise((resolve) => setTimeout(resolve, IMAGE_PRO_POLL_MS));
-          if (ctl.signal.aborted) break;
-          // The whole loop is bounded by the SAME AbortController as the first call, so the existing
-          // IMAGE_PRO_TIMEOUT_MS is still the one clock — there is no second, longer budget hiding here.
-          const poll = await fetch(next, { headers: imageProAuthHeaders(), signal: ctl.signal });
-          if (!poll.ok) {
-            console.error(`[IMAGE PRO] polling returned HTTP ${poll.status}`);
-            break;
-          }
-          payload = await poll.json();
-          if (jobFailed(payload)) {
-            console.error('[IMAGE PRO] the host reported the job failed');
-            break;
-          }
-          parsed = parseImageProResponse(payload);
-          next = parsed ? null : pendingResultUrl(payload);
-        }
-        if (!parsed) {
-          // Nothing was produced, so nothing is charged — the caller's own guard, unchanged.
-          console.error('[IMAGE PRO] host returned no image in a 200 response');
-          res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-          return;
-        }
-        if ('url' in parsed) {
-          // Server-proxied, exactly like the free provider: the bytes are fetched here and re-served
-          // as a data URL, so the user's browser never talks to the vendor and the result carries no
-          // third-party origin. White-label is a network fact here, not only a wording one.
-          const img = await fetch(parsed.url, { signal: ctl.signal });
-          const ct = img.headers.get('content-type') || 'image/png';
-          if (!img.ok || !ct.startsWith('image/')) {
-            console.error(`[IMAGE PRO] fetching the returned image failed (HTTP ${img.status}, ${ct})`);
-            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-            return;
-          }
-          const buf = Buffer.from(await img.arrayBuffer());
-          if (buf.length === 0) {
-            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-            return;
-          }
-          delivered = [{ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct }];
-        } else {
-          delivered = [{ image: `data:${parsed.mimeType};base64,${parsed.base64}`, mimeType: parsed.mimeType }];
-        }
-      } finally {
-        clearTimeout(timer);
+
+    // RUNG 1 — Pollinations, keyed, from OUR server (admin: "paid me hamari [ip]"). Words only: the
+    // keyed door takes a prompt, and an attached photograph goes to the host below, which reads it.
+    // A failure here is an ADMIN line (it names the vendor and the status — White-Label §3) and then
+    // the host's turn; the user never sees it, and is never charged for it.
+    if (mode === 'text-to-image') {
+      const pr = await fetchPollinationsPaidImage(finalPrompt, proReq.size, {
+        custom: { width: proReq.width, height: proReq.height },
+      });
+      if (pr.image) {
+        delivered = [{ image: `data:${pr.image.mimeType};base64,${pr.image.base64}`, mimeType: pr.image.mimeType }];
+        // The provider's own statement of what this picture cost — the number IMAGE_PRO_COST_USD is
+        // waiting to be replaced by. Admin-only, one compact line per delivery.
+        console.log(`[IMAGE PRO] pollinations delivered — usage ${JSON.stringify(pr.usage ?? {})}`);
+      } else if (!pr.disabled) {
+        console.warn(`[IMAGE PRO] pollinations rung failed (${pr.error ?? 'unknown'}) — ${
+          imageProConfigured() ? 'trying the Pro host' : 'no Pro host configured'}.`);
       }
-    } catch (err: unknown) {
-      const aborted = err instanceof Error && /abort/i.test(err.message);
-      console.error(`[IMAGE PRO] ${aborted ? 'timed out' : 'threw'}: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
-      res.status(504).json({ error: imageProFailureMessage(aborted ? 'timeout' : 'failed'), code: 'pro_failed' });
-      return;
+    }
+
+    // RUNG 2 — the Pro host (`IMAGE_PRO_KEY`), for an edit or when rung 1 could not deliver.
+    if (delivered.length === 0) {
+      if (!imageProConfigured()) {
+        // Rung 1 failed and there is nothing behind it. Nothing was produced, so nothing is charged.
+        res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+        return;
+      }
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), IMAGE_PRO_TIMEOUT_MS);
+        try {
+          const r = await fetch(imageProEndpoint(), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...imageProAuthHeaders() },
+            body: JSON.stringify(buildImageProRequest({ ...proReq, prompt: finalPrompt }, px)),
+            signal: ctl.signal,
+          });
+          if (!r.ok) {
+            // The vendor's own status and body stay in the SERVER log and never reach the user.
+            console.error(`[IMAGE PRO] host returned HTTP ${r.status}`);
+            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+            return;
+          }
+          // 🔴 A 200 IS NOT AN IMAGE. The host this tier was priced around is ASYNC by default: the POST
+          // answers with a prediction id, and even in sync mode a task slower than its wait window comes
+          // back HTTP **200** with `code: 5004, status: processing`. A caller that stops at `r.ok` would
+          // report a failure for a job that was about to succeed — and the user would be told their
+          // picture could not be made while it was being made.
+          let payload: unknown = await r.json();
+          let parsed = parseImageProResponse(payload);
+          let next = parsed ? null : pendingResultUrl(payload);
+          while (!parsed && next && !ctl.signal.aborted) {
+            await new Promise((resolve) => setTimeout(resolve, IMAGE_PRO_POLL_MS));
+            if (ctl.signal.aborted) break;
+            // The whole loop is bounded by the SAME AbortController as the first call, so the existing
+            // IMAGE_PRO_TIMEOUT_MS is still the one clock — there is no second, longer budget hiding here.
+            const poll = await fetch(next, { headers: imageProAuthHeaders(), signal: ctl.signal });
+            if (!poll.ok) {
+              console.error(`[IMAGE PRO] polling returned HTTP ${poll.status}`);
+              break;
+            }
+            payload = await poll.json();
+            if (jobFailed(payload)) {
+              console.error('[IMAGE PRO] the host reported the job failed');
+              break;
+            }
+            parsed = parseImageProResponse(payload);
+            next = parsed ? null : pendingResultUrl(payload);
+          }
+          if (!parsed) {
+            // Nothing was produced, so nothing is charged — the caller's own guard, unchanged.
+            console.error('[IMAGE PRO] host returned no image in a 200 response');
+            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+            return;
+          }
+          if ('url' in parsed) {
+            // Server-proxied, exactly like the free provider: the bytes are fetched here and re-served
+            // as a data URL, so the user's browser never talks to the vendor and the result carries no
+            // third-party origin. White-label is a network fact here, not only a wording one.
+            const img = await fetch(parsed.url, { signal: ctl.signal });
+            const ct = img.headers.get('content-type') || 'image/png';
+            if (!img.ok || !ct.startsWith('image/')) {
+              console.error(`[IMAGE PRO] fetching the returned image failed (HTTP ${img.status}, ${ct})`);
+              res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+              return;
+            }
+            const buf = Buffer.from(await img.arrayBuffer());
+            if (buf.length === 0) {
+              res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+              return;
+            }
+            delivered = [{ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct }];
+          } else {
+            delivered = [{ image: `data:${parsed.mimeType};base64,${parsed.base64}`, mimeType: parsed.mimeType }];
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (err: unknown) {
+        const aborted = err instanceof Error && /abort/i.test(err.message);
+        console.error(`[IMAGE PRO] ${aborted ? 'timed out' : 'threw'}: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
+        res.status(504).json({ error: imageProFailureMessage(aborted ? 'timeout' : 'failed'), code: 'pro_failed' });
+        return;
+      }
     }
 
     if (delivered.length === 0) {

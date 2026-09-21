@@ -50,7 +50,7 @@ export interface GeneratedImage {
   base64: string;
 }
 
-const MAX_PROMPT_CHARS = 2_000;
+export const MAX_PROMPT_CHARS = 2_000;
 
 /** Style id → prompt enhancer. Mirrors the client's style chips (kept in sync by the shared test). */
 export const IMAGE_STYLE_ENHANCERS: Record<string, string> = {
@@ -136,10 +136,41 @@ export function pollinationsEnabled(env: NodeJS.ProcessEnv = process.env): boole
 }
 
 /**
- * Build the Pollinations image URL (the FREE provider — no key, no per-image cost). Server-proxied by the
- * route (the bytes are fetched and re-served as a data URL), so — unlike the old raw client hot-link — the
- * user never talks to a third party and the result is branded NavBharatAI. `nologo=true` strips the
- * provider watermark. Pure + bounded. Model is env-tunable via IMAGE_GEN_POLLINATIONS_MODEL (default flux).
+ * The seed a Pollinations request carries — the second half of the 2026-09-18 sharpness work, and it
+ * is about VARIETY rather than focus: without one the provider derives the seed from the prompt, so the
+ * same brief returns the same picture every time and "generate again" — the user's only recourse for a
+ * soft result — silently did nothing. A fresh seed per call makes retry a real option again.
+ *
+ * ⚠️ Time-based rather than random so a URL stays a pure function of its inputs within a tick, which is
+ * what keeps both URL builders unit-testable; a test pins the seed through `__IMAGE_SEED`. ONE function
+ * for the free link and the paid rung, so the two cannot drift on what "a fresh picture" means.
+ */
+export function pollinationsSeed(env: NodeJS.ProcessEnv = process.env): number {
+  // ⚠️ An env value is a STRING, and `Number.isFinite('5')` is false — the pin used to be written
+  // that way and had never once pinned anything (the one test that set it did not read the seed
+  // back, so nothing noticed). A blank value is unset, like every other env read in this repo.
+  const raw = (env.__IMAGE_SEED ?? '').trim();
+  const pinned = raw === '' ? Number.NaN : Number(raw);
+  return Number.isFinite(pinned) ? pinned : Math.floor(Date.now() % 2_147_483_647);
+}
+
+/**
+ * Build the Pollinations image URL for the FREE tier — no key, no per-image cost, the provider's
+ * anonymous door. Since 2026-09-21 the user's OWN browser fetches this link (`IMAGE_GEN_CLIENT_FETCH`),
+ * so the provider sees their address rather than this server's one shared one; the free-chat path
+ * still fetches it here. Pure + bounded. Model is env-tunable via IMAGE_GEN_POLLINATIONS_MODEL
+ * (default flux).
+ *
+ * 🔒 `private=true` — the picture must never appear on the provider's PUBLIC FEED (admin 2026-09-21:
+ * "private=true + token — privacy + watermark — sabse zaroori"). The provider defaults this to
+ * false, so until this line every free picture a user made here was, by default, publishable by
+ * the provider to anyone. A shopkeeper's banner with their phone number on it is theirs.
+ *
+ * ⚠️ `nologo=true` IS SENT AND, ON THIS DOOR, IS NOT HONOURED — stated rather than implied. The
+ * provider strips its watermark only for a request that carries an account key, and this link
+ * carries none BY DESIGN: it is handed to the browser, and a key in a URL a user can copy is a key
+ * everybody has. So the free picture carries the provider's mark; the PAID rung (`pollinationsPaid.ts`)
+ * is where the key lives and where the mark goes. Do not "fix" this by adding `?key=` here.
  */
 export function pollinationsImageUrl(
   prompt: string,
@@ -150,16 +181,8 @@ export function pollinationsImageUrl(
   const px = imagePixelsFor(size, custom?.width, custom?.height);
   const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
   const p = encodeURIComponent(String(prompt || '').slice(0, MAX_PROMPT_CHARS));
-  // `seed` is the second half of the 2026-09-18 sharpness work, and it is about VARIETY rather than
-  // focus: without one, Pollinations derives the seed from the prompt, so the same brief returns the
-  // same picture every time and "generate again" — the user's only recourse for a soft result —
-  // silently did nothing. A fresh seed per call makes retry a real option again.
-  // ⚠️ Time-based rather than random so the URL stays a pure function of its inputs within a tick,
-  // which is what keeps `pollinationsImageUrl` unit-testable; the test pins the seed explicitly.
-  const seed = Number.isFinite(env.__IMAGE_SEED as unknown as number)
-    ? Number(env.__IMAGE_SEED)
-    : Math.floor(Date.now() % 2_147_483_647);
-  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&seed=${seed}&model=${encodeURIComponent(model)}`;
+  const seed = pollinationsSeed(env);
+  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&private=true&seed=${seed}&model=${encodeURIComponent(model)}`;
 }
 
 /**

@@ -35,9 +35,15 @@ describe('the server publishes whether Pro can serve', () => {
       .toEqual(['grievance', 'imageProAvailable', 'metaPixelId', 'platformFeePct']);
   });
 
-  it('the route asks imageProConfigured() rather than reading env itself — one owner for the rule', () => {
+  it('the route asks imageProAvailable() rather than reading env itself — one owner for the rule', () => {
+    // The owner was `imageProConfigured()` until 2026-09-21, when a Pollinations rung made a key ALONE
+    // enough for Pro to be real; a chip still reading only the host's config would have told a
+    // working tier's user it was off. The property is unchanged: one owner, and no env read here.
     const health = readFileSync(join(__dirname, '..', 'src/server/routes/health.ts'), 'utf8');
-    expect(health).toContain('imageProConfigured()');
+    const healthCode = health.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(healthCode).toContain('imageProAvailable()');
+    // The old owner may be NAMED in a comment (it is the history); it may not be CALLED.
+    expect(healthCode).not.toContain('imageProConfigured()');
     // The endpoint, the key and the model id must never be named on this route.
     expect(health).not.toMatch(/IMAGE_PRO_(KEY|ENDPOINT|MODEL)/);
   });

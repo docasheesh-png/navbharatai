@@ -77658,3 +77658,47 @@ returns. **A guard's presence is not a guard**; only running the reversion showe
 - **There is still no platform-wide daily ceiling on free images** — only a per-user limit
   (`AI_IMAGE_FREE_DAILY_LIMIT`, default 3). At 10,000 users that is 30,000 images a day with nothing
   in the code to stop it. Recorded as the next thing to build.
+
+## 2026-09-21 — the PAID image tier asks Pollinations FIRST, with our key, from our server (Phase 2 item 2)
+
+**Admin's order list, item 2:** *"private=true + token padhne ka code — privacy + watermark — sabse
+zaroori."* And the plan behind it: *"free wale me user ki ip, paid me hamari … paid pahle pollination
+use ho, fallback me IMAGE_PRO_KEY. ham 1 rup lenge."*
+
+### What changed
+
+- **`src/server/lib/pollinationsPaid.ts` (new)** — the keyed door (`gen.pollinations.ai`), called from
+  THIS server with `POLLINATIONS_API_KEY` in an `Authorization: Bearer` header. Never `?key=`: the URL
+  builder does not take the key as an input, so it cannot be in the output. Asks `nologo=true` and
+  `private=true`, which a keyed request honours. Captures the provider's `x-usage-*` cost headers on
+  every delivery and the route logs them admin-only — the first real Pro image is the first real cost
+  number; `IMAGE_PRO_COST_USD` keeps pricing the margin warning until then.
+- **`POST /api/image/pro/generate`** — RUNG 1 is this door (words only); RUNG 2 is the existing
+  `IMAGE_PRO_KEY` host, for an edit or when rung 1 could not deliver. The gate asks
+  `imageProAvailable()` (EITHER engine), and `/api/public-config` asks the same function, so the chip
+  and the 503 still have one owner. An edit with no host is honestly "not switched on". The ₹1 charge
+  is unchanged and still reads `delivered`, never the engine.
+- **The FREE link now carries `private=true`.** The provider defaults a picture onto its PUBLIC feed;
+  a shopkeeper's banner with their phone number on it is theirs. It still carries no key by design —
+  it is handed to the browser (#3234). `nologo` stays sent and, on that door, stays ignored; the
+  watermark is the free door's price and the paid door is where it goes. **Do not add `?key=` there.**
+- ✅ **Latent bug:** `__IMAGE_SEED` had never pinned a seed — `Number.isFinite('5')` is false for the
+  string an env value always is. Fixed in the shared `pollinationsSeed`, read back by a test.
+
+### Tests
+
+`tests/thePaidTierAsksPollinationsFirst.test.ts` (26). **Proven by reversion**: `private=true` dropped
+from the free link → 2 fail; the key put into the paid URL → 2; the broken seed pin restored → 2;
+the gate switched back to the host alone → 1. `proTellsYouBeforeYouType.test.ts` repointed at the new
+owner (comments stripped, so the old name may be history but may not be called).
+
+### Still open
+
+- **Whether `POLLINATIONS_API_KEY` is set in Cloud Run is unconfirmed** (the admin wrote *"maine api
+  add kar di hai"* without naming where). The server log on the next Pro image settles it.
+- **The model's pollen price is unverified** (catalog egress-blocked). A `402`/`403` on the first try
+  is a config fact the log names; the image still arrives from the host.
+- **An edit on Pro still goes only to the host.** The keyed door's `/v1/images/edits` shape is
+  undocumented in what we have; not guessed at.
+- Carried from #3234: no platform-wide daily ceiling on free images; no image model in
+  `providerRates.ts`.

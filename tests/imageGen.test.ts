@@ -108,14 +108,22 @@ describe('Pollinations free provider (admin: "free wala chalu karo")', () => {
     expect(pollinationsEnabled({ IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
     expect(pollinationsEnabled({ IMAGE_GEN_POLLINATIONS: 'on' } as unknown as NodeJS.ProcessEnv)).toBe(true);
   });
-  it('builds a URL with the prompt, the size pixels, no-logo, and a model', () => {
+  it('builds a URL with the prompt, the size pixels, no-logo, PRIVATE, and a model', () => {
     const url = pollinationsImageUrl('a blue robot', 'wide', {} as NodeJS.ProcessEnv);
     expect(url.startsWith('https://image.pollinations.ai/prompt/')).toBe(true);
     expect(url).toContain(encodeURIComponent('a blue robot'));
     expect(url).toContain(`width=${IMAGE_SIZE_PIXELS.wide.w}`);
     expect(url).toContain(`height=${IMAGE_SIZE_PIXELS.wide.h}`);
     expect(url).toContain('nologo=true');
+    // 🔒 admin 2026-09-21 ("private=true … privacy … sabse zaroori"): the provider defaults a
+    // picture onto its PUBLIC feed. A shopkeeper's banner with their phone number is theirs.
+    expect(url).toContain('private=true');
     expect(url).toContain('model=flux');
+  });
+  it('🔒 the FREE link never carries a key — it is handed to the browser', () => {
+    const url = pollinationsImageUrl('x', 'square', { POLLINATIONS_API_KEY: 'sk_secret_123' } as unknown as NodeJS.ProcessEnv);
+    expect(url).not.toContain('sk_secret_123');
+    expect(url).not.toMatch(/[?&]key=/);
   });
   it('defaults to square pixels for an unknown size and honours a model override', () => {
     const url = pollinationsImageUrl('x', 'nope', { IMAGE_GEN_POLLINATIONS_MODEL: 'turbo' } as unknown as NodeJS.ProcessEnv);

@@ -1584,6 +1584,46 @@ the code (it is actually read somewhere) on 2026-07-11.
   🔒 **A failure costs the user ₹0** — nothing is charged unless an image is delivered, which is the
   same "working result or free" law a build obeys, and it is untouched by any of this.
 
+- **🌼 `POLLINATIONS_API_KEY` — the PAID image tier's FIRST engine (built 2026-09-21; admin: *"free wale
+  me user ki ip, paid me hamari … paid pahle pollination use ho, fallback me IMAGE_PRO_KEY"*).** Read by
+  `src/server/lib/pollinationsPaid.ts`; applied in `POST /api/image/pro/generate` (`routes/imageGen.ts`)
+  as RUNG 1, with the `IMAGE_PRO_KEY` host as RUNG 2. Optional beside it: `IMAGE_PRO_POLLINATIONS`
+  (`off` turns off ONLY this rung — Pro goes straight to the host) and `IMAGE_PRO_POLLINATIONS_MODEL`
+  (default `tongyi-mai/z-image-turbo`, the model the tier was priced around).
+  ⚠️ **WHETHER IT IS SET IS UNCONFIRMED.** The admin obtained an `sk_` key at `enter.pollinations.ai/keys`
+  on 2026-09-21 and was asked to save it under exactly this name in Cloud Run; they wrote *"maine api add
+  kar di hai"* without naming where. Per this registry's own rule it is not recorded as SET until they
+  say so. **How to tell without asking:** on the next Pro image the server log carries either
+  `[IMAGE PRO] pollinations delivered — usage {…}` or `[IMAGE PRO] pollinations rung failed (…)`; with
+  the key unset there is NO pollinations line at all and the host serves as before.
+  🔑 **WHAT THE KEY BUYS IS THE PICTURE, not only the bill.** On the anonymous door the free tier uses,
+  `nologo` is IGNORED (the watermark stays) and `private` must be asked for or the picture can appear
+  on the provider's public feed. A keyed request honours both — that is the "privacy + watermark" the
+  admin put first in the order list. The free link now asks `private=true` too; it still carries no
+  key BY DESIGN, because it is handed to the user's browser (`IMAGE_GEN_CLIENT_FETCH`) and a key in a
+  URL a user can copy is a key everybody has. **Do not "fix" the free watermark by adding `?key=`
+  there.** The watermark is the free door's price; the paid door is where it goes.
+  🔒 **THE KEY TRAVELS IN A HEADER (`Authorization: Bearer`), NEVER IN THE URL**, though the provider
+  accepts `?key=` — a URL ends up in logs and error messages, a header does not. The URL builder does
+  not take the key as an input, and a test asserts it is absent from the output.
+  💰 **THE COST IS MEASURED, NOT ASSUMED.** The provider bills in pollen (1 pollen = $1) at a per-model
+  rate no session can read (`gen.pollinations.ai` is refused by the execution environment's egress
+  policy), and reports each request's usage in `x-usage-*` response headers. Every delivery logs them
+  admin-only — the first real Pro image is the first real number. `IMAGE_PRO_COST_USD` ($0.005) still
+  prices the margin warning until then; **retune it from that log line, never from a guess.** The
+  admin's wallet on 2026-09-21 held **0.25 quest pollen and 0 paid**; some models need paid pollen, so
+  a `402` (no pollen) or `403` (key lacks the model) on the first try is a config fact, not a bug, and
+  the log names which — the image still arrives, from the host.
+  ⚠️ **AN EDIT STAYS ON THE HOST.** The keyed door takes words; the user's own photograph is never
+  turned into a link. So `initImage` requests go to `IMAGE_PRO_KEY` as before, and with the host
+  unconfigured an edit on Pro is honestly "not switched on" rather than a fresh picture that ignores
+  the attachment. `imageProAvailable()` (either engine) is now the ONE owner of "is Pro on?" for both
+  the chip (`/api/public-config`) and the route's 503; `imageProConfigured()` still means the host.
+  ✅ **A LATENT BUG FOUND ON THE WAY:** `__IMAGE_SEED`, the test pin for the free URL's seed, had never
+  once pinned anything — `Number.isFinite('5')` is false for the string an env value always is. Fixed
+  in the shared `pollinationsSeed`, with a test that reads the seed back.
+  Test-locked and reversion-proven four ways in `tests/thePaidTierAsksPollinationsFirst.test.ts`.
+
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

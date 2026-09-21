@@ -46,13 +46,19 @@ describe('trimReportForStorage', () => {
   });
 
   it('RECOMPUTES problems from the trimmed issues, not a pass-through of the original problems field — a problem entry that fell out of the trimmed issues window is not left dangling in problems', () => {
-    // 501 old info-only issues, then ONE old error that gets trimmed away by the -500 slice, then a
-    // fresh error that survives. If `problems` were a naive pass-through of the ORIGINAL report.problems
-    // (computed before trimming), it would still list the now-vanished old error.
-    const oldNoise = Array.from({ length: 500 }, (_, i) => ({ ts: i, phase: 'build' as const, severity: 'info' as const, code: 'STEP', message: `step ${i}`, autoResolved: true }));
-    const oldError = { ts: 500, phase: 'build' as const, severity: 'error' as const, code: 'OLD_ERR', message: 'old error that will be trimmed', autoResolved: false };
-    const freshError = { ts: 501, phase: 'build' as const, severity: 'error' as const, code: 'NEW_ERR', message: 'fresh error that survives', autoResolved: false };
-    const issues = [oldError, ...oldNoise, freshError]; // oldError sits OUTSIDE the last-500 window
+    // 501 info-only issues with ONE error buried in the MIDDLE of them, where the 500-entry window
+    // drops it, and a fresh error at the end that survives. If `problems` were a naive pass-through
+    // of the ORIGINAL report.problems (computed before trimming), it would still list the vanished one.
+    //
+    // ⚠️ The buried error used to sit at index 0, because the window was the last 500 and the head
+    // was what fell out. Since 2026-09-21 the window is the first 250 AND the last 250 (see
+    // reportTruncation.ts), so the head is deliberately kept and the MIDDLE is what falls out. The
+    // invariant under test — problems is recomputed from the trimmed issues — is unchanged; only
+    // where an entry has to sit to fall out of the window has moved.
+    const noise = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ ts: from + i, phase: 'build' as const, severity: 'info' as const, code: 'STEP', message: `step ${from + i}`, autoResolved: true }));
+    const oldError = { ts: 250, phase: 'build' as const, severity: 'error' as const, code: 'OLD_ERR', message: 'mid-build error that will be trimmed', autoResolved: false };
+    const freshError = { ts: 502, phase: 'build' as const, severity: 'error' as const, code: 'NEW_ERR', message: 'fresh error that survives', autoResolved: false };
+    const issues = [...noise(0, 250), oldError, ...noise(251, 251), freshError]; // 503 entries; oldError is index 250, inside the dropped middle
     const r = baseReport({ issues, problems: [oldError, freshError] }); // original (pre-trim) problems
     const trimmed = trimReportForStorage(r);
     expect(trimmed.issues!.some((i) => i.code === 'OLD_ERR')).toBe(false); // trimmed out of issues

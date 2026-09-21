@@ -30,7 +30,7 @@ import { typecheckEvidenceFromCommands } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
-import { mergeTruncation, COMPLETE, type ReportTruncation } from './reportTruncation';
+import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -717,14 +717,16 @@ export class BuildDiagnostics {
       this.notify();
       return;
     }
-    if (this.issues.length >= MAX_ISSUES) {
-      if (!this.truncated) {
-        this.truncated = true;
-        this.issues.push({ ts: this.now(), phase: 'build', severity: 'warning', code: 'TIMELINE_TRUNCATED', message: `Timeline capped at ${MAX_ISSUES} entries — earlier detail retained, later activity omitted.`, autoResolved: false });
-      }
-      return;
+    if (this.issues.length >= MAX_ISSUES && !this.truncated) {
+      this.truncated = true;
+      // ⚠️ THE OLD WORDING HERE WAS "earlier detail retained, later activity omitted" AND IT WAS
+      // TRUE — the cap used to `return` without recording, so everything after entry 2000 was lost.
+      // It now keeps both ends (pushBounded), so the sentence had to change with the behaviour: a
+      // line describing the old rule on a timeline built by the new one is the kind of quiet lie
+      // rule 5 exists to forbid.
+      pushBounded(this.issues, { ts: this.now(), phase: 'build', severity: 'warning', code: 'TIMELINE_TRUNCATED', message: `Timeline capped at ${MAX_ISSUES} entries — the start and the end of the build are kept, the middle is dropped.`, autoResolved: false }, MAX_ISSUES);
     }
-    this.issues.push({ ts: issue.ts ?? this.now(), ...issue });
+    pushBounded(this.issues, { ts: issue.ts ?? this.now(), ...issue }, MAX_ISSUES);
     this.notify();
   }
 
@@ -878,16 +880,18 @@ export class BuildDiagnostics {
       } catch { /* a diagnostic must never break the command it is describing */ }
     }
     this.channelTotals.commands += 1;
-    if (this.commands.length < MAX_COMMANDS) {
-      this.commands.push({
-        ts: this.now(),
-        command: rec.command.slice(0, 500),
-        exitCode: rec.exitCode,
-        durationMs: rec.durationMs,
-        stdout: capTail(rec.stdout, CMD_OUTPUT_CAP),
-        stderr: capTail(rec.stderr, CMD_OUTPUT_CAP),
-      });
-    }
+    // 🔒 BOTH ENDS, NEVER A PREFIX — see pushBounded. This was `if (length < MAX) push(...)`, which
+    // stopped recording entirely past the cap, so the endgame `tsc` / `npm run build` of a long
+    // build was never written down and the release gate's own evidence readers below could not see
+    // it. The cap is unchanged; which commands fill it is what changed.
+    pushBounded(this.commands, {
+      ts: this.now(),
+      command: rec.command.slice(0, 500),
+      exitCode: rec.exitCode,
+      durationMs: rec.durationMs,
+      stdout: capTail(rec.stdout, CMD_OUTPUT_CAP),
+      stderr: capTail(rec.stderr, CMD_OUTPUT_CAP),
+    }, MAX_COMMANDS);
     // A non-zero exit is a build FAILURE only when it's a REAL failure — not a routine probe. See
     // isExpectedNonzeroExit: `|| true` guards, inspector tools whose exit 1 = "no match" (grep / pkill /
     // ss / …), and a health-probe curl hitting a not-yet-ready port all return non-zero WITHOUT anything
@@ -1198,24 +1202,26 @@ export class BuildDiagnostics {
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
     this.recordTimeToFirstCall(rec.latencyMs);
     this.channelTotals.llmCalls += 1;
-    if (this.llmCalls.length < MAX_LLM_CALLS) {
-      this.llmCalls.push({
-        ts: this.now(),
-        provider: rec.provider,
-        model: rec.model,
-        promptPreview: rec.promptPreview != null ? capHead(rec.promptPreview, LLM_PREVIEW_CAP) : undefined,
-        responsePreview: rec.responsePreview != null ? capHead(rec.responsePreview, LLM_PREVIEW_CAP) : undefined,
-        promptChars: rec.promptChars,
-        responseChars: rec.responseChars,
-        finishReason: rec.finishReason,
-        toolCalls: rec.toolCalls,
-        inputTokens: rec.inputTokens,
-        outputTokens: rec.outputTokens,
-        latencyMs: rec.latencyMs,
-        ok: rec.ok,
-        error: rec.error ? rec.error.slice(0, 500) : undefined,
-      });
-    }
+    // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
+    // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
+    // "last 40" of a list whose last entries were calls 261–300 of a 312-call build. The end the
+    // store thought it was preserving had never been written down. See pushBounded.
+    pushBounded(this.llmCalls, {
+      ts: this.now(),
+      provider: rec.provider,
+      model: rec.model,
+      promptPreview: rec.promptPreview != null ? capHead(rec.promptPreview, LLM_PREVIEW_CAP) : undefined,
+      responsePreview: rec.responsePreview != null ? capHead(rec.responsePreview, LLM_PREVIEW_CAP) : undefined,
+      promptChars: rec.promptChars,
+      responseChars: rec.responseChars,
+      finishReason: rec.finishReason,
+      toolCalls: rec.toolCalls,
+      inputTokens: rec.inputTokens,
+      outputTokens: rec.outputTokens,
+      latencyMs: rec.latencyMs,
+      ok: rec.ok,
+      error: rec.error ? rec.error.slice(0, 500) : undefined,
+    }, MAX_LLM_CALLS);
     // AN ENORMOUS PROMPT IS THE REPORT'S OWN BURIED HEADLINE — say so out loud (autopsy debc468c).
     //
     // That report carried `promptChars: 76,543,256` beside `inputTokens: 24,853`. Both numbers were
@@ -1358,13 +1364,15 @@ export class BuildDiagnostics {
    */
   recordFullError(err: { message: string; stack?: string; phase?: IssuePhase }): void {
     this.channelTotals.errors += 1;
-    if (this.errors.length >= MAX_ERRORS) return;
-    this.errors.push({
+    // Both ends (pushBounded): the FIRST errors are usually the cause and the rest the cascade, but
+    // the LAST ones are what the build died on. Keeping only the first 200 answered one of those
+    // questions and silently refused the other.
+    pushBounded(this.errors, {
       ts: this.now(),
       phase: err.phase ?? 'build',
       message: capTail(err.message, ERROR_MESSAGE_CAP),
       stack: err.stack ? capTail(err.stack, STACK_CAP) : undefined,
-    });
+    }, MAX_ERRORS);
     this.notify();
   }
 
@@ -2205,11 +2213,26 @@ export class BuildDiagnostics {
    */
   private truncationFact(): ReportTruncation {
     return mergeTruncation(COMPLETE, {
-      commands: { kept: this.commands.length, total: this.channelTotals.commands },
-      llmCalls: { kept: this.llmCalls.length, total: this.channelTotals.llmCalls },
-      errors: { kept: this.errors.length, total: this.channelTotals.errors },
+      commands: capFact(this.commands.length, this.channelTotals.commands, MAX_COMMANDS),
+      llmCalls: capFact(this.llmCalls.length, this.channelTotals.llmCalls, MAX_LLM_CALLS),
+      errors: capFact(this.errors.length, this.channelTotals.errors, MAX_ERRORS),
     });
   }
+}
+
+/**
+ * The recorder's own loss for one channel, INCLUDING the shape of the window it kept.
+ *
+ * 🔒 Stating `head` here is what lets the storage pass clamp its own window instead of guessing
+ * (`trimChannel`'s `priorHead`). Today the two agree anyway — both use `boundedWindow`, so the first
+ * 20 of the recorder's first 150 really are the build's first 20 — but a correctness that holds by
+ * coincidence is the shape of bug this whole change exists to end. `undefined` when nothing was
+ * lost, so an intact channel is never listed as a loss.
+ */
+function capFact(kept: number, total: number, cap: number): ChannelTruncation | undefined {
+  if (total <= kept) return undefined;
+  const { head } = boundedWindow(total, cap);
+  return head > 0 && head < kept ? { kept, total, head } : { kept, total };
 }
 
 /**

@@ -76545,6 +76545,179 @@ the key without waiting for the Routine.
 
 Documentation only — no code path, no test and no build behaviour is touched by this change.
 
+## 2026-09-21 — 📊 THIRTEEN REPORTS WERE BEING WRITTEN AND SHOWN TO NOBODY, and a red mark on what is redundant
+
+**Branch `claude/vigilant-feynman-9aobjz`. PR #3221 (merged) and PR #3223.** The admin asked two
+things: *"13 endpoints par asli diagnostic data ban raha hai jo kisi screen par dikhta hi nahi. pahle
+yahi banao!"* and *"admin penal me bahut se card aise hai, jinki koi need nahi hai. identify karo! aur
+un par temporary red mark laga do!"*
+
+### The audit that preceded both (9 agents, 6 readers + 3 rankers)
+
+| | Number |
+|---|---|
+| Admin-panel cards | 84 |
+| Cards with their own Copy/Download | **5** |
+| Report-shaped GET endpoints | 65 |
+| Endpoints with **no client at all** | **13** |
+| Download endpoints in the whole server | **1** |
+
+### Part one — the thirteen, now on a Diagnostics tab
+
+`builder-scorecard` · `agentv3/losses` · `agentv3/usage-report` · `metrics/history` ·
+`assistant-spend` · `provider-status` · `release-gate` · `feature-flags` · `key-version` · `events` ·
+`deployments` · `takedowns` · `announcements`.
+
+🔑 **The one that matters most is the builder scorecard, and its own module says why.**
+`builderMetrics.ts` opens with *"We ship fix after fix without being able to say whether the engine is
+getting better."* It carries `healPressure` — how often the builder had to repair its OWN output,
+which is the fifth absolute rule's 50/50 law as a number — and that was computed on every call to a
+route **no file fetched**.
+
+🔒 **NULL IS NOT ZERO, and the renderer is where that lie would have re-entered.** Every module behind
+these numbers already states the rule; a card printing `0%` for an unmeasured rate would have undone
+it at the last step, looking exactly like a real result. `num`/`pct`/`mins`/`usd` return an em dash,
+every rate carries its sample size, and a test asserts no `?? 0` fallback exists.
+
+⚠️ **A shape the panel does not understand is still fully readable** — each card renders what it can
+and its Copy carries the raw response, so a route whose fields change degrades rather than lying.
+
+### Part two — the red marks, and the bar for one is PROOF
+
+Five cards marked on something checkable: DUPLICATE (same screen, same data), SUPERSEDED, or RESETS
+ON DEPLOY. A card that merely looks busy is not marked.
+
+🔒 **A deliberate duplicate is not a duplicate.** "Published Apps" repeats the Publish Capacity card
+below it and is NOT marked, because its own comment records why it was added (*the card "sits under
+four rows of tiles, and the admin did not know it existed"*) and states both read one source. Marking
+it from a count of cards would be agreeing against a written decision. A test keeps it off the list.
+
+### Part three — "kam information wali ko delete karo", and TWO OF THREE MARKS WERE WRONG
+
+The admin's rule is not "delete what was marked". Each pair was re-read side by side first, and that
+is what caught both errors:
+
+- **Platform Health Score — deleted, mark was right.** The live twin adds a subtitle naming what the
+  score is built from and an honest `Unavailable — <reason>` state; the deleted card rendered nothing
+  on failure. Its state, fetch and Monitor-effect call went with it.
+  ⚠️ `/api/admin/health-score` now has no client and that is **not** the class the Diagnostics tab was
+  built for — the score is still on screen, from `/api/admin/monitor`, on the same inputs.
+- **AI Insights — the mark was on the WRONG HALF, so the OTHER card went.** The live "Insights" panel
+  showed six findings; the marked card shows the full list **plus the ask-box that exists nowhere
+  else**. Deleting by the mark would have destroyed the ask-box.
+- **Provider Token Burn — the identification itself was FALSE, so nothing was deleted.** It reads
+  `analytics.providerWise` (TOKENS) while "API Usage Ranking" reads `analytics.providerRanking`
+  (REQUESTS + latency) — two fields, two questions. The real twin is "Engine cost split"; but this
+  card's footer (total cost, the `(at least)` label, the Cashfree gateway figure) is duplicated
+  nowhere. Entry corrected in place, card kept for the admin.
+
+🔒 **THE GUARD CAUGHT THE ONE MISTAKE MADE WHILE DOING THIS.** After the two register entries were
+removed, `tests/theReportsThatWereNeverShown.test.ts` failed on *"every mark on screen is really
+registered"* — the AI Insights card still carried a badge whose reason had gone. A dangling red mark
+on a card that is staying is exactly what makes the next review untrustworthy, and neither `tsc` nor
+any behavioural test can see it.
+
+### The export half
+
+`reportExport.ts` (pure) + `ReportExportButtons.tsx`. Every export travels in an envelope naming the
+report, the time, the window and the endpoint — the three facts every autopsy in this file establishes
+first, now travelling WITH the data. An empty card REFUSES rather than exporting `{"data":null}`; a
+real zero still exports.
+
+🔴 **DOWNLOAD IS HIDDEN INSIDE THE ANDROID APP, verified not assumed.** `MainActivity.java` registers
+three plugins and installs no `DownloadListener`, and Capacitor's WebView implements neither that nor
+the `download` attribute — so a blob click returns silently and nothing reaches storage. A button that
+does nothing is the state the second absolute rule forbids, so the native shell shows Copy alone,
+which genuinely works there. The admin reads this panel on a phone, so that is the common case.
+
+### Still open
+
+- **The 40-cap deletes the evidence an autopsy needs.** `trimChannel` keeps the NEWEST 40 `llmCalls`
+  and `commands` (`slice(len - cap)`), so on the 312-call build this file already records, calls
+  1–272 are gone — and first-turn starvation, plan-call timeouts and rung-1 ladder falls all live in
+  the EARLY calls. ⚠️ The fix is **not** "keep the head": `reportTruncation.ts` states a real reason
+  for keeping the tail (*"the end of a build is where its failure lives"*), and trading one loss for
+  another is what the 2026-09-13 rule forbids. The fix is **first N + last N inside the same cap**,
+  with the truncation fact declaring that the window has a GAP. Verified safe: the only two readers of
+  the stored ledger are aggregates (`modelPerformance`, `realCostFromCalls`), neither assumes
+  contiguity, and the cost reader already treats a capped list as a lower bound.
+- Marks the admin has not yet ruled on: **Since this server started** (resets on deploy) and **Recent
+  Token Purchases** (superseded by the Revenue purchases table).
+
+Verification both times: typecheck · server typecheck · unused imports · native guard · **28,125
+tests** · build · bundle · boot · deps. `AppKnowledgeBase.ts` carries the Diagnostics tab, per the
+sync rule.
+
+---
+
+## 2026-09-21 — 🔴 A COUNT IS NOT A WINDOW: two caps pulled opposite ways and kept a window from the MIDDLE
+
+Acting on the open root cause recorded above (*"the 40-cap deletes the evidence an autopsy needs"*).
+Reading the code to implement it found the problem was **worse and differently shaped than that note
+said**, so the note is superseded here rather than simply closed.
+
+**What the previous entry got right, and the one thing it got wrong.** It said storage keeps the last
+40 calls, so "calls 1–272 are gone". The first half is true. The second assumed the stored 40 were
+the build's LAST 40. They were not. `BuildDiagnostics` — the recorder, one layer up — caps the same
+channel at 300 and was written `if (this.llmCalls.length < MAX_LLM_CALLS) push(...)`: past the cap it
+**stopped recording entirely**, keeping the build's FIRST 300. The store then kept the LAST 40 *of
+those*, on its own written reasoning that *"the end of a build is where its failure lives"*.
+
+| layer | cap | which end it kept |
+|---|---|---|
+| `BuildDiagnostics` (recorder) | 300 calls / 300 commands / 200 errors / 2000 issues | the **FIRST** |
+| `DiagnosticsStore` (storage) | 40 / 40 / 50 / 500 | the **LAST** |
+
+On a 312-call build the stored window is calls **261–300**. Not the head — the first-turn starvation,
+the plan-call timeout and the rung-1 ladder fall are gone. **Not the tail either** — the twelve calls
+the build actually died on were never written down at all, so the store was preserving an ending that
+did not exist in its input. And `{ kept: 40, total: 312 }`, the truncation fact shipped the day
+before, is perfectly true and perfectly unusable: it states how many survived and nothing about
+*which*, while the store's docblock told the reader they were the last forty.
+
+🔑 **THE CLASS, named so it is recognised again: two caps that disagree about which end matters
+compose into a window neither one intended, and a layer downstream believes a promise the layer
+upstream already broke.** This is the fourth time this repo has paid for a cap or a guard that was
+right where it was written and wrong in composition (`safeRelPath` ×4, the zombie-write lane, the HTML
+boot guard, `tagsOnLine` ×2).
+
+**The fix is one rule at both layers, and it costs zero bytes.** `boundedWindow(length, cap)` in
+`reportTruncation.ts`: keep the first `floor(cap/2)` and the last `cap - floor(cap/2)`. The recorder's
+four capped channels now `pushBounded(...)` (evicting the oldest MIDDLE entry, so the array stays
+chronological and the opening is preserved) instead of refusing everything past the cap; the store's
+`trimChannel` keeps both ends within the same cap. Because it is the SAME rule at both layers they
+compose instead of fighting — the store's first 20 of the recorder's first 150 really are the build's
+first 20. `ChannelTruncation` gains `head`, so the record *states* the window, and `truncationNote`
+now reads *"40 of 312 model calls (the first 20 and the last 20 — 272 from the middle are gone)"*.
+
+⚠️ **IT IS A REAL TRADE AND IS SAID SO IN THE CODE.** A 40-call tail gave 40 consecutive calls before
+the failure; 20 + 20 gives 20. Worth paying because the head was being lost with **certainty** on
+every build over the cap while the tail still keeps 20 consecutive calls of the ending — and because
+the recorder half means long builds now keep a real ending for the first time. Raising the cap instead
+was **rejected**: the caps exist to stay clear of Firestore's 1 MB limit without a size-measuring
+loop, and a report that breaches it falls to `dropHeavyChannelsForStorage`, which destroys the channel
+outright. A byte-neutral change cannot make that worse.
+
+**Honesty half (rule 5).** Three sentences described the retired behaviour and were corrected with
+it: the store's *"keeping the most recent, most useful detail"*, `STORED_LLM_CALLS_MAX`'s *"the newest
+ones"*, and the timeline's own `TIMELINE_TRUNCATED` line, which said *"earlier detail retained, later
+activity omitted"* — true of the old cap, a lie on a timeline built by the new one.
+
+**Test-locked and reversion-proven both ways** in `tests/aCountIsNotAWindow.test.ts` (30 cases). The
+headline cases drive the **real** recorder and the **real** store end to end on a 312-call build and
+assert that call #1 and call #312 both survive — deliberately not two unit halves that could each pass
+while the pair stayed broken, which is exactly how this survived a fix to the same module one day
+earlier. Reverting the recorder to its prefix cap fails 4 cases; reverting the store to tail-only
+fails 5. Source-level guards catch the return of either shape, because `tsc` and `vitest` cannot see
+that a bounded push is written as a prefix cap — the old code compiled and passed every test.
+
+⚠️ One fixture in `DiagnosticsStore.test.ts` moved: it had put the entry it expected to be dropped at
+index 0, because the head was what used to fall out. The invariant it tests (problems is recomputed
+from the trimmed issues) is unchanged; the entry now sits in the middle, which is where an entry has
+to be to fall out of a both-ends window.
+
+Verification: typecheck · server typecheck · unused imports · native guard · **28,163 tests** · build
+· bundle · boot · deps. No user-facing surface changed, so no `AppKnowledgeBase.ts` entry is due.
 ## 2026-09-21 — 🧭 THE ACTION NAVIGATOR: what is left to do, and where it lives
 
 Admin, verbatim: *"mujhe ek nevigator chahiye … jaise user ne app banaya -> preview par green dot 🟢 ->

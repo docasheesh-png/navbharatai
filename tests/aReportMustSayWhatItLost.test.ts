@@ -70,7 +70,8 @@ describe('one trim, one declaration — they cannot be done separately', () => {
   it('keeping 40 of 312 says "40 of 312", not "40"', () => {
     const { list, fact } = trimChannel(Array.from({ length: 312 }, (_, i) => call(i)), 40);
     expect(list).toHaveLength(40);
-    expect(fact).toEqual({ kept: 40, total: 312 });
+    // `head: 20` since 2026-09-21 — a count alone could not say WHICH forty. See the window suite.
+    expect(fact).toEqual({ kept: 40, total: 312, head: 20 });
   });
 
   it('a channel that fits loses nothing and claims nothing', () => {
@@ -79,9 +80,13 @@ describe('one trim, one declaration — they cannot be done separately', () => {
     expect(fact).toBeUndefined();   // silence here is correct — nothing was lost
   });
 
-  it('the TAIL is kept, because a build fails at its end', () => {
+  it('🔴 BOTH ENDS are kept — the head is no longer thrown away', () => {
+    // SUPERSEDED 2026-09-21. This case used to assert `[2, 3]` and was named "the TAIL is kept,
+    // because a build fails at its end". That reason was real and is still honoured (the tail is
+    // never the smaller half), but taken alone it lost the build's opening with certainty — and
+    // the recorder above had already lost the true ending, so the stored "tail" was a middle.
     const { list } = trimChannel([call(1), call(2), call(3)], 2);
-    expect(list?.map((c) => c.ts)).toEqual([2, 3]);
+    expect(list?.map((c) => c.ts)).toEqual([1, 3]);
   });
 
   it('🔴 dropping a channel records the count it had — never a silent undefined', () => {
@@ -170,8 +175,8 @@ describe('the storage path declares its own caps', () => {
     }));
     expect(out.llmCalls).toHaveLength(STORED_LLM_CALLS_MAX);
     expect(out.truncation?.complete).toBe(false);
-    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 312 });
-    expect(out.truncation?.channels?.commands).toEqual({ kept: 40, total: 100 });
+    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 312, head: 20 });
+    expect(out.truncation?.channels?.commands).toEqual({ kept: 40, total: 100, head: 20 });
   });
 
   it('a small report is declared COMPLETE, positively', () => {
@@ -186,7 +191,7 @@ describe('the storage path declares its own caps', () => {
       llmCalls: Array.from({ length: 300 }, (_, i) => call(i)),
       truncation: mergeTruncation(COMPLETE, { llmCalls: { kept: 300, total: 500 } }),
     }));
-    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 500 });
+    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 500, head: 20 });
   });
 });
 

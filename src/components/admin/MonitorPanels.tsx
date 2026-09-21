@@ -261,7 +261,6 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
 
   const health = data?.health?.score ?? null;
   const alerts = Array.isArray(data?.alerts) ? data!.alerts : [];
-  const insights = Array.isArray(data?.insights) ? data!.insights : [];
   const finopsFindings: any[] = Array.isArray(data?.finops?.findings) ? data!.finops.findings : [];
 
   return (
@@ -715,50 +714,28 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
         </div>
       </div>
 
-      {/* ── What is worth acting on: waste findings and derived insights ── */}
-      {(finopsFindings.length > 0 || insights.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {finopsFindings.length > 0 && (
-            <div className={PANEL}>
-              <div className="mb-3">
-                <h3 className={PANEL_TITLE}>Where money is being wasted</h3>
-                <p className={PANEL_SUB}>Observed waste only — no projections</p>
+      {/* ── What is worth acting on: waste findings ──
+          ⚠️ THE "INSIGHTS" PANEL THAT SAT BESIDE THIS ONE WAS DELETED 2026-09-21 (admin: *"DUPLICATE -
+          kam information wali ko delete karo"*). The admin panel's own "AI Insights" card renders the
+          SAME list from the same derivation, and carries two things this panel did not: the FULL list
+          rather than the first six, and the ask-box that answers a typed question about the telemetry,
+          which exists nowhere else. So the shorter, read-only copy went — NOT the richer one, even
+          though the richer one is the card that was first marked. Deleting by "which was marked"
+          instead of by "which holds less" would have destroyed the ask-box. */}
+      {finopsFindings.length > 0 && (
+        <div className={PANEL}>
+          <div className="mb-3">
+            <h3 className={PANEL_TITLE}>Where money is being wasted</h3>
+            <p className={PANEL_SUB}>Observed waste only — no projections</p>
+          </div>
+          <div className="space-y-2">
+            {finopsFindings.slice(0, 6).map((f: any, i: number) => (
+              <div key={f?.id ?? i} className="bg-well rounded-xl p-3">
+                <div className="text-[11px] font-bold text-ink">{f?.title || f?.headline || 'Finding'}</div>
+                {f?.detail && <div className="text-[10px] text-muted mt-0.5 leading-relaxed">{f.detail}</div>}
               </div>
-              <div className="space-y-2">
-                {finopsFindings.slice(0, 6).map((f: any, i: number) => (
-                  <div key={f?.id ?? i} className="bg-well rounded-xl p-3">
-                    <div className="text-[11px] font-bold text-ink">{f?.title || f?.headline || 'Finding'}</div>
-                    {f?.detail && <div className="text-[10px] text-muted mt-0.5 leading-relaxed">{f.detail}</div>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {insights.length > 0 && (
-            <div className={PANEL}>
-              <div className="mb-3">
-                <h3 className={PANEL_TITLE}>Insights</h3>
-                <p className={PANEL_SUB}>Derived from live metrics{data?.metricsScope ? ` for ${data.metricsScope.label}` : ''} — not predicted</p>
-              </div>
-              <div className="space-y-2">
-                {insights.slice(0, 6).map((i: any, idx: number) => (
-                  <div key={i?.id ?? idx} className="flex items-start gap-2.5 bg-well rounded-xl p-3">
-                    <span className={`mt-0.5 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-full border shrink-0 ${
-                      i?.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
-                      : i?.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
-                      : i?.severity === 'good' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
-                      : 'bg-raised border-line text-muted'}`}>
-                      {i?.severity ?? 'info'}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold text-ink">{i?.headline}</div>
-                      <div className="text-[10px] text-muted mt-0.5 leading-relaxed">{i?.detail}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
       )}
 

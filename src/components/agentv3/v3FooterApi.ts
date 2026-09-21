@@ -13,6 +13,8 @@
 // the panel's real internals — the same openTab/history/report code paths the header uses on
 // desktop. No duplicated logic, no fake buttons.
 
+import type { ActionTone } from '../../lib/actionNavigator';
+
 export type V3FooterSection = 'chat' | 'preview' | 'files' | 'diff' | 'terminal' | 'history';
 
 export interface V3FooterApi {
@@ -32,6 +34,21 @@ export interface V3FooterApi {
   previewReady: boolean;
   /** Admin 2026-07-07: the REAL number of built files, shown on the Files item (0 = hidden). */
   fileCount: number;
+  /**
+   * The Action Navigator's roll-up for everything inside the More sheet (admin 2026-09-21:
+   * *"ab 3 dot more par red dot"*). `null` = no dot.
+   *
+   * ⚠️ IT IS A TONE, NOT A BOOLEAN, and that is the point: `previewReady` above is a boolean because
+   * green means one thing, while this dot has to distinguish a fault from an invitation. A boolean
+   * here would force the renderer to pick a colour, which is exactly the decision that must live in
+   * ONE place (`ActionDot`) rather than at every surface that shows a dot.
+   *
+   * It is COUNTED by `badgeAt`, never stored, so it cannot be left switched on after the last thing
+   * under More is done.
+   */
+  moreBadge: ActionTone | null;
+  /** What that dot is about, for the tooltip and the screen reader. A bare dot is not a label. */
+  moreBadgeLabel: string | null;
 }
 
 /**

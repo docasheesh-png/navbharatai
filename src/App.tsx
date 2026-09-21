@@ -47,6 +47,8 @@ import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav
 import { startFreshCase } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
+import { ActionDot } from './components/ActionDot';
+import type { ActionTone } from './lib/actionNavigator';
 import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick } from './components/chat/modePicker';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
@@ -4472,8 +4474,10 @@ export default function App() {
               // v5.0 builds into (files state + workspace syncer), so this is one feature reached from
               // two places — not a second editor.
               { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => toggleTab('studio'), active: false },
-              { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history' },
-            ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number }) => (
+              // The Action Navigator's roll-up (admin 2026-09-21). A TONE, not a boolean: the colour
+              // decision lives in ActionDot alone, so this row cannot invent a third meaning for a dot.
+              { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history', badgeTone: v3FooterApi.moreBadge, badgeLabel: v3FooterApi.moreBadgeLabel },
+            ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count, badgeTone, badgeLabel }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number; badgeTone?: ActionTone | null; badgeLabel?: string | null }) => (
               <button
                 key={key}
                 onClick={onTap}
@@ -4487,6 +4491,13 @@ export default function App() {
                     : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
                   {/* Admin 2026-07-07: green dot = the app is genuinely viewable (real state, never a timer). */}
                   {dot && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_5px_rgba(52,211,153,0.9)]" aria-label="Preview ready" />}
+                  {/* The Action Navigator's dot — same corner as the green one above, and the two
+                      never coexist: green rides Preview, this rides More. */}
+                  {badgeTone && (
+                    <span className="absolute -top-0.5 -right-1">
+                      <ActionDot tone={badgeTone} label={badgeLabel ?? null} />
+                    </span>
+                  )}
                   {/* Admin 2026-07-07: the REAL built-file count on the Files item. */}
                   {typeof count === 'number' && count > 0 && (
                     <span className="absolute -top-1.5 -right-2.5 min-w-[14px] px-0.5 h-3.5 rounded-full bg-indigo-600 text-white text-[8px] font-black leading-[14px] text-center" aria-label={`${count} files`}>{count > 99 ? '99+' : count}</span>

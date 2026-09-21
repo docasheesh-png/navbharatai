@@ -75709,3 +75709,105 @@ Reversion-proven in `tests/theBootGuardRanOnOneLaneOfTwo.test.ts` (8 cases, two 
   own failing auto-start, so ordinary commands paid for an unrelated retry loop.
 - ✅ **CORRECTION to 2026-09-21 (1):** `PREVIEW_SNAPSHOT_STALE` is NOT universal — build 3 reports
   `PREVIEW_SNAPSHOT_CURRENT`. It goes stale exactly when a post-build pass writes after the copy.
+
+---
+
+## 2026-09-21 — 🎧 AUTOPSY: `RUNTIME_UNCHECKED` was the structural outcome of an ordinary build
+
+**Trigger.** Not a single report but a pattern across the two the admin sent: `RUNTIME_UNCHECKED` on
+**all five builds**, beside `IN_BUILD_GREEN`, `GREEN_GUARD_SAVE` and previews that had been opened in a
+real browser and seen rendering. Announced as the next task after #3205 merged, on the reasoning that
+this is the one check that would have caught the `useState` null crash the "Fix bugs" build (`53d43c18`)
+was paid ₹113 to rediscover an hour after the app shipped.
+
+### What was actually wrong
+
+`CONSOLE_LOG` is the only thing `getConsoleErrors` reads. Three lanes could fill it; all three were shut.
+
+| lane | why it could not answer |
+|---|---|
+| **A · the CDP daemon** | the ONLY writer of that file, and it starts solely when the MODEL calls the `browser_action` tool. An ordinary build never does. |
+| **B · the page checks** (`runtimeRecordFromPageChecks`, the documented *"second source of runtime truth"*, 2026-08-19) | needs `extractPageRoutes` to find a route that is not `/`. **MEASURED: 0 of 40 golden scaffolds yield one, and not one uses a router.** |
+| **C · `browseUrl`** | the navigation the PLATFORM makes on essentially every build. Launched a real browser, waited for paint, read the DOM — and attached **no listener of any kind**. |
+
+Both facts were **measured, not read**: a throwaway probe printed the generated `browseUrl` script
+(no `page.on('console')`, no `pageerror`, no write to the log) and ran the real `extractPageRoutes` over
+the real `GOLDEN_SCAFFOLDS` registry (0/40, including `saas-dashboard`, `crm`, `school-erp` — they switch
+none of which uses a router).
+
+🔴 **AND THE FIRST VERSION OF THAT MEASUREMENT WAS WORTHLESS — recorded because the lesson is this
+repo's own.** The probe read `s.files`, a key `GoldenScaffold` does not have, so every scaffold reached
+`extractPageRoutes` as `{}` and it **could not have returned anything except 0**. By the time I went
+back to re-check it a different way, the claim was already published in three documents and a commit
+message. The conclusion HELD on the re-measurement — real field `appTsx`, 40 non-empty sources, 0
+routes, 0 routers — but the original derivation proved nothing: *a derivation is only verified once it
+predicts something it could have got wrong* (the same sentence this file already records for the E2B
+rate). The number now lives in CI, with a control case proving `extractPageRoutes` really does find
+routes when they exist, instead of in a paragraph that can go stale.
+
+⚠️ One clause was also WRONG and is withdrawn: I wrote that the multi-screen scaffolds "switch screens
+on state". The no-router half is verified; the state half is not — my probe found zero matches for it,
+which means my heuristic was narrow, not that the mechanism was confirmed. What is measured is that
+they do not use a router; how they do navigate is unexamined and is not claimed.
+
+### The fix — lane C, because lane C is already paid for
+
+The browser launches regardless, so the four listeners cost nothing. They are now ONE definition
+(`CONSOLE_RECORDER_JS` + `attachConsoleJs`) interpolated into both the daemon and the new pure
+`browsePageScript`, never copied — a second copy is the class this repo has paid for four times
+(`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2).
+
+🔒 **A bug this fix would otherwise have CREATED, caught before writing it.** `getConsoleErrors` reports
+`captured:true` when the log FILE exists, and `provenFromTimeline` reads the resulting `RUNTIME_VERIFIED`
+as *"the app ran in a real browser"*. A browser that loaded a dead preview has a perfectly clean console,
+so an unconditional session marker would have let a **404 earn a render proof**. The marker is gated on
+`painted`; an ERROR is recorded either way, because a crash that prevents paint is the thing worth
+reporting.
+
+⚠️ **It spends money, and that is the point.** A build carrying a real runtime error now reaches the
+auto-fix loop and spends a repair pass it previously could not; on Weak, NavBharatAI pays. Bounded at
+one attempt and wrapped in `verifyAfterFix`. It also wakes `judgeRuntimeRepair`'s `afterCount`, which
+has been `null` on essentially every build since it shipped — the guard against a repair that fixes one
+error and introduces two could never fire, and now can.
+
+🧬 **The 50/50 half — a browser-lane census.** Six scripts in that one file launch or attach to a
+browser, written eighteen months apart, and nothing knew how many there were; the recorder landing on
+exactly one of them was not an oversight anybody could have caught. The census names each lane, whether
+it records and why, and fails when a seventh appears. It deliberately does **not** demand that every
+lane record: the journey check drives hostile input and the page check already collects its own errors,
+so forcing them would put pre-repair errors inside the verdict's 3-minute window and report a fixed bug
+as surviving — trading this problem for a worse one.
+
+🔒 **Honesty half (rule 5).** `AutoFix.ts`'s docblock claimed the page check *"had loaded every page of
+the same app"*. For an app built from our own templates it loads none. Corrected in place with the
+measurement, so the next session is not sent to the wrong lane.
+
+### Tests
+
+`tests/theConsoleListenerLivedOnOneLaneOfThree.test.ts` — 19 cases. The generated scripts are **parsed
+with `node --check`**, because this function has shipped broken twice (a shell-quoting bug that handed
+`node` a fragment; a path bug that hid Playwright) and **neither failed loudly** — the caller falls back
+to curl on any error. Reversion-proven four ways: strip the recorder (7 fail), attach the listeners
+after `goto` (1), make the marker unconditional (1), paste a second copy of the listeners (2).
+
+⚠️ Two assertions in the first draft were wrong and are recorded because the lesson generalises: they
+matched the WORDS `console.log` and `truncate`, and both hit prose — the log file is itself *named*
+`console.log`, and "truncate" appears in the comment explaining why the write appends. A guard that
+trips on its own documentation is a guard someone deletes. They match syntax now.
+
+### OPEN ROOT CAUSES (rule 6 — recorded, not patched)
+
+- **Lane B cannot see a state-routed SPA.** `extractPageRoutes` finds only `<Route path=…>` and Next
+  `app/x/page.tsx`. Every single-screen app, and our own multi-screen scaffolds, yield nothing. Deriving
+  "pages" for those is a separate problem with its own evidence requirement and is **not** guessed at
+  here. Lane C now covers them, which is why this is an upgrade rather than a breakage.
+- **What actually removed the mount node in `e4d27bde`** — still open from yesterday's autopsy; measured
+  *not* to be the app-defaults pass.
+- ✅ **CLOSED in the same change — `claimAudit` checked only `!consoleCaptured`.** A summary claiming a
+  clean console while the captured console showed errors was not flagged. It had never been reachable
+  (an ordinary build captured nothing), and making the capture work is precisely what makes it
+  reachable — so `console-clean-but-errors` ships with it instead of waiting for a report to prove it.
+  It reads the FINAL count after the repair budget, because a mid-build number would accuse a summary
+  of hiding an error the build had already fixed; an omitted count accuses nobody (the discipline
+  `typecheckRan` already states); and the two rules are chained `else if`, so one claim can never
+  produce two contradictions in the user's own correction. Reversion-proven twice.

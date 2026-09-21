@@ -359,27 +359,107 @@ export function stripBridgeFromBuiltFile(relPath: string, bytes: Buffer): Buffer
   return stripped === text ? bytes : Buffer.from(stripped, 'utf8');
 }
 
-const BROWSER_DAEMON_SCRIPT = `
+/**
+ * 🔴 THE CONSOLE LISTENER LIVED ON ONE BROWSER LANE OF THREE (autopsy, 2026-09-21).
+ *
+ * `CONSOLE_LOG` is the ONLY thing `getConsoleErrors` reads, and until now the only script that ever
+ * wrote to it was the agent-driven CDP daemon below — which starts solely when the MODEL calls the
+ * `browser_action` tool. An ordinary build never does. Meanwhile the PLATFORM opens a real browser on
+ * essentially every build (`browseUrl`: the render proof, the verify loop, GreenGuard, verifyAfterFix)
+ * and attached no listener at all, so every one of those navigations threw the console away.
+ *
+ * MEASURED, not read: the generated `browseUrl` script contained no `page.on('console')`, no
+ * `pageerror`, and no write to this file — and the documented second source of truth
+ * (`runtimeRecordFromPageChecks`, 2026-08-19) can answer only when `extractPageRoutes` finds a
+ * non-home route, which is true for **0 of this repo's 40 golden scaffolds**. So all three lanes were
+ * shut at once and `RUNTIME_UNCHECKED` was the structural outcome of an ordinary build, not a fault.
+ *
+ * 🔒 ONE DEFINITION, EVERY LANE THAT CAN CARRY IT. The listeners are extracted here rather than copied
+ * into `browseUrl`, because a second copy is exactly the drifted-copy class this repo has already paid
+ * for four times (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH`).
+ *
+ * ⚠️ IT WRITES TO A FILE AND NEVER TO STDOUT. `browseUrl` parses its script's stdout for the paint
+ * marker and the page HTML, so a single stray `console.log` here would corrupt the DOM every caller
+ * reads. `rec` is append-only for the same reason the daemon's is: two lanes share one log.
+ */
+const CONSOLE_RECORDER_JS = `
+const __nbaiFs=require('fs');
+const __nbaiLog=${JSON.stringify(CONSOLE_LOG)};
+function rec(kind,text,stack){ try{ __nbaiFs.appendFileSync(__nbaiLog, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500),stack:stack?String(stack).slice(0,1200):undefined})+'\\n'); }catch(e){} }
+// A CLEAN APP AND A BROWSER THAT NEVER RAN MUST NOT LOOK THE SAME (autopsy 9cca1fd5, 2026-09-17).
+// \`rec\` only fires ON AN ERROR, so without this the log is absent for a perfectly clean app too and
+// getConsoleErrors reads that absence as \`captured:false\` — "we never looked". Append, never
+// truncate: a second lane must not erase what the first one recorded.
+function recSessionExisted(){ try{ __nbaiFs.appendFileSync(__nbaiLog,''); }catch(e){} }
+`.trim();
+
+/** The four listeners, applied to one page. Shared so the daemon and `browseUrl` can never drift. */
+const attachConsoleJs = (page: string): string => `
+  ${page}.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
+  ${page}.on('pageerror',e=>rec('pageerror',e&&e.message||e,e&&e.stack));
+  ${page}.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
+  ${page}.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
+`;
+
+/**
+ * The script `browseUrl` runs in the sandbox: open the app in a real browser, wait for it to PAINT,
+ * record anything its console says, and print the paint marker plus the rendered DOM.
+ *
+ * EXPORTED AND PURE so it can be PARSED by a test. This function's two predecessors both shipped
+ * broken — a shell-quoting bug that made `node` receive a fragment, and a path bug that put the file
+ * where `require('playwright')` could not resolve — and BOTH were invisible for weeks because the
+ * caller falls back to curl on any failure. A generated script is code; code that nothing ever parses
+ * is code that is presumed to work. `node --check` on this exact string is the cheapest proof there is.
+ *
+ * ⚠️ Everything it prints to STDOUT is parsed by the caller (`splitPaintMarker`). The recorder writes
+ * to a FILE precisely so it can never appear here.
+ */
+export function browsePageScript(url: string, opts?: { recordConsole?: boolean }): string {
+  // Default ON: the measurement was missing, which is the whole finding. `recordConsole: false`
+  // emits the pre-2026-09-21 script byte for byte, so the kill switch is a real revert and not a
+  // different code path that merely looks quiet.
+  const record = opts?.recordConsole !== false;
+  return `
 const {chromium}=require('playwright');
-const fs=require('fs');
-const LOG=${JSON.stringify(CONSOLE_LOG)};
-function rec(kind,text,stack){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(),kind,text:String(text).slice(0,500),stack:stack?String(stack).slice(0,1200):undefined})+'\\n'); }catch(e){} }
+${record ? CONSOLE_RECORDER_JS : ''}
+(async()=>{
+  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+  const p=await b.newPage();
+${record ? attachConsoleJs('p').trimEnd() : ''}
+  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+${paintWaitJs('p')}
+${record ? '  if(painted) recSessionExisted();' : ''}
+  console.log('NBAI_PAINTED:'+painted);
+  console.log((await p.content()).slice(0,30000));
+  await b.close();
+})().catch(e=>{process.stderr.write(e.message);process.exit(1)});
+`;
+}
+
+/**
+ * `AGENTV3_BROWSE_CONSOLE=off` — the no-deploy revert for the lane-C recorder.
+ *
+ * ⚠️ IT IS NOT MERELY A REPORTING SWITCH, which is why it exists at all. With the console captured,
+ * `getConsoleErrors` starts returning `captured:true` on builds where it always returned false — so
+ * a build carrying a REAL runtime error now reaches the auto-fix loop (`AGENTV3_AUTOFIX`, on) and
+ * spends a repair pass it previously could not. That is the feature working, and on the Weak tier
+ * NavBharatAI pays for it, so the operator gets one value to turn it off with.
+ */
+export function browseConsoleCaptureEnabled(): boolean {
+  return (process.env['AGENTV3_BROWSE_CONSOLE'] ?? '').trim().toLowerCase() !== 'off';
+}
+
+export const BROWSER_DAEMON_SCRIPT = `
+const {chromium}=require('playwright');
+${CONSOLE_RECORDER_JS}
 (async()=>{
   const browser=await chromium.launch({headless:true,args:['--no-sandbox','--disable-setuid-sandbox','--remote-debugging-port=${CDP_PORT}']});
-  // A CLEAN APP AND A BROWSER THAT NEVER RAN MUST NOT LOOK THE SAME (autopsy 9cca1fd5, 2026-09-17).
-  // \`rec\` is the only writer and it only fires ON AN ERROR, so this file did not exist for a
-  // perfectly clean app either — and getConsoleErrors reads its absence as \`captured:false\`, i.e.
-  // "we never looked". Creating it HERE, immediately after the browser really launched, is what makes
-  // that flag mean something: the file exists if and only if a browser session genuinely existed.
-  // Append, never truncate: a resumed daemon must not erase the errors the previous one recorded.
-  try{ fs.appendFileSync(LOG,''); }catch(e){}
+  // The browser really launched, so the session is real — see recSessionExisted above.
+  recSessionExisted();
   const seen=new WeakSet();
   function attach(page){
     if(seen.has(page))return; seen.add(page);
-    page.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
-    page.on('pageerror',e=>rec('pageerror',e&&e.message||e,e&&e.stack));
-    page.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
-    page.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
+${attachConsoleJs('page').trimEnd()}
   }
   setInterval(()=>{ try{ for(const ctx of browser.contexts()){ for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
   setInterval(()=>{}, 1<<30);
@@ -2251,18 +2331,20 @@ export class E2BActuator implements IEngineerActuator {
       // function. ⚠️ The DIRECTORY is not a detail: it must be TOOLS_DIR, or `require('playwright')`
       // cannot resolve and this path fails 100% of the time. See `toolsScriptPath`.
       const browsePath = toolsScriptPath('browse'); // TOOLS_DIR, never /tmp — see toolsScriptPath.
-      const playwrightBody = `
-const {chromium}=require('playwright');
-(async()=>{
-  const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
-  const p=await b.newPage();
-  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
-${paintWaitJs('p')}
-  console.log('NBAI_PAINTED:'+painted);
-  console.log((await p.content()).slice(0,30000));
-  await b.close();
-})().catch(e=>{process.stderr.write(e.message);process.exit(1)});
-`;
+      //
+      // 🎧 AND IT LISTENS (autopsy 2026-09-21 — see CONSOLE_RECORDER_JS). This navigation is the one
+      // the platform makes on essentially every build; attaching the SHARED listeners costs nothing
+      // (the browser is already launching) and is what turns `RUNTIME_UNCHECKED` back into a real
+      // measurement instead of the structural default. The listeners must be attached BEFORE `goto`,
+      // or the errors thrown while the page loads — precisely the ones that break an app — are missed.
+      //
+      // 🔒 THE SESSION MARKER IS GATED ON `painted`, AND THAT GATE IS LOAD-BEARING. `getConsoleErrors`
+      // reports `captured:true` when the log FILE exists, and `provenFromTimeline` reads the resulting
+      // `RUNTIME_VERIFIED` as "the app ran in a real browser". A browser that loaded a 404 page has a
+      // perfectly clean console, so marking the session unconditionally would let a dead preview earn
+      // a render proof. Painted ⇒ the app's own mount root had content ⇒ the app really ran.
+      // An error is recorded either way: a crash that prevents paint is exactly what must be reported.
+      const playwrightBody = browsePageScript(url, { recordConsole: browseConsoleCaptureEnabled() });
       await sandbox.files.write(browsePath, playwrightBody);
       // 🔴 NO `2>/dev/null`, AND NO `.catch(() => null)` — both discarded the only explanation there
       // would ever be. The SDK REJECTS on a non-zero exit and carries the command's real stdout /

@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { Wand2, Sparkles, Download, Palette, Copy, Trash2, Clock, Star, Check, Type, Image as ImageIcon } from 'lucide-react';
+import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon } from 'lucide-react';
+import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { Capacitor } from '@capacitor/core';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
@@ -56,14 +57,46 @@ const IMAGE_TYPES = [
   'Thumbnail',
 ];
 
-const COLOR_HINTS = [
-  { color: 'var(--brand-accent-strong)', label: 'Indigo' },
-  { color: '#10b981', label: 'Emerald' },
-  { color: 'var(--brand-warn-text)', label: 'Amber' },
-  { color: 'var(--brand-danger-text)', label: 'Red' },
-  { color: 'var(--brand-info-text)', label: 'Blue' },
-  { color: '#8b5cf6', label: 'Purple' },
+/**
+ * The colour hint is now a SELECTED value, not a button that appends words to the prompt.
+ *
+ * 🔴 WHY THAT IS A FIX AND NOT JUST A RESKIN. The old dots did `setPrompt(p => p + ' in indigo
+ * tones')` on every press — so two presses wrote the phrase twice, and a user who changed their mind
+ * had to find and delete their own text. A selector holds ONE answer and folds it in at send time,
+ * which is also what the other three groups have always done. `none` is a real option, and the
+ * default, so the prompt is untouched unless the user actually asks for a colour.
+ *
+ * ⚠️ The two raw hexes are picture colours — the colour the USER'S image will lean toward, not a
+ * surface of ours that a theme repaints. Same exemption `textOverlay.ts` records for its defaults.
+ */
+const COLOR_HINTS: ImageOption[] = [
+  { id: 'none', label: 'No preference', desc: 'Let the engine choose' },
+  { id: 'indigo', label: 'Indigo', swatch: 'var(--brand-accent-strong)' },
+  { id: 'emerald', label: 'Emerald', swatch: '#10b981' },
+  { id: 'amber', label: 'Amber', swatch: 'var(--brand-warn-text)' },
+  { id: 'red', label: 'Red', swatch: 'var(--brand-danger-text)' },
+  { id: 'blue', label: 'Blue', swatch: 'var(--brand-info-text)' },
+  { id: 'purple', label: 'Purple', swatch: '#8b5cf6' },
 ];
+
+/**
+ * The type list as options. Its `id` IS the label, deliberately: the selected type travels to the
+ * server as `type` and is stored on every history row, so inventing a separate key here would mean
+ * two vocabularies for one thing and a migration for rows already saved on people's devices.
+ */
+const IMAGE_TYPE_OPTIONS: ImageOption[] = IMAGE_TYPES.map((t) => ({ id: t, label: t }));
+
+/**
+ * Three openers for an empty thread. Not "prompt engineering" tips — real, ordinary Indian small-
+ * business requests, because the commonest reason a first-time user writes nothing is not knowing
+ * what kind of thing to ask for.
+ */
+const EXAMPLES = ['Tea shop banner', 'Clinic logo', 'Festival poster'];
+
+/** A group's chosen option, by id — for the one-line summary printed on each sent request. */
+function labelOf(options: ImageOption[], id: string): string {
+  return (options.find((o) => o.id === id) || options[0])?.label ?? '';
+}
 
 const STYLE_ENHANCERS: Record<string, string> = {
   minimal: 'minimalist, clean white background, simple shapes, ',
@@ -110,15 +143,23 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
   const [style, setStyle] = useState('minimal');
   const [size, setSize] = useState('square');
+  const [colorHint, setColorHint] = useState('none');
   const [isLoading, setIsLoading] = useState(false);
-  const [generatedUrl, setGeneratedUrl] = useState('');
   const [imageError, setImageError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const pagedHistory = usePagedList(history);
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [craftNotes, setCraftNotes] = useState<string[]>([]);
   const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
+  /**
+   * The request currently in flight, shown as the user's own message the instant they press send.
+   * Without it the thread stays empty while the engine works and the press looks like it did nothing
+   * — the blank-screen failure this repo already root-caused once on the chat path.
+   */
+  const [pending, setPending] = useState<{ prompt: string; summary: string } | null>(null);
+  const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   // REAL generation (admin autopsy 2026-07-20): images come from NavBharatAI's own server route
   // (/api/image/generate) on our configured image engine — the old code hot-linked a third-party
@@ -136,16 +177,28 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     return () => { alive = false; };
   }, []);
 
-  const buildEffectivePrompt = () =>
-    `${imageType}${prompt.trim() ? ` — ${prompt.trim()}` : ''}`;
+  /** What each sent request says it was, in the user's own terms — never a model or vendor name. */
+  const requestSummary = () => [
+    imageType,
+    labelOf(STYLES, style),
+    labelOf(SIZES, size),
+    colorHint === 'none' ? '' : labelOf(COLOR_HINTS, colorHint),
+  ].filter(Boolean).join(' \u00b7 ');
+
+  const buildEffectivePrompt = () => {
+    const tint = colorHint === 'none' ? '' : ` in ${labelOf(COLOR_HINTS, colorHint).toLowerCase()} tones`;
+    return `${imageType}${prompt.trim() ? ` \u2014 ${prompt.trim()}` : ''}${tint}`;
+  };
 
   const handleGenerate = async () => {
     const effectivePrompt = buildEffectivePrompt();
     if (!effectivePrompt.trim() || isLoading) return;
-    setGeneratedUrl('');
     setImageError(false);
     setErrorMsg('');
     setCraftNotes([]);
+    // The user's message lands in the thread BEFORE the request goes out, so the press is visibly
+    // answered even while nothing has come back yet.
+    setPending({ prompt: prompt.trim(), summary: requestSummary() });
     setIsLoading(true);
     try {
       // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
@@ -170,7 +223,6 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
         throw new Error((data && typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
       }
-      setGeneratedUrl(data.image);
       // Honest caveats from the server — a style chip that was overruled, or the warning that image
       // engines cannot spell. Shown, never swallowed: a user who knows their shop name may come out
       // garbled can shorten it, where a silent misspelling just wastes a generation.
@@ -187,6 +239,10 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       // Persist to IndexedDB so it survives reloads, then reflect it in the UI (newest-first, bounded).
       setHistory((h) => pruneHistory([newItem, ...h]));
       void imageHistoryStore.save(newItem).catch(() => { /* persistence is best-effort — never blocks generation */ });
+      // The box empties on success only, the way every chat input in this app behaves. A FAILED
+      // request keeps the words, because retyping a brief you already wrote is the worst possible
+      // answer to "that did not work".
+      setPrompt('');
       if (onImageGenerated) onImageGenerated(data.image, effectivePrompt);
     } catch (e) {
       // Honest failure — the real reason from the server, never a placeholder image.
@@ -194,6 +250,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       setErrorMsg(e instanceof Error ? e.message : 'Image generation failed — please try again.');
     } finally {
       setIsLoading(false);
+      setPending(null);
     }
   };
 
@@ -236,9 +293,12 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     }
   };
 
-  // The text editor is opened on demand, never mounted with the panel: it loads the picture into a
-  // full-resolution canvas, which is real work to do for a user who never presses the button.
-  const [textEditorOpen, setTextEditorOpen] = useState(false);
+  // Which image the text editor is open on — an id, not a boolean, because this surface now shows a
+  // whole thread and "Add text" has to mean the one whose button was pressed. The same shape the paid
+  // studio already uses, so the two screens behave identically. Opened on demand, never mounted with
+  // the panel: it loads the picture into a full-resolution canvas, which is real work to do for a
+  // user who never presses the button.
+  const [textOn, setTextOn] = useState<string | null>(null);
 
   const flashNote = (msg: string) => {
     setActionNote(msg);
@@ -247,7 +307,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
   // COPY THE ACTUAL IMAGE (not the URL). Puts a real PNG on the clipboard so it pastes as a picture
   // into any app. Falls back to copying the link only if the browser can't do image clipboard.
-  const handleCopyImage = async () => {
+  const handleCopyImage = async (id: string, generatedUrl: string) => {
     if (!generatedUrl) return;
     setActionNote('');
     try {
@@ -258,13 +318,13 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
       // the user-gesture alive across the async decode this way, so image copy works there too.
       const pngPromise = (async () => toPngBlob(await resolveBlob(generatedUrl)))();
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 2000);
     } catch {
       // Honest fallback — tell the user we copied the link (not the image) so they know what they got.
       try { await navigator.clipboard.writeText(generatedUrl); } catch { /* clipboard fully blocked */ }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 2000);
       flashNote('This device can’t copy the image itself — the image link was copied instead. Use Download to save the picture.');
     }
   };
@@ -303,12 +363,12 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
   // DOWNLOAD / SAVE the image. Native: ONE-TAP Save to Photos (media plugin) → OS share sheet fallback.
   // Web: a blob-URL download (far more reliable than a data: href, which just opens a tab).
-  const handleDownload = async () => {
+  const handleDownload = async (generatedUrl: string, forPrompt: string) => {
     if (!generatedUrl) return;
     setActionNote('');
     try {
       const blob = await resolveBlob(generatedUrl);
-      const filename = imageFilename(prompt, blob.type);
+      const filename = imageFilename(forPrompt, blob.type);
 
       if (Capacitor.isNativePlatform()) {
         // 1) Primary: save straight to the Photos gallery, one tap.
@@ -348,8 +408,22 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
 
   const handleClearHistory = () => {
     setHistory([]);
-    setGeneratedUrl('');
     void imageHistoryStore.clear().catch(() => { /* best-effort — the UI is already cleared */ });
+  };
+
+  /** Remove ONE image. The store already had `remove(id)`; the old grid never offered it. */
+  const handleDeleteOne = (id: string) => {
+    setHistory((h) => h.filter((x) => x.id !== id));
+    void imageHistoryStore.remove(id).catch(() => { /* best-effort — the row is already gone here */ });
+  };
+
+  /** Put a past request's settings back in the composer, so "one more like that" costs no retyping. */
+  const reuse = (item: GeneratedImage) => {
+    setPrompt(item.prompt);
+    setImageType(item.type || IMAGE_TYPES[0]);
+    setStyle(item.style);
+    setSize(item.size);
+    taRef.current?.focus();
   };
 
   const relativeTime = (ts: number) => {
@@ -374,12 +448,38 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
     return () => { live = false; };
   }, []);
 
+  // The newest image sits at the BOTTOM, closest to the input, so it appears where the eye already
+  // is rather than at the far end of a scroll. Same rule as the paid studio.
+  useEffect(() => {
+    feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [history.length, isLoading]);
+
+  // The box grows with the words instead of scrolling inside a fixed height — a two-line brief
+  // should be readable while it is being written.
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+  }, [prompt]);
+
   // 🔒 A tier that CANNOT serve is never the one on screen. Only an explicit `false` forces Free, so
   // an unknown or unreachable answer leaves the user exactly where they chose to be.
   const effectiveTier: 'free' | 'pro' = proAvailable === false ? 'free' : chosenTier;
   const proOff = proAvailable === false;
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
+
+  /**
+   * Oldest at the top, newest against the input — chat order.
+   *
+   * The store keeps history NEWEST-first, so `pagedHistory.visible` is the N most recent; reversing
+   * it means "Load more" reveals OLDER images upward, which is how every conversation in this app
+   * already scrolls. Paging is kept exactly as it was: a generated image is a multi-megabyte data
+   * URL, and fifty of them in the DOM at once is the thing `usePagedList` exists to prevent.
+   */
+  const thread = [...pagedHistory.visible].reverse();
+  const styleEnhancer = STYLE_ENHANCERS[style] || '';
 
   return (
     <div className={`h-full flex flex-col text-ink overflow-hidden ${effectiveTier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
@@ -451,279 +551,294 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
           <ImageStudioPro onImageGenerated={onImageGenerated} />
         </div>
       ) : (
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Panel */}
-        <div className="w-[60%] flex flex-col gap-4 p-5 overflow-y-auto border-r border-line">
-          {/* Image Type — compulsory: exactly one is always selected (comes first, above the prompt) */}
-          <div>
-            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Image Type</label>
-            <div className="flex flex-wrap gap-1.5">
-              {IMAGE_TYPES.map(t => (
-                <button
-                  key={t}
-                  onClick={() => setImageType(t)}
-                  aria-pressed={imageType === t}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                    imageType === t
-                      ? 'border-violet-500/60 bg-violet-500/20 text-accent-text font-medium'
-                      : 'border-line bg-card text-muted hover:border-line hover:text-body'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* ── THE THREAD ──────────────────────────────────────────────────────────────────────
+            Admin, 2026-09-21: "pure chat box ka ui bhi sabhi ai ke jaise banao. sabse niche input
+            box. uske upar 4 selector."
 
-          {/* Prompt */}
-          <div>
-            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Prompt</label>
-            <textarea
-              className="w-full bg-card border border-line rounded-xl p-3 text-sm text-ink placeholder-faint resize-none focus:outline-none focus:border-violet-500/50 transition-colors"
-              rows={4}
-              placeholder="Add details for your Modern app logo, banner, icon... e.g. 'with blue gradient and rupee symbol'"
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-            />
-            <div className="flex items-center justify-end mt-2">
-              <button
-                onClick={handleEnhance}
-                className="text-xs text-accent-text hover:text-accent-text flex items-center gap-1 shrink-0"
-              >
-                <Sparkles className="w-3 h-3" /> Enhance
-              </button>
-            </div>
-          </div>
-
-          {/* Style */}
-          <div>
-            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Style</label>
-            <div className="grid grid-cols-3 gap-2">
-              {STYLES.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => setStyle(s.id)}
-                  /* 🔴 `min-w-0` IS THE FIX, NOT DECORATION (admin 2026-09-18: "STYLE wale
-                     column ka text box se bahar nikal kar other box se overlap karta hai").
-                     A flex item defaults to `min-width: auto`, which refuses to shrink below its
-                     content — so "Three dimensional" and "Real photo look" held the button wider
-                     than its grid-cols-3 cell and spilled over the neighbour. The grid cell was
-                     never too small; the child simply would not fit into it. `min-w-0` on BOTH the
-                     button and the text column restores shrinking, and `truncate` decides what
-                     happens at the boundary instead of leaving it to overflow. */
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all min-w-0 ${
-                    style === s.id
-                      ? 'border-violet-500/60 bg-violet-500/10'
-                      : 'border-line bg-card hover:border-line'
-                  }`}
-                >
-                  <span className="text-lg shrink-0">{s.emoji}</span>
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-ink truncate">{s.label}</div>
-                    <div className="text-[10px] text-faint truncate" title={s.desc}>{s.desc}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Size */}
-          <div>
-            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Size / Format</label>
-            <div className="grid grid-cols-4 gap-2">
-              {SIZES.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => setSize(s.id)}
-                  /* Same class as the Style chips above: without `min-w-0` the widest label
-                     ("1536×864") sets the cell's floor and the four-column grid overflows. */
-                  className={`flex flex-col items-center p-2.5 rounded-xl border text-center transition-all min-w-0 ${
-                    size === s.id
-                      ? 'border-violet-500/60 bg-violet-500/10'
-                      : 'border-line bg-card hover:border-line'
-                  }`}
-                >
-                  <div className={`mb-1 border border-line ${
-                    s.id === 'wide' ? 'w-8 h-4' : s.id === 'portrait' ? 'w-4 h-7' : 'w-5 h-5'
-                  } rounded-sm`} />
-                  <div className="text-[10px] font-medium text-ink truncate max-w-full">{s.label}</div>
-                  <div className="text-[9px] text-faint truncate max-w-full" title={s.desc}>{s.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Color Hints */}
-          <div>
-            <label className="text-xs text-muted uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-              <Palette className="w-3 h-3" /> Color Hints
-            </label>
-            <div className="flex gap-2">
-              {COLOR_HINTS.map(c => (
-                <button
-                  key={c.color}
-                  onClick={() => setPrompt(p => p + ` in ${c.label.toLowerCase()} tones`)}
-                  title={`Add ${c.label}`}
-                  className="w-7 h-7 rounded-full border-2 border-line hover:scale-110 transition-transform"
-                  style={{ backgroundColor: c.color }}
-                />
-              ))}
-              <span className="text-xs text-faint self-center ml-1">Click to add to prompt</span>
-            </div>
-          </div>
-
-          {/* Generate Button — pinned at the very bottom of the left column */}
-          <button
-            onClick={handleGenerate}
-            disabled={isLoading}
-            className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors mt-2 text-on-accent"
-          >
-            {isLoading ? (
-              <><TirangaLoader className="w-4 h-4" /> Generating...</>
-            ) : (
-              <><Wand2 className="w-4 h-4" /> Generate Image</>
-            )}
-          </button>
-        </div>
-
-        {/* Right Panel */}
-        <div className="flex-1 flex flex-col gap-4 p-5 overflow-y-auto">
-          {/* Generated Image */}
-          <div>
-            <label className="text-xs text-muted uppercase tracking-wider mb-2 block">Generated Image</label>
-            <div className="relative bg-card border border-line rounded-xl overflow-hidden" style={{ minHeight: '240px' }}>
-              {isLoading && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                  <TirangaLoader className="w-12 h-12" />
-                  <p className="text-xs text-faint">Generating AI image...</p>
-                  <p className="text-[10px] text-faint">Size: {selectedSize.w}×{selectedSize.h}</p>
-                </div>
-              )}
-              {!isLoading && imageError && (
-                <div className="flex flex-col items-center justify-center h-60 gap-2 px-4 text-center">
-                  <ImageIcon className="w-10 h-10 text-faint" />
-                  <p className="text-xs text-danger">{errorMsg || 'Image could not be generated. Retry or change the prompt.'}</p>
-                  <button onClick={handleGenerate} className="text-xs text-accent-text hover:underline">Retry</button>
-                </div>
-              )}
-              {!isLoading && !imageError && !generatedUrl && (
-                <div className="flex flex-col items-center justify-center h-60 gap-2">
-                  <Wand2 className="w-10 h-10 text-faint" />
-                  <p className="text-xs text-faint">Pick a type, add details, then press Generate</p>
-                </div>
-              )}
-              {!isLoading && !imageError && generatedUrl && (
-                <>
-                  <img
-                    src={generatedUrl}
-                    alt="Generated"
-                    className="w-full object-cover rounded-xl"
-                    onError={() => { setImageError(true); setGeneratedUrl(''); }}
-                  />
-                  <div className="absolute bottom-2 right-2 flex gap-1.5">
-                    <button
-                      onClick={() => setTextEditorOpen(true)}
-                      className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
-                      title="Add text (spelled correctly, Hindi too)"
-                    >
-                      <Type className="w-3.5 h-3.5 text-body" />
-                    </button>
-                    <button
-                      onClick={handleCopyImage}
-                      className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
-                      title="Copy image"
-                    >
-                      {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5 text-body" />}
-                    </button>
-                    <button
-                      onClick={handleDownload}
-                      className="p-1.5 bg-scrim hover:bg-scrim rounded-lg transition-colors"
-                      title="Download image"
-                    >
-                      <Download className="w-3.5 h-3.5 text-body" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            {/* Honest fallback note (e.g. device can't copy the raw image, or save needs a long-press). */}
-            {actionNote && (
-              <p className="mt-2 text-[11px] text-warn leading-relaxed">{actionNote}</p>
-            )}
-            {/* Art-direction notes from the server: a style chip that was overruled by the user's own
-                wording, or the warning that no image engine spells reliably. These are shown BESIDE
-                the finished image, where the user can act on them — a spelling warning after the fact
-                is what saves the next generation, not a silent bad result. */}
-            {craftNotes.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {craftNotes.map((n, i) => (
-                  <li key={i} className="text-[11px] text-info leading-relaxed flex gap-1.5">
-                    <span aria-hidden="true">•</span><span>{n}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Recent History */}
-          {history.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-muted uppercase tracking-wider flex items-center gap-1.5">
-                  <Clock className="w-3 h-3" /> Recent ({history.length})
-                </label>
-                <button onClick={handleClearHistory} className="text-[10px] text-faint hover:text-danger flex items-center gap-1">
-                  <Trash2 className="w-3 h-3" /> Clear
-                </button>
+            The old layout was two side-by-side columns — every option on the left, the result on the
+            right — which on a phone stacked into one long form whose Generate button sat below about
+            twenty-five controls. This is the shape every other AI surface here already has, and the
+            one the paid studio has had since it shipped: what you made grows upward out of the box
+            you typed in. `flex-1 min-h-0` on the thread and `shrink-0` on the dock are what pin the
+            input; without the `min-h-0` a long thread pushes the dock off the bottom of the panel
+            instead of scrolling inside itself. */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
+          {thread.length === 0 && !isLoading && !imageError && !pending ? (
+            <div className="h-full flex flex-col items-center justify-center text-center gap-3 px-4">
+              <div className="w-14 h-14 rounded-2xl bg-card border border-line flex items-center justify-center">
+                <ImageIcon className="w-6 h-6 text-accent-text" />
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {pagedHistory.visible.map(item => (
+              <div>
+                <p className="text-sm font-semibold text-ink">No images yet</p>
+                <p className="text-xs text-muted mt-1">Your images appear here, newest at the bottom.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {EXAMPLES.map((e) => (
                   <button
-                    key={item.id}
-                    onClick={() => { setGeneratedUrl(item.url); setPrompt(item.prompt); setImageType(item.type || IMAGE_TYPES[0]); setStyle(item.style); setSize(item.size); }}
-                    className="group relative rounded-lg overflow-hidden border border-line hover:border-violet-500/40 transition-all aspect-square bg-card"
+                    key={e}
+                    type="button"
+                    onClick={() => { setPrompt(e); taRef.current?.focus(); }}
+                    className="text-[11px] text-body bg-card border border-line rounded-full px-3 py-1.5 hover:border-accent-text/40 transition-colors"
                   >
-                    <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-scrim opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
-                      <p className="text-[8px] text-ink text-center line-clamp-2">{item.prompt}</p>
-                      <p className="text-[7px] text-muted">{relativeTime(item.timestamp)}</p>
-                    </div>
+                    {e}
                   </button>
                 ))}
-                <LoadMore list={pagedHistory} label="images" />
               </div>
+              <ul className="text-[11px] text-faint space-y-1 mt-2 max-w-xs text-left">
+                <li>Be specific: "blue gradient tech logo", not just "logo".</li>
+                <li>The four selectors below shape every image you send.</li>
+                <li>Add a phone number or a rate list with "Add text" — typed, not drawn.</li>
+              </ul>
+            </div>
+          ) : (
+            <div className="max-w-2xl mx-auto space-y-4">
+              <LoadMore list={pagedHistory} label="images" />
+              {history.length > 0 && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleClearHistory}
+                    className="text-[10px] text-faint hover:text-danger flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" /> Clear all
+                  </button>
+                </div>
+              )}
+
+              {thread.map((item) => (
+                <div key={item.id} className="space-y-2">
+                  {/* The request, as the user made it. A real button, because tapping it puts those
+                      same settings back in the composer — "one more like that" with no retyping. */}
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => reuse(item)}
+                      title="Use these settings again"
+                      className="max-w-[85%] text-left rounded-2xl rounded-br-md bg-accent text-on-accent px-3 py-2"
+                    >
+                      <span className="block text-xs leading-relaxed">{item.prompt || item.type || 'Image'}</span>
+                      <span className="block text-[10px] opacity-80 mt-1">
+                        {[item.type, labelOf(STYLES, item.style), labelOf(SIZES, item.size)].filter(Boolean).join(' · ')}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* The answer. */}
+                  <div className="rounded-2xl rounded-bl-md border border-line bg-card overflow-hidden">
+                    <img
+                      src={item.url}
+                      alt={item.prompt || item.type || 'Generated image'}
+                      loading="lazy"
+                      className="w-full h-auto block"
+                    />
+                    <div className="flex items-center gap-1.5 p-2">
+                      <button
+                        type="button"
+                        onClick={() => setTextOn(item.id)}
+                        className="flex-1 min-w-0 text-[11px] font-semibold text-on-accent bg-violet-600 hover:bg-violet-500 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Type className="w-3 h-3" /> Add text
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyImage(item.id, item.url)}
+                        className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
+                      >
+                        {copiedId === item.id
+                          ? <><Check className="w-3 h-3 text-success" /> Copied</>
+                          : <><Copy className="w-3 h-3" /> Copy</>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDownload(item.url, item.prompt)}
+                        className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
+                      >
+                        <Download className="w-3 h-3" /> Save
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Delete this image"
+                        onClick={() => handleDeleteOne(item.id)}
+                        className="shrink-0 w-9 h-9 rounded-lg bg-raised border border-line text-muted hover:text-danger flex items-center justify-center transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-faint pl-1">{relativeTime(item.timestamp)}</p>
+                </div>
+              ))}
+
+              {pending && (
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent text-on-accent px-3 py-2">
+                    <span className="block text-xs leading-relaxed">{pending.prompt || imageType}</span>
+                    <span className="block text-[10px] opacity-80 mt-1">{pending.summary}</span>
+                  </div>
+                </div>
+              )}
+
+              {isLoading && (
+                <div className="flex items-center gap-3 rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 w-fit">
+                  <TirangaLoader className="w-5 h-5" />
+                  <span className="text-xs text-muted">
+                    Painting your image at {selectedSize.w}x{selectedSize.h}...
+                  </span>
+                </div>
+              )}
+
+              {!isLoading && imageError && (
+                <div className="rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 space-y-2">
+                  <p className="text-xs text-danger leading-relaxed">
+                    {errorMsg || 'Image could not be generated. Retry or change the prompt.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerate()}
+                    className="text-[11px] font-semibold text-accent-text hover:underline"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+
+              {/* Art-direction notes from the server: a style chip overruled by the user's own
+                  wording, or the standing warning that image engines cannot spell. They belong
+                  beside the finished image, where the user can act on them — a spelling warning
+                  after the fact is what saves the NEXT generation. */}
+              {craftNotes.length > 0 && (
+                <ul className="space-y-1">
+                  {craftNotes.map((n, i) => (
+                    <li key={i} className="text-[11px] text-info leading-relaxed flex gap-1.5">
+                      <span aria-hidden="true">-</span><span>{n}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div ref={feedEndRef} />
             </div>
           )}
+        </div>
 
-          {/* Tips */}
-          <div className="bg-violet-500/5 border border-violet-500/10 rounded-xl p-3">
-            <p className="text-xs text-accent-text font-medium mb-1.5 flex items-center gap-1.5">
-              <Star className="w-3 h-3" /> Pro Tips
+        {/* ── THE DOCK: four selectors, then the input, and nothing else ─────────────────────── */}
+        <div className="shrink-0 border-t border-line px-3 sm:px-4 pt-2.5 pb-3">
+          <div className="max-w-2xl mx-auto space-y-2">
+            {/* Honest fallback note (this device cannot copy a raw image, or a save needs a long-press). */}
+            {actionNote && (
+              <p className="text-[11px] text-warn leading-relaxed">{actionNote}</p>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <ImageOptionSelect
+                label="Image type"
+                heading="What are you making?"
+                options={IMAGE_TYPE_OPTIONS}
+                value={imageType}
+                onChange={setImageType}
+              />
+              <ImageOptionSelect
+                label="Style"
+                heading="How should it look?"
+                options={STYLES}
+                value={style}
+                onChange={setStyle}
+              />
+              <ImageOptionSelect
+                label="Size / format"
+                heading="What shape do you need?"
+                options={SIZES}
+                value={size}
+                onChange={setSize}
+              />
+              <ImageOptionSelect
+                label="Colour hint"
+                heading="Lean toward a colour?"
+                options={COLOR_HINTS}
+                value={colorHint}
+                onChange={setColorHint}
+              />
+            </div>
+
+            <div className="flex items-end gap-2 rounded-2xl border border-line bg-card pl-3 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
+              <label htmlFor="nbai-image-prompt" className="sr-only">Describe your image</label>
+              <textarea
+                id="nbai-image-prompt"
+                ref={taRef}
+                rows={1}
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter sends, Shift+Enter breaks the line — the convention every chat input in
+                  // this app uses, and the reason the box grows rather than scrolls.
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleGenerate(); }
+                }}
+                placeholder="Describe your image..."
+                className="flex-1 min-w-0 bg-transparent resize-none text-sm text-ink placeholder-faint focus:outline-none py-2 leading-6"
+              />
+              {/* Enhance is DISABLED when the chosen style has no keywords to add, rather than
+                  present and inert: "built but not really working" is the state this app does not
+                  have. Realistic is exactly that case — it adds none. */}
+              <button
+                type="button"
+                onClick={handleEnhance}
+                disabled={!styleEnhancer}
+                title={styleEnhancer ? 'Add this style’s keywords to your words' : 'This style adds no extra keywords'}
+                className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={isLoading}
+                aria-label="Generate image"
+                className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-violet-600 hover:bg-violet-500 text-on-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {isLoading ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
+              </button>
+            </div>
+
+            <p className="text-[10px] text-faint text-center flex items-center justify-center gap-1.5">
+              <Wand2 className="w-2.5 h-2.5" /> Free tier, no charge for these images
             </p>
-            <ul className="text-[10px] text-faint space-y-1">
-              <li>• Specific prompts = better results ("blue gradient tech logo" not just "logo")</li>
-              <li>• Style + Color hints add extra quality</li>
-              <li>• "Enhance" button adds style-specific keywords automatically</li>
-              <li>• You can use the image URL directly in an img tag</li>
-            </ul>
           </div>
         </div>
       </div>
       )}
 
-      {/* The typed text replaces the shown image, so Copy and Download then save the version WITH the
-          text on it — which is what someone who just pressed Done expects those buttons to mean. */}
-      {textEditorOpen && generatedUrl && (
-        <TextOverlayEditor
-          imageUrl={generatedUrl}
-          // Read from the prompt the user actually typed, at the moment they open the editor — not
-          // stored at generation time, so editing the prompt and reopening picks up the change.
-          initialLayers={layersFromExtracted(extractImageText(prompt), () => `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`)}
-          extracted={extractImageText(prompt)}
-          onClose={() => setTextEditorOpen(false)}
-          onApply={(url) => { setGeneratedUrl(url); setTextEditorOpen(false); flashNote('Text added \u2713  Now press Download to save it.'); }}
-        />
-      )}
+      {/* The typed text replaces that image in the thread, so Copy and Save then mean the version
+          WITH the text on it — which is what someone who just pressed Done expects. */}
+      {textOn && (() => {
+        const target = history.find((h) => h.id === textOn);
+        if (!target) return null;
+        // 🔴 READ FROM THE IMAGE'S OWN REQUEST, not from the composer. Until this screen became a
+        // thread there was one image and one prompt, so "whatever is in the box" was the same
+        // thing. It is not any more: the box is cleared on a successful send, and by the time a
+        // user scrolls up to put a phone number on their FIRST image the box holds their third
+        // request. Extracting from `target.prompt` keeps each image's text tied to the words that
+        // asked for it.
+        const found = extractImageText(target.prompt);
+        return (
+          <TextOverlayEditor
+            imageUrl={target.url}
+            initialLayers={layersFromExtracted(found, () => `p${Date.now()}${Math.random().toString(36).slice(2, 7)}`)}
+            extracted={found}
+            onClose={() => setTextOn(null)}
+            onApply={(url) => {
+              // Replace the image IN PLACE, and persist it. Appending a second copy would leave two
+              // near-identical images in the thread and no way to tell which one carries the right
+              // phone number.
+              const updated = { ...target, url };
+              setHistory((h) => h.map((x) => (x.id === textOn ? updated : x)));
+              void imageHistoryStore.save(updated).catch(() => { /* best-effort, as every save here is */ });
+              setTextOn(null);
+              flashNote('Text added \u2713  Now press Save to keep it.');
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

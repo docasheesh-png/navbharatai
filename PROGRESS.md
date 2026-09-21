@@ -76553,3 +76553,74 @@ which genuinely works there. The admin reads this panel on a phone, so that is t
 Verification both times: typecheck · server typecheck · unused imports · native guard · **28,125
 tests** · build · bundle · boot · deps. `AppKnowledgeBase.ts` carries the Diagnostics tab, per the
 sync rule.
+
+---
+
+## 2026-09-21 — 🔴 A COUNT IS NOT A WINDOW: two caps pulled opposite ways and kept a window from the MIDDLE
+
+Acting on the open root cause recorded above (*"the 40-cap deletes the evidence an autopsy needs"*).
+Reading the code to implement it found the problem was **worse and differently shaped than that note
+said**, so the note is superseded here rather than simply closed.
+
+**What the previous entry got right, and the one thing it got wrong.** It said storage keeps the last
+40 calls, so "calls 1–272 are gone". The first half is true. The second assumed the stored 40 were
+the build's LAST 40. They were not. `BuildDiagnostics` — the recorder, one layer up — caps the same
+channel at 300 and was written `if (this.llmCalls.length < MAX_LLM_CALLS) push(...)`: past the cap it
+**stopped recording entirely**, keeping the build's FIRST 300. The store then kept the LAST 40 *of
+those*, on its own written reasoning that *"the end of a build is where its failure lives"*.
+
+| layer | cap | which end it kept |
+|---|---|---|
+| `BuildDiagnostics` (recorder) | 300 calls / 300 commands / 200 errors / 2000 issues | the **FIRST** |
+| `DiagnosticsStore` (storage) | 40 / 40 / 50 / 500 | the **LAST** |
+
+On a 312-call build the stored window is calls **261–300**. Not the head — the first-turn starvation,
+the plan-call timeout and the rung-1 ladder fall are gone. **Not the tail either** — the twelve calls
+the build actually died on were never written down at all, so the store was preserving an ending that
+did not exist in its input. And `{ kept: 40, total: 312 }`, the truncation fact shipped the day
+before, is perfectly true and perfectly unusable: it states how many survived and nothing about
+*which*, while the store's docblock told the reader they were the last forty.
+
+🔑 **THE CLASS, named so it is recognised again: two caps that disagree about which end matters
+compose into a window neither one intended, and a layer downstream believes a promise the layer
+upstream already broke.** This is the fourth time this repo has paid for a cap or a guard that was
+right where it was written and wrong in composition (`safeRelPath` ×4, the zombie-write lane, the HTML
+boot guard, `tagsOnLine` ×2).
+
+**The fix is one rule at both layers, and it costs zero bytes.** `boundedWindow(length, cap)` in
+`reportTruncation.ts`: keep the first `floor(cap/2)` and the last `cap - floor(cap/2)`. The recorder's
+four capped channels now `pushBounded(...)` (evicting the oldest MIDDLE entry, so the array stays
+chronological and the opening is preserved) instead of refusing everything past the cap; the store's
+`trimChannel` keeps both ends within the same cap. Because it is the SAME rule at both layers they
+compose instead of fighting — the store's first 20 of the recorder's first 150 really are the build's
+first 20. `ChannelTruncation` gains `head`, so the record *states* the window, and `truncationNote`
+now reads *"40 of 312 model calls (the first 20 and the last 20 — 272 from the middle are gone)"*.
+
+⚠️ **IT IS A REAL TRADE AND IS SAID SO IN THE CODE.** A 40-call tail gave 40 consecutive calls before
+the failure; 20 + 20 gives 20. Worth paying because the head was being lost with **certainty** on
+every build over the cap while the tail still keeps 20 consecutive calls of the ending — and because
+the recorder half means long builds now keep a real ending for the first time. Raising the cap instead
+was **rejected**: the caps exist to stay clear of Firestore's 1 MB limit without a size-measuring
+loop, and a report that breaches it falls to `dropHeavyChannelsForStorage`, which destroys the channel
+outright. A byte-neutral change cannot make that worse.
+
+**Honesty half (rule 5).** Three sentences described the retired behaviour and were corrected with
+it: the store's *"keeping the most recent, most useful detail"*, `STORED_LLM_CALLS_MAX`'s *"the newest
+ones"*, and the timeline's own `TIMELINE_TRUNCATED` line, which said *"earlier detail retained, later
+activity omitted"* — true of the old cap, a lie on a timeline built by the new one.
+
+**Test-locked and reversion-proven both ways** in `tests/aCountIsNotAWindow.test.ts` (30 cases). The
+headline cases drive the **real** recorder and the **real** store end to end on a 312-call build and
+assert that call #1 and call #312 both survive — deliberately not two unit halves that could each pass
+while the pair stayed broken, which is exactly how this survived a fix to the same module one day
+earlier. Reverting the recorder to its prefix cap fails 4 cases; reverting the store to tail-only
+fails 5. Source-level guards catch the return of either shape, because `tsc` and `vitest` cannot see
+that a bounded push is written as a prefix cap — the old code compiled and passed every test.
+
+⚠️ One fixture in `DiagnosticsStore.test.ts` moved: it had put the entry it expected to be dropped at
+index 0, because the head was what used to fall out. The invariant it tests (problems is recomputed
+from the trimmed issues) is unchanged; the entry now sits in the middle, which is where an entry has
+to be to fall out of a both-ends window.
+
+Verification: typecheck · server typecheck · unused imports · native guard · **28,163 tests** · build
+· bundle · boot · deps. No user-facing surface changed, so no `AppKnowledgeBase.ts` entry is due.

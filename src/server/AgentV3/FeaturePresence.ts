@@ -17,6 +17,18 @@ import { isAffirmativelyRequested } from './featureRequest';
 import { inFlagRollout } from './escalationRollout';
 import { envFlag } from '../lib/envFlag';
 
+/**
+ * WHAT a "present" verdict actually rests on — and the distinction is load-bearing, not bookkeeping.
+ *
+ * `control` — a structural or attribute signal that can only come from a real affordance being in the
+ *   captured DOM: an `<input>`, a `<button>`, `type="checkbox"`, `type="password"`, a `<ul>`/`<li>`,
+ *   a `<form>`, or a `placeholder`/`aria-label` on a field.
+ * `text`  — visible PROSE only. The page says the word somewhere. That is a hint about the app and it
+ *   is NOT evidence that any control was captured, because `hasControlMatching` tests the page's whole
+ *   visible-text blob and cannot tell a button's label from a sentence in a paragraph.
+ */
+export type PresenceEvidence = 'control' | 'text';
+
 export interface FeatureProbeResult {
   /** The requested feature (stable slug, e.g. 'add', 'delete', 'filter'). */
   feature: string;
@@ -24,6 +36,8 @@ export interface FeatureProbeResult {
   label: string;
   /** True when a matching affordance was found in the rendered HTML. */
   present: boolean;
+  /** For a PRESENT probe, what the verdict rests on. Absent for a missing one. See PresenceEvidence. */
+  via?: PresenceEvidence;
 }
 
 export interface FeaturePresenceResult {
@@ -40,8 +54,12 @@ interface FeatureDef {
   label: string;
   /** Any of these substrings in the (lowercased) prompt marks the feature as REQUESTED. */
   requested: RegExp;
-  /** Returns true when the rendered HTML shows a matching affordance. Given (rawHtmlLower, visibleTextLower). */
-  present: (htmlLower: string, textLower: string) => boolean;
+  /**
+   * The matching affordance in the rendered HTML, or `false`. Given (rawHtmlLower, visibleTextLower).
+   * Returning the EVIDENCE KIND rather than a bare boolean is what lets the corroboration guard below
+   * refuse a witness that only ever saw prose.
+   */
+  present: (htmlLower: string, textLower: string) => PresenceEvidence | false;
 }
 
 /** Strip to visible text (labels, button text) — same approach as PreviewVerify.visibleText. */
@@ -70,12 +88,27 @@ function buttonCount(htmlLower: string): number {
   return buttons + roleBtn + links;
 }
 
-/** A clickable control (button/link/aria-label) whose text/label matches `re`. */
-function hasControlMatching(htmlLower: string, textLower: string, re: RegExp): boolean {
-  if (re.test(textLower)) return true;                       // visible button/link text
-  // aria-label / title / value / placeholder attributes carrying the intent (icon-only buttons).
+/**
+ * A clickable control (button/link/aria-label) whose text/label matches `re`.
+ *
+ * ⚠️ IT REPORTS *HOW* IT MATCHED, AND THAT IS THE WHOLE POINT. The `text` branch tests the page's
+ * ENTIRE visible-text blob, so a word sitting in an ordinary paragraph satisfies it just as readily as
+ * a button's own label — this function cannot tell the two apart, and pretending otherwise is what let
+ * a sentence vouch for a control nobody captured (autopsy 56f0c645). An ATTRIBUTE match is different in
+ * kind: `aria-label`/`placeholder`/`title`/`value`/`alt` only exist on real elements.
+ */
+function hasControlMatching(htmlLower: string, textLower: string, re: RegExp): PresenceEvidence | false {
+  // Attributes first: strictly stronger evidence, and checking it first means a page that has BOTH is
+  // credited with the control rather than the prose.
   const attrs = htmlLower.match(/(?:aria-label|title|value|placeholder|alt)=["']([^"']*)["']/g) || [];
-  return attrs.some((a) => re.test(a));
+  if (attrs.some((a) => re.test(a))) return 'control';
+  if (re.test(textLower)) return 'text';                     // visible button/link text OR mere prose
+  return false;
+}
+
+/** `true` only when the match came from a real element, never from prose. */
+function matchedAControl(m: PresenceEvidence | false): boolean {
+  return m === 'control';
 }
 
 const FEATURES: FeatureDef[] = [
@@ -83,7 +116,9 @@ const FEATURES: FeatureDef[] = [
     feature: 'add', label: 'Add / create',
     requested: /\b(add|create|new (?:task|item|note|todo|entry|record)|insert)\b/,
     // Needs an input to type into AND a control to submit it (button text or a form).
-    present: (h, t) => inputCount(h) >= 1 && (hasControlMatching(h, t, /\b(add|create|save|submit|new|\+)\b/) || /<form\b/.test(h)),
+    present: (h, t) => (inputCount(h) >= 1 && (hasControlMatching(h, t, /\b(add|create|save|submit|new|\+)\b/) !== false || /<form\b/.test(h)))
+      ? 'control' // an <input> was captured — that is a real affordance, whatever matched the verb
+      : false,
   },
   {
     feature: 'delete', label: 'Delete / remove',
@@ -98,29 +133,44 @@ const FEATURES: FeatureDef[] = [
   {
     feature: 'complete', label: 'Mark complete / toggle',
     requested: /\b(mark (?:as )?complete|complete|done|check(?:box)?|toggle)\b/,
-    present: (h, t) => /type=["']checkbox["']/.test(h) || /role=["']checkbox["']/.test(h) || hasControlMatching(h, t, /\b(complete|done|✓|✔)\b/),
+    present: (h, t) => (/type=["']checkbox["']/.test(h) || /role=["']checkbox["']/.test(h))
+      ? 'control'
+      : hasControlMatching(h, t, /\b(complete|done|✓|✔)\b/),
   },
   {
     feature: 'filter', label: 'Filter',
     requested: /\b(filter|all\b.*\bactive|active\b.*\bcompleted|tabs?)\b/,
     // A filter UI is usually 2+ sibling toggle controls (All / Active / Completed).
-    present: (h, t) => hasControlMatching(h, t, /\b(all|active|completed|pending|show all)\b/) && buttonCount(h) >= 2,
+    present: (h, t) => (hasControlMatching(h, t, /\b(all|active|completed|pending|show all)\b/) !== false && buttonCount(h) >= 2)
+      ? 'control' // two or more buttons were captured
+      : false,
   },
   {
     feature: 'search', label: 'Search',
     requested: /\b(search|find|lookup)\b/,
-    present: (h) => /type=["']search["']/.test(h) || /(?:placeholder|aria-label)=["'][^"']*search/.test(h),
+    present: (h) => (/type=["']search["']/.test(h) || /(?:placeholder|aria-label)=["'][^"']*search/.test(h))
+      ? 'control'
+      : false,
   },
   {
     feature: 'list', label: 'List / items',
     requested: /\b(list|tasks?|items?|notes?|todos?|entries|records|feed)\b/,
     // A real list OR an honest empty-state ("no tasks yet") both count as "the list surface exists".
-    present: (h, t) => /<(?:ul|ol)\b/.test(h) || /role=["']list["']/.test(h) || (h.match(/<li\b/g) || []).length >= 1 || /\bno (?:tasks?|items?|notes?|todos?|results?|entries)\b|\bempty\b|\badd (?:a|your first)\b/.test(t),
+    present: (h, t) => {
+      if (/<(?:ul|ol)\b/.test(h) || /role=["']list["']/.test(h) || (h.match(/<li\b/g) || []).length >= 1) return 'control';
+      // AN EMPTY-STATE SENTENCE IS NOT A CAPTURED LIST. It still counts as "the list surface exists",
+      // but only as PROSE — this is the exact branch that vouched for a partial capture in 56f0c645.
+      return /\bno (?:tasks?|items?|notes?|todos?|results?|entries)\b|\bempty\b|\badd (?:a|your first)\b/.test(t)
+        ? 'text'
+        : false;
+    },
   },
   {
     feature: 'auth', label: 'Login / authentication',
     requested: /\b(login|log in|sign in|sign-in|auth|authentication|password|register|sign up)\b/,
-    present: (h, t) => /type=["']password["']/.test(h) || hasControlMatching(h, t, /\b(login|log in|sign in|sign up|register|logout)\b/),
+    present: (h, t) => /type=["']password["']/.test(h)
+      ? 'control'
+      : hasControlMatching(h, t, /\b(login|log in|sign in|sign up|register|logout)\b/),
   },
   {
     feature: 'theme', label: 'Dark mode / theme toggle',
@@ -170,9 +220,11 @@ export function checkFeaturePresence(prompt: string, html: string): FeaturePrese
     // Negation-aware (deep-test App #1): a feature the user DECLINED ("no delete", "without search")
     // must not be probed, or we'd false-flag it missing. Shares the RequirementCoverage guard.
     if (!isAffirmativelyRequested(promptLower, def.requested)) continue; // not requested → don't probe
-    let present = false;
-    try { present = def.present(htmlLower, textLower); } catch { present = false; }
-    probes.push({ feature: def.feature, label: def.label, present });
+    let via: PresenceEvidence | false = false;
+    try { via = def.present(htmlLower, textLower); } catch { via = false; }
+    probes.push(via === false
+      ? { feature: def.feature, label: def.label, present: false }
+      : { feature: def.feature, label: def.label, present: true, via });
   }
   const presentProbes = probes.filter((p) => p.present);
   // CAPTURE-CORROBORATION GUARD (deep-test build #4, 2026-07-17; widened by real report 1682cd03,
@@ -190,6 +242,34 @@ export function checkFeaturePresence(prompt: string, html: string): FeaturePrese
   // So: any all-absent result (regardless of probe count) stays silent. Advisory-only — a genuinely blank
   // app is caught by the preview/readiness checks, not by this heuristic. Report nothing.
   if (probes.length >= 1 && presentProbes.length === 0) return empty;
+  // 🔴 AND THE WITNESS MUST HAVE SEEN A CONTROL (autopsy 56f0c645, 2026-09-21). The guard above rests
+  // on one premise — "another feature probed PRESENT, so the DOM really was captured" — and that premise
+  // is FALSE for a probe satisfied by prose. The `list` rule counts an empty-state sentence ("No notes
+  // yet"), `hasControlMatching` tests the whole visible-text blob, and neither proves one affordance was
+  // captured.
+  //
+  // What that cost, reproduced exactly from the report: a quick-notes app whose search box is present,
+  // labelled `aria-label="Search notes"` and wired to a real filter was reported as having NO search
+  // control. The capture had painted the heading and the empty-state line and nothing else; `list`
+  // matched the sentence, vouched for the capture, and released a false verdict against a working app.
+  // 44 characters of text also carried it past `isUnrenderedSpaShell`'s 40-character floor.
+  //
+  // So corroboration now needs evidence of the right KIND, not merely of the right count — at least one
+  // present probe must rest on a real element before any feature may be called missing.
+  //
+  // 🔒 IT GATES THE ACCUSATION, NOT THE WHOLE RESULT, and this repo's own suite is what established the
+  // difference. The first version returned `empty` whenever no control-backed witness existed, which
+  // also silenced results where NOTHING was missing — and an all-present result accuses nobody, so
+  // there is nothing in it to be wrong about. ("an honest empty-state counts the list surface as
+  // present" failed, correctly.) The false-verdict risk lives entirely in the missing list.
+  //
+  // ⚠️ THE TRADE, STATED: an app that really lacks a control, whose only present feature is
+  // prose-matched, now stays SILENT instead of reporting that gap. That is the deliberate direction —
+  // this check is advisory, a missed advisory costs one line in a report, and a false "your feature is
+  // missing" tells a user their working app is broken (and, inside the AGENTV3_FEATURE_HEAL cohort,
+  // spends a model pass adding a control that is already there).
+  const missingProbes = probes.filter((p) => !p.present);
+  if (missingProbes.length > 0 && !presentProbes.some((p) => p.via === 'control')) return empty;
   return {
     probes,
     missing: probes.filter((p) => !p.present).map((p) => p.label),
@@ -204,6 +284,25 @@ export function featurePresenceSummary(r: FeaturePresenceResult): string {
     return `Feature coverage: all ${r.present.length} requested feature(s) are visibly present in the running app (${r.present.join(', ')}).`;
   }
   return `Feature coverage: ${r.missing.length} requested feature(s) have NO visible control in the running app — ${r.missing.join(', ')}. Present: ${r.present.join(', ') || 'none'}.`;
+}
+
+/**
+ * What each verdict RESTED ON, for the admin report. PURE.
+ *
+ * 🔎 WHY THIS EXISTS AT ALL — it is the other half of the 56f0c645 fix, and the half that took the
+ * longest to establish. The report recorded the VERDICT ("Search has no visible control") and none of
+ * the evidence, so the finding could not be audited: settling whether a working app had really lost
+ * its search box meant hashing the scaffold's `App.tsx`, re-running the probe against a reconstructed
+ * DOM, and finally guessing the capture — an hour to answer a question one line could have answered.
+ *
+ * A finding nobody can check is re-litigated every time it appears. So a present probe now says which
+ * KIND of evidence carried it, and the caller records the capture beside it.
+ */
+export function featurePresenceEvidence(r: FeaturePresenceResult): string {
+  if (r.probes.length === 0) return '';
+  return r.probes
+    .map((p) => `${p.label}=${p.present ? (p.via ?? 'control') : 'absent'}`)
+    .join(' · ');
 }
 
 /**

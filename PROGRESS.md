@@ -75631,3 +75631,59 @@ Reversion-proven in `tests/theBootGuardRanOnOneLaneOfTwo.test.ts` (8 cases, two 
   own failing auto-start, so ordinary commands paid for an unrelated retry loop.
 - ✅ **CORRECTION to 2026-09-21 (1):** `PREVIEW_SNAPSHOT_STALE` is NOT universal — build 3 reports
   `PREVIEW_SNAPSHOT_CURRENT`. It goes stale exactly when a post-build pass writes after the copy.
+
+## 2026-09-21 — `https://localhost is not enabled or approved`: the app whitelisting could not have fixed it
+
+**Admin, after whitelisting `com.navbharat.ai` (Approved):** *"abhi bhi same error aa rahi old wali"*.
+
+**That second data point is what makes the diagnosis certain rather than plausible.** The app is a
+Capacitor shell in BUNDLED mode, so its WebView origin is `https://localhost`; `paymentService.ts`
+loads the gateway's **JavaScript** SDK into that WebView; and a browser SDK identifies its merchant
+by **page origin**, never by package name. So:
+
+- the gateway is being asked to approve `https://localhost` — which nobody owns and every Capacitor
+  app on earth shares, so it can never be approved;
+- **APP whitelisting cannot reach it**, because the JS SDK never sends a package name;
+- **`apiBase.ts` cannot reach it either**, and its own docblock is why: it rewrites fetch and
+  XMLHttpRequest and already names the WebSocket as *"the ONE transport the rewrite above cannot
+  reach"*. **A third-party script reading `window.location.origin` is the second** — no transport is
+  involved, so there is nothing to intercept. Worth recording as a CLASS: the bundled-mode origin
+  breaks anything that reads the origin rather than sending a request.
+
+🔑 **THE FIX IS AN ORIGIN, NOT A CONSOLE SETTING.** `navbharatai.com` is already an APPROVED website
+in the same console, so the native shell now opens our own `/pay` page **in the system browser**
+(`@capacitor/browser` — a Custom Tab, deliberately not another WebView, which would carry the same
+unusable origin). The SDK then runs where it is allowed to run.
+
+- `src/server/lib/checkoutHandoff.ts` — pure: the path, the mode narrowing, the URL builder, the page.
+- `src/server/routes/checkoutHandoff.ts` — serves it, `no-store`, `noindex`.
+- `spaFallback.ts` — **declared**, or the catch-all answers a payment link with `index.html`: the
+  worst version of that module's own documented bug, and nothing would fail.
+- `src/services/paymentService.ts` — the only client file touched, chosen deliberately: PR #3202 is
+  live in `usePaymentEngine.ts` and `storePurchase.ts`, and `triggerCashfreeCheckout` is a chokepoint
+  both of its call sites already pass through, so the two changes cannot collide.
+
+🔒 **The session id travels in the URL FRAGMENT.** A fragment is never sent to a server, never lands
+in an access log and never appears in a Referer header — so the hand-off costs strictly *less*
+exposure than the status quo, where the same value is already delivered to the client and handed to
+the SDK. This server never sees it. Test-locked, and reversion-proven by moving it to a query string.
+
+🔒 **A HOSTED native shell does NOT hand off** (origin already = the API origin) — the same two-part
+test `needsApiRewrite` makes. The plain web is byte-identical.
+
+💰 **Money cannot be lost in the hand-off**, which is what made this safe to ship on a payment path:
+the order exists server-side before any of it runs, and three independent paths credit it (webhook,
+return redirect, reconcile-on-sign-in). The reconcile net was built for the UPI user who closes the
+app mid-payment and covers this case unchanged. And on Android the top-up was **100% broken**, so a
+change gated to native could only improve it.
+
+**Gate on the final state:** typecheck · typecheck:server · noUnusedImports · native:guard · build ·
+test:bundle (first paint 495.0 → 495.2 KB; the page's HTML tree-shakes out of the client) ·
+boot:check · deps:server-gate all green; `vitest run` **27,724 passed, 1 skipped, 0 failed**.
+Three reversions proven to bite.
+
+⚠️ **NOT done, and honestly open:** after paying in the browser the user lands on
+`/?payment=check&order_id=…` on the WEBSITE, not back inside the app, and must switch back by hand
+(their credit is safe either way — reconcile does it). Returning automatically needs Android App
+Links, which need `ANDROID_CERT_SHA256` set — currently unset — and that path added to the claimed
+allowlist. Left for a separate change rather than half-built.

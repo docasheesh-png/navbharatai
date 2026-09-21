@@ -332,6 +332,20 @@ export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
  *
  * Costs nothing: the browser is already in the sandbox and the pages were already loaded. This only
  * stops the platform from throwing away a measurement it had already paid for.
+ *
+ * ⚠️ CORRECTED 2026-09-21 — THIS LANE ANSWERS FAR LESS OFTEN THAN THE PARAGRAPH ABOVE IMPLIES, and a
+ * session reading it would go looking for the runtime gap in the wrong place. "The page-route check
+ * had loaded every page of the same app" is true only when `extractPageRoutes` finds a route that is
+ * not `/` — a `<Route path=…>` or a Next `app/x/page.tsx`. MEASURED against this repo's own registry:
+ * **0 of 40 golden scaffolds yield one**, because they are single-screen apps (and the multi-screen
+ * ones — saas-dashboard, crm, school-erp — switch on state rather than on a router). So for an app
+ * built from our own templates this lane has never once been able to answer, and `routesChecked` is 0.
+ *
+ * It is left exactly as it is, deliberately: it is correct where it applies and costs nothing where it
+ * does not. The real repair was to make the lane that DOES run on every build carry the listeners —
+ * `browsePageScript` in `E2BActuator` — so this stays a genuine second source rather than the only
+ * fallback. Deriving "pages" for a state-routed SPA is a separate problem and is recorded as an OPEN
+ * root cause in PROGRESS.md rather than guessed at here.
  */
 export function runtimeRecordFromPageChecks(
   routesChecked: number,

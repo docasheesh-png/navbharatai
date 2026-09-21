@@ -18,6 +18,8 @@ API call work exactly as on the web. This is a genuine, store-installable app �
 - `android/` — the full native Android project is committed and ready to build.
 - `public/manifest.json` + mobile meta tags — PWA basics in place.
 - npm scripts: `mobile:sync`, `mobile:android`, `mobile:ios`.
+- **The App Store payments blocker is closed** — the iPhone app can no longer open a web checkout
+  (`purchaseRail()` returns `'none'` on iOS), Android is untouched. See §5.
 
 ## What only YOU can do (external, unavoidable) ⚠️
 
@@ -206,23 +208,71 @@ like Google — so enabling it is also needed to pass review.
 
 ---
 
-## 5. 🚨 Payments policy — read this or the app WILL be rejected
+## 5. 🚨 Payments policy — DONE IN CODE. Read this before touching a purchase screen.
 
-Apple and Google **require their own billing** for digital goods bought *inside* the app (Apple takes 30%,
-Google Play Billing similar). NavBharatAI sells **credits/wallet top-ups** — those are digital goods.
+Apple and Google **require their own billing** for digital goods bought *inside* the app. NavBharatAI
+sells **credits/wallet top-ups** — those are digital goods. Apple Guideline 3.1.1 is not a risk to
+weigh, it is a **certain rejection**, and every App Store build is read by a human reviewer.
 
-**v1 strategy (already decided — "in-app purchases hidden in v1"):** do **not** show a "Buy credits" flow
-inside the native app. Users top up **on the web** (`navbharatai.com` in a browser). The app can *show* the
-balance and say "add credits on the web", but must not open a purchase/checkout screen in-app.
+### 5.1 What the code does TODAY (shipped 2026-09-20, PR #3202)
 
-- ✅ Allowed: show balance, let users build/use existing credits, link out to the website's *account* page.
-- ❌ Rejected: an in-app "Buy ₹X credits" button that charges via Razorpay/Stripe. That bypasses store
-  billing → instant rejection (Apple 3.1.1, Google Payments policy).
-- Later (v2), if you want in-app purchases: integrate `@capacitor/in-app-purchases` (StoreKit / Play
-  Billing) and let the store take its cut — a separate project.
+🔴 **This section used to describe the v1 strategy as "already decided" and told the next reader to
+`Capacitor.isNativePlatform()` and hide the buy buttons. It was decided in 2026-07 and NOT BUILT until
+2026-09-20 — a grep of every `isNativeApp()` call site returned zero purchase gates for fourteen
+months. It is built now, and it is built NARROWER than the old text said. Do not implement it again,
+and do not widen it.**
 
-The bundled WebView already respects this as long as the app hides the purchase UI when running natively.
-Detect the app via the Capacitor user-agent / `Capacitor.isNativePlatform()` and hide the buy buttons.
+`purchaseRail()` in `src/lib/storePurchase.ts` answers one question — *may this device buy?* — and
+returns a third state, **`'none'`**:
+
+| Where | Rail | What the user sees |
+|---|---|---|
+| **iPhone / iPad** (`platform === 'ios'`) | **`'none'`** | an honest "top-up is not available in this app" notice |
+| **Android** | `'play-billing'` or `'web-gateway'` | unchanged — Play Billing where configured, the web rail otherwise |
+| **Web browser** | `'web-gateway'` | unchanged |
+
+⚠️ **THE GATE IS ON THE PLATFORM, NEVER ON `isNative`, and the difference is revenue.** Hiding top-up
+on `isNativeApp()` — which is exactly what the old text above instructed — would also remove the
+**working, revenue-earning Android top-up**. Android is a Play-billing problem with a Play-billing
+answer (`STORE_BILLING`, §Google Play in-app purchases in `CLAUDE.md`); iOS is a *no rail exists yet*
+problem. One predicate, `isApplePlatform(platform)`, checked BEFORE every other rung, because on iOS
+there is nothing to fall back to: Play Billing does not exist there and the web gateway is the very
+thing Apple rejects.
+
+🔒 **It is a chokepoint, not four hidden buttons.** Four screens can start a top-up, so
+`createBillingOrder` in `usePaymentEngine` **refuses on `'none'`** as well. A surface nobody remembered
+to gate still cannot open a checkout.
+
+### 5.2 ⛔ Do NOT add "you can top up on the website" anywhere in the app
+
+The old text said the app "can *show* the balance and say **'add credits on the web'**" and "link out
+to the website's *account* page". **That is anti-steering, and Apple forbids it** — pointing a user at
+an external purchase path from inside the app is its own rejection, separate from 3.1.1. This account
+has already taken one policy strike (the medical-features rejection), so the shipped notice
+deliberately says only this, and stops:
+
+> **Top-up is not available in this app**
+> You cannot add credit from inside the iPhone app yet. Everything else is unchanged — your balance,
+> your apps, and any credit you already have all work exactly as they do everywhere else.
+
+No link, no price comparison, no hint that a cheaper path exists. `ProfilePage` was corrected for the
+same reason: on iOS its row reads **"Wallet · Balance and history"**, never "Add Balance · Recharge via
+UPI / Card" — a row naming a payment method it cannot open is the same broken promise one screen
+earlier.
+
+### 5.3 The real v2, when it is wanted
+
+Selling credits inside the iPhone app needs **StoreKit** — Apple's own in-app purchase, with Apple's
+cut, a product catalogue in App Store Connect and a server-side receipt check. That is the same shape
+as the Play Billing rail already built (`storeBilling.ts` / `storeVerify.ts` /
+`POST /api/payment/store/verify`), so the server half largely exists; what is missing is the Apple
+plugin, the products, and the receipt verification against Apple. **It is a project, not a flag** — and
+the app ships and earns on Android and the web meanwhile, which is why hiding the UI was the right
+first move rather than a stopgap.
+
+🔒 Test-locked in `tests/theIphoneCannotOpenACheckout.test.ts`, including a source-level guard that
+every `purchaseRail(` call site in `src/` passes a platform, and an anti-steering guard over the
+user-facing copy. Four reversions are proven to fail.
 
 ---
 
@@ -235,8 +285,49 @@ Detect the app via the Capacitor user-agent / `Capacitor.isNativePlatform()` and
 - **Privacy Policy URL** — mandatory on both. Host at `https://navbharatai.com/privacy`.
 - **Support URL / email**.
 - **Content rating** (Play questionnaire) + **age rating** (App Store).
-- **Data safety** (Play) / **App Privacy** (App Store) — declare what data the app collects (auth email,
-  usage). Be accurate.
+- **Data safety** (Play) / **App Privacy** (App Store) — declare what data the app collects. **Be
+  accurate: a declaration that contradicts the published Privacy Policy is a violation, not a
+  mismatch.** §6.1 below is a draft App Privacy answer sheet derived from the code, row by row.
+
+### 6.1 App Privacy (App Store) — a DRAFT answer sheet, derived from the code
+
+⚠️ **This is a draft for the admin to check and file, not a filed declaration** — only the admin can
+open App Store Connect. Every row below names the code that makes it true, so each one can be
+re-verified instead of trusted. **Re-grep before filing**: this sheet is dated, and `main` moves.
+
+🔴 **Why it is written down at all.** On 2026-09-02 this project's own Privacy Policy said *"we never
+share your data with advertisers"* while the Meta pixel was being built — caught before either
+shipped. A store declaration that contradicts the policy is a **violation, not a mismatch**, in both
+stores. So the declaration is derived from the code and the policy together, never from memory.
+
+| Apple category | Answer for the **iOS** app | Why — the code that decides it |
+|---|---|---|
+| **Contact Info → Email** | Collected · linked to the user · App Functionality | Firebase Auth sign-in |
+| **Identifiers → User ID** | Collected · linked · App Functionality | the account id every build and chat is stored under |
+| **Identifiers → Device ID** | Collected · linked · App Functionality | the push token, `src/lib/pushNotifications.ts`, native only |
+| **User Content** (prompts, files, built apps) | Collected · linked · App Functionality | the product itself; Policy §2.1/§2.2 |
+| **Usage Data → Product Interaction** | Collected · linked · Analytics | `trackEvent` (`src/lib/analytics.ts`) sends `userId`, and is **consent-gated** by `hasAnalyticsConsent()` |
+| **Purchases** | **NOT collected** | `purchaseRail()` returns `'none'` on iOS — the app cannot take a payment at all (§5.1) |
+| **Health & Fitness** | **NOT collected** | Doctor AI / Pharmacist / First Aid / Maternity are hidden on every native shell — `medicalFeaturesHidden(isNativeApp())`, `src/lib/playCompliance.ts` |
+| **Third-party advertising** | **NONE in the app** | the Meta pixel refuses to load on a native shell — `shouldLoadPixel(… isNative …)` returns false, wired at `src/main.tsx` |
+| **Tracking (ATT prompt)** | **No** — so no `NSUserTrackingUsageDescription` and no ATT prompt | nothing on iOS links activity to third-party data; the pixel is web-only and the Meta **Android** SDK is Android-only |
+| **Diagnostics / Crash data** | **NOT collected** | there is no crash reporter in the app; the Sentry references in this repo are code the BUILD ENGINE writes into *users'* apps, not ours |
+
+**Server-side visit counting** (Policy §11.1) sets no cookie, downloads no script and stores nothing on
+the device; the daily-rotating hash cannot be joined to an account. It is covered by the Usage Data row
+above rather than needing one of its own.
+
+### 6.2 What review will ask for besides the form
+
+- **Privacy Policy URL** — `https://navbharatai.com/privacy`. It is server-rendered HTML with no JS and
+  no auth, deliberately, because Apple and Meta fetch such links with tools that may not run
+  JavaScript.
+- **A working test account** in App Review Notes — a reviewer who cannot sign in rejects the build. Use
+  an account that is **not** on `AGENTV3_FREE_LIST` if you want the reviewer to see what a real user
+  sees, or one that is, if you would rather they never hit a balance wall. Either is defensible; an
+  empty wallet with no way to top up (§5.1) is not.
+- **Say in the notes that top-up is intentionally unavailable on iOS**, so the reviewer reads the
+  notice as a deliberate design rather than a broken screen.
 
 ---
 

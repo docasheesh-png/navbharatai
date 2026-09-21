@@ -24,9 +24,13 @@ import {
   devanagariWarning,
   imagePixels,
   normalizeLayer,
+  rgbaFrom,
+  splitFill,
   type LayerKind,
   type TextLayer,
 } from '../../lib/textOverlay';
+import { DEFAULT_FONT_ID, FONT_CHOICES, fontChoice } from '../../lib/imageFonts';
+import { loadImageFont } from '../../lib/imageFontLoader';
 import { BOARD_TEMPLATES, layersFromTemplate, type BoardTemplate } from '../../lib/imageBoardTemplates';
 import type { ExtractedText } from '../../lib/imageTextFromPrompt';
 
@@ -69,11 +73,60 @@ const KINDS: Array<{ id: LayerKind; label: string; icon: typeof Type; placeholde
   { id: 'list', label: 'Rate list', icon: List, placeholder: 'Chai 10\nSamosa 15\nCoffee 25\n\nOne item per line, price at the end' },
 ];
 
-const BAND_CHOICES: Array<{ id: string; label: string; value: string }> = [
-  { id: 'none', label: 'None', value: '' },
-  { id: 'dark', label: 'Dark bar', value: 'rgba(0,0,0,0.55)' },
-  { id: 'light', label: 'Light bar', value: 'rgba(255,255,255,0.82)' },
+/**
+ * The opacity a background gets when somebody picks a colour while it is currently off.
+ *
+ * 0.55, because that is the value `defaultLayer` has always used for its dark bar — a translucent
+ * bar reads as part of the photograph, while a solid one reads as a sticker pasted over it. Picking
+ * a colour turns the background ON at a sensible strength rather than leaving the user wondering why
+ * the swatch they tapped changed nothing.
+ */
+const DEFAULT_BAND_ALPHA = 0.55;
+
+/**
+ * Border widths, as fractions of the FONT size rather than pixels.
+ *
+ * So a border chosen on a 1024 square looks the same on a 1280 banner — an absolute width would be
+ * a hairline on one and a slab on the other, and the user only ever sees one of them while choosing.
+ */
+const BORDER_CHOICES: Array<{ label: string; value: number }> = [
+  { label: 'None', value: 0 },
+  { label: 'Thin', value: 0.03 },
+  { label: 'Medium', value: 0.06 },
+  { label: 'Thick', value: 0.11 },
 ];
+
+/** `<input type="color">` accepts only `#rrggbb`. Anything else falls back rather than being lost. */
+function hexOf(value: string, fallback: string): string {
+  return /^#[0-9a-f]{6}$/i.test(String(value ?? '')) ? value : fallback;
+}
+
+/**
+ * The colour picker — the device's own, wearing a swatch.
+ *
+ * 🔑 A NATIVE `<input type="color">` IS THE RIGHT ANSWER HERE, not a hand-built HSB square. The OS
+ * already draws exactly that picker, it is the one the user knows from every other app on their
+ * phone, it is reachable by keyboard and by a screen reader for free, and it cannot drift from the
+ * platform. A custom one would be several hundred lines that work worse on a touch screen.
+ *
+ * The input itself is invisible and covers the whole dot, so the coloured circle IS the button.
+ */
+function ColourDot({ value, onChange, label }: { value: string; onChange: (hex: string) => void; label: string }) {
+  return (
+    <span className="relative inline-flex w-6 h-6 shrink-0 rounded-full border-2 border-line overflow-hidden" title={label}>
+      {/* The rainbow ring says "any colour", which a grey square does not. Decorative only. */}
+      <span aria-hidden="true" className="absolute inset-0" style={{ background: 'conic-gradient(#ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)' }} />
+      <span aria-hidden="true" className="absolute inset-[5px] rounded-full border border-line" style={{ background: value }} />
+      <input
+        type="color"
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+      />
+    </span>
+  );
+}
 
 let nextId = 0;
 const newId = () => `t${++nextId}`;
@@ -86,8 +139,11 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
   const [loadFailed, setLoadFailed] = useState(false);
   const [devanagariOk, setDevanagariOk] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [fontState, setFontState] = useState<Record<string, 'loading' | 'ready' | 'failed'>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const dragging = useRef(false);
+  /** Which fonts have already been asked for, so a re-render does not re-request them. */
+  const fontsAsked = useRef<Set<string>>(new Set());
 
   const active = layers.find((l) => l.id === activeId) ?? layers[0];
 
@@ -107,6 +163,31 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
     img.src = imageUrl;
     return () => { alive = false; };
   }, [imageUrl]);
+
+  /**
+   * Fetch every font a layer is using, and record honestly whether it arrived.
+   *
+   * 🔴 THE CANVAS DOES NOT WAIT FOR CSS. `measureText` with a family the document has not finished
+   * loading measures in the FALLBACK face — so the text would be wrapped at one set of widths and
+   * repainted at another the moment the real font landed, and what the user positioned would not be
+   * what they saved. The repaint below therefore depends on `fontState`, so every frame after a
+   * font arrives is measured in the font that is really there.
+   */
+  useEffect(() => {
+    let alive = true;
+    for (const id of new Set(layers.map((l) => l.fontId))) {
+      if (fontsAsked.current.has(id)) continue;
+      fontsAsked.current.add(id);
+      setFontState((prev) => ({ ...prev, [id]: 'loading' }));
+      void loadImageFont(id).then((ok) => {
+        // A failure is forgotten so that choosing the font again really retries it — the commonest
+        // cause is a connection that has since come back, not a font that does not exist.
+        if (!ok) fontsAsked.current.delete(id);
+        if (alive) setFontState((prev) => ({ ...prev, [id]: ok ? 'ready' : 'failed' }));
+      });
+    }
+    return () => { alive = false; };
+  }, [layers]);
 
   // Ask the device — once — whether it can actually draw Devanagari, using the same font stack the
   // canvas will use. A measurement, not a user-agent guess.
@@ -141,9 +222,29 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas && image) paint(canvas, image);
-  }, [image, paint]);
+    // `fontState` is a real dependency, not a tidy-up: a font that finishes loading changes the
+    // widths every line was measured at, so the frame on screen is stale until this runs again.
+  }, [image, paint, fontState]);
 
   const warning = useMemo(() => devanagariWarning(layers, devanagariOk), [layers, devanagariOk]);
+
+  /**
+   * What to say about the ACTIVE layer's font, or nothing when there is nothing to say.
+   *
+   * A font that could not be fetched is named and the consequence is stated, rather than the picture
+   * quietly coming out in a different face — the second absolute rule reaches a dropdown exactly as
+   * it reaches a button: the option either works or it says it does not.
+   */
+  const fontNote = useMemo(() => {
+    const state = fontState[active.fontId];
+    const name = fontChoice(active.fontId).label;
+    if (state === 'loading') return `Loading ${name}…`;
+    if (state === 'failed') return `${name} could not be loaded on this device, so this text will use the default font. Check your connection and pick it again to retry.`;
+    return null;
+  }, [fontState, active.fontId]);
+
+  /** The background, read back into the two controls that edit it. One stored string, two dials. */
+  const bg = useMemo(() => splitFill(active.band), [active.band]);
 
   /** Turn a pointer event into the active layer's new centre, in image fractions. */
   const moveTo = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -162,6 +263,10 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
     if (!canvas || !image) return;
     setBusy(true);
     try {
+      // Wait for every chosen font before the final paint. Cached once loaded, so this is instant on
+      // the ordinary path — and on the path that is not, it is the difference between exporting the
+      // font the user picked and exporting the fallback that happened to be ready.
+      await Promise.all(Array.from(new Set(layers.map((l) => l.fontId))).map((id) => loadImageFont(id)));
       // Repaint synchronously before reading, so a pending React render can never let us export a
       // frame that is one edit behind what the user is looking at.
       if (!paint(canvas, image)) throw new Error('no 2d context');
@@ -337,22 +442,39 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
           </div>
 
           <div className="space-y-3">
+            {/* ── FONT ────────────────────────────────────────────────────────────────────────
+                A native <select> on purpose: 45 options on a phone is a scroll wheel the OS already
+                draws better than any list we could build, and it is reachable by keyboard and by a
+                screen reader for free. The two groups are "will my Hindi work?", which is the
+                question a NavBharatAI user is really asking — not serif versus sans. */}
             <div className="flex items-center gap-3">
-              <label className="text-[11px] text-muted w-12 shrink-0">Width</label>
-              <input
-                type="range"
-                min={20}
-                max={100}
-                value={Math.round(active.widthPct * 100)}
-                onChange={(e) => patch(active.id, { widthPct: Number(e.target.value) / 100 })}
-                className="flex-1 accent-[color:var(--accent)]"
-              />
+              <label htmlFor="nbai-text-font" className="text-[11px] text-muted w-[4.5rem] shrink-0">Font</label>
+              <select
+                id="nbai-text-font"
+                value={active.fontId}
+                onChange={(e) => patch(active.id, { fontId: e.target.value })}
+                className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-card border border-line text-xs text-ink focus:outline-none focus:border-accent-text"
+              >
+                <option value={DEFAULT_FONT_ID}>Default</option>
+                <optgroup label="Hindi + English">
+                  {FONT_CHOICES.filter((f) => f.devanagari && f.id !== DEFAULT_FONT_ID).map((f) => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="English only">
+                  {FONT_CHOICES.filter((f) => !f.devanagari).map((f) => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </optgroup>
+              </select>
             </div>
+            {fontNote && <p className="text-[11px] text-warn leading-relaxed">{fontNote}</p>}
 
             <div className="flex items-center gap-3">
-              <label className="text-[11px] text-muted w-12 shrink-0">Size</label>
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Size</label>
               <input
                 type="range"
+                aria-label="Text size"
                 min={MIN_SIZE_PCT * 1000}
                 max={MAX_SIZE_PCT * 1000}
                 value={active.sizePct * 1000}
@@ -362,8 +484,8 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
             </div>
 
             <div className="flex items-center gap-3">
-              <label className="text-[11px] text-muted w-12 shrink-0">Colour</label>
-              <div className="flex flex-wrap gap-1.5">
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Colour</label>
+              <div className="flex flex-wrap items-center gap-1.5">
                 {SWATCHES.map((c) => (
                   <button
                     key={c}
@@ -373,11 +495,14 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
                     className={`w-6 h-6 rounded-full border-2 ${active.color === c ? 'border-accent-text' : 'border-line'}`}
                   />
                 ))}
+                {/* The picker sits at the END of the row, where the admin asked for it: the swatches
+                    are the eight answers most people want, and this is the one for everyone else. */}
+                <ColourDot value={hexOf(active.color, '#ffffff')} onChange={(c) => patch(active.id, { color: c })} label="Pick any text colour" />
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <label className="text-[11px] text-muted w-12 shrink-0">Style</label>
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Style</label>
               <div className="flex items-center gap-1">
                 {/* A list sets its own two edges, so an alignment control there would be a button
                     that does nothing — which the second absolute rule forbids. Bold still applies. */}
@@ -408,20 +533,97 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
               </label>
             </div>
 
+            {/* ── BACKGROUND ──────────────────────────────────────────────────────────────────
+                Was three fixed chips (None / Dark bar / Light bar). Any colour now, at any
+                strength — and the OPACITY slider is also the on/off: at 0 the layer stores an
+                empty fill, which is exactly what "no background" already meant everywhere else in
+                this module. A separate on/off toggle beside the slider would be a second way to
+                say one thing, and the two would drift the first time either was touched. */}
             <div className="flex items-center gap-3">
-              <label className="text-[11px] text-muted w-12 shrink-0">Behind</label>
-              <div className="flex gap-1.5">
-                {BAND_CHOICES.map((b) => (
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Background</label>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SWATCHES.map((c) => (
                   <button
-                    key={b.id}
-                    onClick={() => patch(active.id, { band: b.value })}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] border ${active.band === b.value ? 'bg-accent text-on-accent border-transparent' : 'bg-raised text-body border-line'}`}
+                    key={c}
+                    onClick={() => patch(active.id, { band: rgbaFrom(c, bg.alpha > 0 ? bg.alpha : DEFAULT_BAND_ALPHA) })}
+                    aria-label={`Background ${c}`}
+                    style={{ background: c }}
+                    className={`w-6 h-6 rounded-full border-2 ${bg.alpha > 0 && bg.hex === c ? 'border-accent-text' : 'border-line'}`}
+                  />
+                ))}
+                <ColourDot
+                  value={bg.hex}
+                  onChange={(c) => patch(active.id, { band: rgbaFrom(c, bg.alpha > 0 ? bg.alpha : DEFAULT_BAND_ALPHA) })}
+                  label="Pick any background colour"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Opacity</label>
+              <input
+                type="range"
+                aria-label="Background opacity"
+                min={0}
+                max={100}
+                value={Math.round(bg.alpha * 100)}
+                onChange={(e) => patch(active.id, { band: rgbaFrom(bg.hex, Number(e.target.value) / 100) })}
+                className="flex-1 accent-[color:var(--accent)]"
+              />
+              <span className="text-[11px] text-faint w-10 text-right shrink-0">
+                {bg.alpha > 0 ? `${Math.round(bg.alpha * 100)}%` : 'None'}
+              </span>
+            </div>
+
+            {/* ── BORDER ──────────────────────────────────────────────────────────────────────
+                A frame around that same box. It shares `bandRect` with the background rather than
+                measuring its own, so the two can never sit a few pixels apart; the widths are
+                fractions of the FONT, so a border that looks right on a square looks the same on a
+                wide banner. "None" is the remove. */}
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Border</label>
+              <div className="flex items-center gap-1.5">
+                {BORDER_CHOICES.map((b) => (
+                  <button
+                    key={b.label}
+                    onClick={() => patch(active.id, { borderPct: b.value })}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] border ${
+                      Math.abs(active.borderPct - b.value) < 0.001 ? 'bg-accent text-on-accent border-transparent' : 'bg-raised text-body border-line'
+                    }`}
                   >
                     {b.label}
                   </button>
                 ))}
+                {active.borderPct > 0 && (
+                  <ColourDot
+                    value={hexOf(active.borderColor, '#ffffff')}
+                    onChange={(c) => patch(active.id, { borderColor: c })}
+                    label="Pick the border colour"
+                  />
+                )}
               </div>
             </div>
+
+            {/* ── TABLE WIDTH — a rate card only ──────────────────────────────────────────────
+                This was a "Width" slider on every layer, and it is gone from captions on purpose
+                (admin: "Width ki jagah background karo"). A caption wraps at a sensible share of
+                the picture and needs no dial. A RATE LIST does: the width is the span its two
+                columns are set against, so it decides where the prices line up — deleting it there
+                would take away a real capability rather than a confusing control. */}
+            {active.kind === 'list' && (
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Table width</label>
+                <input
+                  type="range"
+                  aria-label="Table width"
+                  min={20}
+                  max={100}
+                  value={Math.round(active.widthPct * 100)}
+                  onChange={(e) => patch(active.id, { widthPct: Number(e.target.value) / 100 })}
+                  className="flex-1 accent-[color:var(--accent)]"
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

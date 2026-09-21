@@ -42,16 +42,64 @@ export interface StoreConfig {
  * policy exposure that already exists is unchanged); ON ⇒ Android buys through Play Billing and the
  * exposure is closed. Nothing about turning it on can strand a user, because it only ever switches
  * a rail that is proven configured (`enabled && google && packs.length && the native plugin answers`).
+ *
+ * 🍎 AND THERE IS NOW A THIRD STATE, FOR iOS ONLY — which does NOT contradict the paragraph above,
+ * because that paragraph reasons entirely about ANDROID (admin 2026-09-20, choosing this over
+ * shipping StoreKit first: *"ham ios par buy ui chupa kar publish karwao"*).
+ *
+ * **Apple Guideline 3.1.1 is not a risk to weigh — it is a certain rejection.** Digital goods
+ * consumed inside an App Store app may be sold ONLY through Apple's own in-app purchase, and a
+ * wallet top-up is exactly that. iOS has no Play Billing plugin, so `purchaseRail` used to fall
+ * through to `'web-gateway'` — i.e. the iPhone app opened a Cashfree checkout, the single most
+ * reliable rejection there is, and every App Store build is reviewed by a person.
+ *
+ * ⚠️ **THE STRATEGY WAS DECIDED LONG AGO AND NEVER BUILT.** `MOBILE_PUBLISHING.md` §5 says in so
+ * many words: *"v1 strategy (already decided — in-app purchases hidden in v1): do NOT show a 'Buy
+ * credits' flow inside the native app… Detect the app via `Capacitor.isNativePlatform()` and hide
+ * the buy buttons."* A grep of every `isNativeApp()` call site returns zero purchase gates. This is
+ * that decision, finally implemented — and deliberately narrower than it was written, because
+ * hiding on `isNative` would ALSO remove the working, revenue-earning top-up from Android.
+ *
+ * 🔒 **`'none'` MEANS "this device cannot buy", NOT "hide a button".** Every purchase entry point
+ * reads this one value, and `createBillingOrder` refuses on it as well — so a surface nobody
+ * remembered to gate cannot open a checkout anyway. A dead button is what the second absolute rule
+ * forbids; an honest "not available here" is what replaces it.
  */
-export type PurchaseRail = 'play-billing' | 'web-gateway';
+export type PurchaseRail = 'play-billing' | 'web-gateway' | 'none';
+
+/**
+ * 🍎 IS THIS AN APPLE DEVICE? — the one question that decides whether a purchase may happen at all.
+ *
+ * Matched on the platform STRING, exactly like `isPlayBillingPlatform` beside it, so the rule is pure
+ * and unit-testable without a device. Anything unrecognised is NOT Apple: a wrong "yes" would remove
+ * the working top-up from an Android user, which is a real loss; a wrong "no" only restores today's
+ * behaviour on a platform that does not exist.
+ */
+export function isApplePlatform(platform: string | null | undefined): boolean {
+  return String(platform ?? '').trim().toLowerCase() === 'ios';
+}
 
 export function purchaseRail(input: {
   isNative: boolean;
+  /**
+   * `Capacitor.getPlatform()` — REQUIRED, not optional, and that is the point. An optional field
+   * would make "the caller forgot" and "this is Android" the same input, so a new call site could
+   * silently reopen the App Store rejection.
+   *
+   * ⚠️ REQUIRED IS NOT THE WHOLE GUARANTEE, and the difference was worth checking rather than
+   * assuming: `tsconfig.json` includes only `src/**`, so `tsc` enforces this at every APP call site
+   * and not in `tests/`. `theIphoneCannotOpenACheckout.test.ts` reads the source and fails on any
+   * `purchaseRail(` in `src/` that omits it — which is what makes the claim true either way.
+   */
+  platform: string | null | undefined;
   config: StoreConfig | null;
   /** Did the native Play Billing plugin actually answer? An older installed shell has no plugin. */
   pluginReady: boolean;
 }): PurchaseRail {
   if (!input.isNative) return 'web-gateway';         // the web has no Play Billing to use
+  // 🍎 Apple 3.1.1 — checked BEFORE every other rung, because on iOS there is no rail to fall to:
+  // Play Billing does not exist there, and the web gateway is the very thing Apple rejects.
+  if (isApplePlatform(input.platform)) return 'none';
   if (!input.pluginReady) return 'web-gateway';      // an older .aab predates the plugin entirely
   const c = input.config;
   if (!c || !c.enabled || !c.google) return 'web-gateway';

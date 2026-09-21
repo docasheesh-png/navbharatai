@@ -33,6 +33,26 @@ export function isNativeApp(): boolean {
 }
 
 /**
+ * WHICH native platform this is — `'ios'`, `'android'`, `'web'`, or `'web'` on any failure.
+ *
+ * ⚠️ `isNativeApp()` ABOVE CANNOT ANSWER THIS, and the difference is what shipped an App Store
+ * rejection into the code: an iPhone and an Android phone are both "native", so every rule written
+ * on that boolean applies to both. Apple's Guideline 3.1.1 (no non-Apple payment for digital goods)
+ * has no Android equivalent we obey today, so the purchase rail needs the platform, not the flag.
+ *
+ * Returns a plain string rather than a union on purpose: the PURE predicates that consume it
+ * (`isApplePlatform`, `isPlayBillingPlatform`, `isDeviceCheckPlatform`) each own their own match, so
+ * a vendor string this build has never heard of is simply "not mine" to every one of them.
+ */
+export function nativePlatformName(): string {
+  try {
+    return String(Capacitor.getPlatform() ?? 'web');
+  } catch {
+    return 'web';
+  }
+}
+
+/**
  * Ask the Play Store whether a newer version of the app is available (i.e. the admin uploaded a new
  * signed .aab). Returns false on web or on any error. Because the app runs in BUNDLED mode (the web is
  * baked into the .aab), a Play update is the ONLY way installed users get new code — so this check is

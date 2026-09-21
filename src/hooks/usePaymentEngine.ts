@@ -12,7 +12,7 @@ import { triggerCashfreeCheckout } from '../services/paymentService';
 import { authedHeaders } from '../lib/authHeaders';
 import { trackEvent } from '../lib/analytics';
 import { decideReportOnce } from '../lib/conversionOnce';
-import { isNativeApp } from '../lib/mobileNative';
+import { isNativeApp, nativePlatformName } from '../lib/mobileNative';
 import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/storePurchase';
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
@@ -167,6 +167,17 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
 
   const createBillingOrder = async (amount: number) => {
     if (!user) return;
+    /**
+     * 🍎 THE CHOKEPOINT, not a second opinion. Four separate screens can start a top-up (Wallet &
+     * Billing, the profile card, the finished-gift banner, the checkout modal), and gating each one
+     * is a list that the fifth screen is missing from. Refusing HERE means a device that may not buy
+     * cannot open a Cashfree order however the user got to the button — which is what makes the
+     * Apple 3.1.1 guarantee true by construction rather than by inventory.
+     *
+     * The UI still hides its buy controls (a dead button is what the second absolute rule forbids);
+     * this is the net under that, and it is the half that cannot be forgotten.
+     */
+    if (storeRail === 'none') return;
     setIsRecharging(true);
     setRechargeStatus('Requesting Cashfree checkout protocol...');
     try {
@@ -366,7 +377,15 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   }, [user, playPluginReady, storeConfig, sweepPendingPlayPurchases]);
 
   /** Which rail this device should show. Pure decision, unit-tested in storePurchase.test.ts. */
-  const storeRail = purchaseRail({ isNative: isNativeApp(), config: storeConfig, pluginReady: playPluginReady });
+  const storeRail = purchaseRail({
+    isNative: isNativeApp(),
+    // 🍎 `Capacitor.getPlatform()` is read here rather than inside the pure module, which stays free
+    // of Capacitor so every rule in it is testable without a device — the same split
+    // `playBillingNative.ts` and `deviceIntegrityNative.ts` already use.
+    platform: nativePlatformName(),
+    config: storeConfig,
+    pluginReady: playPluginReady,
+  });
 
   const verifyBillingPayment = async (status: 'SUCCESS' | 'FAILED') => {
     if (!paymentSession || !user) return;

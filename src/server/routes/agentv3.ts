@@ -20955,6 +20955,14 @@ async function noteBuildOutcome(
           // still charged in full.
           editingExistingApp: isEditMode,
           decidedBilledUsd: effectiveBilledUsd,
+          // 🔒 THE TWO DISCOUNTS DO NOT STACK (admin 2026-09-21). `effectiveBilledUsd` has already
+          // had the service margin WAIVED a few lines above whenever the app was never seen running
+          // — and that is the only state in which the half-off band is reachable at all, because
+          // both rules read the same `buildObs.previewRendered`. Halving a margin-free bill charges
+          // the user less than the build cost US, on every stopped build. These two numbers floor it
+          // at our real cost: a cancellation may take our margin, never our cost.
+          realCostUsd: decidedRealCostUsd,
+          sandboxUsd: decidedSandboxUsd,
         })
         : null;
       if (cancelBill?.applies && cancelBill.billedUsd > 0) {
@@ -20967,7 +20975,14 @@ async function noteBuildOutcome(
           message: `${cancelBill.reason} (discount ${cancelBill.discountPct}%, delivery: ${cancelBill.delivery}).`,
           autoResolved: true,
         });
-        if (cancelBill.userMessage) events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+        if (cancelBill.userMessage) {
+          // ONE MONEY STATEMENT, NOT TWO (the lesson of autopsy 586295b7). When the floor decides the
+          // charge, the bill equals the waiver's own figure, so the waived-margin notice below would
+          // ALSO fire and tell the user the same thing twice in different words. The cancellation
+          // message is the more specific of the two and already says there is no service charge.
+          waivedMarkupNotice = null;
+          events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${cancelBill.userMessage}`, ts: Date.now() });
+        }
       } else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {
         effectiveBilledUsd = 0;
         zeroBillReason = cancelBill?.applies

@@ -59,6 +59,50 @@
 //
 // PURE — no clock, no I/O, no env. Every rule is unit-testable and cannot lie about what it did.
 
+// ───────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 THE TWO DISCOUNTS DO NOT STACK — a real-cost FLOOR (admin-mandated 2026-09-21).
+//
+// Admin, after I raised it three times and they asked for the fix rather than the risk:
+// *"haan, floor + naya message bhej do."*
+//
+// 🔑 WHAT WAS WRONG, AND IT WAS NOT A RARE COMPOSITION — IT WAS EVERY STOPPED BUILD. Four days after
+// the table above shipped, `previewEarnsMarkup.ts` (2026-09-18) began waiving the service margin on
+// any build whose app was never seen running. The two modules read the SAME fact:
+//
+//     previewEarnsMarkup:     previewProven: buildObs.previewRendered === true
+//     cancelledBuildBilling:  appRendered:   buildObs.previewRendered === true
+//
+// One expression. So the `files-saved` branch is reachable ONLY when `appRendered` is false — which
+// is exactly when the markup has already been waived. The 50% was therefore never cutting into a
+// margin; it was cutting into **our own out-of-pocket cost**, always.
+//
+//   a build whose real cost is $1.20 · decided bill $4.80 (tiered markup) · user presses Stop
+//     before 2026-09-18:  $4.80 → 50% → $2.40 charged   · we spent $1.20 → +$1.20   ← the design
+//     after  2026-09-18:  $4.80 → margin waived → $1.20 → 50% → $0.60 · we spent $1.20 → −$0.60
+//
+// Neither module is wrong. The 50% was designed against a bill that INCLUDED margin, and the waiver
+// removed the very thing it was discounting. **The composition was never decided** — this is that
+// decision, and it is the same shape as the double-negative class this repo keeps paying for: two
+// locally-correct rules, and nothing asking what happens when both fire.
+//
+// 🔒 THE RULE: a cancellation discount may take our PROFIT and may never take our COST.
+//     billedUsd = min(decided, max(realCost, decided / 2))
+//
+//   • margin waived (today's every Stop) ⇒ the floor IS the bill: the user pays exactly what the
+//     build cost to run, we earn nothing and lose nothing. Both halves of the admin's own
+//     instruction — *"DONO ka nuksan na ho, na mera na user ka"* — hold for the first time.
+//   • margin intact (the kill switch off, or a real cost already above the bill) ⇒ half, byte for
+//     byte as before.
+//   • ⚠️ THE THREE ₹0 OUTCOMES ARE UNTOUCHED, deliberately: nothing written, template-only, and the
+//     unverified edit each return BEFORE this arithmetic. Those are admin rulings about what the
+//     user is holding, not discounts on a bill, and a floor under them would charge for a build that
+//     delivered nothing — the one thing every rule above forbids.
+//
+// ⚠️ AND THE COST MUST BE PASSED IN, NOT ASSUMED. `realCostUsd`/`sandboxUsd` absent ⇒ floor 0 ⇒ the
+// plain half, which is today's behaviour exactly. A module that guessed its own floor would be
+// inventing a cost, which this repo's billing law forbids even when the guess flatters us.
+// ───────────────────────────────────────────────────────────────────────────────────────────────────
+
 import type { AbortCause } from './buildAbortCause';
 
 /** What the user is holding at the moment they stopped. */
@@ -112,13 +156,36 @@ export interface CancelledBuildFacts {
   editingExistingApp?: boolean;
   /** The honest real-cost bill the normal billing model already computed for this build. */
   decidedBilledUsd: number;
+  /**
+   * What the PROVIDERS really cost NavBharatAI on this build (USD, tokens) — the floor's first half.
+   *
+   * Absent means 0, i.e. no floor and the plain half: today's behaviour exactly. This module must
+   * never derive its own figure — `realProviderCostUsd` is the one place that number is computed,
+   * and a second estimate here would be an invented cost.
+   */
+  realCostUsd?: number;
+  /** What the VM really cost (USD), already capped to this build's own window — the floor's second half. */
+  sandboxUsd?: number;
 }
 
 export interface CancelledBuildBill {
   /** What to charge. Always ≤ `decidedBilledUsd`, never negative. */
   billedUsd: number;
-  /** 0, 50 or 100. Reported so the admin's ledger can show the reasoning, not just a number. */
-  discountPct: 0 | 50 | 100;
+  /**
+   * The discount ACTUALLY applied, as a percentage of the decided bill. Reported so the admin's
+   * ledger shows the reasoning rather than just a number.
+   *
+   * ⚠️ It was `0 | 50 | 100` until the real-cost floor existed. It is now derived from the two
+   * numbers, because a floored charge is genuinely somewhere between 0% and 50% and printing a
+   * hardcoded `50%` beside a bill that was not halved would make the ledger state something false —
+   * on the one line an admin reads to judge whether a Stop cost them money.
+   */
+  discountPct: number;
+  /**
+   * True when the real-cost floor is what decided this charge, i.e. half would have billed the user
+   * less than the build cost us. Drives the user's wording, which must not say "half" when it is not.
+   */
+  costFloorApplied: boolean;
   /** What the user was holding. `null` when this was not a user cancel at all. */
   delivery: CancelledDelivery | null;
   /** True only when this module is the thing deciding the charge. */
@@ -146,6 +213,7 @@ function round(usd: number): number {
 
 const FREE: Omit<CancelledBuildBill, 'reason'> = {
   billedUsd: 0, discountPct: 100, delivery: null, applies: false, userMessage: null,
+  costFloorApplied: false,
 };
 
 /**
@@ -176,7 +244,7 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   // to flip: both say "when the evidence disagrees with itself, do not charge".
   if (written === 0) {
     return {
-      billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true,
+      billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true, costFloorApplied: false,
       reason: 'user stopped the build before any file was produced — nothing delivered, not charged',
       userMessage: null,
     };
@@ -193,7 +261,7 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   // be reduced. There is no path that computes a number of its own.
   if (f.appRendered === true) {
     return {
-      billedUsd: round(decided), discountPct: 0, delivery: 'working-app', applies: true,
+      billedUsd: round(decided), discountPct: 0, delivery: 'working-app', applies: true, costFloorApplied: false,
       reason: 'user stopped the build after a working app had been delivered and seen rendering — charged in full for the work done',
       userMessage: decided > 0
         ? 'You stopped this build, and your app was already built and running — it is saved and you can keep using it. You have been charged for the work that was completed, not for a full build.'
@@ -208,7 +276,7 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   // not already have by asking, so there is nothing to charge for.
   if (files === 0) {
     return {
-      billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true,
+      billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true, costFloorApplied: false,
       reason: 'user stopped the build before any file of their own was produced — only the platform template existed and nothing rendered, so not charged',
       userMessage: null,
     };
@@ -224,18 +292,40 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   // so a fresh build with only our template keeps its own, more specific reason.
   if (f.editingExistingApp === true) {
     return {
-      billedUsd: 0, discountPct: 100, delivery: 'unverified-edit', applies: true,
+      billedUsd: 0, discountPct: 100, delivery: 'unverified-edit', applies: true, costFloorApplied: false,
       reason: 'user stopped an edit of an existing app before it could be verified running — the app may be in a worse state than it started, so not charged',
       userMessage: null,
     };
   }
 
+  // 🔒 THE FLOOR (see the header). A cancellation discount may take our PROFIT and never our COST.
+  // The real cost is whatever the caller measured; absent ⇒ 0 ⇒ the plain half, exactly as before.
+  const real = money(f.realCostUsd) + money(f.sandboxUsd);
   const halved = round(decided / 2);
+  // `min(decided, …)` keeps RULE 3 structural: a real cost somehow above the decided bill cannot
+  // raise the charge, it just leaves it where the rest of the billing path already put it.
+  const billedUsd = round(Math.min(decided, Math.max(real, halved)));
+  const costFloorApplied = billedUsd > halved;
+  // Derived, never hardcoded — a bill that was not halved must not print "50%" in the ledger.
+  const discountPct = decided > 0 ? Math.round(((decided - billedUsd) / decided) * 100) : 100;
   return {
-    billedUsd: halved, discountPct: 50, delivery: 'files-saved', applies: true,
-    reason: 'user stopped the build with files saved but no app verified running — charged half the work done',
-    userMessage: halved > 0
-      ? 'You stopped this build. Your files are saved and I can carry on from here whenever you like. Because the app was not finished, you have been charged HALF of what the work done so far cost — not a full build.'
+    billedUsd,
+    discountPct,
+    delivery: 'files-saved',
+    applies: true,
+    costFloorApplied,
+    reason: costFloorApplied
+      ? 'user stopped the build with files saved but no app verified running — the service margin was already waived for the same reason, so the charge is floored at what the build really cost us rather than halved again (a cancellation may take our margin, never our cost)'
+      : 'user stopped the build with files saved but no app verified running — charged half the work done',
+    userMessage: billedUsd > 0
+      ? (costFloorApplied
+        // Deliberately NOT "half": it is not half, and the number on their bill would contradict the
+        // sentence beside it. This is the same statement `previewEarnsMarkup` makes, and the route
+        // suppresses that one when this fires so the user is never told twice.
+        ? 'You stopped this build. Your files are saved and I can carry on from here whenever you like. '
+          + 'Because the app was not finished, you have been charged only what the work done so far actually '
+          + 'cost to run — no service charge on top, and nothing like a full build.'
+        : 'You stopped this build. Your files are saved and I can carry on from here whenever you like. Because the app was not finished, you have been charged HALF of what the work done so far cost — not a full build.')
       : null,
   };
 }

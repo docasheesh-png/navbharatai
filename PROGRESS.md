@@ -75362,6 +75362,107 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — A CANCELLATION TAKES OUR MARGIN, NEVER OUR COST (the double discount, closed)
+
+**Admin, after I raised the same open item three times and they asked for the fix rather than the
+risk: _"haan, floor + naya message bhej do."_**
+
+🔴 **AND A CORRECTION TO MY OWN THREE REPORTS FIRST, because it changes the urgency.** All three
+times I wrote that a stopped build *"can"* cost NavBharatAI money. Verified in code: it **always**
+does. This was never a rare composition — it is every stopped build with files saved.
+
+**WHY "ALWAYS": TWO MODULES READ ONE EXPRESSION.**
+
+```
+previewEarnsMarkup.ts     previewProven: buildObs.previewRendered === true
+cancelledBuildBilling.ts  appRendered:   buildObs.previewRendered === true
+```
+
+`decideCancelledBuildBill`'s `files-saved` branch (the 50%-off band) is reachable **only** when
+`appRendered` is false — and that is exactly the state in which `decideMarkupOnProof` has already
+waived the service margin. So the half was never cutting into margin; it was cutting into
+NavBharatAI's own out-of-pocket cost, on every occurrence.
+
+| a build costing us $1.20 · decided bill $4.80 · user presses Stop | charged | we spent | result |
+|---|---|---|---|
+| before 2026-09-18 | $4.80 → 50% → **$2.40** | $1.20 | **+$1.20** ← the designed trade |
+| after 2026-09-18 (markup waiver shipped) | $4.80 → margin waived → $1.20 → 50% → **$0.60** | $1.20 | **−$0.60 loss** |
+
+🔑 **NEITHER MODULE IS WRONG, AND THAT IS THE CLASS.** The 50% band (2026-09-14) was designed
+against a bill that INCLUDED margin. The waiver (2026-09-18) removed the very thing it was
+discounting, four days later. Each is locally correct; **nothing ever asked what happens when both
+fire.** Same shape as every composition defect this repo has paid for — and the reason it survived
+review is that reading either module alone shows nothing amiss.
+
+### THE FIX — a real-cost floor on the discount, not a second multiplication
+
+```
+billedUsd = min(decided, max(realCost, decided / 2))
+```
+
+Stated as a rule: **a cancellation discount may take our PROFIT and may never take our COST.**
+
+- **margin waived** (today's every Stop) ⇒ the floor IS the bill: the user pays exactly what the
+  build cost to run, we earn nothing and lose nothing. Both halves of the admin's own 2026-09-14
+  instruction — *"DONO ka nuksan na ho, na mera na user ka"* — hold for the first time.
+- **margin intact** (kill switch off, or a real cost already above the bill) ⇒ half, byte for byte
+  as before.
+- 🔒 **THE THREE ₹0 OUTCOMES ARE UNTOUCHED, and the ordering is asserted:** nothing written,
+  template-only (autopsy `2b0a3ed5`), and the unverified edit (autopsy `95598899`) each return
+  BEFORE the arithmetic. Those are admin rulings about *what the user is holding*, not discounts on
+  a bill — a floor under them would charge for a build that delivered nothing, which is the one
+  thing every rule above forbids. A `working-app` Stop is likewise still charged in full.
+- 🔒 **RULE 3 stays structural:** `min(decided, …)`, so the floor can never raise a charge.
+
+⚠️ **THE COST IS PASSED IN, NEVER ASSUMED.** `realCostUsd` / `sandboxUsd` are the SAME two numbers
+the waiver is given (`decidedRealCostUsd`, `decidedSandboxUsd`) — one measured cost, not two
+estimates. **Absent ⇒ floor 0 ⇒ the plain half, i.e. today's behaviour exactly**, which is what
+keeps the existing suite meaningful. A module that derived its own floor would be inventing a cost,
+which this repo's billing law forbids even when the guess flatters us; a test strips comments and
+asserts no cost computation exists in this module's code.
+
+### TWO SECOND-ORDER PROBLEMS THE FIX WOULD OTHERWISE HAVE CREATED
+
+Both caught before pushing, and both are the *"a fix must never trade one problem for another"* rule
+doing its job:
+
+1. **The user's message would have lied.** *"you have been charged HALF"* is false when the charge
+   was floored — and the number beside it on their bill would contradict the sentence. The floored
+   wording says what actually happened: *"charged only what the work done so far actually cost to
+   run — no service charge on top."* `costFloorApplied` is what selects it, so the arithmetic and
+   the sentence cannot drift.
+2. **The user would have been told twice.** When the floor decides the charge, the bill EQUALS
+   `markupDecision.billedUsd`, so the settle's waived-margin notice (`if … effectiveBilledUsd ===
+   markupDecision.billedUsd`) would ALSO have fired — two notices, seconds apart, saying nearly the
+   same thing about the same money. That is autopsy `586295b7`'s exact class. The cancellation
+   branch now clears `waivedMarkupNotice` before emitting, because it is the more specific of the
+   two statements and already says there is no service charge.
+
+`discountPct` widened from `0 | 50 | 100` to a **derived** number for the same honesty reason: a
+floored charge is genuinely somewhere between 0% and 50%, and printing a hardcoded `50%` beside a
+bill that was not halved would make the admin's `CANCELLED_BUILD_CHARGED` ledger line state
+something false — on the one line used to judge whether a Stop cost money. Its only consumer is
+that message string (grepped).
+
+**Files:** `src/server/AgentV3/cancelledBuildBilling.ts` (facts, floor, message, derived pct),
+`src/server/routes/agentv3.ts` (two numbers threaded in; the duplicate notice suppressed).
+**Test-locked and reversion-proven four ways** in `tests/aCancellationTakesOurMarginNotOurCost.test.ts`
+(23 cases): remove the floor → 4 fail; drop `realCostUsd` at the call site → the wiring guard fails;
+let the waived-margin notice fire too → the one-statement guard fails; move the floor above a ₹0
+return → the ordering guard fails. The first test runs BOTH modules in the route's own order, so the
+composition itself is pinned rather than each half separately — which is the only kind of test that
+would have caught this.
+
+**Kill switch unchanged:** `AGENTV3_BILL_CANCELLED=off` restores the whole rule's absence, floor and
+all.
+
+⚠️ **STILL OPEN, and deliberately not decided here:** whether the `files-saved` band should exist at
+all now that it is, in practice, always floored to cost. It is a pricing question (the user pays
+cost rather than half of cost — genuinely more than yesterday), the admin chose this shape when
+shown the trade, and re-opening it is theirs, not a session's.
+
+---
+
 ## 2026-09-21 — A CHAIN IS NOT A REFUSAL: our own PORT injection failed silently on `cd x && npm run dev`
 
 **The admin asked the question that settled it** (verbatim): *"preview port 5000 par tha, navbharatai

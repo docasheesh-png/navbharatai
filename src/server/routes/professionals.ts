@@ -22,6 +22,7 @@ import { routeParam, routeParams } from '../lib/expressCompat';
 import {
   AttachmentRecallStore, referencesEarlierAttachment, buildRecallBlock,
 } from '../lib/clinical/attachmentRecall';
+import { conversationIdFromBody, attachmentRecallKey } from '../professionals/conversationId';
 
 /** Max attachments accepted per turn (defense against oversized payload loops). */
 const MAX_PROFESSIONAL_ATTACHMENTS = 4;
@@ -80,7 +81,12 @@ export function registerProfessionalsRoutes(app: Express): void {
       res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
       return;
     }
-    const { message, history, fileAttachments } = req.body || {};
+    const { message, history, fileAttachments, conversationId: rawConversationId } = req.body || {};
+    // WHICH WINDOW is talking (admin 2026-09-21: five chats at once). Client-minted, validated to a
+    // plausible id or treated as absent; it only ever selects among the VERIFIED user's own
+    // conversations (memory and recall are both keyed under the uid first), so trusting its shape is
+    // safe and trusting its identity is impossible.
+    const conversationId = conversationIdFromBody(rawConversationId);
     const rawAttachments: RawAttachment[] = Array.isArray(fileAttachments)
       ? fileAttachments
           .filter((a: any) => a && typeof a.base64 === 'string' && a.base64 && typeof a.type === 'string')
@@ -136,9 +142,10 @@ export function registerProfessionalsRoutes(app: Express): void {
     const verifiedUserId = identity?.uid || null;
 
     // ── ATTACHMENT RECALL ────────────────────────────────────────────────────────────────────────
-    // Keyed by the VERIFIED user + this professional, so one person's file can never surface in
-    // someone else's conversation, and a signed-out caller (no key) simply gets today's behaviour.
-    const recallKey = verifiedUserId ? `${verifiedUserId}:${config.id}` : '';
+    // Keyed by the VERIFIED user + this professional + THIS CONVERSATION, so one person's file can never
+    // surface in someone else's conversation — nor in their own other window with the same expert
+    // (admin 2026-09-21). A signed-out caller (no key) simply gets today's behaviour.
+    const recallKey = verifiedUserId ? attachmentRecallKey(verifiedUserId, config.id, conversationId) : '';
     if (recallKey) {
       if (attachmentBlock) {
         professionalRecall.remember(recallKey, attachmentBlock, Date.now());
@@ -167,7 +174,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
 
     try {
-      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier);
+      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId });
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);

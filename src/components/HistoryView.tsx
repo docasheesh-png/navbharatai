@@ -67,7 +67,8 @@ export const HistoryView = ({
    */
   includeProfessionals?: boolean;
   /** Open a professional's chat (the row's conversation was already resumed if it was archived). */
-  onOpenProfessional?: (viewId: string) => void;
+  /** Open a professional conversation — the view id and the conversation it is (or has been resumed as). */
+  onOpenProfessional?: (viewId: string, conversationId: string) => void;
   /**
    * Rendered INSIDE something that already has a title (the Free chat's history popup), so this view
    * drops its own big heading and its outer padding (admin 2026-09-20). A popup titled "Chat history"
@@ -224,10 +225,13 @@ export const HistoryView = ({
     const openRow = () => {
       if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
       // An archived conversation is genuinely RESUMED (same rule as Professional History) so
-      // opening it continues that exact conversation rather than starting a fresh one.
+      // opening it continues that exact conversation rather than starting a fresh one — under the id
+      // it had, so the server continues the same memory. An open one is simply named.
       const store = browserStore();
-      if (store && prof.profEndedAt) resumeArchived(store, prof.profViewId, prof.profEndedAt);
-      onOpenProfessional?.(prof.profViewId);
+      let conversationId = prof.profConversationId ?? null;
+      if (store && prof.profEndedAt) conversationId = resumeArchived(store, prof.profViewId, prof.profEndedAt);
+      if (!conversationId) { setProfItems(readProfessionalHistory()); return; } // gone — refresh, never open a blank chat
+      onOpenProfessional?.(prof.profViewId, conversationId);
     };
     const deleteRow = () => {
       if (!prof) { onDeleteSession && onDeleteSession(session.id); return; }

@@ -77145,6 +77145,108 @@ the preview is on screen AND the tab is visible, never while backgrounded, and i
 
 Full gate green on the final state.
 
+## 2026-09-21 — 🪟 FIVE CHATS AT ONCE, AND ONE CHAT'S WORDS STAY IN THAT CHAT
+
+Admin, verbatim: *"ek sath ek bar me 5 modes me chat kar sakte hai (banana hai apko), abhi ek hi chat
+hai"* — and then the condition that decided the whole design: *"chat leak na ho, 2 professional ek sath
+baat karenge, kabhi kabhi ek hi professional 2 chat me baat karega, to aisi sthiti me ek chat ki
+baat/memory 2nd me na jaye? … agar user bole isko yaad rakhna, ya user ka naam, profession, etc jo yaad
+karne layak cheeze hai, woh yaad rakhna hai … chat ki memory bhale hi other chat me chali jaye, par text
+reply idhar ka udhar na ho, gpt/claude/gemini jaisa banao."*
+
+**So two things had to be true at once, and they pull in opposite directions:** the TEXT of a
+conversation must never reach another conversation — not even the same expert's second window — while
+the FACTS about the person (name, profession, language, where they are from, and anything they
+explicitly ask to be remembered) must reach every expert. That is exactly how the memory in the
+assistants the admin named works, and it is what shipped.
+
+### 🔴 The leak that existed before a second window did — two of them
+
+Read before a line was written (safeguard #6, the whole repo): semantic memory (`conversation_memory_v1`)
+holds the user's sentences and the assistant's replies VERBATIM and was scoped **per professional**
+(`professional:<id>`), and the attachment recall (`AttachmentRecallStore`) was keyed
+`${uid}:${professionalId}`. Both would have handed chat A's words and files to chat B the moment two
+Teacher AI windows existed. The profile store (`professional_user_memory`) was already facts-only — the
+ONE layer that may cross — but it crossed nothing: it was per professional too, and had no slot for
+"remember this".
+
+### What shipped — server (the isolation and the sharing)
+
+- **`MemoryChunk.conversationId`** (`semanticMemory.ts`): a chunk is recalled ONLY by the conversation
+  that wrote it. **The rule is uniform and "no id" is itself a conversation** — the one that existed
+  before conversations had ids (every chunk written before today, and every caller that names none, i.e.
+  a client built before this change). A legacy chunk is recalled by legacy callers and by nobody who
+  names a conversation. ⚠️ The first draft read `conversationId !== undefined && …`, under which an
+  id-less caller recalled EVERY window's words; a source-level guard now forbids that shape. The
+  dedupe key in `mergeChunks` carries the conversation too — without it the same sentence said in two
+  chats collapsed to its newest copy, in the OTHER conversation.
+- **`retrieveMemoryBlock` / `rememberTurn`** thread the id; the engine passes it to both
+  (`runProfessionalChatWithUsage(…, { conversationId })`); the route validates it to a plausible shape
+  (`professionals/conversationId.ts`) and keys attachment recall by it too
+  (`attachmentRecallKey(uid, professionalId, conversationId)`). Client-claimed, and safe to be: it only
+  ever selects among the VERIFIED user's own conversations.
+- **`SHARED_MEMORY_FIELDS` + `SHARED_PROFILE_ID = '_shared'`** (`clientMemory.ts`): name, language,
+  location, occupation, and `remember` (a list the PERSON authors — the instruction asks for their own
+  words and only on an explicit request). Stored under one extra profile id in the SAME collection, so
+  no new store and no new availability rule. The engine loads both profiles, injects the professional's
+  own over the shared (`combinedProfile`), validates the model's block against the effective fields
+  (`effectiveFields`), and splits the update (`splitUpdate`): a declared key to the professional's
+  profile as before, a shared key to the shared profile, a key in both (`name`) to both. The memory
+  instruction now says so to the model — *who they are is shared; what was SAID in another chat is never
+  shown to you*.
+
+### What shipped — client (the windows)
+
+- **`lib/chatWindows.ts`** (pure): `MAX_OPEN_CHATS = 5`, open/close/label rules, cap refusal with a
+  reason — a "New chat" that quietly does nothing is the fake-button class, so the cap shows a toast.
+- **`professionalChatStore.ts`** rewritten for MANY conversations per professional: open ones under
+  `prof_<id>_conversations`, each with an id minted client-side (`newConversationId`, the shape the
+  server accepts); the ended ones in the existing archive, now carrying `conversationId` so resuming
+  continues the SAME conversation on the server. **The old `prof_<id>_messages` is read, never
+  written**: it surfaces as `LEGACY_CONVERSATION_ID`, migrates on first save, and is sent to the server
+  as NO id — which is the server's own name for it. Quota shedding archives the oldest real
+  conversation AFTER the shrunken open list is stored (archiving first would fail for the reason we are
+  shedding). `MAX_OPEN_PER_PROFESSIONAL = 5` in storage, so "New chat" pressed a hundred times is not a
+  hundred transcripts.
+- **`App.tsx`**: `openChats` / `activeChatId` beside `openTabs` (never inside it — the tab list is a
+  closed `ViewType[]`); `toggleTab` returns whether it navigated and, for a professional, guarantees a
+  window (a named conversation from "New chat" or History, else the last ongoing one, else a fresh one);
+  `closeChatWindow` ends ONE conversation and closes the tab through `closeTab` only for the last window;
+  `closeTab` ends the WINDOWS of a closing professional — and only them, never a stored conversation the
+  user did not close. **73 hand-written `activeView === 'x_ai'` blocks became ONE map over the open
+  windows**, mounted per conversation and hidden when not on screen, so a reply arriving in another
+  window is not lost. `activeChat` is the ONE answer to "which window is showing" (the render, the header
+  chips and the Mode sheet's ✕ all read it) — `closeTab` can land on an expert whose window was never
+  the focused one, and a tab with nothing behind it is what the fallback prevents.
+- **`TopNav`** gains conversation chips ("Teacher AI", "Teacher AI (2)", ✕ per conversation). A
+  professional was never in `menuItems` (deliberately — a child surface), so until today an open expert
+  chat had NO chip at all and a second chat with the same expert had nowhere to exist.
+- History (both views) opens BY conversation; an ongoing row names its id, an ended row is resumed under
+  its stored id (or a fresh one for pre-id records).
+
+### Locked
+`tests/aChatsWordsStayInThatChat.test.ts` (engine threads the id to both memory calls; helpers;
+source-level guards on the filter, the dedupe key, the route and the client body),
+`semanticMemory.test.ts` (isolation, legacy, new-conversation-recalls-nothing),
+`clientMemory.test.ts` and `teacherMemoryEngine.test.ts` (shared profile load/inject/split/save,
+own-wins, "remember this" shared-only, anonymous never asked), `professionalsRoute.test.ts`
+(threading + implausible ids ⇒ undefined), `chatWindows.test.ts`, `professionalChatStore.test.ts`
+(side-by-side conversations, legacy migration, caps, quota order, resume-by-id, wiring guards),
+`everyChatSurfaceHasAWayOut.test.ts` (ONE render site, `conversationId={win.id}`), `modePicker.test.ts`.
+
+### Still open / stated plainly
+- **Doctor AI is one window.** It has its own per-case addressing (`sdaCaseStore`) and its own server
+  memory; it is not a config-driven professional and was not widened here. Two Doctor AI cases at once
+  is a separate change.
+- **A professional VIEW carries one parent link**, so Teacher #1 opened from Free and Teacher #2 from
+  the hub both close when Free closes. Per-window parents would need `tabOpeners` keyed by conversation.
+- **Voice** (`ProfessionalVoiceButton`) has its own memory store and does not write semantic memory, so
+  it neither leaks nor is scoped by the window. Not changed.
+- The semantic-memory document stays ONE bounded doc per (user, professional); five busy windows share
+  its cap, so a very active chat can age another's chunks out. Bounded storage was preferred over a
+  document per conversation that nothing deletes.
+
+Full gate green on the final state.
 ---
 
 ## 2026-09-21 (later) — THE CARTOON WAS OUR OWN PROMPT: realism and cinematic on the free tier

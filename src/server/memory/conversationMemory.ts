@@ -29,12 +29,16 @@ function active(userId: string | undefined | null): userId is string {
  * Recall the most relevant past turns for `query` and return them as a prompt block ('' when disabled,
  * off, or nothing relevant). `excludeTexts` are turns already in the recent window, so we never
  * re-inject what the prompt already shows.
+ *
+ * `conversationId` names the conversation asking: only ITS chunks are eligible (see
+ * `MemoryChunk.conversationId`). Absent ⇒ the legacy, id-less conversation — never "every conversation".
  */
 export async function retrieveMemoryBlock(
   userId: string | undefined | null,
   scope: string,
   query: string,
   excludeTexts?: Iterable<string>,
+  conversationId?: string,
 ): Promise<string> {
   if (!active(userId) || !scope || !query.trim()) return '';
   try {
@@ -42,7 +46,7 @@ export async function retrieveMemoryBlock(
     if (chunks.length === 0) return '';
     const queryVec = await embedText(query);
     if (!queryVec) return '';
-    const relevant = selectRelevant(queryVec, chunks, { excludeTexts });
+    const relevant = selectRelevant(queryVec, chunks, { excludeTexts, conversationId });
     return formatMemoryBlock(relevant);
   } catch {
     return '';
@@ -53,12 +57,17 @@ export async function retrieveMemoryBlock(
  * Persist this turn (the user message + the assistant reply) as embedded memory, so it can be recalled
  * later. Skips trivial turns, embeds what remains, and appends within the bounded cap. Best-effort +
  * non-throwing — safe to await or fire-and-forget.
+ *
+ * `conversationId` is stamped on every chunk so that only the same conversation can recall it. Omitted
+ * ⇒ the chunk is written id-less, i.e. into the legacy conversation (a field is never written as
+ * `undefined`: Firestore refuses the value, and an absent field IS the legacy marker).
  */
 export async function rememberTurn(
   userId: string | undefined | null,
   scope: string,
   userText: string,
   assistantText: string,
+  conversationId?: string,
 ): Promise<void> {
   if (!active(userId) || !scope) return;
   try {
@@ -71,7 +80,12 @@ export async function rememberTurn(
     const chunks: MemoryChunk[] = [];
     for (const p of pending) {
       const vec = await embedText(p.text);
-      if (vec) chunks.push({ role: p.role, text: p.text, ts: p.ts, embedding: quantizeEmbedding(vec) });
+      if (vec) {
+        chunks.push({
+          role: p.role, text: p.text, ts: p.ts, embedding: quantizeEmbedding(vec),
+          ...(conversationId ? { conversationId } : {}),
+        });
+      }
     }
     if (chunks.length > 0) await appendMemory(userId, scope, chunks, memoryMaxChunks());
   } catch {

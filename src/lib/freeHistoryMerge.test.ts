@@ -20,6 +20,16 @@ describe('freeHistoryMerge — one tagged list for the FREE surface', () => {
     expect(rows[0].id).toBe('prof:chef_ai#live');
   });
 
+  it('two OPEN conversations of one professional are two rows with two ids, each naming its conversation', () => {
+    const rows = professionalRows([
+      { id: 'chef_ai', name: 'Chef AI', preview: 'biryani', conversationId: 'c-1' },
+      { id: 'chef_ai', name: 'Chef AI', preview: 'dosa', conversationId: 'c-2' },
+    ], NOW);
+    expect(rows.map((r) => r.id)).toEqual(['prof:chef_ai#c-1', 'prof:chef_ai#c-2']);
+    expect(rows.map((r) => r.profConversationId)).toEqual(['c-1', 'c-2']);
+    expect(rows.every((r) => r.profLive)).toBe(true);
+  });
+
   it('a blank preview falls back to the professional name, never an empty title', () => {
     const rows = professionalRows([{ id: 'yoga_ai', name: 'Yoga AI', preview: '  ' }], NOW);
     expect(rows[0].title).toBe('Yoga AI');

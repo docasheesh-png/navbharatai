@@ -75362,6 +75362,162 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — AUTOPSY c5fd6ad1 + bff0bf23: the engine cloned the user's project INTO their project, on a turn that said "do not change any files"
+
+**The two builds.** `c5fd6ad1` — *"Import this app from my GitHub repository and give me a short survey
+of what it is and how it is structured. **Do not change any files yet.**"* — Weak tier, 4.4 min, rung 1,
+`ok: true`, ₹6.59 (free-list). Then, 94 seconds later, `bff0bf23` — **"preview nahi chala"** — 9 min,
+builtBy KIMI (the ladder fell to rung 2), 18 unresolved warnings.
+
+### 🔴 THE HEADLINE: `git clone <the repo we had just imported> workspace/mitrify`
+
+The platform's import was CORRECT and said so three times: `IMPORT_ACCOUNTING` 327 entries → 175 source
+files, `IMPORT_LANDING` "bulk extract **count-verified**: 175", `IMPORT_DIAGNOSTIC` "SUCCEEDED". The
+architect then delegated the survey to the **fullstack sub-agent**, whose first command was a `git clone`
+of the same repository into `workspace/mitrify`. Every shell command runs with `cwd: WORKSPACE_ROOT`
+(`E2BActuator`), so that landed at `/home/user/workspace/workspace/mitrify` — **a second complete copy of
+the user's app inside their app.** The report carries the doubled path in a `TOOL_ERROR`:
+`/home/user/workspace/workspace/mitrify/README.md`.
+
+**Every consequence is in the next build's report, and the user paid for all of it:**
+- **175 → 352 "source files"**, persisted durably (`IN_BUILD_GREEN` recorded 351 files as the last known
+  good) and bound for the user's own GitHub repo.
+- `INTEGRITY_DUPLICATE_ENTRY` — *"2 files each mount a React root: client/src/main.tsx,
+  workspace/mitrify/client/src/main.tsx"*. `INTEGRITY_DUPLICATE_STYLESHEET` and
+  `INTEGRITY_FOCUS_CONFLICT` (4 components, two of them the copies) are the same cause.
+- **The integrity heal then spent ~3.5 minutes and 10 model calls EDITING the copy the engine had
+  created** — `edit_file workspace/mitrify/client/src/pages/complete-profile.tsx`, `edit_file
+  workspace/mitrify/client/src/main.tsx` — on a turn where the user had only said "preview nahi chala".
+  It removed the duplicate's autoFocus and root mount. **The 175-file copy itself is still there.**
+- The survey's own facts came from the clone's documentation rather than the running app: it told the
+  user *"Server … on port 5000 / Client … on port 5173"* while the platform's own `npm run dev` output in
+  the same report reads **"serving on port 3000"**.
+
+### 🔑 TWO CAUSES, ONE IN EACH HALF OF THE 50/50 LAW
+
+**1 — THE FACT NEVER REACHED THE ACTOR.** The architect's context already carries, verbatim:
+`[APP IMPORT — already completed] The user's app from … has ALREADY been imported into this workspace:
+N files … Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them.`
+**`makeSubAgentSpawn` passes `projectMap()` and `verificationStatus()` and nothing else.** So the agent
+that ran the clone was told the project had 175 files and was never told those files were on its own
+disk. Fixed: one line, emitted only when the project graph really holds files, so a from-scratch build
+never sees a sentence that would be false.
+
+**2 — NOTHING REFUSED THE COMMAND.** The bash dispatcher has a whole guard family — `scaffoldGuard`,
+`previewGuard`, destructive source deletion, still-imported deletion, dependency mutation — and this
+member was missing. `scaffoldGuard`'s own docblock states the principle and even names this class:
+*"the agent tends to improvise … a nested project subdir … The system prompt already tells the agent not
+to run these generators, but a prompt is advisory — the model can still ignore it (and has)."* A prompt
+had already said it here too, and was ignored. `gitCloneGuard.ts` (pure) is the deterministic backstop;
+kill switch `AGENTV3_CLONE_GUARD=off`.
+
+🔒 **THE DISCRIMINATOR KEEPS A REAL RESCUE OPEN, and it is not a guess.** The guard refuses only when
+the clone lands inside the workspace **AND the project graph already holds files**.
+`shouldRetryImportAnonymously` (`ProjectImport.ts`) records a real July incident in which the platform's
+own authenticated clone of **this same repository** brought in nothing while *"the model's own plain
+`git clone` of the identical URL exited 0"*. An import that lands nothing leaves no project, so the count
+is 0 and that clone still runs. The asymmetry is deliberate: refusing wrongly on an empty workspace costs
+the user their whole import; allowing wrongly on a populated one costs a duplicate — and the duplicate is
+the case the evidence names.
+
+🔒 **BOTH LANES BY CONSTRUCTION, not by a second copy.** The clone was run by the SUB-AGENT, and
+yesterday's autopsy (`53d43c18`) was a guard wired into one of two lanes. `makeSubAgentSpawn` builds a
+child `new ToolDispatcher(...)` — the same class — so a guard in that class covers the architect and
+every sub-agent at once. A source-level test asserts that property, because a second dispatcher
+implementation would silently re-open the gap and nothing else would fail.
+
+### ⚠️ PREVENTION RATHER THAN CLEANUP — and the reason is a fact about the sandbox
+
+The tidier-sounding fix is to exclude a nested repository from the collected project.
+**It is not available, and this is an OPEN root cause (rule 6):** `IGNORED_LIST_DIRS` in `E2BActuator`
+prunes `.git` **inside the sandbox**, so `listFiles` never returns a single `.git` path and
+`collectWorkspaceFiles` therefore cannot distinguish a nested repository from an ordinary
+subdirectory — the one signal that would identify it is destroyed before the collector runs. The
+alternatives are worse and were rejected with reasons: a nested `package.json` is how every **monorepo**
+is laid out, and "a subtree that duplicates the root" is a heuristic that would DELETE a user's real
+files from their durable copy (the standing rule that a fix must never trade one problem for another).
+So the wrong branch is made impossible at the door, after which there is no nested copy to detect.
+**Whoever re-opens this needs a dedicated nested-repo probe (`find . -name .git -not -path ./.git`), not
+a change to the collector's skip list.**
+
+### THE FIVE-BUCKET LEDGER (both builds, every item)
+
+**✅ Self-healed — 5.** Sandbox Postgres provisioned and verified with a real `SELECT 1` (14s); the app's
+own migrations run clean (`npm run db:push`, 57s); 34 unprovisionable env values set to honest empty
+placeholders; the dev server's port discovered as 3000 rather than the framework's 5173 and the preview
+re-pointed; 16 credential-leaking console logs redacted in 4 files. ⚠️ Per the 50/50 law the last one is
+**an unrequested edit to the user's source on a "preview nahi chala" turn**, and so is "🔧 Added 14
+missing import(s)" — 14 edits to an app that was already running.
+
+**🔀 Worked around — 3.** The ladder fell GLM → KIMI in build 2 (rung 1 → 2, `LADDER_DEPTH` was recorded
+only for build 1). The integrity heal routed around the duplicate by editing it instead of removing it.
+`npm run dev` in build 2 took **94 seconds** through two failed health-check attempts because build 1's
+server still held port 5000 (`EADDRINUSE`, "UNCAUGHT EXCEPTION — server kept alive").
+
+**⏭️ Skipped — 4.** `COMPLEXITY_ROUTING: "simple (score 5, **model-unavailable**)"` on BOTH builds — the
+cheap second-opinion classifier never ran, twice, and the report says the score came "from evidence the
+scorer could not read". `SANDBOX_PEAK_MEMORY: not available on this machine` — the 2026-09-11 instrument
+produced nothing. No `JOURNEY_*` outcome on build 1 beyond the gate's prose. `READY_BEFORE_END: "The app
+was never judged finished during the build"` on both.
+
+**❌ Still broken / shipped imperfect — 4.** The 175-file duplicate is still in the user's project. The
+survey states the wrong ports. `requestAnalysis.startTier: "gemini"` on **both** builds — Gemini has been
+on no build ladder since 2026-09-14, and this is the **third** report carrying it (recorded in the
+`56f0c645` autopsy and not fixed). 14 `INTEGRITY_UNUSED_DEP` warnings survive into the delivered app.
+
+**🥵 Struggle points — 5.** `TIME_TO_FIRST_CALL` **92s** on build 1, of which **60s** is a single step,
+"saving your project so it survives a restart" (175 files); 43s on build 2 with a 21s grounding gap. The
+ETA said **"~3–4 min (midpoint ~3 min)"** and the build took **9**, then at minute 2 announced *"up to 56
+min left"* — two estimates that contradict each other and both miss. `WRITE_TIME_TYPECHECK` reports *"no
+TypeScript source was written this build"* on a build that went on to edit two `.tsx` files — the line is
+emitted before the integrity heal runs, so it is true of the moment and false of the build. Two
+write-time typechecks returned **`exitCode: null`**.
+
+### 🔎 STEP 2 — THE MISSING SUBSYSTEM: nothing records what the USER'S PREVIEW SURFACE was showing
+
+This is the most important thing in the report and it is not the clone. Build 1 proved the app rendered,
+by every means the platform has: `PREVIEW_PUBLISHED`, `IMPORT_PREVIEW_SERVING`, *"✅ Preview verified — I
+opened the running app in a browser and it renders correctly"*, `APP_RENDERED`, `TIME_TO_FIRST_RENDER`
+219s, `IN_BUILD_GREEN`, `GREEN_GUARD_SAVE`, `PREVIEW_REVIVAL_RECIPE` stored **and read back**.
+
+**Ninety-four seconds later the user typed "preview nahi chala".**
+
+And the app was still up — build 2's own `npm run dev` failed with `EADDRINUSE` on port 5000, which is
+proof that build 1's server was still listening. So the server was running, the URL was unchanged
+(`https://3000-…e2b.app` in both builds), the platform had opened it in a real browser and seen it
+render — and the user saw nothing. **Nothing in the report can explain the gap, because every proof we
+hold is about the SERVER and the SANDBOX, and not one is about the pane the user is looking at.**
+`deliveryProof.ts` closed "did the app render?"; what is missing is "did the RENDER REACH THE USER?" —
+what the preview surface resolved to, whether the door minted a token, whether the iframe loaded, what
+it displayed. An OPEN root cause, deliberately not guessed at: a fix built on a theory of this would be
+the surface patch the fourth rule forbids.
+
+### THE BAR (🫰) — judged honestly
+
+Build 1 met it: 4.4 minutes, rung 1, one model rung, no heal, the app rendered. **Build 2 did not.** The
+user asked why the preview was not running; nine minutes later they had a preview, ~3.5 of those minutes
+spent repairing damage the engine had done to their project in the previous turn, and 14 unrequested
+import edits and 16 redactions in their source. Every one of those minutes was a struggle the user could
+feel, and none of the work was what they asked for.
+
+### Shipped in this change
+
+- `src/server/AgentV3/gitCloneGuard.ts` — pure: where a clone would land (relative ⇒ inside, because the
+  cwd IS the workspace root; absolute ⇒ inside only under the root, which is what keeps the platform's own
+  `/tmp/nbhydrate` clone allowed by construction rather than by an exception list), whether to refuse, and
+  the redirect. It names `glob`/`read_file`/`grep` and `/tmp`, because a stop that only forbids leaves a
+  model nowhere to go.
+- `ToolDispatcher.ts` — the guard beside `scaffoldGuard`, before the command runs. The project graph is
+  read ONLY for a clone that lands inside, so an ordinary command pays nothing; a source-level test holds
+  that ordering.
+- `SubAgent.ts` — the import fact the sub-agent never had.
+- `tests/theProjectWasClonedIntoItself.test.ts` — 24 cases, **reversion-proven four ways**: removing the
+  guard call fails 3, making the refusal ignore the file count fails the rescue case, moving the graph
+  read ahead of the inside test fails the cost guard, deleting the sub-agent line fails 2.
+
+**What to watch:** `clone-guard refused clone into the workspace` in the workspace audit, and whether
+imported-project builds stop reporting `INTEGRITY_DUPLICATE_ENTRY`.
+
 ## 2026-09-21 — AUTOPSY 56f0c645: a SENTENCE vouched for a control nobody captured, and a working app was told its search was missing
 
 **The report:** a Quick Notes build, free tier, 3.2 min, ₹9.38, `ok: true`, reviewer 90/100 "App looks

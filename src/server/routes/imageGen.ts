@@ -5,7 +5,7 @@ import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { validateBody, vnumber, vobject, vstring } from '../lib/validate';
 import { MAX_CUSTOM_PX, MIN_CUSTOM_PX } from '../../lib/imageSize';
 import {
-  buildImagePrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
+  imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
   pollinationsEnabled, fetchPollinationsImage,
@@ -184,10 +184,12 @@ export function registerImageGenRoutes(app: Express): void {
       // the model's guess. craftImagePrompt applies the rules a designer would — per PURPOSE, since an
       // icon (must read at 48px), a banner (needs empty space for a headline) and an avatar (must
       // survive a circular crop) are three different briefs. Same model, same call, same price.
-      // buildImagePrompt is still used as the base so the India-map directive and every existing
-      // behaviour is preserved; the craft layer adds direction on top of it.
+      // `imageSubjectPrompt` is the base so the India-map directive and every existing behaviour is
+      // preserved; the craft layer adds direction on top of it and owns style and ratio outright.
       const crafted = craftImagePrompt({
-        prompt: buildImagePrompt(req.body),
+        // The SUBJECT, not the decorated string: style and ratio are the craft layer's to decide,
+        // and passing them in pre-written is what stopped its style-conflict guard working at all.
+        prompt: imageSubjectPrompt(req.body),
         style: typeof req.body?.style === 'string' ? req.body.style : undefined,
         size: typeof req.body?.size === 'string' ? req.body.size : undefined,
         type: typeof req.body?.type === 'string' ? req.body.type : undefined,
@@ -208,7 +210,7 @@ export function registerImageGenRoutes(app: Express): void {
       // WRONG number in the picture underneath the right one — so the brief asks for clean space
       // instead. A shop NAME is deliberately NOT included: one to five words is what these engines
       // are genuinely good at, and a name in the artwork beats a caption over it.
-      const userText = buildImagePrompt(req.body);
+      const userText = imageSubjectPrompt(req.body);
       const leaveAlone = noTextDirection(extractImageText(userText));
       const prompt = leaveAlone ? `${withInlineNegative(crafted)} ${leaveAlone}` : withInlineNegative(crafted);
       const timeout = <T,>(p: Promise<T>): Promise<T> => Promise.race([

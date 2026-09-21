@@ -31,6 +31,11 @@ const STYLES = [
   // photograph, so a user wanting one picked "3D" and got the isometric render it promises. First
   // position because it is what most people want most of the time.
   { id: 'photo', label: 'Realistic', desc: 'Real photo look', emoji: '📷' },
+  // CINEMATIC sits second because it is the other half of the same ask (admin 2026-09-21: "kya yeh
+  // aur behatar realistic, CINEMATIC nahi ban sakti?"). It is not "Realistic but stronger" — a film
+  // still is deliberately LIT and graded where a photograph is observed, and the server's
+  // STYLE_DIRECTION keeps them as two different briefs for exactly that reason.
+  { id: 'cinematic', label: 'Cinematic', desc: 'Film still look', emoji: '🎬' },
   { id: 'minimal', label: 'Minimal', desc: 'Clean & simple', emoji: '⬜' },
   { id: 'vibrant', label: 'Vibrant', desc: 'Bold colors', emoji: '🌈' },
   { id: 'dark', label: 'Dark', desc: 'Dark aesthetic', emoji: '🌑' },
@@ -57,6 +62,18 @@ const SIZES = [
 // Image types — a compulsory selector (exactly one is always active). The chosen type is
 // combined into the real generation request, so it genuinely shapes the output.
 const IMAGE_TYPES = [
+  // 🔴 "Photograph" IS FIRST, AND THEREFORE THE DEFAULT, SINCE 2026-09-21 — the admin's report was
+  // "cartoon jaisi image banti hai abhi", and this list is why. The type chip is COMPULSORY: every
+  // request is forced into one of these art briefs, there was no neutral entry, and the default was
+  // "Modern app logo" — whose server-side direction reads, word for word, "flat vector style … no
+  // photorealism". So somebody who typed "a man drinking chai in a Delhi street" was commanding a
+  // flat vector cartoon without ever choosing one. Nothing was wrong with the engine; our own prompt
+  // asked for the cartoon.
+  //
+  // ⚠️ THE LABEL IS DELIBERATELY "Photograph" AND NOT "Photo / Scene": `PURPOSE_PATTERNS` matches
+  // the bare word "scene" as an ILLUSTRATION brief, so that label would have quietly re-created the
+  // same bug one word further along. A test pins that this label resolves to no purpose at all.
+  'Photograph',
   'Modern app logo',
   'Website banner',
   'App icon',
@@ -115,6 +132,10 @@ const STYLE_ENHANCERS: Record<string, string> = {
   gradient: 'smooth gradient, colorful gradient background, ',
   flat: 'flat design, 2D, vector style, no shadows, ',
   '3d': '3D render, isometric, depth, shadows, realistic, ',
+  // Realistic and Cinematic deliberately add NOTHING here. The Enhance button pastes words into the
+  // user's own box, and these two styles are carried by camera language the server applies in full —
+  // pasting a shortened copy of it would put a weaker version of the same instruction in front of
+  // the real one, and `freshTerms` would then drop the real one as "already written".
 };
 
 /**
@@ -151,7 +172,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const [proAvailable, setProAvailable] = useState<ImageProAvailability>(null);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
-  const [style, setStyle] = useState('minimal');
+  // Realistic by default, for the same reason "Photograph" leads the type list: an untouched screen
+  // should make a real picture of what the user described, not a flat graphic they never asked for.
+  // Minimal is one tap away and unchanged for anyone who wants it.
+  const [style, setStyle] = useState('photo');
   const [size, setSize] = useState('square');
   const [colorHint, setColorHint] = useState('none');
   // The user's own picture, when they are CHANGING one instead of inventing one. Its presence is

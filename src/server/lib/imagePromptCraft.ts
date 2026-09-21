@@ -152,6 +152,24 @@ const STYLE_DIRECTION: Record<string, { add: string; conflicts: string[] }> = {
     add: 'photograph, shot on a full-frame camera with a 50mm lens at f/2, natural light, shallow depth of field, sharp focus on the subject, true-to-life colour, fine surface detail and texture',
     conflicts: ['flat', 'vector', 'cartoon', 'illustration', 'drawing', 'anime', 'painting', 'render', 'isometric', 'minimal'],
   },
+  /**
+   * CINEMATIC — the second thing that did not exist, and whose absence was the second half of the
+   * admin's 2026-09-21 report ("kya yeh aur behatar realistic, CINEMATIC nahi ban sakti?").
+   *
+   * 🔑 IT IS NOT "PHOTO, BUT MORE". A photograph and a film still are different crafts, and the
+   * difference is the LIGHT, not the adjective: `photo` above is documentary — 50mm, natural light,
+   * true-to-life colour, the look of a good camera pointed at a real thing. A film still is
+   * deliberately lit and deliberately graded: a wide anamorphic lens, a strong key against a dark
+   * fill, atmosphere in the air, a colour grade, and grain. Merging the two would give a muddle
+   * that is neither, which is exactly what `styleConflictsWithPrompt` exists to prevent elsewhere.
+   *
+   * Same discipline as `photo`: camera and lighting language, never the inert words ("epic", "4k",
+   * "masterpiece") that people reach for and that move a diffusion model almost not at all.
+   */
+  cinematic: {
+    add: 'cinematic film still, anamorphic wide lens, shallow depth of field, dramatic directional key light with deep falloff, atmospheric haze and volumetric light, rich cinematic colour grading, fine film grain, high dynamic range, composed like a frame from a feature film',
+    conflicts: ['flat', 'vector', 'cartoon', 'illustration', 'drawing', 'anime', 'painting', 'isometric', 'minimal', 'bright', 'white background'],
+  },
 };
 
 /**
@@ -159,7 +177,47 @@ const STYLE_DIRECTION: Record<string, { add: string; conflicts: string[] }> = {
  * Kept separate from the per-purpose negatives because "no illustration" is nonsense on an icon brief
  * and actively harmful on a logo one.
  */
-const PHOTO_NEGATIVE = 'illustration, cartoon, anime, 3d render, cgi, painting, drawing, sketch, plastic-looking, over-smoothed skin, waxy texture, blurry, soft focus, low detail';
+const PHOTO_NEGATIVE = 'illustration, cartoon, anime, 3d render, cgi, painting, drawing, sketch, plastic-looking, over-smoothed skin, waxy texture, over-smoothed, low detail';
+
+/** What ruins a FILM STILL specifically — flat light is the tell that it was never lit at all. */
+const CINEMATIC_NEGATIVE = 'flat even lighting, on-camera flash, amateur snapshot, webcam quality, washed-out colour, cluttered background';
+
+/** The two chips that ask for a real camera rather than artwork. */
+const REALISM_STYLES = new Set(['photo', 'cinematic']);
+
+/**
+ * The user asked for a real photograph IN THEIR OWN WORDS, regardless of which chip is set.
+ *
+ * ⚠️ DELIBERATELY NARROW. A bare "photo" is not enough — "logo for a photography studio" is a LOGO
+ * brief that happens to mention photography, and treating it as a realism request would hand a
+ * photographer a snapshot instead of a mark. So the phrases here are ones that describe the IMAGE
+ * ("photo of", "realistic", "cinematic"), never ones that merely name a subject.
+ *
+ * PURE.
+ */
+export function realismInWords(prompt: string): boolean {
+  const p = String(prompt ?? '').toLowerCase();
+  return /\b(?:photo-?realistic|realistic|cinematic|lifelike|real life|real-life)\b/.test(p)
+    || /\b(?:photo|photograph|picture|portrait|shot|still)\s+of\b/.test(p)
+    || /\b(?:real|actual|asli)\s+(?:photo|photograph|picture|image)\b/.test(p)
+    || /\bphoto\s*jaisi\b|\basli\s+jaisi\b/.test(p);
+}
+
+/**
+ * Purposes whose art direction CONTRADICTS a photograph, word for word.
+ *
+ * 🔴 THIS IS THE DEFECT THE ADMIN REPORTED, AND IT IS OUR PROMPT'S FAULT RATHER THAN THE ENGINE'S.
+ * `PURPOSE_DIRECTION.logo` says "flat vector style … **no photorealism**" and
+ * `PURPOSE_NEGATIVE.logo` lists "photorealistic" among the things to avoid. The free picker's
+ * image-type chip is COMPULSORY and defaults to "Modern app logo", so every untouched screen was
+ * commanding a flat vector cartoon — and a user who then chose the Realistic style got BOTH
+ * "photograph, 50mm lens" and "no photorealism" in one prompt, where the negative wins. Realism was
+ * unreachable in practice, the same way it was unreachable before the `photo` chip existed at all.
+ *
+ * `banner`, `avatar`, `background` and `thumbnail` are NOT here: their direction is about framing
+ * and composition, which a photograph obeys perfectly well.
+ */
+const PHOTO_HOSTILE_PURPOSES = new Set<ImagePurpose>(['icon', 'logo', 'screenshot', 'illustration']);
 
 /** Size id → the ratio the model understands. */
 const SIZE_RATIO: Record<string, string> = { square: '1:1', wide: '16:9', portrait: '3:4', icon: '1:1' };
@@ -247,22 +305,58 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
 
   if (base) parts.push(base);
 
-  if (purpose !== 'general') parts.push(PURPOSE_DIRECTION[purpose] + '.');
-
+  // ── DOES THIS REQUEST ASK FOR A REAL PHOTOGRAPH? ────────────────────────────────────────────
+  // Decided BEFORE the purpose direction is written, because it can cancel it. Two ways to ask:
+  // tap the Realistic or Cinematic chip, or simply write it ("a realistic photo of a Delhi
+  // street"). The second matters most — the image-type chip is compulsory and most people never
+  // change it, so their typed words are the only signal of what they actually wanted.
   const styleSpec = STYLE_DIRECTION[String(input.style ?? '')];
-  // Whether the PHOTO direction actually made it into the prompt. Tracked rather than inferred from
-  // `input.style`, because a chip that CONFLICTED with the user's wording was dropped — and adding
-  // "no illustration" negatives to a prompt we never sent photo direction to would fight the user's
-  // own words, which is the one thing this module refuses to do.
-  let photoApplied = false;
+  const styleDropped = !!styleSpec && styleConflictsWithPrompt(input.style, base);
+  const realismChip = !!styleSpec && !styleDropped && REALISM_STYLES.has(String(input.style));
+  const realism = realismChip || realismInWords(base);
+
+  // 🔴 THE USER'S EXPLICIT ASK BEATS A CHIP THEY NEVER TOUCHED. This module already states that
+  // principle, in `styleConflictsWithPrompt`'s own words — "the user's typed intent is the stronger
+  // signal of the two — they wrote it, they did not merely leave a chip on" — and applied it to
+  // exactly half the problem: the STYLE chip. The TYPE chip, which is the one that defaults to
+  // "Modern app logo" and injects "no photorealism", was never subject to it. Same rule, both
+  // halves. A photo-hostile purpose now stands down when a photograph was genuinely asked for.
+  //
+  // 🔴 AND WHEN THEY CONTRADICT, THE PURPOSE WINS — a prompt may never carry both. Before
+  // 2026-09-21 it carried both routinely: `PURPOSE_DIRECTION.logo` says "flat vector style … **no
+  // photorealism**" and `PURPOSE_NEGATIVE.logo` lists "photorealistic" to avoid, so the Realistic
+  // chip produced "photograph, 50mm lens at f/2" and "no photorealism" in one breath, where the
+  // negative wins. Realism was unreachable in practice — the same way it was unreachable before the
+  // `photo` chip existed at all.
+  //
+  // ⚠️ THE PURPOSE WINS *BECAUSE THE TYPE CHIP IS NOW A DELIBERATE CHOICE.* Its default used to be
+  // "Modern app logo", which made every untouched screen command a flat vector cartoon — that is
+  // the bug the admin reported, and it is fixed by the picker's new neutral "Photograph" default,
+  // not by this rule. With a neutral default, a photo-hostile type is one somebody picked on
+  // purpose, and so is a purpose they typed themselves ("a coffee shop LOGO"). Either way a flat
+  // mark is what works at small sizes, so the style chip is the one that stands down.
+  const realismLoses = realism && PHOTO_HOSTILE_PURPOSES.has(purpose);
+  if (purpose !== 'general') parts.push(PURPOSE_DIRECTION[purpose] + '.');
+  if (realismLoses) {
+    // Never silent: they tapped that chip and the reply says which way the conflict went, and how
+    // to get the other answer.
+    notes.push('This is a logo/icon brief, so the realistic-photo style was not applied — a flat mark is what stays readable at small sizes. Set the Image type to "Photograph" if you wanted a real photo.');
+  }
+
+  // Whether the PHOTO negatives belong. Tracked rather than inferred from `input.style`, because a
+  // chip that CONFLICTED with the user's wording was dropped — and adding "no illustration"
+  // negatives to a prompt we never sent photo direction to would fight the user's own words, which
+  // is the one thing this module refuses to do. Words alone DO count: somebody who wrote
+  // "realistic" is served by them exactly as somebody who tapped the chip is.
+  const photoApplied = realism && !realismLoses;
   if (styleSpec) {
-    if (styleConflictsWithPrompt(input.style, base)) {
+    if (styleDropped || (realismChip && realismLoses)) {
       // Silent would be wrong: the user tapped that chip and is entitled to know it was set aside.
-      notes.push('Your own wording took priority over the selected style — they asked for opposite things.');
+      // `realismLoses` has already said so in its own words, so this does not say it twice.
+      if (!realismLoses) notes.push('Your own wording took priority over the selected style — they asked for opposite things.');
     } else {
       const fresh = freshTerms(styleSpec.add, base);
       if (fresh) parts.push(`Style: ${fresh}.`);
-      if (String(input.style) === 'photo') photoApplied = true;
     }
   }
 
@@ -291,6 +385,7 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
     purpose !== 'general' ? PURPOSE_NEGATIVE[purpose] : '',
     // Realism drifts toward illustration unless it is told not to — see PHOTO_NEGATIVE.
     photoApplied ? PHOTO_NEGATIVE : '',
+    photoApplied && realismChip && String(input.style) === 'cinematic' ? CINEMATIC_NEGATIVE : '',
   ]
     .filter(Boolean)
     .join(', ');

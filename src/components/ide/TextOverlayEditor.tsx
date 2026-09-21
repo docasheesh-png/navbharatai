@@ -20,6 +20,7 @@ import {
   MIN_SIZE_PCT,
   composeImage,
   defaultLayer,
+  type LayerKind,
   devanagariRendersHere,
   devanagariWarning,
   imagePixels,

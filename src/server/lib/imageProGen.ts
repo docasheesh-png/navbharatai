@@ -298,6 +298,13 @@ export function buildImageProRequest(
     num_images: n,
     n,
     output_format: 'png',
+    // 🔴 WITHOUT THIS THE PAID TIER IS A DEAD BUTTON ON THE HOST IT WAS SIZED FOR. WaveSpeed — the
+    // vendor whose $0.005 price this module's whole margin is built on — is ASYNCHRONOUS by default:
+    // the POST returns a prediction id and the picture arrives at a separate result URL. Asking for
+    // sync mode makes it answer inline when it can. It is not a guarantee (their wait window is about
+    // 120s and a slow task still comes back `processing`), which is why `pendingResultUrl` and the
+    // caller's polling exist as well. A host that does not know this field ignores it.
+    enable_sync_mode: true,
     // The free tier's own 2026-09-18 finding, carried over: without a seed the same brief returns the
     // same picture, and "try again" stops meaning anything.
     seed: Math.floor(Date.now() % 2_147_483_647),
@@ -348,7 +355,11 @@ export function parseImageProResponse(
     return null;
   };
 
-  const lists = [r.images, r.data, r.output, r.artifacts];
+  // WaveSpeed wraps everything in `{ code, message, data: { … } }`, and its images arrive as
+  // `data.outputs`. The envelope is unwrapped rather than special-cased so a host that returns the
+  // same shapes at the TOP level keeps working exactly as before.
+  const envelope = r.data && typeof r.data === 'object' && !Array.isArray(r.data) ? r.data : r;
+  const lists = [r.images, r.data, r.output, r.artifacts, envelope.outputs, envelope.images, envelope.data];
   for (const list of lists) {
     if (Array.isArray(list)) {
       for (const e of list) {
@@ -360,8 +371,45 @@ export function parseImageProResponse(
       if (got) return got;
     }
   }
-  return fromEntry(r.result?.sample) ?? fromEntry(r.image) ?? fromEntry(r.result) ?? null;
+  return fromEntry(r.result?.sample) ?? fromEntry(r.image) ?? fromEntry(r.result)
+    ?? fromEntry(envelope.image) ?? fromEntry(envelope.url) ?? null;
 }
+
+/**
+ * The URL a still-running job's picture will appear at, or null when the response is not a pending one.
+ *
+ * Two shapes mean "not finished": the ordinary async submit (`status: created|processing`), and sync
+ * mode giving up on its wait window — which is an HTTP **200** carrying `code: 5004`. That second one
+ * is the trap: a caller that only checks `r.ok` sees success, finds no image, and reports a failure
+ * for a job that was going to succeed.
+ *
+ * ⚠️ IT RETURNS A URL ONLY WHEN THE HOST GAVE US ONE. Building `…/predictions/<id>/result` ourselves
+ * would hardcode one vendor's URL shape into a module that is deliberately host-agnostic, and would
+ * be wrong for every other host the moment one is used.
+ */
+export function pendingResultUrl(resp: unknown): string | null {
+  const r = resp as any;
+  if (!r || typeof r !== 'object') return null;
+  const d = r.data && typeof r.data === 'object' ? r.data : r;
+  const status = String(d.status ?? r.status ?? '').toLowerCase();
+  const done = status === 'completed' || status === 'succeeded' || status === 'failed' || status === 'cancelled';
+  if (done && status !== 'completed' && status !== 'succeeded') return null; // terminal failure, not pending
+  if (done) return null; // finished — the image is in the body and `parseImageProResponse` has it
+  const url = d.urls?.get ?? d.url_get ?? d.result_url ?? r.urls?.get;
+  return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null;
+}
+
+/** Did a terminal response say the job FAILED? Distinguishes "no image yet" from "no image ever". */
+export function jobFailed(resp: unknown): boolean {
+  const r = resp as any;
+  if (!r || typeof r !== 'object') return false;
+  const d = r.data && typeof r.data === 'object' ? r.data : r;
+  const status = String(d.status ?? r.status ?? '').toLowerCase();
+  return status === 'failed' || status === 'cancelled' || status === 'timeout';
+}
+
+/** How often to ask whether a pending job has finished, and how long to keep asking. */
+export const IMAGE_PRO_POLL_MS = 2_000;
 
 /**
  * The user-facing failure text. ONE function, so the white-label law holds by construction rather

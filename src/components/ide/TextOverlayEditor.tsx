@@ -12,7 +12,7 @@
 // what they save, and nothing would fail to reveal it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Bold, Check, Plus, Trash2, Type, X } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, Check, List, Plus, Trash2, Type, X } from 'lucide-react';
 import {
   MAX_LAYERS,
   MAX_SIZE_PCT,
@@ -20,6 +20,7 @@ import {
   MIN_SIZE_PCT,
   composeImage,
   defaultLayer,
+  type LayerKind,
   devanagariRendersHere,
   devanagariWarning,
   imagePixels,
@@ -38,6 +39,18 @@ interface Props {
 // The user's own palette for THEIR picture — deliberately fixed hexes, not theme tokens: a caption
 // must look the same in the exported file whatever theme the app is wearing (see `textOverlay.ts`).
 const SWATCHES = ['#ffffff', '#000000', '#ffd400', '#ff3b30', '#0a84ff', '#34c759', '#ff9f0a', '#ff2d9b'];
+/**
+ * What each kind is for, in the user's own terms.
+ *
+ * The placeholder is the whole teaching surface for the list: nobody reads a help page, but everybody
+ * reads the grey text inside an empty box. It shows the exact shape — item, space, price, one per
+ * line — because that is all the format there is.
+ */
+const KINDS: Array<{ id: LayerKind; label: string; icon: typeof Type; placeholder: string }> = [
+  { id: 'text', label: 'Text', icon: Type, placeholder: 'Shop name, phone number, address…\nPress Enter for a new line' },
+  { id: 'list', label: 'Rate list', icon: List, placeholder: 'Chai 10\nSamosa 15\nCoffee 25\n\nOne item per line, price at the end' },
+];
+
 const BAND_CHOICES: Array<{ id: string; label: string; value: string }> = [
   { id: 'none', label: 'None', value: '' },
   { id: 'dark', label: 'Dark bar', value: 'rgba(0,0,0,0.55)' },
@@ -242,18 +255,48 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
           </div>
 
           <div>
+            {/* Caption or rate card. Switching kind re-reads the SAME text, so somebody who typed a
+                menu into a caption gets their menu laid out rather than having to type it again. */}
+            <div className="flex items-center gap-1.5 mb-2">
+              {KINDS.map((k) => {
+                const Icon = k.icon;
+                return (
+                  <button
+                    key={k.id}
+                    onClick={() => patch(active.id, { kind: k.id, align: k.id === 'list' ? 'left' : active.align })}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] border ${
+                      active.kind === k.id ? 'bg-accent text-on-accent border-transparent' : 'bg-raised text-body border-line'
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" /> {k.label}
+                  </button>
+                );
+              })}
+            </div>
             <textarea
               value={active.text}
               onChange={(e) => patch(active.id, { text: e.target.value })}
               maxLength={MAX_TEXT_CHARS}
-              rows={2}
-              placeholder={'Shop name, phone number…\nPress Enter for a new line'}
+              rows={active.kind === 'list' ? 5 : 2}
+              placeholder={KINDS.find((k) => k.id === active.kind)?.placeholder}
               className="w-full px-3 py-2 rounded-xl bg-card border border-line text-sm text-ink placeholder:text-faint resize-none focus:outline-none focus:border-accent-text"
             />
             <p className="mt-1 text-[10px] text-faint text-right">{active.text.length}/{MAX_TEXT_CHARS}</p>
           </div>
 
           <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="text-[11px] text-muted w-12 shrink-0">Width</label>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                value={Math.round(active.widthPct * 100)}
+                onChange={(e) => patch(active.id, { widthPct: Number(e.target.value) / 100 })}
+                className="flex-1 accent-[color:var(--accent)]"
+              />
+            </div>
+
             <div className="flex items-center gap-3">
               <label className="text-[11px] text-muted w-12 shrink-0">Size</label>
               <input
@@ -284,7 +327,9 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
             <div className="flex flex-wrap items-center gap-3">
               <label className="text-[11px] text-muted w-12 shrink-0">Style</label>
               <div className="flex items-center gap-1">
-                {(['left', 'center', 'right'] as const).map((a) => {
+                {/* A list sets its own two edges, so an alignment control there would be a button
+                    that does nothing — which the second absolute rule forbids. Bold still applies. */}
+                {(active.kind === 'list' ? [] : (['left', 'center', 'right'] as const)).map((a) => {
                   const Icon = a === 'left' ? AlignLeft : a === 'right' ? AlignRight : AlignCenter;
                   return (
                     <button

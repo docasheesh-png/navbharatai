@@ -78,10 +78,50 @@ function hasControlMatching(htmlLower: string, textLower: string, re: RegExp): b
   return attrs.some((a) => re.test(a));
 }
 
+/**
+ * What follows "add" when it is an INSTRUCTION TO THE BUILDER rather than a request for an Add control.
+ *
+ * 🔴 WHY (autopsy `ad1596fc`, 2026-09-21). The prompt was *"**Add** pagination or infinite scroll to the
+ * main list so long lists stay fast and easy to browse."* The very first word tripped the `add` probe,
+ * no Add button was found in a memory game, and **"Add / create has no visible control" became the
+ * build's reported root cause** — for a build that did exactly what was asked.
+ *
+ * This is the third occurrence of one class, and `featureRequest.ts` already names the other two: a
+ * NEGATED mention ("no settings") and a DEFERRED one ("login in stage 3"). This is the present tense:
+ * the word is there, affirmative and undeferred, and means something else. `add` is the worst offender
+ * because it is also the commonest word an English sentence starts an instruction with.
+ *
+ * 🔑 The object decides. `add a task` names a thing the USER will add, so an Add control must exist.
+ * `add pagination`, `add dark mode`, `add tests` name a CAPABILITY the builder is being told to build —
+ * and the second half of report `1682cd03` is the Hinglish form of the same thing, *"…bhi **add karo**"*,
+ * where `add karo` is simply "please make this change".
+ *
+ * ⚠️ A BLOCKLIST, DELIBERATELY, and only after a determiner. The opposite shape — an allowlist of data
+ * nouns — has no end (`add a recipe`, `add a song`, `add a patient`), and being wrong there SILENCES a
+ * real missing-control finding. Being wrong here only leaves today's false positive in place, which is
+ * the safe direction. The known residual: `add a contact page` is not suppressed, because allowing
+ * arbitrary words before the noun would swallow `add task and filter`.
+ */
+const BUILDER_INSTRUCTION_OBJECT =
+  '(?:a\\s+|an\\s+|the\\s+|some\\s+|more\\s+|proper\\s+|basic\\s+)*' +
+  '(?:pagination|infinite\\s+scroll(?:ing)?|lazy\\s+load(?:ing)?|search(?:ing)?|filter(?:s|ing)?|' +
+  'sort(?:s|ing)?|dark\\s+mode|light\\s+mode|theme|login|log\\s*in|sign\\s*up|auth(?:entication)?|' +
+  'tests?|validation|animations?|transitions?|charts?|graphs?|responsive(?:ness)?|offline|footer|header|' +
+  'nav\\s*bar|navigation|sidebar|menu|pages?|screens?|routes?|tabs?|buttons?|icons?|loading|spinner|' +
+  'empty\\s+state|error\\s+handling|modal|dialog|toast|notifications?|shortcuts?|accessibility|seo|' +
+  'meta|service\\s+worker|analytics|cach(?:e|ing)|database|api|endpoints?|backend|styling|css|polish|' +
+  'features?|functionality|support|ability|option)s?\\b' +
+  // The instruction with no object at all: "add it", "add this", and the Hinglish "add karo".
+  '|(?:it|this|that|them|these|those)\\b|(?:karo|kar\\s*do|kar\\s*dijiye|kijiye|kare)\\b';
+
 const FEATURES: FeatureDef[] = [
   {
     feature: 'add', label: 'Add / create',
-    requested: /\b(add|create|new (?:task|item|note|todo|entry|record)|insert)\b/,
+    // See BUILDER_INSTRUCTION_OBJECT above: `add a task` is a control, `add pagination` is an order.
+    requested: new RegExp(
+      `\\b(?:add|create|insert)\\b(?!\\s+(?:${BUILDER_INSTRUCTION_OBJECT}))` +
+      '|\\bnew\\s+(?:task|item|note|todo|entry|record)\\b',
+    ),
     // Needs an input to type into AND a control to submit it (button text or a form).
     present: (h, t) => inputCount(h) >= 1 && (hasControlMatching(h, t, /\b(add|create|save|submit|new|\+)\b/) || /<form\b/.test(h)),
   },

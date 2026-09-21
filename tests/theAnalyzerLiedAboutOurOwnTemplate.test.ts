@@ -126,6 +126,38 @@ describe('a feature keyword carries a sense, not just a spelling', () => {
     expect(r.probes.find((p) => p.feature === 'auth')?.present).toBe(true);
   });
 
+  // ── AUTOPSY ad1596fc (2026-09-21) — the SAME class, six days later, on the commonest word of all.
+  // The prompt was "Add pagination or infinite scroll to the main list…". `Add` is the first word of an
+  // INSTRUCTION, and it produced "Add / create has no visible control", which became that build's
+  // reported root cause. `complete` and `auth` were fixed above; `add` was not hunted with them.
+  it('🔴 THE NEXT REPORT: "Add pagination…" is an order to the builder, not a request for an Add button', () => {
+    const HTML = `<div id="root"><h1>Memory match</h1><div class="mem-grid"><button class="mem-card"></button></div>
+      <h2>Game history</h2><ul><li>12 moves</li></ul>
+      <button>Previous</button><span>Page 1 of 2</span><button>Next</button></div>`;
+    const r = checkFeaturePresence('Add pagination or infinite scroll to the main list so long lists stay fast and easy to browse.', HTML);
+    expect(r.missing).toEqual([]);
+    expect(r.probes.map((p) => p.feature)).not.toContain('add');
+  });
+
+  it('⚠️ and a real Add control is still demanded — precision, not silence', () => {
+    const TODO = '<div id="root"><input placeholder="New task" /><button>Add</button><ul><li>Buy milk</li></ul></div>';
+    // The object decides: a TASK is a thing the user adds, so the control must exist.
+    expect(checkFeaturePresence('A notes app where I can add a note and see the list', TODO)
+      .probes.find((p) => p.feature === 'add')?.present).toBe(true);
+    // Two occurrences, one an instruction and one a request — the second must still count.
+    expect(checkFeaturePresence('Add a button to add a task to the list', TODO)
+      .probes.map((p) => p.feature)).toContain('add');
+    // An app that really lacks it is still reported.
+    const noAdd = '<div id="root"><ul><li>Buy milk</li></ul><button>Delete</button></div>';
+    expect(checkFeaturePresence('A todo app to add a task and delete a task', noAdd).missing).toContain('Add / create');
+  });
+
+  it('"add karo" is Hinglish for "please make this change"', () => {
+    // report 1682cd03, named in featureRequest.ts — it reached the report as a false root cause once.
+    const r = checkFeaturePresence('rest timer me 30s ka option bhi add karo', '<div id="root"><h1>Timer</h1><button>Start</button></div>');
+    expect(r.probes.map((p) => p.feature)).not.toContain('add');
+  });
+
   it('a settings switch is not a task being finished', () => {
     const r = checkFeaturePresence('A notes app where you can toggle dark mode and toggle the sidebar', '<div id="root"><button>Dark</button><ul><li>note</li></ul></div>');
     expect(r.probes.map((p) => p.feature)).not.toContain('complete');

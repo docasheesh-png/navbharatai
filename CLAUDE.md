@@ -2832,6 +2832,46 @@ the flag entries above promise.
   **What to watch:** `ACCESSIBILITY` scores on real builds. A sudden crop of genuine `input-label`
   findings on multi-line inputs is the check working for the first time, not a regression.
 
+- **🧩 "FIX BUGS", AND THE BUG WAS OURS — the boot guard ran on one lane of two (autopsy `53d43c18`,
+  2026-09-21; no flag beyond the existing `AGENTV3_HTML_ENTRY_GUARD`).** A finished memory-match game
+  (rendered, typechecked, production build clean, `GREEN_GUARD_SAVE`) came back an hour later with
+  `Cannot read properties of null (reading 'useState')`. The user typed **two words** — *"Fix bugs"* —
+  and a **21-minute** build was spent discovering that `index.html` had *"no `<div id="root">` and no
+  `<script>`"*, `npm run build` transforming **1 module**. They were billed **₹113** for the engine to
+  repair an entry file the engine owns.
+  🔴 **`ensureHtmlEntryScript` exists for exactly that, is pure and unit-tested, and had ONE call site:
+  `SimpleBuilder.ts` — the FAST LANE.** The architect loop, where most builds run and where all three
+  builds in that report ran, had **no boot check at all**. This repo's own headline class (autopsy
+  `a38c6fef`): the instance fixed in one of the two lanes that carry it, the sibling never hunted. It is
+  now wired beside `ensureViteConfig` in `routes/agentv3.ts` — the existing precedent for a
+  deterministic post-build repair — and reports `HTML_ENTRY_REPAIRED`, registered in
+  `PROCESS_ONLY_CODES` because a file OUR pass repaired is never a finding against the user's app.
+  🔴 **SECOND DEFECT, SAME BLOCK, PROVEN FROM THAT REPORT'S OWN NUMBERS: we were saving our preview
+  bridge into the user's source.** The app-defaults pass read `index.html` with a bare
+  `actuator.readFile` — the SANDBOX copy, which carries the console mirror — patched its meta tags in
+  and wrote it back to the sandbox AND the durable store. Measured: a 299-byte entry file is **18,546
+  bytes** bridged and was persisted at **19,224** — which is exactly the `dist/index.html 18.46 kB`
+  that report carries, i.e. **18 KB of NavBharatAI debug code shipped inside the user's published app**.
+  `withoutPreviewBridge`'s own docblock already named this class (*"they read the sandbox directly …
+  apply it wherever sandbox content enters the analysis corpus"*); this call site is worse than an
+  analyser because it WRITES. ⚠️ Stripping here cannot turn the live console off — `E2BActuator`
+  re-injects the bridge every time the dev server starts.
+  ⚠️ **WHAT REMOVED THE MOUNT NODE IS *NOT* SOLVED, and the defaults pass is NOT the culprit** —
+  measured, it preserves both the root div and the entry script. That stays an OPEN root cause in
+  `PROGRESS.md`; the boot guard means the next occurrence is repaired rather than sold back to the user.
+  ⚠️ **THIRD FALSE FINDING OF ONE CLASS IN TWO DAYS** (`FeaturePresence.ts`): *"**Add** pagination or
+  infinite scroll to the main list"* tripped the `add` probe, and *"Add / create has no visible control"*
+  became that build's reported **root cause**. `add` is the commonest word an English instruction starts
+  with. **The object decides** — `add a task` names a thing the USER adds, `add pagination` / `add dark
+  mode` / `add tests` / the Hinglish `add karo` name work for the BUILDER — so `BUILDER_INSTRUCTION_OBJECT`
+  suppresses the probe per OCCURRENCE (`add a button to add a task` still counts, via the second one).
+  Test-locked and reversion-proven in `tests/theBootGuardRanOnOneLaneOfTwo.test.ts` and
+  `tests/theAnalyzerLiedAboutOurOwnTemplate.test.ts`.
+  ✅ **AND ONE CORRECTION TO THE DAY BEFORE:** yesterday's autopsy recorded `PREVIEW_SNAPSHOT_STALE` as
+  if it were universal. It is not — the third build in this report reports `PREVIEW_SNAPSHOT_CURRENT`.
+  It goes stale exactly when a post-build pass writes AFTER the copy is taken, which is what
+  `POST_GREEN_WRITES` measures.
+
 - **🧭 IN THE ADMIN CONSOLE THE BOTTOM BAR *IS* THE TAB STRIP (admin 2026-09-20; no flag, no cost).**
   *"jab admin panel open hota hai, to footer me yeh home|ai|preview|studio|more etc jo dikh rahe hai —
   isko badalna hai!! is footer me MONITOR, USERS, ai engine, revenue … jo abhi header me hai, unko

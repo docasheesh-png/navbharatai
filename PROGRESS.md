@@ -75462,3 +75462,75 @@ source-level guard, because `tsc` and `vitest` cannot see that a regex reads the
   `JOURNEY_NOT_DERIVED` in build 1). Left untouched deliberately: correcting them changes which
   Playwright selector is chosen, which needs its own evidence. `FuzzProbe.ts` and `siteImport.ts` read
   RENDERED HTML, where the regex is correct.
+
+---
+
+## 2026-09-21 (2) — AUTOPSY `e4d27bde` + `53d43c18` + `ad1596fc`: "Fix bugs", and the bug was ours
+
+Three builds, one workspace (a memory-match game). Two from 2026-09-15, one from **this morning**.
+
+### Step 1 — ledger (16 items)
+
+**✅ Self-healed (3)** — GLM benched twice on timeouts and the ladder reached KIMI (builds 2 and 3);
+write-time typecheck caught 7 undefined names the moment the file was written and the next write fixed
+them (build 3) — that feature worked exactly as designed.
+
+**🔀 Worked around (3)** — build 2's whole existence: the engine repaired its own broken entry file and
+billed the user for it; build 3 invented a "Game history" list because the prompt said "the main list"
+and a memory game has none; `GRAPH_RESTORED_STUBS` — 8 of 20 files carried placeholder facts from a cold
+resume, so recall, evaluate, the architecture analysis and the readiness score all ran on a third of the
+project being blank.
+
+**⏭️ Skipped (3)** — `RUNTIME_UNCHECKED` on builds 1 and 2 (console never captured, and build 1's summary
+CLAIMED "zero console errors", corrected by `CLAIM_UNSUPPORTED`); `REVIEW_INCOMPLETE` on both (the
+post-build review timed out at 94 s and 122 s and its findings were lost); build 1's `TEST_SUITE_UNVERIFIED`.
+
+**❌ Still broken (4)** — **`index.html` lost its mount node and entry script between build 1 and build
+2**; **our preview bridge was being persisted into the user's source**; **`FEATURE_COVERAGE` reported a
+missing "Add / create" for the instruction "Add pagination…"**, and it became build 3's `rootCause`;
+`DESIGN_CONSISTENCY` 60/100 on builds 1–2 (22 colours, 15 off-grid spacings) — largely our own scaffold's
+stylesheet.
+
+**🥵 Struggle (3)** — build 1 spent **87 s** on one `tsc` and **78 s** on a `cat`, both blocked behind a
+failing dev-server auto-start, and reported `OUTCOME_STOPPED`; build 2 ran **21.5 minutes** and its two
+GLM timeouts cost 150 s each; `REPEATED_READS` on build 2 — 17 reads over 11 files, 35% re-reads.
+
+### Step 2 — the missing subsystem
+
+**A deterministic repair that exists but is wired to one lane is not a repair.** `ensureHtmlEntryScript`
+is pure, unit-tested and has guaranteed since 2026-07-13 that an app can boot — from `SimpleBuilder.ts`
+only. The architect loop, which is where most builds run, never asked it. The same shape as
+`a38c6fef`'s zombie write and `c847b523`'s accessibility analyzer.
+
+### Step 3–5 — fixes shipped (into PR #3205)
+
+1. **`ensureHtmlEntryScript` on the architect path**, beside `ensureViteConfig` — the existing precedent
+   for a post-build deterministic repair. Adds only what is missing, only when an `index.html` AND a real
+   entry module exist, never rewrites a page that boots, and can never affect the build's result. Reports
+   `HTML_ENTRY_REPAIRED`, registered in `PROCESS_ONLY_CODES`.
+2. **`withoutPreviewBridge` on the app-defaults read.** Measured: 299 bytes → 18,546 bridged → 19,224
+   persisted, matching that report's own `dist/index.html 18.46 kB`. The live console is unaffected —
+   `E2BActuator` re-injects on every dev-server start.
+3. **`BUILDER_INSTRUCTION_OBJECT` in `FeaturePresence.ts`** — the third false finding of one class in two
+   days. `add pagination` / `add dark mode` / `add tests` / `add karo` are orders to the builder; `add a
+   task` is a control. Suppressed per OCCURRENCE, so `add a button to add a task` still counts.
+
+Reversion-proven in `tests/theBootGuardRanOnOneLaneOfTwo.test.ts` (8 cases, two source-level guards) and
+`tests/theAnalyzerLiedAboutOurOwnTemplate.test.ts` (16 cases).
+
+### 🔴 OPEN ROOT CAUSES (rule 6)
+
+- **What removed the mount node and entry script from `index.html` between build 1 and build 2 is NOT
+  known.** The app-defaults pass was the obvious suspect and is measurably NOT the culprit (it preserves
+  both — pinned by a test so the next reader does not re-investigate it). Build 1 wrote `index.html` only
+  through post-build passes that fired AFTER `endedAt`, which is where to look next. The boot guard above
+  means the next occurrence is repaired instead of being sold back to the user as a bug fix.
+- **`REVIEW_INCOMPLETE` on both 2026-09-15 builds** — the post-build review timed out at 94 s/122 s and
+  its findings were discarded. Build 3 (today, after `AGENTV3_GREEN_REVIEW_LEAN`) completed in 45 s, so
+  this may already be closed; it needs a real not-green build to confirm.
+- **`GRAPH_RESTORED_STUBS`** — a cold resume leaves 40% of the project graph as placeholders and every
+  reader silently degrades. Nothing warns the user or the engine that recall is running half-blind.
+- **The 87-second `tsc` and the 78-second `cat`** in build 1: both were queued behind the dev server's
+  own failing auto-start, so ordinary commands paid for an unrelated retry loop.
+- ✅ **CORRECTION to 2026-09-21 (1):** `PREVIEW_SNAPSHOT_STALE` is NOT universal — build 3 reports
+  `PREVIEW_SNAPSHOT_CURRENT`. It goes stale exactly when a post-build pass writes after the copy.

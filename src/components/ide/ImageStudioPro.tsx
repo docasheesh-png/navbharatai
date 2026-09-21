@@ -85,7 +85,10 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
   const [error, setError] = useState('');
   const [results, setResults] = useState<Result[]>([]);
   // Which result the text editor is open on — an id, not a boolean, because this surface shows a
-  // whole run of images and "add text" has to mean the one whose button was pressed.
+  // whole run of images and "add text" has to mean the one whose button was pressed. Applying
+  // REPLACES that result's url in place, so Save and "use as reference" both carry the text
+  // forward; appending a second copy would leave two near-identical images in the list and no way
+  // to tell which one has the right phone number on it.
   const [textOn, setTextOn] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const feedEndRef = useRef<HTMLDivElement | null>(null);
@@ -372,9 +375,6 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
         </div>
       </div>
 
-      {/* Applying REPLACES that result's url in place, so Save and "use as reference" both carry the
-          text forward — the alternative (a second copy in the list) leaves two near-identical images
-          and no way to tell which one has the right phone number on it. */}
       {textOn && (() => {
         const target = results.find((r) => r.id === textOn);
         if (!target) return null;

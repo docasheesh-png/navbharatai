@@ -423,12 +423,25 @@ describe('the feature is actually wired to both tiers', () => {
   const PRO = 'src/components/ide/ImageStudioPro.tsx';
   const EDITOR = 'src/components/ide/TextOverlayEditor.tsx';
 
+  // ⚠️ A BOUNDARY, NOT `toContain` — and this is not theoretical fussiness. The first draft of these
+  // two used `toContain('<TextOverlayEditor')`, and the reversion proof renamed the element to
+  // `<TextOverlayEditorXX`: the element no longer existed, and BOTH tests still passed, because the
+  // old name is a prefix of the new one. That is the exact weak-assertion class this file's header
+  // warns about, reproduced while writing the guard against it. The element must be followed by
+  // whitespace, `/` or `>` — i.e. it must really be that tag.
+  const rendersEditor = (src: string) => /<TextOverlayEditor[\s/>]/.test(src);
+
   it('the free image generator renders the editor', () => {
-    expect(code(FREE)).toContain('<TextOverlayEditor');
+    expect(rendersEditor(code(FREE))).toBe(true);
   });
 
   it('the Pro studio renders the editor too — a paying user never loses a capability', () => {
-    expect(code(PRO)).toContain('<TextOverlayEditor');
+    expect(rendersEditor(code(PRO))).toBe(true);
+  });
+
+  it('the boundary check rejects a renamed element, which a substring check does not', () => {
+    expect(rendersEditor('<TextOverlayEditor imageUrl={u} />')).toBe(true);
+    expect(rendersEditor('<TextOverlayEditorXX imageUrl={u} />')).toBe(false);
   });
 
   it('both tiers apply the result, so Done is not a button that does nothing', () => {

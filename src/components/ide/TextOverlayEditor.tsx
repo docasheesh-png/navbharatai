@@ -164,8 +164,12 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
   const hasText = layers.some((l) => l.text.trim().length > 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-scrim p-0 sm:p-4">
-      <div className="w-full sm:max-w-3xl max-h-[95vh] overflow-y-auto bg-surface sm:rounded-2xl rounded-t-2xl border border-line">
+    // `nb-sheet-overlay` / `nb-sheet` (index.css) rather than a bare `vh` cap: on a phone `vh` is the
+    // LARGE viewport, so a 95vh panel is taller than the screen the moment the browser chrome is
+    // showing and its own footer becomes unreachable. That bug reached the admin twice from two
+    // different files, which is why the repo has one shared geometry and a test that enforces it.
+    <div className="nb-sheet-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-scrim">
+      <div className="nb-sheet w-full sm:max-w-3xl flex flex-col overflow-y-auto bg-surface sm:rounded-2xl rounded-t-2xl border border-line">
 
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3 bg-card border-b border-line">
           <div className="flex items-center gap-2 min-w-0">

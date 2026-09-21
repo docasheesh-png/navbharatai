@@ -28,7 +28,9 @@ import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
 import { usePublishState } from '../../hooks/usePublishState';
-import { needsPublishDot } from '../../lib/publishFreshness';
+import { pendingActions, badgeAt, badgeLabelAt } from '../../lib/actionNavigator';
+import { usePreviewDwell } from '../../hooks/usePreviewDwell';
+import { ActionDot } from '../ActionDot';
 import { rememberPublishIntent, takePublishIntent, browserIntentStore } from '../../lib/publishResume';
 import { getStoredMotionMode, resolveReduceMotion, systemPrefersReducedMotion } from '../../lib/a11y';
 import {  } from '../../lib/authHeaders';
@@ -3145,7 +3147,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // this adds a dot beside its label and changes nothing about what it does.
   // Re-read when a build or a publish FINISHES, which are the only two things that can move it.
   const publishState = usePublishState(state.workspaceId, `${running}|${publishing}`);
-  const showPublishDot = needsPublishDot(publishState?.freshness);
+
+  // ── THE ACTION NAVIGATOR (admin 2026-09-21) ───────────────────────────────────────────────────
+  // "What is left to do?", asked once and answered for every dot on this screen. The rules live in
+  // `actionNavigator.ts`; this block's only job is to hand it facts it can trust.
+  //
+  // 🔒 A FACT THIS PANEL DOES NOT HOLD IS LEFT OUT, NOT GUESSED. `appMartPublished`, `apkBuilt` and
+  // `missingRequiredKeys` have no signal here today, so those dots simply never light — which is the
+  // navigator's third law working as designed, not an omission to paper over. They start working the
+  // day something really answers them, with no change to this file's shape.
+  const previewDwellMs = usePreviewDwell(showWorkspace && tab === 'preview' && !!state.previewUrl);
+  const navActions = useMemo(() => pendingActions({
+    building: running,
+    buildFinished: state.done,
+    buildOk: state.ok,
+    previewDwellMs,
+    publishFreshness: publishState?.freshness,
+    // Offered only where the server flag is on AND there is a workspace to attach a domain to —
+    // the same two conditions HostingChooser already gates that card on.
+    customDomainOffered: customDomainsEnabled && !!state.workspaceId,
+    reportsSentForThisBuild: reportCount,
+  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount]);
+
+  // The old single-purpose dot, now derived from the navigator so this screen and the Publish sheet
+  // can never disagree. `needsPublishDot`'s verdict is unchanged — it is the same 'changed' case,
+  // reached through the one place that also knows about the blue first-publish dot.
+  const publishDotTone = badgeAt(navActions, ['more', 'publish', 'navbharatai']);
+  const publishDotLabel = badgeLabelAt(navActions, ['more', 'publish', 'navbharatai']);
 
   /**
    * Start a real publish. Returns an HONEST reason when it could NOT start, null when it did.
@@ -3498,9 +3526,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       previewReady: previewReadySignal(!!state.previewUrl, state.done, state.ok, realFileCount,
         !running && workspaceFiles !== null && Object.keys(workspaceFiles).length > 0),
       fileCount: realFileCount,
+      // The whole More sheet rolled into one dot (admin 2026-09-21: "ab 3 dot more par red dot").
+      // Counted, never stored: it is exactly the strongest tone under `['more']`, so it goes out on
+      // its own the moment the last thing inside is done.
+      moreBadge: badgeAt(navActions, ['more']),
+      moreBadgeLabel: badgeLabelAt(navActions, ['more']),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onFooterApi, showWorkspace, tab, reportSending, openReportPicker, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles, running]);
+  }, [onFooterApi, showWorkspace, tab, reportSending, openReportPicker, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles, running, navActions]);
   // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
   // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
@@ -4083,6 +4116,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           onLoadMyApps={loadMyPublishedApps}
           onUnpublishApp={unpublishByWorkspace}
           customDomainsEnabled={customDomainsEnabled}
+          navActions={navActions}
           customDomainPriceInr={customDomainPriceInr}
           ownRepo={state.ownRepo}
           githubConnected={!!ghToken()}
@@ -4320,7 +4354,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           >
             <Rocket className="w-3.5 h-3.5" />
             Publish
-            {showPublishDot && <span className="w-1.5 h-1.5 rounded-full bg-red-500 text-on-accent" aria-label="You have unpublished changes" />}
+            <ActionDot tone={publishDotTone} label={publishDotLabel} size="sm" />
           </button>
           {liveUrl && (
             <a
@@ -6174,6 +6208,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       <span className="block text-[11px] text-faint leading-snug">{reportAlreadySentHint(reportCount)}</span>
                     )}
                   </span>
+                  {/* Red while this build failed and no report has been SENT (admin 2026-09-21:
+                      "3 dot par red dot -> andar report par red dot"). It clears on the report
+                      landing, never on this button being tapped — the navigator's first law. */}
+                  <ActionDot tone={badgeAt(navActions, ['more', 'report'])} label={badgeLabelAt(navActions, ['more', 'report'])} className="mt-1.5" />
                 </button>
                 {state.repoUrl && (
                   <a
@@ -6194,7 +6232,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
                   <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
-                  {showPublishDot && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 text-on-accent" aria-label="You have unpublished changes" />}
+                  <ActionDot tone={badgeAt(navActions, ['more', 'publish'])} label={badgeLabelAt(navActions, ['more', 'publish'])} />
                 </button>
                 {liveUrl && (
                   <a

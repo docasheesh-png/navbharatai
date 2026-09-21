@@ -31,6 +31,14 @@ import {
 interface Props {
   /** The generated image, as a data URL or an https URL. */
   imageUrl: string;
+  /**
+   * Layers to start with, read out of the user's own prompt.
+   *
+   * A suggestion, never a decision: every one is draggable, editable and deletable before anything is
+   * drawn, and the user still has to press Done. What it removes is the blank-page moment — arriving
+   * at something nearly right rather than at an empty box holding a number they already typed once.
+   */
+  initialLayers?: TextLayer[];
   /** Called with the composited PNG data URL when the user presses Done. */
   onApply: (dataUrl: string) => void;
   onClose: () => void;
@@ -60,8 +68,9 @@ const BAND_CHOICES: Array<{ id: string; label: string; value: string }> = [
 let nextId = 0;
 const newId = () => `t${++nextId}`;
 
-export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
-  const [layers, setLayers] = useState<TextLayer[]>(() => [defaultLayer(newId(), '')]);
+export function TextOverlayEditor({ imageUrl, initialLayers, onApply, onClose }: Props) {
+  const [layers, setLayers] = useState<TextLayer[]>(() =>
+    (initialLayers && initialLayers.length > 0 ? initialLayers : [defaultLayer(newId(), '')]));
   const [activeId, setActiveId] = useState<string>(() => layers[0].id);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);

@@ -6,6 +6,7 @@
 // right, is the kind they are least likely to notice. So the false-positive tests matter more than
 // the true-positive ones, and there are deliberately more of them.
 
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
   ENGINE_CANNOT_RENDER,
@@ -206,5 +207,48 @@ describe('the engine is told to leave alone only what it cannot do', () => {
     expect(line).toContain('price or menu lists');
     expect(line).not.toContain('addresses');
     expect(line).toContain('clean');
+  });
+});
+
+
+describe('the extraction is actually wired to both tiers and to the brief', () => {
+  // Source-level: nothing in `tsc` or a behavioural test can see a prop that stopped being passed,
+  // and the failure would be silent — the editor would simply open empty again, exactly as before,
+  // which is indistinguishable from "the prompt had nothing in it".
+  const code = (path: string) =>
+    readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+      .split('\n')
+      .filter((l) => {
+        const t = l.trim();
+        return t && !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+      })
+      .join('\n');
+
+  const FREE = 'src/components/ide/AIImageGenerator.tsx';
+  const PRO = 'src/components/ide/ImageStudioPro.tsx';
+  const ROUTE = 'src/server/routes/imageGen.ts';
+  const EDITOR = 'src/components/ide/TextOverlayEditor.tsx';
+
+  it('the free generator pre-fills the editor from the prompt', () => {
+    expect(/initialLayers=\{layersFromExtracted\(extractImageText\(/.test(code(FREE))).toBe(true);
+  });
+
+  it('the Pro studio pre-fills from THAT result\'s prompt', () => {
+    const src = code(PRO);
+    expect(/initialLayers=\{layersFromExtracted\(extractImageText\(/.test(src)).toBe(true);
+    expect(src).toContain('target.prompt');
+  });
+
+  it('the editor actually uses what it is given, rather than accepting a dead prop', () => {
+    const src = code(EDITOR);
+    expect(src).toContain('initialLayers');
+    expect(/initialLayers\s*&&\s*initialLayers\.length\s*>\s*0/.test(src)).toBe(true);
+  });
+
+  it('the engine is told to leave those categories alone', () => {
+    const src = code(ROUTE);
+    expect(src).toContain('noTextDirection(extractImageText(');
+    // And the direction must reach the prompt that is actually sent, not sit in an unused variable.
+    expect(/leaveAlone\s*\?/.test(src)).toBe(true);
   });
 });

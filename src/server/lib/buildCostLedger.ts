@@ -9,7 +9,8 @@
 //   • REAL COST  — `billing.realCostUsd`, the figure the settle priced with the SAME call that priced the
 //     bill (persisted since 2026-09-14; `source: 'settled'`). For a report written BEFORE that, the cost
 //     is recomputed from the stored `llmCalls` through the same rate card (`realRateFor` + `usageCostUsd`)
-//     — and storage keeps only the newest `STORED_LLM_CALLS_MAX` calls, so a log that has hit that cap
+//     — and storage keeps only `STORED_LLM_CALLS_MAX` calls (the build's first few and its last few),
+//     so a log that has hit that cap
 //     is a LOWER BOUND (`source: 'call-log-capped'`, `measured: false`), never presented as the cost.
 //     ⚠️ A call with no token counts cannot be priced. It is COUNTED as unmeasured and the row is marked
 //     `measured: false` — never priced at zero, never estimated. Sandbox minutes are a separate figure

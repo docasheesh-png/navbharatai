@@ -298,7 +298,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [llmLoading, setLlmLoading] = useState(false);
 
   // P-MON.4 — composite platform health score (real, from /api/admin/health-score).
-  const [healthScore, setHealthScore] = useState<any>(null);
 
   // P-MON.5 — AI insights + NL telemetry query (real, from /api/admin/insights).
   const [insights, setInsights] = useState<any>(null);
@@ -1382,17 +1381,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
-  const fetchHealthScore = useCallback(async () => {
-    try {
-      const r = await fetch('/api/admin/health-score', { headers });
-      const d = await r.json();
-      setHealthScore(d && typeof d === 'object' ? d : null);
-    } catch (e) {
-      console.error(e);
-      setHealthScore(null);
-    }
-  }, [adminToken]);
-
   const fetchInsights = useCallback(async () => {
     try {
       const r = await fetch('/api/admin/insights', { headers });
@@ -1426,7 +1414,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken, insightQuestion]);
 
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
-  useEffect(() => { if (activeTab === 'monitor') { fetchHealthScore(); fetchInsights(); fetchChannels(); } }, [activeTab, fetchHealthScore, fetchInsights, fetchChannels]);
+  // `fetchHealthScore` went with the Platform Health Score card — the Monitor no longer asks for a
+  // score nothing renders. The number itself is still shown, from /api/admin/monitor.
+  useEffect(() => { if (activeTab === 'monitor') { fetchInsights(); fetchChannels(); } }, [activeTab, fetchInsights, fetchChannels]);
   const PURCHASE_PAGE = 25;
   const fetchPurchases = useCallback(async (q: typeof purchaseQuery) => {
     setPurchasesLoading(true);
@@ -1972,50 +1962,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               )}
 
-              {/* ── P-MON.4 Composite platform health (real, from /api/admin/health-score) ── */}
-              {healthScore?.score && (
-                <div className="bg-card border border-line rounded-[1.5rem] p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Platform Health Score</h3>
-                    <UnusedCardMark id="health-score-duplicate" />
-                    <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                      healthScore.score.grade === 'excellent' ? 'bg-emerald-500/10 border-emerald-500/30 text-success'
-                      : healthScore.score.grade === 'good' ? 'bg-sky-500/10 border-sky-500/30 text-info'
-                      : healthScore.score.grade === 'fair' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
-                      : healthScore.score.grade === 'unknown' ? 'bg-raised border-line text-muted'
-                      : 'bg-red-500/10 border-red-500/30 text-danger'}`}>
-                      {healthScore.score.grade}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4">
-                    {([
-                      { label: 'Health', value: healthScore.score.health, good: (v: number) => v >= 75 },
-                      { label: 'Reliability', value: healthScore.score.reliability, good: (v: number) => v >= 75 },
-                      { label: 'Risk', value: healthScore.score.risk, good: (v: number) => v <= 25 },
-                    ] as const).map(m => (
-                      <div key={m.label} className="bg-well rounded-xl p-4 text-center">
-                        <div className="text-[9px] text-muted uppercase font-bold tracking-widest">{m.label}</div>
-                        <div className={`text-2xl font-black font-mono mt-1 ${
-                          m.value == null ? 'text-muted' : m.good(m.value) ? 'text-success' : 'text-warn'}`}>
-                          {m.value == null ? '—' : m.value}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {Array.isArray(healthScore.score.missing) && healthScore.score.missing.length > 0 && (
-                    <p className="text-[9px] text-faint font-bold uppercase tracking-widest mt-3">
-                      No data yet for: {healthScore.score.missing.join(', ')} — excluded from the score (not faked).
-                    </p>
-                  )}
-                </div>
-              )}
-
+              {/* PLATFORM HEALTH SCORE — DELETED 2026-09-21 (admin: *"DUPLICATE - kam information wali
+                  ko delete karo"*). The live "Platform health" panel higher up this same page shows the
+                  SAME grade and the same Health / Reliability / Risk numbers, and carries two things this
+                  card did not: a subtitle naming what the score is built from (build success, engine
+                  errors, latency, uptime) and its measurement scope, and an honest "Unavailable — <reason>"
+                  state where this one simply rendered nothing. So the card with LESS information went.
+                  ⚠️ `/api/admin/health-score` now has no client, and that is NOT the "report nobody can
+                  see" class the Diagnostics tab was built for: the score itself is still on screen, served
+                  by `/api/admin/monitor`, which computes it from the same inputs. */}
               {/* ── P-MON.5 AI Insights (real, deterministic from live metrics) + NL query ── */}
               {insights && (
                 <div className="bg-card border border-line rounded-[1.5rem] p-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-black text-ink uppercase tracking-tight">AI Insights</h3>
-                    <UnusedCardMark id="ai-insights-duplicate" />
+                    {/* The red mark that was here is GONE, and the twin it duplicated is what was
+                        deleted instead: the live "Insights" panel showed the first six findings and
+                        nothing else, while this card shows the full list AND the ask-box below. The
+                        mark had been put on the wrong half of the pair. */}
                     <span className="text-[9px] text-faint font-bold uppercase tracking-widest">Derived from live metrics — not projected</span>
                   </div>
                   <div className="space-y-2">

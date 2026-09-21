@@ -77145,6 +77145,73 @@ the preview is on screen AND the tab is visible, never while backgrounded, and i
 
 Full gate green on the final state.
 
+---
+
+## 2026-09-21 — 🐢 FIVE TO TEN SECONDS ON OUR OWN PAGE: THE SDK WAS QUEUED BEHIND A ROUND TRIP
+
+**Admin, after the website top-up worked:** *"par bahut show hai, button prss aur cashfee page par
+jane me 5-10second lag rhe, **hamare page par hi**"*. The last clause is the whole finding — the wait
+was ours, not the gateway's.
+
+**THE CAUSE WAS AN ORDER OF OPERATIONS, NOT A SLOW NETWORK:**
+
+```
+click → await POST /api/payment/create-order   (our server → the gateway's orders API)
+      → THEN create <script src="https://sdk.cashfree.com/js/v3/cashfree.js">   (cold DNS + TLS + download)
+      → THEN checkout()
+```
+
+🔑 **The SDK does not need the session id.** Nothing about fetching a third-party script depends on
+the order existing, so it was queued behind a network round trip for no reason and the user waited
+for the SUM of the two. There was no `preconnect` either, so step two also paid for a cold DNS
+lookup and TLS handshake before the first byte arrived.
+
+**Fixed at the class, not the instance:**
+- `preloadCheckoutSdk()` (`paymentService.ts`) — the load, extracted and **idempotent**: repeated
+  callers share ONE promise and ONE `<script>`. `warmCheckout()` starts it when the purchase BEGINS,
+  beside the order call, so the download overlaps the round trip instead of following it.
+- `index.html` — `preconnect` + `dns-prefetch` to the SDK origin, with `crossorigin` (a script is
+  fetched in CORS mode; a preconnect without it opens a connection the script cannot reuse, and the
+  hint would look present while buying nothing). Deliberately NOT `preload`: every visitor would
+  then pay for a payment SDK they will probably never use.
+
+⚠️ **A FAILED load clears the memo, on purpose.** Caching "it failed" would turn one bad moment on a
+train into a permanently dead Purchase button for the rest of the session; a retry must be a real
+retry. A SUCCESSFUL load is cached for ever — the global is there.
+
+🔒 **The native shell downloads NOTHING** — it hands the checkout to the system browser and never
+runs this SDK, so fetching it inside the WebView would spend a mobile user's data on a script that
+cannot execute. The native/web decision lives inside `warmCheckout()` rather than at the call site,
+so the fifth screen that starts a top-up cannot get it wrong.
+
+**Test-locked and reversion-proven** in `theCheckoutSdkLoadsBesideTheOrder.test.ts` (11 cases).
+Three guards are SOURCE-level because `tsc` and `vitest` cannot see that a call sits BEFORE an
+`await` rather than after it — moving it back restores the 5-10 seconds and breaks no behavioural
+test in this repo, which is exactly how the serial order shipped in the first place. Both reversions
+were run and confirmed to fail.
+
+🔴 **AND THE FULL GATE CAUGHT A SIBLING THE TARGETED RUN DID NOT.**
+`theCheckoutCannotRunOnLocalhost.test.ts` anchored its reversion guard on the literal
+`if ((window as any).Cashfree)` — which this refactor moved INTO `preloadCheckoutSdk()`. The guard
+broke on a change that never touched the branch it protects. It is re-aimed **and made stricter**:
+scoped to the BODY of `triggerCashfreeCheckout`, because a file-wide `indexOf` would now find the
+`shouldHandOffCheckout(` inside `warmCheckout()` above it and pass while saying nothing about the
+function it names. Re-proven by deleting the hand-off branch.
+
+⚠️ **STILL OPEN, and it costs money rather than code: Cloud Run cold start.** Part of that 5-10 s may
+be our own server waking up (`min-instances` is 0). The SCALE PLAN's rule holds — that lever is a
+standing monthly bill and is not to be pulled without the admin's decision. Measure before buying:
+if the delay persists on a WARM second attempt, the remainder is the SDK/network and this fix is the
+whole of it; if only the FIRST purchase after an idle period is slow, that is the cold start.
+
+Full gate green on the final state (re-run after the last edit, safeguard #5): typecheck,
+typecheck:server, noUnusedImports, native:guard, vitest (**28,233 passed | 1 skipped | 0 FAIL**),
+build, test:bundle, boot:check, deps:server-gate.
+
+📌 **SEQUENCING NOTE FOR THE `.aab`:** this fix is CLIENT code, and the app is BUNDLED mode — so it
+reaches installed users only in a fresh bundle. It must merge BEFORE the `.aab` is built, or the
+build carries the Android hand-off (#3210) without the speed fix and a second versionCode is spent
+immediately.
 ## 2026-09-21 — 🪟 FIVE CHATS AT ONCE, AND ONE CHAT'S WORDS STAY IN THAT CHAT
 
 Admin, verbatim: *"ek sath ek bar me 5 modes me chat kar sakte hai (banana hai apko), abhi ek hi chat
@@ -77249,6 +77316,102 @@ own-wins, "remember this" shared-only, anonymous never asked), `professionalsRou
 Full gate green on the final state.
 ---
 
+## 2026-09-21 (later) — THE CARTOON WAS OUR OWN PROMPT: realism and cinematic on the free tier
+
+**Admin:** *"navbharatai free me jo pollination image ban rahi hai, kya yeh aur behatar realistic,
+cinematic nahi ban sakti? cartoon jaisi image banti hai abhi."*
+
+### The evidence came first, and it settled the question in one line
+
+Before changing anything I traced what the default free screen actually sends. Verbatim:
+
+> `Modern app logo — a man drinking chai in a Delhi street at night … Design as a LOGO MARK: flat
+> vector style … **no photorealism**, no heavy shadows … Avoid: … **photorealistic, 3D render** …`
+
+**Nothing was wrong with the engine. We were commanding the cartoon.** Three defects, each fixed.
+
+### 1 · The image-type chip is COMPULSORY and there was no neutral entry
+
+Every request was forced into one of eight art briefs, and the default was `Modern app logo` — whose
+server-side direction reads, word for word, *"flat vector style … no photorealism"*. So somebody who
+typed a scene was asking for a flat vector cartoon without ever choosing one.
+
+**`Photograph` is now the first entry and the default**, and the default style is **Realistic**. An
+untouched screen makes a real picture of what was described; Minimal is one tap away and unchanged.
+
+⚠️ **The label is `Photograph` and not `Photo / Scene` on purpose:** `PURPOSE_PATTERNS` matches the
+bare word **"scene"** as an ILLUSTRATION brief, so that label would have re-created the same bug one
+word further along. A test pins that the default label resolves to purpose `general`.
+
+### 2 · Choosing "Realistic" did not help — the prompt contradicted itself
+
+With the type left at its default, the Realistic chip produced **both** `photograph, shot on a
+full-frame camera with a 50mm lens at f/2` **and** `no photorealism`, plus `photorealistic` in the
+Avoid list. A negative wins that argument. **Realism was unreachable in practice** — exactly as it
+was unreachable before the `photo` chip existed at all (2026-08-16).
+
+A prompt may now never carry both. When a photo-hostile purpose (`icon`, `logo`, `screenshot`,
+`illustration`) meets a realism request, **the purpose wins and the style chip stands down**, with an
+honest note saying which way it went and how to get the other answer.
+
+⚠️ **The purpose wins BECAUSE the type chip is now a deliberate choice.** With a neutral default, a
+logo type is one somebody picked — and so is a purpose they typed themselves (*"a coffee shop
+LOGO"*, which `detectPurpose` reads from their own words). A flat mark is what stays readable at
+small sizes, so realism is the one that yields. The reported bug is fixed by the DEFAULT, not by
+this rule; this rule is what stops the two chips ever producing an incoherent prompt again.
+
+### 3 · There was no way to ask for CINEMATIC at all
+
+Added as a real style chip. **It is not "Realistic but stronger":** a photograph is *observed*
+(50mm, natural light, true-to-life colour) and a film still is *lit and graded* (anamorphic wide
+lens, dramatic key with deep falloff, atmospheric haze, colour grading, grain). Merging them gives a
+muddle that is neither — which is what `styleConflictsWithPrompt` exists to prevent elsewhere. Same
+discipline as `photo`: camera and lighting language, never the inert words ("epic", "4k",
+"masterpiece") that move a diffusion model almost not at all. It carries its own negatives, because
+**flat even lighting is the tell that a picture was never lit**.
+
+### 4 · A fourth defect found while tracing, and it had been silently live
+
+`styleConflictsWithPrompt` — which withholds the style chip's words when they contradict what the
+user typed — **has never been able to work on the free route.** The route handed
+`buildImagePrompt`'s output to `craftImagePrompt`, so the style words and the aspect ratio were
+already baked into the string the guard received, and were written a second time on top. Verified
+against a real request: *"a dark moody neon street"* with the Minimal chip still carried
+`Style: minimalist, clean white background` into the engine, from the layer below the guard.
+
+`imageSubjectPrompt` is the fix — the craft layer receives the SUBJECT (plus the India-map
+directive) and owns style and ratio outright. `buildImagePrompt` is untouched for every other
+caller. As a side effect every prompt is shorter: `Aspect ratio` and `Style:` now appear once.
+
+### 5 · The realism direction no longer fights itself
+
+`PHOTO_NEGATIVE` avoided *"blurry, soft focus"* while the `photo` direction asks for **shallow depth
+of field**, which IS selective blur. The whole-image case is still covered by `BASE_NEGATIVE`
+("blurry, out of focus"); the self-contradiction is gone.
+
+### Tests
+
+`tests/theCartoonWasOurOwnPrompt.test.ts` (19). The central one is a property over eight real
+screen states: **no prompt may both ask for a photograph and forbid one.** Precision is locked in
+both directions — a deliberate icon brief still gets `48×48`, and `realismInWords` is deliberately
+narrow so *"logo for a photography studio"* stays a LOGO. **Proven by reversion**: restoring the
+logo default → 4 fail; letting the purpose direction back in beside realism → 2; handing the
+decorated string back to the craft layer → 1 (the source-level wiring guard, which is the only one
+that can see it — the behavioural tests exercise the craft layer, not the route).
+
+`AppKnowledgeBase.ts` updated in the same change, per the sync rule.
+
+### Still open (rule 6), and stated rather than guessed
+
+- **The Pollinations MODEL was NOT changed, because it could not be verified from here.** It is
+  `flux` (`IMAGE_GEN_POLLINATIONS_MODEL`, env-tunable with no deploy). Whether a realism-tuned
+  variant is live on that host is a fact only a real call can settle, and outbound to
+  `image.pollinations.ai` is refused by this execution environment's egress policy (tried
+  2026-09-21, `connect_rejected`). Guessing a model id would be the "not invented ≠ checked" mistake
+  this file already records for the E2B rate.
+- **Not one generated image has been looked at.** Every change here is a change to the BRIEF, argued
+  from what the prompt said and what the words mean to a diffusion model. The first real pictures are
+  the first real evidence — and if they are still flat, the model id above is the next lever.
 ## 2026-09-21 — 🧬 THE EVIDENCE LEDGER: it was never a missing store, it was a missing VOCABULARY
 
 Admin: *"fir yeh ek ek kar ke pura karro"*, starting with the ledger. Reading the code first found that

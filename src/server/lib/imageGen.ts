@@ -64,6 +64,9 @@ export const IMAGE_STYLE_ENHANCERS: Record<string, string> = {
   // the word "realistic" — which, note, `3d` above already contains, and which is exactly why asking
   // for a realistic image used to return an isometric render.
   photo: 'photograph, 50mm lens, natural light, shallow depth of field, sharp focus, true-to-life colour, fine texture',
+  // See STYLE_DIRECTION.cinematic in imagePromptCraft.ts for why a film still is a different craft
+  // from a photograph rather than a stronger version of one.
+  cinematic: 'cinematic film still, anamorphic wide lens, dramatic key light, atmospheric haze, rich colour grading, film grain',
 };
 
 /** Size id → aspect-ratio hint (the model takes ratios, not exact pixels). */
@@ -195,6 +198,26 @@ export const INDIA_MAP_IMAGE_DIRECTIVE =
   '(Survey of India) — Jammu & Kashmir and Ladakh (including Aksai Chin and Pakistan-occupied Kashmir/' +
   'Gilgit-Baltistan) and Arunachal Pradesh are shown as integral parts of India, with the complete ' +
   'official boundary. Do not use a foreign or “neutral” boundary.';
+
+/**
+ * The user's SUBJECT, and nothing else — plus the India-map directive when it applies.
+ *
+ * 🔴 WHY THIS EXISTS, AND WHAT IT FIXES (2026-09-21). The route used to hand `buildImagePrompt`'s
+ * output to `craftImagePrompt`, so the style words and the aspect ratio were written TWICE into
+ * every prompt — and worse, they were written BEFORE the craft layer could judge them. That made
+ * `styleConflictsWithPrompt` unable to do its job on the free route at all: it correctly withholds
+ * its own style words when they contradict what the user typed, but the contradicting words were
+ * already baked into the string it received. Verified by tracing a real request: "a dark moody neon
+ * street" with the Minimal chip still carried "Style: minimalist, clean white background" into the
+ * engine, from this function, after the guard had dropped it.
+ *
+ * So the craft layer now receives the SUBJECT and owns style and ratio outright. `buildImagePrompt`
+ * is unchanged and still serves callers that want the whole thing in one string.
+ */
+export function imageSubjectPrompt(req: ImageGenRequest): string {
+  const base = String(req.prompt || '').trim().slice(0, MAX_PROMPT_CHARS);
+  return wantsIndiaMap(base) ? `${base} ${INDIA_MAP_IMAGE_DIRECTIVE}` : base;
+}
 
 export function buildImagePrompt(req: ImageGenRequest): string {
   const base = String(req.prompt || '').trim().slice(0, MAX_PROMPT_CHARS);

@@ -12,7 +12,7 @@
 // what they save, and nothing would fail to reveal it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Bold, Check, Plus, Trash2, Type, X } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, Check, LayoutTemplate, List, Plus, Trash2, Type, X } from 'lucide-react';
 import {
   MAX_LAYERS,
   MAX_SIZE_PCT,
@@ -24,12 +24,31 @@ import {
   devanagariWarning,
   imagePixels,
   normalizeLayer,
+  type LayerKind,
   type TextLayer,
 } from '../../lib/textOverlay';
+import { BOARD_TEMPLATES, layersFromTemplate, type BoardTemplate } from '../../lib/imageBoardTemplates';
+import type { ExtractedText } from '../../lib/imageTextFromPrompt';
 
 interface Props {
   /** The generated image, as a data URL or an https URL. */
   imageUrl: string;
+  /**
+   * Layers to start with, read out of the user's own prompt.
+   *
+   * A suggestion, never a decision: every one is draggable, editable and deletable before anything is
+   * drawn, and the user still has to press Done. What it removes is the blank-page moment — arriving
+   * at something nearly right rather than at an empty box holding a number they already typed once.
+   */
+  initialLayers?: TextLayer[];
+  /**
+   * What was read out of the prompt, so a template can fill its slots from it.
+   *
+   * Passed separately from `initialLayers` on purpose: those are already PLACED, and a template's
+   * job is to place them differently. Handing it the findings rather than the finished layers is
+   * what stops "where does a phone go" existing in two places.
+   */
+  extracted?: ExtractedText[];
   /** Called with the composited PNG data URL when the user presses Done. */
   onApply: (dataUrl: string) => void;
   onClose: () => void;
@@ -38,6 +57,18 @@ interface Props {
 // The user's own palette for THEIR picture — deliberately fixed hexes, not theme tokens: a caption
 // must look the same in the exported file whatever theme the app is wearing (see `textOverlay.ts`).
 const SWATCHES = ['#ffffff', '#000000', '#ffd400', '#ff3b30', '#0a84ff', '#34c759', '#ff9f0a', '#ff2d9b'];
+/**
+ * What each kind is for, in the user's own terms.
+ *
+ * The placeholder is the whole teaching surface for the list: nobody reads a help page, but everybody
+ * reads the grey text inside an empty box. It shows the exact shape — item, space, price, one per
+ * line — because that is all the format there is.
+ */
+const KINDS: Array<{ id: LayerKind; label: string; icon: typeof Type; placeholder: string }> = [
+  { id: 'text', label: 'Text', icon: Type, placeholder: 'Shop name, phone number, address…\nPress Enter for a new line' },
+  { id: 'list', label: 'Rate list', icon: List, placeholder: 'Chai 10\nSamosa 15\nCoffee 25\n\nOne item per line, price at the end' },
+];
+
 const BAND_CHOICES: Array<{ id: string; label: string; value: string }> = [
   { id: 'none', label: 'None', value: '' },
   { id: 'dark', label: 'Dark bar', value: 'rgba(0,0,0,0.55)' },
@@ -47,8 +78,9 @@ const BAND_CHOICES: Array<{ id: string; label: string; value: string }> = [
 let nextId = 0;
 const newId = () => `t${++nextId}`;
 
-export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
-  const [layers, setLayers] = useState<TextLayer[]>(() => [defaultLayer(newId(), '')]);
+export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply, onClose }: Props) {
+  const [layers, setLayers] = useState<TextLayer[]>(() =>
+    (initialLayers && initialLayers.length > 0 ? initialLayers : [defaultLayer(newId(), '')]));
   const [activeId, setActiveId] = useState<string>(() => layers[0].id);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -143,6 +175,21 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
     }
   };
 
+  /**
+   * Replace everything with a template's arrangement.
+   *
+   * It REPLACES rather than appends, which is what makes it one tap instead of one tap plus a
+   * clean-up: a board is a layout, and merging two layouts produces neither. Anything typed so far
+   * that the prompt also carried survives, because the template fills its slots from the SAME
+   * findings; anything typed by hand does not, which is why the button reads as a fresh start.
+   */
+  const applyTemplate = (template: BoardTemplate) => {
+    const next = layersFromTemplate(template, extracted ?? [], newId);
+    if (next.length === 0) return;
+    setLayers(next);
+    setActiveId(next[0].id);
+  };
+
   const addLayer = () => {
     if (layers.length >= MAX_LAYERS) return;
     const layer = defaultLayer(newId(), '');
@@ -214,6 +261,24 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
 
           {warning && <p className="text-[11px] text-warn leading-relaxed">{warning}</p>}
 
+          {/* One tap lays the whole board out. Shown above the chips because it REPLACES them — a
+              control that rearranges everything belongs before the thing it rearranges. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-muted flex items-center gap-1 mr-0.5">
+              <LayoutTemplate className="w-3 h-3" /> Layout
+            </span>
+            {BOARD_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => applyTemplate(t)}
+                title={t.hint}
+                className="px-2.5 py-1 rounded-lg text-[11px] bg-raised text-body border border-line hover:border-accent-text transition-colors"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
           {/* Layer chips — which caption the controls below are editing. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {layers.map((l, i) => (
@@ -224,7 +289,7 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
                   l.id === active.id ? 'bg-accent text-on-accent border-transparent' : 'bg-raised text-body border-line'
                 }`}
               >
-                {l.text.trim().split('\n')[0].slice(0, 14) || `Text ${i + 1}`}
+                {l.text.trim().split('\n')[0].slice(0, 14) || l.label || `Text ${i + 1}`}
               </button>
             ))}
             <button
@@ -242,18 +307,48 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
           </div>
 
           <div>
+            {/* Caption or rate card. Switching kind re-reads the SAME text, so somebody who typed a
+                menu into a caption gets their menu laid out rather than having to type it again. */}
+            <div className="flex items-center gap-1.5 mb-2">
+              {KINDS.map((k) => {
+                const Icon = k.icon;
+                return (
+                  <button
+                    key={k.id}
+                    onClick={() => patch(active.id, { kind: k.id, align: k.id === 'list' ? 'left' : active.align })}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] border ${
+                      active.kind === k.id ? 'bg-accent text-on-accent border-transparent' : 'bg-raised text-body border-line'
+                    }`}
+                  >
+                    <Icon className="w-3 h-3" /> {k.label}
+                  </button>
+                );
+              })}
+            </div>
             <textarea
               value={active.text}
               onChange={(e) => patch(active.id, { text: e.target.value })}
               maxLength={MAX_TEXT_CHARS}
-              rows={2}
-              placeholder={'Shop name, phone number…\nPress Enter for a new line'}
+              rows={active.kind === 'list' ? 5 : 2}
+              placeholder={KINDS.find((k) => k.id === active.kind)?.placeholder}
               className="w-full px-3 py-2 rounded-xl bg-card border border-line text-sm text-ink placeholder:text-faint resize-none focus:outline-none focus:border-accent-text"
             />
             <p className="mt-1 text-[10px] text-faint text-right">{active.text.length}/{MAX_TEXT_CHARS}</p>
           </div>
 
           <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="text-[11px] text-muted w-12 shrink-0">Width</label>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                value={Math.round(active.widthPct * 100)}
+                onChange={(e) => patch(active.id, { widthPct: Number(e.target.value) / 100 })}
+                className="flex-1 accent-[color:var(--accent)]"
+              />
+            </div>
+
             <div className="flex items-center gap-3">
               <label className="text-[11px] text-muted w-12 shrink-0">Size</label>
               <input
@@ -284,7 +379,9 @@ export function TextOverlayEditor({ imageUrl, onApply, onClose }: Props) {
             <div className="flex flex-wrap items-center gap-3">
               <label className="text-[11px] text-muted w-12 shrink-0">Style</label>
               <div className="flex items-center gap-1">
-                {(['left', 'center', 'right'] as const).map((a) => {
+                {/* A list sets its own two edges, so an alignment control there would be a button
+                    that does nothing — which the second absolute rule forbids. Bold still applies. */}
+                {(active.kind === 'list' ? [] : (['left', 'center', 'right'] as const)).map((a) => {
                   const Icon = a === 'left' ? AlignLeft : a === 'right' ? AlignRight : AlignCenter;
                   return (
                     <button

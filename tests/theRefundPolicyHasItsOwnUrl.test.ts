@@ -62,12 +62,66 @@ describe('it is findable, and it agrees with the Terms', () => {
     expect(refund).toContain('(/grievance)');
   });
 
-  it('🔒 THE WINDOW IS ONE NUMBER IN TWO DOCUMENTS — change it in both or not at all', () => {
-    // A refund policy that says 7 days while the Terms say something else is not a smaller problem
-    // than having no refund policy; it is a bigger one, because both are published.
-    const window = /\*\*7 days\*\*|within \*\*7 days\*\*|within 7 days/;
-    expect(refund).toMatch(window);
-    expect(terms).toMatch(window);
+  it('🔒 BOTH DOCUMENTS STATE FINALITY, AND NEITHER OFFERS A CASH-REFUND WINDOW', () => {
+    // REPLACES the 7-day-window agreement test (2026-09-21). That test locked a NUMBER that was a
+    // session's assumption; this one locks the admin's actual ruling — *"agar user ne ek bar
+    // navbharatai me payment kar diya to woh non refundable hai"*. A refund policy that says
+    // "final" while the Terms still offer a 7-day window is not a smaller problem than having no
+    // refund policy; it is a bigger one, because both are published and a reviewer reads both.
+    expect(refund).toMatch(/non-refundable/i);
+    expect(terms).toMatch(/non-refundable/i);
+
+    // Neither document may promise a period inside which money comes back. This is the reversion
+    // guard: restoring either half of the old wording fails here rather than shipping a
+    // contradiction between two live pages.
+    const cashWindow = /refundable within \*{0,2}\d+/i;
+    expect(refund).not.toMatch(cashWindow);
+    expect(terms).not.toMatch(cashWindow);
+
+    // And the cross-reference that used to send a reader to "refunds ... the unused part" must not
+    // survive the reversal — it was the third place the old promise lived, and the one easiest to
+    // miss because it sits in a different section entirely.
+    expect(terms).not.toMatch(/\(refunds\) applies to the unused part/i);
+  });
+
+  it('🔒 OUR OWN DEFECT IS REPAID IN CREDIT, NEVER IN CASH', () => {
+    // Admin, verbatim: *"agar kisi user ke credit khatam ho gaye, navbharatai ki galti se to
+    // credit/token wapas milenge? ₹ nahi."* Both documents must carry the remedy, because a
+    // non-refundable policy with no stated remedy for OUR fault is the version an aggregator's
+    // reviewer — and a customer — is right to object to.
+    expect(refund).toMatch(/re-?credit|put that credit back/i);
+    expect(terms).toMatch(/re-?credit/i);
+    expect(refund).toMatch(/in credit, not in money/i);
+
+    // The two things that are NOT refunds must stay covered: refusing a duplicate charge invites a
+    // chargeback, which costs more than the disputed amount.
+    expect(refund).toMatch(/duplicate/i);
+    expect(refund).toMatch(/Charged twice/i);
+  });
+
+  it('🔒 A PAYMENT MADE BY MISTAKE IS FINAL — but an UNAUTHORISED one is not the same thing', () => {
+    // Admin, 2026-09-21: *"koi kahe galti se payment ho gaya, woh bhi non refundable hai. xx
+    // payment karna chah raha tha, xxx ho gaya, non refundble"*. This is the commonest refund
+    // request there is, so the policy states it rather than leaving it to be argued case by case.
+    expect(refund).toMatch(/payment made by mistake is final/i);
+    expect(refund).toMatch(/check the amount on the payment screen/i);
+
+    // 🔴 THE LINE THAT MUST NOT BE ERASED WITH IT. "I chose the wrong amount" is the customer's own
+    // error and is covered above. "I never authorised this" is an unauthorised transaction — a
+    // legal matter, not a change of mind — and collapsing the two would put a fraud victim and a
+    // careless typist under one sentence. The policy keeps them apart and points at section 5.
+    expect(refund).toMatch(/did not authorise at all/i);
+    expect(refund).toMatch(/A payment you do not recognise/i);
+  });
+
+  it('🔒 THE PERMANENT-UNLOCK CLAIM IS THE JUSTIFICATION, so it may not quietly disappear', () => {
+    // The policy tells a paying customer that one payment unlocks every build tier PERMANENTLY.
+    // That is the consideration which makes finality fair, and it was verified against
+    // powerUnlocked -> isFreeTierUser -> hasEverPaid (a lifetime field, never decremented) before
+    // it was published. If the entitlement is ever made balance-dependent, this sentence becomes
+    // false and the policy must change with it.
+    expect(refund).toMatch(/all three build tiers/i);
+    expect(refund).toMatch(/balance reaching zero|spend every last token/i);
   });
 
   it('the Terms point at the section refunds are really in (they said Section 5; refunds are in 4)', () => {

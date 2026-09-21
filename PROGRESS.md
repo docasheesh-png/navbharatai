@@ -75362,6 +75362,121 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — A CHAIN IS NOT A REFUSAL: our own PORT injection failed silently on `cd x && npm run dev`
+
+**The admin asked the question that settled it** (verbatim): *"preview port 5000 par tha, navbharatai
+ne 3000 par chalaya is liye nahi chala, aisi isthiti me ya to navharatai ko 5000 par chalana chahiye
+ya app me edit kar ke 3000 kar dena chahiye?"* — and then, decisively: *"yeh repo dekho batao kon se
+port par chalegi?"*
+
+### The answer, MEASURED in their own repository, not inferred
+
+`aashishcpmt093-ui/mitrify`, `server/index.ts:71` (read from a real clone):
+
+```ts
+const port = parseInt(process.env.PORT || "5000", 10);
+```
+
+and `package.json`'s dev script is `NODE_ENV=development tsx server/index.ts`.
+
+**So the port is whatever `PORT` says, and 5000 when nothing says anything.** Two consequences worth
+recording because both were guessed wrongly earlier in the session:
+
+- ⚠️ **`--port` is inert on this app.** `tsx server/index.ts` never reads argv, so the flag the
+  platform appends can change nothing. `DevServerRecovery.ts`'s `conflictPort` field already records
+  exactly this from an earlier mitrify report — *"an Express server ignoring the `--port` flag we
+  appended and taking `process.env.PORT || 5000`"*.
+- ⚠️ **It is ONE process, not two.** `setupVite(httpServer, app)` — Express serves the Vite client
+  itself. So the two-port hypothesis (*"web page on one port, API on another"*, which
+  `isSecondaryAppPort` exists for) does NOT apply to this app, and the suggestion that it might was
+  withdrawn.
+
+### 🔴 THE DEFECT: the guard was RIGHT and INCOMPLETE
+
+Build 1 was correct end to end: the managed launch composes `PORT=3000 HOST=0.0.0.0 npm run dev`
+(`devScript.ts`), the app bound 3000, logged `serving on port 3000`, the preview published 3000, and a
+real browser rendered it.
+
+Build 2's command came from the sub-agent instead: **`cd workspace/mitrify && npm run dev`**. And
+`canPrefixEnv` (`devServerHost.ts:147`) says:
+
+```ts
+if (/&&|;/.test(command)) return false;   // the prefix would land on the chain's FIRST command
+```
+
+That refusal is **correct** — `PORT=3000 cd x && npm run dev` gives the variable to `cd`, real shell
+semantics, and a wrong prefix is worse than none. But the refusal returned the command with **no port
+at all**, and for a plain Node server that is not a neutral outcome: it fell back to its own 5000,
+that port was already held, and the health check spent **94 seconds** over two failed restarts
+(`EADDRINUSE 0.0.0.0:5000`, "attempt 1 … attempt 2 — Port 5000 is already in use").
+
+🔑 **So neither of the admin's two options is the fix, and one of them is forbidden.** Running the
+app's own port is already the design (`PortDiscovery` ranks the app's boot log first). **Editing the
+user's app to change its port must never happen** — it is the engine rewriting a user's code to suit
+our infrastructure (the class autopsy `c5fd6ad1` was written about), and it would break their app on
+Render, on their own machine and in their own `.env`. Our sandbox can publish any port, so "we need
+3000" was never a real constraint.
+
+### Fixed
+
+`prefixEnvOnChainedServer` (`devServerHost.ts`, pure) places the prefix on the segment that actually
+starts the server: `cd workspace/mitrify && PORT=3000 npm run dev`. It returns **null** whenever it
+cannot be done safely and the caller then keeps today's behaviour exactly — so it can only ever ADD a
+correct prefix, never move or remove one.
+
+- `startsADevServer` is deliberately **narrower** than the loose `/(?:npm|pnpm|yarn|bun)\b/` the
+  un-chained path passes to `canPrefixEnv`: in a chain the wrong choice is reachable, and
+  `npm install && npm run dev` must put the port on the SERVER, never on the install.
+- `hasSeparatorInsideQuotes` stands the helper down when an `&&` sits inside a quoted literal
+  (`node -e 'a && b'`), because splitting on text would cut the program in half.
+- The **LAST** qualifying segment wins, which is what makes `npm install && npm run dev` land right.
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE (rule 3):** the `HOST=0.0.0.0` injection has the identical
+  shape and the identical gap, so a chained command also got no HOST — and a server that reads HOST
+  from the env (CRA, and any plain Node app that does) bound localhost and was unreachable through the
+  preview URL. Same refusal, same silent cost.
+
+### ⚠️ Corrections to claims made earlier in this session
+
+- **"The cloned copy had no `.env`, so PORT was missing" — WRONG.** `mitrify` has **no `dotenv`
+  dependency at all** and never reads a `.env` itself; `process.env.PORT` can only come from the real
+  process environment. The cause is the `&&`, not a missing file. The wrong explanation was reported
+  to the admin and is corrected here rather than quietly dropped.
+- **The two-port / `isSecondaryAppPort` theory does not apply to this app** (one process — see above).
+
+### Still open, and NOT guessed at
+
+**Nothing records what the USER'S PREVIEW SURFACE was showing.** Build 1 proved the app rendered on
+3000 by every means the platform has; 94 seconds later the user said the preview had not run, and the
+server was still listening (build 2's own `EADDRINUSE` proves it). Every proof we hold is about the
+SERVER and the SANDBOX; not one is about the pane the user is looking at. This fix removes a real
+94-second stall and a real silent HOST gap — **it is not claimed to be the whole of "preview nahi
+chala"**, and a fix built on a theory of that would be the surface patch the fourth rule forbids.
+
+**Also considered and NOT done:** asking the user which port to use, via the header help control. A
+port number is our plumbing, not a product decision a non-technical user can answer, and that control
+is a HELP surface — turning it into a configuration prompt would change what it is. Where an app
+genuinely has two ports, `isSecondaryAppPort` (2026-09-18) already TELLS rather than asks, which is
+the right shape.
+
+### ⚠️ ONE PRE-EXISTING TEST DELIBERATELY PINNED THE OLD BEHAVIOUR — and it was STRENGTHENED, not weakened
+
+`devServerHost.test.ts` carried *"still refuses to prefix a CHAIN, where the prefix would land on the
+wrong command"* (autopsy `debc468c`, the 5173-vs-5000 cascade), whose comment called the refusal *"the
+half that keeps the fix from being a different bug."* The full suite caught it — a targeted run would
+not have.
+
+**It was not changed to match new behaviour; its own stated reason was preserved and is now asserted
+directly.** That reason is about ONE placement: *"`PORT=5173 cd app && npm run dev` would give the
+port to `cd`"* — front-prefixing. This change does not front-prefix, and the test now asserts
+positively that the result never starts with `PORT=`/`HOST=`, which the old expectation only implied
+by doing nothing. What was incomplete was the CONCLUSION drawn from the reason ("therefore do
+nothing"), and the same describe block's FIRST test quotes the identical cascade for pipelines — so
+chains were simply the half left refused by the fix that block records.
+
+Tests: `tests/aChainIsNotARefusal.test.ts` (17), **reversion-proven three ways** — reverting the
+wiring fails 1, using the loose predicate in the chain fails 3, dropping the quoted-separator
+stand-down fails 1.
+
 ## 2026-09-21 — AUTOPSY c5fd6ad1 + bff0bf23: the engine cloned the user's project INTO their project, on a turn that said "do not change any files"
 
 **The two builds.** `c5fd6ad1` — *"Import this app from my GitHub repository and give me a short survey
@@ -76136,3 +76251,66 @@ payment, wallet or billing code is involved at any point.
 
 Either the fix above, or **StoreKit** — at which point the question disappears, because there would be a
 legitimate in-app purchase path for the assistant to describe.
+## 2026-09-21 — 🔴 THE REFUND POLICY WAS A SESSION'S ASSUMPTION, AND THE ADMIN REVERSED IT
+
+**What happened.** `/refund` shipped on 2026-09-20 promising a refund of UNUSED purchased credit
+within **7 days**, refunded **in full including the platform fee** (*"we absorb our own processing
+cost"*). **Neither term was ever the admin's decision.** The session that wrote it recorded them
+honestly — as a code comment reading *"assumed defaults the admin can change"* — and that is the
+defect worth naming: **a money commitment was published to a live legal page, and the only disclosure
+of its uncertainty was in a file the admin does not read.** It surfaced only because they asked
+*"non refundable likha ya nahii?"* — a day later, and by their own initiative rather than ours.
+
+**THE RULE THIS ESTABLISHES: an assumption that costs money, or that a customer can hold us to, is
+not disclosed by a comment. It is put to the admin in the reply, in the turn that ships it.** A
+docblock is the right place for the REASONING; it is never the right place for the ASKING.
+
+**The admin's ruling, verbatim:**
+- *"jab cashfree wapas nahi karta to ham kyu kare"* — we do not absorb the gateway's fee.
+- *"agar kisi user ke credit khatam ho gaye, navbharatai ki galti se to credit/token wapas milenge? ₹ nahi."*
+- *"agar user ne ek bar navbharatai me payment kar diya to woh non refundable hai."*
+- *"paise dete hi, user paid user ban jayega, navbharatai pro, ke sabhi teeno tier unlock ho jayenge."*
+- *"koi kahe galti se payment ho gaya, woh bhi non refundable hai."*
+
+🔒 **THE JUSTIFICATION WAS VERIFIED IN CODE BEFORE IT WAS PUBLISHED**, because a legal page may not
+assert a behaviour the Platform does not have:
+`powerUnlocked = isAgentV3FreeUser || (!!uid && !isFreeTierUser(wallet))` →
+`isFreeTierUser(w) = !hasEverPaid(w)` → `hasEverPaid(w) = lifetimeMoneySpentInr(w) > 0 || lastRechargeAt`.
+`totalMoneySpent` is a LIFETIME gross total with exactly one writer (`computeCreditedWallet`, on a
+verified purchase) and is **never decremented** — so one payment unlocks all three tiers
+**permanently**, surviving a zero balance. That is real consideration delivered at the instant of
+payment, and it is what makes finality fair rather than merely convenient.
+
+⚠️ **THREE THINGS KEPT AGAINST THE GRAIN OF "NON-REFUNDABLE", each argued to the admin and accepted:**
+1. **A duplicate charge** is not a refund — the customer made one purchase. Refusing it invites a
+   CHARGEBACK, which costs the aggregator's dispute fee *on top of* the disputed amount and blocks
+   the money for weeks: **risking ₹500+ to keep ₹100.** The policy gives the customer the CHOICE —
+   the full amount as wallet credit (immediate, and costs us nothing, since the gateway's cut is not
+   returned to us on a refund either way) or the full amount back to the card. The admin approved
+   this shape explicitly (*"yeh theek h"*).
+2. **Money taken with no credit delivered** is not a refund either — the remedy is to COMPLETE the
+   delivery, which the reconciler already does on the next sign-in. ₹0 leaves the business.
+3. **An UNAUTHORISED payment is not "a payment made by mistake."** The admin's mistake ruling covers
+   a customer's own error about an AMOUNT; collapsing fraud into it would put a fraud victim and a
+   careless typist under one sentence. The policy states the mistake rule and points at section 5.
+
+✅ **IT ALSO CLOSED A CONTRADICTION THAT WAS ALREADY LIVE.** `DangerZone.tsx` has told users
+*"your unused token balance is not refundable"* on account deletion, and App Mart's player says
+*"Non-refundable"* — both contradicted the 7-day page while it stood. Found by grepping every
+`refund` mention outside `content/legal/`, not assumed.
+
+**Changed in one commit, because two published documents may never disagree:** `refundPolicy.ts`
+(rewritten), `termsOfService.ts` (Section 4's Refunds bullet, the §3 cross-reference that still said
+*"(refunds) applies to the unused part"* — a third place the old promise lived and the easiest to
+miss — and the Last-updated date). Test-locked and reversion-proven in
+`theRefundPolicyHasItsOwnUrl.test.ts` (the 7-day agreement test REPLACED by one that asserts
+finality, forbids a cash-refund window in BOTH documents, and holds the fraud carve-out) and
+`legalDocs.test.ts` (four assertions that pinned the old window).
+
+Full gate green on the final state — re-run AFTER the last edit, per safeguard #5: typecheck,
+typecheck:server, noUnusedImports, native:guard, vitest (**27,923 passed | 1 skipped | 0 FAIL**),
+build, test:bundle, boot:check, deps:server-gate.
+
+⚠️ **STILL THE ADMIN'S TO DECIDE (not a defect):** whether a duplicate charge returned as MONEY
+should be the net we received rather than the gross. They were shown the chargeback arithmetic and
+chose the credit-or-cash choice instead; the net-only option remains open if they want it.

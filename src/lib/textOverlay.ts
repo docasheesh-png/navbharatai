@@ -40,8 +40,20 @@ const OUTLINE_DARK = '#000000';
 const OUTLINE_LIGHT = '#ffffff';
 
 /** Where a layer's box sits, as a fraction of the image. Percentages, so one layer fits every size. */
+/**
+ * What a layer IS.
+ *
+ * `text` is a caption — words laid out as lines. `list` is a rate card: every line is split into a
+ * LABEL and a VALUE, the label set against the left edge of the box and the value against the right,
+ * with a dotted leader between them. A menu is not a caption with spaces in it — spaces cannot align
+ * a column, because every glyph is a different width — so it needs its own kind rather than a
+ * convention users have to get right.
+ */
+export type LayerKind = 'text' | 'list';
+
 export interface TextLayer {
   id: string;
+  kind: LayerKind;
   text: string;
   /** Centre of the text box, 0..1 across the image. */
   xPct: number;
@@ -56,6 +68,22 @@ export interface TextLayer {
   band: string;
   align: 'left' | 'center' | 'right';
   bold: boolean;
+  /**
+   * What this layer is FOR, when a template placed it — "Shop name", "Phone".
+   *
+   * ⚠️ UI ONLY, AND IT MUST STAY THAT WAY. It is never drawn, never measured and never exported; it
+   * exists so an empty slot from a template reads as "Phone" in the layer chips instead of as
+   * "Text 3". A label that could reach the canvas would be a caption nobody typed.
+   */
+  label?: string;
+  /**
+   * The box's width, as a fraction of the image's width.
+   *
+   * Needed for two things that did not exist before: it is the width a long line WRAPS at, and it is
+   * the span a list's two columns are set against. A caption anchored at a point has no width, which
+   * is exactly why the first version could do neither.
+   */
+  widthPct: number;
 }
 
 /**
@@ -88,8 +116,21 @@ export function hasDevanagari(text: string): boolean {
   return DEVANAGARI.test(String(text ?? ''));
 }
 
-export const MAX_LAYERS = 6;
-export const MAX_TEXT_CHARS = 120;
+export const MAX_LAYERS = 10;
+/**
+ * 400, not 120.
+ *
+ * 120 was sized for a caption and made a rate card impossible: ten items with prices is ~150–250
+ * characters before anybody has typed an address. The cap exists to bound what reaches the canvas,
+ * not to bound what a shop sells.
+ */
+export const MAX_TEXT_CHARS = 400;
+/** A list's rows, past which extra lines are dropped rather than drawn off the bottom. */
+export const MAX_LIST_ROWS = 20;
+/** How far auto-fit may shrink the chosen size before it gives up and lets the text be clipped. */
+export const MIN_FIT_SCALE = 0.5;
+/** Gap between baselines, as a multiple of the font size. */
+const LINE_HEIGHT = 1.25;
 /** Size bounds as a fraction of the shorter side: readable on a phone, never taller than the image. */
 export const MIN_SIZE_PCT = 0.02;
 export const MAX_SIZE_PCT = 0.30;
@@ -108,9 +149,10 @@ function clamp(n: unknown, lo: number, hi: number, fallback: number): number {
  * default is a white word on a dark band because that is legible on ANY photo, which a bare colour
  * is not: the one thing a default must never do is produce text nobody can read on the first try.
  */
-export function defaultLayer(id: string, text = ''): TextLayer {
+export function defaultLayer(id: string, text = '', kind: LayerKind = 'text'): TextLayer {
   return {
     id,
+    kind,
     text,
     xPct: 0.5,
     yPct: 0.82,
@@ -118,8 +160,10 @@ export function defaultLayer(id: string, text = ''): TextLayer {
     color: DEFAULT_TEXT_COLOR,
     outline: true,
     band: DEFAULT_BAND,
-    align: 'center',
+    // A list reads left-to-right against its own box, so centring its labels would undo the column.
+    align: kind === 'list' ? 'left' : 'center',
     bold: true,
+    widthPct: kind === 'list' ? 0.7 : 0.86,
   };
 }
 
@@ -128,6 +172,7 @@ export function normalizeLayer(layer: TextLayer): TextLayer {
   const align = layer.align === 'left' || layer.align === 'right' ? layer.align : 'center';
   return {
     ...layer,
+    kind: layer.kind === 'list' ? 'list' : 'text',
     text: String(layer.text ?? '').slice(0, MAX_TEXT_CHARS),
     xPct: clamp(layer.xPct, 0, 1, 0.5),
     yPct: clamp(layer.yPct, 0, 1, 0.5),
@@ -137,6 +182,9 @@ export function normalizeLayer(layer: TextLayer): TextLayer {
     bold: !!layer.bold,
     color: typeof layer.color === 'string' && layer.color ? layer.color : DEFAULT_TEXT_COLOR,
     band: typeof layer.band === 'string' ? layer.band : '',
+    // Never 0 — a zero-width box would divide by nothing in the wrap and produce an endless loop of
+    // one-character lines. 0.1 is narrow enough to be a deliberate choice and wide enough to draw.
+    widthPct: clamp(layer.widthPct, 0.1, 1, 0.86),
   };
 }
 
@@ -156,7 +204,12 @@ export function fontPx(layer: TextLayer, w: number, h: number): number {
 
 /** The CSS font shorthand a 2D context wants. Line-height is omitted; we place lines ourselves. */
 export function fontString(layer: TextLayer, w: number, h: number): string {
-  return `${layer.bold ? '700 ' : '400 '}${fontPx(layer, w, h)}px ${FONT_STACK}`;
+  return fontStringAt(layer, fontPx(layer, w, h));
+}
+
+/** The same shorthand at an explicit size — what auto-fit needs while it is still choosing one. */
+export function fontStringAt(layer: TextLayer, size: number): string {
+  return `${layer.bold ? '700 ' : '400 '}${Math.max(1, Math.round(size))}px ${FONT_STACK}`;
 }
 
 /**
@@ -177,16 +230,145 @@ export function textLines(layer: TextLayer): string[] {
   return lines;
 }
 
+/** How wide a string is, in the given font. Injected so every layout rule stays pure and testable. */
+export type Measure = (text: string, font: string) => number;
+
+/** One row of a rate card: what is being sold, and for how much. */
+export interface ListRow { label: string; value: string }
+
+/**
+ * Split a rate-card line into its label and its value.
+ *
+ * The value is the PRICE at the END of the line — a trailing run of digits, optionally carrying a
+ * currency mark, a decimal part, or a range/unit ("10", "₹10", "10.50", "10/-", "10-15", "₹10 kg").
+ * Everything before it is the label.
+ *
+ * ⚠️ IT ANCHORS AT THE END, NOT AT THE FIRST NUMBER, and that is the whole correctness of it: a real
+ * menu is full of labels containing digits — "2 piece samosa 15", "500ml Coke 40", "Thali No.1 120".
+ * Taking the first number would sell "piece samosa 15" for ₹2. A line with no trailing number is not
+ * a row with an empty price; it is a HEADING ("Snacks"), and it is returned with an empty value so
+ * the caller can set it across the full width instead of squeezing it into a column.
+ */
+export function parseListRow(line: string): ListRow {
+  const raw = String(line ?? '').trim();
+  if (!raw) return { label: '', value: '' };
+  const m = /^(.*?)[\s.\u00b7]*((?:₹|rs\.?|inr)?\s*\d+(?:[.,]\d+)?(?:\s*[-\u2013]\s*\d+(?:[.,]\d+)?)?(?:\s*\/?-)?(?:\s*(?:\/|per\s)?\s*[a-z]{1,4})?)$/i.exec(raw);
+  if (!m || !m[1].trim()) return { label: raw, value: '' };
+  return { label: m[1].trim(), value: m[2].trim() };
+}
+
+/**
+ * Break one line so that no piece is wider than `maxPx`.
+ *
+ * 🔴 THE FIRST VERSION OF THIS MODULE REFUSED TO WRAP, and the reason it gave was right: wrapping
+ * needs `measureText`, so a layout that guessed and a canvas that measured would disagree the moment
+ * a font was substituted. The fix is not to guess — it is to hand the SAME measuring function to
+ * both, which is what `Measure` is. The preview and the export therefore wrap identically because
+ * they are asking the same context the same question.
+ *
+ * A single word longer than the box is broken mid-word rather than allowed to run off the picture: a
+ * clipped word is a bug the user can see and fix, and a word that leaves the frame is one they
+ * cannot. Explicit newlines are still honoured exactly — this only ever adds breaks.
+ */
+export function wrapLine(line: string, maxPx: number, font: string, measure: Measure): string[] {
+  const text = String(line ?? '');
+  if (!text) return [''];
+  if (!(maxPx > 0) || measure(text, font) <= maxPx) return [text];
+
+  const out: string[] = [];
+  let current = '';
+  for (const word of text.split(/(\s+)/)) {
+    if (!word) continue;
+    const candidate = current + word;
+    if (current && measure(candidate.trim(), font) > maxPx) {
+      out.push(current.trim());
+      current = word.trim() ? word : '';
+    } else {
+      current = candidate;
+    }
+    // One word on its own is still too wide — break it by characters so nothing leaves the frame.
+    while (measure(current.trim(), font) > maxPx && current.trim().length > 1) {
+      let cut = current.trim();
+      while (cut.length > 1 && measure(cut, font) > maxPx) cut = cut.slice(0, -1);
+      out.push(cut);
+      current = current.trim().slice(cut.length);
+    }
+  }
+  if (current.trim()) out.push(current.trim());
+  return out.length > 0 ? out : [''];
+}
+
 export interface LineBox {
   text: string;
   /** Where `fillText` should be given the line, honouring the layer's alignment. */
   x: number;
   /** The BASELINE y for this line. */
   y: number;
+  /** A list row's price. Absent on a caption, and on a list HEADING (a line with no price). */
+  value?: string;
+  /** The right edge a row's price is set against. */
+  valueX?: number;
+  /** The span a dotted leader fills between a row's label and its price. */
+  leader?: { from: number; to: number };
 }
 
-/** Gap between baselines, as a multiple of the font size. */
-const LINE_HEIGHT = 1.25;
+/** The box a layer is laid out inside, in real pixels: centred on xPct, `widthPct` wide. */
+export function layerBox(layer: TextLayer, w: number): { left: number; right: number; width: number; centre: number } {
+  const l = normalizeLayer(layer);
+  const width = l.widthPct * w;
+  const centre = l.xPct * w;
+  return { left: centre - width / 2, right: centre + width / 2, width, centre };
+}
+
+/**
+ * The lines a layer will really draw, AFTER wrapping — the count auto-fit and the band both need.
+ *
+ * Without a `measure` nothing wraps, which is exactly the pre-wrap behaviour and is what keeps the
+ * older callers (and their tests) meaning what they meant.
+ */
+export function renderedLines(layer: TextLayer, w: number, h: number, measure?: Measure, sizeOverride?: number): string[] {
+  const l = normalizeLayer(layer);
+  const raw = textLines(l);
+  if (raw.length === 0) return [];
+  if (l.kind === 'list') return raw.slice(0, MAX_LIST_ROWS);
+  if (!measure) return raw;
+  const size = sizeOverride ?? fontPx(l, w, h);
+  const font = fontStringAt(l, size);
+  const max = layerBox(l, w).width;
+  const out: string[] = [];
+  for (const line of raw) out.push(...wrapLine(line, max, font, measure));
+  return out;
+}
+
+/**
+ * The font size actually used, after shrinking to fit the picture.
+ *
+ * ⚠️ IT SHRINKS ON HEIGHT, NOT WIDTH — width is already handled, because wrapping makes any line fit
+ * the box by construction. What wrapping CANNOT prevent is the block growing downward past the
+ * bottom of the image, and a rate card is precisely the layer that does that. Bounded by
+ * `MIN_FIT_SCALE`: past a point, shrinking to fit stops producing something anybody can read, and an
+ * honest clip the user can see and fix beats text too small to be text.
+ *
+ * Without a `measure` it returns the chosen size unchanged, so nothing auto-fits behind a caller's
+ * back — the behaviour only appears where a real context is doing the measuring.
+ */
+export function fittedFontPx(layer: TextLayer, w: number, h: number, measure?: Measure): number {
+  const l = normalizeLayer(layer);
+  const chosen = fontPx(l, w, h);
+  if (!measure || textLines(l).length === 0) return chosen;
+  const limit = h * 0.94;
+  let size = chosen;
+  // A handful of steps, each 8% smaller. A loop that solved it exactly would re-wrap every
+  // iteration for a difference nobody can see.
+  for (let i = 0; i < 9; i++) {
+    const count = renderedLines(l, w, h, measure, size).length;
+    if (count * size * LINE_HEIGHT <= limit) break;
+    const next = Math.round(size * 0.92);
+    if (next < chosen * MIN_FIT_SCALE || next < 1) break;
+    size = next;
+  }
+  return Math.max(1, size);
+}
 
 /**
  * Where every line of a layer lands, in real pixels.
@@ -194,46 +376,87 @@ const LINE_HEIGHT = 1.25;
  * The block is centred vertically on `yPct`, so growing a two-line caption to three does not shove it
  * off the bottom of the image — it grows from its middle, which is what "the text is HERE" means to
  * somebody who dragged it there.
+ *
+ * For a `list`, each line also carries its price and the leader span between the two columns. A row
+ * with no price is a HEADING and is returned as a plain line, so a section title is not squeezed into
+ * a label column it does not belong in.
  */
-export function layoutLayer(layer: TextLayer, w: number, h: number): LineBox[] {
+export function layoutLayer(layer: TextLayer, w: number, h: number, measure?: Measure): LineBox[] {
   const l = normalizeLayer(layer);
-  const lines = textLines(l);
+  if (textLines(l).length === 0) return [];
+  const size = fittedFontPx(l, w, h, measure);
+  const lines = renderedLines(l, w, h, measure, size);
   if (lines.length === 0) return [];
-  const size = fontPx(l, w, h);
+  const font = fontStringAt(l, size);
   const step = size * LINE_HEIGHT;
-  const blockHeight = step * lines.length;
-  const cx = l.xPct * w;
-  // `textBaseline` is 'alphabetic', so the first baseline sits one ascent below the block's top.
-  // 0.78 of the size is a good approximation of ascent for the faces in FONT_STACK.
-  const top = l.yPct * h - blockHeight / 2;
-  // x is the same for all three alignments ON PURPOSE: `drawTextLayers` sets `ctx.textAlign` to the
-  // layer's own value, so this point is the ANCHOR the context aligns against (left edge, centre, or
-  // right edge) rather than always the left edge. `bandRect` reads it the same way.
-  return lines.map((text, i) => ({ text, x: cx, y: top + step * i + size * 0.78 }));
+  const top = l.yPct * h - (step * lines.length) / 2;
+  const box = layerBox(l, w);
+  const baseline = (i: number) => top + step * i + size * 0.78;
+
+  if (l.kind !== 'list') {
+    // x is the same for all three alignments ON PURPOSE: `drawTextLayers` sets `ctx.textAlign` to the
+    // layer's own value, so this point is the ANCHOR the context aligns against (left edge, centre, or
+    // right edge) rather than always the left edge. `bandRect` reads it the same way.
+    //
+    // 🔴 AND THE ANCHOR IS THE DRAG POINT, NOT THE BOX EDGE. An earlier draft anchored a left-aligned
+    // caption at `box.left`, which moved it 430px away from where the user had just dropped it —
+    // dragging would have read as broken for every alignment but centre. The box governs WRAPPING,
+    // which is a width question; it must never govern WHERE, which is the user's answer.
+    return lines.map((text, i) => ({ text, x: box.centre, y: baseline(i) }));
+  }
+
+  const gap = size * 0.5;
+  return lines.map((line, i) => {
+    const { label, value } = parseListRow(line);
+    const y = baseline(i);
+    if (!value) return { text: label, x: box.left, y };
+    const labelWidth = measure ? measure(label, font) : 0;
+    const valueWidth = measure ? measure(value, font) : 0;
+    return {
+      text: label,
+      x: box.left,
+      y,
+      value,
+      valueX: box.right,
+      leader: { from: box.left + labelWidth + gap, to: box.right - valueWidth - gap },
+    };
+  });
 }
 
-/** The band behind a layer, in real pixels — or null when the layer has none. */
+/**
+ * The band behind a layer, in real pixels — or null when the layer has none.
+ *
+ * ⚠️ A LIST'S BAND SPANS ITS WHOLE BOX, not the widest label. A rate card's right column is set
+ * against the box's right edge, so a band sized to the text would stop short of the prices and leave
+ * them sitting on the bare photograph — unreadable, and obviously wrong the first time anyone looks.
+ */
 export function bandRect(
   layer: TextLayer,
   w: number,
   h: number,
-  measure: (text: string, font: string) => number,
+  measure: Measure,
 ): { x: number; y: number; w: number; h: number } | null {
   const l = normalizeLayer(layer);
   if (!l.band) return null;
-  const lines = textLines(l);
+  const size = fittedFontPx(l, w, h, measure);
+  const lines = renderedLines(l, w, h, measure, size);
   if (lines.length === 0) return null;
-  const size = fontPx(l, w, h);
-  const font = fontString(l, w, h);
-  const widest = lines.reduce((m, line) => Math.max(m, measure(line, font)), 0);
+  const font = fontStringAt(l, size);
+  const box = layerBox(l, w);
   const step = size * LINE_HEIGHT;
   const padX = size * 0.45;
   const padY = size * 0.28;
-  const boxW = widest + padX * 2;
   const boxH = step * lines.length + padY * 2;
-  const cx = l.xPct * w;
-  const left = l.align === 'left' ? cx - padX : l.align === 'right' ? cx - boxW + padX : cx - boxW / 2;
-  return { x: left, y: l.yPct * h - boxH / 2, w: boxW, h: boxH };
+  const top = l.yPct * h - boxH / 2;
+
+  if (l.kind === 'list') {
+    return { x: box.left - padX, y: top, w: box.width + padX * 2, h: boxH };
+  }
+  const widest = lines.reduce((m, line) => Math.max(m, measure(line, font)), 0);
+  const boxW = widest + padX * 2;
+  const anchor = box.centre; // the drag point — see the note in `layoutLayer`
+  const left = l.align === 'left' ? anchor - padX : l.align === 'right' ? anchor - boxW + padX : anchor - boxW / 2;
+  return { x: left, y: top, w: boxW, h: boxH };
 }
 
 /** The small, honest subset of a 2D context this module uses. Keeps the tests free of a real canvas. */
@@ -268,36 +491,69 @@ export interface TextContext {
  * with two layers and therefore only in front of a user.
  */
 export function drawTextLayers(ctx: TextContext, layers: TextLayer[], w: number, h: number): void {
+  const measure: Measure = (text, font) => {
+    ctx.font = font;
+    return ctx.measureText(text).width;
+  };
   for (const raw of layers) {
     const layer = normalizeLayer(raw);
-    const lines = layoutLayer(layer, w, h);
+    const lines = layoutLayer(layer, w, h, measure);
     if (lines.length === 0) continue;
     ctx.save();
-    const font = fontString(layer, w, h);
-    ctx.font = font;
-    ctx.textBaseline = 'alphabetic';
-    ctx.textAlign = layer.align;
+    const size = fittedFontPx(layer, w, h, measure);
+    const font = fontStringAt(layer, size);
 
-    const rect = bandRect(layer, w, h, (text, f) => {
-      ctx.font = f;
-      return ctx.measureText(text).width;
-    });
+    const rect = bandRect(layer, w, h, measure);
     ctx.font = font; // measuring may have changed it; restore before anything is drawn
+    ctx.textBaseline = 'alphabetic';
+    // A list sets its own two edges, so the context must not re-align underneath it.
+    ctx.textAlign = layer.kind === 'list' ? 'left' : layer.align;
     if (rect) {
       ctx.fillStyle = layer.band;
       ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
     }
 
-    const size = fontPx(layer, w, h);
+    const paint = (draw: (text: string, x: number, y: number) => void) => {
+      for (const line of lines) {
+        if (line.text) draw(line.text, line.x, line.y);
+        if (line.value && typeof line.valueX === 'number') {
+          ctx.textAlign = 'right';
+          draw(line.value, line.valueX, line.y);
+          ctx.textAlign = 'left';
+        }
+      }
+    };
+
     if (layer.outline) {
       ctx.lineWidth = Math.max(1, size * 0.14);
       ctx.lineJoin = 'round';
       ctx.strokeStyle = outlineFor(layer.color);
-      for (const line of lines) if (line.text) ctx.strokeText(line.text, line.x, line.y);
+      paint((t, x, y) => ctx.strokeText(t, x, y));
     }
     ctx.fillStyle = layer.color;
-    for (const line of lines) if (line.text) ctx.fillText(line.text, line.x, line.y);
+    paint((t, x, y) => ctx.fillText(t, x, y));
+    drawLeaders(ctx, lines, size);
     ctx.restore();
+  }
+}
+
+/**
+ * The dotted run between a rate card's two columns.
+ *
+ * Drawn as small squares rather than as a row of '\u00b7' characters: a character leader's spacing is
+ * a property of whichever font the device substituted, so the same menu would come out differently on
+ * two phones. Squares are the same everywhere, which is the point of doing this on our side at all.
+ * Skipped when the columns nearly touch — a leader shorter than a couple of dots reads as dirt.
+ */
+function drawLeaders(ctx: TextContext, lines: LineBox[], size: number): void {
+  const dot = Math.max(1, size * 0.07);
+  const gap = size * 0.42;
+  for (const line of lines) {
+    if (!line.leader) continue;
+    const { from, to } = line.leader;
+    if (!(to - from > gap * 2)) continue;
+    const y = line.y - size * 0.22;
+    for (let x = from; x <= to - dot; x += gap) ctx.fillRect(x, y, dot, dot);
   }
 }
 

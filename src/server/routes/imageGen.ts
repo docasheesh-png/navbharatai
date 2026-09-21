@@ -10,10 +10,12 @@ import {
   pollinationsEnabled, fetchPollinationsImage,
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
+import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
   IMAGE_PRO_PRICE_INR, IMAGE_PRO_TIMEOUT_MS, imageProConfigured, imageProEndpoint, imageProAuthHeaders,
   imageProMode, imageProCount, imageProQuotedInr, buildImageProRequest, parseImageProResponse,
+  pendingResultUrl, jobFailed, IMAGE_PRO_POLL_MS,
   imageProFailureMessage, initImageTooLarge, parseDataUrl, imageProMargin, imageProMarginWarning,
 } from '../lib/imageProGen';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -147,7 +149,16 @@ export function registerImageGenRoutes(app: Express): void {
       });
       // Providers here take a single string, so the negatives ride inline — phrased as "Avoid:", never
       // a bare list, which some models read as a request FOR those things.
-      const prompt = withInlineNegative(crafted);
+      //
+      // 🔑 AND THE ENGINE IS TOLD TO LEAVE ALONE WHAT IT CANNOT DO. A phone number, an address and a
+      // price list are the three kinds of text no image engine renders correctly, and the overlay
+      // editor now draws them with a real font. Asking for them twice would put a plausible-looking
+      // WRONG number in the picture underneath the right one — so the brief asks for clean space
+      // instead. A shop NAME is deliberately NOT included: one to five words is what these engines
+      // are genuinely good at, and a name in the artwork beats a caption over it.
+      const userText = buildImagePrompt(req.body);
+      const leaveAlone = noTextDirection(extractImageText(userText));
+      const prompt = leaveAlone ? `${withInlineNegative(crafted)} ${leaveAlone}` : withInlineNegative(crafted);
       const timeout = <T,>(p: Promise<T>): Promise<T> => Promise.race([
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('image-generation timeout')), ROUTE_TIMEOUT_MS)),
@@ -371,8 +382,34 @@ export function registerImageGenRoutes(app: Express): void {
           res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
           return;
         }
-        const parsed = parseImageProResponse(await r.json());
+        // 🔴 A 200 IS NOT AN IMAGE. The host this tier was priced around is ASYNC by default: the POST
+        // answers with a prediction id, and even in sync mode a task slower than its wait window comes
+        // back HTTP **200** with `code: 5004, status: processing`. A caller that stops at `r.ok` would
+        // report a failure for a job that was about to succeed — and the user would be told their
+        // picture could not be made while it was being made.
+        let payload: unknown = await r.json();
+        let parsed = parseImageProResponse(payload);
+        let next = parsed ? null : pendingResultUrl(payload);
+        while (!parsed && next && !ctl.signal.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, IMAGE_PRO_POLL_MS));
+          if (ctl.signal.aborted) break;
+          // The whole loop is bounded by the SAME AbortController as the first call, so the existing
+          // IMAGE_PRO_TIMEOUT_MS is still the one clock — there is no second, longer budget hiding here.
+          const poll = await fetch(next, { headers: imageProAuthHeaders(), signal: ctl.signal });
+          if (!poll.ok) {
+            console.error(`[IMAGE PRO] polling returned HTTP ${poll.status}`);
+            break;
+          }
+          payload = await poll.json();
+          if (jobFailed(payload)) {
+            console.error('[IMAGE PRO] the host reported the job failed');
+            break;
+          }
+          parsed = parseImageProResponse(payload);
+          next = parsed ? null : pendingResultUrl(payload);
+        }
         if (!parsed) {
+          // Nothing was produced, so nothing is charged — the caller's own guard, unchanged.
           console.error('[IMAGE PRO] host returned no image in a 200 response');
           res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
           return;

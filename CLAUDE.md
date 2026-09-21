@@ -166,6 +166,14 @@ promised to build it.** Every model refused — the model's virtue, never our de
 
 - `ILLEGAL_RULES.ADULT_CONTENT` → `triagePrompt` returns **`block`**, before a sandbox or a token.
   One triage serves BOTH the build route and the chat route, so the ban covers both by construction.
+  🔴 **CORRECTED 2026-09-21 — IT SERVED NEITHER IMAGE ROUTE.** `/api/image/generate` and
+  `/api/image/pro/generate` never called `triagePrompt`; the only thing between a pornographic prompt
+  and a picture was whichever provider happened to refuse, and the free provider's anonymous door has
+  safety OFF. A PR description (#3234) had stated the ban was enforced there "as before" — written from
+  this paragraph, not from the route. Now all THREE surfaces run the same triage
+  (`src/server/lib/imageSafety.ts`; surface `image` in the safety flags), before a link is minted or a
+  provider is called. **"Both" in the line above means build and chat; a new surface that takes a
+  prompt is not covered until it calls the triage itself — grep for `triagePrompt(` before claiming it.**
 - **A refusal is a FINAL answer**: `shouldRetryEmptyBuild` never escalates one, and the free-tier
   upsell can never follow one (`looksLikeRefusal`). "Zero files" is not always a capability failure.
 - ⚠️ **The message is blunt on purpose, so detection must stay PRECISION-FIRST.** The rule carries an

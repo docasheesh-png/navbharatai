@@ -77777,3 +77777,26 @@ ata hai"* · G *"₹1 per image, charged only if it arrives (pro mode me already
 Tests: `tests/theFreeComposerIsOneBox.test.ts` (12) — placement guards, since where a control or a
 sentence sits is exactly what `tsc` cannot see. The colour-literal ratchet baseline was regenerated
 (the studio lost a literal) and committed.
+
+## 2026-09-21 — the image routes never ran the safety triage (found while wiring the ⭐ enhancer)
+
+**What was true:** `triagePrompt` — the deterministic ban (pornography → `block`, illegal classes →
+block/flag) — ran on the BUILD route and the CHAT route. It ran on **neither image route**. A pornographic
+prompt to `/api/image/generate` or `/api/image/pro/generate` reached the provider; on the free tier the
+only refusal possible was the provider's own, and the anonymous door has safety OFF unless asked for.
+Since #3234 the browser fetches that link itself.
+
+**And I had claimed the opposite, in writing.** PR #3234's description says *"the ban's enforcement is,
+as before, `triagePrompt` on our server — which this design preserves."* That was written from
+`CLAUDE.md`'s *"one triage serves BOTH the build route and the chat route"* — true, and not about images
+— not from reading the route. Corrected in the PR body and in `CLAUDE.md` the same hour.
+
+**Fix:** `src/server/lib/imageSafety.ts` — the SAME triage, the SAME flag record (surface `image`) and
+the SAME branded refusal (`blockMessage`, Hindi or English by the user's own words) as the other two
+surfaces. Both image routes call it first: before a link is minted, before a provider is called, before
+an account is looked up. A block is a 422 with `code: 'blocked'` and the refusal as the error text; a
+`flag` is recorded and the request proceeds, exactly as chat does. A triage that cannot run allows,
+loudly in the log — never a refusal it cannot justify.
+
+Tests: `tests/theImageRoutesRunTheTriage.test.ts`. Source-level for the ORDER (the triage before the
+account gate and before any provider or link), because the order is the point.

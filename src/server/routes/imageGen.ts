@@ -12,6 +12,7 @@ import {
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
+import { triageImageRequest } from '../lib/imageSafety';
 import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
 import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
@@ -107,6 +108,17 @@ export function registerImageGenRoutes(app: Express): void {
     if (!isValidImageGenRequest(req.body)) {
       res.status(400).json({ error: 'Describe the image you want, or attach a picture to change.' });
       return;
+    }
+    // ── THE SAFETY TRIAGE — the same one build and chat run, and until 2026-09-21 the one thing
+    // this route did not do. Before a link is minted, before a provider is called, before an
+    // account is even looked up: a banned request costs nothing and produces nothing. The words
+    // are the user's own; an attached picture is not read.
+    {
+      const safety = await triageImageRequest(req, typeof req.body.prompt === 'string' ? req.body.prompt : '');
+      if (safety.blocked) {
+        res.status(422).json({ error: safety.message, code: 'blocked' });
+        return;
+      }
     }
     if (!imageGenConfigured()) {
       // Honest not-available state (rule 2): the capability needs the image key in the environment.
@@ -495,6 +507,14 @@ export function registerImageGenRoutes(app: Express): void {
     if (!mode) {
       res.status(400).json({ error: 'Add a prompt, or attach an image to work from.' });
       return;
+    }
+    // The same triage the free route runs (see there) — a paid door is not a way round the ban.
+    {
+      const safety = await triageImageRequest(req, proReq.prompt ?? '');
+      if (safety.blocked) {
+        res.status(422).json({ error: safety.message, code: 'blocked' });
+        return;
+      }
     }
     if (proReq.initImage && !parseDataUrl(proReq.initImage)) {
       res.status(400).json({ error: 'That attachment is not an image we can read. Please attach a PNG or JPEG.' });

@@ -75362,6 +75362,240 @@ symptom undiagnosable — an error path that deleted its own evidence — is gon
 
 ---
 
+## 2026-09-21 — AUTOPSY c5fd6ad1 + bff0bf23: the engine cloned the user's project INTO their project, on a turn that said "do not change any files"
+
+**The two builds.** `c5fd6ad1` — *"Import this app from my GitHub repository and give me a short survey
+of what it is and how it is structured. **Do not change any files yet.**"* — Weak tier, 4.4 min, rung 1,
+`ok: true`, ₹6.59 (free-list). Then, 94 seconds later, `bff0bf23` — **"preview nahi chala"** — 9 min,
+builtBy KIMI (the ladder fell to rung 2), 18 unresolved warnings.
+
+### 🔴 THE HEADLINE: `git clone <the repo we had just imported> workspace/mitrify`
+
+The platform's import was CORRECT and said so three times: `IMPORT_ACCOUNTING` 327 entries → 175 source
+files, `IMPORT_LANDING` "bulk extract **count-verified**: 175", `IMPORT_DIAGNOSTIC` "SUCCEEDED". The
+architect then delegated the survey to the **fullstack sub-agent**, whose first command was a `git clone`
+of the same repository into `workspace/mitrify`. Every shell command runs with `cwd: WORKSPACE_ROOT`
+(`E2BActuator`), so that landed at `/home/user/workspace/workspace/mitrify` — **a second complete copy of
+the user's app inside their app.** The report carries the doubled path in a `TOOL_ERROR`:
+`/home/user/workspace/workspace/mitrify/README.md`.
+
+**Every consequence is in the next build's report, and the user paid for all of it:**
+- **175 → 352 "source files"**, persisted durably (`IN_BUILD_GREEN` recorded 351 files as the last known
+  good) and bound for the user's own GitHub repo.
+- `INTEGRITY_DUPLICATE_ENTRY` — *"2 files each mount a React root: client/src/main.tsx,
+  workspace/mitrify/client/src/main.tsx"*. `INTEGRITY_DUPLICATE_STYLESHEET` and
+  `INTEGRITY_FOCUS_CONFLICT` (4 components, two of them the copies) are the same cause.
+- **The integrity heal then spent ~3.5 minutes and 10 model calls EDITING the copy the engine had
+  created** — `edit_file workspace/mitrify/client/src/pages/complete-profile.tsx`, `edit_file
+  workspace/mitrify/client/src/main.tsx` — on a turn where the user had only said "preview nahi chala".
+  It removed the duplicate's autoFocus and root mount. **The 175-file copy itself is still there.**
+- The survey's own facts came from the clone's documentation rather than the running app: it told the
+  user *"Server … on port 5000 / Client … on port 5173"* while the platform's own `npm run dev` output in
+  the same report reads **"serving on port 3000"**.
+
+### 🔑 TWO CAUSES, ONE IN EACH HALF OF THE 50/50 LAW
+
+**1 — THE FACT NEVER REACHED THE ACTOR.** The architect's context already carries, verbatim:
+`[APP IMPORT — already completed] The user's app from … has ALREADY been imported into this workspace:
+N files … Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them.`
+**`makeSubAgentSpawn` passes `projectMap()` and `verificationStatus()` and nothing else.** So the agent
+that ran the clone was told the project had 175 files and was never told those files were on its own
+disk. Fixed: one line, emitted only when the project graph really holds files, so a from-scratch build
+never sees a sentence that would be false.
+
+**2 — NOTHING REFUSED THE COMMAND.** The bash dispatcher has a whole guard family — `scaffoldGuard`,
+`previewGuard`, destructive source deletion, still-imported deletion, dependency mutation — and this
+member was missing. `scaffoldGuard`'s own docblock states the principle and even names this class:
+*"the agent tends to improvise … a nested project subdir … The system prompt already tells the agent not
+to run these generators, but a prompt is advisory — the model can still ignore it (and has)."* A prompt
+had already said it here too, and was ignored. `gitCloneGuard.ts` (pure) is the deterministic backstop;
+kill switch `AGENTV3_CLONE_GUARD=off`.
+
+🔒 **THE DISCRIMINATOR KEEPS A REAL RESCUE OPEN, and it is not a guess.** The guard refuses only when
+the clone lands inside the workspace **AND the project graph already holds files**.
+`shouldRetryImportAnonymously` (`ProjectImport.ts`) records a real July incident in which the platform's
+own authenticated clone of **this same repository** brought in nothing while *"the model's own plain
+`git clone` of the identical URL exited 0"*. An import that lands nothing leaves no project, so the count
+is 0 and that clone still runs. The asymmetry is deliberate: refusing wrongly on an empty workspace costs
+the user their whole import; allowing wrongly on a populated one costs a duplicate — and the duplicate is
+the case the evidence names.
+
+🔒 **BOTH LANES BY CONSTRUCTION, not by a second copy.** The clone was run by the SUB-AGENT, and
+yesterday's autopsy (`53d43c18`) was a guard wired into one of two lanes. `makeSubAgentSpawn` builds a
+child `new ToolDispatcher(...)` — the same class — so a guard in that class covers the architect and
+every sub-agent at once. A source-level test asserts that property, because a second dispatcher
+implementation would silently re-open the gap and nothing else would fail.
+
+### ⚠️ PREVENTION RATHER THAN CLEANUP — and the reason is a fact about the sandbox
+
+The tidier-sounding fix is to exclude a nested repository from the collected project.
+**It is not available, and this is an OPEN root cause (rule 6):** `IGNORED_LIST_DIRS` in `E2BActuator`
+prunes `.git` **inside the sandbox**, so `listFiles` never returns a single `.git` path and
+`collectWorkspaceFiles` therefore cannot distinguish a nested repository from an ordinary
+subdirectory — the one signal that would identify it is destroyed before the collector runs. The
+alternatives are worse and were rejected with reasons: a nested `package.json` is how every **monorepo**
+is laid out, and "a subtree that duplicates the root" is a heuristic that would DELETE a user's real
+files from their durable copy (the standing rule that a fix must never trade one problem for another).
+So the wrong branch is made impossible at the door, after which there is no nested copy to detect.
+**Whoever re-opens this needs a dedicated nested-repo probe (`find . -name .git -not -path ./.git`), not
+a change to the collector's skip list.**
+
+### THE FIVE-BUCKET LEDGER (both builds, every item)
+
+**✅ Self-healed — 5.** Sandbox Postgres provisioned and verified with a real `SELECT 1` (14s); the app's
+own migrations run clean (`npm run db:push`, 57s); 34 unprovisionable env values set to honest empty
+placeholders; the dev server's port discovered as 3000 rather than the framework's 5173 and the preview
+re-pointed; 16 credential-leaking console logs redacted in 4 files. ⚠️ Per the 50/50 law the last one is
+**an unrequested edit to the user's source on a "preview nahi chala" turn**, and so is "🔧 Added 14
+missing import(s)" — 14 edits to an app that was already running.
+
+**🔀 Worked around — 3.** The ladder fell GLM → KIMI in build 2 (rung 1 → 2, `LADDER_DEPTH` was recorded
+only for build 1). The integrity heal routed around the duplicate by editing it instead of removing it.
+`npm run dev` in build 2 took **94 seconds** through two failed health-check attempts because build 1's
+server still held port 5000 (`EADDRINUSE`, "UNCAUGHT EXCEPTION — server kept alive").
+
+**⏭️ Skipped — 4.** `COMPLEXITY_ROUTING: "simple (score 5, **model-unavailable**)"` on BOTH builds — the
+cheap second-opinion classifier never ran, twice, and the report says the score came "from evidence the
+scorer could not read". `SANDBOX_PEAK_MEMORY: not available on this machine` — the 2026-09-11 instrument
+produced nothing. No `JOURNEY_*` outcome on build 1 beyond the gate's prose. `READY_BEFORE_END: "The app
+was never judged finished during the build"` on both.
+
+**❌ Still broken / shipped imperfect — 4.** The 175-file duplicate is still in the user's project. The
+survey states the wrong ports. `requestAnalysis.startTier: "gemini"` on **both** builds — Gemini has been
+on no build ladder since 2026-09-14, and this is the **third** report carrying it (recorded in the
+`56f0c645` autopsy and not fixed). 14 `INTEGRITY_UNUSED_DEP` warnings survive into the delivered app.
+
+**🥵 Struggle points — 5.** `TIME_TO_FIRST_CALL` **92s** on build 1, of which **60s** is a single step,
+"saving your project so it survives a restart" (175 files); 43s on build 2 with a 21s grounding gap. The
+ETA said **"~3–4 min (midpoint ~3 min)"** and the build took **9**, then at minute 2 announced *"up to 56
+min left"* — two estimates that contradict each other and both miss. `WRITE_TIME_TYPECHECK` reports *"no
+TypeScript source was written this build"* on a build that went on to edit two `.tsx` files — the line is
+emitted before the integrity heal runs, so it is true of the moment and false of the build. Two
+write-time typechecks returned **`exitCode: null`**.
+
+### 🔎 STEP 2 — THE MISSING SUBSYSTEM: nothing records what the USER'S PREVIEW SURFACE was showing
+
+This is the most important thing in the report and it is not the clone. Build 1 proved the app rendered,
+by every means the platform has: `PREVIEW_PUBLISHED`, `IMPORT_PREVIEW_SERVING`, *"✅ Preview verified — I
+opened the running app in a browser and it renders correctly"*, `APP_RENDERED`, `TIME_TO_FIRST_RENDER`
+219s, `IN_BUILD_GREEN`, `GREEN_GUARD_SAVE`, `PREVIEW_REVIVAL_RECIPE` stored **and read back**.
+
+**Ninety-four seconds later the user typed "preview nahi chala".**
+
+And the app was still up — build 2's own `npm run dev` failed with `EADDRINUSE` on port 5000, which is
+proof that build 1's server was still listening. So the server was running, the URL was unchanged
+(`https://3000-…e2b.app` in both builds), the platform had opened it in a real browser and seen it
+render — and the user saw nothing. **Nothing in the report can explain the gap, because every proof we
+hold is about the SERVER and the SANDBOX, and not one is about the pane the user is looking at.**
+`deliveryProof.ts` closed "did the app render?"; what is missing is "did the RENDER REACH THE USER?" —
+what the preview surface resolved to, whether the door minted a token, whether the iframe loaded, what
+it displayed. An OPEN root cause, deliberately not guessed at: a fix built on a theory of this would be
+the surface patch the fourth rule forbids.
+
+### THE BAR (🫰) — judged honestly
+
+Build 1 met it: 4.4 minutes, rung 1, one model rung, no heal, the app rendered. **Build 2 did not.** The
+user asked why the preview was not running; nine minutes later they had a preview, ~3.5 of those minutes
+spent repairing damage the engine had done to their project in the previous turn, and 14 unrequested
+import edits and 16 redactions in their source. Every one of those minutes was a struggle the user could
+feel, and none of the work was what they asked for.
+
+### Shipped in this change
+
+- `src/server/AgentV3/gitCloneGuard.ts` — pure: where a clone would land (relative ⇒ inside, because the
+  cwd IS the workspace root; absolute ⇒ inside only under the root, which is what keeps the platform's own
+  `/tmp/nbhydrate` clone allowed by construction rather than by an exception list), whether to refuse, and
+  the redirect. It names `glob`/`read_file`/`grep` and `/tmp`, because a stop that only forbids leaves a
+  model nowhere to go.
+- `ToolDispatcher.ts` — the guard beside `scaffoldGuard`, before the command runs. The project graph is
+  read ONLY for a clone that lands inside, so an ordinary command pays nothing; a source-level test holds
+  that ordering.
+- `SubAgent.ts` — the import fact the sub-agent never had.
+- `tests/theProjectWasClonedIntoItself.test.ts` — 24 cases, **reversion-proven four ways**: removing the
+  guard call fails 3, making the refusal ignore the file count fails the rescue case, moving the graph
+  read ahead of the inside test fails the cost guard, deleting the sub-agent line fails 2.
+
+**What to watch:** `clone-guard refused clone into the workspace` in the workspace audit, and whether
+imported-project builds stop reporting `INTEGRITY_DUPLICATE_ENTRY`.
+
+## 2026-09-21 — 🔴 CORRECTION: the "second iOS risk" was never a risk, and the runbook still told the next session to rebuild #3202 the wrong way
+
+### Part 1 — retracting yesterday's open item (rule 6 cuts both ways)
+
+The entry above headed **"⚠️ STILL OPEN — the second iOS risk, NOT fixed here"** is **WRONG and is
+retracted here rather than edited away**, per this file's append-only rule. It claimed
+*"`metaPixel.ts` has no native gate … disabling the pixel on iOS is one line"* and it was reported to
+the admin as a decision they had to take. **There was nothing to decide.**
+
+The gate has existed since the pixel shipped on 2026-08-31:
+
+- `shouldLoadPixel()` — `if (input.isNative) return false;`, with the comment *"rule 2: the Android
+  SDK owns the app's own events"*.
+- `initMetaPixel()` checks it **twice** — once cheaply before the network call, once after the async
+  fetch in case consent changed.
+- Wired at `src/main.tsx` with `isNative: () => isNativeShell(window as never)`.
+
+**And this file already said so.** The 2026-08-31 entry, eight lines of it, reads *"Loads only on:
+production + analytics consent + **NOT the native app** + a valid configured id."* I wrote a
+contradiction of my own project log and did not notice.
+
+🔎 **HOW THE WRONG ANSWER WAS REACHED, because the method matters more than the fact:** I grepped
+`metaPixel.ts` for `Capacitor` and `isNative`, saw no `Capacitor` import, and concluded there was no
+gate. **The gate is INJECTED, not imported** — `initMetaPixel(deps)` takes `isNative: () => boolean`,
+which is this repo's own house pattern for keeping decisions pure and testable (`purchaseRail` takes
+its platform the same way, and I had just written that one). So the very convention I had spent the
+day applying is what made my search miss.
+
+That is safeguard #6's vocabulary failure in its purest form, and it adds one rule worth naming:
+**in a codebase that injects its dependencies, a grep for the dependency's NAME cannot answer "is this
+gated?" — the answer is at the call site, not in the module.** Read the function's parameters and
+follow them outward. `grep -n 'isNative' src/lib/metaPixel.ts` returns the answer in one line; I
+searched for the vendor instead of the concept.
+
+⚠️ **The cost was not zero even though nothing was broken.** The admin was told, twice, that an open
+privacy risk sat on their iOS submission and that a decision about ad measurement was theirs to make.
+Reporting a phantom risk spends the same trust as missing a real one.
+
+**So the App Privacy consequence is the opposite of what was reported:** no third-party advertising
+runs in the iOS app, nothing links activity to third-party data, and therefore **no App Tracking
+Transparency prompt and no `NSUserTrackingUsageDescription` are needed**. That is now written into
+the runbook (§6.1) where it will be read at filing time, instead of living in a session's memory.
+
+### Part 2 — `MOBILE_PUBLISHING.md` §5 was a trap, and it was aimed at the next session
+
+PR #3202 closed the Apple 3.1.1 blocker in code. The runbook that a session reads *before* touching
+mobile still described that work as an un-built plan, in the same paragraph I had quoted in the PR
+body as *"decided long ago and never built"* — and it gave two instructions that are now actively
+harmful:
+
+1. **"Detect the app via `Capacitor.isNativePlatform()` and hide the buy buttons."** Following that
+   literally removes the **working, revenue-earning Android top-up**. The shipped gate is on the
+   PLATFORM (`isApplePlatform`), because Android is a Play-billing problem with a Play-billing answer
+   and iOS is a *no rail exists yet* problem. Two different problems, one sentence conflating them.
+2. **"The app can say 'add credits on the web' and link out to the website's account page."** That is
+   **anti-steering, which Apple forbids** — a second, independent rejection reason. The runbook was
+   instructing a future session to write the exact copy the shipped notice deliberately omits, on an
+   account that has already taken one policy strike.
+
+§5 now describes what the code does, in a table, with the platform-vs-`isNative` distinction stated as
+the load-bearing fact and the anti-steering ban given its own subsection. §5.3 records what a real
+StoreKit v2 would need, so "hide it" is legible as a first move rather than a permanent answer.
+
+**Nothing in this change touches `src/`** — it is documentation plus the retraction above. The code
+shipped yesterday; this is the half that stops it being un-shipped by somebody reading a stale page.
+
+### Part 3 — the App Privacy sheet exists before it is needed (§6.1)
+
+The old checklist said *"declare what data the app collects (auth email, usage). Be accurate."* —
+which is advice, not an answer. §6.1 is now a row-per-category draft in which **every row names the
+code that decides it**, so the admin can re-verify rather than trust it, plus the two findings that
+surprise people: **Purchases — not collected** (the app cannot take a payment on iOS at all) and
+**Health & Fitness — not collected** (`medicalFeaturesHidden(isNativeApp())` hides Doctor AI,
+Pharmacist, First Aid and Maternity on every native shell).
+
+It is labelled a DRAFT, dated, and carries the instruction to re-grep before filing — because the
+2026-09-02 incident in `CLAUDE.md` is precisely a store declaration and a policy page drifting apart,
+and a confident sheet that goes stale is how that happens a second time.
 ## 2026-09-21 — AUTOPSY 56f0c645: a SENTENCE vouched for a control nobody captured, and a working app was told its search was missing
 
 **The report:** a Quick Notes build, free tier, 3.2 min, ₹9.38, `ok: true`, reviewer 90/100 "App looks
@@ -75631,3 +75865,105 @@ Reversion-proven in `tests/theBootGuardRanOnOneLaneOfTwo.test.ts` (8 cases, two 
   own failing auto-start, so ordinary commands paid for an unrelated retry loop.
 - ✅ **CORRECTION to 2026-09-21 (1):** `PREVIEW_SNAPSHOT_STALE` is NOT universal — build 3 reports
   `PREVIEW_SNAPSHOT_CURRENT`. It goes stale exactly when a post-build pass writes after the copy.
+
+---
+
+## 2026-09-21 — 🎧 AUTOPSY: `RUNTIME_UNCHECKED` was the structural outcome of an ordinary build
+
+**Trigger.** Not a single report but a pattern across the two the admin sent: `RUNTIME_UNCHECKED` on
+**all five builds**, beside `IN_BUILD_GREEN`, `GREEN_GUARD_SAVE` and previews that had been opened in a
+real browser and seen rendering. Announced as the next task after #3205 merged, on the reasoning that
+this is the one check that would have caught the `useState` null crash the "Fix bugs" build (`53d43c18`)
+was paid ₹113 to rediscover an hour after the app shipped.
+
+### What was actually wrong
+
+`CONSOLE_LOG` is the only thing `getConsoleErrors` reads. Three lanes could fill it; all three were shut.
+
+| lane | why it could not answer |
+|---|---|
+| **A · the CDP daemon** | the ONLY writer of that file, and it starts solely when the MODEL calls the `browser_action` tool. An ordinary build never does. |
+| **B · the page checks** (`runtimeRecordFromPageChecks`, the documented *"second source of runtime truth"*, 2026-08-19) | needs `extractPageRoutes` to find a route that is not `/`. **MEASURED: 0 of 40 golden scaffolds yield one, and not one uses a router.** |
+| **C · `browseUrl`** | the navigation the PLATFORM makes on essentially every build. Launched a real browser, waited for paint, read the DOM — and attached **no listener of any kind**. |
+
+Both facts were **measured, not read**: a throwaway probe printed the generated `browseUrl` script
+(no `page.on('console')`, no `pageerror`, no write to the log) and ran the real `extractPageRoutes` over
+the real `GOLDEN_SCAFFOLDS` registry (0/40, including `saas-dashboard`, `crm`, `school-erp` — they switch
+none of which uses a router).
+
+🔴 **AND THE FIRST VERSION OF THAT MEASUREMENT WAS WORTHLESS — recorded because the lesson is this
+repo's own.** The probe read `s.files`, a key `GoldenScaffold` does not have, so every scaffold reached
+`extractPageRoutes` as `{}` and it **could not have returned anything except 0**. By the time I went
+back to re-check it a different way, the claim was already published in three documents and a commit
+message. The conclusion HELD on the re-measurement — real field `appTsx`, 40 non-empty sources, 0
+routes, 0 routers — but the original derivation proved nothing: *a derivation is only verified once it
+predicts something it could have got wrong* (the same sentence this file already records for the E2B
+rate). The number now lives in CI, with a control case proving `extractPageRoutes` really does find
+routes when they exist, instead of in a paragraph that can go stale.
+
+⚠️ One clause was also WRONG and is withdrawn: I wrote that the multi-screen scaffolds "switch screens
+on state". The no-router half is verified; the state half is not — my probe found zero matches for it,
+which means my heuristic was narrow, not that the mechanism was confirmed. What is measured is that
+they do not use a router; how they do navigate is unexamined and is not claimed.
+
+### The fix — lane C, because lane C is already paid for
+
+The browser launches regardless, so the four listeners cost nothing. They are now ONE definition
+(`CONSOLE_RECORDER_JS` + `attachConsoleJs`) interpolated into both the daemon and the new pure
+`browsePageScript`, never copied — a second copy is the class this repo has paid for four times
+(`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2).
+
+🔒 **A bug this fix would otherwise have CREATED, caught before writing it.** `getConsoleErrors` reports
+`captured:true` when the log FILE exists, and `provenFromTimeline` reads the resulting `RUNTIME_VERIFIED`
+as *"the app ran in a real browser"*. A browser that loaded a dead preview has a perfectly clean console,
+so an unconditional session marker would have let a **404 earn a render proof**. The marker is gated on
+`painted`; an ERROR is recorded either way, because a crash that prevents paint is the thing worth
+reporting.
+
+⚠️ **It spends money, and that is the point.** A build carrying a real runtime error now reaches the
+auto-fix loop and spends a repair pass it previously could not; on Weak, NavBharatAI pays. Bounded at
+one attempt and wrapped in `verifyAfterFix`. It also wakes `judgeRuntimeRepair`'s `afterCount`, which
+has been `null` on essentially every build since it shipped — the guard against a repair that fixes one
+error and introduces two could never fire, and now can.
+
+🧬 **The 50/50 half — a browser-lane census.** Six scripts in that one file launch or attach to a
+browser, written eighteen months apart, and nothing knew how many there were; the recorder landing on
+exactly one of them was not an oversight anybody could have caught. The census names each lane, whether
+it records and why, and fails when a seventh appears. It deliberately does **not** demand that every
+lane record: the journey check drives hostile input and the page check already collects its own errors,
+so forcing them would put pre-repair errors inside the verdict's 3-minute window and report a fixed bug
+as surviving — trading this problem for a worse one.
+
+🔒 **Honesty half (rule 5).** `AutoFix.ts`'s docblock claimed the page check *"had loaded every page of
+the same app"*. For an app built from our own templates it loads none. Corrected in place with the
+measurement, so the next session is not sent to the wrong lane.
+
+### Tests
+
+`tests/theConsoleListenerLivedOnOneLaneOfThree.test.ts` — 19 cases. The generated scripts are **parsed
+with `node --check`**, because this function has shipped broken twice (a shell-quoting bug that handed
+`node` a fragment; a path bug that hid Playwright) and **neither failed loudly** — the caller falls back
+to curl on any error. Reversion-proven four ways: strip the recorder (7 fail), attach the listeners
+after `goto` (1), make the marker unconditional (1), paste a second copy of the listeners (2).
+
+⚠️ Two assertions in the first draft were wrong and are recorded because the lesson generalises: they
+matched the WORDS `console.log` and `truncate`, and both hit prose — the log file is itself *named*
+`console.log`, and "truncate" appears in the comment explaining why the write appends. A guard that
+trips on its own documentation is a guard someone deletes. They match syntax now.
+
+### OPEN ROOT CAUSES (rule 6 — recorded, not patched)
+
+- **Lane B cannot see a state-routed SPA.** `extractPageRoutes` finds only `<Route path=…>` and Next
+  `app/x/page.tsx`. Every single-screen app, and our own multi-screen scaffolds, yield nothing. Deriving
+  "pages" for those is a separate problem with its own evidence requirement and is **not** guessed at
+  here. Lane C now covers them, which is why this is an upgrade rather than a breakage.
+- **What actually removed the mount node in `e4d27bde`** — still open from yesterday's autopsy; measured
+  *not* to be the app-defaults pass.
+- ✅ **CLOSED in the same change — `claimAudit` checked only `!consoleCaptured`.** A summary claiming a
+  clean console while the captured console showed errors was not flagged. It had never been reachable
+  (an ordinary build captured nothing), and making the capture work is precisely what makes it
+  reachable — so `console-clean-but-errors` ships with it instead of waiting for a report to prove it.
+  It reads the FINAL count after the repair budget, because a mid-build number would accuse a summary
+  of hiding an error the build had already fixed; an omitted count accuses nobody (the discipline
+  `typecheckRan` already states); and the two rules are chained `else if`, so one claim can never
+  produce two contradictions in the user's own correction. Reversion-proven twice.

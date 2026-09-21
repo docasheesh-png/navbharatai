@@ -16553,6 +16553,12 @@ async function noteBuildOutcome(
       // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
       // model's "no console errors" against whether anyone actually looked.
       let runtimeCaptureAvailable = false;
+      // …and HOW MANY errors were still in it at the end. Hoisted for the same reason and from the same
+      // place: `remaining` is block-scoped to the auto-fix loop, and the claim audit runs after it.
+      // ⚠️ It must be the FINAL count, taken after the repair budget — a mid-build number would accuse
+      // the summary of hiding an error the build had already fixed, which is the exact dishonesty
+      // `runtimeRecordFromPageChecks` refuses to commit in the other direction.
+      let runtimeErrorsRemaining = 0;
 
       // THE RELEASE GATE'S EVIDENCE (Mission 10/10 Phase 5, §23), collected as the checks below run.
       //
@@ -19532,6 +19538,7 @@ async function noteBuildOutcome(
           const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
           if (fin.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
           remaining = filterActionableErrors(fin.errors);
+          runtimeErrorsRemaining = remaining.length;
         } catch { /* best-effort — availability stays whatever the loop proved */ }
         try {
           if (remaining.length) {
@@ -19578,6 +19585,10 @@ async function noteBuildOutcome(
       try {
         const contradictions = auditSummaryClaims(result.summary, {
           consoleCaptured: runtimeCaptureAvailable,
+          // "No runtime errors in the browser console" while the console we DID read still held some.
+          // Unreachable until 2026-09-21, because an ordinary build captured nothing; the same change
+          // that made `browseUrl` record its console is what makes this fact real.
+          consoleErrorsFound: runtimeErrorsRemaining,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           previewVerified: previewVerifiedRendered,
           // The app's real source — a label it does not contain cannot have been on the screen.

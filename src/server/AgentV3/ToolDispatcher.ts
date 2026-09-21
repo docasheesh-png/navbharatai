@@ -106,6 +106,7 @@ import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
+import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
@@ -3055,6 +3056,35 @@ export class ToolDispatcher {
           );
           this.state?.appendTerminal(msg);
           return msg;
+        }
+        // CLONING THE PROJECT INTO THE PROJECT — REFUSED (autopsy c5fd6ad1 + bff0bf23, 2026-09-21).
+        // A survey turn whose prompt said "Do not change any files yet" ran
+        // `git clone <the repo we had just imported> workspace/mitrify`, and because every command
+        // runs with `cwd: WORKSPACE_ROOT` that landed a SECOND complete copy of the user's app inside
+        // their app — 175 → 352 source files, two React roots, and a heal pass on the NEXT turn that
+        // spent 3.5 minutes editing the copy the engine had created. Same shape as the scaffold guard
+        // above, and refused for the same reason: a prompt already said not to and was ignored.
+        // Fires ONLY when the project is already here, so the July import-rescue clone (an import
+        // that landed nothing) still runs. Kill switch AGENTV3_CLONE_GUARD=off.
+        if (process.env.AGENTV3_CLONE_GUARD !== 'off') {
+          const cloneDest = cloneDestination(command);
+          let projectFileCount = 0;
+          // Only asked when the command IS a clone into the workspace, so an ordinary command pays
+          // nothing. In-process (the project graph), never a sandbox round trip.
+          if (cloneDest.kind === 'inside') {
+            try { projectFileCount = getWorkspaceMemory(this.workspaceId).graph().files.length; } catch { projectFileCount = 0; }
+          }
+          if (shouldRefuseClone({ destination: cloneDest, projectFileCount })) {
+            const target = cloneDest.kind === 'inside' ? cloneDest.target : '';
+            const cmsg = cloneGuardMessage(target, projectFileCount);
+            try {
+              getWorkspaceMemory(this.workspaceId).recordAudit(
+                `clone-guard refused clone into the workspace (${target}): ${command.slice(0, 160)}`,
+              );
+            } catch { /* audit best-effort */ }
+            this.state?.appendTerminal(cmsg);
+            return cmsg;
+          }
         }
         // Preview guard: the live preview is MANAGED (E2BActuator detects `npm run dev` and binds
         // host / pins port / sets allowedHosts / health-checks / publishes the URL). When it looks

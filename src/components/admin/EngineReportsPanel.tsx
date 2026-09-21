@@ -252,36 +252,58 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
       <ReportCard
         title="Engine usage and margin" source={ENDPOINTS.usage} icon={Activity} window="last 30 days"
         state={s('usage')} onRefresh={() => void load('usage')} onStatus={onStatus}
-        note="Tokens per provider against what was billed. The baseline over-states cheap-provider cost, so the real margin is at least what is shown."
+        note="Tokens per engine against what was billed. The baseline OVER-states cheap-engine cost, so the real margin is at least what is shown."
       >
         {(d) => {
-          const rows: any[] = Array.isArray(d?.providers) ? d.providers : Array.isArray(d?.rows) ? d.rows : [];
-          return rows.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="text-left text-muted">
-                    <th className="py-1 pr-2 font-black">Provider</th>
-                    <th className="py-1 pr-2 font-black">In</th>
-                    <th className="py-1 pr-2 font-black">Out</th>
-                    <th className="py-1 font-black">Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.slice(0, 20).map((row, i) => (
-                    <tr key={`${row?.provider ?? i}`} className="border-t border-line">
-                      <td className="py-1 pr-2 text-body font-bold">{String(row?.provider ?? DASH)}</td>
-                      <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.inputTokens)}</td>
-                      <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.outputTokens)}</td>
-                      <td className="py-1 text-muted tabular-nums">{usd(row?.realCostUsd)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          // FIELD NAMES READ OUT OF `UsageReport` IN `AgentV3CostTelemetry.ts`, NOT GUESSED. The first
+          // version of this card looked for `providers`/`rows` and `realCostUsd`; the route returns
+          // `perProvider` and `baselineCostUsd`, so every row was missing and every cost was a dash —
+          // a card that looked built and showed nothing, which the second absolute rule forbids.
+          const rows: any[] = Array.isArray(d?.perProvider) ? d.perProvider : [];
+          return (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <Stat label="Builds" value={num(d?.totalBuilds)} />
+                <Stat label="Billed" value={usd(d?.totalBilledUsd)} />
+                <Stat label="Baseline cost" value={usd(d?.totalBaselineCostUsd)} />
+                <Stat
+                  label="Margin (at least)" value={usd(d?.marginUsd)}
+                  tone={typeof d?.marginUsd === 'number' && d.marginUsd < 0 ? 'text-danger' : 'text-success'}
+                />
+              </div>
+              {rows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="text-left text-muted">
+                        <th className="py-1 pr-2 font-black">Engine</th>
+                        <th className="py-1 pr-2 font-black">Builds</th>
+                        <th className="py-1 pr-2 font-black">In</th>
+                        <th className="py-1 pr-2 font-black">Out</th>
+                        <th className="py-1 font-black">Baseline</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 20).map((row, i) => (
+                        <tr key={`${row?.provider ?? i}`} className="border-t border-line">
+                          <td className="py-1 pr-2 text-body font-bold">{String(row?.provider ?? DASH)}</td>
+                          <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.builds)}</td>
+                          <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.inputTokens)}</td>
+                          <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.outputTokens)}</td>
+                          <td className="py-1 text-muted tabular-nums">{usd(row?.baselineCostUsd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className={NOTE}>No engine recorded a build in this window.</p>
+              )}
+              <p className={NOTE}>
+                {d?.fromDate && d?.toDate ? `${d.fromDate} to ${d.toDate} · ` : ''}
+                {num(d?.lossBuilds)} build(s) went out free after spending tokens, costing {usd(d?.lossRealCostUsd)}.
+              </p>
             </div>
-          ) : (
-            // The shape is the route's, not this file's — Copy carries it in full either way.
-            <p className={NOTE}>No per-provider rows in this window. Copy for the full response.</p>
           );
         }}
       </ReportCard>
@@ -309,15 +331,33 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
       <ReportCard
         title="Assistant spend" source={ENDPOINTS.assistant} icon={IndianRupee} window="last 14 days"
         state={s('assistant')} onRefresh={() => void load('assistant')} onStatus={onStatus}
-        note="What the Professionals, Doctor AI and the other assistants cost — and the share served by a genuinely free model."
+        note="What the Professionals, Doctor AI and the other assistants cost — and the share a genuinely free model answered."
       >
-        {(d) => (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            <Stat label="Charged" value={typeof d?.totalInr === 'number' ? `₹${d.totalInr.toFixed(2)}` : DASH} />
-            <Stat label="Free-model share" value={pct(d?.freeShare)} tone="text-success" />
-            <Stat label="Calls" value={num(d?.calls)} />
-          </div>
-        )}
+        {(d) => {
+          // `AssistantSpendSummary` from `AssistantSpendStore.ts`: days[] + a verdict for the newest
+          // day that has data. The first version of this card read `totalInr`/`freeShare`/`calls` at
+          // the top level — none of which exist — so it showed three dashes on every load.
+          const days: any[] = Array.isArray(d?.days) ? d.days : [];
+          const today = days[0] ?? null;
+          const verdict = d?.today ?? null;
+          return (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <Stat label="Free share (today)" value={pct(verdict?.freeShare)} tone="text-success" />
+                <Stat label="Turns (today)" value={num(today?.turns)} />
+                <Stat label="Real cost (today)" value={usd(today?.realUsd)} />
+                <Stat label="Unmeasured turns" value={num(today?.unmeasuredTurns)} tone="text-warn" />
+              </div>
+              {verdict?.message ? (
+                <p className="text-[12px] text-accent-text font-bold leading-relaxed">{verdict.message}</p>
+              ) : null}
+              <p className={NOTE}>
+                {days.length} day(s) recorded. An unmeasured turn is one the engine reported no usage
+                for — counted separately, never as a zero.
+              </p>
+            </div>
+          );
+        }}
       </ReportCard>
 
       <h3 className={LABEL}>Platform state</h3>
@@ -337,7 +377,8 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
                     <th className="py-1 pr-2 font-black">Provider</th>
                     <th className="py-1 pr-2 font-black">Requests</th>
                     <th className="py-1 pr-2 font-black">Errors</th>
-                    <th className="py-1 font-black">Avg ms</th>
+                    <th className="py-1 pr-2 font-black">Avg ms</th>
+                    <th className="py-1 font-black">Circuit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -348,7 +389,12 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
                       <td className={`py-1 pr-2 tabular-nums ${Number(v?.errorCount) > 0 ? 'text-danger' : 'text-muted'}`}>
                         {num(v?.errorCount)}
                       </td>
-                      <td className="py-1 text-muted tabular-nums">{num(v?.avgLatencyMs)}</td>
+                      <td className="py-1 pr-2 text-muted tabular-nums">{num(v?.avgLatencyMs)}</td>
+                      {/* The circuit is the fact that decides whether an engine is being SKIPPED right
+                          now — the requests column alone cannot say that. */}
+                      <td className={`py-1 font-bold ${v?.circuitState && v.circuitState !== 'closed' ? 'text-danger' : 'text-muted'}`}>
+                        {v?.circuitState ? String(v.circuitState) : DASH}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

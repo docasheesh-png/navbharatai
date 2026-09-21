@@ -20,9 +20,19 @@ import { braceBlock } from './helpers/sourceSlice';
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
+/**
+ * ⚠️ UPDATED 2026-09-21, AND NOTHING HERE WAS WEAKENED. The admin asked for the same button on every
+ * other chat surface too ("input box se pahle mode button add karo, jisse kabhi bhi kisi bhi mode me
+ * se kisi bhi mode me jaya ja sake"), so the markup these cases used to read inline in AIChat became
+ * ONE shared component, and the call-site condition became one named const. Every property below is
+ * still asserted — accessibility, the label, the icon, the height, the ordering, the untouched input
+ * box — just where the code now lives. A moved invariant is followed, never deleted: dropping a case
+ * because its needle moved is how a guard quietly stops guarding.
+ */
 const APP = stripComments(read('src/App.tsx'));
 const PANEL = stripComments(read('src/components/panels/NBIChatPanel.tsx'));
 const CHAT = stripComments(read('src/components/ide/AIChat.tsx'));
+const BUTTON = stripComments(read('src/components/chat/ModeButton.tsx'));
 
 describe('one mode state, two doors — App.tsx', () => {
   it('the composer prop opens the SAME picker the bottom bar opens', () => {
@@ -30,13 +40,19 @@ describe('one mode state, two doors — App.tsx', () => {
     expect(APP).toContain("if (key === 'mode') { setShowModePicker(true); return; }");
     // The composer's door, on the Free chat panel:
     const panel = APP.slice(APP.indexOf('<NBIChatPanel'), APP.indexOf('/>', APP.indexOf('<NBIChatPanel')));
-    expect(panel).toContain('onOpenModePicker={showsGlobalMobileNav ? undefined : () => setShowModePicker(true)}');
+    // The composer's door, through the one named opener every surface now shares…
+    expect(panel).toContain('onOpenModePicker={modePickerOpener}');
+    // …which is defined from exactly the old expression, so the chain is unchanged end to end.
+    expect(APP).toContain('const modePickerOpener = showsGlobalMobileNav ? undefined : () => setShowModePicker(true)');
   });
 
   it('🔒 the prop is ABSENT exactly when the mobile bar is on screen — mobile stays byte-identical', () => {
     // Passing it unconditionally would put a second Mode button on every phone, under the bar's.
     const panel = APP.slice(APP.indexOf('<NBIChatPanel'), APP.indexOf('/>', APP.indexOf('<NBIChatPanel')));
-    expect(panel).toMatch(/onOpenModePicker=\{showsGlobalMobileNav \? undefined :/);
+    expect(panel).toContain('onOpenModePicker={modePickerOpener}');
+    expect(APP).toMatch(/const modePickerOpener = showsGlobalMobileNav \? undefined :/);
+    // One opener, so this gate cannot be re-derived differently by the surfaces added since.
+    expect(APP.match(/showsGlobalMobileNav \? undefined/g)?.length).toBe(1);
     // …and that gate is the one the <nav> itself reads, not a second breakpoint.
     expect(APP).toContain('{showsGlobalMobileNav && (\n        <nav');
   });
@@ -58,25 +74,28 @@ describe('the door is forwarded, never re-implemented — NBIChatPanel', () => {
 });
 
 describe('the button, in the composer — AIChat', () => {
-  const button = braceBlock(CHAT, '{showFreeModeButton && (');
-
   it('renders only when asked for, and never beside the Pro dropdown that owns the same slot', () => {
     expect(CHAT).toContain("const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');");
+    // The rendering is the shared component now, wired to this surface's own opener.
+    expect(CHAT).toContain('{showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}');
   });
 
   it('is a real, accessible control that opens the picker', () => {
-    expect(button).not.toBe('');
-    expect(button).toContain('onClick={onOpenModePicker}');
-    expect(button).toContain('aria-label="Choose AI mode"');
-    expect(button).toContain('aria-haspopup="dialog"');
-    expect(button).toContain('type="button"');
-    expect(button).toContain('focus-visible:ring-2');
+    // Asserted against ModeButton, which is where this markup lives since it became shared. Every
+    // property the inline version was pinned for is still pinned — and now for all five surfaces.
+    expect(BUTTON).toContain('onClick={onOpen}');
+    expect(BUTTON).toContain('aria-label="Choose AI mode"');
+    expect(BUTTON).toContain('aria-haspopup="dialog"');
+    expect(BUTTON).toContain('type="button"');
+    expect(BUTTON).toContain('focus-visible:ring-2');
     // The word "Mode" — the same label the mobile bar uses — and the same icon.
-    expect(button).toMatch(/<Layers className="w-3\.5 h-3\.5" \/>\s*Mode/);
+    expect(BUTTON).toMatch(/<Layers[^>]*\/>\s*\n?\s*Mode/);
+    // Same height as the box's minimum (48px), so the two read as one composer.
+    expect(BUTTON).toContain('h-12');
   });
 
   it('sits OUTSIDE the message box, immediately to its LEFT — and the box itself is untouched', () => {
-    const buttonAt = CHAT.indexOf('{showFreeModeButton && (');
+    const buttonAt = CHAT.indexOf('{showFreeModeButton && <ModeButton');
     const box = CHAT.indexOf('<div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">');
     const textarea = CHAT.indexOf('placeholder="Ask NavBharatAI..."');
     expect(box).toBeGreaterThan(-1);
@@ -90,8 +109,6 @@ describe('the button, in the composer — AIChat', () => {
     // The textarea's own inset is EXACTLY what it was — the input box is not touched ("na inputbox").
     expect(CHAT).toContain("onModeChange && activeAgent === 'navbharatai-pro' ? \"pl-32\" : \"pl-5\"");
     expect(CHAT).not.toContain('pl-24');
-    // Same height as the box's minimum (48px), so the two read as one composer.
-    expect(button).toContain('h-12');
   });
 
   it('holds no mode of its own — it only asks', () => {

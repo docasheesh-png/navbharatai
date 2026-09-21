@@ -3,6 +3,7 @@ import { ArrowUp, Download, ImagePlus, Loader2, RefreshCw, Sparkles, Type, Wand2
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
 import { TextOverlayEditor } from './TextOverlayEditor';
+import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 
 /**
@@ -28,11 +29,19 @@ import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPr
  * 🔒 WHITE-LABEL: nothing here names the model or the vendor. To the user this is NavBharatAI Pro.
  */
 
-const SIZES = [
-  { id: 'square', label: '1:1', desc: '1024×1024' },
-  { id: 'wide', label: '16:9', desc: '1280×720' },
-  { id: 'portrait', label: '3:4', desc: '864×1152' },
-  { id: 'icon', label: 'Icon', desc: '1024×1024' },
+/**
+ * The size options, in the shape the SHARED selector takes.
+ *
+ * Admin, 2026-09-21: *"dono same hi hai"* — and until this change they were not. The free tier and
+ * this studio each drew their own size control, so a user moving between the two met two different
+ * widgets for one decision. One component now, used on both screens, which is also the only way the
+ * Escape key, the scrim and the tab-bar reservation stay right in both places at once.
+ */
+const SIZES: ImageOption[] = [
+  { id: 'square', label: '1:1', desc: 'Square, 1024×1024' },
+  { id: 'wide', label: '16:9', desc: 'Wide, 1280×720' },
+  { id: 'portrait', label: '3:4', desc: 'Portrait, 864×1152' },
+  { id: 'icon', label: 'Icon', desc: 'App icon, 1024×1024' },
 ];
 
 /**
@@ -314,6 +323,22 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
             </div>
           )}
 
+          {/* The selector sits ABOVE the input, where the free tier's four now sit — "sabse niche
+              input box. uske upar selector". This studio has one option to choose, because its mode
+              is DERIVED from what you attach rather than picked. */}
+          <div className="flex items-center gap-2">
+            <div className="w-40 shrink-0">
+              <ImageOptionSelect
+                label="Size / format"
+                heading="What shape do you need?"
+                options={SIZES}
+                value={size}
+                onChange={setSize}
+              />
+            </div>
+            {mode && <span className="text-[11px] text-muted truncate">{MODE_LABEL[mode]}</span>}
+          </div>
+
           <div className="flex items-end gap-2 bg-raised border border-line focus-within:border-amber-400/40 rounded-[26px] pl-2 pr-2 py-2 transition-colors">
             <button
               onClick={() => fileRef.current?.click()}
@@ -352,27 +377,9 @@ export function ImageStudioPro({ onImageGenerated }: { onImageGenerated?: (url: 
             </button>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {SIZES.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setSize(s.id)}
-                title={s.desc}
-                className={`text-[11px] rounded-full px-2.5 py-1 border transition-colors min-w-0 ${
-                  size === s.id
-                    ? 'border-amber-400/50 bg-amber-400/10 text-warn'
-                    : 'border-line text-faint hover:text-body hover:border-line'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-            <span className="ml-auto text-[11px] text-faint flex items-center gap-1.5 shrink-0">
-              {mode ? <span className="text-muted">{MODE_LABEL[mode]}</span> : null}
-              <span aria-hidden>·</span>
-              <Wand2 className="w-3 h-3" /> ₹{PRICE_INR} per image
-            </span>
-          </div>
+          <p className="text-[11px] text-faint flex items-center justify-center gap-1.5">
+            <Wand2 className="w-3 h-3" /> ₹{PRICE_INR} per image, charged only if it arrives
+          </p>
         </div>
       </div>
 

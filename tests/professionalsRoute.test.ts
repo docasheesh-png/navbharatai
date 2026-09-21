@@ -141,4 +141,27 @@ describe('professional chat route — verified identity only', () => {
     expect(res400.statusCode).toBe(400);
     expect(runChatMock).not.toHaveBeenCalled();
   });
+
+  // ── WHICH WINDOW IS TALKING (admin 2026-09-21: five chats at once, no leak between them) ─────────
+  it('threads a plausible body conversationId into the engine as the sixth argument', async () => {
+    verifyIdentityMock.mockResolvedValue({ uid: 'uid-verified', email: null });
+    const res = mockRes();
+    await chatHandler()(
+      mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', conversationId: 'c_9f2a-b' } }),
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: 'c_9f2a-b' });
+  });
+
+  it('an absent or implausible conversationId reaches the engine as undefined — the legacy conversation, never a guess', async () => {
+    verifyIdentityMock.mockResolvedValue({ uid: 'uid-verified', email: null });
+    for (const bad of [undefined, 42, '', 'has spaces', 'x'.repeat(65), { id: 'c1' }]) {
+      runChatMock.mockClear();
+      const res = mockRes();
+      await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', conversationId: bad } }), res);
+      expect(res.statusCode).toBe(200);
+      expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: undefined });
+    }
+  });
 });

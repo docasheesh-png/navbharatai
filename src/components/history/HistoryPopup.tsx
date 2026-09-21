@@ -21,7 +21,7 @@ export interface HistoryPopupProps {
   onClose: () => void;
   onRestoreSession?: (uci: string) => void;
   onDeleteSession?: (id: string) => void;
-  onOpenProfessional?: (viewId: string) => void;
+  onOpenProfessional?: (viewId: string, conversationId: string) => void;
 }
 
 // NO `filter` PROP, DELIBERATELY. The popup serves the Free surface only (see historySurface.ts), so
@@ -52,7 +52,7 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
 
   // OPENING A ROW MUST ALSO CLOSE THE POPUP. Without this the chosen conversation loads UNDERNEATH a
   // list that is still covering it — the user taps, something happens, and they see the same list.
-  const closeAfter = <T,>(fn: ((arg: T) => void) | undefined) => (arg: T) => { fn?.(arg); onClose(); };
+  const closeAfter = <A extends unknown[],>(fn: ((...args: A) => void) | undefined) => (...args: A) => { fn?.(...args); onClose(); };
 
   return (
     // `nb-sheet-overlay-flush` (admin 2026-09-06): z-130 is BELOW the global tab bar's z-150, so the

@@ -4,8 +4,8 @@ import { Briefcase, MessageSquare, LogIn, Trash2, Search, X } from 'lucide-react
 import { cn } from '../../lib/utils';
 import { PROFESSIONAL_CHATS } from './professionalConfigs';
 import {
-  browserStore, readActive, readArchive, hasRealExchange, resumeArchived, deleteArchived, activeKey,
-  type ProfMsg,
+  browserStore, readOpenConversations, readArchive, hasRealExchange, resumeArchived, deleteArchived,
+  deleteOpenConversation, type ProfMsg,
 } from '../../lib/professionalChatStore';
 
 // PROFESSIONAL-SCOPED HISTORY (admin 2026-08-11: "Professional ki History sirf Professional ki dikhaye,
@@ -17,7 +17,7 @@ import {
 // sessions here (unrelated) and ZERO of the professional's real chats. This view reads the RIGHT source:
 // the localStorage buffers, one row per professional the user has actually talked to.
 
-interface ProfHistoryItem {
+export interface ProfHistoryItem {
   id: string;
   name: string;
   /** A short preview — the last thing said in the conversation. */
@@ -25,10 +25,16 @@ interface ProfHistoryItem {
   /** How many messages the user + assistant have exchanged (excludes the opening welcome). */
   turns: number;
   /**
-   * Set when the user has ENDED this conversation with ✕ — it is archived rather than live.
-   * Doubles as the conversation's id within its professional (see professionalChatStore).
+   * Set when the user has ENDED this conversation with ✕ — it is archived rather than open.
+   * Doubles as the conversation's id within its professional's ARCHIVE (see professionalChatStore).
    */
   endedAt?: number;
+  /**
+   * The conversation id of an OPEN (ongoing) conversation — a professional can hold several since
+   * 2026-09-21, so "Open" on an ongoing row must say WHICH one. Absent on an ended row (its id, if it
+   * still has one, is re-adopted by `resumeArchived`).
+   */
+  conversationId?: string;
 }
 
 /**
@@ -49,8 +55,11 @@ export function readProfessionalHistory(): ProfHistoryItem[] {
     turns: msgs.filter((m) => m?.role === 'user').length,
   });
   for (const [id, config] of Object.entries(PROFESSIONAL_CHATS)) {
-    const live = readActive(store, id);
-    if (hasRealExchange(live)) items.push({ id, name: config.name, ...describe(live) });
+    // Every OPEN conversation is a row of its own — one professional, several ongoing chats.
+    for (const open of readOpenConversations(store, id)) {
+      if (!hasRealExchange(open.messages)) continue;
+      items.push({ id, name: config.name, conversationId: open.id, ...describe(open.messages) });
+    }
     for (const past of readArchive(store, id)) {
       if (!hasRealExchange(past.messages)) continue;
       items.push({ id, name: config.name, endedAt: past.endedAt, ...describe(past.messages) });
@@ -60,14 +69,17 @@ export function readProfessionalHistory(): ProfHistoryItem[] {
 }
 
 /** A stable React key / identity for a row — a professional can now hold several conversations. */
-const rowId = (item: ProfHistoryItem) => `${item.id}#${item.endedAt ?? 'live'}`;
+const rowId = (item: ProfHistoryItem) => `${item.id}#${item.conversationId ?? item.endedAt ?? 'live'}`;
 
 export function ProfessionalHistoryView({
   onOpen,
   onBack,
 }: {
-  /** Resume a professional's chat — `id` is that professional's ViewType. */
-  onOpen: (id: string) => void;
+  /**
+   * Open a professional's conversation — `id` is that professional's ViewType, `conversationId` the
+   * conversation to show (an ended one has already been resumed under that id by the time this fires).
+   */
+  onOpen: (id: string, conversationId: string) => void;
   onBack?: () => void;
 }) {
   const [reloadKey, setReloadKey] = useState(0);
@@ -84,7 +96,7 @@ export function ProfessionalHistoryView({
     const store = browserStore();
     if (!store) return;
     if (item.endedAt === undefined) {
-      try { store.removeItem(activeKey(item.id)); } catch { /* ignore */ }
+      if (item.conversationId) deleteOpenConversation(store, item.id, item.conversationId);
     } else {
       deleteArchived(store, item.id, item.endedAt);
     }
@@ -92,12 +104,14 @@ export function ProfessionalHistoryView({
   };
 
   // "Open" must open the conversation the user clicked, not a blank chat. An ENDED conversation is
-  // therefore made live again first — and whatever is live at that moment is archived rather than
-  // overwritten, so resuming an old chat can never cost the user a newer one.
+  // therefore made open again first, under the id it had (so its memory continues) — nothing else is
+  // disturbed, because with several windows there is no single live slot to protect.
   const openOne = (item: ProfHistoryItem) => {
     const store = browserStore();
-    if (store && item.endedAt !== undefined) resumeArchived(store, item.id, item.endedAt);
-    onOpen(item.id);
+    let conversationId = item.conversationId ?? null;
+    if (store && item.endedAt !== undefined) conversationId = resumeArchived(store, item.id, item.endedAt);
+    if (!conversationId) { setReloadKey((k) => k + 1); return; } // gone from storage — refresh rather than open a blank chat
+    onOpen(item.id, conversationId);
   };
 
   return (

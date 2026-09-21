@@ -129,7 +129,76 @@ describe('professional engine — generic per-user memory', () => {
 
     expect(reply).not.toMatch(/student_memory/);
     expect(reply.length).toBeGreaterThan(0);
+    // `name` is BOTH a Teacher field and a shared one, so it is saved to both profiles (2026-09-21).
+    expect(saveMock).toHaveBeenCalledWith('uid-1', 'teacher_ai', { name: 'Ravi' });
+    expect(saveMock).toHaveBeenCalledWith('uid-1', '_shared', { name: 'Ravi' });
+    expect(saveMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ── THE SHARED IDENTITY (admin 2026-09-21: "user ka naam, profession … woh yaad rakhna hai") ──────
+  it('a name learned by ANOTHER expert greets the user here — the shared profile is loaded and injected', async () => {
+    // Teacher's own profile is empty; the shared one (written by, say, the Lawyer) knows the name.
+    loadMock.mockImplementation(async (_uid: string, id: string) => (id === '_shared' ? { name: 'Priya', occupation: 'CA student' } : null));
+    const router = routerCapturing('Hello Priya!');
+    getRouterMock.mockReturnValue(router);
+
+    await runProfessionalChat(TEACHER, 'namaste', [], 'uid-1');
+
+    expect(loadMock).toHaveBeenCalledWith('uid-1', 'teacher_ai');
+    expect(loadMock).toHaveBeenCalledWith('uid-1', '_shared');
+    const systemPrompt = router.routeRaced.mock.calls[0][1] as string;
+    expect(systemPrompt).toMatch(/WHAT YOU ALREADY KNOW ABOUT THIS STUDENT/);
+    expect(systemPrompt).toMatch(/Priya/);
+    // `occupation` is not a TEACHER field, yet it is rendered: the effective fields include the shared ones.
+    expect(systemPrompt).toMatch(/CA student/);
+  });
+
+  it("the professional's OWN value wins over the shared one for the same key", async () => {
+    loadMock.mockImplementation(async (_uid: string, id: string) => (id === '_shared' ? { name: 'P. Sharma' } : { name: 'Priya' }));
+    const router = routerCapturing('Hi!');
+    getRouterMock.mockReturnValue(router);
+
+    await runProfessionalChat(TEACHER, 'hi', [], 'uid-1');
+
+    const systemPrompt = router.routeRaced.mock.calls[0][1] as string;
+    expect(systemPrompt).toMatch(/• Name: Priya/);
+    expect(systemPrompt).not.toMatch(/P\. Sharma/);
+  });
+
+  it('"remember this" is saved to the SHARED profile only — never into the professional\'s own', async () => {
+    loadMock.mockResolvedValue(null);
+    getRouterMock.mockReturnValue(
+      routerCapturing('Done.\n<user_memory>{"remember":["I prefer replies in Hinglish"],"college":"DAV College"}</user_memory>'),
+    );
+
+    await runProfessionalChat(TEACHER, 'isko yaad rakhna: Hinglish me reply dena', [], 'uid-1');
+
+    expect(saveMock).toHaveBeenCalledWith('uid-1', 'teacher_ai', { college: 'DAV College' });
+    expect(saveMock).toHaveBeenCalledWith('uid-1', '_shared', { remember: ['I prefer replies in Hinglish'] });
+    expect(saveMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a shared key the professional did NOT declare still reaches the shared profile, and not its own', async () => {
+    loadMock.mockResolvedValue(null);
+    getRouterMock.mockReturnValue(routerCapturing('Noted.\n<user_memory>{"location":"Lucknow"}</user_memory>'));
+
+    await runProfessionalChat(TEACHER, 'main Lucknow se hoon', [], 'uid-1');
+
     expect(saveMock).toHaveBeenCalledTimes(1);
+    expect(saveMock).toHaveBeenCalledWith('uid-1', '_shared', { location: 'Lucknow' });
+  });
+
+  it('the shared block is NOT injected for an anonymous user, and no memory block is asked for', async () => {
+    const router = routerCapturing('Welcome!');
+    getRouterMock.mockReturnValue(router);
+    await runProfessionalChat(TEACHER, 'hi');
+    const systemPrompt = router.routeRaced.mock.calls[0][1] as string;
+    expect(loadMock).not.toHaveBeenCalled();
+    // The RULE mentioning the section is always present; the SECTION itself (the rendered block) is not.
+    expect(systemPrompt).not.toMatch(/WHAT YOU ALREADY KNOW ABOUT THIS STUDENT \(remembered/);
+    // …and an anonymous user is never asked for a memory block at all, shared keys included.
+    expect(systemPrompt).not.toMatch(/"remember"/);
+    expect(systemPrompt).toMatch(/Do not output any <user_memory> block/);
   });
 
   it('buildProfessionalSystemPrompt places the memory block into the assembled prompt', () => {

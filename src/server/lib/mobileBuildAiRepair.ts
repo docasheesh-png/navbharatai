@@ -28,6 +28,20 @@
 //
 // PURE where it matters: prompt building, reply validation, path extraction and sanitization are pure
 // functions with no I/O, so every guard is unit-testable. The one LLM call is injected by the route.
+//
+// 🔴 THE LOOP, NOT THE MODEL (admin 2026-09-22: *"NavBharatAI ki GitHub-based APK/AAB building ko
+// 'Claude Code level' par lao … Loop theek karo, model nahi"*). Everything above described a ONE-SHOT
+// patch: one prompt, one reply, committed blind, and a five-minute GitHub run to learn whether it
+// worked. Claude Code's loop differs in three ways that have nothing to do with which model runs:
+//   1. it can OPEN the file it needs — the import target beside the file that failed, the types file
+//      the error names — instead of guessing at content it was never shown;
+//   2. it RUNS THE BUILD before it pushes, so a change that does not compile is never committed;
+//   3. it ITERATES on the real error the build printed, keeping its own previous change in view.
+// `runAiRepairLoop` is those three, bounded. The reply contract gains one shape — {"needFiles": [...]}
+// — and every path it names is checked against a listing WE supplied, so the allowlist is not loosened:
+// the model chooses from a menu, it never invents a path. A fix that fails verification is NEVER
+// committed, whatever round it was; a fix that could not be verified at all is committed exactly as
+// before and is LABELLED unverified, so the caller and the user know which kind of fix they got.
 
 export interface AiRepairContext {
   /** The failing step's log — already narrowed by failedStepSection, already timestamp-stripped. */
@@ -36,6 +50,16 @@ export interface AiRepairContext {
   files: Record<string, string>;
   /** What the deterministic tier concluded, so the model starts from the honest state. */
   ruleSummary: string;
+  /**
+   * Every other file in the repository the model may ASK for (bounded). Absent or empty ⇒ the model
+   * cannot ask, and a `needFiles` reply is rejected as out of contract — today's behaviour exactly.
+   */
+  tree?: string[];
+  /**
+   * Set by the loop on a round after a verified failure: what the build said about the model's OWN
+   * previous change. The model sees its change in `files` and this message beside it.
+   */
+  previousAttempt?: { round: number; buildSaid: string };
 }
 
 export interface AiRepairFix {
@@ -83,6 +107,16 @@ export const AI_REPAIR_MAX_FILE_CHARS = 300_000;
 export const AI_REPAIR_MAX_FILES = 6;
 /** How much of the failing log the model sees. Failures live at the end, so the TAIL is kept. */
 export const AI_REPAIR_LOG_CHARS = 12_000;
+/** How many files the model may ask for in one round, and how much of the tree it is shown. */
+export const AI_REPAIR_MAX_ASK = 4;
+export const AI_REPAIR_TREE_CHARS = 8_000;
+/** Bounded rounds: model calls per repair. Env-tunable; a malformed value takes the default, never "no limit". */
+export const AI_REPAIR_DEFAULT_ROUNDS = 4;
+export function aiRepairMaxRounds(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.MOBILE_AUTOFIX_AI_ROUNDS);
+  if (!Number.isFinite(raw) || raw < 1) return AI_REPAIR_DEFAULT_ROUNDS;
+  return Math.min(8, Math.floor(raw));
+}
 
 /** Paths that must never be offered to or accepted from the model, whatever the log says. */
 const FORBIDDEN_PATH = /(^|\/)(\.env[^/]*|.*\.(keystore|jks|p12|pem|key)|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i;
@@ -92,6 +126,12 @@ const FORBIDDEN_PATH = /(^|\/)(\.env[^/]*|.*\.(keystore|jks|p12|pem|key)|package
  * files broke, and those are the ones worth showing the model. Bounded and deduplicated; forbidden
  * paths are dropped here so they are never even fetched.
  */
+/** The app's OWN source, as distinct from the packaging files NavBharatAI generated around it. */
+export const APP_SOURCE_PREFIX = /^(src|app|pages|components|lib|public|www)\//;
+export function isAppSourcePath(path: string): boolean {
+  return APP_SOURCE_PREFIX.test(path) && !FORBIDDEN_PATH.test(path) && !path.includes('..');
+}
+
 export function filesNamedInLog(log: string, cap = 4): string[] {
   const out: string[] = [];
   const re = /(?:^|[\s"'(\[])((?:src|app|pages|components|lib|public|www)\/[\w./-]+\.(?:tsx?|jsx?|mjs|cjs|css|scss|vue|json|html?))(?=$|[\s"':)\],(])/gim;
@@ -176,6 +216,9 @@ export const AI_REPAIR_SYSTEM_PROMPT = [
   '{"fixable": true, "explanation": "<one short sentence, plain language, no tool or vendor names>",',
   ' "files": {"<path>": "<the COMPLETE new content of that file>"}}',
   'or {"fixable": false, "explanation": "<one short sentence saying what is wrong>"}',
+  'or, when you need to READ another file of the app before you can fix it (the file an import points',
+  'at, a types file the error names), {"needFiles": ["<path>", ...]} choosing ONLY from the list of',
+  'other files you are shown. You will then receive those files and be asked again.',
   '',
   'Rules:',
   '- Only include files you actually need to change, chosen ONLY from the provided files.',
@@ -183,6 +226,9 @@ export const AI_REPAIR_SYSTEM_PROMPT = [
   '- Fix the root cause of the build failure; keep every unrelated line exactly as it is.',
   '- Never add secrets, tokens, keystores or signing configuration.',
   '- If the real cause is a missing signing key or anything outside these files, reply fixable:false.',
+  '- Ask for a file only when you genuinely need its content; do not ask for files you were already given.',
+  '- If told that your previous change did not fix the build, read what the build said and correct',
+  '  YOUR change — do not repeat it.',
 ].join('\n');
 
 /** The user prompt: the honest rule-tier verdict, the failing log tail, then every offered file. */
@@ -191,15 +237,50 @@ export function buildAiRepairPrompt(ctx: AiRepairContext): string {
   const parts = [
     `Automated diagnosis so far: ${ctx.ruleSummary}`,
     '',
-    '=== FAILING STEP LOG ===',
-    log,
-    '',
-    '=== FILES YOU MAY CHANGE ===',
   ];
+  if (ctx.previousAttempt) {
+    // The build's verdict on the model's OWN change, in its own words. The changed content is already in
+    // the files below, so the model corrects what it wrote rather than starting from a blank guess.
+    parts.push(
+      `=== ROUND ${ctx.previousAttempt.round}: YOUR PREVIOUS CHANGE DID NOT FIX THE BUILD ===`,
+      'The files below already contain your previous change. The build was run with it and said:',
+      ctx.previousAttempt.buildSaid.slice(-AI_REPAIR_LOG_CHARS),
+      '',
+    );
+  }
+  parts.push('=== FAILING STEP LOG ===', log, '', '=== FILES YOU MAY CHANGE ===');
   for (const [path, content] of Object.entries(ctx.files)) {
     parts.push(`--- ${path} ---`, content.length > AI_REPAIR_MAX_FILE_CHARS ? content.slice(0, AI_REPAIR_MAX_FILE_CHARS) : content, '');
   }
+  const askable = (ctx.tree ?? []).filter((p) => !(p in ctx.files));
+  if (askable.length > 0) {
+    parts.push(
+      `=== OTHER FILES IN THE APP (you may ask for up to ${AI_REPAIR_MAX_ASK} with {"needFiles": [...]}) ===`,
+      askable.join('\n').slice(0, AI_REPAIR_TREE_CHARS),
+      '',
+    );
+  }
   return parts.join('\n');
+}
+
+/**
+ * Is this rewrite a real change, or the same code with different comments and spacing?
+ *
+ * 🔴 A comment-only rewrite passed the loop guard and was reported as `fixed: true`, then re-ran a
+ * five-minute build that failed the same way. Stripping comments and collapsing whitespace before the
+ * comparison is a deterministic answer to "did anything that the compiler sees change?". It can only
+ * REJECT more, never accept more — a rejected rewrite is a miss, which is the honest verdict for it.
+ */
+export function isMeaningfulChange(path: string, before: string, after: string): boolean {
+  if (before === after) return false;
+  const strip = (text: string): string => {
+    let t = text;
+    if (/\.(ya?ml|toml|properties|gradle)$/i.test(path)) t = t.replace(/(^|\s)#[^\n]*/g, '$1');
+    else if (/\.(m?[jt]sx?|c?js|css|scss|json)$/i.test(path)) t = t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:"'\\])\/\/[^\n]*/g, '$1');
+    else if (/\.html?$/i.test(path)) t = t.replace(/<!--[\s\S]*?-->/g, '');
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  return strip(before) !== strip(after);
 }
 
 /**
@@ -218,11 +299,15 @@ export function sanitizeAiText(text: string): string {
  * Validate a model reply into an applied-or-rejected decision. Every rule here is a hard gate:
  * a reply that fails ANY of them yields null (or an honest fixable:false), never a partial write.
  */
+/** The model asked to read more of the app before answering. Every path is from the menu we showed it. */
+export interface AiRepairAsk { needFiles: string[] }
+
 export function parseAiRepairReply(
   raw: string,
   allowedPaths: string[],
   current: Record<string, string>,
-): AiRepairFix | { fixable: false; explanation: string } | null {
+  askable: readonly string[] = [],
+): AiRepairFix | AiRepairAsk | { fixable: false; explanation: string } | null {
   const text = String(raw || '');
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -231,9 +316,20 @@ export function parseAiRepairReply(
   let parsed: unknown;
   try { parsed = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
   if (!parsed || typeof parsed !== 'object') return null;
-  const obj = parsed as { fixable?: unknown; explanation?: unknown; files?: unknown };
+  const obj = parsed as { fixable?: unknown; explanation?: unknown; files?: unknown; needFiles?: unknown };
 
   const explanation = sanitizeAiText(typeof obj.explanation === 'string' ? obj.explanation : '');
+
+  if (Array.isArray(obj.needFiles)) {
+    // A request to READ, not to write. Only a path we LISTED may be asked for — the model chooses from
+    // a menu, never invents — and one it already holds is dropped, so a model that asks for the same
+    // file twice cannot spend a round on nothing. With no menu at all this reply is out of contract.
+    const menu = new Set(askable);
+    const needFiles = [...new Set(obj.needFiles.filter((p): p is string => typeof p === 'string'))]
+      .filter((p) => menu.has(p) && !(p in current) && !FORBIDDEN_PATH.test(p) && !p.includes('..'))
+      .slice(0, AI_REPAIR_MAX_ASK);
+    return needFiles.length > 0 ? { needFiles } : null;
+  }
 
   if (obj.fixable === false) {
     return { fixable: false, explanation: explanation || 'The problem is outside what can be repaired automatically.' };
@@ -249,6 +345,8 @@ export function parseAiRepairReply(
     if (typeof content !== 'string' || !content.trim()) return null;
     if (content.length > AI_REPAIR_MAX_FILE_CHARS) return null;
     if ((current[path] || '') === content) continue;
+    // Same code, different comments: nothing the compiler sees changed, so nothing was fixed.
+    if (!isMeaningfulChange(path, current[path] || '', content)) continue;
     files[path] = content;
   }
   // Everything it sent was identical to what is already there — that is a miss, not a fix; committing
@@ -276,10 +374,172 @@ export async function runAiRepair(
     try {
       const reply = await llm(model, AI_REPAIR_SYSTEM_PROMPT, prompt);
       const result = parseAiRepairReply(reply, Object.keys(ctx.files), ctx.files);
-      if (result) return result;
+      // No menu was offered here, so `parseAiRepairReply` cannot return an ask; the guard keeps the
+      // type honest if a caller ever passes a tree through this one-shot entry point.
+      if (result && !('needFiles' in result)) return result;
     } catch {
       // This rung failed or timed out — the next one gets its chance. Never the user's problem.
     }
   }
   return null;
+}
+
+// ───────────────────────────── the loop ─────────────────────────────
+
+/**
+ * The build's verdict on a candidate change, supplied by the caller (the sandbox runner). `changed` is
+ * only the files that differ from the repository — the sandbox already holds everything else.
+ */
+export type VerifyFix = (changed: Record<string, string>) => Promise<
+  | { ran: false; reason: string }
+  | { ran: true; ok: true }
+  | { ran: true; ok: false; log: string; summary: string }
+>;
+
+export interface AiRepairLoopDeps {
+  /** Read more of the repository — the files the model asked for. Missing paths are simply absent. */
+  fetchFiles: (paths: string[]) => Promise<Record<string, string>>;
+  /** Run the real build on a candidate. Absent ⇒ the loop cannot verify and says so in its outcome. */
+  verify?: VerifyFix;
+}
+
+export type AiRepairLoopOutcome =
+  /** A change the build was run with, here, and it passed. Commit it. */
+  | 'fixed'
+  /** A change nothing could verify (no sandbox for this app, or a stage the sandbox cannot judge). */
+  | 'unverified-fix'
+  /** The model said the cause is outside what it may change, or no rung answered in contract. */
+  | 'miss'
+  /** Rounds spent, and every change the model made was proven NOT to fix the build. Nothing to commit. */
+  | 'gave-up';
+
+export interface AiRepairLoopResult {
+  outcome: AiRepairLoopOutcome;
+  /** Present for 'fixed' and 'unverified-fix': only the files that differ from the repository. */
+  fix?: AiRepairFix;
+  verified: boolean;
+  /** Model calls made. */
+  rounds: number;
+  /** Files the model asked for and was given. */
+  asked: string[];
+  /** One plain sentence for the user when nothing is committed. Vendor-free. */
+  reason: string;
+  /** How many candidate changes the build rejected. Admin telemetry, never a user sentence. */
+  rejected: number;
+}
+
+/** Only the entries of `candidate` whose content differs from `original`. */
+function diffFrom(original: Record<string, string>, candidate: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [path, content] of Object.entries(candidate)) {
+    if ((original[path] ?? null) !== content) out[path] = content;
+  }
+  return out;
+}
+
+/**
+ * Repair the way a developer does: read what you need, change it, RUN THE BUILD, and if it still fails
+ * read what it said and correct your own change — a bounded number of times.
+ *
+ * Every round is one model call. A `needFiles` reply spends a round and adds those files to what the
+ * model may see AND change (they were chosen from the repository's own listing, so the allowlist is
+ * widened only by paths that really exist). A fix reply is verified when a verifier was supplied; a
+ * verified failure feeds the build's own words back and the loop continues on the candidate. The files
+ * returned are always the diff against the ORIGINAL repository, so a model that undoes its own earlier
+ * attempt commits nothing for it.
+ *
+ * 🔒 A fix the build REJECTED is never committed, on any round. And once any verification has run and
+ * failed, a later round whose verification could not run is NOT committed blind either — we have
+ * evidence this repair goes wrong, and "could not check this one" is not evidence that it went right.
+ */
+export async function runAiRepairLoop(
+  llm: AiRepairLlm,
+  chain: AiRepairModel[],
+  ctx: AiRepairContext,
+  deps: AiRepairLoopDeps,
+  maxRounds: number = aiRepairMaxRounds(),
+): Promise<AiRepairLoopResult> {
+  const original: Record<string, string> = { ...ctx.files };
+  let working: Record<string, string> = { ...ctx.files };
+  let log = ctx.log;
+  let previousAttempt: AiRepairContext['previousAttempt'];
+  const asked: string[] = [];
+  let rounds = 0;
+  let rejected = 0;
+  let sawVerifiedFailure = false;
+  const none = (outcome: AiRepairLoopOutcome, reason: string): AiRepairLoopResult =>
+    ({ outcome, verified: false, rounds, asked, reason, rejected });
+
+  if (chain.length === 0) return none('miss', 'No repair engine is available right now.');
+  const bound = Math.max(1, Math.min(8, Math.floor(maxRounds) || AI_REPAIR_DEFAULT_ROUNDS));
+
+  while (rounds < bound) {
+    rounds += 1;
+    const prompt = buildAiRepairPrompt({ ...ctx, log, files: working, previousAttempt });
+    const askable = (ctx.tree ?? []).filter((p) => !(p in working));
+
+    let reply: ReturnType<typeof parseAiRepairReply> = null;
+    for (const model of chain) {
+      try {
+        const raw = await llm(model, AI_REPAIR_SYSTEM_PROMPT, prompt);
+        reply = parseAiRepairReply(raw, Object.keys(working), working, askable);
+        if (reply) break;
+      } catch {
+        // This rung failed or timed out — the next one gets its chance. Never the user's problem.
+      }
+    }
+    if (!reply) return none('miss', 'NavBharatAI could not work out a repair for this build.');
+
+    if ('needFiles' in reply) {
+      const more = await deps.fetchFiles(reply.needFiles).catch(() => ({} as Record<string, string>));
+      const got = Object.keys(more).filter((p) => typeof more[p] === 'string');
+      if (got.length === 0) {
+        // Asked for files that could not be read: the model would ask again with the same menu. Rather
+        // than spend the remaining rounds on that, the menu shrinks so the next round cannot repeat it.
+        ctx = { ...ctx, tree: (ctx.tree ?? []).filter((p) => !reply || !('needFiles' in reply) || !reply.needFiles.includes(p)) };
+        continue;
+      }
+      for (const p of got) { original[p] = more[p]; working[p] = more[p]; asked.push(p); }
+      continue;
+    }
+
+    if (!('files' in reply)) {
+      return none('miss', reply.explanation || 'The problem is outside what can be repaired automatically.');
+    }
+
+    const candidate: Record<string, string> = { ...working, ...reply.files };
+    const changed = diffFrom(original, candidate);
+    if (Object.keys(changed).length === 0) {
+      // Every change it made this round only undid an earlier one — net nothing against the repository.
+      working = candidate;
+      continue;
+    }
+
+    if (!deps.verify) {
+      return { outcome: 'unverified-fix', fix: { files: changed, explanation: reply.explanation }, verified: false, rounds, asked, reason: '', rejected };
+    }
+    const verdict = await deps.verify(changed).catch(() => ({ ran: false as const, reason: 'threw' }));
+    if (verdict.ran && verdict.ok) {
+      return { outcome: 'fixed', fix: { files: changed, explanation: reply.explanation }, verified: true, rounds, asked, reason: '', rejected };
+    }
+    if (!verdict.ran) {
+      if (sawVerifiedFailure) {
+        return none('gave-up', 'NavBharatAI made a change but could not confirm it fixes the build, so it was not applied.');
+      }
+      return { outcome: 'unverified-fix', fix: { files: changed, explanation: reply.explanation }, verified: false, rounds, asked, reason: '', rejected };
+    }
+    // Verified failure: keep the candidate in view and hand the build's own words back.
+    sawVerifiedFailure = true;
+    rejected += 1;
+    working = candidate;
+    previousAttempt = { round: rounds, buildSaid: verdict.summary ? `${verdict.summary}\n${verdict.log}` : verdict.log };
+    log = verdict.log || log;
+  }
+
+  return none(
+    sawVerifiedFailure ? 'gave-up' : 'miss',
+    sawVerifiedFailure
+      ? 'NavBharatAI tried several repairs and checked each one by building your app, and none of them made it compile.'
+      : 'NavBharatAI could not work out a repair for this build.',
+  );
 }

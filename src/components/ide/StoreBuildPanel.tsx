@@ -405,6 +405,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       seen = new Set<number>((data?.runs || []).map((r: RunInfo) => r.id));
     } catch { /* no history readable — every run we see next is new by definition */ }
 
+    // How many repairs really landed in the repository this cycle — what the final sentence is about.
+    let fixesApplied = 0;
     for (let attempt = 0; attempt < MAX_AUTO_ATTEMPTS && liveRef.current; attempt++) {
       setAttempt(attempt);
       setProgressNote(attempt === 0 ? 'Sending your app to be built…' : 'Starting the build again…');
@@ -504,20 +506,26 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       // ── Failed: work out why and fix it, rather than handing the user a log ──
       if (attempt === MAX_AUTO_ATTEMPTS - 1) {
         setPhase('failed');
-        setError('NavBharatAI fixed what it could and tried again, but the build still did not finish.');
+        // 🔴 This sentence used to claim a repair on EVERY exhausted cycle — including one where each
+        // autofix had answered `fixed: false` and nothing was ever changed. It now says which happened.
+        setError(fixesApplied > 0
+          ? `NavBharatAI applied ${fixesApplied} repair${fixesApplied === 1 ? '' : 's'} and tried again, but the build still did not finish.`
+          : 'The build did not finish, and NavBharatAI could not find a repair it could verify.');
         void fetchFailReport(finished.id, kind);
         return;
       }
       setProgressNote('Something went wrong — NavBharatAI is looking at it…');
       // `detail` carries the classifier's facts — `missing` is every signing secret the repository
       // lacks, which is what raises the one-press key offer below.
-      let fix: { fixed?: boolean; summary?: string; code?: string; report?: string;
+      let fix: { fixed?: boolean; verified?: boolean; summary?: string; code?: string; report?: string;
         detail?: Record<string, string | string[]> | null } | null = null;
       try {
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
           headers: await ghHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id, powerLevel }),
+          // `sessionId` names the app's workspace, where its own sandbox can run the build a repair would
+          // face on GitHub — so only a change that compiles is committed (2026-09-22).
+          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id, powerLevel, sessionId }),
         });
         fix = await fRes.json().catch(() => null);
       } catch { /* handled as "could not fix" below */ }
@@ -557,9 +565,12 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         );
         return;
       }
-      setProgressNote(`${fix.summary} NavBharatAI fixed it and is building again…`);
+      fixesApplied += 1;
+      setProgressNote(fix.verified
+        ? `${fix.summary} Building the phone app again…`
+        : `${fix.summary} NavBharatAI fixed it and is building again…`);
     }
-  }, [setup, ghHeaders, dispatch, fetchFailReport]);
+  }, [setup, sessionId, ghHeaders, dispatch, fetchFailReport]);
 
   /** Step 2 — one press, and everything from here on happens on its own. */
   const build = useCallback((kind: BuildKind = 'apk') => {

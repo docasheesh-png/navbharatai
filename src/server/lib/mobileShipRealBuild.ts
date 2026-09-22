@@ -28,6 +28,8 @@
 import { classifyBuildFailure } from './mobileBuildRepair';
 import { detectProjectKind } from './mobileProjectAssembler';
 import { envFlag } from './envFlag';
+import { ensureWorkspaceFilesInSandbox } from '../AgentV3/sandboxSeed';
+import type { VerifyFix } from './mobileBuildAiRepair';
 
 /** Kill switch. Unset means ON: the check makes the ship cheaper, so it is the default. */
 export function realBuildCheckEnabled(): boolean {
@@ -92,8 +94,32 @@ export function readRealBuildFailure(log: string): { blocking: boolean; code: st
 /** Just enough of the actuator for this check — so a test needs no sandbox and no E2B key. */
 export interface RealBuildActuator {
   hasLiveSandbox?(workspaceId: string): boolean;
+  readFile(workspaceId: string, filePath: string): Promise<string>;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
   build(workspaceId: string): Promise<{ success: boolean; logs: string }>;
+  /** Needed only by the repair path, which may seed an empty machine. */
+  listFiles?(workspaceId: string): Promise<string[]>;
+}
+
+/**
+ * PROVE the sandbox holds the app before trusting anything its build says.
+ *
+ * 🔴 `build()` answers `success: true — "(no build step — static project)"` for a machine with NO
+ * package.json. A sandbox that came back empty, or a paused handle whose `files.exists` threw and was
+ * swallowed, would therefore PASS a real-build check without building anything, and the ship would be
+ * told the app compiled. The one fact that rules that out is reading the project marker back: a read
+ * that throws or comes back empty means the verdict below would be about a different machine than the
+ * app, and no verdict is issued.
+ *
+ * `null` ⇒ not proven. Never a pass.
+ */
+export async function sandboxHoldsApp(actuator: RealBuildActuator, workspaceId: string): Promise<boolean> {
+  try {
+    const marker = await actuator.readFile(workspaceId, 'package.json');
+    return typeof marker === 'string' && marker.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -118,6 +144,8 @@ export async function runRealBuildCheck(
   }
   // A static app has no build script to run; its page IS its files. Nothing to predict.
   if (detectProjectKind(files) === 'static') return { ran: false, reason: 'static-app' };
+  // A warm handle is not proof the machine holds the app — see `sandboxHoldsApp`.
+  if (!(await sandboxHoldsApp(actuator, workspaceId))) return { ran: false, reason: 'unavailable' };
 
   try {
     for (const [path, content] of Object.entries(changed)) {
@@ -157,4 +185,120 @@ export function realBuildNote(v: RealBuildVerdict): string | null {
   if (v.ok) return 'Your app was built here first and it compiled, so the phone build starts from something that already works.';
   if (!v.blocking) return null; // the runner rescues this class itself; saying so would invent a worry
   return `Your app did not compile here, so the phone build would have failed too: ${v.summary}`;
+}
+
+// ───────────────────────── the repair loop's verifier ─────────────────────────
+
+export interface RepairVerifyOptions {
+  /** Which stage the remote build died in, from the workflow's own marker. Decides judgeability. */
+  stage: 'install' | 'webbuild' | 'capacitor' | 'android' | 'ios' | null;
+  /** The failure class, so a class the sandbox cannot judge is refused before a machine is touched. */
+  code: string;
+  budgetMs?: number;
+}
+
+/**
+ * Can `npm run build` in the app's sandbox answer whether this failure is fixed?
+ *
+ * It can for the stages that ARE the app's own build — dependency install and the web build — and for
+ * an unmarked log that the classifier read as the app not compiling. It cannot for the Capacitor,
+ * Gradle or Xcode stages: the sandbox has no Android SDK and no Mac, so a "pass" there would be a pass
+ * of a different question. Refusing those keeps the verifier from ever certifying a change it did not
+ * actually test. PURE.
+ */
+export function sandboxCanJudge(opts: Pick<RepairVerifyOptions, 'stage' | 'code'>): boolean {
+  if (opts.stage === 'install' || opts.stage === 'webbuild') return true;
+  if (opts.stage === null) return opts.code === 'APP_CODE_BUILD_FAILED' || opts.code === 'TYPE_GATE_BLOCKED_PACKAGING' || opts.code === 'UNKNOWN';
+  return false;
+}
+
+/**
+ * Build the verifier the AI repair loop calls with each candidate change.
+ *
+ * Unlike the ship-time check above, this one MAY wake the app's machine: it holds a real failure and a
+ * real cost to avoid (a five-minute GitHub run and one of the user's attempts), so a resume — seconds,
+ * and a few paise of sandbox time — is the cheap side of that trade. An EMPTY machine is seeded from the
+ * durable store first (`ensureWorkspaceFilesInSandbox`, the same path publish uses), because a verdict
+ * needs the app to be there.
+ *
+ * 🔒 THE SANDBOX IS THE USER'S WORKSPACE, BORROWED. Every file this writes is snapshotted first and put
+ * back afterwards — on a failed build, on a timeout, on a throw, AND on success — except the app's own
+ * source files on success, which the route then also merges into the durable workspace, so the user's
+ * app inside NavBharatAI is healed by the same change that heals the repository (the compile
+ * pre-flight's own rule). Repository-only files (the workflow, the assembled package.json,
+ * capacitor.config.ts) are never left behind in the workspace.
+ *
+ * A path that does not exist in the sandbox is not written: it could not be affecting the sandbox's
+ * build, and writing it would plant a repository file in the workspace. The candidate is still judged
+ * on the files that do exist there.
+ */
+export function makeRepairVerifier(
+  actuator: RealBuildActuator | null | undefined,
+  workspaceId: string,
+  opts: RepairVerifyOptions,
+  isAppSource: (path: string) => boolean,
+): VerifyFix | undefined {
+  if (!actuator || !workspaceId) return undefined;
+  if (!sandboxCanJudge(opts)) return undefined;
+  const budgetMs = opts.budgetMs ?? realBuildBudgetMs();
+
+  return async (changed) => {
+    // Presence, then seed, then presence again — a read that still fails means no machine holds the app.
+    if (!(await sandboxHoldsApp(actuator, workspaceId))) {
+      if (typeof actuator.listFiles === 'function') {
+        await ensureWorkspaceFilesInSandbox(
+          actuator as { listFiles: (w: string) => Promise<string[]>; writeFile: RealBuildActuator['writeFile'] },
+          workspaceId,
+        ).catch(() => undefined);
+      }
+      if (!(await sandboxHoldsApp(actuator, workspaceId))) return { ran: false, reason: 'no-sandbox' };
+    }
+
+    // Snapshot what we are about to overwrite. A path the sandbox does not have is skipped, not created.
+    const before: Record<string, string> = {};
+    for (const path of Object.keys(changed)) {
+      try {
+        before[path] = await actuator.readFile(workspaceId, path);
+      } catch { /* not in the sandbox — skipped below */ }
+    }
+    const toWrite = Object.keys(changed).filter((p) => p in before);
+    if (toWrite.length === 0) return { ran: false, reason: 'nothing-to-test' };
+
+    const restore = async (only?: (path: string) => boolean): Promise<void> => {
+      for (const path of toWrite) {
+        if (only && !only(path)) continue;
+        await actuator.writeFile(workspaceId, path, before[path]).catch(() => undefined);
+      }
+    };
+
+    try {
+      for (const path of toWrite) await actuator.writeFile(workspaceId, path, changed[path]);
+    } catch {
+      await restore();
+      return { ran: false, reason: 'unavailable' };
+    }
+
+    let result: { success: boolean; logs: string } | null = null;
+    try {
+      result = await Promise.race([
+        actuator.build(workspaceId),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
+      ]);
+    } catch {
+      await restore();
+      return { ran: false, reason: 'unavailable' };
+    }
+    if (!result) {
+      await restore();
+      return { ran: false, reason: 'timed-out' };
+    }
+    if (result.success) {
+      // Keep the app's own healed source in the workspace; put every repository-only file back.
+      await restore((p) => !isAppSource(p));
+      return { ran: true, ok: true };
+    }
+    await restore();
+    const read = readRealBuildFailure(result.logs);
+    return { ran: true, ok: false, log: String(result.logs || '').slice(-6000), summary: read.summary };
+  };
 }

@@ -50,6 +50,7 @@ interface OutcomeData {
   diagnosed: number;
   diagnosisGap: number;
   cures?: Record<Cure, number>;
+  repairs?: { fixed: number; 'unverified-fix': number; 'gave-up': number; miss: number };
 }
 
 const LANE_LABEL: Record<string, string> = {
@@ -184,6 +185,18 @@ export function MobileBuildOutcomeCard({ adminToken }: { adminToken: string }): 
               </div>
             )}
           </div>
+
+          {data.repairs && (data.repairs.fixed + data.repairs['unverified-fix'] + data.repairs['gave-up'] + data.repairs.miss) > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-muted">How the automatic repairs ended</p>
+              {/* The number that says whether the verifier is reaching real builds: a repair that was BUILT
+                  here first and passed, against one that was committed with nothing to judge it. */}
+              <p className="text-[11px] font-semibold text-muted">
+                {data.repairs.fixed} built here first and passed · {data.repairs['unverified-fix']} committed unverified
+                · {data.repairs['gave-up']} rejected by the build, nothing committed · {data.repairs.miss} no repair found
+              </p>
+            </div>
+          )}
 
           {cures && (
             <div>

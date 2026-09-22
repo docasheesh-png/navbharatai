@@ -4,9 +4,18 @@
 // OpenAI's, why the cap is the real defence, why the response never names a vendor) and is not
 // repeated here. This file is the I/O that pure core deliberately refused to own.
 //
-//   GET  /api/v1/usage             read:usage   — wallet balance + this month's builds and spend
-//   GET  /api/v1/builds            read:builds  — the holder's apps, with live links where published
-//   POST /api/v1/chat/completions  ai:chat      — NavBharatAI's AI, on the holder's wallet, capped per key
+//   GET  /api/v1/usage                     read:usage        — wallet balance + this month's builds and spend
+//   GET  /api/v1/builds                    read:builds       — the holder's apps, with live links where published
+//   POST /api/v1/chat/completions          ai:chat           — NavBharatAI's AI, on the holder's wallet, capped per key
+//   POST /api/v1/professionals/:id/chat    ai:professionals  — ask one of the ~80 expert AIs by id
+//   POST /api/v1/images/generations        ai:images         — NavBharatAI Pro images, ₹1 each
+//   GET  /api/v1/models                    (any valid key)   — so `client.models.list()` works
+//   GET  /api/v1/key                       (any valid key)   — what THIS key may do, and what it spent today
+//
+// 🔑 TWO ROUTES HAVE NO SCOPE OF THEIR OWN, deliberately. `/models` and `/key` disclose nothing but
+// what the caller already holds — the names it may address, and the key's own limits. Scope-gating a
+// key's description of ITSELF would mean a developer debugging a 403 has to leave their terminal to
+// find out why, which is the one moment this API can save them.
 //
 // Registered UNVERSIONED (`/api/usage`, …): `apiVersionMiddleware` rewrites the canonical `/api/v1/…`
 // path onto these before routing, exactly as it does for `/api/me`.
@@ -23,8 +32,22 @@ import { apiKeyAuth, requireScope, apiAuthOf } from './apiKeys';
 import {
   readChatCompletionRequest, foldMessagesToPrompt, DEVELOPER_API_SYSTEM_PROMPT, keyDecision,
   refusalMessage, refusalStatus, chatCompletionResponse, apiError, takeRateSlot, keyDayKey,
-  normalizeDailyCapInr, type RateWindow,
+  normalizeDailyCapInr, professionalIdFromModel, professionalModelName, readImageRequest,
+  imageGenerationResponse, MAX_IMAGES_PER_REQUEST, MAX_IMAGE_PROMPT_CHARS, PUBLIC_MODEL_NAME,
+  type RateWindow, type ChatMessage,
 } from '../lib/developerApi';
+import { hasScope, effectiveScopes, FULL_ACCESS_SCOPE } from '../lib/ApiKeyManager';
+import { getProfessional, listProfessionals } from '../professionals/registry';
+import { runProfessionalChatWithUsage } from '../professionals/engine';
+import { decideImageSafety } from '../lib/imageSafety';
+import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
+import { imagePixelsFor } from '../lib/imageGen';
+import { generateProImages } from '../lib/imageProEngine';
+import { imageProAvailable } from '../lib/pollinationsPaid';
+import { IMAGE_PRO_PRICE_INR, imageProFailureMessage } from '../lib/imageProGen';
+import { debitWalletRolledUp } from '../lib/walletDebit';
+import { featureRollupRef, featureLabel } from '../lib/walletFeature';
+import { routeParam } from '../lib/expressCompat';
 import { apiKeyUsageStore } from '../lib/ApiKeyUsageStore';
 import { userCostStore } from '../lib/UserCostStore';
 import { triagePrompt, safetyExcerpt, blockMessage } from '../lib/promptSafety';
@@ -74,6 +97,131 @@ function keyAllowedNow(keyId: string, nowMs: number): boolean {
   const { next, allowed } = takeRateSlot(rateWindows.get(keyId), nowMs);
   rateWindows.set(keyId, next);
   return allowed;
+}
+
+/**
+ * 🔒 THE SPEND GATE — every door that can cost money passes through exactly this, in this order.
+ *
+ * Extracted from the chat route on 2026-09-22, when experts and images became two more doors that
+ * spend the same wallet. Three doors with three hand-written copies of "rate slot, triage, cap,
+ * wallet" is the drifted-copy class; one gate is what makes "a banned prompt is refused before a
+ * token is spent, whoever is asking and however they ask" true of doors nobody has written yet.
+ *
+ * Order is cheap-first on purpose: every refusal that costs nothing happens before a provider is
+ * called. Returns `null` having ALREADY responded when the caller may not proceed.
+ *
+ * ⚠️ `quotedInr` is the one difference between an AI turn and an image. A chat answer's price is
+ * unknown until it exists, so the cap can only be checked as "have you already reached it?". An
+ * image's price IS known in advance — so when it is passed, the gate refuses a request that WOULD
+ * cross the cap rather than letting it through and reporting the overshoot afterwards. Checking a
+ * known price against a stated limit is not an extra rule; it is the limit actually working.
+ */
+async function spendGate(
+  res: Response,
+  auth: { userId: string; keyId: string; dailyCapInr?: number },
+  now: number,
+  words: string,
+  surface: 'chat' | 'image',
+  quotedInr = 0,
+): Promise<{ capInr: number; freeListed: boolean } | null> {
+  if (!keyAllowedNow(auth.keyId, now)) {
+    res.status(429).json(apiError('rate_limited', 'Too many requests on this key. Please slow down to under 60 per minute.'));
+    return null;
+  }
+
+  // SAFETY TRIAGE — the same three-way check the build and chat routes run, for the same reason: a
+  // banned request is refused before a token is spent, whoever is asking and however they ask.
+  // An IMAGE request is judged by the image triage, which is the one that carries the picture rules;
+  // a text turn by the prompt triage. Same verdicts, same refusal, different rule book.
+  try {
+    if (surface === 'image') {
+      const safety = decideImageSafety(words);
+      if (safety.triage.verdict !== 'allow') {
+        // ⚠️ Recorded HERE rather than through `triageImageRequest`: that helper resolves the uid from
+        // a Firebase token, which an API-key request does not carry, so every flag it recorded on this
+        // door would read `anon`. We know exactly whose key this is.
+        audit(safety.blocked ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+          { uid: auth.userId, rule: safety.triage.ruleId, class: safety.triage.contentClass, tier: 'api' }, 'warn');
+        void recordSafetyFlag(buildSafetyFlag({
+          uid: auth.userId, triage: safety.triage, surface: 'image', excerpt: safetyExcerpt(words), at: now,
+        })).catch(() => { /* the decision stands either way */ });
+      }
+      if (safety.blocked) {
+        res.status(422).json(apiError('content_policy', safety.message));
+        return null;
+      }
+    } else {
+      const triage = triagePrompt(words);
+      if (triage.verdict !== 'allow') {
+        audit(triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+          { uid: auth.userId, rule: triage.ruleId, class: triage.contentClass, tier: 'api' }, 'warn');
+        void recordSafetyFlag(buildSafetyFlag({
+          uid: auth.userId, triage, surface: 'chat', excerpt: safetyExcerpt(words), at: now,
+        })).catch(() => { /* the decision stands either way */ });
+        if (triage.verdict === 'block') {
+          res.status(422).json(apiError('content_policy', blockMessage(triage.contentClass, words)));
+          return null;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[DEVAPI] safety triage unavailable — allowing the turn:', e);
+  }
+
+  // THE CAP, THEN THE WALLET — see `keyDecision`. Both reads in one round trip.
+  const day = keyDayKey(now);
+  const capInr = normalizeDailyCapInr(auth.dailyCapInr);
+  const [spent, balance, email] = await Promise.all([
+    apiKeyUsageStore.spentToday(auth.keyId, day),
+    readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), auth.userId).catch(() => null),
+    emailForUid(auth.userId),
+  ]);
+  const freeListed = isAgentV3FreeUser(auth.userId, email);
+  // A known price is added to what has been spent BEFORE the comparison — see the note above.
+  const decision = keyDecision({
+    spentTodayInr: spent.spentInr + Math.max(0, quotedInr),
+    capInr,
+    walletBalanceInr: balance,
+    freeListed,
+  });
+  if (!decision.allow) {
+    res.status(refusalStatus(decision.reason)).json(apiError(
+      decision.reason === 'key-cap' ? 'daily_cap_reached' : 'insufficient_balance',
+      refusalMessage(decision.reason, capInr),
+      decision.reason === 'key-cap'
+        ? { dailyCapInr: capInr, spentTodayInr: Math.round(spent.spentInr * 100) / 100, ...(quotedInr > 0 ? { wouldCostInr: quotedInr } : {}) }
+        : {},
+    ));
+    return null;
+  }
+  if (!spent.known) {
+    console.warn(`[DEVAPI] key ${auth.keyId}: spend counter unreadable — this call was allowed without a cap check.`);
+  }
+  return { capInr, freeListed };
+}
+
+/**
+ * Settle one AI turn for a key. Shared by `/chat/completions` and the expert doors, so the money half
+ * cannot differ between them: the counter moves on what the turn COST, the wallet is charged AFTER
+ * the answer is out, and a free-listed account is honoured while a Professional Pass deliberately is
+ * not (it pays for the holder's own use in the app, not for an unbounded number of THEIR users).
+ */
+function settleKeyTurn(
+  auth: { userId: string; keyId: string },
+  now: number,
+  freeListed: boolean,
+  spend: Parameters<typeof chargeForAiTurns>[2],
+): void {
+  const usdInr = usdInrRate();
+  const cost = sumChatTurnCosts(spend.map((u) => chatTurnCost(u, usdInr)), usdInr);
+  void apiKeyUsageStore.record(auth.keyId, keyDayKey(now), cost.billedInr);
+  void chargeForAiTurns(
+    getServerDb() as any,
+    { userId: auth.userId, feature: 'api', isFreeListed: freeListed },
+    spend,
+    usdInr,
+    now,
+  );
 }
 
 export function registerDeveloperApiRoutes(app: Express): void {
@@ -136,65 +284,36 @@ export function registerDeveloperApiRoutes(app: Express): void {
   app.post('/api/chat/completions', ipLimiter, apiKeyAuth, requireScope('ai:chat'), async (req: Request, res: Response) => {
     const auth = apiAuthOf(req);
     const now = Date.now();
-    if (!keyAllowedNow(auth.keyId, now)) {
-      res.status(429).json(apiError('rate_limited', 'Too many requests on this key. Please slow down to under 60 per minute.'));
-      return;
-    }
 
     const request = readChatCompletionRequest(req.body);
     if (!request.ok) {
-      const why: Record<typeof request.reason, string> = {
-        'no-messages': 'Send `messages: [{ role, content }]` (or a `prompt` string).',
-        'bad-message': 'Each message needs a role of user, assistant or system, and string content.',
-        'too-many': 'Too many messages in one request. Send at most 40.',
-        'too-long': 'This conversation is too long for one request. Send less history.',
-        'no-user-turn': 'The last message must be from the user, and it must not be empty.',
-      };
-      res.status(400).json(apiError('invalid_request', why[request.reason]));
+      res.status(400).json(apiError('invalid_request', chatRequestHelp(request.reason)));
       return;
     }
 
-    // SAFETY TRIAGE — the same three-way check the build and chat routes run, for the same reason: a
-    // banned request is refused before a token is spent, whoever is asking and however they ask.
-    const lastUser = request.messages[request.messages.length - 1].content;
-    try {
-      const triage = triagePrompt(lastUser);
-      if (triage.verdict !== 'allow') {
-        audit(triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
-          { uid: auth.userId, rule: triage.ruleId, class: triage.contentClass, tier: 'api' }, 'warn');
-        void recordSafetyFlag(buildSafetyFlag({
-          uid: auth.userId, triage, surface: 'chat', excerpt: safetyExcerpt(lastUser), at: now,
-        })).catch(() => { /* the decision stands either way */ });
-        if (triage.verdict === 'block') {
-          res.status(422).json(apiError('content_policy', blockMessage(triage.contentClass, lastUser)));
-          return;
-        }
+    // 🧑‍🏫 `model: "navbharatai/teacher_ai"` addresses an EXPERT through the standard endpoint, because
+    // that is how every chat-completions client already selects a model — a developer holding an SDK
+    // reaches all of them without writing a second HTTP call. It is the SAME handler as the plain door
+    // below, so the two entry points cannot drift.
+    //
+    // 🔒 It needs the expert scope AS WELL as `ai:chat`. A key granted only "NavBharatAI's AI" chose
+    // the general assistant; quietly letting a model name reach a different persona would make the
+    // scope a label again. The 403 names the scope, so the fix is one tick on the key.
+    const expertId = professionalIdFromModel((req.body as { model?: unknown } | undefined)?.model);
+    if (expertId) {
+      if (!hasScope(auth.scopes, 'ai:professionals')) {
+        res.status(403).json(apiError('missing_scope',
+          'This key is missing the required scope: ai:professionals. Edit the key on the Developer Tools page to grant it.',
+          { scope: 'ai:professionals' }));
+        return;
       }
-    } catch (e) {
-      console.error('[DEVAPI] safety triage unavailable — allowing the turn:', e);
-    }
-
-    // THE CAP, THEN THE WALLET — see `keyDecision`. Both reads in one round trip.
-    const day = keyDayKey(now);
-    const capInr = normalizeDailyCapInr(auth.dailyCapInr);
-    const [spent, balance, email] = await Promise.all([
-      apiKeyUsageStore.spentToday(auth.keyId, day),
-      readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), auth.userId).catch(() => null),
-      emailForUid(auth.userId),
-    ]);
-    const freeListed = isAgentV3FreeUser(auth.userId, email);
-    const decision = keyDecision({ spentTodayInr: spent.spentInr, capInr, walletBalanceInr: balance, freeListed });
-    if (!decision.allow) {
-      res.status(refusalStatus(decision.reason)).json(apiError(
-        decision.reason === 'key-cap' ? 'daily_cap_reached' : 'insufficient_balance',
-        refusalMessage(decision.reason, capInr),
-        decision.reason === 'key-cap' ? { dailyCapInr: capInr, spentTodayInr: Math.round(spent.spentInr * 100) / 100 } : {},
-      ));
+      await answerAsExpert(res, auth, now, expertId, request.system, request.messages);
       return;
     }
-    if (!spent.known) {
-      console.warn(`[DEVAPI] key ${auth.keyId}: spend counter unreadable — this call was allowed without a cap check.`);
-    }
+
+    const lastUser = request.messages[request.messages.length - 1].content;
+    const gate = await spendGate(res, auth, now, lastUser, 'chat');
+    if (!gate) return;
 
     const system = request.system ? `${DEVELOPER_API_SYSTEM_PROMPT}\n\n${request.system}` : DEVELOPER_API_SYSTEM_PROMPT;
     const run = await collectAiSpend(() => callProfessionalAIWithUsage(system, foldMessagesToPrompt(request.messages), 'free'));
@@ -213,20 +332,216 @@ export function registerDeveloperApiRoutes(app: Express): void {
     }));
 
     // ── Money, AFTER the answer is out ──────────────────────────────────────────────────────
-    const usdInr = usdInrRate();
-    const cost = sumChatTurnCosts(run.spend.map((u) => chatTurnCost(u, usdInr)), usdInr);
-    // The COUNTER moves on what the turn cost, not on what was debited — so the cap keeps biting on a
-    // free-listed account and while the wallet switch is off, exactly like the app gateway's counter.
-    void apiKeyUsageStore.record(auth.keyId, day, cost.billedInr);
-    void chargeForAiTurns(
-      getServerDb() as any,
-      // The free list is honoured (admin/test accounts). A Professional Pass is deliberately NOT:
-      // it pays for the holder's own assistant use inside the app, and a key's traffic may be an
-      // unbounded number of THEIR users — the same reasoning the app gateway records.
-      { userId: auth.userId, feature: 'api', isFreeListed: freeListed },
-      run.spend,
-      usdInr,
-      now,
-    );
+    settleKeyTurn(auth, now, gate.freeListed, run.spend);
   });
+
+  // ── ai:professionals ────────────────────────────────────────────────────────────────────────
+  //
+  // 🔴 THERE IS DELIBERATELY NO `GET /api/professionals` HERE, and that is a correction rather than an
+  // omission. One was written, and `routeCollision.test.ts` caught it: `routes/professionals.ts` has
+  // claimed that exact path since long before this API existed, publicly and unauthenticated — so a
+  // second registration would never have been reached at all (the first one wins), and a developer
+  // calling `/api/v1/professionals` would have been silently served the other module's answer. The
+  // duplicate-route class, caught by the guard written for it.
+  //
+  // The discovery need is real and is met twice over: that public list already answers
+  // `GET /api/v1/professionals`, and `GET /api/v1/models` below returns the ADDRESSABLE names
+  // (`navbharatai/<id>`), which is where a chat-completions client looks for them anyway.
+  app.post('/api/professionals/:id/chat', ipLimiter, apiKeyAuth, requireScope('ai:professionals'), async (req: Request, res: Response) => {
+    const auth = apiAuthOf(req);
+    const now = Date.now();
+    const request = readChatCompletionRequest(req.body);
+    if (!request.ok) {
+      res.status(400).json(apiError('invalid_request', chatRequestHelp(request.reason)));
+      return;
+    }
+    await answerAsExpert(res, auth, now, routeParam(req.params.id), request.system, request.messages);
+  });
+
+  // ── ai:images ───────────────────────────────────────────────────────────────────────────────
+  //
+  // 🔴 THE PRO ENGINE, AT THE PRO PRICE — see `MAX_IMAGES_PER_REQUEST` in lib/developerApi.ts for why
+  // the API cannot serve the free tier (no image model is on the rate card, so a free-tier image
+  // cannot be priced, and its paid rungs are bounded by a platform-wide budget the app's own users
+  // are inside). ₹1 an image is the number this platform already publishes; nothing here invents one.
+  app.post('/api/images/generations', ipLimiter, apiKeyAuth, requireScope('ai:images'), async (req: Request, res: Response) => {
+    const auth = apiAuthOf(req);
+    const now = Date.now();
+
+    const request = readImageRequest(req.body);
+    if (!request.ok) {
+      const why: Record<typeof request.reason, string> = {
+        'no-prompt': 'Send a `prompt` describing the image you want.',
+        'too-long': `That prompt is too long. Keep it under ${MAX_IMAGE_PROMPT_CHARS} characters.`,
+        'bad-n': `\`n\` must be a whole number from 1 to ${MAX_IMAGES_PER_REQUEST}.`,
+        'bad-format': '`response_format` must be "b64_json" (the default) or "data_url".',
+      };
+      res.status(400).json(apiError('invalid_request', why[request.reason]));
+      return;
+    }
+
+    // Honest not-available, never a silent fall back to the free provider: that would charge the Pro
+    // price for a picture the caller could have had for nothing. Same rule as the app's own Pro door.
+    if (!imageProAvailable()) {
+      res.status(503).json(apiError('engine_unavailable', imageProFailureMessage('unconfigured')));
+      return;
+    }
+
+    // The price is known before the work, so the cap is checked against it — see `spendGate`.
+    const quotedInr = request.n * IMAGE_PRO_PRICE_INR;
+    const gate = await spendGate(res, auth, now, request.prompt, 'image', quotedInr);
+    if (!gate) return;
+
+    // The same art direction the app's own users get. A paid image through a different door is a
+    // different CALLER, not a worse brief.
+    const crafted = withInlineNegative(craftImagePrompt({ prompt: request.prompt, size: request.size }));
+    const px = imagePixelsFor(request.size);
+
+    // `n` images means `n` calls: the engine delivers one picture per call today, and asking it for a
+    // batch it does not do would bill for pictures that never arrive. Sequential rather than parallel
+    // because each one is a paid provider call and a burst is exactly what the rate limit exists for.
+    const images: Array<{ image: string; mimeType: string }> = [];
+    for (let i = 0; i < request.n; i += 1) {
+      const produced = await generateProImages({ prompt: request.prompt, size: request.size }, 'text-to-image', crafted, px);
+      if (!produced.ok) {
+        // Nothing more will come. Whatever DID arrive is served and charged; if nothing did, the
+        // failure is the answer and nothing is charged at all.
+        if (images.length === 0) {
+          res.status(produced.status).json(apiError('engine_unavailable', produced.message));
+          return;
+        }
+        break;
+      }
+      images.push(...produced.images);
+    }
+
+    // ⚠️ Charged on what was DELIVERED, never on what was asked for — the app route's own rule.
+    const chargedInr = gate.freeListed ? 0 : images.length * IMAGE_PRO_PRICE_INR;
+    res.status(200).json(imageGenerationResponse(images, { createdMs: now, format: request.format, chargedInr }));
+
+    if (chargedInr > 0) {
+      // After the answer and never awaited into it: a money-path failure must not cost the caller the
+      // images they already have. The SAME rollup ref the app's Pro door uses, so one person's images
+      // are one line on their statement however they were made.
+      void debitWalletRolledUp(getServerDb() as never, auth.userId, {
+        billedInr: chargedInr,
+        rollupRef: featureRollupRef('image-pro', now),
+        description: featureLabel('image-pro'),
+        feature: 'image-pro',
+      }).then((r) => {
+        if (!r.ok) console.error(`[DEVAPI] image wallet debit FAILED for ${auth.userId}: ${r.error} — images served, not charged.`);
+      }).catch(() => { /* logged above; never throws into the request */ });
+    }
+    // The key's own counter moves on what was charged, so the daily cap keeps biting.
+    if (images.length > 0) void apiKeyUsageStore.record(auth.keyId, keyDayKey(now), images.length * IMAGE_PRO_PRICE_INR);
+  });
+
+  // ── any valid key: what can I address? ──────────────────────────────────────────────────────
+  //
+  // OpenAI-shaped so `client.models.list()` works untouched. The experts are listed only when the key
+  // may actually address them — a list of names that 403 on use is worse than no list.
+  app.get('/api/models', ipLimiter, apiKeyAuth, (req: Request, res: Response) => {
+    const auth = apiAuthOf(req);
+    const ids = [PUBLIC_MODEL_NAME];
+    if (hasScope(auth.scopes, 'ai:professionals')) ids.push(...listProfessionals().map((p) => professionalModelName(p.id)));
+    res.json({
+      object: 'list',
+      data: ids.map((id) => ({ id, object: 'model', owned_by: PUBLIC_MODEL_NAME })),
+    });
+  });
+
+  // ── any valid key: what am I, and what have I spent? ────────────────────────────────────────
+  //
+  // 🔑 The endpoint a developer reaches for when something returns 403 or 429 — it answers both
+  // questions from the terminal they are already in, rather than sending them back to the app.
+  // `scopes` is the EXPANDED list, so a full-access key shows what it can really do rather than
+  // the single word `all`.
+  app.get('/api/key', ipLimiter, apiKeyAuth, async (req: Request, res: Response) => {
+    const auth = apiAuthOf(req);
+    const now = Date.now();
+    const day = keyDayKey(now);
+    const spent = await apiKeyUsageStore.spentToday(auth.keyId, day).catch(() => null);
+    res.json({
+      keyId: auth.keyId,
+      granted: auth.scopes,
+      scopes: effectiveScopes(auth.scopes),
+      fullAccess: auth.scopes.includes(FULL_ACCESS_SCOPE),
+      dailyCapInr: normalizeDailyCapInr(auth.dailyCapInr),
+      // `null` = the counter could not be read right now, never a confident zero. A developer
+      // reasoning about a 429 must be able to tell "nothing spent" from "we do not know".
+      todaySpentInr: spent && spent.known ? Math.round(spent.spentInr * 100) / 100 : null,
+      todayCalls: spent && spent.known ? spent.calls : null,
+      day,
+    });
+  });
+}
+
+/** The one place a malformed chat body is explained, so both chat doors say the same thing. */
+function chatRequestHelp(reason: 'no-messages' | 'bad-message' | 'too-many' | 'too-long' | 'no-user-turn'): string {
+  const why = {
+    'no-messages': 'Send `messages: [{ role, content }]` (or a `prompt` string).',
+    'bad-message': 'Each message needs a role of user, assistant or system, and string content.',
+    'too-many': 'Too many messages in one request. Send at most 40.',
+    'too-long': 'This conversation is too long for one request. Send less history.',
+    'no-user-turn': 'The last message must be from the user, and it must not be empty.',
+  } as const;
+  return why[reason];
+}
+
+/**
+ * Ask one expert, and settle it. The single handler behind BOTH expert entry points.
+ *
+ * 🔒 The expert's own persona, knowledge and memory are the platform's — `runProfessionalChatWithUsage`
+ * is the same function the app's own screen calls, so an API caller gets the real Teacher AI rather
+ * than a thin imitation of it. The developer's `system` message rides ON TOP and shapes the job; it
+ * does not get to rename the engine (White-Label Law, same as the plain chat door).
+ */
+async function answerAsExpert(
+  res: Response,
+  auth: { userId: string; keyId: string; dailyCapInr?: number },
+  now: number,
+  id: string,
+  developerSystem: string,
+  messages: readonly ChatMessage[],
+): Promise<void> {
+  const config = getProfessional(id);
+  if (!config) {
+    res.status(404).json(apiError('not_found',
+      `No NavBharatAI expert with the id "${id}". Call GET /api/v1/professionals for the list.`, { id }));
+    return;
+  }
+
+  const last = messages[messages.length - 1].content;
+  const gate = await spendGate(res, auth, now, last, 'chat');
+  if (!gate) return;
+
+  // `readChatCompletionRequest` folds every `system` message into `developerSystem`, so nothing in
+  // `messages` is one — the filter is what proves that to the compiler rather than a cast asserting it.
+  const history = messages
+    .slice(0, -1)
+    .filter((m): m is { role: 'user' | 'assistant'; content: string } => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: m.content }));
+  const question = developerSystem
+    ? `${last}\n\n[The program asking on the user's behalf adds: ${developerSystem}]`
+    : last;
+
+  const run = await collectAiSpend(() => runProfessionalChatWithUsage(config, question, history, auth.userId, 'free'));
+  if (!run.ok) {
+    console.error(`[DEVAPI] key ${auth.keyId}: expert ${id} failed:`, run.error);
+    res.status(503).json(apiError('engine_unavailable', 'NavBharatAI could not answer right now. Please try again in a moment.'));
+    return;
+  }
+
+  const usage = run.spend[run.spend.length - 1];
+  res.status(200).json({
+    ...chatCompletionResponse(run.result.reply, {
+      id: `${auth.keyId}-${now.toString(36)}`,
+      createdMs: now,
+      usage: usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : null,
+    }),
+    // Which expert answered, under our own brand. Never the vendor beneath it.
+    model: professionalModelName(config.id),
+  });
+
+  settleKeyTurn(auth, now, gate.freeListed, run.spend);
 }

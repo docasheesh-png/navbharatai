@@ -23,6 +23,9 @@ import {
   AttachmentRecallStore, referencesEarlierAttachment, buildRecallBlock,
 } from '../lib/clinical/attachmentRecall';
 import { conversationIdFromBody, attachmentRecallKey } from '../professionals/conversationId';
+import {
+  normalizeExamSpec, examSpecIsUsable, examPaperInstruction, parseExamPaper, EXAM_MAX_QUESTIONS,
+} from '../professionals/examMode';
 
 /** Max attachments accepted per turn (defense against oversized payload loops). */
 const MAX_PROFESSIONAL_ATTACHMENTS = 4;
@@ -193,6 +196,79 @@ export function registerProfessionalsRoutes(app: Express): void {
       res.json({ reply, professionalId: config.id });
     } catch (err: any) {
       sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional chat');
+    }
+  });
+
+  /**
+   * 🎓 EXAM MODE — set one objective paper (admin 2026-09-22). See `professionals/examMode.ts`.
+   *
+   * 🔑 **ONE call for the WHOLE paper, not one per question**, and that is the decision that shapes
+   * this route. A call per question would cost the student N times as much, make every Next press wait
+   * on a model, and let question 7 repeat question 3 because nothing sees the others. One paper also
+   * means the difficulty MIX is real: the generator can order thirty questions easy-first, which it
+   * cannot do one at a time.
+   *
+   * 🔒 **The answers travel WITH the paper, deliberately, and that is stated rather than hidden.**
+   * Marking on the client is what makes a tap turn green instantly and costs nothing. This is a study
+   * aid — a student practising alone — not a proctored exam, and a determined person can read the
+   * paper in their own browser. Round-tripping each answer would buy no honesty (the paper is already
+   * theirs) and would spend a request and a wait on every tap. If a graded, invigilated exam is ever
+   * wanted, that is a different feature with a server-held key, not a flag on this one.
+   *
+   * It reuses the chat route's whole spine — the rate limiter, the ban check, the Professional Pass
+   * gate, the persona (so the paper is pitched at THIS student, from the memory the engine already
+   * loads) and the ONE-WALLET charge — so exam mode cannot become a second, ungoverned way to spend.
+   */
+  app.post('/api/professional/:id/exam', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    const config = getProfessional(routeParam(req.params.id));
+    if (!config) {
+      res.status(404).json({ error: `Unknown professional: ${routeParam(req.params.id)}` });
+      return;
+    }
+    const spec = normalizeExamSpec(req.body || {});
+    if (!examSpecIsUsable(spec)) {
+      res.status(400).json({ error: 'Tell me the subject to set the paper on.' });
+      return;
+    }
+    const identity = await verifyFirebaseIdentity(req);
+    const verifiedUserId = identity?.uid || null;
+    const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+    try {
+      const { reply, spend } = await runProfessionalChatWithUsage(
+        config,
+        examPaperInstruction(spec),
+        [],
+        verifiedUserId || undefined,
+        gate.tier,
+        { conversationId: conversationIdFromBody(req.body?.conversationId) },
+      );
+      const paper = parseExamPaper(reply, Math.min(spec.count, EXAM_MAX_QUESTIONS));
+      if (gate.countsAgainstFree && verifiedUserId) {
+        void professionalUsageStore.increment(verifiedUserId);
+      }
+      // ONE WALLET, same discipline as the chat turn above: after the answer, never awaited into the
+      // response, and never for an unmeasured turn.
+      void chargeForAiTurn(
+        getServerDb() as any,
+        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'professionals' },
+        spend,
+        usdInrRate(),
+        Date.now(),
+      );
+      if (paper.questions.length === 0) {
+        // Honest failure: no paper, and no charge pretended into a score. The student is told plainly.
+        res.status(502).json({ error: 'The paper did not come back in a usable form. Please try once more.' });
+        return;
+      }
+      // ⚠️ `asked` and `dropped` both travel, so the surface can say "7 of the 10 you asked for"
+      // instead of quietly renumbering the test the student chose.
+      res.json({ professionalId: config.id, spec, questions: paper.questions, asked: spec.count, dropped: paper.dropped });
+    } catch (err: any) {
+      sendSafeError(res, 503, 'Could not set the paper right now. Please try again.', err, 'professional exam');
     }
   });
 }

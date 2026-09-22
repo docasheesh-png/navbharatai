@@ -888,10 +888,20 @@ What happens if it is NOT renewed (honest answer): you get in-app reminders 5 da
     name: 'Teacher AI',
     path: 'NavBharatAI Free chat → Mode (bottom bar) → Teacher AI',
     description: 'Patient expert PERSONAL teacher/tutor for Indian students and teachers. Takes a real introduction on first meeting (name, place, occupation, college, course, target exam, subjects, weak subjects) and — for signed-in users — remembers the student across sessions and devices, teaching them personally on every visit (extra care on weak subjects, examples pitched to their exam). Teaches concepts so they STICK (explain → example → analogy → check → explain-back/Feynman → memory hook → recap + practice + spaced revision), solves doubts step by step (Socratic), teaches ANY topic including out-of-syllabus, creates lesson plans, quizzes and exam study plans (boards, NEET, JEE, UPSC), in any Indian language. Grounded in standard pedagogy; a study aid — verify exam-specific syllabus from official sources.',
-    howToUse: 'Open NavBharatAI Free chat → Mode (bottom bar) → Teacher AI. First time, introduce yourself (or just start asking — the teacher will get to know you); it remembers you when signed in. Ask anything: "explain X so I never forget", "solve this step by step", "make a study plan", "quiz me on Y".',
-    relatedFeatures: ['professionals'],
+    howToUse: 'Open NavBharatAI Free chat → Mode (bottom bar) → Teacher AI. First time, introduce yourself (or just start asking — the teacher will get to know you); it remembers you when signed in. Ask anything: "explain X so I never forget", "solve this step by step", "make a study plan", "quiz me on Y". For a real marked test, press "Exam mode" in the header.',
+    relatedFeatures: ['professionals', 'teacher_exam_mode'],
     aiSurface: 'teacher_ai',
     keywords: ['teacher ai', 'tutor', 'study', 'lesson plan', 'exam prep', 'doubt', 'quiz', 'padhai', 'teacher', 'learn', 'personal teacher', 'remember', 'my teacher', 'weak subject', 'yaad', 'introduction', 'concept', 'never forget'],
+  },
+  {
+    id: 'teacher_exam_mode',
+    name: 'Exam mode (Teacher AI)',
+    path: 'NavBharatAI Free chat → Mode (bottom bar) → Teacher AI → Exam mode (button in the header)',
+    description: 'A REAL marked objective test set by Teacher AI. You choose the subject, an optional topic, the level (Easy / Medium / Hard / Mixed) and how many questions (up to 30). Each question has 4 tappable options: a correct answer scores +4 with a green tick, a wrong one −1 with a red cross, and SKIP costs nothing (0) — real negative marking, so choosing not to answer is part of the practice. When you are wrong the correct option is shown too, and every question carries an explanation. Answer with the mouse or the keyboard (A–D or 1–4, S to skip, Enter for Next). At the end: marks out of the maximum, accuracy of what you attempted, which TOPICS you were weak in, a full review of every question with your answer beside the right one, and one button that asks Teacher AI to teach exactly the ones you got wrong. The paper is pitched at the student Teacher AI remembers (class, course, target exam).',
+    howToUse: 'Open Teacher AI, press "Exam mode" in the header, type the subject (topic optional), pick the level and the number of questions, and press "Start the paper". Tap an option to answer or press Skip; read the explanation; press Next. At the result, press "Teach me the ones I got wrong" to go back into the chat with those exact questions, or "New paper" to go again.',
+    relatedFeatures: ['teacher_ai', 'professionals'],
+    aiSurface: 'teacher_ai',
+    keywords: ['exam mode', 'exam', 'test', 'mock test', 'mcq', 'objective', 'quiz', 'practice test', 'marks', 'negative marking', 'paper', 'pariksha', 'test do', 'exam lo', 'mock', 'question paper', 'objective question', 'marking', 'score', 'result', 'skip', 'multiple choice'],
   },
 
   // ─── MENTOR / CAREER COACH ───────────────────────────────────────────────

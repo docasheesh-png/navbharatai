@@ -28,6 +28,10 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
       'Make a 1-week study plan for class 10 maths',
       'Help me solve a doubt step by step',
     ],
+    // 🎓 Exam mode — a real objective paper with marks, not a quiz typed into the chat. Teacher AI is
+    // the only professional this fits today; it is a declared skill rather than an id check so the next
+    // one (Maths & Science Solver, Spoken English) is a flag.
+    skills: { exam: true },
   },
   mentor_ai: {
     id: 'mentor_ai',

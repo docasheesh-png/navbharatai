@@ -60,6 +60,12 @@ export interface AiRepairContext {
    * previous change. The model sees its change in `files` and this message beside it.
    */
   previousAttempt?: { round: number; buildSaid: string };
+  /**
+   * What happened on EARLIER GitHub runs of this same failure (`mobileRepairHistory.historyForModel`):
+   * a refresh that did not help, or the model's own committed change that did not fix it. Rendered
+   * ahead of the log so the model corrects rather than repeats. Absent on a first attempt.
+   */
+  history?: string;
 }
 
 export interface AiRepairFix {
@@ -126,10 +132,24 @@ const FORBIDDEN_PATH = /(^|\/)(\.env[^/]*|.*\.(keystore|jks|p12|pem|key)|package
  * files broke, and those are the ones worth showing the model. Bounded and deduplicated; forbidden
  * paths are dropped here so they are never even fetched.
  */
-/** The app's OWN source, as distinct from the packaging files NavBharatAI generated around it. */
-export const APP_SOURCE_PREFIX = /^(src|app|pages|components|lib|public|www)\//;
+/**
+ * Paths NavBharatAI's own packaging OWNS in a prepared repository, and build output — never the user's
+ * app. Everything else in the repository is the app: `src/App.tsx`, but also `index.html`,
+ * `vite.config.ts` and `tsconfig.json` at the root, which a prefix list of "source folders" left out —
+ * so a verified fix to a root file was put back in the sandbox and never reached the workspace.
+ */
+export const REPO_ONLY_PATH = /^(\.github\/|android\/|ios\/|fastlane\/|resources\/|node_modules\/|dist\/|build\/|out\/|\.next\/|www\/\.nbai-prebuilt$|package\.json$|capacitor\.config\.[tj]s(on)?$|\.gitignore$|SHIPPING\.md$|MOBILE_EXPORT\.md$|Gemfile(\.lock)?$|\.ruby-version$)/;
+/**
+ * The app's OWN source, as distinct from the packaging files NavBharatAI generated around it.
+ *
+ * ⚠️ Judged on a WORKSPACE path. A repository path is mapped first (`workspacePathForRepoPath`): a
+ * static repository keeps its source under `www/`, and a prebuilt one keeps its BUILD there.
+ */
 export function isAppSourcePath(path: string): boolean {
-  return APP_SOURCE_PREFIX.test(path) && !FORBIDDEN_PATH.test(path) && !path.includes('..');
+  const p = String(path || '');
+  if (!p || p.includes('..') || p.startsWith('/')) return false;
+  if (FORBIDDEN_PATH.test(p)) return false;
+  return !REPO_ONLY_PATH.test(p);
 }
 
 export function filesNamedInLog(log: string, cap = 4): string[] {
@@ -238,6 +258,9 @@ export function buildAiRepairPrompt(ctx: AiRepairContext): string {
     `Automated diagnosis so far: ${ctx.ruleSummary}`,
     '',
   ];
+  if (ctx.history) {
+    parts.push('=== WHAT HAPPENED ON EARLIER ATTEMPTS ===', ctx.history.slice(0, 2_000), '');
+  }
   if (ctx.previousAttempt) {
     // The build's verdict on the model's OWN change, in its own words. The changed content is already in
     // the files below, so the model corrects what it wrote rather than starting from a blank guess.

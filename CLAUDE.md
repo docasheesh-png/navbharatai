@@ -1708,6 +1708,59 @@ the code (it is actually read somewhere) on 2026-07-11.
   NavBharatAI, plus a sandbox resume per verification. The bet is the same as `AGENTV3_COMPLEX_TO_KIMI`'s:
   a blind fix that fails is paid twice, once in the call and once in the five-minute run it triggers.
   **Watch:** `fixed` vs `unverified-fix` vs `gave-up` on the card, and whether the failure rate moves.
+  🏗️ **THE APP IS BUILT HERE; GITHUB ONLY PACKAGES IT (same day, third PR — admin: *"aapne 5 point
+  bataye hai, sab karo … toote hi na wala banao"*).** Two more keys, neither set, both with working code
+  defaults: `MOBILE_SHIP_PREBUILT` (**default ON**; `off` reverts to the source ship for every app) and
+  `MOBILE_SHIP_PREBUILT_MS` (**240 s**, floor 30 s, cap 600 s; malformed ⇒ default). Read by
+  `src/server/lib/mobileShipPrebuilt.ts`. Before a repository is prepared, the app's own PRODUCTION build
+  runs in its sandbox, the output is read with the ONE reader the platform already has (`downloadDistFiles`,
+  which strips the preview bridge) and ships as `www/` with the static no-op build script — so the runner
+  compiles NOTHING, and the step most phone builds died in does not exist for that repository.
+  `www/.nbai-prebuilt` is the stamp; the pushed package.json keeps only Capacitor and the plugins the
+  MACHINE named (read from `node_modules`, `null` ⇒ nothing trimmed), so the runner's install is seconds.
+  ⚠️ **CORRECTION TO THE SENTENCE ABOVE — "It NEVER starts a machine" is true of `runRealBuildCheck` and
+  of nothing else on this path any more.** The prebuild MAY wake a paused sandbox and seed an empty one
+  (`ensureWorkspaceFilesInSandbox`), deliberately: that rule was written for an OPPORTUNISTIC check beside
+  a ship that would proceed either way; this IS the ship's build, and a resume (seconds, paise) against
+  a failed five-minute run is the trade the admin chose. The check now runs only where the prebuild
+  never STARTED a build — a build that ran here (shipped, timed out, or unreadable) is its answer, and a
+  second one in the same machine would double the cost. Presence of `hasLiveSandbox` is what marks a
+  sandbox-backed actuator; the local one has none, so a test never builds on disk.
+  🔒 **Every stand-down is a fall-through to the source ship, exactly as before; the ONE refusal is a
+  build that failed here in a way the runner would fail too** — the same 422 `real-build-failed`.
+  `www/` is OWNED by the push: what an earlier push left there and this one does not carry is removed in
+  the same commit (`commitFiles(..., removePaths)`, `listRepoPathsUnder`), or a hashed bundle from last
+  week is packaged into the phone app for ever.
+  📏 **Measured from here on:** `ships.prebuilt / source` and `prebuildSkips.<reason>` on the day rollup,
+  shown on the admin's Phone-build-outcomes card as "How the app reached GitHub" — the number that says
+  whether the runner still compiles apps at all, and which fallback fires when it does.
+  🔁 **The rest of the same PR, no keys:** the generated workflows cache `~/.npm` (keyed on
+  `package.json`, the one manifest that IS pushed — NEVER setup-node's `cache: npm`, which hard-fails
+  without a lock file) and, on Android, `~/.gradle/{caches,wrapper}` (keyed on the Java pin), saved
+  `if: always()` so the retry after a repair does not pay for the first run's downloads; the panel
+  carries an attempt HISTORY to each autofix (`mobileRepairHistory.ts`: the same failure back after a
+  rules refresh skips the rules, after an AI change tells the model its own change failed, after
+  NOTHING ends the cycle honestly), every autofix answer carries the tool's own last words
+  (`failureLine`) so a repeat is recognisable, and the panel says which of THREE things a repair was —
+  built and checked here first, a packaging step the sandbox cannot judge (`judgeable: false`), or one
+  it could not check on this request. And a class fixed on the way: the verifier and the workspace heal
+  took a REPOSITORY path as a WORKSPACE path, so a static repo's `www/index.html` was "nothing to test"
+  and a root `index.html` / `vite.config.ts` was never app source — `workspacePathForRepoPath` +
+  `detectRepoLayout` (assembler) and `REPO_ONLY_PATH` (`isAppSourcePath`) now decide both.
+  🔴 **THE REVIEW'S CRITICAL CATCH, recorded because it is true of EVERY static ship before this
+  date: Capacitor's CLI reads `capacitor.config.ts` with the PROJECT's TypeScript** (`@capacitor/cli`
+  config.js fatals *"Could not find installation of TypeScript"*), and a package.json assembled for a
+  hand-written static app declared only `@capacitor/cli`. `buildPackageJson` now declares `typescript`
+  for every kind (never overriding the app's own range), and `TYPESCRIPT_MISSING` is a classifier class
+  with a rules repair for old repositories. Also from the review: a refusal needs a POSITIVE app fault
+  (`APP_FAULT_CODES` — `UNKNOWN` falls through to the source ship), nothing is ever deleted from the
+  machine (a stale MARKER replaces the first draft's `rm -rf`), only `www/` paths RECORDED in
+  `www/.nbai-shipped` are ever removed from a repository, and the prebuild stands down beside a build
+  in flight (`isBuildActive` / `isGreenLatched` ⇒ `build-in-flight`).
+  ⚠️ **NOT done, said plainly:** a verified AI fix to the REPOSITORY's package.json (a dependency
+  version) is still never merged into the workspace — the assembled file carries Capacitor deps and the
+  sentinel script, so copying it back would break the app's own build — and the next ship regenerates
+  it from the workspace. A dependency-only merge is a separate change.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

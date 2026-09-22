@@ -111,7 +111,8 @@ export function friendlyBuildStep(rawName: string): string | null {
   // GitHub's own housekeeping + trivial / failure-only steps → hidden.
   if (/^set up job$|^complete job$|^post\b/.test(n)) return null;
   if (/checkout/.test(n)) return null;
-  if (/remove the keystore|always remove|clean ?up|summary|explain what stopped/.test(n)) return null;
+  // A cache restore or save is the runner's own housekeeping — nothing about the user's app happens in it.
+  if (/remove the keystore|always remove|clean ?up|summary|explain what stopped|\bcache\b/.test(n)) return null;
 
   // Build-machine setup, both platforms.
   if (/set ?up node|setup-node|set ?up java|setup-java|select xcode|xcode-select|install ruby|bundler|bundle install/.test(n)) return 'Getting the build machine ready';

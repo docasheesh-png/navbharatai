@@ -50,7 +50,7 @@ describe('every failure class the classifier can emit is deliberately filed', ()
     'JAVA_VERSION_TOO_OLD', 'MISSING_SIGNING_SECRET', 'NODE_OUT_OF_MEMORY', 'NPM_CI_NO_LOCK',
     'NPM_LOCK_CACHE', 'NPM_PACKAGE_NOT_FOUND', 'NPM_PEER_CONFLICT', 'NPM_REGISTRY_AUTH',
     'NPM_VERSION_NOT_FOUND', 'SDK_LICENSE_NOT_ACCEPTED', 'SIGNING_CREDENTIALS_WRONG',
-    'STALE_WORKFLOW', 'TYPE_GATE_BLOCKED_PACKAGING', 'UNKNOWN', 'WEB_DIR_MISSING',
+    'STALE_WORKFLOW', 'TYPE_GATE_BLOCKED_PACKAGING', 'TYPESCRIPT_MISSING', 'UNKNOWN', 'WEB_DIR_MISSING',
   ].sort();
 
   it('🔴 the classifier emits exactly the classes this card knows how to file', () => {

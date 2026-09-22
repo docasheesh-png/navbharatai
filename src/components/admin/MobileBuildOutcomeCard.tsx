@@ -51,7 +51,23 @@ interface OutcomeData {
   diagnosisGap: number;
   cures?: Record<Cure, number>;
   repairs?: { fixed: number; 'unverified-fix': number; 'gave-up': number; miss: number };
+  /** How apps reached GitHub: built here first (the runner packages, compiles nothing) or as source. */
+  ships?: { prebuilt: number; source: number };
+  /** Why the built path stood down, commonest first. */
+  prebuildSkips?: Array<{ reason: string; count: number }>;
 }
+
+/** Plain words for the prebuild's stand-down reasons — an admin reads this card on a phone. */
+const SKIP_LABEL: Record<string, string> = {
+  'flag-off': 'switched off',
+  'static-app': 'already a static app',
+  'no-sandbox': 'no machine held the app',
+  'build-in-flight': 'another build of the app was running',
+  unavailable: 'the machine could not answer',
+  'timed-out': 'the build ran past its budget',
+  'no-output': 'the build wrote no readable page',
+  'too-large': 'the output was too large to push',
+};
 
 const LANE_LABEL: Record<string, string> = {
   apk: 'Installable .apk',
@@ -195,6 +211,22 @@ export function MobileBuildOutcomeCard({ adminToken }: { adminToken: string }): 
                 {data.repairs.fixed} built here first and passed · {data.repairs['unverified-fix']} committed unverified
                 · {data.repairs['gave-up']} rejected by the build, nothing committed · {data.repairs.miss} no repair found
               </p>
+            </div>
+          )}
+
+          {data.ships && (data.ships.prebuilt + data.ships.source) > 0 && (
+            <div>
+              <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-muted">How the app reached GitHub</p>
+              {/* The number that says whether the runner is still compiling apps at all: a ship whose
+                  `www/` is the app's own production build, against one the runner has to build. */}
+              <p className="text-[11px] font-semibold text-muted">
+                {data.ships.prebuilt} built here first (GitHub only packaged) · {data.ships.source} sent as source for the runner to build
+              </p>
+              {Array.isArray(data.prebuildSkips) && data.prebuildSkips.length > 0 && (
+                <p className="text-[11px] text-faint mt-0.5">
+                  Why a ship went as source: {data.prebuildSkips.map((k) => `${k.count} × ${SKIP_LABEL[k.reason] ?? k.reason}`).join(' · ')}
+                </p>
+              )}
             </div>
           )}
 

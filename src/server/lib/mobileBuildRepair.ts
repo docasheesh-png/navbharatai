@@ -20,7 +20,7 @@
 
 import { toolchainForMajor } from './capacitorToolchain';
 import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
-import { capacitorMajorFromFiles, detectWebDir, isAssembledStaticApp } from './mobileProjectAssembler';
+import { capacitorMajorFromFiles, detectWebDir, isAssembledStaticApp, TYPESCRIPT_FOR_CONFIG } from './mobileProjectAssembler';
 
 /** Every failure class NavBharatAI can name from a build log. */
 export type RepairCode =
@@ -33,6 +33,7 @@ export type RepairCode =
   | 'BUILD_SCRIPT_MISSING'
   | 'WEB_DIR_MISSING'
   | 'ANDROID_PLATFORM_MISSING'
+  | 'TYPESCRIPT_MISSING'
   | 'GRADLEW_NOT_EXECUTABLE'
   | 'SDK_LICENSE_NOT_ACCEPTED'
   | 'JAVA_VERSION_TOO_OLD'
@@ -282,6 +283,20 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       // the framework default — overwriting a correct webDir with a wrong one and committing it.
       needs: ['capacitor.config.ts', 'package.json', 'vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'angular.json'],
       detail: webDirMatch ? { expected: webDirMatch[1].replace(/\/+$/, '') } : undefined,
+    };
+  }
+
+  // ── Capacitor's CLI reads capacitor.config.ts with the PROJECT's TypeScript, and the project has none. ──
+  //
+  // `@capacitor/cli` (config.js): "Could not find installation of TypeScript. To use capacitor.config.ts
+  // files, you must install TypeScript in your project". A hand-written static app has no TypeScript;
+  // neither did the first prebuilt ships. The repair is exactly what the CLI asks for: declare it.
+  if (/Could not find installation of TypeScript/i.test(log)) {
+    return {
+      code: 'TYPESCRIPT_MISSING',
+      summary: 'The phone project could not be created because a tool it reads its settings with was not installed.',
+      autoFixable: true,
+      needs: ['package.json'],
     };
   }
 
@@ -723,6 +738,25 @@ export function repairBuildScript(pkgJson: string): string | null {
  * Returns null when package.json is unparseable or does not declare the package at all — then there is
  * nothing here to repair and the honest path is the v5 hand-off.
  */
+/**
+ * Declare TypeScript so Capacitor's CLI can read `capacitor.config.ts`. `null` when it is already
+ * declared (nothing to change — the loop must not commit an identical file) or the file is unreadable.
+ */
+export function repairTypescriptForConfig(pkgJson: string): string | null {
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(pkgJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const deps = (pkg.dependencies as Record<string, string> | undefined) || {};
+  const devDeps = { ...((pkg.devDependencies as Record<string, string> | undefined) || {}) };
+  if (deps.typescript || devDeps.typescript) return null;
+  devDeps.typescript = TYPESCRIPT_FOR_CONFIG;
+  pkg.devDependencies = devDeps;
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
 export function repairDependencyVersion(pkgJson: string, pkg: string): string | null {
   let parsed: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   try {
@@ -844,6 +878,9 @@ export function repairFiles(
     case 'BUILD_SCRIPT_MISSING':
       return one('package.json', repairBuildScript(current['package.json'] || ''),
         'NavBharatAI: define the build step the packager needs');
+    case 'TYPESCRIPT_MISSING':
+      return one('package.json', repairTypescriptForConfig(current['package.json'] || ''),
+        'NavBharatAI: install the tool the phone project reads its settings with');
     case 'NPM_VERSION_NOT_FOUND': {
       // `detail` values may be a string or a list (see the type). This repair needs ONE package name,
       // so it accepts only the string form rather than coercing a list into "a,b" and patching a

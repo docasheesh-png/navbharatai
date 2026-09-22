@@ -79172,6 +79172,111 @@ den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebu
   `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
   the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.
 
+## 2026-09-22 — AUTOPSY `21b431e1`: the platform already held the answer and asked the prompt again
+
+**The build.** Workspace `agentv3-…fea1ce73`, build `21b431e1`. **18.1 minutes. ₹164.68 billed to a
+FREE-tier user.** Real cost $0.428 in tokens + $0.0499 of sandbox.
+
+### The five buckets
+
+- ✅ **Self-healed (0).** Nothing was healed. The fast lane's three repair attempts did not converge.
+- 🔀 **Worked around / alternative used (3).** GLM timed out five times (60s ×3, then abandoned for
+  crawling at 26.2s and 42.8s) and was benched twice — the ladder fell to rung 2 of 5. The fast lane
+  spent ~8.5 min and 3 repairs, then handed off (`SIMPLE_BUILD_FALLBACK` / `TYPECHECK_FAILED`).
+  `UNBILLED_BARREN_WORK` absorbed ₹4.64 of turns that produced nothing.
+- ⏭️ **Skipped / ignored (3).** `JOURNEY_NOT_DERIVED` (no addressable form field);
+  `READINESS_WARNING` (`dangerouslySetInnerHTML` at `ChatInterface.tsx:61`; no tests at all);
+  `GREEN_FREEZE_DEFERRED` ×9 — the freeze working, and the app shipping with no test suite.
+- ❌ **Still broken / shipped imperfect (4).** `SCRIPT_INTEGRITY` — `src/App.tsx` carries `"nमैं"`, a
+  corrupted label the user reads verbatim. `REVIEW_INCOMPLETE` — the post-build review timed out at
+  45 s (+11.25 s grace) over 23 files, the `GREEN_REVIEW_LEAN` budget. `DESIGN_CONSISTENCY` 80/100,
+  17 off-grid spacing values. `RELEASE_GATE: YELLOW`.
+- 🥵 **Struggle points (5).** The whole 18.1 minutes for a request the sizer itself filed as *chat*;
+  five provider timeouts; 8.5 minutes in a fast lane that died on **one** `TS2554`; 23 TypeScript
+  writes compiled by nothing; ETA midpoint 7.3 min against 18.1 actual (2.5×, outside the band — and
+  correctly NOT shown to the user, since it was unevidenced).
+
+### The missing subsystem, and it is the same one as `697b38ee`
+
+**There is still no shared evidence ledger.** Two instances in this one build, and in BOTH the module
+that got it wrong had already written the diagnosis into its own docblock:
+
+1. `RequestAnalyser`'s own comment: *"TWO MODULES ANSWER 'IS THIS A BUILD?' AND ONE IS NEVER TOLD THE
+   OTHER'S ANSWER."* It then answers by re-reading the prompt.
+2. `writeTimeTypecheck`'s `probeFailures` comment: *"`probeFailures > 0` with `skippedNoTsconfig > 0`
+   is the shape of a check that disabled itself on a read error."* It then lets it disable itself.
+
+Naming a shape is not acting on it. Both are fixed by being TOLD rather than by guessing better.
+
+### DNA-level fixes (all reversion-proven in `tests/theAnswerWasAlreadyInTheRoom.test.ts`, 16 cases)
+
+**1 · A question-shaped order is filed as an app, not as "hi".** `anAppWasOrderedButNotRecognised`
+(written 2026-09-20 for autopsy `31dc61fd`) requires `userAskedForAnAppToBeBuilt`, i.e. **HIGH**
+confidence — and the 2026-09-13 mood rule caps a QUESTION below HIGH on purpose. So the guard was
+structurally unreachable for the commonest shapes a real Indian user types. Measured on `main`:
+
+| request | intent · conf | filed as |
+|---|---|---|
+| `Create a upsc preparation aap` | new_build HIGH | app_unsized · 15 |
+| `Can you make me a UPPCS preparation app?` | new_build low | **chat · 5** |
+| `kya tum mere liye ek UPPCS preparation app bana sakte ho?` | new_build low | **chat · 5** |
+| `mujhe uppcs ki preparation ke liye ek app chahiye` | new_build low | **chat · 5** |
+
+The last is not a question at all. `AnalyserInput.buildIntent` now carries the route's OWN decision
+(`routes/agentv3.ts`, `buildIntent: intent`). **The precision half is kept, not dropped**: the four
+refusals inside `userAskedForAnAppToBeBuilt` (continuation, problem report, our own "Fix error"
+template, pasted machine error) were EXTRACTED as `describesWorkAlreadyStarted` — one definition, two
+readers — so *"Continue from where you left off and finish the build"* is still `chat` (autopsy
+`697b38ee`). Absent ⇒ today's behaviour exactly. Routing-neutral here (5 → 15 is still the same start
+band); what changes is that the report, the cost telemetry and the prompt audit stop filing real app
+builds under "chat".
+
+**2 · Three unreadable probes are a fact about the READER.** `writeTypecheckNote` read
+`tsconfig.json` and latched the third failure as *"this is not a TypeScript project"* — about a
+workspace whose own `ls -la` in the same report lists `tsconfig.json`, and into which `.tsx` files
+were being written **at that moment**. 23 TypeScript writes went unchecked; the fast lane then died on
+`src/components/StudySession.tsx(24,65): error TS2554` — precisely what this check exists to surface
+at write time. Now only a REAL `'no'` (a genuine `isMissingFileError`) stands the compiler down.
+`probeExhausted` is its own state, and since the probe is reached **only while a `.ts`/`.tsx` file is
+being written**, the compiler itself is asked in the probe's place — a `tsc` with no config prints
+lines with no `file(line,col):` prefix, which `parseTscErrors` does not match, so the genuinely
+config-less case yields zero errors and an empty note. New counters `compiledUnprobed` and
+`projectVerdict`; the report line no longer says "treated as non-TypeScript" about a read it could not
+make.
+
+**3 · SIBLING (rule 3), found while writing case 2's controls: every phone types the wrong
+apostrophe.** Every signal in `IntentClassifier` is written with a straight `'`; iOS smart punctuation
+and Gboard both produce `’`. Measured: `"it isn't working"` → problem report; `"it isn’t working"` →
+**nothing matched**. The whole negated-contraction family — `doesn’t work`, `won’t load`, `isn’t
+showing`, and the ANSWER-ONLY `don’t build` override that exists to STOP an unwanted build — was
+invisible to exactly the users who type it, on a product whose primary surface is a phone. Folded at
+the one reader (`firstSignalWord`), not by doubling six arrays. Same shape as the trailing space that
+made `BRAVE_API_KEY` look configured while every call was rejected.
+
+**4 · SIBLING: Hindi puts the negation either side of the verb.** `chal nahi raha` was listed;
+`nahi chal raha` was not — so *"preview nahi chal raha"*, the exact phrase this file's own comment
+quotes as a problem report, matched nothing. Mirrored spellings only; no widening of what counts.
+
+### The 50/50 law — why the problems arose at all
+
+- The 31dc61fd fix closed the shape its own report contained and did not ask which OTHER shapes route
+  to `new_build` without earning HIGH. **A guard built on a confidence level inherits every rule that
+  caps confidence** — and the mood rule caps questions deliberately. The fix is to stop deriving the
+  fact at all.
+- The probe's retry budget was written as *"a project that genuinely has no tsconfig must not pay a
+  failed read on every write"* — reasoning that never noticed the probe is only ever reached while
+  TypeScript is being written, which makes the expensive case nearly empty and the latch pure loss.
+
+### Still open (rule 6) — recorded, not fixed here
+
+- **`SCRIPT_INTEGRITY`: `"nमैं"` in `src/App.tsx`** — a literal `\n` swallowed into a Devanagari
+  string by the generator. Detected and reported, never repaired; a user reads the corruption.
+- **`REVIEW_INCOMPLETE` at 23 files.** `GREEN_REVIEW_LEAN`'s 45 s budget was sized for a proven-green
+  app's suggestion pass; this build was not green. Whether the lean budget should apply to a
+  YELLOW gate is a real question and is not answered here.
+- **Five provider timeouts before the ladder moved.** The slow-rung bench keys on throughput, not on
+  a timeout count within one lane; five is not obviously the right number to sit through.
+- **No shared evidence ledger.** Third autopsy naming it. Until one exists, this class returns.
 ## 2026-09-22 — "Purchage promo code": buy a code with real money and give it away (PR pending)
 
 **Admin, verbatim:** *"promocode credit ke andar ek option aur add karo! **purchage promo code** —

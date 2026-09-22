@@ -12219,7 +12219,7 @@ async function noteBuildOutcome(
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel })
+        ? analyzeRequest({ prompt, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
         : undefined;
       if (analysis) {
         console.log(

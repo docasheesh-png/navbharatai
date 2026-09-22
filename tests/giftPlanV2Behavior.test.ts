@@ -93,6 +93,19 @@ beforeEach(() => {
 afterEach(() => { process.env = { ...ENV }; });
 
 /**
+ * 🔴 AMENDED 2026-09-22 — A NEW ACCOUNT IS CREDITED ₹50 AGAIN, AND THESE SCENARIOS ARE WHY IT IS SAFE.
+ *
+ * Google rejected the Android release: a brand-new account held ₹0, so the paid rung of the image
+ * ladder refused the moment the free third party was down, and a Play reviewer IS a brand-new
+ * account. The admin's ruling: *"new account me 50₹ credit do. jab tak, refral system activate na
+ * hota hai, tab tak."*
+ *
+ * So the SIGNUP door pays **5,000 tokens (₹50)** below, while the CLAIM door still pays zero — the
+ * retired ₹250 phone top-up is not re-opened, and that asymmetry is the whole design. The interim
+ * grant spends the SAME per-identity markers, which is what keeps every scenario in this file
+ * meaningful: the Gmail-alias leak and the one-number-many-spellings case still pay exactly once,
+ * they simply pay ₹50 instead of ₹250.
+ *
  * 🔴 REWRITTEN 2026-09-17 — THE FLAT WELCOME GIFT IS RETIRED, BY ADMIN ORDER.
  *
  * *"nahi welcome bonus ₹500 band karna hai! sirf refer aur verification wale ₹400 dene hai …
@@ -125,51 +138,51 @@ describe('the admin set WALLET_GIFT_V2=on — the value itself must mean yes', (
 });
 
 describe('door 1 — email / Google sign-up', () => {
-  it('credits ₹250 and spends the mailbox', async () => {
+  it('credits the ₹50 interim welcome credit and spends the mailbox', async () => {
     const { wallet } = await signUp('u1', 'amit@gmail.com');
-    expect(wallet.tokenBalance, 'retired — nothing is gifted for arriving').toBe(0);
-    expect(wallet.freeGiftedTokens).toBe(0);
+    expect(wallet.tokenBalance, '₹50 interim credit — a new account must be able to use the app').toBe(5_000);
+    expect(wallet.freeGiftedTokens, 'recorded, so it counts against the ₹400 lifetime ceiling').toBe(5_000);
     expect(wallet.giftPlan).toBe('v2');
-    // A marker is written only WITH a grant. Nothing is granted, so no identity is spent —
-    // which also means nobody's mailbox is burned by a gift they never received.
-    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(0);
+    // A marker is written only WITH a grant — and now there IS one, so the mailbox is spent. That is
+    // what stops one person collecting ₹50 on ten aliases; the next case proves it.
+    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(1);
     // No phone was verified, so no number was spent.
     expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(0);
   });
 
   it('THE REAL LEAK: a Gmail alias gets NOTHING the second time', async () => {
     await signUp('u1', 'amit@gmail.com');
-    expect(tokensOf('u1')).toBe(0);
+    expect(tokensOf('u1')).toBe(5_000);
     // Same inbox, three spellings, three separate Firebase accounts.
     for (const [uid, email] of [['u2', 'amit+1@gmail.com'], ['u3', 'a.m.i.t@gmail.com'], ['u4', 'AMIT@googlemail.com']] as const) {
       const { wallet } = await signUp(uid, email);
       expect(wallet.tokenBalance, `${email} must not be gifted again`).toBe(0);
     }
-    // A marker is written only WITH a grant. Nothing is granted, so no identity is spent —
-    // which also means nobody's mailbox is burned by a gift they never received.
-    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(0);
+    // ONE marker for ONE mailbox, however many ways it is spelled — ₹50 paid once, not four times.
+    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(1);
   });
 
   it('a genuinely different person is still gifted', async () => {
     await signUp('u1', 'amit@gmail.com');
     const { wallet } = await signUp('u2', 'sunita@gmail.com');
-    expect(wallet.tokenBalance, 'retired — nothing is gifted for arriving').toBe(0);
+    expect(wallet.tokenBalance, 'a different mailbox is a different person — it gets its own ₹50').toBe(5_000);
   });
 });
 
 describe('door 2 — phone OTP sign-up', () => {
-  it('credits the full ₹500 at once and spends BOTH identities', async () => {
+  it('pays the same ₹50 — NOT the retired ₹500 — and spends BOTH identities', async () => {
     phoneOnToken = '+919876543210';
     const { wallet } = await signUp('p1', 'amit@gmail.com');
-    expect(wallet.tokenBalance, 'retired — the phone door pays nothing either').toBe(0);
-    // No grant, so no gift is RECORDED either. A wallet stamped `phoneVerifiedGift` that was never
-    // paid a phone gift is a false receipt — it would read back as "this person has had theirs".
-    expect(wallet.phoneVerifiedGift ?? false).toBe(false);
-    expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(0);
-    // The mailbox is spent too — otherwise the ₹250 tier could be taken again on it.
-    // A marker is written only WITH a grant. Nothing is granted, so no identity is spent —
-    // which also means nobody's mailbox is burned by a gift they never received.
-    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(0);
+    // 🔒 THE ASSERTION THAT MATTERS MOST IN THIS FILE: a verified phone does NOT re-open the ₹500
+    // tier. The interim credit is one flat ₹50 through either door; only the retirement's amounts
+    // were retired, and this is what proves they stayed retired.
+    expect(wallet.tokenBalance, 'the phone door pays the same ₹50, never the retired ₹500').toBe(5_000);
+    // True under this field's own definition — a welcome grant really did land on a verified-phone
+    // signup. Nothing reads it today; the gift_phone marker below is the guard that does the work.
+    expect(wallet.phoneVerifiedGift).toBe(true);
+    expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(1);
+    // The mailbox is spent too — otherwise the same person could sign out and take ₹50 again on it.
+    expect(markers().filter((m) => m.includes('gift_email'))).toHaveLength(1);
   });
 
   it('the same handset in another spelling is not a second person', async () => {
@@ -177,6 +190,8 @@ describe('door 2 — phone OTP sign-up', () => {
     await signUp('p1', 'a@gmail.com');
     phoneOnToken = '09876543210'; // same number, different form
     const { wallet } = await signUp('p2', 'b@gmail.com');
+    // A FRESH mailbox, and still zero: the number is the scarce identity, so a used one blocks the
+    // grant even when the address has never been seen. That is the ₹750 rule, at ₹50.
     expect(wallet.tokenBalance).toBe(0);
   });
 });
@@ -193,8 +208,11 @@ describe('the claim — email account tops up to ₹500', () => {
     expect(res.body.ok).toBe(false);
     expect(res.body.message, 'honest, and it does not accuse anyone').toMatch(/not open right now/i);
     expect(res.body.granted, 'retired — the claim tops up nothing').toBe(0);
-    expect(tokensOf('u1')).toBe(0);
-    expect(DOCS[key('user_token_wallets', 'u1')].freeGiftedTokens).toBe(0);
+    // 🔒 The signup ₹50 is untouched by the refusal — re-opening the SIGNUP door must not re-open
+    // the CLAIM door, and a refusal must never reduce a balance.
+    expect(tokensOf('u1')).toBe(5_000);
+    expect(DOCS[key('user_token_wallets', 'u1')].freeGiftedTokens).toBe(5_000);
+    // The number was never spent, because nothing was paid for it.
     expect(markers().filter((m) => m.includes('gift_phone'))).toHaveLength(0);
   });
 
@@ -205,7 +223,7 @@ describe('the claim — email account tops up to ₹500', () => {
     const res2 = mockRes();
     await (await claimBonus())(mockReq({ params: { userId: 'u1' } }), res2);
     expect(res2.body.granted).toBe(0);
-    expect(tokensOf('u1')).toBe(0); // unchanged, and never reduced
+    expect(tokensOf('u1')).toBe(5_000); // unchanged, and never reduced
   });
 
   it('refuses honestly, and as a 200, when no phone is on the token', async () => {
@@ -215,21 +233,21 @@ describe('the claim — email account tops up to ₹500', () => {
     await (await claimBonus())(mockReq({ params: { userId: 'u1' } }), res);
     expect(res.statusCode).toBe(400);
     expect(res.body.message).toMatch(/verify your phone/i);
-    expect(tokensOf('u1')).toBe(0);
+    expect(tokensOf('u1')).toBe(5_000);
   });
 });
 
 describe('THE ₹750 HOLE — the whole point of the design', () => {
   it('one number cannot be paid through both doors', async () => {
-    // 1. Sign up by phone → ₹500, the number is spent.
+    // 1. Sign up by phone → ₹50, and the number is spent.
     phoneOnToken = '+919876543210';
     await signUp('p1', 'first@gmail.com');
-    expect(tokensOf('p1')).toBe(0);
+    expect(tokensOf('p1')).toBe(5_000);
 
-    // 2. A SECOND account on a genuinely new mailbox — which used to be a legitimate ₹250.
+    // 2. A SECOND account on a genuinely new mailbox — a legitimate ₹50 of its own.
     phoneOnToken = null;
     await signUp('u2', 'second@outlook.com');
-    expect(tokensOf('u2'), 'retired — even the legitimate door pays nothing now').toBe(0);
+    expect(tokensOf('u2'), 'a new mailbox earns its own interim credit').toBe(5_000);
 
     // 3. Verify it with the SAME number. This is the leak. It must pay ZERO.
     phoneOnToken = '+91 98765-43210'; // same handset, typed differently
@@ -237,9 +255,11 @@ describe('THE ₹750 HOLE — the whole point of the design', () => {
     await (await claimBonus())(mockReq({ params: { userId: 'u2' } }), res);
 
     expect(res.body.granted).toBe(0);
-    // ₹0 + ₹0. The hole this file was written to close cannot open, because neither door pays.
-    expect(tokensOf('u2')).toBe(0);
-    expect(tokensOf('p1') + tokensOf('u2')).toBe(0);
+    // ₹50 + ₹50, one per MAILBOX — never a third payment for re-presenting a number already spent.
+    // The hole was one NUMBER being paid twice; it is still shut, and the claim door pays nothing
+    // at all.
+    expect(tokensOf('u2')).toBe(5_000);
+    expect(tokensOf('p1') + tokensOf('u2')).toBe(10_000);
   });
 });
 
@@ -297,7 +317,11 @@ describe('the kill switch really reverts', () => {
   it('with the flag off, a new wallet takes the legacy path and no marker is written', async () => {
     process.env.WALLET_GIFT_V2 = 'off';
     const { wallet } = await signUp('u1', 'amit+1@gmail.com');
-    expect(wallet.tokenBalance, 'retired — nothing is gifted for arriving').toBe(0);   // legacy welcome bonus
+    // ⚠️ THE INTERIM CREDIT IS NOT ON THE v2 SWITCH, and that is deliberate: a new account must be
+    // able to use the app whatever WALLET_GIFT_V2 says. What v2 provides is the per-IDENTITY
+    // protection, so with it off the ₹50 is paid per ACCOUNT and nothing is spent — the same
+    // exposure the legacy welcome bonus carried for its whole life, at a twentieth of the amount.
+    expect(wallet.tokenBalance, 'the interim credit does not ride the v2 flag').toBe(5_000);
     expect(wallet.giftPlan).toBeUndefined();     // not stamped ⇒ keeps the ladder
     expect(markers()).toHaveLength(0);           // no identity was spent
   });

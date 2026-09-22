@@ -78311,6 +78311,143 @@ ungli se khich ke kahi bhi rakh sake! expand (full screen on) wala theek hai."*
 - The header's ENTER button is untouched. Locked by `tests/theExitButtonGoesWhereTheFingerPutsIt.test.ts`
   and two `topRightPosition` cases in `floatingButtonPosition.test.ts`.
 
+## 2026-09-22 — 🎁 ₹50 for a new account: the Play rejection was an empty wallet
+
+Google rejected the Android release under the **Broken Functionality** policy. Their label says
+*"Loading problems: Your app doesn't open or load"* — their own evidence screenshots show the app OPEN,
+on the AI Image Generator, carrying *"Image generation failed — please try again"* three times. The
+chain behind that, read out of the code rather than reasoned about:
+
+1. a brand-new account receives **₹0** — `flatWelcomeGiftAllowed()` has been a hardcoded `false` since
+   2026-09-17 and `weeklyTopUpAllowed()` likewise, while `REFERRAL_REWARDS` — the ladder meant to pay
+   instead — is deliberately unset until the app is live on Play;
+2. free images come from Pollinations, a keyless third party with no SLA;
+3. when it fails, the ladder falls to a **paid** rung;
+4. `gateToolAction` refuses a paid rung on an empty wallet (402), and the client shows one generic line.
+
+So image generation worked for a new user only while a free third party happened to be up. **A Play
+reviewer is exactly that user** — and it was a deadlock: the referral ladder was gated on being live on
+Play, and Play would not pass because a new account could not use the product.
+
+Admin's ruling, verbatim: *"new account me 50₹ credit do. jab tak, refral system activate na hota hai,
+tab tak. uske baad 100x4=400 denge.(after refral system activation)"*
+
+- **`src/server/lib/interimWelcomeGift.ts`** (new) — ₹50 = 5,000 tokens at signup. It is its own module
+  for a real reason: `referralRewards.ts` already imports `giftPolicy.ts`, so putting this in
+  `giftPolicy` would have closed a `giftPolicy → welcomeGiftExclusion → referralRewards → giftPolicy`
+  cycle.
+- 🔒 **The 2026-09-17 retirement is NOT reversed — only scoped.** `flatWelcomeGiftAllowed()` gates three
+  things: the signup grant, the retired **₹250 phone bonus** claim route, and the v2 gift summary.
+  Flipping it to reach the first would have silently re-opened a claim the admin retired — one problem
+  traded for another. It stays a hardcoded `false`; the interim grant is a separate, smaller, signup-only
+  predicate, and the phone route and the summary stand down exactly as they do today.
+- 🔒 **It stands down by itself.** The live test is `flatWelcomeGiftSuppressed` — the module that already
+  owns *"is the referral ladder paying instead?"* — so the moment `REFERRAL_REWARDS` is on this grant
+  returns 0, with no second copy of that rule and nothing for anyone to remember to switch off. That is
+  the admin's "jab tak … tab tak", in code.
+- 🔒 **It counts against the ₹400 lifetime ceiling** (`capSelfGift`, recorded in `freeGiftedTokens` in the
+  same write), so ₹50 today plus referral steps later tops out at ₹400, never ₹450.
+- ⚠️ **An unreadable `INTERIM_WELCOME_TOKENS` falls back to ₹50, never to zero.** `Number('')` is `0`, so
+  a key present-but-empty in a console would otherwise read as a deliberate "give nobody anything" and
+  silently restore the very bug this closes. An explicit `0` is honoured.
+- `alreadyGranted` still wins, so a re-created wallet document collects nothing; `retiredGiftSummary`
+  already reports the ₹50 as gifted with nothing claimable, so no screen promises a second instalment.
+- **AppKnowledgeBase:** the billing entry now states what a new account starts with and that the amount
+  is interim; the referral entry now leads with the fact that referral rewards are **not switched on
+  yet** — the Promo screen already says so, and the entry had been describing the ₹400 ladder as if it
+  were paying.
+- Test-locked and reversion-proven three ways in `tests/aNewAccountCanActuallyUseTheApp.test.ts`
+  (12 cases): removing the ladder stand-down, treating a blank env as zero, and reaching the grant
+  through `flatWelcomeGiftAllowed` (which would re-open the ₹250 phone bonus) each fail it.
+
+✅ **It is entirely server-side, so it reaches every installed app on the next merge to `main`** — no
+new `.aab` is needed for the credit itself (nothing user-facing in `dist/` changed).
+⚠️ **It does not by itself clear the rejection.** Play re-reviews on a resubmission, and what this
+changes is the reviewer's account having credit when Pollinations is down — the paid rung of the image
+ladder can now serve instead of refusing. The rejection is cleared by a resubmission that a reviewer
+gets through, not by this merge.
+
+## 2026-09-22 — 💳 "This is a paid service": an empty balance now says what it means
+
+Admin, the same hour as the ₹50 credit: *"agar user ke pas balance khatam hai, to proper likh kar ana
+chahiye. this is paid service!!"* Two defects were behind it, and neither was a missing message — both
+were about what the message actually said and what the screen then did with it.
+
+**🔴 1. The sentence was a drifted copy, three times.** `professionals/passGate.ts`, `tools/toolGate.ts`
+and the Pro image route each carried their own wording of the same refusal, already diverging
+("Add credit" / "Add credits", "balance is empty" / "credits are used up"). The drifted-copy class this
+repo has paid for four times over. One builder now: `src/server/lib/walletEmptyNotice.ts`, and a source
+guard fails if a fourth copy appears.
+
+**🔴 2. And for a wallet in DEBT the sentence was simply false.** The refusal fires at
+`balanceInr <= 0` (`walletTooEmptyForTurn`), and a build may legitimately leave a wallet down to −₹50
+(`WALLET_OVERDRAFT_FLOOR_INR`) — a real account was found at **−₹506**. Telling that person *"your
+balance is empty. Add credit"* is not a rounding of the truth: they top up ₹20, meet the identical
+refusal, and nothing anywhere tells them the real figure. The notice now names what was overspent and
+the amount that actually clears it, states the price of the refused thing where the caller knows it,
+and — when the balance could not be read at all — says so rather than inventing a zero.
+
+**🔴 3. The image studio treated a bill as a breakage.** The server's honest sentence landed in a red
+error line beside a **Try again** button, and retrying an empty wallet cannot work — the one control
+offered was the one guaranteed to fail. It now renders an *Add credit to carry on* card with a real
+button, through `navbharat:navigate`, the channel `AgentV3Panel` already uses. The generic error card
+stands down while a balance block is set, so a retry is never offered for a condition retrying cannot
+clear.
+
+- **`src/lib/walletEmptyRefusal.ts`** — the client half: `isWalletEmptyRefusal` switches on the server's
+  `wallet_empty` CODE, never on its prose (the sentence is written for a person and will be reworded).
+  ⚠️ A 402 alone is not enough — hosting plans and custom domains answer 402 with different offers.
+- 🔒 Test-locked and **reversion-proven twice** in `tests/anEmptyBalanceIsSaidProperly.test.ts`
+  (18 cases): moving the wallet check after the generic throw that swallows it, and treating a debt as
+  "empty" again, each fail it. Both guards are SOURCE-level — `tsc` and `vitest` cannot see either,
+  which is exactly how both shipped.
+- 🔒 White-label locked: no vendor, model or routing word can reach the text.
+
+⚠️ **What this does NOT do, said plainly.** The build panel and the Professional chat already had a
+proper card with an Add-credit button and are untouched. Doctor AI and the AI tool panels (Debugger,
+Design System, App Scan) still show the refusal as plain text with no button — honest, and better than
+before because the sentence itself improved, but not one tap from the fix. That is the next slice.
+
+## 2026-09-22 — 🔴 The red dot that leads to the top-up
+
+Admin, verbatim: *"agar balat kahatam hai, to navigator dot, ko 3lins menu-> wallet and billing ->
+buy token -> purchage wallet token par ek red dot show hona chahiye!"*
+
+A **trail**, not a badge: ☰ → **Wallet & Billing** → **Buy tokens** → **Purchase Wallet Tokens**, four
+marks that walk a blocked user to the one control that unblocks them. A refusal message tells someone
+they are stuck; this tells them where to go.
+
+- **`src/lib/walletNeedsTopUp.ts`** — one predicate, four readers. Four places asking "is the balance
+  finished?" in four slightly different ways is the drifted-copy class this repo has now paid for six
+  times (`safeRelPath` ×4, `tagsOnLine` ×2, the boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2, and the
+  empty-balance sentence earlier the same day). What makes it a trail rather than four coincidences is
+  that a dot cannot lead to a screen where it has quietly vanished.
+- 🔑 **The line is the SERVER's own refusal line** (`walletTooEmptyForTurn`: `balanceInr <= 0`). A dot
+  at ₹5 while builds still work is a nag; no dot at ₹0 while everything is refused is useless. Tying
+  it to the same number means the dot and the refusal can never disagree about whether the app works.
+- 🔴 **It reads the HIGHER of the wallet's two views, and that is a bug already paid for.** The wallet
+  holds one balance in `remaining_balance` and `tokenBalance`, and the gift path once moved only the
+  second (admin 2026-08-03: *"₹0 + 50,000 tokens → app building off"*). Reading ₹ alone would paint a
+  red "you have no money" dot across the whole app for **every brand-new account on the ₹50 welcome
+  credit**, whose token view is the one carrying it.
+- 🔒 **Silent on every doubt** — signed out, not fetched, still loading, or a balance that cannot be
+  read ⇒ no dot. A dot that is wrong once is a dot nobody reads again.
+- **One dot, two reasons, on the ☰ button.** An unread notification and a finished balance raise the
+  SAME mark; the accessible label names which (the balance first — it is the one that stops the app).
+  Two marks on one button would be two problems where the user has one.
+- 🔴 **Wired on the mobile DRAWER as well as the desktop rail.** `SidebarNav` has two `NavItem` render
+  sites and ☰ opens the drawer — wiring only the rail ships the feature working nowhere it was asked
+  for. Test-locked by counting both.
+- Test-locked and **reversion-proven three ways** in `tests/theRedDotLeadsToTheTopUp.test.ts`
+  (12 cases): dropping the drawer's dot, reading the ₹ view alone, and nagging while the wallet loads
+  each fail it. Half the suite is SOURCE-level — `tsc` and `vitest` cannot see a dot wired on one of
+  two render sites.
+- Colour comes from `bg-danger`; the ratchet's per-file baselines are unchanged.
+
+⚠️ **It does not warn BEFORE the wall.** "Your balance is running low" is a different, still-unbuilt
+thing (`notifyLowBalance`'s `blocked: false` branch has no caller anywhere) and a different decision,
+because a warning has to obey the alert-noise rule. This dot states a fact that is true right now and
+disappears the moment it stops being true.
 ## 2026-09-22 — Resize sheet: "W aur H button kaam nahi kar rahe" — the buttons worked, the preview could not show width
 
 Admin, with a screenshot of the sheet at 1024 × 1024: *"ai image generate: me image banne ke bad, resize me

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move, Wallet } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
 import { ImageResizeEditor } from './ImageResizeEditor';
@@ -16,6 +16,7 @@ import { auth } from '../../lib/firebase';
 import { ImageStudioPro } from './ImageStudioPro';
 import { fetchImageFromUser, relayImage, type ClientFetchTicket } from '../../lib/clientImageFetch';
 import { imageWaitMessage } from '../../lib/imageDelivery';
+import { isWalletEmptyRefusal, walletEmptyMessage, openAddCredit } from '../../lib/walletEmptyRefusal';
 import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
@@ -215,6 +216,11 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const [isLoading, setIsLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  // AN EMPTY BALANCE IS NOT A FAILURE (admin 2026-09-22: "this is paid service!!"). It used to land
+  // in `errorMsg` as a red line next to a **Try again** button — and retrying an empty wallet cannot
+  // work, so the only control offered was the one that could not help. Held separately so it renders
+  // as what it is: a price, and the one action that clears it.
+  const [balanceBlock, setBalanceBlock] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const pagedHistory = usePagedList(history);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -280,6 +286,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     // A picture on its own IS a request ("re-render this"), so words are required only without one.
     if ((!effectivePrompt.trim() && !reference) || isLoading) return;
     setImageError(false);
+    setBalanceBlock('');
     setErrorMsg('');
     setCraftNotes([]);
     // The user's message lands in the thread BEFORE the request goes out, so the press is visibly
@@ -314,6 +321,13 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
         }),
       });
       const data = await res.json().catch(() => null);
+      // Checked BEFORE the generic throw: this is a bill, not a breakage, and the difference decides
+      // which control the user is given. Switching on the server's `wallet_empty` code rather than on
+      // its wording — the sentence is for the person and will be reworded, the code will not.
+      if (isWalletEmptyRefusal(res.status, data)) {
+        setBalanceBlock(walletEmptyMessage(data));
+        return; // the prompt is deliberately kept — they will send it again after topping up
+      }
       if (!res.ok || !data) {
         throw new Error((data && typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
@@ -942,7 +956,23 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 </div>
               )}
 
-              {!isLoading && imageError && (
+              {/* The wallet, not a fault. No "Try again" here on purpose: the next press would be
+                  refused by the same gate, and offering it is what made a price look like a bug. */}
+              {!isLoading && balanceBlock && (
+                <div className="rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 space-y-2">
+                  <p className="text-xs font-semibold text-warn">Add credit to carry on</p>
+                  <p className="text-xs text-muted leading-relaxed">{balanceBlock}</p>
+                  <button
+                    type="button"
+                    onClick={openAddCredit}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent"
+                  >
+                    <Wallet className="w-3.5 h-3.5" /> Add credit
+                  </button>
+                </div>
+              )}
+
+              {!isLoading && imageError && !balanceBlock && (
                 <div className="rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 space-y-2">
                   <p className="text-xs text-danger leading-relaxed">
                     {errorMsg || 'Image could not be generated. Retry or change the prompt.'}

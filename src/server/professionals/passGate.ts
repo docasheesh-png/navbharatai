@@ -14,6 +14,7 @@ import { professionalUsageStore } from './ProfessionalUsageStore';
 import { aiWalletSpendEnabled } from '../lib/aiTurnCharge';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
+import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
 
 export type ProfessionalTier = 'free' | 'paid';
 
@@ -61,21 +62,19 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
   if (walletSpend && uid && !freeListed && !hasActivePass) {
     const balanceInr = await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid).catch(() => null);
     if (walletTooEmptyForTurn(balanceInr)) {
+      // ADMIN 2026-08-10 ("pass system hata do"): this used to end "…or get the Professional Pass
+      // for unlimited access to every professional." That sentence was a LIVE LIE — this branch is
+      // reachable today (AI_WALLET_SPEND has been on since 2026-08-08) while the Pass has never
+      // been sellable (PROFESSIONAL_PAID_ENABLED defaults off, and it is not set in Cloud Run), so
+      // a user with an empty balance was pointed at a product that cannot be bought. One honest
+      // instruction is worth more than two, and adding credit is the only thing that actually works.
+      // ADMIN 2026-09-22 ("proper likh kar ana chahiye. this is paid service!!"): the wording moved
+      // to `walletEmptyNotice`, which three routes now share — and which says what is OWED when the
+      // balance is negative, instead of calling a −₹506 wallet "empty".
       return {
         allow: false,
-        status: 402,
-        body: {
-          // ADMIN 2026-08-10 ("pass system hata do"): this used to end "…or get the Professional Pass
-          // for unlimited access to every professional." That sentence was a LIVE LIE — this branch is
-          // reachable today (AI_WALLET_SPEND has been on since 2026-08-08) while the Pass has never
-          // been sellable (PROFESSIONAL_PAID_ENABLED defaults off, and it is not set in Cloud Run), so
-          // a user with an empty balance was pointed at a product that cannot be bought. One honest
-          // instruction is worth more than two, and adding credit is the only thing that actually works.
-          error: 'Your balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use.',
-          code: 'wallet_empty',
-          reason: 'wallet-empty',
-          balanceInr: balanceInr ?? 0,
-        },
+        status: WALLET_EMPTY_STATUS,
+        body: walletEmptyBody({ balanceInr, what: 'this answer' }),
       };
     }
   }

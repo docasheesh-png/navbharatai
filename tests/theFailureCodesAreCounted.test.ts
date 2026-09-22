@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  buildLane, cureFamily, cureSplit, outcomeDayKey, summariseBuildOutcomes,
+  buildLane, countedDocId, cureFamily, cureSplit, outcomeDayKey, summariseBuildOutcomes,
+  MOBILE_BUILD_COUNTED_COLLECTION, MOBILE_BUILD_OUTCOME_COLLECTION,
   type DailyBuildOutcomes,
 } from '../src/server/lib/mobileBuildOutcomeStore';
+import { RETENTION_POLICIES } from '../src/server/lib/DataRetentionManager';
 import { SHIP_WORKFLOWS } from '../src/lib/shipWorkflows';
 
 /**
@@ -196,5 +198,51 @@ describe('the wiring: counted once per run, and never on a path that repeats', (
     // the status a user is refreshing, to measure a thing that does not matter to them at all.
     expect(route).toContain('void recordBuildOutcome(');
     expect(route).toContain('void recordBuildFailureCode(');
+  });
+});
+
+describe('measuring the pipeline does not mean keeping a file on the people using it', () => {
+  it('🔴 the per-run marker is a DIGEST — the owner login never becomes a document id', () => {
+    // `owner` is a person's GitHub login, and this marker grows with every build while being keyed by
+    // nothing a user owns — so `deleteUserData` could never reach it. The id was
+    // `${owner}_${repo}_${runId}`. Removing the data beats promising to erase it later.
+    const id = countedDocId('nagpurcity16', 'gif-bharat-alpha', '35709280304');
+    expect(id).toMatch(/^[0-9a-f]{64}$/);
+    expect(id).not.toContain('nagpurcity16');
+    expect(id).not.toContain('gif-bharat');
+  });
+
+  it('it is STABLE and it separates the fields, so two different runs cannot collide', () => {
+    // Stability is the whole contract: a poll minutes later must find the same claim. And the parts are
+    // separated, so `a_b` + `c` and `a` + `b_c` are different runs rather than one silently-merged claim.
+    expect(countedDocId('o', 'r', '1')).toBe(countedDocId('o', 'r', '1'));
+    expect(countedDocId('o', 'r', '1')).not.toBe(countedDocId('o', 'r', '2'));
+    expect(countedDocId('a_b', 'c', '1')).not.toBe(countedDocId('a', 'b_c', '1'));
+  });
+
+  it('🔒 the stored body says what a count IS, and nothing about who ran it', () => {
+    const src = codeOnly(read('src/server/lib/mobileBuildOutcomeStore.ts'));
+    expect(src).toContain('.create({ lane, outcome, countedAt: atMs });');
+    expect(src).not.toContain('.create({ owner, repo');
+  });
+
+  it('🔴 both collections are on a retention clock — the growing one especially', () => {
+    // The day rollup is one document a day and could sit for ever without hurting anything; the MARKER
+    // is one document per finished build and is exactly the shape that made `site_analytics` outlive a
+    // published 30-day promise with nothing anywhere failing.
+    const byName = new Map(RETENTION_POLICIES.map((p) => [p.collection, p]));
+    expect(byName.get(MOBILE_BUILD_OUTCOME_COLLECTION)).toMatchObject({ timestampField: 'day', timestampKind: 'iso' });
+    expect(byName.get(MOBILE_BUILD_COUNTED_COLLECTION)).toMatchObject({ timestampField: 'countedAt', timestampKind: 'epochMs' });
+    // The marker's window must outlast any real poll by a wide margin: purging it early would count a
+    // run a second time, which inflates the very rate this module exists to measure.
+    expect(byName.get(MOBILE_BUILD_COUNTED_COLLECTION)!.ttlDays).toBeGreaterThanOrEqual(7);
+  });
+
+  it('the purge field really is the field the write stores — a wrong name deletes nothing, for ever', () => {
+    // `retentionBound` compares against a named field; a policy naming a field the write never sets is a
+    // silent no-op, which is the defect that made `timestampKind` a required part of a policy at all.
+    const src = codeOnly(read('src/server/lib/mobileBuildOutcomeStore.ts'));
+    expect(src).toContain('countedAt: atMs');
+    expect(src).toContain('{ day, outcomes:');
   });
 });

@@ -79075,6 +79075,26 @@ been THE root cause. **It is false.** `routes/mobileShip.ts` reads *"the rules c
 the AI pass is exactly for this case"* and calls `tryAiRepair()` first. The loop's real gaps are the
 ones the brief names, not this.
 
+### 🔒 MEASURING THE PIPELINE DOES NOT MEAN KEEPING A FILE ON THE PEOPLE USING IT
+
+Caught by `tests/everyCollectionIsClassified.test.ts` before either collection ever ran — *"a collection
+is guilty until listed"*, which is exactly what that guard is for. The per-run marker that stops a POLLED
+status endpoint counting one build twice was keyed `${owner}_${repo}_${runId}` and carried `{ owner, repo }`
+in its body. `owner` is a person's GitHub login; the collection grows with every finished build; and it is
+keyed by nothing a user owns, so `deleteUserData` could never have reached it — the `site_analytics` shape,
+before it shipped rather than three days after.
+
+- **The id is now a SHA-256 digest** (`countedDocId`) and the body holds `{ lane, outcome, countedAt }` —
+  what a count IS, and nothing about who ran it. Removing the data beats promising to erase it later.
+- **A plain digest, deliberately not an HMAC.** `siteAnalytics.visitorHash` keys its hash with a secret
+  because an IP address is a 32-bit space anybody can enumerate; this id must instead resolve to the same
+  string FOR EVER, and a rotated secret would make every existing claim unfindable at once — counting every
+  run still being polled a second time, the precise defect the marker exists to prevent.
+- **Both collections are on a retention clock**: the day rollup at 400 days (`day` is its own ISO
+  timestamp, like `build_failures`), the marker at 30 — far past any real poll, because purging it early
+  inflates the very rate this feature was built to measure. The marker is also in `GROWING_COLLECTIONS`,
+  so the Load board's storage warning can see it.
+
 ### 🔴 STILL OPEN — and the numbers decide the order, which is the brief's own instruction
 
 - **C — the AI repair is a one-shot blind patch, not a loop.** It sees the failing step's log and a

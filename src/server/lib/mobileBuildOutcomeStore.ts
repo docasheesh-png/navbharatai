@@ -25,6 +25,7 @@
 // a user the status of the build they are watching.
 
 import * as admin from 'firebase-admin';
+import { createHash } from 'node:crypto';
 import { getServerDb } from './serverDb';
 import { SHIP_WORKFLOWS } from '../../lib/shipWorkflows';
 
@@ -38,6 +39,27 @@ export const MOBILE_BUILD_OUTCOME_COLLECTION = 'mobile_build_outcomes';
  * (`AdminApkReportStore.saveApkFailureReport`) and that `hosting-daily-bill` uses before it moves money.
  */
 export const MOBILE_BUILD_COUNTED_COLLECTION = 'mobile_build_counted';
+
+/**
+ * The marker's document id: a digest of the run, never the run's own names.
+ *
+ * 🔴 WHY IT IS HASHED. `owner` is a person's GitHub login. This marker answers exactly one question —
+ * *"have I already counted this run?"* — and that question does not need to know whose run it was. The
+ * first version stored `${owner}_${repo}_${runId}` as the id AND `{ owner, repo }` in the body, which
+ * put an identifier into a collection that grows with every build, is keyed by nothing a user owns, and
+ * therefore could never be reached by `deleteUserData`. Hashing removes the data rather than promising
+ * to erase it later, which is the only version of that promise nothing can quietly break.
+ *
+ * ⚠️ A PLAIN DIGEST, DELIBERATELY NOT AN HMAC. `siteAnalytics.visitorHash` keys its hash with a secret
+ * because its input is an IP address — a 32-bit space anybody can enumerate. This input carries a
+ * GitHub run id, which is not enumerable in the same way, and the cost of a secret here is severe in a
+ * way it is not there: this id must resolve to the SAME string for ever, and a rotated secret would
+ * make every existing claim unfindable at once, so every run still being polled would be counted a
+ * second time. That is precisely the defect this document exists to prevent.
+ */
+export function countedDocId(owner: string, repo: string, runId: string): string {
+  return createHash('sha256').update(`${owner}\u0000${repo}\u0000${runId}`).digest('hex');
+}
 
 /** The three lanes a user can press, plus the honest bucket for anything else. */
 export type BuildLane = 'apk' | 'aab' | 'ipa' | 'other';
@@ -93,8 +115,10 @@ export async function recordBuildOutcome(
   const lane = buildLane(workflow);
   try {
     await store.collection(MOBILE_BUILD_COUNTED_COLLECTION)
-      .doc(`${owner}_${repo}_${runId}`)
-      .create({ owner, repo, runId, lane, outcome, countedAt: atMs });
+      .doc(countedDocId(owner, repo, runId))
+      // The body holds what a count IS — which lane, how it ended, when — and nothing about who ran
+      // it. `countedAt` is also the field its retention policy purges on.
+      .create({ lane, outcome, countedAt: atMs });
   } catch {
     // ALREADY_EXISTS on a repeat poll is the expected, silent case — this run is already in the day's
     // total. Any other failure is also best-effort: a build's status must never wait on telemetry.

@@ -39,10 +39,19 @@ import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } fr
 // Code runs, which is exactly what the admin asked for ("jo claude code karta hai, woh navbharatai
 // nahi kar sakta kya?", 2026-08-03). See mobileBuildAiRepair.ts for the full safety model.
 import {
-  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepair, normalizeRepairTier,
+  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepairLoop, normalizeRepairTier,
+  isAppSourcePath,
 } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
-import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
+import { commitFiles, githubApiHeaders, readRepoFiles, listRepoTree } from '../lib/githubRepoWrite';
+// The repair loop's verifier: the app's own sandbox runs the build a candidate change would face on
+// GitHub, so only a change that compiles is ever committed (2026-09-22, "the loop, not the model").
+import { makeRepairVerifier } from '../lib/mobileShipRealBuild';
+import { buildActuator } from './actuatorFactory';
+import { sessionWorkspaceId } from '../lib/workspaceEdit';
+import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { failedStage } from '../lib/mobileBuildRepair';
+import { cureFamily, recordRepairOutcome } from '../lib/mobileBuildOutcomeStore';
 import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
 import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
@@ -714,7 +723,7 @@ export function registerMobileShipRoutes(app: Express): void {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
 
-    const { owner, repo, workflow, runId, ref = 'main', powerLevel } = (req.body || {}) as Record<string, unknown>;
+    const { owner, repo, workflow, runId, ref = 'main', powerLevel, sessionId } = (req.body || {}) as Record<string, unknown>;
     // The user's selected NavBharatAI Pro tier decides which models the AI repair may use — weak stays
     // GLM/Kimi (never Claude), paid tiers escalate to Sonnet/Opus, exactly like the main build.
     const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
@@ -740,9 +749,18 @@ export function registerMobileShipRoutes(app: Express): void {
     // The classified code is the highest-signal telemetry this pipeline produces: it names WHICH class
     // actually fired on a real user build. Written before any repair is attempted, so an unfixable
     // failure is counted exactly like a fixable one.
+    //
+    // The same verified identity names the app's WORKSPACE (uid + the session the panel is open on),
+    // which is where the app's own sandbox lives — the machine that can run the build a repair would
+    // face on GitHub. Derived from the verified uid, never taken from the body, exactly as the setup
+    // route does. An old client that sends no sessionId gets the unverified path, honestly labelled.
+    let workspaceId: string | null = null;
     try {
       const identity = await verifyFirebaseIdentity(req);
-      if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), 'failure', diag.code);
+      if (identity?.uid) {
+        void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), 'failure', diag.code);
+        workspaceId = sessionWorkspaceId(identity.uid, typeof sessionId === 'string' ? sessionId : '');
+      }
     } catch { /* best-effort */ }
 
     // The ONE failure that is genuinely the user's to resolve. Their signing key is their permanent
@@ -791,18 +809,27 @@ export function registerMobileShipRoutes(app: Express): void {
       ].join('\n');
     };
 
-    if (diag.code === 'MISSING_SIGNING_SECRET') {
+    // 🔒 A CLASS NO REPAIR CAN EVER FIX ENDS HERE, before a model or an attempt is spent on it. These
+    // are the user's own credentials — a signing key, a Firebase services file, a registry token — not
+    // a file with a mistake in it. Only the signing key used to stop here; the other three reached the
+    // AI pass, which spent a round to conclude the obvious and then the client spent a five-minute run
+    // on the same certainty. The family is `cureFamily`'s, the ONE list the admin's card also reads.
+    if (cureFamily(diag.code) === 'user-credentials') {
       return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
     }
 
-    /** Apply a fix: one named commit in the user's repository, then start the build again. */
-    const commitAndRerun = async (files: Record<string, string>, message: string): Promise<void> => {
+    /**
+     * Apply a fix: one named commit in the user's repository. The CLIENT starts the next build.
+     *
+     * 🔴 THIS USED TO DISPATCH THE WORKFLOW TOO, and so did the client on its next attempt — so every
+     * repair started TWO GitHub runs, both billed against the user's Actions minutes, with the panel
+     * watching whichever appeared first. The panel has owned the dispatch since the loop was written
+     * (it must: an old bundled Android client will keep dispatching whatever this route does), so the
+     * one honest fix is for the server to stop. `fixed: true` now means exactly "committed — build
+     * again", and every client, old or new, produces one run per repair.
+     */
+    const commitFix = async (files: Record<string, string>, message: string): Promise<void> => {
       await commitFiles(headers, String(owner), String(repo), ref, files, {}, message);
-      await axios.post(
-        `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
-        { ref },
-        { headers },
-      );
     };
 
     /**
@@ -813,6 +840,15 @@ export function registerMobileShipRoutes(app: Express): void {
      * mobileBuildAiRepair.ts. Model chain follows the user's selected tier (weak = GLM/Kimi only;
      * paid tiers add Sonnet/Opus) — the same Model Routing Policy the main build uses.
      */
+    /**
+     * The loop (2026-09-22): the model may ASK for a file from the repository's own listing, every
+     * candidate change is RUN through the app's sandbox build before it is committed, and a verified
+     * failure is fed back so the next round corrects the previous change. A change the build rejected
+     * is never committed; a change nothing could verify (no workspace on this request, or a Gradle /
+     * Xcode stage the sandbox cannot judge) is committed as before and LABELLED `verified: false`.
+     *
+     * Returns true when a response has been sent — a commit, or an honest gave-up that names why.
+     */
     const tryAiRepair = async (): Promise<boolean> => {
       if (!aiRepairEnabled()) return false;
       const chain = aiRepairModelChain(process.env, repairTier);
@@ -821,19 +857,52 @@ export function registerMobileShipRoutes(app: Express): void {
       const allowed = aiRepairAllowedPaths(wfPath, failingStep);
       const aiFiles = await readRepoFiles(headers, String(owner), String(repo), ref, allowed);
       if (Object.keys(aiFiles).length === 0) return false;
-      const result = await runAiRepair(callRepairModel, chain, {
+      const tree = await listRepoTree(headers, String(owner), String(repo), ref);
+      const stage = failedStage(normalizeLog(log));
+      const verify = makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath);
+      const loop = await runAiRepairLoop(callRepairModel, chain, {
         log: failingStep,
         files: aiFiles,
         ruleSummary: diag.summary,
+        tree,
+      }, {
+        fetchFiles: (paths) => readRepoFiles(headers, String(owner), String(repo), ref, paths),
+        verify,
       });
-      if (!result || !('files' in result)) return false;
-      await commitAndRerun(result.files, 'NavBharatAI: repair the build failure and run it again');
+      void recordRepairOutcome(String(workflow), loop.outcome);
+
+      if (loop.outcome === 'gave-up') {
+        // Every change the model made was proven not to compile. Nothing is committed, and the user is
+        // told that rather than watching one more five-minute run fail the same way.
+        res.json({ fixed: false, code: diag.code, summary: loop.reason, detail: diag.detail, report: failureReport(), rounds: loop.rounds });
+        return true;
+      }
+      if (!loop.fix) return false;
+
+      await commitFix(
+        loop.fix.files,
+        loop.verified
+          ? 'NavBharatAI: repair the build failure (verified by building the app first)'
+          : 'NavBharatAI: repair the build failure and run it again',
+      );
+      // A VERIFIED fix to the app's own source heals the user's app inside NavBharatAI too — the
+      // compile pre-flight's rule, applied from the other end. Never an unverified one: the workspace
+      // is the app the user works on, and a guess does not belong in it. Best-effort.
+      if (loop.verified && workspaceId) {
+        const source = Object.fromEntries(Object.entries(loop.fix.files).filter(([p]) => isAppSourcePath(p)));
+        if (Object.keys(source).length > 0) await mergeWorkspaceFiles(workspaceId, source).catch(() => undefined);
+      }
       res.json({
         fixed: true,
         fixedBy: 'ai',
+        verified: loop.verified,
+        rounds: loop.rounds,
+        asked: loop.asked,
         code: diag.code,
-        summary: result.explanation,
-        changed: Object.keys(result.files),
+        summary: loop.verified
+          ? `${loop.fix.explanation} NavBharatAI built your app with this change first, and it compiled.`
+          : loop.fix.explanation,
+        changed: Object.keys(loop.fix.files),
       });
       return true;
     };
@@ -875,10 +944,11 @@ export function registerMobileShipRoutes(app: Express): void {
           report: failureReport(),
         });
       }
-      await commitAndRerun(repair.files, repair.message);
+      await commitFix(repair.files, repair.message);
       return res.json({
         fixed: true,
         fixedBy: 'rules',
+        verified: false,
         code: diag.code,
         summary: diag.summary,
         changed: Object.keys(repair.files),

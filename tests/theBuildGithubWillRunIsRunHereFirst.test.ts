@@ -32,6 +32,9 @@ function fakeActuator(over: Partial<RealBuildActuator> & { warm?: boolean; resul
   let built = 0;
   const a: RealBuildActuator & { writes: string[]; builds: () => number } = {
     hasLiveSandbox: over.warm === undefined ? () => true : () => over.warm as boolean,
+    // The presence proof (`sandboxHoldsApp`) reads the project marker back before any verdict is
+    // trusted; a fake that holds the app answers it, and the case below removes it to prove the guard.
+    readFile: over.readFile ?? (async (_w, p) => (p === 'package.json' ? VITE_APP['package.json'] : '')),
     writeFile: async (_w, p) => { writes.push(p); },
     build: async () => {
       built += 1;
@@ -85,6 +88,16 @@ describe('rule 1 — it NEVER starts a machine', () => {
     const a = fakeActuator();
     const v = await runRealBuildCheck(a, 'ws1', { 'index.html': '<html></html>' });
     expect(v).toEqual({ ran: false, reason: 'static-app' });
+    expect(a.builds()).toBe(0);
+  });
+
+  it('🔴 a warm handle whose machine does NOT hold the app is "could not tell", never a pass', async () => {
+    // `build()` answers success for a machine with no package.json ("no build step — static project").
+    // A sandbox that came back empty, or a paused handle whose existence checks were swallowed, would
+    // therefore PASS this check without building anything. Reading the marker back is what rules it out.
+    const a = fakeActuator({ readFile: async () => { throw new Error('sandbox is paused'); } });
+    const v = await runRealBuildCheck(a, 'ws1', VITE_APP);
+    expect(v).toEqual({ ran: false, reason: 'unavailable' });
     expect(a.builds()).toBe(0);
   });
 

@@ -79567,6 +79567,35 @@ before it shipped rather than three days after.
   inflates the very rate this feature was built to measure. The marker is also in `GROWING_COLLECTIONS`,
   so the Load board's storage warning can see it.
 
+### ✅ C IS BUILT (later the same day, admin: *"navbharatai, github se jo capacitor apk/aab banata hai, usko claude.code level karo"*)
+
+The admin repeated the request after #3249 merged, which under the standing rule is the decision. The
+numbers card exists and starts counting with the next build; C did not wait for it.
+
+**"Loop theek karo, model nahi."** `runAiRepairLoop` (`mobileBuildAiRepair.ts`) + `makeRepairVerifier`
+(`mobileShipRealBuild.ts`) + `listRepoTree` (`githubRepoWrite.ts`):
+- the model may ASK for a file (`{"needFiles": [...]}`), only from a listing we supplied — the allowlist is
+  a menu, never loosened;
+- every candidate is RUN through the app's own sandbox build before commit; a rejected change is never
+  committed, on any round, and once a verified failure exists a later unverifiable round is not committed
+  blind either;
+- a verified failure is fed back in the build's own words with the candidate in view;
+- bounded by `MOBILE_AUTOFIX_AI_ROUNDS` (4, clamped 1–8).
+
+**Siblings found and fixed in the same change:** `build()` passes a machine with no package.json, so the
+ship-time check merged that morning could have certified an empty sandbox — `sandboxHoldsApp` on both
+paths now; every repair started TWO GitHub runs (server dispatch + panel dispatch) — the server stopped;
+a comment-only rewrite reported `fixed: true` — `isMeaningfulChange`; three of the four credential classes
+still reached the AI pass — `cureFamily` ends them first; the panel claimed a repair on every exhausted
+cycle — it now counts what really landed.
+
+**Measured on the admin's card from here on:** `repairs.fixed / unverified-fix / gave-up / miss` per lane.
+The verified share is the number that says whether the sandbox is reaching real builds.
+
+**D (a per-class attempt budget) is deliberately still not built**: with credential classes ending at
+once and each remaining attempt carrying a VERIFIED fix, the fixed 3 already means "3 GitHub runs that
+each started from something that compiled". Whether a fourth is worth the minutes is the card's to say.
+
 ### 🔴 STILL OPEN — and the numbers decide the order, which is the brief's own instruction
 
 - **C — the AI repair is a one-shot blind patch, not a loop.** It sees the failing step's log and a
@@ -79672,3 +79701,42 @@ Test-locked and reversion-proven in `tests/anEscapeIsNotALetter.test.ts` (12) an
 - **Review budget on a non-green build** (costs tokens) · **tests generated in every build** (costs
   generated tokens) · **the shared evidence ledger** (architecture) · **the double discount on a
   stopped build** (a pricing decision, the admin's).
+## 2026-09-22 — The Play upload failed on its LAST line, and the log read like a success
+
+`upload_to_play` was ticked for the first time (run **#127**, built from `main`). The bundle built,
+signed and **uploaded**:
+
+```
+Validating tracks: 'internal'
+Uploading android/app/build/outputs/bundle/release/app-release.aab
+Successfully uploaded 1 artifacts
+Committing the Edit
+##[error]Changes cannot be sent for review automatically. Please set the query parameter
+         changesNotSentForReview to true.
+```
+
+**The edit was never committed, so the "successful" upload landed NOTHING.** Google refuses to
+auto-submit an edit for review while an app has a change it will not take automatically — and on this
+day the app was under a **Broken Functionality** enforcement with its previous release rejected. The
+fix is one input, `changesNotSentForReview: true`: the bundle is committed to the internal track and
+the admin presses *Send for review* in the Console. Internal testing needs no review to be installable,
+which is the whole point of uploading there.
+
+⚠️ **It is not a workaround for the rejection and does not make one less likely** — it only stops the
+upload itself from failing. What reaches users stays the admin's decision, taken in the Console.
+
+📌 **What the rejection actually was, and it was NOT the policy strike this session first guessed.**
+Google's label reads *"Loading problems: Your app doesn't open or load"*; their own evidence shows the
+app OPEN on the AI Image Generator with *"Image generation failed — please try again"* three times.
+`interimWelcomeGift.ts` (same day, another session) had already root-caused it: a new account received
+₹0, free images come from a keyless third party with no SLA, its failure falls to a PAID rung, and a
+paid rung is refused on an empty wallet. **A Play reviewer is exactly that user.** All three of the
+fixes that break that chain — the ₹50 interim welcome credit, the client-fetched free image, and the
+free-tier paid-rung ceiling — were verified ABSENT from rejected build 125 (`6a5a6085`) and PRESENT in
+`main`, so build 127 is the first bundle that does not have the defect.
+
+📌 **And the App Links work cannot be tested on the live app at all.** The manifest claim landed
+2026-09-19; build **116**, the one live on Play, was built 2026-09-15 and — read at its own commit —
+carries no `autoVerify` intent filter. Today's server-side work (both certificates published, the
+`/.well-known/` redirect exemption) is correct and verified on both hosts, but it takes a build from
+2026-09-19 or later to demonstrate it.

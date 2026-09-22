@@ -2638,6 +2638,22 @@ the flag entries above promise.
   compiles) and each run reaches the release gate's typecheck evidence through `onCommand`. Report
   line `WRITE_TIME_TYPECHECK`. Logic in `writeTimeTypecheck.ts`; test-locked in
   `tests/writeTimeTypecheck.test.ts`.
+  🔴 **IT WATCHES ONE LANE, AND ITS REPORT LINE USED TO DENY THE OTHER (corrected 2026-09-22).** All
+  four call sites are in `ToolDispatcher`, so the check sees the ARCHITECT's writes; the FAST LANE
+  writes through `deps.writeFiles` and verifies once with a `tsc` of its own — by design, since its
+  files are generated concurrently and a per-file compile would quote errors from files not yet
+  written. So a successful fast-lane build leaves the counters untouched, which is correct, and the
+  summary read that silence as **"no TypeScript source was written this build (0 write(s) skipped as
+  not TypeScript)"** — about a build that had just written a whole app. ⚠️ **`sharedWriteTypecheckStats`
+  had ALREADY named the all-zero state as the tell** (*"that object was never touched, not that
+  nothing happened"*, autopsy 3ce8459b) for the SUB-AGENT cause of it; that instance was fixed by
+  sharing the object and the fast-lane sibling was never hunted — the headline class again, and the
+  third time this one sentence has been wrong. **Fixed with EVIDENCE, not wording:** the route passes
+  `modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length` — `writtenFiles` being the
+  one set every lane feeds — so "no TypeScript source was written" is said only when a real count
+  says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
+  silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
+  `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks

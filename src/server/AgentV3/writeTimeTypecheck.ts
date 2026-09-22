@@ -27,6 +27,14 @@
  * Runs are COALESCED per build: parallel writers (write_files_batch, sub-agents) never stack ten
  * compiles — one runs, everyone waiting shares the next one. PURE core; the dispatcher supplies the
  * sandbox I/O.
+ *
+ * ⚠️ IT WATCHES ONE LANE, AND THE REPORT MUST SAY SO. Every call site is in `ToolDispatcher`, so the
+ * check sees the ARCHITECT's writes (its own and its sub-agents'). The FAST LANE writes through
+ * `deps.writeFiles` and verifies once with a `tsc` of its own — by design, since its files are
+ * generated concurrently and a per-file compile would report errors from files not yet written. So a
+ * fast-lane build leaves these counters untouched, which is correct; what was NOT correct is that the
+ * summary read that silence as "no TypeScript source was written this build". See
+ * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
 import { robustTscCommand } from './tscCommand';
 import type { TscError } from './EndgameRepair';
@@ -243,11 +251,56 @@ export function tsProjectSettled(verdict: TsProjectVerdict, attempts: number): b
   return verdict !== 'unknown' || attempts >= MAX_TSCONFIG_PROBES;
 }
 
-/** The admin-only report line. Says plainly when the check never ran and why. Pure. */
-export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean): string {
+/**
+ * Was this stats object NEVER TOUCHED — i.e. not one write of any kind reached the check?
+ *
+ * 🔴 THE DISTINCTION THIS EXISTS FOR, and it is this module's own rule applied to itself: *"we did
+ * not look"* is not *"there is nothing there"*. Every counter at zero means no write was ever
+ * offered to the check — which is a fact about the CHECK's reach, never a fact about the BUILD's
+ * files. Reporting it as "no TypeScript source was written" states the second from the first.
+ *
+ * ⚠️ `runs === 0` alone is NOT this. A build that skipped twenty `.css` writes has runs at zero and
+ * was genuinely consulted; it has something true to say. Pure.
+ */
+export function writeTypecheckUntouched(s: WriteTypecheckStats): boolean {
+  return s.runs === 0 && s.skipped === 0 && s.skippedNotTs === 0
+    && s.skippedNoTsconfig === 0 && s.probeFailures === 0 && s.disabledReason === null;
+}
+
+/**
+ * The admin-only report line. Says plainly when the check never ran and why. Pure.
+ *
+ * 🔴 `tsFilesWritten` IS THE EVIDENCE, AND WITHOUT IT THIS LINE COULD ONLY GUESS (autopsy 2026-09-22).
+ *
+ * The check's four call sites all live in `ToolDispatcher`, so it observes ONE lane: the architect's
+ * tools. The FAST LANE writes through `deps.writeFiles` and verifies once with a `tsc` of its own —
+ * so on every successful fast-lane build this stats object stays untouched, and the report read
+ * *"no TypeScript source was written this build (0 write(s) skipped as not TypeScript)"* about a
+ * build that had just written a whole app. Both counters zero was already named as the tell in
+ * `sharedWriteTypecheckStats` when sub-agents produced the same all-zero state (autopsy 3ce8459b);
+ * that instance was fixed by sharing the object and **the fast-lane sibling was never hunted** —
+ * this repo's headline class, and the third time this one sentence has been wrong.
+ *
+ * So the caller passes the build's OWN count of model-authored TypeScript files (from `writtenFiles`,
+ * the one set every writer feeds). With it, "no TypeScript source was written" is said only when a
+ * real count says so; without it the line says what it actually knows and no more. `null` means the
+ * count was not supplied — never zero, because a missing measurement is not a measurement of zero.
+ */
+export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, tsFilesWritten: number | null = null): string {
   if (!enabled) return 'Write-time typecheck: OFF (AGENTV3_WRITE_TYPECHECK=off) — the first compile is whenever the model asks for one.';
   if (s.runs === 0) {
     if (s.disabledReason) return `Write-time typecheck: never ran — ${s.disabledReason}.`;
+    // A lane that does not write through the build's tools is the commonest reason this check sees
+    // nothing, and it is the one the old wording asserted the opposite of.
+    const elsewhere = typeof tsFilesWritten === 'number' && tsFilesWritten > 0
+      ? `${tsFilesWritten} TypeScript file(s) written by a lane that does not write through the build's tools `
+        + `(the fast lane writes its whole file list at once and runs a single typecheck of its own) — nothing here says whether THAT check passed`
+      : '';
+    if (writeTypecheckUntouched(s)) {
+      if (elsewhere) return `Write-time typecheck: never ran — not one write reached it, and ${elsewhere}.`;
+      if (tsFilesWritten === 0) return 'Write-time typecheck: no TypeScript source was written this build.';
+      return 'Write-time typecheck: never ran — not one write reached it. Whether another lane wrote TypeScript is not recorded here.';
+    }
     // THE SKIPPED WRITES ARE REPORTED BY REASON, because the reasons mean opposite things to whoever
     // reads this next. TypeScript that was written and not checked is a DEFECT in this check; a build
     // of `.css` and `.html` files is this check correctly having nothing to do.
@@ -257,7 +310,12 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean):
         : 'no tsconfig.json was found';
       return `Write-time typecheck: never ran although ${s.skippedNoTsconfig} TypeScript write(s) happened — ${why}, so the project was treated as non-TypeScript.`;
     }
-    return `Write-time typecheck: no TypeScript source was written this build (${s.skippedNotTs || s.skipped} write(s) skipped as not TypeScript).`;
+    const seen = `${s.skippedNotTs || s.skipped} write(s) skipped as not TypeScript`;
+    // ⚠️ THE SAME CORRECTION APPLIES HERE, not only to the untouched case: the check can be consulted
+    // about a handful of `.css` writes while ANOTHER lane writes the TypeScript. Saying "none was
+    // written" would then be false for exactly the same reason, one branch along.
+    if (elsewhere) return `Write-time typecheck: never ran — the writes it saw were not TypeScript (${seen}), and ${elsewhere}.`;
+    return `Write-time typecheck: no TypeScript source was written this build (${seen}).`;
   }
   const avg = Math.round(s.elapsedMs / s.runs / 100) / 10;
   return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `

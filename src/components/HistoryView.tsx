@@ -11,6 +11,7 @@ import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from
 import { shapeSessions, messagesOf } from '../lib/sessionShape';
 import { readHistoryIndex, buildHistoryIndex, writeHistoryIndex } from '../lib/historyIndex';
 import { groupSessionsByRecency } from './history/historyGroups';
+import { sessionIsPro, sessionIsDoctor, sessionOwnerOf } from '../lib/sessionRouting';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
@@ -22,10 +23,10 @@ function cachedRowsOnce() {
   return cachedRowsMemo;
 }
 
-// NavBharatAI Pro (AgentV3) sessions are saved with agent 'agentv3', tab
-// 'engine_builder', and a doc id prefixed 'v3_'. They are Pro-tier builds and
-// must be classified as Pro (not Free) so they list under the Pro filter and in
-// the app-builder view.
+// ⚠️ THIS IS NOT THE SURFACE RULE — that is `sessionIsPro` in sessionRouting.ts, and it is the only
+// thing that decides which history list a session appears in. This narrower test answers a DIFFERENT
+// question, asked only by `isAppSession` below: did this session produce an app? A v5.0 build always
+// did, whatever its agent fields were later rewritten to.
 const isV3Session = (session: any) => {
   const a = String(session.agent || session.current_agent || session.currentAgent || session.original_agent || '').toLowerCase();
   const tab = String(session.tab || session.meta?.tab || '').toLowerCase();
@@ -166,15 +167,15 @@ export const HistoryView = ({
     return () => unsubscribe();
   }, [user]);
 
-  const isProSession = (s: any) => {
-    const a = String(s.agent || s.current_agent || s.currentAgent || '').toLowerCase();
-    return a.includes('pro') || a.includes('vishwakarma') || isV3Session(s);
-  };
-  const isSdaSession = (s: any) => {
-    const a = String(s.agent || s.current_agent || s.currentAgent || '').toLowerCase();
-    return a.includes('sda') || a.includes('doctor');
-  };
-  const isFreeSession = (s: any) => !isProSession(s) && !isSdaSession(s);
+  // WHOSE HISTORY IS THIS ROW? — asked of the ONE shared classifier (sessionRouting.ts), never of a
+  // local copy. These three used to read `s.agent || s.current_agent || s.currentAgent`, which takes
+  // the FIRST field present and ignores the rest: a Pro session whose `current_agent` a restore had
+  // overwritten with 'navbharatai' came back classified FREE and appeared in NavBharatAI Free's
+  // history for ever. The Pro panel's own list now asks the same function, so the two lists cannot
+  // disagree about where a session belongs (admin 2026-09-22).
+  const isProSession = (s: any) => sessionIsPro(s);
+  const isSdaSession = (s: any) => sessionIsDoctor(s);
+  const isFreeSession = (s: any) => sessionOwnerOf(s) === 'free';
 
   const filteredSessions = useMemo(() => {
     let result = sessions;

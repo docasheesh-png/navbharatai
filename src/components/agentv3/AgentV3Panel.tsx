@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
+import { sessionIsPro } from '../../lib/sessionRouting';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
@@ -2224,6 +2225,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // previous chat's saved doc with a shrunken thread. That gradual erasure is why old chats opened
   // empty ("history open nahi ho rahi").
   const sessionSwitchRef = useRef(false);
+  /** Which history load is current — a later open/retry supersedes an earlier one still in flight. */
+  const historyLoadGenRef = useRef(0);
   // Reusable loader so both the initial open AND the "Try again" retry button can
   // re-fetch without duplicating the fetch/loading-state logic.
   //
@@ -2236,54 +2239,76 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const loadHistory = async () => {
     setHistoryLoading(true);
     setHistoryError(null);
+    // A newer open/retry supersedes this one — the background pass below outlives its own call, so
+    // without this a slow first load could land on top of a fresher list.
+    const gen = ++historyLoadGenRef.current;
+    const prefix = `agentv3-${normalizeUid(userId)}-`;
+    const sidOf = (c: ConversationMeta) =>
+      (c.workspaceId && c.workspaceId.startsWith(prefix)) ? c.workspaceId.slice(prefix.length) : c.id;
+    const bySession = new Map<string, ConversationMeta>();
+    const publish = () => {
+      if (gen !== historyLoadGenRef.current) return;
+      setHistoryItems([...bySession.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+    };
+
+    // 🔴 THE LIST NO LONGER WAITS FOR THE SUPERSET (admin 2026-09-22: "navbharatai pro ki history bhi
+    // quickly load ho jaye"). Both sources were awaited before ANYTHING was shown, and the second one
+    // is a `getDocs` over EVERY `chat_sessions` document this user owns — whole documents, which carry
+    // the full `messages` transcript, a second copy in `restoredMessages`, and a built app's entire
+    // `files` contents. Opening a list of titles downloaded megabytes, exactly the cost historyIndex.ts
+    // records for the Free list, and the user watched a spinner through all of it.
+    //
+    // 🔒 THE MERGE RESULT IS UNCHANGED, which is what makes this safe rather than a trade. It used to
+    // seed the map with the chat_sessions rows and then let the server records overwrite them ("richer
+    // record wins"); now the server records land first and the top-up only fills in sessions the server
+    // did not list — the same map either way, just no longer in a fixed order. Rows can only be ADDED
+    // by the second pass, never removed.
+    let loadErr: string | null = null;
     try {
-      const { items, error: loadErr } = await listConversations({ userId, email });
-
-      // Pull this account's v5.0 sessions from chat_sessions (client SDK) — the reliable superset.
-      let chatItems: ConversationMeta[] = [];
-      chatSessionMsgsRef.current.clear();
-      const prefix = `agentv3-${normalizeUid(userId)}-`;
-      if (userId) {
-        try {
-          const snap = await getDocs(query(collection(db, 'chat_sessions'), where('userId', '==', userId)));
-          chatItems = snap.docs
-            .filter((d) => {
-              const data = d.data() as any;
-              return d.id.startsWith('v3_') || data?.tab === 'engine_builder'
-                || data?.current_agent === 'agentv3' || data?.original_agent === 'agentv3';
-            })
-            .map((d) => {
-              const data = d.data() as any;
-              const sessionId = d.id.replace(/^v3_/, '');
-              chatSessionMsgsRef.current.set(sessionId, Array.isArray(data.messages) ? data.messages : []);
-              return {
-                id: d.id,
-                title: data.title || 'Untitled build',
-                status: (data.status as string) || 'complete',
-                workspaceId: `${prefix}${sessionId}`,
-                updatedAt: data.lastUpdated ? (Date.parse(data.lastUpdated) || 0) : 0,
-                // Marked when a previous open PROVED this pre-rebuild session's transcript is gone
-                // everywhere — rendered honestly as lost instead of a chat that "won't open".
-                deadTranscript: data.deadTranscript === true,
-              } as ConversationMeta;
-            });
-        } catch { /* best-effort — the conversation-store list still shows below */ }
-      }
-
-      const sidOf = (c: ConversationMeta) =>
-        (c.workspaceId && c.workspaceId.startsWith(prefix)) ? c.workspaceId.slice(prefix.length) : c.id;
-      const bySession = new Map<string, ConversationMeta>();
-      for (const c of chatItems) bySession.set(sidOf(c), c);   // baseline: every saved v5.0 session
-      for (const c of items) bySession.set(sidOf(c), c);        // richer conversation-store record wins
-      const merged = [...bySession.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-      setHistoryItems(merged);
-      // Only surface the conversation-store error when it produced NOTHING to show — if chat_sessions
-      // gave us the history, a transient store error must not blank the list with a scary message.
-      setHistoryError(merged.length > 0 ? null : (loadErr ?? null));
+      const { items, error } = await listConversations({ userId, email });
+      loadErr = error ?? null;
+      for (const c of items) bySession.set(sidOf(c), c);
+      publish();
+      if (gen === historyLoadGenRef.current) setHistoryError(bySession.size > 0 ? null : loadErr);
     } finally {
-      setHistoryLoading(false);
+      // The list is on screen the moment the server answers. The superset keeps loading behind it.
+      if (gen === historyLoadGenRef.current) setHistoryLoading(false);
     }
+
+    // The Firestore `chat_sessions` metadata rows (`v3_<sessionId>`) — the panel writes one for every
+    // session, and they cover the gap where a session was persisted while identity had degraded to
+    // anon, so the server list does not carry it.
+    if (!userId) return;
+    try {
+      const snap = await getDocs(query(collection(db, 'chat_sessions'), where('userId', '==', userId)));
+      if (gen !== historyLoadGenRef.current) return;
+      chatSessionMsgsRef.current.clear();
+      for (const d of snap.docs) {
+        const data = d.data() as any;
+        // ONE rule for "is this a Pro session?", shared with the Free history list (sessionRouting.ts)
+        // — so neither list can show a session the other one claims. The id is passed explicitly
+        // because a stored document does not always carry its own id as a field.
+        if (!sessionIsPro({ ...data, id: d.id })) continue;
+        const sessionId = d.id.replace(/^v3_/, '');
+        chatSessionMsgsRef.current.set(sessionId, Array.isArray(data.messages) ? data.messages : []);
+        const row: ConversationMeta = {
+          id: d.id,
+          title: data.title || 'Untitled build',
+          status: (data.status as string) || 'complete',
+          workspaceId: `${prefix}${sessionId}`,
+          updatedAt: data.lastUpdated ? (Date.parse(data.lastUpdated) || 0) : 0,
+          // Marked when a previous open PROVED this pre-rebuild session's transcript is gone
+          // everywhere — rendered honestly as lost instead of a chat that "won't open".
+          deadTranscript: data.deadTranscript === true,
+        } as ConversationMeta;
+        const sid = sidOf(row);
+        if (!bySession.has(sid)) bySession.set(sid, row);
+      }
+      publish();
+      // Only surface the conversation-store error when NOTHING is on screen — if chat_sessions gave us
+      // the history, a transient store error must not blank the list with a scary message.
+      if (gen === historyLoadGenRef.current) setHistoryError(bySession.size > 0 ? null : loadErr);
+    } catch { /* best-effort — the conversation-store list already showed above */ }
   };
   const toggleHistory = async () => {
     const next = !historyOpen;

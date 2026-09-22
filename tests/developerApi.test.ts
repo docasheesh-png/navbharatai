@@ -29,7 +29,9 @@ vi.mock('../src/server/lib/aiTurnCharge', () => ({
   chargeForAiTurns: vi.fn(async () => ({ charge: false, reason: 'disabled', billedInr: 0, debited: false, tokensDebited: 0 })),
 }));
 
-import { API_SCOPES, API_SCOPE_DESCRIPTIONS, normalizeScopes } from '../src/server/lib/ApiKeyManager';
+import {
+  API_SCOPES, API_SCOPE_DESCRIPTIONS, normalizeScopes, SPECIFIC_API_SCOPES, FULL_ACCESS_SCOPE, hasScope,
+} from '../src/server/lib/ApiKeyManager';
 import {
   normalizeDailyCapInr, DEFAULT_KEY_DAILY_CAP_INR, MAX_KEY_DAILY_CAP_INR,
   readChatCompletionRequest, foldMessagesToPrompt, keyDecision, chatCompletionResponse, apiError,
@@ -49,20 +51,41 @@ const VENDOR = /\b(GLM|Z\.ai|Kimi|Moonshot|Claude|Anthropic|Gemini|Vertex|Grok|x
 // ── 1 · every scope is a real door ─────────────────────────────────────────────────────────────
 
 describe('🔴 every scope a user can tick opens a real endpoint', () => {
-  it('the four scopes exist, are described in plain words, and each names its route', () => {
-    expect([...API_SCOPES]).toEqual(['read:profile', 'read:usage', 'read:builds', 'ai:chat']);
+  it('every scope exists, is described in plain words, and each specific one names its route', () => {
+    // ⚠️ GREW 2026-09-22 (admin: add full access, professionals, an image generator). `all` is FIRST
+    // and is the only scope with no single route of its own — it is every route — so `SCOPE_ROUTES`
+    // is keyed by the SPECIFIC scopes and `all` is proven a different way, two cases below. The
+    // original guarantee is unchanged: no scope on this screen may be a label.
+    expect([...API_SCOPES]).toEqual([
+      'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals', 'ai:images',
+    ]);
+    expect(API_SCOPES[0]).toBe(FULL_ACCESS_SCOPE);
+    expect([...SPECIFIC_API_SCOPES]).toEqual(API_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE));
     for (const s of API_SCOPES) {
       expect(API_SCOPE_DESCRIPTIONS[s].title.length).toBeGreaterThan(2);
       expect(API_SCOPE_DESCRIPTIONS[s].detail.length).toBeGreaterThan(10);
+    }
+    for (const s of SPECIFIC_API_SCOPES) {
       expect(SCOPE_ROUTES[s].path.startsWith('/api/v1/')).toBe(true);
     }
   });
 
-  it('🔒 …and the route each scope names is REGISTERED and GUARDED by that scope', () => {
+  it('🔒 `all` is not a label either — it satisfies EVERY check, in the one function every guard calls', () => {
+    for (const s of API_SCOPES) {
+      expect(hasScope([FULL_ACCESS_SCOPE], s), `full access must satisfy ${s}`).toBe(true);
+    }
+    // …and it is the ONLY scope that does. A narrow scope opens its own door and nothing else.
+    expect(hasScope(['read:profile'], 'ai:chat')).toBe(false);
+    expect(hasScope(['ai:chat'], 'ai:images')).toBe(false);
+    expect(hasScope([], 'read:profile')).toBe(false);
+    expect(hasScope(undefined, 'read:profile')).toBe(false);
+  });
+
+  it('🔒 …and the route each specific scope names is REGISTERED and GUARDED by that scope', () => {
     const keys = read('src/server/routes/apiKeys.ts');
     const dev = read('src/server/routes/developerApi.ts');
     const src = keys + dev;
-    for (const s of API_SCOPES) {
+    for (const s of SPECIFIC_API_SCOPES) {
       const r = SCOPE_ROUTES[s];
       const unversioned = r.path.replace('/api/v1/', '/api/');
       // `app.get('/api/usage', …, requireScope('read:usage')` — the scope on the same registration.

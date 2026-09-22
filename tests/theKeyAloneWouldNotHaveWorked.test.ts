@@ -102,13 +102,19 @@ describe('the request asks for the result inline', () => {
   });
 });
 
-describe('the route waits for a pending job before it gives up', () => {
-  // Source-level: the polling loop is I/O inside a route, and the failure it prevents is silent —
-  // the user is told their picture could not be made while it is being made.
+describe('the engine waits for a pending job before it gives up', () => {
+  // Source-level: the polling loop is I/O, and the failure it prevents is silent — the user is told
+  // their picture could not be made while it is being made.
+  //
+  // ⚠️ MOVED 2026-09-22, NOT WEAKENED. The two paid rungs (and this loop with them) were lifted out
+  // of `routes/imageGen.ts` into `lib/imageProEngine.ts` so the NavBharatAI API's own image door could
+  // call the SAME code instead of carrying a copy. Every assertion below is the one that stood before;
+  // only the file it reads changed — and it is now STRICTLY stronger, because it covers both doors at
+  // once rather than the one route it happened to be pointed at.
   const code = () =>
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     (require('node:fs') as typeof import('node:fs'))
-      .readFileSync(new URL('../src/server/routes/imageGen.ts', import.meta.url), 'utf8')
+      .readFileSync(new URL('../src/server/lib/imageProEngine.ts', import.meta.url), 'utf8')
       .split('\n')
       .filter((l) => {
         const t = l.trim();

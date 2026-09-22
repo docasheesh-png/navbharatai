@@ -28,10 +28,10 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  unit: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  integration: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-  edge: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  security: 'text-red-400 bg-red-500/10 border-red-500/20',
+  unit: 'text-info bg-blue-500/10 border-blue-500/20',
+  integration: 'text-success bg-emerald-500/10 border-emerald-500/20',
+  edge: 'text-warn bg-amber-500/10 border-amber-500/20',
+  security: 'text-danger bg-red-500/10 border-red-500/20',
 };
 
 function generateTestsFromCode(code: string): TestCase[] {
@@ -211,19 +211,19 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
   const categories = ['all', 'unit', 'integration', 'edge', 'security'];
 
   return (
-    <div className="h-full flex flex-col bg-[#0d1117] text-white overflow-hidden">
+    <div className="h-full flex flex-col bg-surface text-ink overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-[#161b22]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-line bg-card">
         <div className="w-10 h-10 bg-emerald-600/20 rounded-xl flex items-center justify-center">
-          <TestTube className="w-5 h-5 text-emerald-400" />
+          <TestTube className="w-5 h-5 text-success" />
         </div>
         <div>
-          <h2 className="font-semibold text-white text-base">AI Testing Suite</h2>
-          <p className="text-xs text-white/40">Automatically generate test cases from your code</p>
+          <h2 className="font-semibold text-ink text-base">AI Testing Suite</h2>
+          <p className="text-xs text-faint">Automatically generate test cases from your code</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {generated && (
-            <button onClick={exportTests} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-[#0d1117] border border-white/10 rounded-lg text-white/50 hover:text-white transition-all">
+            <button onClick={exportTests} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-muted hover:text-ink transition-all">
               <Download className="w-3.5 h-3.5" /> Export .test.js
             </button>
           )}
@@ -233,30 +233,30 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
       {/* Summary — an HONEST count of what was generated (this screen does not run the tests; see the
           note by copy/export). No pass/fail here, because nothing was executed. */}
       {generated && (
-        <div className="flex items-center gap-4 px-6 py-3 border-b border-white/5 bg-[#161b22]">
+        <div className="flex items-center gap-4 px-6 py-3 border-b border-line bg-card">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-white/40">Generated:</span>
-            <span className="text-xs font-bold text-white">{tests.length} test{tests.length === 1 ? '' : 's'}</span>
+            <span className="text-xs text-faint">Generated:</span>
+            <span className="text-xs font-bold text-ink">{tests.length} test{tests.length === 1 ? '' : 's'}</span>
           </div>
-          <span className="text-[11px] text-white/40">Copy or export these into your project and run them with your test runner.</span>
+          <span className="text-[11px] text-faint">Copy or export these into your project and run them with your test runner.</span>
         </div>
       )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Controls */}
-        <div className="w-52 flex flex-col border-r border-white/5 p-4 gap-3">
+        <div className="w-52 flex flex-col border-r border-line p-4 gap-3">
           <button
             onClick={generateTests}
             disabled={!generatedCode.trim()}
-            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all"
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all text-on-accent"
           >
             <Zap className="w-4 h-4" /> Generate Tests
           </button>
 
-          <div className="h-px bg-white/5" />
+          <div className="h-px bg-raised" />
 
           {/* Category filters */}
-          <p className="text-[10px] text-white/30 uppercase tracking-wider">Categories</p>
+          <p className="text-[10px] text-faint uppercase tracking-wider">Categories</p>
           {categories.map(cat => {
             const count = cat === 'all' ? tests.length : tests.filter(t => t.category === cat).length;
             return (
@@ -264,21 +264,21 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all ${
-                  selectedCategory === cat ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' : 'border-white/5 bg-white/2 text-white/40 hover:border-white/10'
+                  selectedCategory === cat ? 'border-emerald-500/50 bg-emerald-500/10 text-success' : 'border-line bg-raised text-faint hover:border-line'
                 }`}
               >
                 <span className="capitalize">{cat === 'all' ? 'All Tests' : CATEGORY_LABELS[cat]}</span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${selectedCategory === cat ? 'bg-emerald-500/20' : 'bg-white/5'}`}>{count}</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${selectedCategory === cat ? 'bg-emerald-500/20' : 'bg-raised'}`}>{count}</span>
               </button>
             );
           })}
 
-          <div className="h-px bg-white/5" />
+          <div className="h-px bg-raised" />
 
           {/* Coverage estimate */}
           {generated && (
-            <div className="bg-[#161b22] rounded-xl p-3 border border-white/5 space-y-1.5">
-              <p className="text-[10px] text-white/40 font-medium">Est. Coverage</p>
+            <div className="bg-card rounded-xl p-3 border border-line space-y-1.5">
+              <p className="text-[10px] text-faint font-medium">Est. Coverage</p>
               {[
                 { label: 'Statements', val: 72 + Math.floor(Math.random() * 15) },
                 { label: 'Branches', val: 58 + Math.floor(Math.random() * 20) },
@@ -286,11 +286,11 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
               ].map(c => (
                 <div key={c.label}>
                   <div className="flex justify-between text-[9px] mb-0.5">
-                    <span className="text-white/30">{c.label}</span>
-                    <span className={c.val >= 80 ? 'text-emerald-400' : c.val >= 60 ? 'text-amber-400' : 'text-red-400'}>{c.val}%</span>
+                    <span className="text-faint">{c.label}</span>
+                    <span className={c.val >= 80 ? 'text-success' : c.val >= 60 ? 'text-warn' : 'text-danger'}>{c.val}%</span>
                   </div>
-                  <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${c.val >= 80 ? 'bg-emerald-500' : c.val >= 60 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${c.val}%` }} />
+                  <div className="h-1 bg-raised rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${c.val >= 80 ? 'bg-emerald-500 text-on-accent' : c.val >= 60 ? 'bg-amber-500 text-on-accent' : 'bg-red-500 text-on-accent'}`} style={{ width: `${c.val}%` }} />
                   </div>
                 </div>
               ))}
@@ -303,11 +303,11 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
           {!generated ? (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20">
-                <TestTube className="w-8 h-8 text-emerald-400" />
+                <TestTube className="w-8 h-8 text-success" />
               </div>
               <div className="text-center">
-                <p className="text-base font-semibold text-white mb-1">AI-Powered Test Generation</p>
-                <p className="text-sm text-white/40">Automatically generates tests by analyzing your code</p>
+                <p className="text-base font-semibold text-ink mb-1">AI-Powered Test Generation</p>
+                <p className="text-sm text-faint">Automatically generates tests by analyzing your code</p>
               </div>
               <div className="grid grid-cols-2 gap-3 max-w-md w-full">
                 {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
@@ -318,46 +318,46 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
                 ))}
               </div>
               {!generatedCode.trim() && (
-                <p className="text-xs text-amber-400 flex items-center gap-1.5">
+                <p className="text-xs text-warn flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5" /> Generate some code first
                 </p>
               )}
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
-              <p className="text-sm text-white/30">No tests in this category</p>
+              <p className="text-sm text-faint">No tests in this category</p>
             </div>
           ) : (
             <div className="space-y-2">
               {filtered.map(t => (
-                <div key={t.id} className="border border-white/5 bg-[#161b22] rounded-xl overflow-hidden transition-all">
+                <div key={t.id} className="border border-line bg-card rounded-xl overflow-hidden transition-all">
                   <button
                     onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}
                     className="w-full flex items-center gap-3 px-4 py-3 text-left"
                   >
-                    <FileCode className="w-4 h-4 text-white/30 shrink-0" />
+                    <FileCode className="w-4 h-4 text-faint shrink-0" />
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-xs font-medium text-white truncate">{t.name}</span>
+                        <span className="text-xs font-medium text-ink truncate">{t.name}</span>
                         <span className={`text-[9px] px-1.5 py-0.5 rounded-md border shrink-0 ${CATEGORY_COLORS[t.category]}`}>{CATEGORY_LABELS[t.category]}</span>
                       </div>
-                      <p className="text-[10px] text-white/40 truncate">{t.description}</p>
+                      <p className="text-[10px] text-faint truncate">{t.description}</p>
                     </div>
 
-                    <ChevronRight className={`w-3.5 h-3.5 text-white/20 shrink-0 transition-transform ${expandedId === t.id ? 'rotate-90' : ''}`} />
+                    <ChevronRight className={`w-3.5 h-3.5 text-faint shrink-0 transition-transform ${expandedId === t.id ? 'rotate-90' : ''}`} />
                   </button>
 
                   {expandedId === t.id && (
-                    <div className="border-t border-white/5">
+                    <div className="border-t border-line">
                       <div className="p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-[10px] text-white/30 uppercase tracking-wider">Test Code</span>
-                          <button onClick={() => copyTest(t)} className={`text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${copiedId === t.id ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/30 hover:text-white/60 bg-white/5'}`}>
+                          <span className="text-[10px] text-faint uppercase tracking-wider">Test Code</span>
+                          <button onClick={() => copyTest(t)} className={`text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${copiedId === t.id ? 'text-success bg-emerald-500/10' : 'text-faint hover:text-muted bg-raised'}`}>
                             {copiedId === t.id ? <><Check className="w-2.5 h-2.5" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
                           </button>
                         </div>
-                        <pre className="text-[9px] font-mono text-emerald-300 bg-[#0d1117] rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{t.code}</pre>
+                        <pre className="text-[9px] font-mono text-success bg-surface rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{t.code}</pre>
                       </div>
                     </div>
                   )}

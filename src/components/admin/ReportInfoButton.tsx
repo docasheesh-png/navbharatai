@@ -76,11 +76,11 @@ export function ReportInfoButton({ facts, title }: { facts: ReadonlyArray<RowFac
 
   const toneClass = (tone: RowFact['tone']) => {
     switch (tone) {
-      case 'good': return 'text-emerald-300';
-      case 'bad': return 'text-rose-300';
-      case 'warn': return 'text-amber-300';
-      case 'muted': return 'text-[#8b949e]';
-      default: return 'text-white';
+      case 'good': return 'text-success';
+      case 'bad': return 'text-danger';
+      case 'warn': return 'text-warn';
+      case 'muted': return 'text-muted';
+      default: return 'text-ink';
     }
   };
 
@@ -98,13 +98,13 @@ export function ReportInfoButton({ facts, title }: { facts: ReadonlyArray<RowFac
         maxHeight: placement.maxHeight,
         ...(placement.top === undefined ? { bottom: placement.bottom } : { top: placement.top }),
       }}
-      className="z-[60] overflow-y-auto overscroll-contain rounded-xl border border-white/15 bg-[#0d1117] shadow-2xl shadow-black/60 p-3 space-y-1.5 text-left"
+      className="z-[60] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-2xl shadow-black/60 p-3 space-y-1.5 text-left"
     >
       {facts.length === 0 ? (
-        <span className="block text-[11px] text-[#8b949e]">Nothing recorded for this row.</span>
+        <span className="block text-[11px] text-muted">Nothing recorded for this row.</span>
       ) : facts.map((f, i) => (
         <span key={`${f.label}-${i}`} className="flex items-start gap-2 text-[11px]">
-          <span className="shrink-0 w-[5.5rem] text-[#8b949e] font-bold">{f.label}</span>
+          <span className="shrink-0 w-[5.5rem] text-muted font-bold">{f.label}</span>
           <span className={`flex-1 min-w-0 break-words ${toneClass(f.tone)}`} title={f.hint}>{f.value}</span>
         </span>
       ))}
@@ -124,7 +124,7 @@ export function ReportInfoButton({ facts, title }: { facts: ReadonlyArray<RowFac
         onPointerDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
         className={`shrink-0 p-1.5 rounded-lg border transition-colors ${
-          open ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200' : 'border-white/10 text-[#8b949e] hover:text-white hover:border-white/25'
+          open ? 'border-indigo-500/60 bg-indigo-500/15 text-accent-text' : 'border-line text-muted hover:text-ink hover:border-line'
         }`}
       >
         <Info className="w-3.5 h-3.5" />

@@ -75,16 +75,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/60 z-[1000] backdrop-blur-sm"
+            className="fixed inset-0 bg-scrim z-[1000] backdrop-blur-sm"
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="fixed top-20 left-1/2 -translate-x-1/2 w-full max-w-xl bg-[#252526] border border-white/10 rounded-xl shadow-2xl z-[1001] overflow-hidden"
+            className="fixed top-20 left-1/2 -translate-x-1/2 w-full max-w-xl bg-card border border-line rounded-xl shadow-2xl z-[1001] overflow-hidden"
           >
-            <div className="flex items-center px-4 py-3 border-b border-white/5 bg-[#1e1e1e]">
-               <ChevronRight className="w-4 h-4 text-white mr-3" />
+            <div className="flex items-center px-4 py-3 border-b border-line bg-card">
+               <ChevronRight className="w-4 h-4 text-ink mr-3" />
                <input 
                  id="command-palette-input"
                  autoFocus
@@ -94,13 +94,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     setSelectedIndex(0);
                  }}
                  placeholder="Search commands..."
-                 className="flex-1 bg-transparent border-none outline-none text-white text-sm"
+                 className="flex-1 bg-transparent border-none outline-none text-ink text-sm"
                />
             </div>
             
             <div className="max-h-[40vh] supports-[height:100dvh]:max-h-[40dvh] overflow-y-auto py-2 no-scrollbar">
                {filteredItems.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-[#858585] text-xs">
+                  <div className="px-4 py-8 text-center text-muted text-xs">
                      No commands found for "{query}"
                   </div>
                ) : (
@@ -114,7 +114,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       onMouseEnter={() => setSelectedIndex(index)}
                       className={cn(
                         "px-4 py-2 flex items-center justify-between cursor-pointer transition-colors",
-                        index === selectedIndex ? "bg-[#04395e] text-white" : "text-[#cccccc] hover:bg-white/5"
+                        index === selectedIndex ? "bg-[#04395e] text-on-accent" : "text-[#cccccc] hover:bg-white/5"
                       )}
                     >
                       <div className="flex flex-col">
@@ -123,7 +123,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       </div>
                       {index === selectedIndex && (
                          <div className="flex items-center gap-1 opacity-40">
-                             <span className="px-1.5 py-0.5 bg-black/40 rounded border border-white/10 text-[9px]">Enter</span>
+                             <span className="px-1.5 py-0.5 bg-well rounded border border-line text-[9px]">Enter</span>
                          </div>
                       )}
                     </div>
@@ -131,10 +131,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                )}
             </div>
             
-            <div className="px-4 py-2 bg-[#1e1e1e] border-t border-white/5 text-[9px] text-[#858585] flex items-center justify-between">
+            <div className="px-4 py-2 bg-card border-t border-line text-[9px] text-muted flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <span className="flex items-center gap-1"><span className="px-1 py-0.5 bg-white/5 rounded">↑↓</span> to navigate</span>
-                  <span className="flex items-center gap-1"><span className="px-1 py-0.5 bg-white/5 rounded">↵</span> to select</span>
+                  <span className="flex items-center gap-1"><span className="px-1 py-0.5 bg-raised rounded">↑↓</span> to navigate</span>
+                  <span className="flex items-center gap-1"><span className="px-1 py-0.5 bg-raised rounded">↵</span> to select</span>
                 </div>
                 <div>{filteredItems.length} commands found</div>
             </div>

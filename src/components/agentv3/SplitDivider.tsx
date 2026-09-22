@@ -141,7 +141,7 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
     >
       {/* The visible line stays 1px — the generous part is the invisible hit area around it. */}
       <div className={`absolute inset-y-0 left-1/2 -translate-x-1/2 w-px transition-colors
-        ${dragging ? 'bg-indigo-400' : 'bg-zinc-800 group-hover:bg-indigo-400/60 group-focus:bg-indigo-400/60'}`} />
+        ${dragging ? 'bg-indigo-400' : 'bg-raised group-hover:bg-indigo-400/60 group-focus:bg-indigo-400/60'}`} />
 
       {/* ◀ ▶ — the tablet path, always visible so a touch user can find it without hovering. */}
       <div className="relative z-10 flex flex-col gap-1">
@@ -150,14 +150,14 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
           aria-label="Give the preview more room"
           onPointerDown={(e) => e.stopPropagation()}   // a tap on the button must not start a drag
           onClick={(e) => { e.stopPropagation(); step('left'); }}
-          className="w-[18px] h-[22px] flex items-center justify-center rounded bg-zinc-800/90 border border-zinc-700 text-zinc-300 hover:bg-indigo-600 hover:text-white hover:border-indigo-500 transition-colors"
+          className="w-[18px] h-[22px] flex items-center justify-center rounded bg-raised border border-line text-on-accent hover:bg-indigo-600 hover:text-on-accent hover:border-indigo-500 transition-colors"
         ><ChevronLeft className="w-3 h-3" /></button>
         <button
           type="button"
           aria-label="Give the chat more room"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); step('right'); }}
-          className="w-[18px] h-[22px] flex items-center justify-center rounded bg-zinc-800/90 border border-zinc-700 text-zinc-300 hover:bg-indigo-600 hover:text-white hover:border-indigo-500 transition-colors"
+          className="w-[18px] h-[22px] flex items-center justify-center rounded bg-raised border border-line text-on-accent hover:bg-indigo-600 hover:text-on-accent hover:border-indigo-500 transition-colors"
         ><ChevronRight className="w-3 h-3" /></button>
       </div>
 
@@ -171,7 +171,7 @@ export function SplitDivider({ split, onSplit, onCollapse, containerRef }: {
             <div className="fixed inset-0 z-[60] pointer-events-none">
               <div className="absolute inset-y-0 w-px bg-indigo-400" style={{ left: lineLeft }} />
               <div
-                className="absolute top-2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-mono whitespace-nowrap shadow"
+                className="absolute top-2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-indigo-600 text-on-accent text-[10px] font-mono whitespace-nowrap shadow"
                 style={{ left: lineLeft }}
               >
                 {paneWidthPx(shown, rect.width)}px

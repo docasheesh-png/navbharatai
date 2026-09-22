@@ -33,22 +33,22 @@ export function AppUpdateChatNotice() {
 
   return (
     <div className="flex items-start gap-2.5" role="status" aria-live="polite">
-      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 ring-1 ring-white/10">
-        <Sparkles className="w-4 h-4 text-white" />
+      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 ring-1 ring-line text-on-accent">
+        <Sparkles className="w-4 h-4 text-on-accent" />
       </div>
-      <div className="relative max-w-[85%] rounded-2xl rounded-tl-sm bg-[#161b22] border border-indigo-500/25 px-4 py-3 shadow-lg">
+      <div className="relative max-w-[85%] rounded-2xl rounded-tl-sm bg-card border border-indigo-500/25 px-4 py-3 shadow-lg">
         <button
           onClick={dismiss}
           aria-label="Dismiss"
-          className="absolute top-2 right-2 text-[#586069] hover:text-white transition-colors"
+          className="absolute top-2 right-2 text-faint hover:text-ink transition-colors"
         >
           <X className="w-3.5 h-3.5" />
         </button>
-        <p className="text-sm text-[#c9d1d9] leading-relaxed pr-4">{t.body}</p>
+        <p className="text-sm text-body leading-relaxed pr-4">{t.body}</p>
         <button
           onClick={onUpdate}
           disabled={busy}
-          className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-widest transition-colors active:scale-95"
+          className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-on-accent text-xs font-black uppercase tracking-widest transition-colors active:scale-95"
         >
           {busy ? <TirangaLoader className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
           {t.button}

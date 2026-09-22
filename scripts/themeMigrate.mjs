@@ -616,6 +616,17 @@ export const INLINE_SKIP = {
   'MultiPageBuilder.tsx': "TRAP 2 — exports colours into the USER'S app, where our variables do not exist.",
   'DarkModeGenerator.tsx': "TRAP 2 — generates a theme for the USER'S app.",
   'WhitelabelBranding.tsx': "TRAP 2 — the user's own brand colours.",
+  // —— added 2026-09-21, after the full sweep left them at 100% and nothing said why ——
+  'previewUtils.ts': "TRAP 2 — a CSS string injected into the PREVIEW IFRAME, which is the user's app document; our var(--…) tokens do not exist there.",
+  'SEOOptimizer.tsx': 'THIRD-PARTY PREVIEW — Google\'s and Facebook\'s own result/card colours (#1a0dab, #006621, #f0f2f5). Repainting them would make the mockup stop looking like the thing it is mocking.',
+  'frameworkOptions.ts': "BRAND CATALOGUE — each framework's OWN colour (#61DAFB React, #FF3E00 Svelte, #E34F26 HTML5). Theming them would make a logo's colour follow the user's theme.",
+  // 🔴 A STATUS DOT IS NOT A SURFACE, and this one produced a real regression before it was caught.
+  // The sweep turned the neutral dot's `bg-zinc-600` into `bg-raised` — a SURFACE token, so the dot
+  // took the colour of the card it sits on and all but disappeared — `bg-zinc-500` into `bg-faint`
+  // (a TEXT token used as a background), and added `text-on-accent` to elements that carry no text.
+  // CLAUDE.md names this file's class by example: *"a status dot whose `bg-emerald-500` a test
+  // names … must not be migrated as a side effect."* A semantic swatch needs a hand decision.
+  'agentV3History.ts': 'SEMANTIC SWATCH — status DOTS, not surfaces. The table maps a dot\'s `bg-*` to surface tokens, which makes the neutral dot invisible on the card it sits on.',
 };
 export const inlineSkipReason = (file) => INLINE_SKIP[String(file).split('/').pop()] ?? null;
 

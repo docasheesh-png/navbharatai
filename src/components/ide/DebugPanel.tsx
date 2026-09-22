@@ -34,21 +34,21 @@ export function DebugPanel({ onClose, breakpoints, onJumpToBreakpoint, onClearBr
   const count = breakpointCount(breakpoints);
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] text-zinc-200">
+    <div className="flex flex-col h-full bg-surface text-body">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 h-9 border-b border-white/10 shrink-0">
+      <div className="flex items-center justify-between px-3 h-9 border-b border-line shrink-0">
         <div className="flex items-center gap-2 text-xs font-semibold">
-          <Bug className="w-3.5 h-3.5 text-rose-400" />
+          <Bug className="w-3.5 h-3.5 text-danger" />
           Debugger
-          {count > 0 && <span className="text-[10px] text-zinc-500">({count} breakpoint{count > 1 ? 's' : ''})</span>}
+          {count > 0 && <span className="text-[10px] text-faint">({count} breakpoint{count > 1 ? 's' : ''})</span>}
         </div>
         <div className="flex items-center gap-1">
           {count > 0 && (
-            <button onClick={onClearAll} title="Remove all breakpoints" className="text-zinc-500 hover:text-white transition-colors p-1">
+            <button onClick={onClearAll} title="Remove all breakpoints" className="text-faint hover:text-ink transition-colors p-1">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
-          <button onClick={onClose} aria-label="Close debugger" className="text-zinc-500 hover:text-white transition-colors p-1">
+          <button onClick={onClose} aria-label="Close debugger" className="text-faint hover:text-ink transition-colors p-1">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -60,7 +60,7 @@ export function DebugPanel({ onClose, breakpoints, onJumpToBreakpoint, onClearBr
           first thing you see, and a row of greyed-out controls reads as a broken feature rather than an
           unbuilt one. One plain sentence says the same thing without pretending there is a control to
           press. Breakpoints below are fully real. */}
-      <div className="px-3 py-2 border-b border-white/5 shrink-0 text-[10px] leading-relaxed text-zinc-500">
+      <div className="px-3 py-2 border-b border-line shrink-0 text-[10px] leading-relaxed text-faint">
         Set breakpoints in the editor gutter and manage them here. Pausing execution and stepping
         through code line by line is not available yet.
       </div>
@@ -69,17 +69,17 @@ export function DebugPanel({ onClose, breakpoints, onJumpToBreakpoint, onClearBr
       <div className="flex-1 overflow-y-auto p-2 text-xs">
         {(
           list.length === 0 ? (
-            <div className="text-zinc-500 p-3 leading-relaxed">
+            <div className="text-faint p-3 leading-relaxed">
               No breakpoints yet. Click a line's gutter (left margin) in the editor to add a red breakpoint dot. Your breakpoints are saved and will be used automatically once live debugging is available.
             </div>
           ) : (
             <ul className="space-y-0.5">
               {list.map(({ file, line }) => (
-                <li key={`${file}:${line}`} className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-white/5 group">
+                <li key={`${file}:${line}`} className="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-raised group">
                   <button onClick={() => onJumpToBreakpoint(file, line)} className="flex items-center gap-2 min-w-0 text-left">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                    <span className="truncate text-zinc-200">{baseName(file)}</span>
-                    <span className="text-zinc-500 shrink-0">:{line}</span>
+                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0 text-on-accent" />
+                    <span className="truncate text-body">{baseName(file)}</span>
+                    <span className="text-faint shrink-0">:{line}</span>
                   </button>
                   {/* Always visible, never hover-only. A touch device has no hover, so `opacity-0
                       group-hover:opacity-100` made this button INVISIBLE and effectively untappable on
@@ -89,7 +89,7 @@ export function DebugPanel({ onClose, breakpoints, onJumpToBreakpoint, onClearBr
                     onClick={() => onClearBreakpoint(file, line)}
                     title="Remove breakpoint"
                     aria-label={`Remove breakpoint at ${baseName(file)} line ${line}`}
-                    className="p-1 -m-1 text-zinc-500 hover:text-rose-400 opacity-70 group-hover:opacity-100 transition-opacity shrink-0"
+                    className="p-1 -m-1 text-faint hover:text-danger opacity-70 group-hover:opacity-100 transition-opacity shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>

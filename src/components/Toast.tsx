@@ -11,16 +11,16 @@ export interface Toast {
 }
 
 const ICONS: Record<ToastType, React.ReactNode> = {
-  success: <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />,
-  error:   <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />,
-  info:    <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />,
-  warning: <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />,
+  success: <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />,
+  error:   <AlertCircle className="w-4 h-4 text-danger flex-shrink-0" />,
+  info:    <Info className="w-4 h-4 text-accent-text flex-shrink-0" />,
+  warning: <AlertCircle className="w-4 h-4 text-warn flex-shrink-0" />,
 };
 const COLORS: Record<ToastType, string> = {
-  success: 'border-emerald-500/30 bg-emerald-900/20',
-  error:   'border-red-500/30 bg-red-900/20',
-  info:    'border-indigo-500/30 bg-indigo-900/20',
-  warning: 'border-amber-500/30 bg-amber-900/20',
+  success: 'border-emerald-500/30 bg-emerald-500/10',
+  error:   'border-red-500/30 bg-red-500/10',
+  info:    'border-indigo-500/30 bg-indigo-500/10',
+  warning: 'border-amber-500/30 bg-amber-500/10',
 };
 
 export function useToast() {
@@ -60,10 +60,10 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onRemove
           style={{ background: '#161b22ee' }}
         >
           {ICONS[t.type]}
-          <p className="text-[11px] text-white font-medium flex-1 leading-relaxed">{t.message}</p>
+          <p className="text-[11px] text-ink font-medium flex-1 leading-relaxed">{t.message}</p>
           <button
             onClick={() => onRemove(t.id)}
-            className="p-0.5 hover:bg-white/10 rounded-md text-white/40 hover:text-white transition-colors flex-shrink-0"
+            className="p-0.5 hover:bg-raised rounded-md text-faint hover:text-ink transition-colors flex-shrink-0"
           >
             <X className="w-3 h-3" />
           </button>

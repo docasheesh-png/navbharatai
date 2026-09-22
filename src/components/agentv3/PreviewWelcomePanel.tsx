@@ -55,16 +55,16 @@ export function PreviewWelcome({ checking = false, slow = false }: { checking?: 
       />
 
       <div className="space-y-2 max-w-sm">
-        <h3 className="text-zinc-100 text-base font-semibold tracking-tight">{WELCOME_HEADLINE}</h3>
+        <h3 className="text-body text-base font-semibold tracking-tight">{WELCOME_HEADLINE}</h3>
         {/* `key` restarts the fade on every change, so the line visibly turns over instead of
             swapping in place where the eye misses it. */}
-        <p key={tick} className="text-xs leading-relaxed text-zinc-400 nbai-fade-in min-h-[2.6em]">
+        <p key={tick} className="text-xs leading-relaxed text-muted nbai-fade-in min-h-[2.6em]">
           {welcomeLine(tick)}
         </p>
       </div>
 
       {checking && (
-        <p className="text-[11px] text-zinc-600">
+        <p className="text-[11px] text-faint">
           {slow ? 'Still checking for your saved files…' : 'Checking for your files…'}
         </p>
       )}

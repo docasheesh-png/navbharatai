@@ -208,7 +208,7 @@ export function AdminCopyButton({ pageLabel, jsonPayload }: AdminCopyButtonProps
       ? createPortal(
           <div
             data-nb-no-copy=""
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-[#161b22] border border-white/10 text-[#c9d1d9] px-4 py-2 rounded-xl text-xs font-bold shadow-2xl"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-card border border-line text-body px-4 py-2 rounded-xl text-xs font-bold shadow-2xl"
           >
             Copy button hidden — reload the admin panel to bring it back.
           </div>,
@@ -229,8 +229,8 @@ export function AdminCopyButton({ pageLabel, jsonPayload }: AdminCopyButtonProps
         <div
           className={`absolute bottom-full right-0 mb-2 w-60 px-3 py-2 rounded-xl text-[11px] font-bold shadow-2xl border ${
             status.ok
-              ? 'bg-emerald-950 border-emerald-500/40 text-emerald-300'
-              : 'bg-red-950 border-red-500/40 text-red-300'
+              ? 'bg-emerald-950 border-emerald-500/40 text-success'
+              : 'bg-red-950 border-red-500/40 text-danger'
           }`}
         >
           <span className="flex items-start gap-2">
@@ -251,7 +251,7 @@ export function AdminCopyButton({ pageLabel, jsonPayload }: AdminCopyButtonProps
         onPointerUp={endGesture}
         onPointerCancel={endGesture}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void copyPage(); } }}
-        className={`w-14 h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-2xl border border-white/20 flex items-center justify-center cursor-grab ${
+        className={`w-14 h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-on-accent shadow-2xl border border-line flex items-center justify-center cursor-grab ${
           dragging ? 'cursor-grabbing scale-105' : ''
         } ${busy ? 'opacity-70' : ''} transition-transform`}
       >
@@ -264,7 +264,7 @@ export function AdminCopyButton({ pageLabel, jsonPayload }: AdminCopyButtonProps
         title="Hide until the admin panel is reloaded"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); setHidden(true); setClosedNote(true); }}
-        className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-[#21262d] border border-white/20 text-[#c9d1d9] hover:text-white hover:bg-red-600 flex items-center justify-center shadow-lg"
+        className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-raised border border-line text-on-accent hover:text-on-accent hover:bg-red-600 flex items-center justify-center shadow-lg"
       >
         <X className="w-3.5 h-3.5" />
       </button>

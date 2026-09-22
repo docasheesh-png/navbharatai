@@ -75,17 +75,17 @@ export function GitViewPanel({
     ?? (selectedRepo ? { owner: selectedRepo.owner.login, repo: selectedRepo.name, branch: currentBranch } : null);
 
   return (
-    <div className="flex-1 bg-[#0d1117] p-4 lg:p-6 text-left min-h-screen flex flex-col items-center">
-      <div className="max-w-4xl w-full h-[88vh] flex flex-col bg-[#161b22] border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative">
+    <div className="flex-1 bg-surface p-4 lg:p-6 text-left min-h-screen flex flex-col items-center">
+      <div className="max-w-4xl w-full h-[88vh] flex flex-col bg-card border border-line rounded-3xl overflow-hidden shadow-2xl relative">
         {/* Header */}
-        <div className="p-4 bg-[#0d1117] border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between shrink-0 gap-3">
+        <div className="p-4 bg-surface border-b border-line flex flex-col sm:flex-row sm:items-center justify-between shrink-0 gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex items-center justify-center">
-              <Rocket className="w-4.5 h-4.5 text-indigo-400" />
+              <Rocket className="w-4.5 h-4.5 text-accent-text" />
             </div>
             <div>
-              <h3 className="text-xs font-black text-white uppercase tracking-widest leading-none font-sans">navBharatAI DevOps Engine</h3>
-              <p className="text-[9px] text-[#8b949e] font-serif uppercase tracking-widest mt-1">
+              <h3 className="text-xs font-black text-ink uppercase tracking-widest leading-none font-sans">navBharatAI DevOps Engine</h3>
+              <p className="text-[9px] text-muted font-serif uppercase tracking-widest mt-1">
                 {selectedRepo
                   ? `Active Repo: ${selectedRepo.name} (${currentBranch})`
                   : 'Sandbox Simulator Mode (GitHub Unconnected)'}
@@ -96,7 +96,7 @@ export function GitViewPanel({
             {githubToken ? (
               <button
                 onClick={onNavigateToGitHubRepos}
-                className="px-3 py-1 bg-indigo-600/10 border border-indigo-500/25 hover:bg-indigo-600/20 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-indigo-400 flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1 bg-indigo-600/10 border border-indigo-500/25 hover:bg-indigo-600/20 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-accent-text flex items-center gap-1.5 cursor-pointer"
               >
                 <List className="w-3 h-3" />
                 {selectedRepo ? 'Switch Repo' : 'Select Repo'}
@@ -104,9 +104,9 @@ export function GitViewPanel({
             ) : (
               <button
                 onClick={onNavigateToConnections}
-                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-white flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all text-on-accent flex items-center gap-1.5 cursor-pointer"
               >
-                <Github className="w-3 h-3 text-white" />
+                <Github className="w-3 h-3 text-ink" />
                 Connect GitHub
               </button>
             )}
@@ -114,11 +114,11 @@ export function GitViewPanel({
               <button
                 onClick={() => onImportRepo(selectedRepo, currentBranch)}
                 disabled={isGHSyncing}
-                className="px-3 py-1 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all hover:bg-white/10 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                className="px-3 py-1 bg-raised border border-line hover:border-line rounded-lg text-[9px] font-black uppercase tracking-wider transition-all hover:bg-raised-hover flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
               >
                 {isGHSyncing
-                  ? <TirangaLoader className="w-3 h-3 text-white" />
-                  : <Search className="w-3 h-3 text-white" />}
+                  ? <TirangaLoader className="w-3 h-3 text-ink" />
+                  : <Search className="w-3 h-3 text-ink" />}
                 Review Files
               </button>
             )}

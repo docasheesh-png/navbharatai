@@ -47,8 +47,8 @@ export interface ChatToolbarProps {
 
 /** Shared pill styling — one definition, so the four screens cannot drift on hover or press state. */
 const PILL = 'text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all active:scale-95';
-const PILL_IDLE = `${PILL} bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10`;
-const PILL_ON = `${PILL} bg-indigo-600/20 text-indigo-400`;
+const PILL_IDLE = `${PILL} bg-raised text-muted hover:text-ink hover:bg-raised`;
+const PILL_ON = `${PILL} bg-indigo-600/20 text-accent-text`;
 
 export function ChatToolbar({
   messageCount, sendOnEnter, onSendOnEnterChange, searchQuery, onSearchQueryChange,
@@ -71,22 +71,22 @@ export function ChatToolbar({
           to the control that opened it, and on a phone a field 600px away from its button reads as a
           different feature entirely. */}
       {searchOpen && showActions && (
-        <div className="mb-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-black/20 border border-white/5">
-          <Search className="w-3 h-3 text-[#484f58] shrink-0" />
+        <div className="mb-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-well border border-line">
+          <Search className="w-3 h-3 text-faint shrink-0" />
           <input
             autoFocus
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') closeSearch(); }}
             placeholder="Search messages…"
-            className="flex-1 min-w-0 bg-transparent text-[11px] text-white outline-none placeholder:text-[#484f58]"
+            className="flex-1 min-w-0 bg-transparent text-[11px] text-ink outline-none placeholder:text-faint"
           />
           {searchQuery.trim() !== '' && typeof searchMatches === 'number' && (
-            <span className={`text-[9px] font-mono shrink-0 ${searchMatches === 0 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+            <span className={`text-[9px] font-mono shrink-0 ${searchMatches === 0 ? 'text-warn' : 'text-faint'}`}>
               {searchResultLabel(searchMatches, messageCount)}
             </span>
           )}
-          <button onClick={closeSearch} title="Close search" className="text-[#484f58] hover:text-white shrink-0">
+          <button onClick={closeSearch} title="Close search" className="text-faint hover:text-ink shrink-0">
             <X className="w-3 h-3" />
           </button>
         </div>
@@ -96,7 +96,7 @@ export function ChatToolbar({
         <div className="flex items-center gap-2 min-w-0">
           {leftSlot}
           {typeof charCount === 'number' && charCount > 60 && (
-            <span className={`text-[9px] font-mono ${charCount > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+            <span className={`text-[9px] font-mono ${charCount > 1000 ? 'text-warn' : 'text-faint'}`}>
               {charCount}
             </span>
           )}

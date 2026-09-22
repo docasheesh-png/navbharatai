@@ -243,9 +243,42 @@ const PURPOSE_PATTERNS: Array<[RegExp, ImagePurpose]> = [
  * who tapped the chip.
  */
 export function detectPurpose(type: string | undefined, prompt: string): ImagePurpose {
-  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(type ?? ''))) return purpose;
-  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(prompt ?? ''))) return purpose;
-  return 'general';
+  return detectPurposeWithSource(type, prompt).purpose;
+}
+
+/**
+ * The purpose AND where it came from — because the two sources carry different weight.
+ *
+ * 🔴 AUTOPSY 2026-09-22 (the clinic-logo screenshot). Type chip: **Photograph**. Style chip:
+ * Realistic. Brief: *"A minimalist photograph of a clinic logo … shot with a shallow depth of field
+ * … studio lighting … professional photography."* What the engine received, measured:
+ *
+ *     "…photograph… shallow depth of field… studio lighting… professional photography.
+ *      Design as a LOGO MARK: flat vector style… **no photorealism**… Avoid: …**blurry, out of
+ *      focus**… **photorealistic**…"
+ *
+ * One prompt asking for a photograph AND forbidding photorealism — the exact muddle this module's
+ * own docblock says it exists to prevent — and the picture that came back was a shallow-depth-of-
+ * field blur of nothing, related to the brief by nothing. Then the note told the user to *"set the
+ * Image type to Photograph"* — the chip that was ALREADY selected.
+ *
+ * 🔑 THE CAUSE: "Photograph" matches no purpose pattern, so `detectPurpose` fell through to the
+ * WORDS, found the noun "logo", and that word-inferred purpose then overruled the realism the same
+ * words asked for explicitly ("photograph of … shot with …"). A noun mentioned in passing beat a
+ * sentence of camera direction, both from the same text. This module's own stated principle — the
+ * user's typed intent is the stronger signal — was applied to the style chip and never to this.
+ *
+ * So the source is returned: a purpose the user CHOSE on the type chip ('type') keeps its full
+ * authority; one merely INFERRED from a noun in the brief ('words') yields when the same brief asks
+ * for a photograph in so many words. Pure.
+ */
+export function detectPurposeWithSource(
+  type: string | undefined,
+  prompt: string,
+): { purpose: ImagePurpose; source: 'type' | 'words' | 'none' } {
+  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(type ?? ''))) return { purpose, source: 'type' };
+  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(prompt ?? ''))) return { purpose, source: 'words' };
+  return { purpose: 'general', source: 'none' };
 }
 
 /** Normalised words of a prompt, for "did the user already say this?" checks. */
@@ -299,7 +332,7 @@ export function requestedText(prompt: string): string {
  */
 export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   const base = String(input.prompt ?? '').trim().slice(0, MAX_PROMPT_CHARS);
-  const purpose = detectPurpose(input.type, base);
+  const detected = detectPurposeWithSource(input.type, base);
   const notes: string[] = [];
   const parts: string[] = [];
 
@@ -335,12 +368,28 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   // not by this rule. With a neutral default, a photo-hostile type is one somebody picked on
   // purpose, and so is a purpose they typed themselves ("a coffee shop LOGO"). Either way a flat
   // mark is what works at small sizes, so the style chip is the one that stands down.
+  //
+  // 🔴 …AND A PURPOSE THAT WAS ONLY *INFERRED* FROM THE BRIEF YIELDS TO A PHOTOGRAPH THE SAME BRIEF
+  // ASKS FOR IN WORDS (2026-09-22, the clinic-logo screenshot — see `detectPurposeWithSource`). The
+  // rule above was written for a purpose somebody CHOSE on the type chip. When "Photograph" is on
+  // the chip and the words say "a photograph of a clinic logo, shot with…", the noun "logo" is not
+  // a decision to make a flat mark — it is the subject of the photo. Overruling the sentence with
+  // the noun produced a prompt that asked for a photograph and forbade photorealism in one breath,
+  // and a picture related to nothing. So: a chip-chosen purpose still wins; a word-inferred one
+  // stands down to 'general' when the same words asked for a photo, and the photo direction applies.
+  const purposeInferredFromWords = detected.source === 'words';
+  const purpose: ImagePurpose = realismInWords(base) && purposeInferredFromWords && PHOTO_HOSTILE_PURPOSES.has(detected.purpose)
+    ? 'general'
+    : detected.purpose;
   const realismLoses = realism && PHOTO_HOSTILE_PURPOSES.has(purpose);
   if (purpose !== 'general') parts.push(PURPOSE_DIRECTION[purpose] + '.');
   if (realismLoses) {
     // Never silent: they tapped that chip and the reply says which way the conflict went, and how
-    // to get the other answer.
-    notes.push('This is a logo/icon brief, so the realistic-photo style was not applied — a flat mark is what stays readable at small sizes. Set the Image type to "Photograph" if you wanted a real photo.');
+    // to get the other answer. The other answer is NAMED CORRECTLY now: the way to a real photo is
+    // to change the TYPE chip away from the logo/icon it is set to, or to say "a photo of" in the
+    // brief — it used to say "set the type to Photograph", which is impossible advice when that chip
+    // is the one already selected (it was, in the screenshot).
+    notes.push('The Image type is set to a logo/icon, so the realistic-photo style was not applied — a flat mark is what stays readable at small sizes. For a real photograph of it, change the Image type or write "a photo of" in the brief.');
   }
 
   // Whether the PHOTO negatives belong. Tracked rather than inferred from `input.style`, because a

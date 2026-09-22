@@ -1,3 +1,4 @@
+import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
 import { usePagedList } from '../../hooks/usePagedList';
@@ -286,13 +287,20 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     const effectivePrompt = buildEffectivePrompt();
     // A picture on its own IS a request ("re-render this"), so words are required only without one.
     if ((!effectivePrompt.trim() && !reference) || isLoading) return;
+    // Captured ONCE, because the box is emptied on the next line and everything below that still
+    // needs the words — the history row, the bubble, and the restore on failure.
+    const typed = prompt.trim();
     setImageError(false);
     setBalanceBlock('');
     setErrorMsg('');
     setCraftNotes([]);
     // The user's message lands in the thread BEFORE the request goes out, so the press is visibly
     // answered even while nothing has come back yet.
-    setPending({ prompt: prompt.trim(), summary: requestSummary() });
+    setPending({ prompt: typed, summary: requestSummary() });
+    // THE BOX EMPTIES AT SEND, like every other box in this app (admin 2026-09-22: the brief sat in
+    // the input for a whole 52-second retry countdown after the bubble had already appeared). A
+    // failure below puts the words back — see `draftAfterFailedSend` for why only into an empty box.
+    setPrompt('');
     setIsLoading(true);
     try {
       // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
@@ -328,7 +336,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       const noCredit = walletEmptyRefusalMessage(res.status, data);
       if (noCredit) {
         setBalanceBlock(noCredit);
-        return; // the prompt is deliberately kept — they will send it again after topping up
+        setPrompt((cur) => draftAfterFailedSend(cur, typed)); // they will send it again after topping up
+        return;
       }
       if (!res.ok || !data) {
         throw new Error((data && typeof data.error === 'string' && data.error)
@@ -373,7 +382,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: imageUrl,
         ...(ticket ? { ticket: ticket.ticket, exp: ticket.exp } : {}),
-        prompt: prompt.trim(),
+        prompt: typed,
         type: imageType,
         style,
         size,
@@ -382,13 +391,12 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       // Persist to IndexedDB so it survives reloads, then reflect it in the UI (newest-first, bounded).
       setHistory((h) => pruneHistory([newItem, ...h]));
       void imageHistoryStore.save(newItem).catch(() => { /* persistence is best-effort — never blocks generation */ });
-      // The box empties on success only, the way every chat input in this app behaves. A FAILED
-      // request keeps the words, because retyping a brief you already wrote is the worst possible
-      // answer to "that did not work".
-      setPrompt('');
       if (onImageGenerated) onImageGenerated(imageUrl, effectivePrompt);
     } catch (e) {
-      // Honest failure — the real reason from the server, never a placeholder image.
+      // Honest failure — the real reason from the server, never a placeholder image. The words come
+      // back, because retyping a brief you already wrote is the worst possible answer to "that did
+      // not work" — unless a new brief is already being typed, which is never overwritten.
+      setPrompt((cur) => draftAfterFailedSend(cur, typed));
       setImageError(true);
       setErrorMsg(e instanceof Error ? e.message : 'Image generation failed — please try again.');
     } finally {

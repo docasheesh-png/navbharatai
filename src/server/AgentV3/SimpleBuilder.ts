@@ -24,6 +24,7 @@ import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
+import type { FastLanePhases } from './fastLanePhases';
 import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
@@ -863,6 +864,22 @@ export interface SimpleBuildResult {
    */
   typecheckRan?: boolean;
   /**
+   * WHERE THE FAST LANE'S MINUTES WENT (autopsy `21b431e1`, 2026-09-22). Measurement only — nothing
+   * reads it to make a decision.
+   *
+   * 🔴 WHY IT HAD TO EXIST BEFORE ANY FIX. That build spent ~8.5 minutes in this lane and died on ONE
+   * `TS2554`, then handed off and was rebuilt by the architect — the single most expensive item in
+   * the report. Two plausible cures were available (hand off sooner when the first verify blames many
+   * files; send the repair only the offending file) and **nothing in the report could say which phase
+   * the time was actually in**, so choosing between them would have been a guess. This repo's fourth
+   * absolute rule forbids fixing from a guess; this is the evidence the fix will be chosen from.
+   *
+   * Every field is a real clock around a real call, summed across rounds. `verifyRuns` and
+   * `repairRuns` are counts, not durations, so a lane that verified three times and repaired twice is
+   * distinguishable from one that sat in a single slow compile.
+   */
+  phases?: FastLanePhases;
+  /**
    * The ACTUAL compiler/verify error text that made the per-file build fail (after repairs) — so the
    * build report can show WHY the fast lane fell back to the full builder, not just the outcome code.
    * Deep-test App #2 (2026-07-13): the report said only "TYPECHECK_FAILED" with no error, so the real
@@ -911,7 +928,27 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   //   • `generatedSoFar` mirrors every completed file OUTSIDE the closure, so the catch can SALVAGE
   //     the finished work into the workspace ONCE, synchronously, BEFORE the full builder starts —
   //     it continues from real files instead of rebuilding from an empty tree.
+  /**
+   * The phase ledger, as it stands right now. Called on EVERY return path — the handoff paths most of
+   * all, since a lane that hands off is the one whose minutes are worth explaining. Returns undefined
+   * before the lane started, so a caller never reports an all-zero ledger as a measurement of zero
+   * (the `writeTypecheckUntouched` lesson, one module along).
+   */
+  const phasesNow = (): SimpleBuildResult['phases'] => (clock.startedAt
+    ? {
+      planMs: clock.planMs, contractMs: clock.contractMs, generateMs: clock.generateMs,
+      verifyMs: clock.verifyMs, repairMs: clock.repairMs,
+      verifyRuns: clock.verifyRuns, repairRuns: clock.repairRuns,
+      totalMs: Date.now() - clock.startedAt,
+    }
+    : undefined);
+
   let lapsed = false;
+  // WHERE THE MINUTES GO — see `SimpleBuildResult.phases`. Clocks only; they decide nothing, and they
+  // are hoisted OUT of the closure for exactly the reason `generatedSoFar` below is: on the failure
+  // path — the path this measurement exists for — the closure's locals are gone before the caller can
+  // ask. A measurement that only survives success answers the wrong question.
+  const clock = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
   const generatedSoFar: OneShotFile[] = [];
   // The contract module (see `contractModule`) — '' / null when the contract stays prose-only.
   let contractPath = '';
@@ -946,6 +983,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const configuredPlanCap = deps.planTimeoutMs ?? 90_000;
       const overallMs = deps.overallTimeoutMs ?? 240_000;
       const laneStartedAt = Date.now();
+      clock.startedAt = laneStartedAt;
       const planCap = preambleCapMs(overallMs, 0, configuredPlanCap);
       // 🔴 THE INVERSION THIS CLOSES. `withTimeout` only RACES: the lane stopped waiting at this cap while
       // the Kimi rung kept running to its own 120 s client timeout, so a build could — and did — log
@@ -962,6 +1000,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // The plan call is a REAL model call on this build's REAL provider chain, and it is the only
       // latency measurement that exists before a single file is generated. See canFinishAfterPreamble.
       const planCallMs = Date.now() - laneStartedAt;
+      clock.planMs = planCallMs;
       // THE OTHER HALF OF THE SEVEN MINUTES (50/50 law). Restoring src/ErrorBoundary.tsx after the fact
       // is recovery; this is why it needed recovering. The manifest prompt hands the model the scaffold
       // list and says "edit/extend", so the plan can — and did — include a file we ship correct, and the
@@ -1030,6 +1069,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // Recorded on BOTH paths: a throw here is usually the cap firing, and that duration is the
         // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
         contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
+        clock.contractMs = contractCallMs;
       } else if (shareContract) {
         // 🔴 ONE SKIP, ONE SENTENCE (autopsy f97eb0ec, 2026-09-20). This used to be TWO logs: an
         // `if (!contractAffordable)` above and this `else`, and they are not exclusive — an
@@ -1135,6 +1175,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // context includes it, and is excluded from the "did the model generate enough?" counts below.
       const written: OneShotFile[] = contractFile ? [contractFile] : [];
       const generatedCount = () => written.length - (contractFile ? 1 : 0);
+      const generateStartedAt = Date.now();
       for (let ti = 0; ti < tiers.length; ti++) {
         const tier = tiers[ti];
         const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
@@ -1155,6 +1196,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           throw new Error(`simple-build ${earlyBailReason(progress)}`);
         }
       }
+      clock.generateMs = Date.now() - generateStartedAt;
       if (generatedCount() < minFiles) throw new Error('too_few_files_generated');
       // DETERMINISTIC IMPORT SELF-HEAL before the files are written/previewed (jungle-game report
       // 104f5b09 + fae70e42): (1) fix unambiguous named<->default import mismatches; (2) ADD a
@@ -1335,6 +1377,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       outcome: 'BUILD_FAILED',
       salvagedPaths,
       plannedFiles,
+      phases: phasesNow(),
       plannedPaths,
     };
   }
@@ -1356,7 +1399,15 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // A verify THROW = the check never executed (sandbox infra failure) — record that honestly
     // (ran:false) instead of silently converting it into a pass. The jungle-game report (2026-07-12)
     // shipped a runtime ReferenceError behind "Build verified ✓" through exactly this silent catch.
-    let verdict: VerifyResult = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+    // ONE clock for every verify call site (there are four), so a round can never be counted in one
+    // place and missed in another — the drifted-copy class this repo keeps paying for.
+    const timedVerify = async (): Promise<VerifyResult> => {
+      const at = Date.now();
+      try { return await deps.verify!(); }
+      catch { return { ok: true, errors: '', ran: false }; }
+      finally { clock.verifyMs += Date.now() - at; clock.verifyRuns++; }
+    };
+    let verdict: VerifyResult = await timedVerify();
     let attempt = 0;
     // GA-8 circuit-breaker: the errors that prompted the CURRENT attempt. If a repair comes back with the
     // byte-identical error set, the model is stuck and every further attempt burns a model call + verify
@@ -1381,7 +1432,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           await deps.writeFiles(restoreFiles);
           for (const f of restoreFiles) byPath.set(f.path, f);
           deps.log?.(`Put ${restoreFiles.length} NavBharatAI-provided file(s) back to their known-good version — no repair pass needed for those.`);
-          verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+          verdict = await timedVerify();
         }
       } catch { /* a free restore is best-effort — fall through to the model repair below */ }
     }
@@ -1423,7 +1474,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
               byPath.set(f.path, prev ? { ...prev, content: f.content } : (f as OneShotFile));
             }
             deps.log?.(`Fixed ${det.fixes.length} mechanical error(s) directly — no repair pass needed for those: ${det.fixes.slice(0, 3).join('; ')}${det.fixes.length > 3 ? '; …' : ''}`);
-            verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+            verdict = await timedVerify();
           }
         }
       } catch { /* a free fix is best-effort — fall through to the model repair below */ }
@@ -1458,7 +1509,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (causes) repairErrors = `${repairErrors}${causes}`;
       } catch { /* the analysis is advisory — the repair still gets the compiler's own words */ }
       let fixed: OneShotFile[] = [];
+      const repairStartedAt = Date.now();
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
+      finally { clock.repairMs += Date.now() - repairStartedAt; clock.repairRuns++; }
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
       // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one
@@ -1485,7 +1538,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       for (const f of fixed) byPath.set(f.path, f);
       try { await deps.writeFiles(fixed); } catch { break; }
-      verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+      verdict = await timedVerify();
       const judgement = judgeRepair({
         beforeErrors: priorVerdict.errors, afterErrors: verdict.errors,
         afterOk: verdict.ok, afterRan: verdict.ran, createdPaths,
@@ -1524,6 +1577,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
         plannedFiles,
+        phases: phasesNow(),
         typecheckRan: verdict.ran !== false,
         // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
         verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
@@ -1549,5 +1603,5 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // wired OR could not execute (an un-run check is "unknown", never a pass — no fake success).
   // previewOk is left unknown here — the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS.
   const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify && typecheckRan ? true : null });
-  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan, plannedFiles };
+  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan, plannedFiles, phases: phasesNow() };
 }

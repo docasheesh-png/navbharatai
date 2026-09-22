@@ -64,6 +64,13 @@ export interface MultiProviderOptions {
    */
   onProviderBenched?: (family: string, reason: string) => void;
   /**
+   * One attempt produced NOTHING, and this is what it cost in wall clock.
+   *
+   * Measurement only (autopsy 21b431e1): the bench's trigger is a COUNT of consecutive timeouts and
+   * its cost is a CLOCK, and nothing had ever compared the two. Never read back, never acted on.
+   */
+  onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+  /**
    * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
    * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
    * to price a GLM-flash turn as free and a glm-5.2 turn at the flagship rate). Feeds the
@@ -817,6 +824,24 @@ export function makeMultiProviderTurnRunner(
            * merely observe slowness: we measured it against a floor and acted on it. `canBenchAnother`
            * still guards the last engine, and `abandonedSlowRung` makes this at most once per build.
            */
+          /**
+           * WHAT THIS ATTEMPT COST AND GOT NOTHING FOR (autopsy 21b431e1). Measurement only — it
+           * benches nothing, retries nothing and reads nothing back. One emit, placed BEFORE the
+           * classification below so no branch can forget it, and the kind is taken from the same
+           * predicates the branches use rather than re-derived.
+           *
+           * ⚠️ OUR OWN CLOCK ENDING IS NOT THE VENDOR'S WASTE (autopsy bb688add) — a budget-ended
+           * call is our accounting and is deliberately left out; `isTimeoutProviderError` is the
+           * same test the bench uses, so the two can never disagree about what a timeout is.
+           */
+          try {
+            const wastedMs = Math.max(0, now() - attemptStartedAt);
+            const kind = isSlowStreamAbandon(err) ? 'crawl'
+              : isTimeoutProviderError(err) ? 'timeout'
+                : isRateLimitProviderError(err) ? 'rate-limit'
+                  : 'error';
+            opts.onAttemptWasted?.(reportName, kind, wastedMs);
+          } catch { /* telemetry only — it must never replace the error below */ }
           if (isSlowStreamAbandon(err)) {
             abandonedSlowRung = true;
             try {

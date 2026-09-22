@@ -79583,3 +79583,92 @@ before it shipped rather than three days after.
 **C and D are deliberately NOT built yet.** If the aggregate says most failures are the credentials
 class, their benefit is ZERO and the whole plan should change — which is what Step 0 exists to find out,
 and what the admin's own brief instructs.
+
+## 2026-09-22 — AUTOPSY `21b431e1`, PART 2: the ₹0 items (admin: "₹0 wale sare complete karo")
+
+Four items, none of which spends a model call. The two that would cost tokens (the review budget; tests
+generated in every build) and the pricing decision are deliberately NOT in this change.
+
+### 1 · `"n` + Devanagari — and the check was accusing CORRECT code as often as broken code
+
+The report said `src/App.tsx` carried a corrupted label. Reading the detector settled something the
+report could not: **`stringLiterals` returns the literal's body as written**, so `"\nमैं"` — a newline
+before Devanagari, which is right — arrived as the characters `\`, `n`, `म`…, the backslash split away
+as punctuation, and the token left behind was **`nमैं`**. Measured before the fix:
+
+    "\nमैं"        -> ["nमैं"]     ← correct source, reported as a corrupted label
+    "पंक्ति\tदो"    -> ["tदो"]     ← correct source, reported as a corrupted label
+
+**That is the exact token the report carried**, so the finding may never have been a defect in the
+user's app at all. Third analyzer in three days caught describing its own blind spot as the user's bug
+(`AccessibilityAnalysis` 2026-09-20, `FeaturePresence` 2026-09-21) — same class each time: a regex
+reading a dialect it was not written for.
+
+- `decodeLiteralEscapes` runs before tokenising. ⚠️ `looksLikePattern` must stay on the RAW body — it
+  reads `\b`, `\d`, `\s`, the very sequences decoding destroys.
+- **And when the check IS right, it now repairs the one shape that needs no guess.** A lone `n`/`t`/`r`
+  standing against Indic text inside a quoted literal is a dropped backslash. `repairLostEscapes` runs
+  as a deterministic pass (same idiom and same place as the CSS and dotenv guards, before the green
+  latch), reports `SCRIPT_INTEGRITY_REPAIRED`, and runs BEFORE the finding is recorded so the warning
+  describes what actually shipped.
+- 🔒 **Nothing is ever deleted from a user's text.** Restoring the backslash turns a VISIBLE wrong
+  letter into INVISIBLE whitespace: right when we are right, harmless when we are wrong. Deleting the
+  letter would be destructive if the reading is wrong. The founding case `"জungle"` needs a word nobody
+  wrote down and is refused, as are `greenमैं`, `n मैं` and anything already escaped.
+- 🔁 The loop closes: after the repair the check no longer complains about that file.
+
+### 2 · `greenFreeze.ts`'s own header promised a carve-out the code deleted six weeks ago
+
+The header said *"Creating a genuinely NEW file is allowed (a new test/doc file cannot break the app)"*.
+`writeRefused`'s docblock, thirty lines below, records that carve-out being removed on 2026-08-12 after
+an adversarial review. Both statements sat in one file. The same report shows nine
+`GREEN_FREEZE_DEFERRED` writes — tests, a manifest, robots.txt, an icon, a service worker — and the
+header said they would have been allowed. Behaviour unchanged (full deny is correct); the header now
+says so and records why.
+
+⚠️ **And the obvious fix for "the app shipped with no tests" is WRONG, recorded so nobody tries it.**
+Widening the freeze to allow test files would let a HALF-landed change through: a test asserting
+behaviour whose accompanying edit was refused makes the app's own suite fail, which `AGENTV3_VACCINE`
+then correctly reports. `sw.js` can break a site outright. The real cause is that `generateIntegrationTests`
+is a TOOL the model calls, so tests were attempted AFTER green; the fix is upstream (tests inside the
+build), it costs generated tokens, and it is NOT in this change.
+
+### 3 · `FAST_LANE_PHASES` — where the 8.5 minutes went
+
+The single most expensive item in the report, and two plausible cures were available: hand off when the
+first verify blames many files, or send the repair only the offending file. **Which one is right depends
+entirely on which phase the minutes were in, and no report carried a phase.** Fixing from a guess is
+what the fourth absolute rule forbids, so the number ships first.
+
+`SimpleBuilder` now clocks plan / contract / generate / verify / repair, with RUN COUNTS beside the
+durations (three compiles is a different problem from one slow compile). ONE `timedVerify` closure
+covers all four verify call sites — four copies of a clock is the drifted-copy class. The ledger is
+hoisted OUT of the lane closure for the same reason `generatedSoFar` is: on the failure path, which is
+the path this exists for, the closure's locals are gone before the caller can ask. The unaccounted
+remainder is PRINTED, never folded into a phase. **Nothing reads it.**
+
+### 4 · `PROVIDER_TIME_WASTED` — what five failed attempts actually cost
+
+"The bench is too slow" is the obvious reading of five failed attempts ending on rung 2 of 5. It may
+well be wrong: **the bench's trigger is a COUNT (two consecutive timeouts on a family) and its cost is
+a CLOCK, and nothing had ever compared them.** Three minutes of a 480-second turn is 37% of the user's
+wait; three minutes of a 30-minute build is noise. The same five timeouts mean opposite things.
+
+One emit in `MultiProviderTurnRunner`, placed BEFORE the classification branches so no branch can forget
+it, with the kind taken from the same predicates the branches use. A budget-ended call is deliberately
+excluded — our own clock is not the vendor's waste (autopsy bb688add). Reported beside `LADDER_DEPTH`,
+outside every feature's conditional (the `READY_BEFORE_END` rule: an instrument inside another feature's
+`if` reports on a biased sample, and a biased sample reads as an ABSENCE of the problem). A share of the
+build's clock is printed ONLY when a real denominator was passed.
+
+Test-locked and reversion-proven in `tests/anEscapeIsNotALetter.test.ts` (12) and
+`tests/theNumberComesBeforeTheFix.test.ts` (13).
+
+### Still open after this change
+
+- **Fast lane's 8.5 minutes** — instrumented, not yet fixed. The fix waits for real `FAST_LANE_PHASES`
+  lines from production builds.
+- **The bench's trigger** — instrumented, not yet changed. Same reason.
+- **Review budget on a non-green build** (costs tokens) · **tests generated in every build** (costs
+  generated tokens) · **the shared evidence ledger** (architecture) · **the double discount on a
+  stopped build** (a pricing decision, the admin's).

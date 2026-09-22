@@ -67,7 +67,12 @@ describe('a check that did not run can never count against the user app', () => 
 
   it('PAGE_RENDER_NOT_RUN is registered as process-only, beside JOURNEY_NOT_RUN', () => {
     const diag = fs.readFileSync('src/server/AgentV3/BuildDiagnostics.ts', 'utf8');
-    const block = diag.slice(diag.indexOf('const PROCESS_ONLY_CODES'), diag.indexOf('const PROCESS_ONLY_CODES') + 2000);
+    // ⚠️ SLICED TO THE SET'S OWN CLOSING BRACKET, not to a character count (2026-09-22). It was
+    // `+ 2000`, and two new entries with their reasons above this one pushed it out of the window —
+    // so the guard failed while the registration it checks was right there. A fixed-width window over
+    // a list that is expected to GROW is a test that fails on the day the list does its job.
+    const at = diag.indexOf('const PROCESS_ONLY_CODES');
+    const block = diag.slice(at, diag.indexOf(']);', at));
     expect(block).toContain("'PAGE_RENDER_NOT_RUN'");
   });
 

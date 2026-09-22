@@ -36,7 +36,7 @@ import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepE
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite } from '../AgentV3/writeTimeTypecheck';
-import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
+import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
@@ -461,6 +461,8 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
+import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
+import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { looksLikeRefusal } from '../lib/promptSafety';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -3344,7 +3346,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3389,6 +3391,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     },
     ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
     ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+    ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
   });
 }
@@ -12629,6 +12632,15 @@ async function noteBuildOutcome(
       } catch { /* diagnostics are best-effort — never blocks a build */ }
       // The bench is a FACT ABOUT THE ENGINE and must appear in the timeline as one — otherwise the only
       // trace of "KIMI was reached" is the absence of further GLM lines, which nobody can read.
+      /**
+       * WHAT THE FAILED CALLS COST (autopsy 21b431e1). A build-scoped ledger, reported once, read by
+       * nothing. See `providerWaste.ts` for why the number had to exist before the bench's trigger
+       * can honestly be re-chosen.
+       */
+      const providerWaste = emptyWasteLedger();
+      const recordAttemptWasted = (family: string, kind: WasteKind, ms: number): void => {
+        try { recordWaste(providerWaste, family, kind, ms); } catch { /* telemetry only */ }
+      };
       const recordProviderBenched = (family: string, reason: string): void => {
         buildDiag.record({
           phase: 'provider', severity: 'info', code: 'PROVIDER_BENCHED',
@@ -12717,6 +12729,7 @@ async function noteBuildOutcome(
         onTurnComplete: captureShadowUsage,
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
+        onAttemptWasted: recordAttemptWasted,
       });
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
@@ -12726,6 +12739,7 @@ async function noteBuildOutcome(
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
+        onAttemptWasted: recordAttemptWasted,
         // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
         // repeat), admin-only like every other provider name.
         onChain: (chain) => {
@@ -16000,6 +16014,15 @@ async function noteBuildOutcome(
         });
         const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
+        // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
+        // needs explaining, and a check only ever visible when it complains cannot be told apart from
+        // one that never ran.
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'FAST_LANE_PHASES',
+          message: fastLanePhaseSummary(sb.phases), autoResolved: true,
+          detail: dominantFastLanePhase(sb.phases),
+        });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause
         // (the tip-calc report showed only "TYPECHECK_FAILED" with no error → the plan↔contract mismatch
@@ -17508,6 +17531,32 @@ async function noteBuildOutcome(
             // `label: 'জungle'` shipped past a 100/100 accessibility score and a PASS review.
             // Deterministic and free — no model call — and advisory: it can never affect a build.
             if (hasUserApp) {
+              /**
+               * 🔧 REPAIR THE ONE SHAPE THAT NEEDS NO GUESS — A DROPPED BACKSLASH (autopsy 21b431e1).
+               *
+               * That build shipped `"n` + Devanagari in `src/App.tsx`. The check SAW it, said so, and
+               * had nothing to do about it — so the user read the corruption on their own screen.
+               * Deterministic, free (no model call), and conservative by construction: a lone
+               * `n`/`t`/`r` standing against Indic text inside a QUOTED literal is a `\n`/`\t`/`\r`
+               * whose backslash the generator lost. Nothing is ever deleted from a user's text, and
+               * the unrepairable shape (`জungle`, which needs the word nobody wrote down) is refused.
+               *
+               * It runs BEFORE the finding is recorded, so the warning describes what actually
+               * shipped rather than what we had already fixed. Same idiom and same place as the CSS
+               * and dotenv guards above; both write the store copy and the sandbox, and both sit
+               * before the green latch. Kill: AGENTV3_SCRIPT_REPAIR=off.
+               */
+              if (process.env.AGENTV3_SCRIPT_REPAIR !== 'off' && !isImportTurn) {
+                const repaired = repairLostEscapes(integrityFiles);
+                if (repaired.repairs.length > 0) {
+                  for (const [path, content] of Object.entries(repaired.files)) {
+                    integrityFiles[path] = content;
+                    writtenFiles.set(path, content);
+                    try { await actuator.writeFile(workspaceId, path, content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+                  }
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY_REPAIRED', message: scriptRepairSummary(repaired.repairs), autoResolved: true });
+                }
+              }
               const mixed = findMixedScriptText(integrityFiles);
               if (mixed.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'warning', code: 'SCRIPT_INTEGRITY', ...obs(scriptIntegritySummary(mixed)) });
@@ -21180,6 +21229,29 @@ async function noteBuildOutcome(
           code: 'LADDER_DEPTH',
           message: describeLadderDepth(ladderDepth, ladderOpenedAt),
           detail: `depth=${ladderDepth.depth ?? 'unknown'} of ${ladderDepth.rungCount} · opened-at=${ladderOpenedAt} · matched=${ladderDepth.matched} · unattributed=${ladderDepth.unmatched}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
+      /**
+       * ITS SIBLING: WHAT THE CALLS THAT RETURNED NOTHING COST (autopsy 21b431e1).
+       *
+       * `LADDER_DEPTH` says how far down the ladder a build went; this says what the falling cost in
+       * wall clock. Read together they answer the question five timeouts raised and nothing could:
+       * was the bench slow, or were the timeouts cheap? Neither line decides anything.
+       *
+       * ⚠️ Placed HERE, beside its sibling and outside every feature's conditional, for the reason
+       * `READY_BEFORE_END` already states in this file: an instrument about our own engine that lives
+       * inside another feature's `if` reports on a biased sample, and a biased sample reads as an
+       * ABSENCE of the problem.
+       */
+      try {
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'PROVIDER_TIME_WASTED',
+          message: wasteSummary(providerWaste, Date.now() - buildStartedAt),
+          detail: `calls=${totalWasteCalls(providerWaste)}`,
           autoResolved: true,
         });
       } catch { /* an observation must never affect a finished build */ }

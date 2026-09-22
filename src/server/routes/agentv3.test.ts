@@ -2446,7 +2446,17 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      the file set, and only when the content genuinely changes; `ensureHtmlEntryScript` is pure and
     //      additive (it never rewrites a page that already boots). Kill switch `AGENTV3_HTML_ENTRY_GUARD`.
     //      Considered ✓.
-    expect(count).toBe(21);
+    //   1× the DROPPED-BACKSLASH repair (autopsy 21b431e1, 2026-09-22) — gated on `!isImportTurn` and
+    //      on `hasUserApp`, in the same advisory quality block as the checks above, so it never writes
+    //      on a read-only turn. It runs BEFORE the green latch, so Green Freeze is not what governs it
+    //      (the DESIGN_GATE entry above records the same ordering fact). It repairs exactly ONE shape —
+    //      a lone `n`/`t`/`r` pressed against Indic text inside a QUOTED literal, which is a `\n`/`\t`/
+    //      `\r` whose backslash the generator dropped — by RESTORING the backslash, so nothing is ever
+    //      deleted from a user's text: right when the reading is right, invisible whitespace when it is
+    //      wrong. The unrepairable shape (`জungle`, which needs a word nobody wrote down) is refused,
+    //      as is any token whose Latin side is a real word. It deliberately does NOT require result.ok:
+    //      a corrupted label is shown to the user either way. Considered ✓.
+    expect(count).toBe(22);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

@@ -59,7 +59,7 @@ import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
-import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
 import { headerTabFor, hiddenHeaderTabs } from './lib/headerTab';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
@@ -4027,17 +4027,36 @@ export default function App() {
               hideMedical={medicalFeaturesHidden(isNativeApp())}
               onClose={() => setShowModePicker(false)}
               // ✕ ON A RECENT ROW (admin 2026-09-21, one row; 2026-09-22, every open chat). It closes
-              // the conversation that row names — a WINDOW through `closeChatWindow` (its sibling
-              // windows with the same expert stay open), a single-chat view through the SAME `closeTab`
-              // the header tab's ✕ calls, so there is one teardown for a chat rather than a second copy
-              // of the rule (which is what would decide, differently, what happens to the preview,
-              // the draft and the session id).
+              // ONE conversation — never the tab that is home to the others. NavBharatAI FREE has no ✕
+              // at all (admin 2026-09-22, `recentRowClosable`): closing it from inside its own list
+              // used to call the header tab's teardown and take every AI inside the tab down with it,
+              // and the tab-less "closed FREE" that replaced that for a few hours was a flag, an effect
+              // and a shared reset for a row that "New chat → FREE" already restarts in one tap. A WINDOW
+              // closes through `closeChatWindow` (its sibling windows stay); a single-chat view through
+              // the same `closeTab` the header's ✕ calls. Then the screen goes to the row BELOW the
+              // closed one (else above — FREE, when it was the row under FREE), and the list stays open
+              // so more can be closed; when the LAST chat closes the list is dismissed and FREE is on
+              // screen, its own conversation untouched because nobody closed it.
               onCloseRecent={(recentId) => {
+                if (!recentRowClosable(recentId)) return;
                 const target = recentTargetFromId(recentId);
                 if (!target) return;
-                setShowModePicker(false);
-                if (target.conversationId) { closeChatWindow(undefined, target.conversationId); return; }
-                closeTab(undefined, target.view as ViewType);
+                const hideMedical = medicalFeaturesHidden(isNativeApp());
+                const recent = recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats });
+                const next = nextRecentAfterClose(recent, recentId);
+                const last = lastChatClosed(recent, recentId);
+                const wasOnScreen = activeModeId(activeView, activeChat?.id ?? null) === recentId;
+                if (target.conversationId) closeChatWindow(undefined, target.conversationId);
+                else closeTab(undefined, target.view as ViewType);
+                if (last) {
+                  // Nothing but FREE is open now: the list goes, FREE shows. With no FREE tab open at all
+                  // (an expert opened from the hub with FREE closed), this is the app's starting page.
+                  setShowModePicker(false);
+                  if (!next) startNewChat();
+                  toggleTab('nbi_chat');
+                  return;
+                }
+                if (wasOnScreen && next) toggleTab(next.view as ViewType, true, next.conversationId);
               }}
               onPick={(id) => {
                 setShowModePicker(false);

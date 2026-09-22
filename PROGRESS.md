@@ -78837,3 +78837,45 @@ prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** 
 ⚠️ **Said to the admin, per the third absolute rule:** the Deep-links page is ADVISORY. Red rows there never
 block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
 which this session cannot see — asked for that screen rather than pretending the two are the same problem.
+
+## 2026-09-22 — 🧹 Closing FREE from the Mode list no longer closes the tab and every AI inside it
+
+Admin, the same evening, with screenshots: *"recent chat me navbharatai free ko x karte hai, to navbharatai
+free pura window hi band ho jata hai, chahe 3-5 kitne bhi ai open ho! isko badlo. mode navbharatai free ko
+agar band kiya jaye, to uske niche jo on ho woh open ho jaye. aur agar mode me kebal ek hi AI open hai, aur
+user usko bhi band kar de! to mode list band ho jaye aur navbharatai free ka page open ho jaye, starting
+jaisa!!"*
+
+- **Root cause:** the FREE row's ✕ called `closeTab('nbi_chat')` — the header tab's teardown, which by design
+  (`computeTabClose` + `tabOpeners`) closes every child opened through that tab. After #3243 every AI picked
+  from Mode is such a child, so one ✕ emptied the whole workspace.
+- **Fix:** `resetFreeChatSurface` (the free-chat reset extracted out of `closeTab`, so the header ✕ and the
+  Mode ✕ share ONE teardown) plus a `freeChatClosed` flag that takes FREE out of the Recent group while its
+  tab stays open; being on the FREE chat again clears the flag (one effect, whichever door). The screen goes
+  to the row BELOW the closed one, else above (`nextRecentAfterClose`, pure), and the list stays open; when
+  the LAST chat closes the sheet dismisses, `startNewChat()` runs and FREE opens — the app's starting page.
+- Locked in `modePicker.test.ts` (two pure cases) and `theModeListIsTheWindowSwitcher.test.ts` (source pins:
+  the FREE row never reaches `closeTab('nbi_chat')`; the only `setShowModePicker(false)` in the close path
+  is the last-close branch). KB `professionals` howToUse updated.
+
+### 2026-09-22, later — 🥰 the admin's simpler answer: the FREE row has NO ✕ (supersedes the flag above)
+
+Admin, on reading the fix above: *"isse simple bhi ek rasta tha! navbharatai free, chat ke age se X hi hata
+den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebuilt on it before it merged.
+
+- **Why it is better, not merely smaller:** the FREE tab is the HOME of every chat opened through its Mode
+  button, so "close FREE from inside its own list" had no honest meaning — it either closed the tab and every
+  AI inside it (the morning's bug) or needed a second, tab-less notion of "closed" (`freeChatClosed` + an
+  effect + a shared reset, the first fix). A fresh FREE chat is already one tap away under "New chat", and
+  the header tab's ✕ still closes the whole thing. So the row simply carries no ✕.
+- **One rule, two readers:** `recentRowClosable(id)` (`modePicker.ts`, pure) decides both whether the sheet
+  renders the ✕ and whether App acts on a close for that id. `freeChatClosed`, its effect and
+  `resetFreeChatSurface` are gone; `closeTab`'s FREE branch is back to its original lines.
+- **The rest of the admin's spec stands:** ✕ on any other row closes that one chat, the screen moves to the
+  row below (else above — FREE, when it was the row under FREE; `nextRecentAfterClose`), the list stays open;
+  when the last chat closes (`lastChatClosed`: nothing but FREE remains) the list dismisses and FREE shows.
+  ⚠️ FREE's own conversation is NOT wiped by closing somebody else — it was never closed; `startNewChat()`
+  runs only when no FREE tab was open at all (an expert opened from the hub with FREE closed).
+- Locked in `modePicker.test.ts` (`recentRowClosable`, `lastChatClosed`, the FREE-above case) and
+  `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
+  the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.

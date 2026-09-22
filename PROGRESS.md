@@ -79788,3 +79788,48 @@ cause: given "Photograph + Realistic" it wrote a coherent photo brief; the craft
 
 Test-locked and reversion-proven in `tests/theBoxEmptiesWhenYouPressSend.test.ts` (6) and
 `tests/aNounIsNotAChip.test.ts` (9); all 234 existing composer/craft tests unchanged and green.
+
+## 2026-09-22 — IMAGE GENERATOR, PART 2: the two halves left open, closed (admin: "to fix karo sab")
+
+### 1 · The ⭐ turned a logo into a photograph because of a chip nobody chose
+
+**Root cause (verified):** the style chip DEFAULTS to `photo` (Realistic) — `AIImageGenerator.tsx:209`
+— and the enhancer was handed `Style: Realistic` for the brief *"clinic logo"*. Its own instruction
+says a photographic style *"gets real camera language"*, so it wrote *"a minimalist photograph of a
+clinic logo, shot with a shallow depth of field…"*. The craft layer then read a photo request in the
+words and built a photo. **Two modules, two rules about what a chip may overrule.** The craft layer had
+already learned *"a chip they never touched yields to the words"* for the picture it BUILT; the ⭐ kept
+a rule of its own.
+
+**Fix — one owner.** `resolveImageBrief` (`imagePromptCraft.ts`) now answers every chip-vs-words
+question; `craftImagePrompt` is built from it and the enhancer asks it too (`resolveEnhanceBrief`), so
+they cannot disagree because there is only one of them. Concretely:
+- the style chip is forwarded to the model ONLY when the resolution says it applies; when a flat mark
+  won, the model is told in words to keep it one (`keepTheKindLine`);
+- a rewrite that turned a flat mark into a photograph is REFUSED (`changed-kind`), the same shape as
+  `keepsTheFacts` for the kind of picture rather than its facts — the user's words are kept and the
+  note says how to get a photo of it (say so in the brief);
+- the client sends the chip's **id** (`styleId`) beside its label; the rule reads the id, the model reads
+  the label, and an id is never guessed from a label. Without an id the old behaviour holds exactly.
+
+### 2 · The Avoid list repeated the prompt — and may have contradicted it
+
+The prompt said *sharp, professionally composed, coherent lighting, production quality* and then, ~500
+characters later, *Avoid: … blurry, out of focus, low resolution, cluttered composition …* — into a
+provider with ONE string and no negative field, which `withInlineNegative`'s own comment has always
+said some models read as a request. `compactNegative` drops every negative whose POSITIVE the prompt
+already carries (a fixed table, `NEGATIVE_COVERED_BY_POSITIVE`); everything with no positive form —
+watermark, gibberish text, extra fingers, mockup frame — stays. Measured on the logo case: 8 items gone,
+776 → 663 chars. `crafted.negative` itself is untouched, so a provider with a real negative field still
+gets the whole list. `IMAGE_GEN_INLINE_NEGATIVE=full` restores the long list with no deploy.
+
+⚠️ **Honest about what is proven (rule 6):** that the negatives CAUSED the blur is a suspicion, not a
+measurement — the provider's output cannot be taken from here. What is certain is that a negative whose
+positive is already present adds no instruction, so removing it cannot remove any direction the model
+was given; it can only remove a risk. The admin's next real free image, with and without `=full`, is the
+evidence.
+
+Test-locked and **reversion-proven four ways** in `tests/theStarKeepsTheKindOfPicture.test.ts` (18):
+the star forwards the chip unconditionally again · a kind-changing rewrite is accepted again · the
+Avoid list repeats the prompt again · the craft layer keeps a private second reading of the chips.
+All 109 existing enhancer/craft/composer tests unchanged.

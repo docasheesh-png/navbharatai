@@ -426,6 +426,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
           prompt: original,
           type: imageType,
           style: labelOf(STYLES, style),
+          // The id beside the label — the server's precedence rule reads the id, the model reads the label.
+          styleId: style,
           colorHint: labelOf(COLOR_HINTS, colorHint),
         }),
       });

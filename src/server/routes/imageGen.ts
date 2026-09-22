@@ -115,6 +115,9 @@ const enhanceSchema = vobject({
   prompt: vstring({ max: ENHANCE_MAX_INPUT }),
   type: vstring({ optional: true, max: 60 }),
   style: vstring({ optional: true, max: 40 }),
+  // The chip's ID beside its label: the label is what the model is shown, the id is what the
+  // precedence rule reads (`resolveImageBrief`). An id is never guessed from a label.
+  styleId: vstring({ optional: true, max: 40 }),
   colorHint: vstring({ optional: true, max: 60 }),
 });
 const enhanceLimiter = () => rateLimiter({
@@ -548,6 +551,7 @@ export function registerImageGenRoutes(app: Express): void {
         prompt,
         type: typeof body.type === 'string' ? body.type : undefined,
         style: typeof body.style === 'string' ? body.style : undefined,
+        styleId: typeof body.styleId === 'string' ? body.styleId : undefined,
         colorHint: typeof body.colorHint === 'string' ? body.colorHint : undefined,
       },
       async (system, user) => {

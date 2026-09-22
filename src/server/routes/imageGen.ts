@@ -32,6 +32,7 @@ import { imagePixelsFor } from '../lib/imageGen';
 import { getServerDb } from '../lib/serverDb';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { walletTooEmptyForTurn } from '../professionals/passGate';
+import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
 import { isProfessionalFreeUser } from '../professionals/professionalPaid';
 import { debitWalletRolledUp } from '../lib/walletDebit';
 import { featureRollupRef, featureLabel } from '../lib/walletFeature';
@@ -632,13 +633,18 @@ export function registerImageGenRoutes(app: Express): void {
       // `null` (unreadable) is allowed through on purpose — fail-open, exactly as the build gate and
       // the chat gate do. Refusing a paying user over a Firestore blip costs more than one image.
       if (walletTooEmptyForTurn(balanceInr)) {
-        res.status(402).json({
-          error: `Your balance is empty. This would cost ₹${quotedInr} (₹${IMAGE_PRO_PRICE_INR} per image) — add credit, or switch the toggle to Free.`,
-          code: 'wallet_empty',
-          balanceInr: balanceInr ?? 0,
-          priceInr: IMAGE_PRO_PRICE_INR,
-          quotedInr,
-        });
+        // ADMIN 2026-09-22: one shared notice, so the three routes that refuse for an empty wallet
+        // cannot drift again — and so a wallet in DEBT is told what it owes rather than "empty".
+        // The free toggle stays named here: it is the one way out this route has and no other has.
+        res.status(WALLET_EMPTY_STATUS).json(walletEmptyBody(
+          {
+            balanceInr,
+            what: 'this image',
+            priceInr: quotedInr,
+            alternative: 'Or switch the toggle to Free.',
+          },
+          { priceInr: IMAGE_PRO_PRICE_INR, quotedInr },
+        ));
         return;
       }
     }

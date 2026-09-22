@@ -9,6 +9,11 @@ import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 import { decideWeeklyTopUp, topUpLedgerEntry, summarizeGiftLadder } from '../lib/weeklyTopUp';
 import { flatWelcomeGiftAllowed, weeklyTopUpAllowed, retiredGiftSummary } from '../lib/giftPolicy';
+// The ₹50 INTERIM welcome credit (admin 2026-09-22, after the Play rejection). Deliberately a
+// SEPARATE predicate from `flatWelcomeGiftAllowed`, which also gates the retired ₹250 phone bonus
+// and the v2 summary below — re-enabling that one to reach the signup grant would have re-opened a
+// claim the admin retired. See `interimWelcomeGift.ts` for the whole reasoning.
+import { interimWelcomeTokens } from '../lib/interimWelcomeGift';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { giftPlanV2Enabled, decideSignupGrant, decidePhoneClaim, claimRefusalMessage, verifiedGiftTotalTokens } from '../lib/giftPlan';
 import { normalizeEmailForGift, normalizePhoneForGift, giftMarkerCandidates, giftMarkerIdToWrite } from '../lib/giftIdentity';
@@ -331,7 +336,25 @@ export function registerWalletRoutes(app: Express): void {
           // 🔴 RETIRED (admin 2026-09-17): nothing is handed over for merely arriving. Both plans are
           // gated together HERE rather than inside their own modules, because this is the only place
           // either one moves money — which keeps their anti-abuse logic and tests intact and true.
-          const welcomeTokens = !flatWelcomeGiftAllowed() ? 0
+          // 🔴 NO LONGER FLATLY 0 (admin 2026-09-22: *"new account me 50₹ credit do. jab tak, refral
+          // system activate na hota hai, tab tak."*). A new account receiving NOTHING is what Google
+          // rejected the release over — a reviewer is a brand-new account, and with ₹0 the paid rung
+          // of every free-first ladder refuses. `interimWelcomeTokens` returns 0 by itself the moment
+          // the referral ladder is switched on, so this is temporary by construction rather than by
+          // anyone remembering. `alreadyGranted` still wins: a re-created wallet document collects
+          // nothing, exactly as it does on the two plans below.
+          //
+          // ⚠️ IT SPENDS THE SAME PER-IDENTITY MARKERS the v2 plan did, and that is deliberate rather
+          // than incidental: without it, one person with ten Gmail aliases collects ten ₹50 grants —
+          // the exact leak `giftPlanV2Behavior.test.ts` calls THE REAL LEAK. The verdict is read
+          // straight off `decideSignupGrant` (`reason === 'identity-used'`) rather than re-derived
+          // here, so the two can never disagree about whether an identity is spent; and because the
+          // grant is non-zero again, the marker block below writes those markers WITH it, keeping
+          // "a grant and its marker are written together" true instead of quietly burning an
+          // identity for a gift nobody received.
+          const identityAlreadySpent = v2Grant?.reason === 'identity-used';
+          const welcomeTokens = !flatWelcomeGiftAllowed()
+            ? (alreadyGranted || identityAlreadySpent ? 0 : interimWelcomeTokens())
             : v2Grant
               ? (alreadyGranted ? 0 : v2Grant.tokens)
               : welcomeGrantTokens(alreadyGranted);

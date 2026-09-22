@@ -50,7 +50,14 @@ describe('the ONLY way to be given money is to earn it', () => {
     const w = read('src/server/routes/wallet.ts');
     expect(w).toContain("from '../lib/giftPolicy'");
     // The new-wallet grant, the phone claim, and the weekly ladder — three applications, all gated.
-    expect(w).toContain('!flatWelcomeGiftAllowed() ? 0');
+    // 🔴 CHANGED 2026-09-22. The new-wallet branch is no longer a flat `? 0`: it pays the ₹50 INTERIM
+    // credit (admin's ruling after the Play rejection), which stands down by itself the moment the
+    // referral ladder is switched on. What this assertion protects is unchanged and is the reason it
+    // exists — the retirement predicate still GUARDS that branch, so re-enabling the ₹500 plan is
+    // still one decision in one place, and the two applications below are untouched by the interim
+    // credit. Anchored on `interimWelcomeTokens()` so a branch that started paying the RETIRED amount
+    // again would fail here.
+    expect(w).toMatch(/const welcomeTokens = !flatWelcomeGiftAllowed\(\)\s*\n?\s*\? \(alreadyGranted \|\| identityAlreadySpent \? 0 : interimWelcomeTokens\(\)\)/);
     expect(w).toContain("if (!flatWelcomeGiftAllowed()) return { granted: 0, reason: 'disabled' as const };");
     expect(w).toContain('const ladderRetired = !weeklyTopUpAllowed()');
   });

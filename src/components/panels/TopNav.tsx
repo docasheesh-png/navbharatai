@@ -6,7 +6,6 @@ import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 import { signOutEverywhere } from '../../lib/firebase';
-import { NotificationBell } from '../NotificationBell';
 
 interface MenuItem {
   id: string;
@@ -51,9 +50,12 @@ export interface TopNavProps {
   undoCode: () => void;
   redoCode: () => void;
   user: FirebaseUser | null;
-  /** Open the Report a problem sheet on the conversation list — passed down to the notification bell,
-   *  so a "New message from NavBharatAI" is one tap rather than a set of directions. */
-  onOpenReports?: () => void;
+  /**
+   * Unread notifications — drawn as a DOT on the ☰ button (admin 2026-09-22: *"agar notification aaye
+   * to 3-line menu button par dot dikhe"*). The bell itself left this bar: the row it took is the row
+   * the open chat windows need. The number lives on the sidebar's Notifications row; here only the fact.
+   */
+  unreadNotifications?: number;
   setShowAuth: (v: boolean) => void;
   auth: any;
   /** Enter Focus Mode — hides the header (this bar) + the mobile bottom nav so only the
@@ -73,9 +75,14 @@ export function TopNav({
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
-  onOpenProfile, onOpenSettings, isAdmin, onOpenReports,
+  onOpenProfile, onOpenSettings, isAdmin, unreadNotifications = 0,
   chatWindows = [], onSelectChatWindow, onCloseChatWindow,
 }: TopNavProps) {
+  /** The one dot both ☰ buttons draw — a fact, never a number; the number is in the sidebar. */
+  const menuDot = unreadNotifications > 0 ? (
+    <span aria-hidden className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-danger ring-2 ring-card" />
+  ) : null;
+  const menuLabel = unreadNotifications > 0 ? `Menu, ${unreadNotifications} unread notifications` : 'Menu';
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   // ONE ACCOUNT AT A TIME (admin 2026-09-19). The avatar menu used to carry a "Switch account" list
@@ -111,31 +118,39 @@ export function TopNav({
 
   return (
     <nav className={cn(
-      "h-10 border-b flex items-center justify-between px-4 shrink-0 transition-all z-[100] gap-4 select-none w-full bg-card border-line"
+      // THE ROW BELONGS TO THE WINDOWS (admin 2026-09-22: "header me tab/window dikh nahi rahi hai, jyada
+      // jagah banao"). Gaps are tight, the bell is gone, and the strip below is `flex-1 min-w-0` so it
+      // takes every pixel the fixed controls leave — and scrolls inside that width instead of pushing
+      // the controls off the edge.
+      "h-10 border-b flex items-center justify-between px-2 sm:px-3 shrink-0 transition-all z-[100] gap-2 select-none w-full bg-card border-line"
     )}>
-      <div className="flex items-center gap-3 min-w-0 flex-1">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
         {effectiveDeviceMode === 'mobile' && (
           <button
             onClick={() => setIsMenuOpen(true)}
-            className="p-2 hover:bg-raised rounded-lg text-accent-text transition-all shrink-0 border border-line"
+            aria-label={menuLabel}
+            className="relative p-2 hover:bg-raised rounded-lg text-accent-text transition-all shrink-0 border border-line"
           >
             <Menu className="w-5 h-5" />
+            {menuDot}
           </button>
         )}
 
         {effectiveDeviceMode !== 'mobile' && (
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-2 hover:bg-raised rounded-lg text-accent-text transition-all shrink-0 border border-line"
+            aria-label={menuLabel}
+            className="relative p-2 hover:bg-raised rounded-lg text-accent-text transition-all shrink-0 border border-line"
             title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
             <Menu className="w-5 h-5" />
+            {menuDot}
           </button>
         )}
 
         <button
           onClick={() => toggleTab('home')}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0 mr-2"
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
         >
           <img
             src="/logo.png"
@@ -143,11 +158,11 @@ export function TopNav({
             className="w-7 h-7 object-contain drop-shadow-md select-none pointer-events-none"
             referrerPolicy="no-referrer"
           />
-          <h1 className="text-sm font-bold tracking-tighter text-ink hidden sm:block italic">navBharatAI</h1>
+          <h1 className="text-sm font-bold tracking-tighter text-ink hidden md:block italic">navBharatAI</h1>
         </button>
 
-        {/* Open tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-2 select-none">
+        {/* Open tabs — every pixel the fixed controls leave, scrolling inside it. */}
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-2 select-none flex-1 min-w-0">
           <AnimatePresence mode="popLayout">
             {openTabs.filter(id => id !== 'home').map((tabId) => {
               const item = menuItems.find(m => m.id === tabId);
@@ -222,8 +237,9 @@ export function TopNav({
         </div>
       </div>
 
-      {/* Action Controls */}
-      <div className="flex items-center gap-2 shrink-0">
+      {/* Action Controls — Focus Mode sits LAST (admin 2026-09-22: "expand button ko thoda right me
+          khiska do"), past the account, at the edge of the bar. */}
+      <div className="flex items-center gap-1.5 shrink-0">
         {hasGeneratedCode && (
           <div className="hidden sm:flex items-center gap-1 border border-line rounded-xl overflow-hidden">
             <button
@@ -245,24 +261,10 @@ export function TopNav({
             </button>
           </div>
         )}
-        {/* Focus Mode — hide the header + mobile bottom nav so only the open page is visible.
-            A floating corner button (app shell) brings it back; Esc also exits. */}
-        {onEnterFocusMode && (
-          <button
-            onClick={onEnterFocusMode}
-            title="Focus Mode — hide the header (Esc to exit)"
-            aria-label="Enter Focus Mode"
-            className="p-2 hover:bg-raised rounded-lg text-faint hover:text-ink transition-all border border-line"
-          >
-            <Maximize2 className="w-4 h-4" />
-          </button>
-        )}
-        {/* Admin → user messages (admin 2026-07-30): renders null when signed out. */}
-        <NotificationBell user={user} {...(onOpenReports ? { onOpenReports } : {})} />
         {!user ? (
           <button
             onClick={() => setShowAuth(true)}
-            className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
+            className="py-2 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
           >
             Login
           </button>
@@ -347,6 +349,19 @@ export function TopNav({
               )}
             </AnimatePresence>
           </div>
+        )}
+        {/* Focus Mode — hide the header + mobile bottom nav so only the open page is visible.
+            A floating corner button (app shell) brings it back; Esc also exits. Last in the row, so
+            it sits at the bar's right edge, clear of the account menu. */}
+        {onEnterFocusMode && (
+          <button
+            onClick={onEnterFocusMode}
+            title="Focus Mode — hide the header (Esc to exit)"
+            aria-label="Enter Focus Mode"
+            className="p-2 hover:bg-raised rounded-lg text-faint hover:text-ink transition-all border border-line"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
         )}
       </div>
     </nav>

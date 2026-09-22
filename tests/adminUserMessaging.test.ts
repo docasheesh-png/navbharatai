@@ -47,13 +47,15 @@ describe('Admin UI — Message Users', () => {
   });
 });
 
-describe('User UI — notification bell', () => {
-  it('the bell is mounted in the top bar and reads the user endpoint', () => {
-    // ⚠️ ANCHORED ON THE MOUNT, NOT ON THE WHOLE TAG (2026-09-17). This asserted the exact string
-    // `<NotificationBell user={user} />`, so adding the `onOpenReports` prop — which is what makes a
-    // reply notification tappable — failed a test that has no opinion about that prop. What it
-    // PROTECTS is unchanged: the bell is mounted in the top bar and is handed the signed-in user.
-    expect(topnav).toContain('<NotificationBell user={user}');
+describe('User UI — notifications inbox', () => {
+  it('the inbox is owned by App and opened from the sidebar, and reads the user endpoint', () => {
+    // 2026-09-22: the bell LEFT the top bar (admin: the header row belongs to the open chat windows).
+    // The inbox hook lives in App — the unread count is needed while the panel is closed — and the
+    // panel is opened from the sidebar's Notifications row. See notificationsLiveInTheSidebar.test.ts.
+    const app = read('src/App.tsx');
+    expect(app).toContain('const inbox = useNotificationInbox(user);');
+    expect(app).toContain('<NotificationPanel');
+    expect(topnav).not.toContain('NotificationBell');
     const bell = read('src/components/NotificationBell.tsx');
     expect(bell).toContain("'/api/notifications'");
     expect(bell).toContain("'/api/notifications/read'");
@@ -61,10 +63,12 @@ describe('User UI — notification bell', () => {
 });
 
 describe('KB awareness', () => {
-  it('notifications_bell entry exists and points at the top-bar bell', () => {
+  it('notifications_bell entry exists and points at the sidebar row (not the retired top-bar bell)', () => {
     const e = APP_KNOWLEDGE_BASE.find((f) => f.id === 'notifications_bell');
     expect(e).toBeTruthy();
-    expect(e!.path.toLowerCase()).toContain('bell');
+    expect(e!.path).toContain('Menu');
+    expect(e!.path).toContain('Notifications');
+    expect(e!.description).toMatch(/three-line|☰/);
     expect(e!.description).toMatch(/NavBharatAI team/);
   });
 });

@@ -78177,6 +78177,43 @@ The number PR #3234 left open, built as the first proactive item after the admin
 Tests: `tests/thePlatformHasADayToo.test.ts` — the env parsing, the decision, the wording, and the
 ORDER at source level; proven by reversion.
 
+## 2026-09-22 — 🔔 Notifications moved to the sidebar; the header row belongs to the windows
+
+Admin: *"notifications 🔔 ko header se hata kar, sidebar menu me karo, dot ke sath. agar notification
+aaye to 3-line menu button par dot dikhe, fir notification option par number dikhe. header se hata do.
+expand (full screen) button ko bhi thoda right me khiska do; header me tab/window dikh nahi rahi hai,
+jyada jagah banao."*
+
+- **`NotificationBell.tsx` is a hook + a panel now, and no button.** `useNotificationInbox(user)` lives
+  in App (the unread count must exist while the panel is CLOSED, for the ☰ dot and the sidebar row's
+  number — one hook, three readers, one number); `NotificationPanel` is the same list with the same
+  three-step delete flow, opened from the sidebar. The file keeps its name because the delete flow is
+  pinned by tests under it.
+- **Sidebar:** a "Notifications" row (bell icon, red dot, exact unread count, `99+` past that) defined
+  ONCE and rendered in both the rail and the drawer; only for a signed-in user with a handler, never
+  rendered inert.
+- **Header:** the bell is gone; BOTH ☰ buttons (mobile hamburger, desktop collapse) carry a dot from the
+  same count — a fact, never a number; Focus Mode is the LAST control; gaps tightened (`gap-4 → gap-2`,
+  `px-4 → px-2/3`, the logo's `mr-2` dropped, the wordmark `sm → md`), the login button compact, and the
+  window strip is `flex-1 min-w-0` so it takes every pixel the fixed controls leave and scrolls inside it.
+- KB `notifications_bell` re-pointed to the sidebar row. Locked by `tests/notificationsLiveInTheSidebar.test.ts`;
+  three old pins re-pointed (`adminUserMessaging`, `polishCollabSettings`).
+
+## 2026-09-22 — 🫳 The Focus Mode exit button goes where the finger puts it
+
+Admin: *"full screen off (collapse) button upper right corner me fix hai. isko moveable banao, user usko
+ungli se khich ke kahi bhi rakh sake! expand (full screen on) wala theek hai."*
+
+- **`useDraggableFloat`** (`src/hooks/`) — the drag, pointer capture, the clamp on every position (drag,
+  first paint, resize, rotation), the remembered spot per browser and the tap-vs-drag decision, ONCE.
+  The admin copy button had all of it inline since 2026-09-14; a second inline copy would have been the
+  drifted-copy class, so the admin button now calls the hook too (its wiring test re-pointed).
+- **`FloatingExitFocusButton`** — same blur, same size, same top-right default (`topRightPosition`, under
+  the notch), so a user who never drags it sees nothing change; a drag anywhere is remembered under
+  `nbai.focusExit.pos` and clamped to whatever screen it is next shown on. Keyboard still exits.
+- The header's ENTER button is untouched. Locked by `tests/theExitButtonGoesWhereTheFingerPutsIt.test.ts`
+  and two `topRightPosition` cases in `floatingButtonPosition.test.ts`.
+
 ## 2026-09-22 — Resize sheet: "W aur H button kaam nahi kar rahe" — the buttons worked, the preview could not show width
 
 Admin, with a screenshot of the sheet at 1024 × 1024: *"ai image generate: me image banne ke bad, resize me

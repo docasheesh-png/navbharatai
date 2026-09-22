@@ -102,9 +102,13 @@ describe('delete is per-user dismissal, never a document delete', () => {
     // An optimistic removal would show a message as deleted and have it reappear on the next
     // 90-second poll — which reads as the delete button being broken.
     const bell = src('src/components/NotificationBell.tsx');
-    const fn = bell.slice(bell.indexOf('const confirmDelete ='));
-    const body = fn.slice(0, fn.indexOf('\n  };') + 5);
-    expect(body.indexOf('if (!res.ok) { setFailed(true); return; }')).toBeLessThan(body.indexOf('setItems((prev) => prev.filter'));
+    // Since 2026-09-22 the request lives in the inbox hook (`deleteIds`) and the panel's confirmDelete
+    // acts on its answer — the ORDER is the invariant: the server says ok, THEN the rows go.
+    const fn = bell.slice(bell.indexOf('const deleteIds = useCallback('));
+    const body = fn.slice(0, fn.indexOf('\n  }, [') + 5);
+    expect(body.indexOf('if (!res.ok) return false;')).toBeLessThan(body.indexOf('setItems((prev) => prev.filter'));
+    expect(bell).toContain('if (await deleteIds(ids)) cancelSelection();');
+    expect(bell).toContain('else setFailed(true);');
     // A failed delete is stated on screen rather than looking like nothing happened.
     expect(bell).toContain('nothing was removed');
   });
@@ -142,7 +146,7 @@ describe('the delete flow cannot destroy anything in one tap', () => {
   });
 
   it('step 1 — the header offers only Select (plus close) until selecting', () => {
-    expect(bell).toContain('>\n                      Select\n                    <');
+    expect(bell).toMatch(/>\n\s+Select\n\s+</);
     expect(bell).toContain('setSelecting(true)');
   });
 
@@ -162,7 +166,7 @@ describe('the delete flow cannot destroy anything in one tap', () => {
 
   it('the confirmation names the exact COUNT and what deleting does not do', () => {
     expect(bell).toContain('Delete {selected.size} message');
-    expect(bell).toContain('other\n                      people keep');
+    expect(bell).toMatch(/other\n\s+people keep/);
     expect(bell).toContain('OK, delete');
     expect(bell).toContain('Cancel');
   });
@@ -176,6 +180,8 @@ describe('the delete flow cannot destroy anything in one tap', () => {
   });
 
   it('closing the panel drops a half-made selection rather than keeping it armed', () => {
-    expect(bell).toContain('else cancelSelection();');
+    // The panel's close path (backdrop, ✕, a tapped reply) goes through `close`, which cancels first.
+    expect(bell).toContain('const close = () => { cancelSelection(); onClose(); };');
+    expect(bell.match(/onClick=\{close\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });

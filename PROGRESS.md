@@ -77500,6 +77500,310 @@ third. That is defensible — they are genuinely different kinds of evidence —
 this build proven?" still has no single answer, and a NEW actor proving a NEW fact still has to be
 wired into whichever reader happens to cover it.
 
+---
+
+## 2026-09-21 — 🔍 THE NESTED-REPO PROBE: the signal was destroyed before the collector ran
+
+The second item of the admin's list, and the one open root cause that came with its own written
+prescription. `gitCloneGuard.ts` closed the door in the morning and recorded why the tidier fix was
+unavailable, in as many words:
+
+> *"`IGNORED_LIST_DIRS` in `E2BActuator` prunes `.git` **inside the sandbox**, so `listFiles` never
+> returns a single `.git` path and `collectWorkspaceFiles` therefore cannot tell a nested repository
+> from an ordinary subdirectory. The one signal that would identify it is destroyed before the
+> collector runs. … Whoever re-opens this needs a dedicated nested-repo probe (`find . -name .git -not
+> -path ./.git`), **not a change to the collector's skip list**."*
+
+Built to that instruction, and the skip list is untouched — widening it would put every `.git` blob
+back on the wire and reverse the 226-second fix `buildListFilesCommand` exists for (report a876b7bb).
+
+### What it costs and what it buys
+
+One extra `find`, pruned the same way the file listing is pruned. **No model call.** It answers one
+question — *is there a second git repository inside this workspace, and where?* — and
+`analyzeProjectIntegrity` then judges each project on its own.
+
+That regrouping is correct in general rather than a patch for one autopsy: **every check in that
+module pairs files with other files** (two root mounts, one stylesheet imported twice, one module
+under two convention roots), and **across a repository boundary every one of those pairings is false
+by construction.** Two independent projects legitimately each have a root mount, their own global
+stylesheet and their own `src/components/Button.tsx`. A user's own submodule or vendored example app
+produces the identical false findings with nobody at fault — which is what made the autopsy's
+`INTEGRITY_DUPLICATE_ENTRY` / `_STYLESHEET` / `INTEGRITY_FOCUS_CONFLICT` inevitable once a second copy
+existed, and what made the heal spend **~3.5 minutes and 10 model calls editing the copy the engine
+had itself created**.
+
+### 🔒 What it is NOT allowed to do
+
+It finds and it reports. **It never deletes, never excludes a file from the durable copy, and never
+edits anything** — a source-level test asserts the module contains no such call. `PROGRESS.md` rejects
+the deleting alternatives by name (a nested `package.json` is how every monorepo is laid out; *"a
+subtree that duplicates the root"* would throw away a user's real files), and this module cannot tell
+a legitimate nested repository from our own mistake. So it makes the fact KNOWN — `NESTED_REPO_FOUND`,
+admin-only, naming the path, the file count, and saying plainly that nothing was removed.
+
+**Nothing is dropped from the analysis either.** Files are GROUPED, not filtered, so a real duplicate
+*inside* one project is still reported exactly as before.
+
+### Three decisions worth not re-deriving
+
+- **The root's own `.git` is excluded in the PARSER, not with `find -not -path`.** The recorded cure
+  spells it `find . -name .git -not -path ./.git`, which works only when the root is literally `.`;
+  interpolating a real absolute root into a `-path` pattern makes the answer depend on trailing
+  slashes and shell quoting. The parser already holds the root, so it answers exactly — and the
+  decision is unit-testable instead of living in a string.
+- **`ok` is ANDed per project, never recomputed over the merged arrays.** Two projects with one focus
+  owner each would fail a `focusOwners.length <= 1` test over the union — the exact false finding the
+  split exists to remove. Reversion-proven.
+- **The probe takes `SANDBOX_WORKSPACE_ROOT` from `lib/workspacePath`, not a sixth private copy.**
+  Five files already carry `const WORKSPACE_ROOT = '/home/user/workspace'`. A probe searching a root
+  the actuator is not using would return nothing, for ever, with nothing failing.
+
+### Verification
+
+`tests/theNestedRepoLooksLikeAFolder.test.ts` — 26 cases, **reversion-proven both ways**: recomputing
+`ok` over the merged arrays fails 2, putting `.git` back in the probe's prune list fails 1. The prune
+list is asserted against the actuator's exported `isIgnoredListPath`, so the two cannot drift; and the
+file listing is asserted to STILL prune `.git`, because widening that list is the rejected fix.
+
+Full gate: typecheck · server typecheck · unused imports · native guard · **28,268 tests** · build ·
+bundle · boot · deps. No user-facing surface changed.
+
+### ⚠️ Honest limit
+
+The probe runs where the integrity analysis runs, so it sees the sandbox as it is at that moment. A
+nested repository created *after* that point is not seen until the next turn — acceptable, because
+`gitCloneGuard` is what stops one being created at all, and this is the detection half for the ones
+that already exist.
+
+---
+
+## 2026-09-21 — 💰 TWO `hasEverPaid`s DISAGREED, AND NEITHER OF THEM WAS THE BUG
+
+Third item of the admin's list. `adminUserListQuery.ts` had recorded the pair honestly rather than
+picking one, and left the question open in exactly these words:
+
+> *"They disagree about a wallet carrying `lastRechargeAt` with no `totalMoneySpent`. … Unifying them
+> is a MONEY-SEMANTICS decision (does a recharge timestamp alone make somebody a customer?)"*
+
+### 🔴 Reading the WRITER answers it — the predicates were arguing about a false fact
+
+`payments.ts` has one real-money credit path, and it wrote:
+
+```
+const amountPaid = n(txData.amountPaid);   // n() returns 0 for anything non-finite
+…
+update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
+update.lastRechargeAt  = now;              // ← unconditional
+```
+
+So a transaction row whose `amountPaid` is absent, a string or NaN — a legacy row, a hand-fixed one,
+a provider payload that changed shape — **and the promo branch above it**, all added **₹0** and still
+stamped the wallet. The wallet then said *"they recharged"* and *"they have paid us nothing"* at the
+same time, and both sentences were read as the answer to "is this a paying customer?":
+
+- **`FreeTierBuildRouting.hasEverPaid`** reads the money ⇒ *not* a customer — routed to the cheap
+  engines, shown as **Free** on the admin Users list.
+- **`giftSpend.hasEverPaid`** also accepts the stamp ⇒ a customer, so on an untracked wallet
+  `giftRemaining` returns 0 and **the welcome gift buys a hosting plan** — the one thing the admin
+  banned in capitals (*"gift … plan purchase me kam nahi ayenge!!!!!"*).
+
+**A recharge stamp alone does not make somebody a customer, because the one writer set it when nobody
+paid.** That is the money-semantics answer, and it comes from the code rather than a preference.
+`lastRechargeAt` is also shown to the USER (`routes/profile.ts`), where a stamp for a recharge that
+never happened is its own dishonesty. It is now gated on money actually arriving; a wallet already
+carrying a false stamp keeps it, which is precisely the legacy case the generosity below exists for.
+
+### 🔎 The sibling found while doing it (rule 3)
+
+**`FreeTierBuildRouting.hasEverPaid` was still bypassing `walletLifetime.ts`** — reading
+`totalMoneySpent` alone, not the snake_case spelling. That module exists because the money lives
+under two names (`accountMerge.ts` writes both), and its own docblock says *"a new READER that
+bypasses this file is the only way the bug comes back"* — the bug being the admin Users page showing
+₹0 for every account. Here it is the predicate that decides whether somebody is routed to the cheap
+engines. It goes through the shared reader now, taking the MAX so a merged wallet is not double-counted.
+
+### 🔒 They are NOT unified into one function, and that is the honest answer
+
+The task said "centralise to one". Reading them says otherwise: they answer **two different
+questions**, and their errors are not equal.
+
+| | reads | a wrong answer costs |
+|---|---|---|
+| `FreeTierBuildRouting.hasEverPaid` | money only, both spellings | spending Claude on a non-customer |
+| `giftSpend.walletMayBuyWithItsBalance` | money, **or** a legacy bare stamp | telling a real payer their money is not real |
+
+The second is deliberately generous, and `giftSpend`'s own docblock already argued why. What WAS a
+hazard is that both were exported under **one name** on the money path — a wrong import waiting to
+happen, and `adminUserListQuery` had to spell out in prose which one it meant. **One name, one
+meaning:** the gift predicate is renamed, the asymmetry is asserted in a test instead of described in
+a comment, and the open root cause is closed where it was recorded.
+
+### Honesty half (rule 5)
+
+Three comments described the retired state and were corrected with it: `adminUserListQuery.ts`'s open
+root cause, `refundPolicy.ts`'s formula, and `walletLifetime.ts`'s note — which now records that the
+build router was found still bypassing it, the exact return that docblock warns about.
+
+### Verification
+
+`tests/aRechargeStampWithoutMoney.test.ts` — 15 cases, **reversion-proven both ways**: restoring the
+unconditional stamp fails 5, returning the router to one spelling fails 2. A source-level guard holds
+the gated write, because a behavioural test cannot see an unconditional assignment re-added beside
+the guarded one — on the line that decides whether the welcome gift can buy a plan.
+
+Full gate: typecheck · server typecheck · unused imports · native guard · **28,408 tests** · build ·
+bundle · boot · deps.
+
+---
+
+## 2026-09-21 — 🔔 THE TRAY'S PR 2: one honest row, and two that would have been guesses
+
+Fourth item. `PROGRESS.md` (2026-09-20) shipped PR 1 and named this as the bigger half:
+
+> *"The tray shows what the engine already emits. The larger category — 'connect GitHub', 'connect a
+> database', 'point your domain' — is still prose inside the model's summary and reaches no
+> structured surface. PR 2 derives those from facts the server already holds … at zero model cost."*
+
+`userActions.ts` had reserved the shape in as many words: *"PR 2 adds 'connect' (GitHub / database /
+domain)"*. That kind now exists — and **only one of the three categories has a fact behind it.**
+
+### ⚠️ The three, checked one at a time rather than assumed (rule 6)
+
+| category | the fact | verdict |
+|---|---|---|
+| **database** | `databaseReadiness` — the app's OWN files save data, the vault has no database | ✅ complete, tested, zero cost |
+| **GitHub** | **no durable per-user connection record exists at all.** The token arrives per request (`githubTokenFromRequest`) and the build reads a CLIENT-SUPPLIED `githubConnected` hint | ❌ a row would be a guess |
+| **domain** | `DomainLink` records that a domain is linked and stores the DNS records to add — but carries **no verified status**, so "still not pointed" needs a live DNS probe | ❌ a propagating answer would nag someone who already did it |
+
+**Shipping one honest row beats shipping three, two of which are guesses.** A row derived from a
+client hint is a row that tells a user to connect something they connected last week. Both gaps are
+named in `connectActions.ts` so the next session re-opens them with the missing fact rather than a
+heuristic.
+
+### What the database row is, and what it cannot do
+
+`databaseReadiness` has always known this — the app's own files save data, the vault has no database —
+and it answered **only an endpoint the user has to go looking for**. In the build's own summary it was
+prose. Now it is a row.
+
+- 🔒 **It never blocks.** `blocking` is what makes the tray open ITSELF, and that is reserved for a
+  build genuinely stopped at a gate; using it for "do this before you publish" is exactly how a user
+  learns to dismiss the tray without reading it. It lights the badge and sits under *"Your app needs
+  this to work"*.
+- 🔒 **It cannot nag.** `connected` accepts EITHER the provider marker OR any real credential, so
+  somebody who pasted a `DATABASE_URL` by hand and never opened the Database screen is not told they
+  have no database. That rule already existed; this change adds no new judgement.
+- 🔒 **One row, not one per build** — the id is derived from the THING (`actionKey('connect', …)`).
+- ⚠️ **Neither wording names the provider.** The row is read by somebody who may never have chosen
+  one; the screen it sends them to names it there. The wording does follow `canProvision`, because an
+  offer we cannot fulfil is worse than no offer.
+- **Zero model cost.** The app's files and the vault are already in hand; the only extra read decides
+  the wording, never whether the row appears.
+
+### 🔴 The durable copy, not this turn's diff
+
+`appNeedsDatabase` reads the app's own source, so judging `writtenFiles` on an EDIT turn — the diff —
+would report *"no database needed"* about an app full of persistence. The route loads the durable
+copy, which is the same source the readiness endpoint uses, so the tray and that screen cannot
+disagree.
+
+### 🔒 The mirrored union is now test-locked, and TypeScript cannot do it
+
+The browser may not import server code, so `userActionView.ts` keeps its **own copy** of
+`UserActionKind`. Adding a kind on one side and forgetting the other produces **no error at all** —
+the row falls through every branch and the tray hands the user a generic sentence. The suite reads
+both unions out of their sources and fails when they differ.
+
+⚠️ Worth recording because it cost real time: the first version of that check failed on its own
+comment. The comment contained `src/server/` followed by a wildcard, whose `/**` the test's
+comment-stripper read as the start of a block comment — swallowing the very line it was meant to
+assert on. **A source-level guard can be defeated by prose.**
+
+### Verification
+
+`tests/theTrayKnowsWhatIsNotConnected.test.ts` — 17 cases, **reversion-proven both ways**: letting the
+client mirror fall behind fails 2, making the row blocking fails 2. Full gate: typecheck · server
+typecheck · unused imports · native guard · **28,481 tests** · build · bundle · boot · deps.
+
+### 🔴 Still open — PR 3, and the two facts above
+
+PR 3 gives the builder a tool to raise and resolve rows itself, and feeds the open list into the
+per-turn context — deliberately the per-turn message, not the cached prefix, or every build's prompt
+cache breaks. The GitHub and domain rows wait on a durable connection record and a stored
+verification status respectively; neither is invented here.
+
+---
+
+## 2026-09-21 — 🎨 THE THEME SWEEP: 896 → 342, and the floor is NOT zero
+
+Fifth and last item. The ratchet's number across the whole client: **896 colour literals in 106 files
+→ 342 in 70.** Run with the existing codemod, heaviest first, in two batches with the full suite
+between them.
+
+### What the number now means, because "342 left" is not one thing
+
+| | literals | what they are |
+|---|---|---|
+| migrated | **554** | table-driven, every row either EXACT (the token emits the same value `theme-compat.css` already remapped) or a named readability FIX |
+| **irreducible** | **132** | 7 skip-listed files — see below. These can never go |
+| still migratable | **210** | the codemod left them because it could not classify them as EXACT or FIX. Hand decisions, not a rerun |
+
+🔴 **`CLAUDE.md` says `theme-compat.css` "is deleted when the baseline reaches zero". As written, that
+day cannot come** — 132 literals belong to files that must keep them. The honest target is
+**zero MIGRATABLE literals**, at which point the compat layer covers only the irreducible set and can
+be narrowed to exactly those files rather than deleted.
+
+### The seven files that must keep their literals, each for a different reason
+
+Four were already skip-listed; **three were added today**, after the full sweep left them at 100% with
+nothing in the codemod saying why — so the next session would have re-attempted them:
+
+- **`previewUtils.ts` (32)** — a CSS string injected into the PREVIEW IFRAME, which is the *user's app
+  document*. Our `var(--…)` tokens do not exist there. Same TRAP 2 as `MultiPageBuilder`.
+- **`SEOOptimizer.tsx` (25)** — Google's and Facebook's own result/card colours (`#1a0dab`,
+  `#006621`, `#f0f2f5`). Repainting them makes the mockup stop looking like the thing it mocks.
+  CLAUDE.md already states this policy for third-party previews; the codemod had no record of it.
+- **`frameworkOptions.ts` (21)** — each framework's OWN brand colour (`#61DAFB` React, `#FF3E00`
+  Svelte, `#E34F26` HTML5). Theming them would make a logo's colour follow the user's theme.
+
+### 🔴 ONE REAL REGRESSION, CAUGHT BY A PINNED TEST — a status dot is not a surface
+
+`agentV3History.ts` was migrated and **broken by it**, exactly as CLAUDE.md warns by example (*"a
+status dot whose `bg-emerald-500` a test names … must not be migrated as a side effect"*):
+
+- `bg-zinc-600` → **`bg-raised`** — a SURFACE token, so the neutral dot took the colour of the card it
+  sits on and all but disappeared;
+- `bg-zinc-500` → **`bg-faint`** — a TEXT token used as a background;
+- `bg-emerald-500` → `bg-emerald-500 **text-on-accent**` — a label colour added to an element that
+  carries no text.
+
+**Reverted in full and skip-listed with the reason.** The codemod's table reads a `bg-*` as a fill; a
+semantic swatch needs a hand decision, and there is no rule that distinguishes the two automatically.
+
+### Three pinned tests were SUPERSEDED, and each was checked rather than re-baselined
+
+- **`uiVariants`** — asserted the raw `bg-[#161b22]` under the heading *"card uses the shared surface
+  token"*. The change is what made that heading literally true; the pin moved to `bg-card`. The
+  input case keeps a new assertion that invalid still differs visibly from valid.
+- **`androidBack`** — the exit dialog's `bg-white/10` → `bg-raised`. The invariant is *Exit
+  destructive, Cancel calm*, and it holds: `bg-red-600` is untouched and `bg-raised` IS the calm
+  surface, now themed instead of a white wash that only worked on a dark ground.
+- **`visualRegression`** snapshots — regenerated and **read back**, not accepted blind: every solid
+  fill carries `text-on-accent` (white on indigo), every themed surface carries a themed ink.
+
+### Verification
+
+Full gate on the final state: typecheck · server typecheck · unused imports · native guard ·
+**28,511 tests** · build · bundle · boot · deps. The ratchet itself is the proof the number only went
+down; `themeTokensOnly`, `themeSystem`, `inlineThemeColours`, `themeMigrate` and `theme` all pass.
+
+### 🔴 Still open
+
+The **210 migratable literals** are hand work the codemod deliberately refuses to guess at — its own
+rule is that a row is EXACT or FIX or it is left and listed. That is a slice for a later session, and
+the file-by-file rule still applies: a pinned literal is a decision somebody made, and the test that
+names it is the warning.
 ## 2026-09-21 — 🔴 CORRECTION to the entry above, the same evening: the review found twelve defects, and one sentence up there was false
 
 The adversarial review of #3231 (three lenses, every finding independently refuted; 12 of 12 survived)

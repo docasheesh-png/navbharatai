@@ -142,12 +142,12 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
   }, [ghHeaders]);
 
   if (apps === null) {
-    return <p className="text-xs text-white/45 flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Loading your apps…</p>;
+    return <p className="text-xs text-muted flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Loading your apps…</p>;
   }
 
   if (apps.length === 0) {
     return (
-      <p className="text-xs text-white/45 leading-relaxed">
+      <p className="text-xs text-muted leading-relaxed">
         {listError || 'No apps yet. Build one and it will appear here — even if you close this screen.'}
       </p>
     );
@@ -156,65 +156,65 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-bold text-white flex items-center gap-1.5"><Package size={14} /> Your apps</h4>
-        <button onClick={() => void loadApps()} className="text-white/40 hover:text-white p-1" aria-label="Refresh list">
+        <h4 className="text-sm font-bold text-ink flex items-center gap-1.5"><Package size={14} /> Your apps</h4>
+        <button onClick={() => void loadApps()} className="text-faint hover:text-ink p-1" aria-label="Refresh list">
           <RefreshCw size={13} />
         </button>
       </div>
       {/* Nothing here spends money — said out loud, because the build itself does. */}
-      <p className="text-[11px] text-white/40 leading-snug">
+      <p className="text-[11px] text-faint leading-snug">
         Every app you have built with NavBharatAI. Opening one is free — you already paid when it was built.
       </p>
 
       {apps.map((app) => {
         const st = state[app.id];
         return (
-          <div key={app.id} className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div key={app.id} className="rounded-xl border border-line bg-raised overflow-hidden">
             <div className="flex items-center gap-2 p-3">
               <button onClick={() => open(app)} className="flex-1 text-left min-w-0">
-                <span className="block text-sm font-semibold text-white truncate">{app.appName || app.repo}</span>
-                <span className="block text-[11px] text-white/40 truncate">
+                <span className="block text-sm font-semibold text-ink truncate">{app.appName || app.repo}</span>
+                <span className="block text-[11px] text-faint truncate">
                   {app.owner}/{app.repo}{app.createdAt ? ` · ${fmtDate(app.createdAt)}` : ''}
                 </span>
               </button>
               <button onClick={() => void forget(app)} aria-label={`Remove ${app.appName || app.repo} from this list`}
-                className="shrink-0 text-white/30 hover:text-red-400 p-1">
+                className="shrink-0 text-faint hover:text-danger p-1">
                 <Trash2 size={14} />
               </button>
             </div>
 
             {openId === app.id && (
-              <div className="px-3 pb-3 space-y-2 border-t border-white/5 pt-3">
+              <div className="px-3 pb-3 space-y-2 border-t border-line pt-3">
                 {(!st || st.kind === 'checking') && (
-                  <p className="text-xs text-white/45 flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Checking this build…</p>
+                  <p className="text-xs text-muted flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Checking this build…</p>
                 )}
                 {st?.kind === 'building' && (
-                  <p className="text-xs text-indigo-300 flex items-center gap-2"><Clock size={13} /> Still building. Come back in a few minutes.</p>
+                  <p className="text-xs text-accent-text flex items-center gap-2"><Clock size={13} /> Still building. Come back in a few minutes.</p>
                 )}
                 {st?.kind === 'failed' && (
-                  <p className="text-xs text-amber-300 flex items-start gap-2">
+                  <p className="text-xs text-warn flex items-start gap-2">
                     <X size={13} className="shrink-0 mt-0.5" />
                     <span>This build did not finish. Build it again from the app builder — a failed build was never charged.</span>
                   </p>
                 )}
                 {st?.kind === 'expired' && (
-                  <p className="text-xs text-amber-300 flex items-start gap-2">
+                  <p className="text-xs text-warn flex items-start gap-2">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                     <span>GitHub keeps a built file for 14 days, and this one has passed that. Build it again to get a fresh file.</span>
                   </p>
                 )}
                 {st?.kind === 'unknown' && (
                   // Never presented as "your build is broken" — we could not ask, which is a different fact.
-                  <p className="text-xs text-white/50 flex items-start gap-2">
+                  <p className="text-xs text-muted flex items-start gap-2">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" /><span>{st.why}</span>
                   </p>
                 )}
                 {st?.kind === 'ready' && (
                   <>
-                    <p className="text-xs text-emerald-300 flex items-center gap-2"><CheckCircle2 size={13} /> Ready</p>
+                    <p className="text-xs text-success flex items-center gap-2"><CheckCircle2 size={13} /> Ready</p>
                     {st.artifacts.map((a) => (
                       <button key={String(a.id)} onClick={() => void download(app, a.id, String(a.name))}
-                        className="w-full text-left px-3 py-2 rounded-lg bg-indigo-600/90 hover:bg-indigo-500 text-white text-xs font-bold">
+                        className="w-full text-left px-3 py-2 rounded-lg bg-indigo-600/90 hover:bg-indigo-500 text-on-accent text-xs font-bold">
                         Download {String(a.name)}
                       </button>
                     ))}

@@ -72,12 +72,12 @@ export const FreeGiftBanner: React.FC<FreeGiftBannerProps> = ({ freeGift, tokens
     return (
       <div className="rounded-[1.6rem] border border-amber-500/25 bg-amber-500/[0.07] p-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-black tracking-tight text-amber-200">
+            <p className="text-sm font-black tracking-tight text-warn">
               Your free credit is finished
             </p>
-            <p className="mt-1 text-[11px] leading-relaxed text-[#8b949e]">
+            <p className="mt-1 text-[11px] leading-relaxed text-muted">
               You&apos;ve used all ₹{rupees(freeGift.capTokens)} of the free credit NavBharatAI gives every
               new account. Add credit to keep building — you only pay for what you actually use.
             </p>
@@ -99,21 +99,21 @@ export const FreeGiftBanner: React.FC<FreeGiftBannerProps> = ({ freeGift, tokens
     <div className="rounded-[1.6rem] border border-emerald-500/20 bg-emerald-500/[0.06] p-4 sm:p-5">
       <div className="flex items-start gap-3">
         {isLast ? (
-          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-success" />
         ) : (
-          <Gift className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+          <Gift className="mt-0.5 h-4 w-4 shrink-0 text-success" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-black tracking-tight text-emerald-200">
+          <p className="text-sm font-black tracking-tight text-success">
             ₹{rupees(freeGift.giftedTokens)} of ₹{rupees(freeGift.capTokens)} free credit received
           </p>
-          <p className="mt-1 text-[11px] leading-relaxed text-[#8b949e]">
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
             {freeGift.nextCreditAt ? (
               <>
                 Your next ₹{rupees(freeGift.remainingTokens > rupeesToTokens(200, tokensPerRupee)
                   ? rupeesToTokens(200, tokensPerRupee)
                   : freeGift.remainingTokens)} arrives{' '}
-                <span className="font-semibold text-emerald-300">{creditArrivesIn(freeGift.nextCreditAt)}</span>
+                <span className="font-semibold text-success">{creditArrivesIn(freeGift.nextCreditAt)}</span>
                 {isLast ? ' — and that is the last one.' : '.'}
               </>
             ) : (
@@ -122,7 +122,7 @@ export const FreeGiftBanner: React.FC<FreeGiftBannerProps> = ({ freeGift, tokens
           </p>
 
           {/* Progress along the ladder — how much of the one-time gift has arrived. */}
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-raised">
             <div
               className="h-full rounded-full bg-emerald-400/80 transition-all"
               style={{ width: `${usedPct}%` }}

@@ -54,14 +54,14 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
             if (e.key === 'Escape') { e.preventDefault(); cancel(); }
           }}
           rows={2}
-          className="w-full resize-none rounded-lg bg-black/30 border border-indigo-500/40 px-2 py-1.5 text-[12px] text-white outline-none focus:border-indigo-400"
+          className="w-full resize-none rounded-lg bg-well border border-indigo-500/40 px-2 py-1.5 text-[12px] text-ink outline-none focus:border-indigo-400"
         />
         <div className="mt-1 flex items-center gap-1.5">
           <button
             type="button"
             onClick={commit}
             title="Save and ask again"
-            className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30"
+            className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-indigo-600/20 text-accent-text hover:bg-indigo-600/30"
           >
             <Check className="w-3 h-3" /> Save
           </button>
@@ -69,17 +69,17 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
             type="button"
             onClick={cancel}
             title="Cancel"
-            className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10"
+            className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-raised text-muted hover:text-ink hover:bg-raised-hover"
           >
             <X className="w-3 h-3" /> Cancel
           </button>
-          <span className="text-[9px] text-[#586069]">Everything after this is replaced by the new answer</span>
+          <span className="text-[9px] text-faint">Everything after this is replaced by the new answer</span>
         </div>
       </div>
     );
   }
 
-  const btn = 'p-1 rounded text-[#484f58] transition-colors';
+  const btn = 'p-1 rounded text-faint transition-colors';
   return (
     <div className={`flex items-center gap-0.5 ${className ?? ''}`}>
       <button
@@ -87,7 +87,7 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
         onClick={() => { setDraft(text); setEditing(true); }}
         title="Edit — re-write this and get a new answer"
         aria-label="Edit message"
-        className={`${btn} hover:text-indigo-400 hover:bg-white/10`}
+        className={`${btn} hover:text-accent-text hover:bg-raised`}
       >
         <Pencil className="w-3 h-3" />
       </button>
@@ -98,7 +98,7 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
         onClick={() => { if (window.confirm('Delete this message? The replies to it will go as well.')) onDelete(); }}
         title="Delete this message and its replies"
         aria-label="Delete message"
-        className={`${btn} hover:text-red-400 hover:bg-white/10`}
+        className={`${btn} hover:text-danger hover:bg-raised`}
       >
         <Trash2 className="w-3 h-3" />
       </button>

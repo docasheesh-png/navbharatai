@@ -56,7 +56,7 @@ export const ExitConfirmDialog: React.FC<ExitConfirmDialogProps> = ({ open, onEx
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-5 bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-5 bg-scrim backdrop-blur-sm"
       role="presentation"
       onKeyDown={onKeyDown}
     >
@@ -66,16 +66,16 @@ export const ExitConfirmDialog: React.FC<ExitConfirmDialogProps> = ({ open, onEx
         aria-modal="true"
         aria-labelledby="nbai-exit-title"
         aria-describedby="nbai-exit-body"
-        className="w-full max-w-[340px] rounded-2xl bg-[#161b22] border border-white/10 shadow-2xl p-5"
+        className="w-full max-w-[340px] rounded-2xl bg-card border border-line shadow-2xl p-5"
       >
         <div className="flex items-center gap-2.5 mb-2">
           <span className="w-9 h-9 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
-            <LogOut size={16} className="text-red-400" />
+            <LogOut size={16} className="text-danger" />
           </span>
-          <h2 id="nbai-exit-title" className="text-base font-bold text-white">Exit NavBharatAI?</h2>
+          <h2 id="nbai-exit-title" className="text-base font-bold text-ink">Exit NavBharatAI?</h2>
         </div>
 
-        <p id="nbai-exit-body" className="text-sm text-white/60 leading-relaxed mb-5">
+        <p id="nbai-exit-body" className="text-sm text-muted leading-relaxed mb-5">
           Do you want to close the app? Your work is saved.
         </p>
 
@@ -85,13 +85,13 @@ export const ExitConfirmDialog: React.FC<ExitConfirmDialogProps> = ({ open, onEx
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-white/30"
+            className="flex-1 px-4 py-2.5 rounded-xl bg-raised hover:bg-raised-hover text-ink text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-line"
           >
             Cancel
           </button>
           <button
             onClick={onExit}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-red-400/60"
+            className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent text-sm font-bold transition-colors focus:outline-none focus:ring-2 focus:ring-red-400/60"
           >
             Exit
           </button>

@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   giftRemaining, paidSpendableTokens, giftAfterSpend, giftAfterGrant,
-  checkPlanPayable, hasEverPaid,
+  checkPlanPayable, walletMayBuyWithItsBalance,
 } from '../src/server/lib/giftSpend';
 import { computePlanPurchase } from '../src/server/lib/hostingPlan';
 import { computeDebitedWallet } from '../src/server/lib/walletDebit';
@@ -53,7 +53,7 @@ describe('the migration — wallets that existed before this rule', () => {
   // token they hold came from us.
   it('a never-paid wallet with no tracked figure is ALL gift', () => {
     const legacy = { tokenBalance: 50_000 };
-    expect(hasEverPaid(legacy)).toBe(false);
+    expect(walletMayBuyWithItsBalance(legacy)).toBe(false);
     expect(giftRemaining(legacy)).toBe(50_000);
     expect(paidSpendableTokens(legacy)).toBe(0);
   });
@@ -66,9 +66,12 @@ describe('the migration — wallets that existed before this rule', () => {
   });
 
   it('an empty or blank recharge stamp is not a payment', () => {
-    expect(hasEverPaid({ tokenBalance: 10, lastRechargeAt: '' })).toBe(false);
-    expect(hasEverPaid({ tokenBalance: 10, lastRechargeAt: '   ' })).toBe(false);
-    expect(hasEverPaid({ tokenBalance: 10, total_money_spent: 0 })).toBe(false);
+    // ⚠️ RENAMED 2026-09-21 — same predicate, a name that says which question it answers.
+    // `AgentV3/FreeTierBuildRouting` exports its own `hasEverPaid` with a deliberately different
+    // rule, and two exports of one name on the money path is a wrong import waiting to happen.
+    expect(walletMayBuyWithItsBalance({ tokenBalance: 10, lastRechargeAt: '' })).toBe(false);
+    expect(walletMayBuyWithItsBalance({ tokenBalance: 10, lastRechargeAt: '   ' })).toBe(false);
+    expect(walletMayBuyWithItsBalance({ tokenBalance: 10, total_money_spent: 0 })).toBe(false);
   });
 });
 

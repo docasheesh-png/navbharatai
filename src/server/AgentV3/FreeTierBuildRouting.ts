@@ -1,5 +1,4 @@
 // Free-tier build routing (admin plan 2026-07-10) — a NEW public user still on their welcome bonus
-import { envFlag } from '../lib/envFlag';
 // (has never purchased) gets their builds on the CHEAP floor (GLM / Kimi), NEVER on Claude. Rationale
 // the admin set: NavBharatAI must not spend its expensive Claude budget on a user who has not paid yet.
 // The moment the user recharges (becomes a paying customer) they graduate to the normal Claude-first
@@ -16,6 +15,9 @@ import { envFlag } from '../lib/envFlag';
 // path. Pure + unit-tested; the route wires the decision into model selection, escalation, and the
 // build-failed message.
 
+import { envFlag } from '../lib/envFlag';
+import { lifetimeMoneySpentInr } from '../lib/walletLifetime';
+
 /** DORMANT switch. Free-tier cheap routing is inert unless this is exactly 'true'. */
 export function freeTierCheapEnabled(): boolean {
   return envFlag('AGENTV3_FREE_TIER_CHEAP');
@@ -25,6 +27,8 @@ export function freeTierCheapEnabled(): boolean {
 export interface FreeTierWallet {
   /** Total ₹ the user has ever spent buying tokens. 0 / absent ⇒ still on the welcome bonus. */
   totalMoneySpent?: unknown;
+  /** The same figure under its other spelling — see `walletLifetime.ts` for why both must be read. */
+  total_money_spent?: unknown;
 }
 
 /**
@@ -60,8 +64,14 @@ export function isFreeTierUser(wallet: FreeTierWallet | null | undefined): boole
  * that they never paid.
  */
 export function hasEverPaid(wallet: FreeTierWallet | null | undefined): boolean {
-  const paid = Number(wallet?.totalMoneySpent);
-  return Number.isFinite(paid) && paid > 0;
+  // 🔒 BOTH SPELLINGS, THROUGH THE ONE READER (2026-09-21). This read `wallet?.totalMoneySpent`
+  // alone. `walletLifetime.ts` exists because a wallet's lifetime money lives under two names —
+  // `payments.ts` increments the camelCase one and `accountMerge.ts` writes BOTH — and its docblock
+  // states the rule this function was quietly outside of: *"a new READER that bypasses this file is
+  // the only way the bug comes back"*. Reading one spelling is how the admin Users page came to show
+  // ₹0 for every account, and this predicate decides whether somebody is routed to the cheap engines.
+  // It takes the MAX, never the sum, so a merged wallet carrying both is not counted twice.
+  return lifetimeMoneySpentInr(wallet as { totalMoneySpent?: unknown }) > 0;
 }
 
 export interface FreeTierInputs {

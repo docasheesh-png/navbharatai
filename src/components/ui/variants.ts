@@ -13,10 +13,10 @@ const BUTTON_BASE =
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 disabled:opacity-40 disabled:cursor-not-allowed';
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-indigo-600 hover:bg-indigo-500 text-white',
-  secondary: 'bg-white/10 hover:bg-white/15 text-white border border-white/10',
-  ghost: 'bg-transparent hover:bg-white/10 text-[#8b949e] hover:text-white',
-  danger: 'bg-red-600 hover:bg-red-500 text-white',
+  primary: 'bg-indigo-600 hover:bg-indigo-500 text-on-accent',
+  secondary: 'bg-raised hover:bg-raised-hover text-ink border border-line',
+  ghost: 'bg-transparent hover:bg-raised text-muted hover:text-ink',
+  danger: 'bg-red-600 hover:bg-red-500 text-on-accent',
 };
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
@@ -32,17 +32,17 @@ export function buttonClasses(variant: ButtonVariant = 'primary', size: ButtonSi
 
 /** Resolve the surface className for a Card. Pure. */
 export function cardClasses(): string {
-  return 'bg-[#161b22] border border-white/10 rounded-2xl';
+  return 'bg-card border border-line rounded-2xl';
 }
 
 /** Resolve the className for a text Input / Select. Pure. */
 export function inputClasses(invalid = false): string {
   return (
-    'w-full bg-zinc-900 border rounded-xl px-3 py-2 text-sm text-white placeholder:text-[#6e7681] ' +
+    'w-full bg-card border rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint ' +
     'focus:outline-none transition-colors ' +
     (invalid
       ? 'border-red-500/60 focus:border-red-500'
-      : 'border-zinc-700 focus:border-indigo-500')
+      : 'border-line focus:border-indigo-500')
   );
 }
 
@@ -55,7 +55,7 @@ export function inputClasses(invalid = false): string {
 /** Floating panel for a click-triggered Popover (anchored under its trigger). Pure. */
 export function popoverPanelClasses(): string {
   return (
-    'absolute z-[90] mt-1 min-w-[10rem] rounded-xl border border-white/10 bg-[#1c2128] ' +
+    'absolute z-[90] mt-1 min-w-[10rem] rounded-xl border border-line bg-raised ' +
     'shadow-2xl p-1 focus:outline-none'
   );
 }

@@ -237,13 +237,13 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
   return (
     <div className="mb-5 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
       <div className="flex items-start gap-3 mb-3">
-        <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-success flex items-center justify-center shrink-0">
           <Database className="w-4.5 h-4.5" />
         </div>
         <div className="min-w-0">
-          <h4 className="text-sm font-bold text-white">Create a database in one tap</h4>
-          <p className="text-[11px] text-[#8b949e] leading-snug mt-0.5">
-            NavBharatAI creates the database inside <b className="text-[#c9d1d9]">your own</b> Supabase
+          <h4 className="text-sm font-bold text-ink">Create a database in one tap</h4>
+          <p className="text-[11px] text-muted leading-snug mt-0.5">
+            NavBharatAI creates the database inside <b className="text-body">your own</b> Supabase
             account, so your data and its billing stay yours. No keys to copy.
           </p>
         </div>
@@ -251,7 +251,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
 
       {status.connected ? (
         <>
-          <p className="text-[11px] text-emerald-300 flex items-center gap-1.5 mb-3">
+          <p className="text-[11px] text-success flex items-center gap-1.5 mb-3">
             <Check className="w-3.5 h-3.5" />
             Connected{status.orgName ? ` to ${status.orgName}` : ''}
           </p>
@@ -259,7 +259,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
             <button
               onClick={() => void createDatabase()}
               disabled={busy !== null}
-              className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
               {busy === 'create' ? 'Creating your database…' : 'Create database'}
@@ -267,7 +267,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
             <button
               onClick={disconnect}
               disabled={busy !== null}
-              className="text-xs font-semibold px-3 py-2 rounded-xl border border-white/10 text-[#8b949e] hover:text-white hover:bg-white/5 disabled:opacity-50"
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-line text-muted hover:text-ink hover:bg-raised disabled:opacity-50"
             >
               Disconnect
             </button>
@@ -279,13 +279,13 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
                why it is the second button and not the first. */
             <button
               onClick={() => void createDatabase(true)}
-              className="mt-2 text-[11px] font-semibold text-[#8b949e] underline hover:text-white"
+              className="mt-2 text-[11px] font-semibold text-muted underline hover:text-ink"
             >
               Want this app to have its own separate database instead? Create a new one
             </button>
           )}
           {busy === 'create' && (
-            <p className="text-[10px] text-[#8b949e] mt-2 leading-snug">
+            <p className="text-[10px] text-muted mt-2 leading-snug">
               This takes a minute or two — Supabase has to start the database before it can be used.
               We wait for it to be genuinely ready before telling you it is done.
             </p>
@@ -295,7 +295,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
         <button
           onClick={connect}
           disabled={busy !== null}
-          className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
+          className="flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-on-accent disabled:opacity-50"
         >
           {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
           Connect Supabase
@@ -303,12 +303,12 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
       )}
 
       {error && (
-        <p className="mt-3 text-[11px] text-amber-300 flex items-start gap-1.5 leading-snug">
+        <p className="mt-3 text-[11px] text-warn flex items-start gap-1.5 leading-snug">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
           <span>{error}</span>
         </p>
       )}
-      {done && <p className="mt-3 text-[11px] text-emerald-300 leading-snug">{done}</p>}
+      {done && <p className="mt-3 text-[11px] text-success leading-snug">{done}</p>}
 
       {/* The other end of the round trip. Most people arrive here mid-publish from Pro v5.0, and
           finishing the database left them to find their own way back. Shown ONLY when the v5.0 tab is
@@ -316,7 +316,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
       {done && v3TabOpen && (
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: V3_VIEW } }))}
-          className="mt-3 flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
+          className="mt-3 flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-emerald-500/30 text-success hover:bg-emerald-500/10"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to your app

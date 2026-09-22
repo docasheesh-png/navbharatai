@@ -15,6 +15,7 @@
 // sandbox). Designed to feed the existing fast-lane repair gate: each finding carries a precise,
 // actionable instruction the repair pass can act on, so these defects self-heal before a build ships.
 
+import { splitByProject } from './nestedRepoProbe';
 import { isNonAppPath } from '../lib/nonAppPaths';
 
 export interface FocusOwner {
@@ -334,8 +335,48 @@ export function findDuplicateComponentModules(files: Record<string, string>): Du
   return out.sort((a, b) => a.module.localeCompare(b.module));
 }
 
-/** Run every project-integrity check over the written file set. Pure + deterministic. */
-export function analyzeProjectIntegrity(files: Record<string, string>): ProjectIntegrityReport {
+/**
+ * Run every project-integrity check over the written file set. Pure + deterministic.
+ *
+ * 🔴 **`nestedRepoRoots` MAKES EACH PROJECT JUDGE ITSELF (2026-09-21).** Every check here pairs
+ * files with other files — two root mounts, one stylesheet imported twice, one module under two
+ * convention roots. **Across a repository boundary every one of those pairings is false by
+ * construction:** two independent projects legitimately each have a root mount, their own global
+ * stylesheet and their own `src/components/Button.tsx`.
+ *
+ * That is not a patch for one autopsy, though one is what found it: a sub-agent's `git clone` put a
+ * complete second copy of the user's app inside their app, and the heal then spent ~3.5 minutes and
+ * 10 model calls "fixing" duplicates between two different repositories. A user's own submodule or
+ * vendored example app produces the identical false findings with nobody at fault.
+ *
+ * 🔒 **Nothing is dropped.** Every file is still analysed — grouped, not filtered — so a real
+ * defect inside a nested repository is still reported. Omitting the argument is today's behaviour
+ * exactly, so a caller that cannot run the probe loses nothing.
+ */
+export function analyzeProjectIntegrity(
+  files: Record<string, string>,
+  nestedRepoRoots?: readonly string[],
+): ProjectIntegrityReport {
+  if (nestedRepoRoots && nestedRepoRoots.length > 0) {
+    const groups = splitByProject(files, nestedRepoRoots);
+    const reports = groups.map((g) => analyzeOneProject(g.files));
+    return {
+      focusOwners: reports.flatMap((r) => r.focusOwners),
+      duplicateStylesheets: reports.flatMap((r) => r.duplicateStylesheets),
+      orphanStylesheets: reports.flatMap((r) => r.orphanStylesheets),
+      duplicateEntryPoints: reports.flatMap((r) => r.duplicateEntryPoints),
+      duplicateComponentModules: reports.flatMap((r) => r.duplicateComponentModules),
+      // ⚠️ `ok` is per-project and ANDed, never recomputed over the merged arrays: two projects with
+      // one focus owner each would fail a `focusOwners.length <= 1` test over the union — which is
+      // the exact false finding this split exists to remove.
+      ok: reports.every((r) => r.ok),
+    };
+  }
+  return analyzeOneProject(files);
+}
+
+/** One project's own integrity — the whole of this function before repository grouping existed. */
+function analyzeOneProject(files: Record<string, string>): ProjectIntegrityReport {
   const focusOwners = findFocusOwners(files);
   const duplicateStylesheets = findDuplicateStylesheets(files);
   const orphanStylesheets = findOrphanStylesheets(files);

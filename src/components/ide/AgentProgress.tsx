@@ -20,7 +20,7 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({ steps }) => {
         {steps.map((step) => (
           <div key={step.id} className="flex items-center gap-3">
             <StatusIcon status={step.status} />
-            <span className={`text-xs font-medium ${step.status === 'running' ? 'text-white' : 'text-gray-400'}`}>
+            <span className={`text-xs font-medium ${step.status === 'running' ? 'text-ink' : 'text-muted'}`}>
               {step.label}
             </span>
           </div>
@@ -31,9 +31,9 @@ export const AgentProgress: React.FC<AgentProgressProps> = ({ steps }) => {
 
 const StatusIcon: React.FC<{ status: BuildStepStatus }> = ({ status }) => {
   switch (status) {
-    case 'complete': return <CheckCircle2 className="w-4 h-4 text-emerald-500" />;
+    case 'complete': return <CheckCircle2 className="w-4 h-4 text-success" />;
     case 'running': return <TirangaLoader className="w-4 h-4" />;
-    case 'error': return <AlertCircle className="w-4 h-4 text-rose-500" />;
+    case 'error': return <AlertCircle className="w-4 h-4 text-danger" />;
     default: return <Circle className="w-4 h-4 text-gray-700" />;
   }
 };

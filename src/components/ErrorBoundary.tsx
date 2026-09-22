@@ -54,14 +54,14 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return this.props.fallback || (
-        <div className="flex-1 flex items-center justify-center bg-[#0d1117] p-8">
-          <div className="max-w-sm w-full bg-[#161b22] border border-red-500/20 rounded-2xl p-6 text-center space-y-4">
+        <div className="flex-1 flex items-center justify-center bg-surface p-8">
+          <div className="max-w-sm w-full bg-card border border-red-500/20 rounded-2xl p-6 text-center space-y-4">
             <div className="w-12 h-12 bg-red-500/10 rounded-2xl flex items-center justify-center mx-auto">
-              <span className="text-red-400 text-2xl">⚠</span>
+              <span className="text-danger text-2xl">⚠</span>
             </div>
             <div>
-              <h2 className="text-sm font-black text-white uppercase tracking-widest">Something went wrong</h2>
-              <p className="text-[10px] text-[#484f58] font-bold uppercase tracking-wider mt-1">{this.state.errorMessage || 'An unexpected error occurred'}</p>
+              <h2 className="text-sm font-black text-ink uppercase tracking-widest">Something went wrong</h2>
+              <p className="text-[10px] text-faint font-bold uppercase tracking-wider mt-1">{this.state.errorMessage || 'An unexpected error occurred'}</p>
             </div>
             {/* 🔒 A RETRY THAT CANNOT WORK MUST NOT BE THE ONLY WAY OUT (admin 2026-08-27).
                 This button used to do one thing: clear the flag and re-render THE SAME children, with
@@ -79,24 +79,24 @@ export class ErrorBoundary extends Component<Props, State> {
                 land straight back on the screen that broke. */}
             {this.state.retries === 0 ? (
               <button
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-on-accent text-xs font-bold rounded-xl transition-all"
                 onClick={() => this.setState({ hasError: false, errorMessage: '', retries: 1 })}
               >
                 Try Again
               </button>
             ) : (
               <div className="space-y-2">
-                <p className="text-[10px] text-[#8b949e] font-semibold">
+                <p className="text-[10px] text-muted font-semibold">
                   Retrying did not help — this screen keeps failing.
                 </p>
                 <button
-                  className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all"
+                  className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-on-accent text-xs font-bold rounded-xl transition-all"
                   onClick={() => { try { window.location.href = '/'; } catch { /* nothing else to try */ } }}
                 >
                   Go to the home page
                 </button>
                 <button
-                  className="w-full px-4 py-2 bg-white/5 hover:bg-white/10 text-[#8b949e] text-xs font-bold rounded-xl transition-all"
+                  className="w-full px-4 py-2 bg-raised hover:bg-raised-hover text-muted text-xs font-bold rounded-xl transition-all"
                   onClick={() => this.setState({ hasError: false, errorMessage: '', retries: this.state.retries + 1 })}
                 >
                   Try again anyway

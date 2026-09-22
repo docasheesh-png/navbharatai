@@ -86,37 +86,37 @@ export function ProfessionalVoiceButton({ professionalId, conversationId, getHis
         onClick={() => setAsking(true)}
         aria-label={title || 'Talk with voice'}
         title={title || 'Talk with voice'}
-        className={className || 'w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-300 hover:text-indigo-200 flex items-center justify-center shrink-0'}
+        className={className || 'w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover border border-line text-accent-text hover:text-accent-text flex items-center justify-center shrink-0'}
       >
         {icon || <Mic className="w-4 h-4" />}
       </button>
 
       {asking && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-5"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim p-5"
           onClick={() => setAsking(false)}
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-sm rounded-2xl bg-[#161b22] border border-white/10 p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-indigo-300 flex items-center justify-center">
+          <div className="w-full max-w-sm rounded-2xl bg-card border border-line p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-accent-text flex items-center justify-center">
               <Mic className="w-6 h-6" />
             </div>
-            <h3 className="font-bold text-white text-center mb-2">{consent.title}</h3>
+            <h3 className="font-bold text-ink text-center mb-2">{consent.title}</h3>
             {/* THE PRICE, AND NOTHING ELSE (admin 2026-09-12: "user bina padhe hi start kar deta hai").
                 Big, red and centred, because the whole point of the change is that this line gets
                 read in the half-second before somebody taps Start. The longer explanation moved to
                 the live cost meter during the call — see voiceConsent for why. */}
-            <p className="text-center text-lg font-black text-red-400 mb-5">{consent.body}</p>
+            <p className="text-center text-lg font-black text-danger mb-5">{consent.body}</p>
             <button
               onClick={() => { setAsking(false); setHistory(getHistory ? getHistory() : []); setOpen(true); }}
-              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold"
+              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-on-accent font-bold"
             >
               {consent.confirm}
             </button>
             <button
               onClick={() => setAsking(false)}
-              className="mt-2 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 text-[#8b949e] text-sm font-semibold"
+              className="mt-2 w-full py-2 rounded-xl bg-raised hover:bg-raised-hover text-muted text-sm font-semibold"
             >
               {consent.cancel}
             </button>

@@ -3356,7 +3356,7 @@ export default function App() {
       {/* L3: skip to main content for keyboard/screen-reader users */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-indigo-600 focus:text-white focus:rounded-xl focus:text-sm focus:font-bold"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-indigo-600 focus:text-on-accent focus:rounded-xl focus:text-sm focus:font-bold"
       >
         Skip to main content
       </a>
@@ -3438,7 +3438,7 @@ export default function App() {
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
               <TirangaLoader className="w-8 h-8" />
-              <span className="text-xs text-[#8b949e] font-mono uppercase tracking-widest">Loading module…</span>
+              <span className="text-xs text-muted font-mono uppercase tracking-widest">Loading module…</span>
             </div>
           </div>
         }>
@@ -4351,7 +4351,7 @@ export default function App() {
                 onClick={onTap}
                 aria-label={label}
                 aria-current={active ? 'page' : undefined}
-                className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${active ? 'text-indigo-400' : 'text-[#484f58]'}`}
+                className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${active ? 'text-accent-text' : 'text-faint'}`}
               >
                 <span className="relative inline-flex">
                   {busy
@@ -4368,10 +4368,10 @@ export default function App() {
                   )}
                   {/* Admin 2026-07-07: the REAL built-file count on the Files item. */}
                   {typeof count === 'number' && count > 0 && (
-                    <span className="absolute -top-1.5 -right-2.5 min-w-[14px] px-0.5 h-3.5 rounded-full bg-indigo-600 text-white text-[8px] font-black leading-[14px] text-center" aria-label={`${count} files`}>{count > 99 ? '99+' : count}</span>
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[14px] px-0.5 h-3.5 rounded-full bg-indigo-600 text-on-accent text-[8px] font-black leading-[14px] text-center" aria-label={`${count} files`}>{count > 99 ? '99+' : count}</span>
                   )}
                 </span>
-                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${active ? 'text-indigo-400' : ''}`}>{label}</span>
+                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${active ? 'text-accent-text' : ''}`}>{label}</span>
                 {active && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             ))
@@ -4420,12 +4420,12 @@ export default function App() {
                   }}
                   aria-label={label}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-indigo-400' : 'text-[#484f58]'}`}
+                  className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${isActive ? 'text-accent-text' : 'text-faint'}`}
                 >
                   <span className="relative inline-flex">
                     <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
                   </span>
-                  <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                  <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-accent-text' : ''}`}>{label}</span>
                   {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
                 </button>
               );
@@ -4450,11 +4450,11 @@ export default function App() {
                 aria-label={label}
                 aria-current={isActive ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${
-                  isActive ? 'text-indigo-400' : isDisabled ? 'text-white/20' : 'text-[#484f58]'
+                  isActive ? 'text-accent-text' : isDisabled ? 'text-faint' : 'text-faint'
                 }`}
               >
                 <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />
-                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-indigo-400' : ''}`}>{label}</span>
+                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${isActive ? 'text-accent-text' : ''}`}>{label}</span>
                 {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             );
@@ -4485,7 +4485,7 @@ export default function App() {
           onClick={() => setFocusMode(false)}
           title="Exit Focus Mode (Esc)"
           aria-label="Exit Focus Mode — show header"
-          className="fixed z-[9999] top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/15 text-white/70 hover:text-white shadow-lg transition-all active:scale-90"
+          className="fixed z-[9999] top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-scrim hover:bg-scrim backdrop-blur-md border border-line text-body hover:text-ink shadow-lg transition-all active:scale-90"
           style={{ marginTop: 'env(safe-area-inset-top, 0px)', marginRight: 'env(safe-area-inset-right, 0px)' }}
         >
           <Minimize2 className="w-4 h-4" />

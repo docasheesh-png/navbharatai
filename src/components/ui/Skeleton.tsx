@@ -16,7 +16,7 @@ interface SkeletonProps {
 
 /** A single shimmer block. Size it with Tailwind height/width classes via `className`. */
 export function Skeleton({ className = '', style, rounded = 'rounded-md' }: SkeletonProps) {
-  return <div aria-hidden="true" className={`animate-pulse bg-white/10 ${rounded} ${className}`} style={style} />;
+  return <div aria-hidden="true" className={`animate-pulse bg-raised ${rounded} ${className}`} style={style} />;
 }
 
 /** A multi-line text shimmer; the last line is shorter to mimic real paragraph text. */
@@ -33,7 +33,7 @@ export function SkeletonText({ lines = 3, className = '' }: { lines?: number; cl
 /** A card-row shimmer: icon block + two text lines. Used for history/template/list items. */
 export function SkeletonCard({ className = '' }: { className?: string }) {
   return (
-    <div className={`border border-white/5 bg-white/[0.02] rounded-xl p-4 ${className}`} aria-hidden="true">
+    <div className={`border border-line bg-raised rounded-xl p-4 ${className}`} aria-hidden="true">
       <div className="flex items-center gap-3">
         <Skeleton className="h-10 w-10 shrink-0" rounded="rounded-lg" />
         <div className="flex-1 space-y-2">
@@ -61,7 +61,7 @@ export function SkeletonGrid({ count = 6, className = '' }: { count?: number; cl
   return (
     <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 ${className}`} aria-hidden="true">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="border border-white/5 bg-white/[0.02] rounded-xl p-4 space-y-3">
+        <div key={i} className="border border-line bg-raised rounded-xl p-4 space-y-3">
           <Skeleton className="h-24 w-full" rounded="rounded-lg" />
           <Skeleton className="h-3.5 w-2/3" />
           <Skeleton className="h-3 w-full" />

@@ -7,26 +7,26 @@ import { useState } from 'react';
 import { doseRateToPump, pumpToDoseRate, dripRate, dilutionPrep, type InfusionRateUnit } from '../../lib/erCalcs';
 import { cn } from '../../lib/utils';
 
-const label = 'text-[9px] font-black uppercase tracking-widest text-[#484f58]';
-const field = 'mt-1 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[#30363d] focus:outline-none focus:border-emerald-500';
+const label = 'text-[9px] font-black uppercase tracking-widest text-faint';
+const field = 'mt-1 w-full bg-well border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-emerald-500';
 
 const RATE_UNITS: InfusionRateUnit[] = ['mcg/kg/min', 'mcg/kg/hr', 'mg/kg/hr', 'mg/hr', 'mcg/min'];
 
 function Result({ headline, workings, problem }: { headline?: string; workings?: string; problem?: string }) {
-  if (problem) return <p className="text-[11px] text-amber-300 mt-2">{problem}</p>;
+  if (problem) return <p className="text-[11px] text-warn mt-2">{problem}</p>;
   if (!headline) return null;
   return (
     <div className="mt-2">
-      <p className="text-lg font-black text-emerald-300 leading-tight">{headline}</p>
-      {workings && <p className="text-[10px] text-[#8b949e] font-mono mt-0.5">{workings}</p>}
+      <p className="text-lg font-black text-success leading-tight">{headline}</p>
+      {workings && <p className="text-[10px] text-muted font-mono mt-0.5">{workings}</p>}
     </div>
   );
 }
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-2">{title}</p>
+    <div className="rounded-xl border border-line bg-raised p-3">
+      <p className="text-[10px] font-black uppercase tracking-widest text-success mb-2">{title}</p>
       {children}
     </div>
   );
@@ -117,7 +117,7 @@ export function QuickCalcs() {
         />
       </Card>
 
-      <p className="text-[9px] text-[#484f58] leading-relaxed">
+      <p className="text-[9px] text-faint leading-relaxed">
         These are unit conversions on the numbers you enter — the rate you ordered, the concentration on
         the label, the drop factor on the set. Check the workings line against your order.
       </p>
@@ -132,7 +132,7 @@ export function CalcTabs({ tab, onTab }: { tab: 'meds' | 'calcs'; onTab: (t: 'me
       {([['meds', 'Medicines'], ['calcs', 'Quick calcs']] as const).map(([id, text]) => (
         <button key={id} onClick={() => onTab(id)}
           className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all',
-            tab === id ? 'bg-emerald-900/50 border-emerald-500/60 text-emerald-200' : 'bg-white/5 border-white/10 text-[#8b949e] hover:text-white')}>
+            tab === id ? 'bg-emerald-500/10 border-emerald-500/60 text-success' : 'bg-raised border-line text-muted hover:text-ink')}>
           {text}
         </button>
       ))}

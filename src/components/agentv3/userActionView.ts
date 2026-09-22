@@ -5,7 +5,13 @@
 // grouping, the honesty note under a closed row, and the sentence a row hands to the composer are all
 // testable without rendering anything.
 
-export type UserActionKind = 'secret' | 'approve' | 'question';
+// ⚠️ A DELIBERATE MIRROR, AND SINCE 2026-09-21 A TEST-LOCKED ONE. The browser cannot import server
+// code, so this union is a second copy of the writer's — the drift class this repo has paid for
+// repeatedly. Adding `'connect'` on the server and forgetting it here produces NO error: the row
+// falls through every branch and the tray hands the user a generic sentence.
+// `tests/theTrayKnowsWhatIsNotConnected.test.ts` reads both unions out of their sources and fails
+// when they differ, so the copy cannot silently fall behind.
+export type UserActionKind = 'secret' | 'approve' | 'question' | 'connect';
 export type UserActionStatus = 'open' | 'done' | 'not_needed' | 'superseded';
 export type UserActionClosedBy = 'user' | 'verified' | 'ai' | 'system';
 
@@ -90,6 +96,12 @@ export function askPrompt(action: UserActionView): string {
   }
   if (action.kind === 'approve') {
     return `Before I answer "${action.title}" — explain in simple words what will happen if I say yes, and what happens if I say no.`;
+  }
+  // A CONNECT row is the one kind whose way out is often "do I have to?" (PR 2, connectActions.ts).
+  // It is derived from the app's own code — so the honest offer is to explain what breaks without it
+  // and what the alternatives are, not to assume the user has already decided to do it.
+  if (action.kind === 'connect') {
+    return `About "${action.title}" — what exactly stops working in my app if I don't do this? Walk me through it step by step, and tell me if there is a simpler option.`;
   }
   return `About this: "${action.title}" — here is what I actually want instead: `;
 }

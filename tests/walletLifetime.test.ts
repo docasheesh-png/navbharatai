@@ -10,7 +10,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { lifetimeMoneySpentInr, lifetimeTokensUsed, lifetimeTokensPurchased } from '../src/server/lib/walletLifetime';
-import { hasEverPaid } from '../src/server/lib/giftSpend';
+import { walletMayBuyWithItsBalance } from '../src/server/lib/giftSpend';
+import { hasEverPaid } from '../src/server/AgentV3/FreeTierBuildRouting';
 import { mergeWallets } from '../src/server/lib/accountMerge';
 
 describe('a wallet as the credit and debit paths actually write it', () => {
@@ -38,10 +39,22 @@ describe('a wallet as the credit and debit paths actually write it', () => {
 });
 
 describe('siblings that read the same fact', () => {
-  it('hasEverPaid recognises a paying user from the LIVE field, without needing lastRechargeAt', () => {
-    expect(hasEverPaid({ tokenBalance: 10, totalMoneySpent: 99 })).toBe(true);
-    expect(hasEverPaid({ tokenBalance: 10, total_money_spent: 99 })).toBe(true);
-    expect(hasEverPaid({ tokenBalance: 10, totalMoneySpent: 0, total_money_spent: 0 })).toBe(false);
+  it('both paid-predicates read the LIVE field, without needing lastRechargeAt', () => {
+    // 🔒 BOTH of them now, and that is the point (2026-09-21). The build router's own predicate
+    // read `totalMoneySpent` ALONE — bypassing this very module, whose docblock says a reader that
+    // does so is the only way the ₹0-for-every-user bug returns. It decides whether somebody is
+    // routed to the cheap engines, so reading one spelling is not a cosmetic gap.
+    for (const paid of [walletMayBuyWithItsBalance, hasEverPaid]) {
+      expect(paid({ tokenBalance: 10, totalMoneySpent: 99 })).toBe(true);
+      expect(paid({ tokenBalance: 10, total_money_spent: 99 })).toBe(true);
+      expect(paid({ tokenBalance: 10, totalMoneySpent: 0, total_money_spent: 0 })).toBe(false);
+    }
+  });
+
+  it('🔴 and they differ ONLY on a bare recharge stamp — the documented asymmetry', () => {
+    const stampOnly = { tokenBalance: 10, lastRechargeAt: '2026-09-01T00:00:00.000Z' };
+    expect(walletMayBuyWithItsBalance(stampOnly)).toBe(true);   // a legacy payer is trusted
+    expect(hasEverPaid(stampOnly)).toBe(false);                 // no money, no customer
   });
   it('a merge carries the retired wallet\'s real payments in the live field', () => {
     const into = { userId: 'a', tokenBalance: 100, totalTokensPurchased: 100, totalTokensUsed: 0, totalMoneySpent: 100, walletLedger: [] };

@@ -24,13 +24,13 @@ export function Breadcrumb({ items, className }: { items: Crumb[]; className?: s
         const clickable = !isLast && typeof c.onClick === 'function';
         return (
           <Fragment key={`${c.label}-${i}`}>
-            {i > 0 && <ChevronRight className="w-3 h-3 text-zinc-600 shrink-0" aria-hidden="true" />}
+            {i > 0 && <ChevronRight className="w-3 h-3 text-faint shrink-0" aria-hidden="true" />}
             {clickable ? (
               <button
                 type="button"
                 onClick={c.onClick}
                 title={c.title || c.label}
-                className="truncate max-w-[12rem] text-zinc-400 hover:text-white transition-colors"
+                className="truncate max-w-[12rem] text-muted hover:text-ink transition-colors"
               >
                 {c.label}
               </button>
@@ -38,7 +38,7 @@ export function Breadcrumb({ items, className }: { items: Crumb[]; className?: s
               <span
                 title={c.title || c.label}
                 aria-current={isLast ? 'page' : undefined}
-                className={cn('truncate max-w-[12rem]', isLast ? 'text-zinc-200 font-medium' : 'text-zinc-400')}
+                className={cn('truncate max-w-[12rem]', isLast ? 'text-body font-medium' : 'text-muted')}
               >
                 {c.label}
               </span>

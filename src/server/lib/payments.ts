@@ -177,7 +177,27 @@ export function computeCreditedWallet(
   update.totalTokensPurchased = n(w.totalTokensPurchased) + creditedTokens;
   // GROSS here on purpose: "how much has this user paid us" is the full amount, fee included.
   update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
-  update.lastRechargeAt = now;
+  // 🔴 A "LAST RECHARGE" TIMESTAMP ON A ZERO-RUPEE CREDIT IS A FALSE FACT (2026-09-21).
+  //
+  // This was unconditional, three lines below `amountPaid = n(txData.amountPaid)` — and `n()`
+  // returns **0** for anything that is not a finite number. So a transaction row whose `amountPaid`
+  // is absent, a string or NaN (a legacy row, a hand-fixed one, a provider payload that changed
+  // shape), and the promo branch above, all added ₹0 to `totalMoneySpent` and still stamped
+  // `lastRechargeAt`. The wallet then said *"they recharged"* and *"they have paid us nothing"* at
+  // the same time — and BOTH sentences were read, by different modules, as the answer to "is this a
+  // paying customer?":
+  //
+  //   • `FreeTierBuildRouting.hasEverPaid` reads the money ⇒ not a customer (routed to cheap engines,
+  //     shown as "Free" on the admin Users list);
+  //   • `giftSpend`'s predicate also accepts the timestamp ⇒ a customer, so on an untracked wallet
+  //     `giftRemaining` returns 0 and **the welcome gift buys a hosting plan** — the one thing the
+  //     admin banned in capitals (*"gift … plan purchase me kam nahi ayenge!!!!!"*).
+  //
+  // The two predicates are not the bug; this line is. `lastRechargeAt` is also shown to the USER
+  // (`routes/profile.ts`), where a stamp for a recharge that never happened is its own dishonesty.
+  // Money arrived, or no recharge happened. A wallet already carrying a real stamp keeps it — this
+  // only stops a new false one being written.
+  if (amountPaid > 0) update.lastRechargeAt = now;
   const ledgerEntry = {
     type: 'purchase',
     amountCoinsOrTokens: creditedTokens,

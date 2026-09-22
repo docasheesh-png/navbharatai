@@ -34,7 +34,7 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, openPrevie
 
   if (state === 'loading') {
     return (
-      <div className="h-full flex items-center justify-center text-zinc-500">
+      <div className="h-full flex items-center justify-center text-faint">
         <TirangaLoader className="w-5 h-5" />
       </div>
     );
@@ -45,12 +45,12 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, openPrevie
   }
 
   return (
-    <div className="h-full flex flex-col items-center justify-center p-8 text-center gap-4 bg-zinc-950 text-zinc-100">
+    <div className="h-full flex flex-col items-center justify-center p-8 text-center gap-4 bg-surface text-body">
       <div className="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center">
-        <Sparkles className="w-7 h-7 text-indigo-400" />
+        <Sparkles className="w-7 h-7 text-accent-text" />
       </div>
       <h2 className="text-lg font-bold">NavBharatAI Pro</h2>
-      <p className="max-w-sm text-sm text-zinc-400 leading-relaxed">
+      <p className="max-w-sm text-sm text-muted leading-relaxed">
         NavBharatAI Pro — the agentic app builder — is rolling out to accounts in batches. It will appear
         here automatically as soon as it's enabled for your account.
       </p>

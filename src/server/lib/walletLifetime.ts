@@ -12,8 +12,11 @@
 // `total_money_spent` and `total_output_tokens_used` — snake_case fields that are written EXACTLY
 // ONCE, as `0`, when a wallet is created, and never touched again. So "Total Used: 0" and
 // "Money Spent: ₹0" for every account, on the screens used to judge who pays and who consumes.
-// `giftSpend.hasEverPaid` read the same dead field and only worked because it ALSO checks
-// `lastRechargeAt`.
+// `giftSpend`'s paid-predicate read the same dead field and only worked because it ALSO checks
+// `lastRechargeAt` (renamed `walletMayBuyWithItsBalance` on 2026-09-21). ⚠️ On that date
+// `FreeTierBuildRouting.hasEverPaid` was found STILL bypassing this file — reading `totalMoneySpent`
+// alone — which is exactly the return this docblock warns about, on the predicate that decides
+// whether somebody is routed to the cheap engines. It goes through here now.
 //
 // 🔑 FIXED AS A CLASS: every reader goes through here, and the reader accepts BOTH spellings. It
 // takes the MAX, never the sum — a wallet that carries both (an account merged by `accountMerge.ts`,

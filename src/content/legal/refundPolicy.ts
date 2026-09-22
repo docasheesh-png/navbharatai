@@ -25,7 +25,9 @@
 // because a policy may not assert a behaviour the Platform does not have. The chain is:
 //     powerUnlocked = isAgentV3FreeUser(uid, email) || (!!uid && !isFreeTierUser(wallet))
 //     isFreeTierUser(w) = !hasEverPaid(w)                              [FreeTierBuildRouting.ts]
-//     hasEverPaid(w)    = lifetimeMoneySpentInr(w) > 0 || w.lastRechargeAt   [giftSpend.ts]
+//     walletMayBuyWithItsBalance(w) = lifetimeMoneySpentInr(w) > 0 || w.lastRechargeAt  [giftSpend.ts]
+//       (renamed from `hasEverPaid` 2026-09-21 — FreeTierBuildRouting exports that name for a
+//        deliberately stricter rule, and one name for two money answers is a wrong import waiting.)
 // `totalMoneySpent` is a LIFETIME gross total with exactly one writer (`computeCreditedWallet`, on a
 // verified purchase) and it is never decremented. So one successful payment unlocks all three tiers
 // PERMANENTLY — the entitlement survives the balance reaching zero. That is a real, irreversible

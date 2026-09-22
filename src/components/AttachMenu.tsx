@@ -102,18 +102,18 @@ export function AttachMenu({
         aria-expanded={open}
         title={title}
         onClick={() => setOpen((v) => !v)}
-        className={`relative ${buttonClassName || 'h-[42px] w-10 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-50'}`}
+        className={`relative ${buttonClassName || 'h-[42px] w-10 flex items-center justify-center rounded border border-line text-muted hover:text-ink disabled:opacity-50'}`}
       >
         <Paperclip className="w-4 h-4" />
         {typeof badge === 'number' && badge > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{badge}</span>
+          <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-on-accent text-center">{badge}</span>
         )}
       </button>
 
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 mb-2 z-[60] min-w-[220px] rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl overflow-hidden"
+          className="absolute bottom-full left-0 mb-2 z-[60] min-w-[220px] rounded-2xl border border-line bg-card shadow-2xl overflow-hidden"
         >
           {OPTIONS.map((o) => (
             <button
@@ -121,9 +121,9 @@ export function AttachMenu({
               type="button"
               role="menuitem"
               onClick={() => pick(o.ref)}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised transition-colors"
             >
-              <span className="text-zinc-400">{o.icon}</span>
+              <span className="text-muted">{o.icon}</span>
               <span>{o.label}</span>
             </button>
           ))}
@@ -132,10 +132,10 @@ export function AttachMenu({
               type="button"
               role="menuitem"
               onClick={() => pick(zipRef)}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
+              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised transition-colors border-t border-line"
             >
-              <span className="text-emerald-400"><Folder className="w-4 h-4" /></span>
-              <span>Import project (.zip)<span className="block text-[11px] text-zinc-500">Opens your app in Files — any size</span></span>
+              <span className="text-success"><Folder className="w-4 h-4" /></span>
+              <span>Import project (.zip)<span className="block text-[11px] text-faint">Opens your app in Files — any size</span></span>
             </button>
           )}
           {/* OPEN FOLDER — no zip at all. Gated on real capability rather than a browser sniff: the
@@ -147,10 +147,10 @@ export function AttachMenu({
               type="button"
               role="menuitem"
               onClick={() => { setOpen(false); onOpenFolder(); }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
+              className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-body hover:bg-raised transition-colors border-t border-line"
             >
-              <span className="text-sky-400"><FolderOpen className="w-4 h-4" /></span>
-              <span>Open project folder<span className="block text-[11px] text-zinc-500">No zipping, no upload of extras — pick the folder itself</span></span>
+              <span className="text-info"><FolderOpen className="w-4 h-4" /></span>
+              <span>Open project folder<span className="block text-[11px] text-faint">No zipping, no upload of extras — pick the folder itself</span></span>
             </button>
           )}
         </div>

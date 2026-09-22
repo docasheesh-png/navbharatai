@@ -39,8 +39,16 @@
 
 import { isUsableEnvName, isPlatformSecret } from './secretRequest';
 
-/** The kinds a row can be. PR 2 adds 'connect' (GitHub / database / domain) and 'external'. */
-export type UserActionKind = 'secret' | 'approve' | 'question';
+/**
+ * The kinds a row can be.
+ *
+ * ✅ `'connect'` ARRIVED 2026-09-21 (PR 2 — see `connectActions.ts`): a thing the user must connect
+ * before their app really works, DERIVED from a fact the server already holds rather than read out of
+ * the model's prose. One fact supports it today (no database, on an app whose own files save data);
+ * that module names the two categories whose facts do NOT exist yet and why a row for them would be a
+ * guess. `'external'` is still unclaimed.
+ */
+export type UserActionKind = 'secret' | 'approve' | 'question' | 'connect';
 
 /**
  * Why a row is no longer open.
@@ -145,6 +153,11 @@ export type UserActionGroup = 'blocking' | 'needed' | 'later';
 
 export function groupOf(action: UserAction): UserActionGroup {
   if (action.blocking) return 'blocking';
+  // ✅ A 'connect' row lands in `needed` — same as a secret, and for the same reason: the app does not
+  // really work until it is done. `later` is for a model's assumptions, which are questions rather
+  // than work. Reached by the `!== 'question'` arm rather than a new branch, which is why this is a
+  // comment and not a line of code: a new kind therefore defaults to `needed`, the safe side — a real
+  // task shown under "later" is how a task stops being done.
   return action.kind === 'question' ? 'later' : 'needed';
 }
 

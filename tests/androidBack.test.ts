@@ -132,8 +132,12 @@ describe('the exit dialog says what the admin asked for', () => {
     // Whitespace-tolerant: these are JSX children on their own lines, not inline text nodes.
     expect(dlg).toMatch(/>\s*Exit\s*<\/button>/);
     expect(dlg).toMatch(/>\s*Cancel\s*<\/button>/);
-    expect(dlg).toContain('bg-red-600');    // Exit — destructive
-    expect(dlg).toContain('bg-white/10');   // Cancel — calm/gray
+    expect(dlg).toContain('bg-red-600');    // Exit — destructive, a fixed brand red on every theme
+    // ⚠️ SUPERSEDED 2026-09-21: `bg-white/10` → `bg-raised`. The INVARIANT this case tests is that
+    // Cancel is the calm one and Exit the destructive one, and it still holds — `bg-raised` IS the
+    // calm surface, now themed instead of a white wash that only worked on a dark ground.
+    expect(dlg).toContain('bg-raised');     // Cancel — calm
+    expect(dlg).not.toContain('bg-red-600 hover:bg-red-500 text-white');   // Exit's label rides the fill
     expect(dlg).toContain('Exit NavBharatAI?');
   });
 

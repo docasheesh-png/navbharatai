@@ -41,7 +41,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     // is DOING, which is why non-AI utilities (Versioning, Minifier, APK Builder) sit here: they are
     // the things reached while iterating on an app, next to the AI helpers used in the same breath.
     title: 'AI Tools',
-    color: 'text-violet-400',
+    color: 'text-accent-text',
     icon: Bot,
     items: [
       { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare },
@@ -59,7 +59,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     // every one of its five items was moved here by name, so leaving an empty heading behind would be
     // a dead section on the home page.
     title: 'Developer Tools',
-    color: 'text-emerald-400',
+    color: 'text-success',
     icon: Code,
     items: [
       // THE NAVBHARATAI API (admin 2026-09-17: `"other" -> "developer tools"` — "developer tools ke
@@ -108,7 +108,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
   },
   {
     title: 'Publish & Deploy',
-    color: 'text-cyan-400',
+    color: 'text-info',
     icon: Rocket,
     items: [
       { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket },
@@ -127,7 +127,7 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
   },
   {
     title: 'Monetization & Team',
-    color: 'text-amber-400',
+    color: 'text-warn',
     icon: IndianRupee,
     items: [
       { id: 'monetize', label: 'Monetize', icon: IndianRupee },

@@ -78176,3 +78176,49 @@ The number PR #3234 left open, built as the first proactive item after the admin
 
 Tests: `tests/thePlatformHasADayToo.test.ts` — the env parsing, the decision, the wording, and the
 ORDER at source level; proven by reversion.
+
+## 2026-09-22 — Resize sheet: "W aur H button kaam nahi kar rahe" — the buttons worked, the preview could not show width
+
+Admin, with a screenshot of the sheet at 1024 × 1024: *"ai image generate: me image banne ke bad, resize me
+W aur H button kaam nahi kar rahe hai. dono me se kuch bhi press karo, bas height change hoti hai, width
+nahi! fix karo!!"*
+
+**Investigated before touching code.** The field wiring is correct — W calls `onChange(n, height)`, H calls
+`onChange(width, n)` — and the output PNG was made at the frame's real pixels the whole time. The defect was
+the PREVIEW: the canvas was styled `w-full h-auto`, so its displayed WIDTH was pinned to the container and
+any change of shape could only show as a change of displayed HEIGHT. Reproduced in Chromium in a 360 px
+container before a line changed:
+
+| frame | shown on screen |
+|---|---|
+| 1024 × 1024 | 360 × 360 |
+| 1088 × 1024 (W+) | 360 × 339 — **shorter** |
+| 1280 × 1024 | 360 × 288 |
+| 1024 × 1088 (H+) | 360 × 383 — taller |
+
+So "whatever you press, only the height changes" was exactly true, and W+ read as the picture SHRINKING.
+
+**Fix — one rule, `previewPercent` in `src/lib/imageResize.ts`:** a SQUARE stage (`aspect-square`), and the
+canvas sized as a PERCENT of it on BOTH axes against ONE constant reference (`MAX_CUSTOM_PX`, the longest
+side any frame may have — so nothing reachable can overflow, and a frame past it keeps its shape). Measured
+after: 1024 × 1024 → 240 × 240, 1088 × 1024 → 255 × 240, 1280 × 1024 → 300 × 240, 1024 × 1280 → 240 × 300.
+The axis pressed is the axis that moves. **The cost, stated:** a 1024 square now shows at two-thirds of the
+stage instead of filling it; that is the price of a preview that moves the way the buttons say.
+
+⚠️ **Why the reference must be CONSTANT and not "the frame's own longer side":** with the latter, W+ on a
+square re-scales everything and the width stays pinned — the exact bug in different clothes. Proven by
+reversion (test fails when the reference follows the frame).
+
+**Second defect in the same sheet, fixed alongside (rule 3):** two `CustomSizeFields` can be on the page at
+once — the composer's (size = Custom) and the sheet's, portalled over it — with the SAME input ids, so the
+sheet's "W" label pointed at the composer's input BEHIND it (`getElementById` returns the first). The fields
+take an `idPrefix` now; the sheet passes `nbai-resize`, the composer keeps the default.
+
+**Siblings hunted:** `ImageCropEditor` (attach side) and `TextOverlayEditor` use the same `w-full h-auto`
+canvas, but their frame never changes while they are open, so the defect cannot occur there. Left as they
+are, on purpose — shrinking those previews would buy nothing.
+
+Tests: `tests/theFrameGrowsOnTheAxisYouPressed.test.ts` (10) — the pure rule (W+ moves only w, H+ only h,
+constant reference across every preset and custom frame, shape kept past the reference, junk → 0) and source
+guards (percent-sized canvas, square stage, distinct ids). **Proven by reversion three ways:** reference
+following the frame; the width-pinned canvas restored; shared ids restored.

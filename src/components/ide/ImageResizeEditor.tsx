@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
 import { Move, Maximize2, Minus, Plus, RotateCcw, Check, X } from 'lucide-react';
 import {
   FREE_IDENTITY, FREE_MAX_ZOOM, FREE_MIN_ZOOM, RESIZE_BACKGROUND, clampFreeView, fitZoom, freeDrawRect,
-  freeZoomBy, isFreeIdentity, showsBackground, type FreeView, type ResizeMode,
+  freeZoomBy, isFreeIdentity, previewPercent, showsBackground, type FreeView, type ResizeMode,
 } from '../../lib/imageResize';
 import { dragToFrame } from '../../lib/imageCrop';
 import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, describeSize, pixelsForSize } from '../../lib/imageSize';
@@ -46,6 +46,8 @@ export function ImageResizeEditor({ image, initialSize, initialCustom, sizes, on
   const last = useRef<{ x: number; y: number } | null>(null);
 
   const frame = pixelsForSize(size, customW, customH);
+  // On-screen size against ONE constant reference, so W+ widens and H+ heightens — see previewPercent.
+  const pct = previewPercent(frame);
 
   useEffect(() => {
     let alive = true;
@@ -173,10 +175,15 @@ export function ImageResizeEditor({ image, initialSize, initialCustom, sizes, on
               height={customH}
               onChange={(w, h) => { setCustomW(w); setCustomH(h); }}
               className="rounded-xl border border-line bg-card px-2.5 py-2"
+              idPrefix="nbai-resize"
             />
           )}
 
-          <div className="rounded-xl overflow-hidden border border-line bg-well">
+          {/* A SQUARE stage; the canvas is sized as a percentage of it on BOTH axes, against one
+              constant reference. The old `w-full h-auto` canvas pinned the displayed width to the
+              container, so W+ showed as a SHORTER picture and H+ as a taller one — "bas height change
+              hoti hai, width nahi". Measured, then fixed; the rule lives in previewPercent. */}
+          <div className="rounded-xl overflow-hidden border border-line bg-well aspect-square w-full flex items-center justify-center">
             {loadFailed ? (
               <p className="p-6 text-xs text-warn text-center leading-relaxed">
                 This picture could not be opened here. Save it and try again from your gallery.
@@ -184,7 +191,8 @@ export function ImageResizeEditor({ image, initialSize, initialCustom, sizes, on
             ) : (
               <canvas
                 ref={canvasRef}
-                className={`w-full h-auto block touch-none ${mode === 'crop' ? 'cursor-move' : ''}`}
+                style={{ width: `${pct.w}%`, height: `${pct.h}%` }}
+                className={`block touch-none ring-1 ring-line ${mode === 'crop' ? 'cursor-move' : ''}`}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={endDrag}

@@ -15,10 +15,19 @@
 //
 // THE RULE: once a workspace is GREEN-LATCHED, an actuator write that would OVERWRITE a file present at
 // the green moment is REFUSED — UNLESS the current async pass is on a small, explicit allowlist. A pass
-// a future session adds is denied automatically, because it is not on the list. Creating a genuinely NEW
-// file is allowed (a new test/doc file cannot break the app the browser already rendered). Refusing a
+// a future session adds is denied automatically, because it is not on the list. Refusing a
 // write can only ever KEEP the working app as it was — it can never break it — so this is safe by the
 // one absolute rule, by construction.
+//
+// ⚠️ THIS PARAGRAPH USED TO PROMISE A CARVE-OUT THE CODE HAD ALREADY REMOVED (corrected 2026-09-22,
+// autopsy 21b431e1). It read *"Creating a genuinely NEW file is allowed (a new test/doc file cannot
+// break the app the browser already rendered)"* — and `writeRefused`'s own docblock, thirty lines
+// below, records that exact carve-out being deleted after the adversarial review of 2026-08-12,
+// because a coordinated change (a new file plus an edit) would land half of itself. Both statements
+// sat in one file for six weeks. The behaviour is, and stays, FULL DENY for a non-allowlisted pass.
+// The header is the half a reader meets first, which is what made the drift expensive: the same
+// build's report shows nine `GREEN_FREEZE_DEFERRED` writes — tests, a manifest, robots.txt, an icon
+// and a service worker — and this paragraph said they would have been allowed.
 //
 // WHAT STAYS ALLOWED, and why it is not "our opinion": the runtime-error auto-fix (the app renders but
 // throws — the user wants a WORKING app) and the feature-presence heal (a feature the user EXPLICITLY

@@ -78407,3 +78407,44 @@ clear.
 proper card with an Add-credit button and are untouched. Doctor AI and the AI tool panels (Debugger,
 Design System, App Scan) still show the refusal as plain text with no button — honest, and better than
 before because the sentence itself improved, but not one tap from the fix. That is the next slice.
+
+## 2026-09-22 — 🔴 The red dot that leads to the top-up
+
+Admin, verbatim: *"agar balat kahatam hai, to navigator dot, ko 3lins menu-> wallet and billing ->
+buy token -> purchage wallet token par ek red dot show hona chahiye!"*
+
+A **trail**, not a badge: ☰ → **Wallet & Billing** → **Buy tokens** → **Purchase Wallet Tokens**, four
+marks that walk a blocked user to the one control that unblocks them. A refusal message tells someone
+they are stuck; this tells them where to go.
+
+- **`src/lib/walletNeedsTopUp.ts`** — one predicate, four readers. Four places asking "is the balance
+  finished?" in four slightly different ways is the drifted-copy class this repo has now paid for six
+  times (`safeRelPath` ×4, `tagsOnLine` ×2, the boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2, and the
+  empty-balance sentence earlier the same day). What makes it a trail rather than four coincidences is
+  that a dot cannot lead to a screen where it has quietly vanished.
+- 🔑 **The line is the SERVER's own refusal line** (`walletTooEmptyForTurn`: `balanceInr <= 0`). A dot
+  at ₹5 while builds still work is a nag; no dot at ₹0 while everything is refused is useless. Tying
+  it to the same number means the dot and the refusal can never disagree about whether the app works.
+- 🔴 **It reads the HIGHER of the wallet's two views, and that is a bug already paid for.** The wallet
+  holds one balance in `remaining_balance` and `tokenBalance`, and the gift path once moved only the
+  second (admin 2026-08-03: *"₹0 + 50,000 tokens → app building off"*). Reading ₹ alone would paint a
+  red "you have no money" dot across the whole app for **every brand-new account on the ₹50 welcome
+  credit**, whose token view is the one carrying it.
+- 🔒 **Silent on every doubt** — signed out, not fetched, still loading, or a balance that cannot be
+  read ⇒ no dot. A dot that is wrong once is a dot nobody reads again.
+- **One dot, two reasons, on the ☰ button.** An unread notification and a finished balance raise the
+  SAME mark; the accessible label names which (the balance first — it is the one that stops the app).
+  Two marks on one button would be two problems where the user has one.
+- 🔴 **Wired on the mobile DRAWER as well as the desktop rail.** `SidebarNav` has two `NavItem` render
+  sites and ☰ opens the drawer — wiring only the rail ships the feature working nowhere it was asked
+  for. Test-locked by counting both.
+- Test-locked and **reversion-proven three ways** in `tests/theRedDotLeadsToTheTopUp.test.ts`
+  (12 cases): dropping the drawer's dot, reading the ₹ view alone, and nagging while the wallet loads
+  each fail it. Half the suite is SOURCE-level — `tsc` and `vitest` cannot see a dot wired on one of
+  two render sites.
+- Colour comes from `bg-danger`; the ratchet's per-file baselines are unchanged.
+
+⚠️ **It does not warn BEFORE the wall.** "Your balance is running low" is a different, still-unbuilt
+thing (`notifyLowBalance`'s `blocked: false` branch has no caller anywhere) and a different decision,
+because a warning has to obey the alert-noise rule. This dot states a fact that is true right now and
+disappears the moment it stops being true.

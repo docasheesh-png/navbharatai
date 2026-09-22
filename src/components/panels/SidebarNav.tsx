@@ -7,6 +7,7 @@ import { TextSizeSlider } from './TextSizeSlider';
 import type { ThemeMode } from '../../lib/theme';
 import type { ViewType, ChatSession } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { TOP_UP_DOT_LABEL } from '../../lib/walletNeedsTopUp';
 
 interface MenuItem {
   id: string;
@@ -54,6 +55,12 @@ export interface SidebarNavProps {
    */
   unreadNotifications?: number;
   onOpenNotifications?: () => void;
+  /**
+   * The balance is finished, so the **Wallet & Billing** row carries a dot (admin 2026-09-22) — the
+   * middle of the trail ☰ → Wallet & Billing → Buy tokens → Purchase. Computed ONCE in App.tsx by
+   * `walletNeedsTopUp`, so this row, the ☰ button and the Billing screen cannot disagree.
+   */
+  walletNeedsTopUp?: boolean;
   /** Reopen a past chat (routes v5.0 → Pro v5.0, others → their own surface). Unused by this
    *  component (the "Recent Chats" menu block was removed 2026-07-01, admin request) — kept on the
    *  props interface only so App.tsx's existing call site doesn't need touching. */
@@ -67,12 +74,18 @@ function NavItem({
   hasGeneratedCode,
   user,
   onClick,
+  needsAttention = false,
+  attentionLabel,
 }: {
   item: MenuItem;
   activeView: ViewType;
   hasGeneratedCode: boolean;
   user: FirebaseUser | null;
   onClick: () => void;
+  /** Draw the attention dot on this row — today only "Wallet & Billing", when the balance is finished. */
+  needsAttention?: boolean;
+  /** What the dot means, for the tooltip and the screen reader. A dot with no words is a puzzle. */
+  attentionLabel?: string;
 }) {
   const isPreview = item.id === 'preview';
   const isLoginGated = (item.id === 'nbi_pro_chat' || item.id === 'sda_chat') && !user;
@@ -83,7 +96,7 @@ function NavItem({
     <button
       key={item.id}
       disabled={isDisabled}
-      title={isLoginGated ? 'Sign in to access this feature' : isDisabled ? 'Generate an app to enable this' : ''}
+      title={isLoginGated ? 'Sign in to access this feature' : isDisabled ? 'Generate an app to enable this' : (needsAttention && attentionLabel) || ''}
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group ${
         isActive
@@ -107,10 +120,20 @@ function NavItem({
           {(item as any).status}
         </div>
       )}
-      {isActive && !isLoginGated && (
+      {/* THE SECOND STEP OF THE TOP-UP TRAIL (admin 2026-09-22). It sits BEFORE the active/preview
+          dots on purpose: those two are decoration for a row the user is already on, this one is the
+          reason to press it. `sr-only` text rather than an aria-label, so the row keeps its own name
+          and gains the reason instead of losing one for the other. */}
+      {needsAttention && !isLoginGated && (
+        <span className="ml-auto flex items-center">
+          <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />
+          {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
+        </span>
+      )}
+      {isActive && !isLoginGated && !needsAttention && (
         <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
       )}
-      {isPreview && hasGeneratedCode && !isActive && (
+      {isPreview && hasGeneratedCode && !isActive && !needsAttention && (
         <div className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)] text-on-accent"></div>
       )}
     </button>
@@ -123,7 +146,7 @@ export function SidebarNav({
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
   setErrorContext, onReportProblem,
-  unreadReports, unreadNotifications, onOpenNotifications,
+  unreadReports, unreadNotifications, onOpenNotifications, walletNeedsTopUp = false,
 }: SidebarNavProps) {
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
   // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
@@ -246,6 +269,8 @@ export function SidebarNav({
                   hasGeneratedCode={hasGeneratedCode}
                   user={user}
                   onClick={makeClickHandler(item)}
+                  needsAttention={walletNeedsTopUp && item.id === 'billing'}
+                  attentionLabel={TOP_UP_DOT_LABEL}
                 />
               ))}
               {notificationsRow(false)}
@@ -316,6 +341,8 @@ export function SidebarNav({
                       hasGeneratedCode={hasGeneratedCode}
                       user={user}
                       onClick={makeClickHandler(item, true)}
+                      needsAttention={walletNeedsTopUp && item.id === 'billing'}
+                      attentionLabel={TOP_UP_DOT_LABEL}
                     />
                   ))}
                   {notificationsRow(true)}

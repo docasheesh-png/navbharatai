@@ -32,7 +32,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Minimize2, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
+import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -42,6 +42,8 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
+import { useNotificationInbox, NotificationPanel } from './components/NotificationBell';
+import { FloatingExitFocusButton } from './components/FloatingExitFocusButton';
 import {
   endConversation, latestOpenConversationId, newConversationId, resumeArchived, deleteOpenConversation,
   browserStore as professionalStore,
@@ -273,6 +275,11 @@ export default function App() {
 
   const [tabHistories, setTabHistories] = useState<Record<string, ViewType[]>>({});
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  // 🔔 The notifications inbox lives at App level (admin 2026-09-22): its unread count is drawn on the
+  // ☰ button and the sidebar's Notifications row while the panel is CLOSED, so a component that only
+  // existed while open could not carry it. One hook, three readers, one number.
+  const inbox = useNotificationInbox(user);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(() => {
     return localStorage.getItem('navbharat_admin_v1') === 'true';
   });
@@ -3363,7 +3370,7 @@ export default function App() {
       {/* Focus Mode hides the header entirely — the floating corner button (below) or Esc bring it back. */}
       {!focusMode && (
         <TopNav
-          onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
+          unreadNotifications={inbox.unread}
           effectiveDeviceMode={effectiveDeviceMode}
           isSidebarCollapsed={isSidebarCollapsed}
           setIsSidebarCollapsed={setIsSidebarCollapsed}
@@ -3408,6 +3415,8 @@ export default function App() {
       <SidebarNav
         onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
         unreadReports={unreadReports}
+        unreadNotifications={inbox.unread}
+        onOpenNotifications={() => setNotificationsOpen(true)}
         effectiveDeviceMode={effectiveDeviceMode}
         isSidebarCollapsed={isSidebarCollapsed}
         isMenuOpen={isMenuOpen}
@@ -3991,6 +4000,15 @@ export default function App() {
           {/* The Mode sheet (admin 2026-08-25). Selecting navigates through the SAME toggleTab paths
               the Professionals hub uses, so every expert opens its real chat — engine, disclaimers and
               pass-gate untouched. "FREE +" mints a new free session; the old one stays in History. */}
+          {/* The notifications inbox, opened from the sidebar's row (admin 2026-09-22). A reply
+              notification's tap opens the Report a problem list, exactly as the old bell's did. */}
+          {notificationsOpen && (
+            <NotificationPanel
+              inbox={inbox}
+              onClose={() => setNotificationsOpen(false)}
+              onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
+            />
+          )}
           {showModePicker && (
             <ModePickerSheet
               activeView={activeView}
@@ -4480,17 +4498,9 @@ export default function App() {
           — the opposite trade to the one that was removed.
           ⚠️ The marker above is what `tests/theAppDoesNotBlurWhatNobodyCanSee.test.ts` looks for: a
           blur placed over the app's own scrolling content has to justify itself in place, or CI fails. */}
-      {focusMode && (
-        <button
-          onClick={() => setFocusMode(false)}
-          title="Exit Focus Mode (Esc)"
-          aria-label="Exit Focus Mode — show header"
-          className="fixed z-[9999] top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-scrim hover:bg-scrim backdrop-blur-md border border-line text-body hover:text-ink shadow-lg transition-all active:scale-90"
-          style={{ marginTop: 'env(safe-area-inset-top, 0px)', marginRight: 'env(safe-area-inset-right, 0px)' }}
-        >
-          <Minimize2 className="w-4 h-4" />
-        </button>
-      )}
+      {/* Draggable since 2026-09-22 (admin: "ungli se khich ke kahi bhi rakh sake") — same blur, same
+          size, same default corner; the mechanics are the shared useDraggableFloat hook. */}
+      {focusMode && <FloatingExitFocusButton onExit={() => setFocusMode(false)} />}
 
       {/* SCROLLBAR RULES DELIBERATELY ABSENT (2026-09-19). They used to sit at the top of this block —
           a second copy of .custom-scrollbar / .no-scrollbar, already declared in src/index.css. The copy

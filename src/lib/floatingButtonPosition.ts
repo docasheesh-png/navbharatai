@@ -48,6 +48,15 @@ export function defaultPosition(size: Size, view: Viewport, margin = EDGE_MARGIN
   );
 }
 
+/**
+ * Top-right, under the status bar — where the Focus Mode exit button has always sat, so a user who
+ * never drags it sees nothing change. PURE. `insetTop` is the safe-area top (a notch), added to the margin.
+ */
+export function topRightPosition(size: Size, view: Viewport, margin = EDGE_MARGIN, insetTop = 0): Point {
+  const inset = Number.isFinite(insetTop) ? Math.max(0, insetTop) : 0;
+  return clampPosition({ x: view.width - size.width - margin, y: margin + inset }, size, view, margin);
+}
+
 /** Was this pointer gesture a press rather than a drag? PURE. */
 export function isTap(dx: number, dy: number, elapsedMs: number): boolean {
   const moved = Math.hypot(Number.isFinite(dx) ? dx : 0, Number.isFinite(dy) ? dy : 0);

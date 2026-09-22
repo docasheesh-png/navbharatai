@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   clampPosition, defaultPosition, isTap, parsePosition, serializePosition,
   EDGE_MARGIN, TAP_SLOP_PX, TAP_MAX_MS,
+  topRightPosition,
 } from '../src/lib/floatingButtonPosition';
 
 const size = { width: 56, height: 56 };
@@ -107,5 +108,19 @@ describe('parsePosition / serializePosition', () => {
 
   it.each([null, undefined, '', 'not json', '{}', '[]', '{"x":"a","y":1}', 'null'])('rejects %p', (raw) => {
     expect(parsePosition(raw as string | null | undefined)).toBeNull();
+  });
+});
+
+describe('topRightPosition — where the Focus Mode exit button starts (2026-09-22)', () => {
+  it('sits in the top-right corner, a margin in, under the notch', () => {
+    expect(topRightPosition({ width: 36, height: 36 }, { width: 400, height: 800 })).toEqual({ x: 352, y: 12 });
+    expect(topRightPosition({ width: 36, height: 36 }, { width: 400, height: 800 }, 12, 44)).toEqual({ x: 352, y: 56 });
+  });
+  it('ignores a nonsense inset and stays on screen on a tiny viewport', () => {
+    expect(topRightPosition({ width: 36, height: 36 }, { width: 400, height: 800 }, 12, Number.NaN).y).toBe(12);
+    expect(topRightPosition({ width: 36, height: 36 }, { width: 400, height: 800 }, 12, -50).y).toBe(12);
+    const tiny = topRightPosition({ width: 36, height: 36 }, { width: 40, height: 40 });
+    expect(tiny.x).toBeGreaterThanOrEqual(12);
+    expect(tiny.y).toBeGreaterThanOrEqual(12);
   });
 });

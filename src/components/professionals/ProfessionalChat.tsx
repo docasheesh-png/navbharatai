@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet } from 'lucide-react';
+import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { ModeButton } from '../chat/ModeButton';
 import { AttachMenu } from '../AttachMenu';
@@ -10,6 +10,7 @@ import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { ExamMode } from './ExamMode';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
@@ -32,6 +33,14 @@ export interface ProfessionalChatConfig {
    *  route. Used by specialised surfaces (e.g. Repo Analyst) that have their
    *  own backend but reuse this chat UI. */
   endpoint?: string;
+  /**
+   * 🎓 STRUCTURED SKILLS this professional offers beyond conversation (admin 2026-09-22, exam mode).
+   *
+   * A skill is a real screen, not a prompt: exam mode has clickable options, marks and a result, which
+   * no amount of chat text can be. Declared per professional so this shared component never grows an
+   * `if (config.id === 'teacher_ai')` — the next professional that wants one adds a flag, not a branch.
+   */
+  skills?: { exam?: boolean };
 }
 
 interface Msg { role: 'user' | 'assistant'; content: string; edited?: boolean; }
@@ -242,6 +251,9 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
     }
   };
 
+  /** Is the exam skill taking the pane? Declared here so the launcher and the render agree. */
+  const [examOpen, setExamOpen] = useState(false);
+
   // STOP the in-flight reply (admin 2026-08-13) — one tap cancels a wrong query instead of waiting it out.
   const stop = () => {
     stoppedRef.current = true;
@@ -250,6 +262,21 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
   };
 
   const showQuick = config.quickPrompts && messages.filter((m) => m.role === 'user').length === 0;
+
+  // 🎓 EXAM MODE takes the WHOLE pane while it runs, and that is the decision rather than a modal.
+  // A paper with four tappable options, an explanation and a Next button does not fit beside a
+  // conversation on a phone, and a student mid-question should not be able to half-see the chat they
+  // are about to ask for help in. It hands its "teach me what I got wrong" message back through
+  // `send`, so the exam ENDS in the conversation it started from.
+  if (examOpen && config.skills?.exam) {
+    return (
+      <ExamMode
+        professionalId={config.id}
+        onAskTeacher={(m) => { setExamOpen(false); void send(m); }}
+        onClose={() => setExamOpen(false)}
+      />
+    );
+  }
 
   return (
     <div className="relative flex flex-col h-full min-h-0 bg-surface text-ink">
@@ -262,8 +289,17 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         {/* Free-allowance chip — only when the daily gate is on for a signed-in user. It is a COUNTER
             now, not an upsell: it used to be a button that opened a Pass paywall, and there is nothing
             left to sell. Unlimited accounts show nothing at all rather than a crown they cannot act on. */}
+        {config.skills?.exam && (
+          <button
+            onClick={() => setExamOpen(true)}
+            className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-full bg-accent hover:bg-accent-hover text-on-accent flex items-center gap-1.5"
+            title="Take an objective test: +4 for a correct answer, −1 for a wrong one"
+          >
+            <GraduationCap className="w-3 h-3" /> Exam mode
+          </button>
+        )}
         {pass?.enabled && pass?.signedIn && !pass.unlimited && (
-          <span className="ml-auto text-[11px] font-semibold px-2.5 py-1 rounded-full bg-raised border border-line text-body">
+          <span className={`${config.skills?.exam ? '' : 'ml-auto'} text-[11px] font-semibold px-2.5 py-1 rounded-full bg-raised border border-line text-body`}>
             <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
           </span>
         )}

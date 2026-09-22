@@ -78176,3 +78176,100 @@ The number PR #3234 left open, built as the first proactive item after the admin
 
 Tests: `tests/thePlatformHasADayToo.test.ts` — the env parsing, the decision, the wording, and the
 ORDER at source level; proven by reversion.
+## 2026-09-22 — 🎓 EXAM MODE in Teacher AI: a real marked paper, not a quiz typed into a chat
+
+Admin's brief, verbatim in substance: the student tells the teacher the subject, topic, level (low /
+medium / hard / mix) and how many questions; the teacher asks objective questions with 4 clickable
+options; a correct click is a green tick and **+4**, a wrong one a red ❌ and **−1**; an explanation
+below; a **Next** button; the cycle repeats. And: *"isko aur jyada accha professional banao. mere
+batane se bhi jyada ux sundar ho!!"*
+
+### The four additions, and why each is not decoration
+
+1. **🔴 SKIP, worth 0.** With negative marking, deciding NOT to answer is the single skill the paper
+   trains — in NEET, JEE and every UPSC prelim a guessed wrong answer costs a mark a blank does not.
+   **A test with −1 and no skip button teaches the opposite of what it is for.** `skipped` is a
+   different fact from `wrong` in the marks, in the accuracy and in the per-topic breakdown.
+2. **🔴 The RIGHT option is revealed on a wrong answer.** A red cross alone tells a student they
+   failed and not what the answer was, so the next attempt is the same guess. This is the whole
+   difference between a score and a lesson.
+3. **🔑 A result that names the weak TOPICS and hands them back to the teacher in one press.** Each
+   question carries its sub-topic, so the end of a paper says *"revise Thermodynamics"* and offers one
+   button that asks Teacher AI to teach exactly the questions that were lost, with the student's own
+   wrong choice quoted. **Without this it is a quiz toy; with it, it is a teacher.**
+4. **Two honest numbers, never one.** `marks` answers *"what would this exam have scored?"*;
+   `accuracyPct` answers *"how good were my answers?"* — over ATTEMPTED only. Collapsing them is how
+   a student who skipped 29 of 30 sees "100%".
+
+Plus: **keyboard A–D or 1–4 to answer, S to skip, Enter for Next** (nobody doing thirty questions on
+a laptop should reach for a mouse); a progress bar with a live running mark total; **full review** of
+every question with the student's answer beside the right one; and the paper is pitched at the student
+Teacher AI already remembers, because the exam route runs through the same persona and memory the
+chat does.
+
+### 🔒 Honesty, where it would have been easy to fake
+
+- **A short paper is said out loud.** `parseExamPaper` REFUSES a malformed question rather than
+  repairing it, and returns `dropped` alongside what survived. Padding would invent questions;
+  silently renumbering a 10-question request to 7 would change the denominator of the student's own
+  score. The surface says *"7 questions, not the 10 you asked for … I would rather be short than make
+  them up."*
+- **A question with two identical options is refused** even when `correctIndex` points at one of
+  them — the answer is ambiguous whatever the index says.
+- **No paper, no score.** An unusable reply is a 502 with an honest sentence, never a fabricated set.
+- **Never colour alone.** Every option state carries an icon AND a word (`Correct`, `Correct answer`,
+  `Your answer`) — a red tint and a green tint are the same tint to roughly one boy in twelve, and
+  telling those two apart is this screen's entire job.
+- **The minus sign is a real `−`**, not a hyphen, because on a result screen a hyphen reads as a dash.
+
+### The two architecture decisions worth not re-deriving
+
+- **ONE model call for the WHOLE paper.** A call per question would cost the student N times as much,
+  make every Next press wait, and let question 7 repeat question 3 because nothing sees the others.
+  One paper is also what makes `mix` real — a generator can order thirty questions easy-first, which
+  it cannot do one at a time.
+- **The answers travel WITH the paper, deliberately and in writing.** Marking on the client is what
+  makes a tap turn green instantly and costs nothing. This is a study aid, not a proctored exam, and
+  the paper is already in the student's own browser. A graded invigilated exam would be a different
+  feature with a server-held key, not a flag on this one.
+
+### 🔒 It cannot become a second, ungoverned way to spend
+
+`POST /api/professional/:id/exam` reuses the chat route's whole spine — the rate limiter, the ban
+check, the Professional Pass gate, the persona, and `chargeForAiTurn` under THE ONE-WALLET LAW, after
+the answer and never awaited into the response. A source test asserts the charge is there and that
+exactly one model call is made.
+
+### Where it lives
+
+`professionals/examMode.ts` (pure: marks, the generator contract, the parser, the scoreboard, the
+hand-back message) · `professionals/examView.ts` (pure: every visual state, the keyboard map, the
+honest notes) · `professionals/ExamMode.tsx` (the screen) · one route · `skills: { exam: true }` on
+Teacher AI's client config.
+
+⚠️ **It is a DECLARED SKILL, not an id check.** `ProfessionalChat` is shared by ~50 professionals, so
+`config.skills?.exam` is what mounts it — the next professional that wants a paper (Maths & Science
+Solver, Spoken English) adds a flag, not a branch. A test asserts `config.id === 'teacher_ai'` appears
+nowhere in that component.
+
+### Verification
+
+`tests/examModeMarksWhatItSays.test.ts` — **53 cases**, reversion-proven three ways: not revealing the
+right answer on a wrong one fails 2; counting a skip as wrong fails 2; accepting duplicate options
+fails 1. White-label and colour-token guards included (no vendor name, no colour literal, no
+`text-white` anywhere in the feature).
+
+Full gate: typecheck · server typecheck · unused imports · native guard · **28,584 tests** · build ·
+bundle · boot · deps. `AppKnowledgeBase.ts` carries the new `teacher_exam_mode` entry per the sync
+rule, and Teacher AI's own prompt now knows the button exists, so a student who types *"mock test do"*
+is pointed at it instead of getting questions typed into the chat.
+
+### 🔴 Still open, deliberately not built
+
+- **No timer.** A real exam is timed, and a clock on a practice paper adds pressure to a student who
+  came to learn. It belongs behind an explicit "timed mode" choice, not as a default.
+- **No resume across a reload.** A paper in progress lives in component state; closing the pane loses
+  it. Worth a slice, and it needs a decision about whether a half-finished paper should be scored.
+- **No history of past papers** — a student cannot yet see whether their Thermodynamics score is
+  improving. That is the natural next slice and the one that would make the weak-topic list a trend
+  rather than a snapshot.

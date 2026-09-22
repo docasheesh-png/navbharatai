@@ -79803,6 +79803,98 @@ carries no `autoVerify` intent filter. Today's server-side work (both certificat
 `/.well-known/` redirect exemption) is correct and verified on both hosts, but it takes a build from
 2026-09-19 or later to demonstrate it.
 
+## 2026-09-22 — IMAGE GENERATOR: the box that did not empty, and the noun that overruled the sentence
+
+Admin, two screenshots: *"1. image generate me messages send hone ke bad bhi, message input box me show
+ho raha hai! 2. image irrelevant ban rahi hai, prompt se koi lena dena hi nahi hai!"*
+
+### 1 · The box emptied only on SUCCESS — a minute after the bubble said "sent"
+
+Both image composers (`AIImageGenerator.tsx`, `ImageStudioPro.tsx`) cleared their input only after
+the picture arrived; on the free tier that is after a 15-second-per-address retry countdown ("trying
+again (52s)" in the screenshot). Every other box in this app clears at send. The old reason was real
+and is kept — *"a FAILED request keeps the words"* — so the fix is clear-at-send + restore-on-failure
+through ONE pure rule, `src/lib/draftAfterSend.ts` (`draftAfterFailedSend`), which restores **only
+into an empty box**: a new brief typed while the old one was in flight is never overwritten. The
+wallet-refusal path restores too (they will send it again after topping up). The words are captured
+once at send (`typed`) because the history row and the bubble still need them after the clear.
+
+### 2 · "Photograph" on the chip, "logo" in the words — and the noun won
+
+Type chip **Photograph**, style **Realistic**, brief *"A minimalist photograph of a clinic logo …
+shot with a shallow depth of field … studio lighting …"*. Reproduced with `craftImagePrompt`; what
+the engine received:
+
+    …photograph… shallow depth of field… studio lighting… professional photography.
+    Design as a LOGO MARK: flat vector style… **no photorealism**… Avoid: …**blurry, out of
+    focus**… **photorealistic**…
+
+One prompt asking for a photograph and forbidding photorealism — the muddle `imagePromptCraft.ts`'s
+own docblock says it exists to prevent — and the picture was a shallow-depth-of-field blur related to
+nothing. Then the note told the user to *"set the Image type to Photograph"* — the chip already set.
+
+**Cause:** "Photograph" matches no purpose pattern, so `detectPurpose` fell through to the WORDS,
+found the noun "logo", and that word-inferred purpose overruled the realism the same words asked for
+explicitly. The module's own principle — *the user's typed intent is the stronger signal* — was
+applied to the style chip and never to this. **Fix:** `detectPurposeWithSource` returns where the
+purpose came from; a purpose CHOSEN on the type chip keeps full authority (a chip-set logo still wins
+over the Realistic chip, unchanged), a purpose merely INFERRED from a noun stands down to `general`
+when the same brief asks for a photo in words, and the photo direction applies. The note now names an
+action that exists (*change the Image type, or write "a photo of"*).
+
+⚠️ **Not changed, and recorded as an open question:** the negatives ride INLINE as "Avoid: …" (~500
+chars) into a provider with no negative-prompt field, and the module admits some models read such a
+list as a request FOR those things — the output was "blurry, out of focus", both in that list. Not
+proven, not guessed at; the verified contradiction above is the fix. The ⭐ enhancer was NOT the
+cause: given "Photograph + Realistic" it wrote a coherent photo brief; the craft layer then fought it.
+
+Test-locked and reversion-proven in `tests/theBoxEmptiesWhenYouPressSend.test.ts` (6) and
+`tests/aNounIsNotAChip.test.ts` (9); all 234 existing composer/craft tests unchanged and green.
+
+## 2026-09-22 — IMAGE GENERATOR, PART 2: the two halves left open, closed (admin: "to fix karo sab")
+
+### 1 · The ⭐ turned a logo into a photograph because of a chip nobody chose
+
+**Root cause (verified):** the style chip DEFAULTS to `photo` (Realistic) — `AIImageGenerator.tsx:209`
+— and the enhancer was handed `Style: Realistic` for the brief *"clinic logo"*. Its own instruction
+says a photographic style *"gets real camera language"*, so it wrote *"a minimalist photograph of a
+clinic logo, shot with a shallow depth of field…"*. The craft layer then read a photo request in the
+words and built a photo. **Two modules, two rules about what a chip may overrule.** The craft layer had
+already learned *"a chip they never touched yields to the words"* for the picture it BUILT; the ⭐ kept
+a rule of its own.
+
+**Fix — one owner.** `resolveImageBrief` (`imagePromptCraft.ts`) now answers every chip-vs-words
+question; `craftImagePrompt` is built from it and the enhancer asks it too (`resolveEnhanceBrief`), so
+they cannot disagree because there is only one of them. Concretely:
+- the style chip is forwarded to the model ONLY when the resolution says it applies; when a flat mark
+  won, the model is told in words to keep it one (`keepTheKindLine`);
+- a rewrite that turned a flat mark into a photograph is REFUSED (`changed-kind`), the same shape as
+  `keepsTheFacts` for the kind of picture rather than its facts — the user's words are kept and the
+  note says how to get a photo of it (say so in the brief);
+- the client sends the chip's **id** (`styleId`) beside its label; the rule reads the id, the model reads
+  the label, and an id is never guessed from a label. Without an id the old behaviour holds exactly.
+
+### 2 · The Avoid list repeated the prompt — and may have contradicted it
+
+The prompt said *sharp, professionally composed, coherent lighting, production quality* and then, ~500
+characters later, *Avoid: … blurry, out of focus, low resolution, cluttered composition …* — into a
+provider with ONE string and no negative field, which `withInlineNegative`'s own comment has always
+said some models read as a request. `compactNegative` drops every negative whose POSITIVE the prompt
+already carries (a fixed table, `NEGATIVE_COVERED_BY_POSITIVE`); everything with no positive form —
+watermark, gibberish text, extra fingers, mockup frame — stays. Measured on the logo case: 8 items gone,
+776 → 663 chars. `crafted.negative` itself is untouched, so a provider with a real negative field still
+gets the whole list. `IMAGE_GEN_INLINE_NEGATIVE=full` restores the long list with no deploy.
+
+⚠️ **Honest about what is proven (rule 6):** that the negatives CAUSED the blur is a suspicion, not a
+measurement — the provider's output cannot be taken from here. What is certain is that a negative whose
+positive is already present adds no instruction, so removing it cannot remove any direction the model
+was given; it can only remove a risk. The admin's next real free image, with and without `=full`, is the
+evidence.
+
+Test-locked and **reversion-proven four ways** in `tests/theStarKeepsTheKindOfPicture.test.ts` (18):
+the star forwards the chip unconditionally again · a kind-changing rewrite is accepted again · the
+Avoid list repeats the prompt again · the craft layer keeps a private second reading of the chips.
+All 109 existing enhancer/craft/composer tests unchanged.
 **The adversarial review (seven finders, three refuters each) found, and the same PR fixed:**
 - 🔴 **CRITICAL — the trimmed package.json dropped `typescript`, and Capacitor's CLI reads
   `capacitor.config.ts` with the project's own TypeScript** (`@capacitor/cli` config.js: *"Could not find

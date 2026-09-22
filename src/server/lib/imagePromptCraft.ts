@@ -243,9 +243,42 @@ const PURPOSE_PATTERNS: Array<[RegExp, ImagePurpose]> = [
  * who tapped the chip.
  */
 export function detectPurpose(type: string | undefined, prompt: string): ImagePurpose {
-  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(type ?? ''))) return purpose;
-  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(prompt ?? ''))) return purpose;
-  return 'general';
+  return detectPurposeWithSource(type, prompt).purpose;
+}
+
+/**
+ * The purpose AND where it came from — because the two sources carry different weight.
+ *
+ * 🔴 AUTOPSY 2026-09-22 (the clinic-logo screenshot). Type chip: **Photograph**. Style chip:
+ * Realistic. Brief: *"A minimalist photograph of a clinic logo … shot with a shallow depth of field
+ * … studio lighting … professional photography."* What the engine received, measured:
+ *
+ *     "…photograph… shallow depth of field… studio lighting… professional photography.
+ *      Design as a LOGO MARK: flat vector style… **no photorealism**… Avoid: …**blurry, out of
+ *      focus**… **photorealistic**…"
+ *
+ * One prompt asking for a photograph AND forbidding photorealism — the exact muddle this module's
+ * own docblock says it exists to prevent — and the picture that came back was a shallow-depth-of-
+ * field blur of nothing, related to the brief by nothing. Then the note told the user to *"set the
+ * Image type to Photograph"* — the chip that was ALREADY selected.
+ *
+ * 🔑 THE CAUSE: "Photograph" matches no purpose pattern, so `detectPurpose` fell through to the
+ * WORDS, found the noun "logo", and that word-inferred purpose then overruled the realism the same
+ * words asked for explicitly ("photograph of … shot with …"). A noun mentioned in passing beat a
+ * sentence of camera direction, both from the same text. This module's own stated principle — the
+ * user's typed intent is the stronger signal — was applied to the style chip and never to this.
+ *
+ * So the source is returned: a purpose the user CHOSE on the type chip ('type') keeps its full
+ * authority; one merely INFERRED from a noun in the brief ('words') yields when the same brief asks
+ * for a photograph in so many words. Pure.
+ */
+export function detectPurposeWithSource(
+  type: string | undefined,
+  prompt: string,
+): { purpose: ImagePurpose; source: 'type' | 'words' | 'none' } {
+  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(type ?? ''))) return { purpose, source: 'type' };
+  for (const [re, purpose] of PURPOSE_PATTERNS) if (re.test(String(prompt ?? ''))) return { purpose, source: 'words' };
+  return { purpose: 'general', source: 'none' };
 }
 
 /** Normalised words of a prompt, for "did the user already say this?" checks. */
@@ -297,9 +330,57 @@ export function requestedText(prompt: string): string {
  * weight the opening of a prompt most heavily, so the user's actual subject must lead; direction that
  * arrived before it would compete with the thing they asked for.
  */
+/**
+ * WHAT THE PICTURE IS — resolved ONCE, from the chips and the words together.
+ *
+ * 🔴 WHY THIS IS A SEPARATE, EXPORTED FUNCTION (2026-09-22, the clinic-logo screenshot, second half).
+ * Two modules answered "is this a logo or a photograph?" and each answered differently. The ⭐
+ * enhancer (`imagePromptEnhancer.ts`) was handed "Style: Realistic" — the chip's DEFAULT, which the
+ * user had never touched — and rewrote *"clinic logo"* into *"a minimalist photograph of a clinic
+ * logo, shot with a shallow depth of field…"*. This module then read those words, found a photo
+ * request, and built a photo. **The enhancer changed what the picture IS, and the craft layer
+ * followed the new words.** Neither module was wrong by its own rules; they had two sets of rules.
+ *
+ * This is the SAME class this file already fixed once for the type chip ("a chip they never touched
+ * must not overrule the words") — applied, on the other side of the ⭐, to the style chip. The cure
+ * is one owner: every question of precedence between a chip and the words is answered HERE, and the
+ * enhancer asks this function instead of keeping an opinion of its own. The two cannot disagree
+ * because there is only one of them. Pure.
+ */
+export interface ResolvedBrief {
+  purpose: ImagePurpose;
+  purposeSource: 'type' | 'words' | 'none';
+  /** The request asks for a real photograph — by chip or by its own words. */
+  realism: boolean;
+  /** Realism came from the chip (and the chip was not dropped for contradicting the words). */
+  realismChip: boolean;
+  /** A photo-hostile purpose won over the realism request — a flat mark is what will be made. */
+  realismLoses: boolean;
+  /** The style chip contradicts the user's own wording and is set aside. */
+  styleDropped: boolean;
+  /** Whether the style chip's direction is applied at all. */
+  styleApplies: boolean;
+}
+
+export function resolveImageBrief(input: CraftInput): ResolvedBrief {
+  const base = String(input.prompt ?? '').trim().slice(0, MAX_PROMPT_CHARS);
+  const detected = detectPurposeWithSource(input.type, base);
+  const styleSpec = STYLE_DIRECTION[String(input.style ?? '')];
+  const styleDropped = !!styleSpec && styleConflictsWithPrompt(input.style, base);
+  const realismChip = !!styleSpec && !styleDropped && REALISM_STYLES.has(String(input.style));
+  const realism = realismChip || realismInWords(base);
+  // A purpose merely INFERRED from a noun stands down when the same words ask for a photograph;
+  // a purpose CHOSEN on the type chip keeps its authority. See `detectPurposeWithSource`.
+  const purpose: ImagePurpose = realismInWords(base) && detected.source === 'words' && PHOTO_HOSTILE_PURPOSES.has(detected.purpose)
+    ? 'general'
+    : detected.purpose;
+  const realismLoses = realism && PHOTO_HOSTILE_PURPOSES.has(purpose);
+  const styleApplies = !!styleSpec && !styleDropped && !(realismChip && realismLoses);
+  return { purpose, purposeSource: detected.source, realism, realismChip, realismLoses, styleDropped, styleApplies };
+}
+
 export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   const base = String(input.prompt ?? '').trim().slice(0, MAX_PROMPT_CHARS);
-  const purpose = detectPurpose(input.type, base);
   const notes: string[] = [];
   const parts: string[] = [];
 
@@ -310,10 +391,10 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   // tap the Realistic or Cinematic chip, or simply write it ("a realistic photo of a Delhi
   // street"). The second matters most — the image-type chip is compulsory and most people never
   // change it, so their typed words are the only signal of what they actually wanted.
+  // Every precedence question is answered by `resolveImageBrief` — the one owner the ⭐ enhancer
+  // asks too, so the two can never disagree about what the picture is.
   const styleSpec = STYLE_DIRECTION[String(input.style ?? '')];
-  const styleDropped = !!styleSpec && styleConflictsWithPrompt(input.style, base);
-  const realismChip = !!styleSpec && !styleDropped && REALISM_STYLES.has(String(input.style));
-  const realism = realismChip || realismInWords(base);
+  const { purpose, styleDropped, realismChip, realism, realismLoses } = resolveImageBrief(input);
 
   // 🔴 THE USER'S EXPLICIT ASK BEATS A CHIP THEY NEVER TOUCHED. This module already states that
   // principle, in `styleConflictsWithPrompt`'s own words — "the user's typed intent is the stronger
@@ -335,12 +416,23 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   // not by this rule. With a neutral default, a photo-hostile type is one somebody picked on
   // purpose, and so is a purpose they typed themselves ("a coffee shop LOGO"). Either way a flat
   // mark is what works at small sizes, so the style chip is the one that stands down.
-  const realismLoses = realism && PHOTO_HOSTILE_PURPOSES.has(purpose);
+  //
+  // 🔴 …AND A PURPOSE THAT WAS ONLY *INFERRED* FROM THE BRIEF YIELDS TO A PHOTOGRAPH THE SAME BRIEF
+  // ASKS FOR IN WORDS (2026-09-22, the clinic-logo screenshot — see `detectPurposeWithSource`). The
+  // rule above was written for a purpose somebody CHOSE on the type chip. When "Photograph" is on
+  // the chip and the words say "a photograph of a clinic logo, shot with…", the noun "logo" is not
+  // a decision to make a flat mark — it is the subject of the photo. Overruling the sentence with
+  // the noun produced a prompt that asked for a photograph and forbade photorealism in one breath,
+  // and a picture related to nothing. So: a chip-chosen purpose still wins; a word-inferred one
+  // stands down to 'general' when the same words asked for a photo, and the photo direction applies.
   if (purpose !== 'general') parts.push(PURPOSE_DIRECTION[purpose] + '.');
   if (realismLoses) {
     // Never silent: they tapped that chip and the reply says which way the conflict went, and how
-    // to get the other answer.
-    notes.push('This is a logo/icon brief, so the realistic-photo style was not applied — a flat mark is what stays readable at small sizes. Set the Image type to "Photograph" if you wanted a real photo.');
+    // to get the other answer. The other answer is NAMED CORRECTLY now: the way to a real photo is
+    // to change the TYPE chip away from the logo/icon it is set to, or to say "a photo of" in the
+    // brief — it used to say "set the type to Photograph", which is impossible advice when that chip
+    // is the one already selected (it was, in the screenshot).
+    notes.push('The Image type is set to a logo/icon, so the realistic-photo style was not applied — a flat mark is what stays readable at small sizes. For a real photograph of it, change the Image type or write "a photo of" in the brief.');
   }
 
   // Whether the PHOTO negatives belong. Tracked rather than inferred from `input.style`, because a
@@ -404,7 +496,54 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
  * Phrased as "Avoid:" rather than a bare list, because a raw list of unwanted words in a positive
  * prompt is read by some models as a request FOR them — the classic way a negative prompt backfires.
  */
-export function withInlineNegative(crafted: CraftedPrompt): string {
+/**
+ * A negative whose POSITIVE is already in the prompt says nothing new — and on a single-string
+ * provider it may say the opposite.
+ *
+ * 🔴 WHY (2026-09-22, the clinic-logo screenshot). The prompt already says "sharp", "professionally
+ * composed", "coherent lighting", "production quality" — and then, ~500 characters later, "Avoid:
+ * … blurry, out of focus, low resolution, jpeg artifacts, oversaturated, harsh flash, cluttered
+ * composition, awkward crop …". The free provider takes ONE string and exposes no negative-prompt
+ * field, and this module's own `withInlineNegative` comment has always said what that risks: *"a
+ * raw list of unwanted words in a positive prompt is read by some models as a request FOR them"*.
+ * The picture that came back was blurry and out of focus — both words in that list.
+ *
+ * ⚠️ HONEST ABOUT WHAT IS PROVEN (rule 6): that the negatives CAUSED the blur is a suspicion, not a
+ * measurement — Pollinations' own output cannot be taken from here. What IS certain is that a
+ * negative whose positive form the prompt already carries adds no instruction at all, so dropping it
+ * cannot remove any direction the model was given; it can only remove a risk. Every remaining item
+ * — a watermark, gibberish text, extra fingers, a mockup frame — has no positive form and stays.
+ *
+ * `IMAGE_GEN_INLINE_NEGATIVE=full` restores the complete list with no deploy, so the two can be
+ * compared on real pictures. Pure.
+ */
+const NEGATIVE_COVERED_BY_POSITIVE: ReadonlyArray<[negative: string, positive: RegExp]> = [
+  ['blurry', /\bsharp\b/i],
+  ['out of focus', /\bsharp\b|\bin focus\b/i],
+  ['low resolution', /\bproduction quality\b|\bhigh detail\b|\bfine .*detail\b/i],
+  ['jpeg artifacts', /\bproduction quality\b|\bclean edges\b/i],
+  ['cluttered composition', /\bprofessionally composed\b|\bclean geometry\b|\buncluttered\b/i],
+  ['awkward crop', /\bprofessionally composed\b|\bcomposed\b/i],
+  ['harsh flash', /\bcoherent lighting\b|\bnatural light\b|\bstudio lighting\b/i],
+  ['oversaturated', /\btrue-to-life colou?r\b|\brestrained palette\b|\bmuted\b/i],
+  ['clutter', /\bclean geometry\b|\bbalanced negative space\b|\buncluttered\b/i],
+  ['busy background', /\bsimple .*background\b|\bplain background\b|\buncluttered\b/i],
+];
+
+export function compactNegative(negative: string, prompt: string, env: NodeJS.ProcessEnv = process.env): string {
+  const items = String(negative ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+  if (String(env.IMAGE_GEN_INLINE_NEGATIVE ?? '').trim().toLowerCase() === 'full') return items.join(', ');
+  const kept = items.filter((item) => {
+    const rule = NEGATIVE_COVERED_BY_POSITIVE.find(([neg]) => neg === item.toLowerCase());
+    return !(rule && rule[1].test(prompt));
+  });
+  // De-duplicate what the purpose list and the base list both name, preserving first order.
+  return Array.from(new Set(kept)).join(', ');
+}
+
+export function withInlineNegative(crafted: CraftedPrompt, env: NodeJS.ProcessEnv = process.env): string {
   if (!crafted.negative) return crafted.prompt;
-  return `${crafted.prompt} Avoid: ${crafted.negative}.`.slice(0, MAX_PROMPT_CHARS);
+  const compact = compactNegative(crafted.negative, crafted.prompt, env);
+  if (!compact) return crafted.prompt;
+  return `${crafted.prompt} Avoid: ${compact}.`.slice(0, MAX_PROMPT_CHARS);
 }

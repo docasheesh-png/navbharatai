@@ -51,8 +51,32 @@ export interface ChatWindow {
   professionalId: string;
 }
 
-/** How many professional conversations may be open at once. The admin's number, verbatim. */
+/**
+ * How many chats may be open at once. The admin's number, verbatim.
+ *
+ * ⚠️ SINCE 2026-09-22 THE FIVE ARE COUNTED ACROSS EVERY CHAT THE MODE LIST CAN SWITCH TO, not across
+ * professional windows alone (admin, approving the redesign: Doctor AI and the Image Generator count,
+ * "doctor + 4 = 5"). The FREE chat is the home of the tab and is never counted — it is always there.
+ * `chatSlotsUsed` is the one place that arithmetic lives.
+ */
 export const MAX_OPEN_CHATS = 5;
+
+/**
+ * The chats that take a slot WITHOUT being a window: Doctor AI holds one case at a time, the image
+ * studio is one view. Each is one row of the Mode list's Recent group while its view is open, so each
+ * is one of the five. A view here must also be a mode surface (`isModeSurface`) — the test locks that.
+ */
+export const SLOT_VIEWS: readonly string[] = ['sda_chat', 'imagegen'];
+
+/** How many of the five are taken: every open window, plus every slot view that is open. */
+export function chatSlotsUsed(windows: ChatWindow[], openViews: readonly string[]): number {
+  return windows.length + SLOT_VIEWS.filter((v) => openViews.includes(v)).length;
+}
+
+/** Is there room for one more chat (a new window, a Doctor AI case, the image studio)? */
+export function chatSlotFree(windows: ChatWindow[], openViews: readonly string[]): boolean {
+  return chatSlotsUsed(windows, openViews) < MAX_OPEN_CHATS;
+}
 
 export interface OpenOutcome {
   windows: ChatWindow[];
@@ -66,10 +90,15 @@ export interface OpenOutcome {
  * Open a window. Re-opening a window that is already open is a no-op that still reports `opened`
  * (the caller then simply focuses it); a NEW window past the cap is refused with a reason the surface
  * must show — a "New chat" that quietly does nothing is the fake-button class.
+ *
+ * `openViews` (the open tab ids) is what makes the cap count Doctor AI and the image studio too.
  */
-export function openWindow(windows: ChatWindow[], win: ChatWindow): OpenOutcome {
+export function openWindow(windows: ChatWindow[], win: ChatWindow, openViews: readonly string[] = []): OpenOutcome {
   if (windows.some((w) => w.id === win.id)) return { windows, opened: true };
-  if (windows.length >= MAX_OPEN_CHATS) return { windows, opened: false, reason: 'cap' };
+  // `openViews` is what lets Doctor AI and the image studio count (2026-09-22). A caller that omits it
+  // gets the window-only count, which is LOOSER than the truth — so App passes `openTabs` at every
+  // call site, and the wiring test reads that it does.
+  if (!chatSlotFree(windows, openViews)) return { windows, opened: false, reason: 'cap' };
   return { windows: [...windows, win], opened: true };
 }
 

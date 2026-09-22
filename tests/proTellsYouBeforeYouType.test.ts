@@ -82,12 +82,24 @@ describe('the panel is honest before a prompt is written', () => {
     expect(codeOnly).toContain('fetchImageProAvailable()');
   });
 
-  it('a remembered Pro choice is DISPLAYED as Free when Pro is off, and is not overwritten', () => {
-    // Only an explicit false forces Free…
+  it('a Pro press is DISPLAYED as Free when Pro is off, and is not discarded', () => {
+    // Only an explicit false forces Free — an UNKNOWN answer changes nothing. This half is the
+    // original protection and is untouched: the press the user made is kept in `chosenTier`, so the
+    // moment Pro is confirmed available their choice takes effect instead of having been erased.
     expect(codeOnly).toMatch(/proAvailable === false \? 'free' : chosenTier/);
-    // …and what is persisted is the CHOICE, never the effective tier, so switching Pro on restores it.
-    expect(codeOnly).toMatch(/setItem\(TIER_KEY, chosenTier\)/);
-    expect(codeOnly).not.toMatch(/setItem\(TIER_KEY, effectiveTier\)/);
+  });
+
+  it('🔴 …but it does NOT outlive the panel — every open starts on free (admin 2026-09-22)', () => {
+    // This replaces two assertions that pinned the persistence (`setItem(TIER_KEY, chosenTier)`,
+    // and never `effectiveTier`). Their reason was that persisting the EFFECTIVE tier would
+    // overwrite a real choice with a fallback — a sound rule, and now unreachable, because nothing
+    // persists the tier at all. The admin reported the paid tier opening by itself, which is what a
+    // remembered choice does to anyone who tried Pro once; a Pro image costs real rupees per press.
+    expect(codeOnly).toMatch(/useState<'free' \| 'pro'>\('free'\)/);
+    expect(codeOnly).not.toMatch(/TIER_KEY/);
+    // The distinction the old assertions protected still cannot be got wrong, because there is no
+    // writer to get wrong — asserted so that re-adding persistence has to re-read this reasoning.
+    expect(codeOnly).not.toMatch(/setItem\([^)]*[Tt]ier/);
   });
 
   it('the dead Pro chip cannot be pressed, so it cannot cost a prompt', () => {

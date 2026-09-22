@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalHostRedirect, canonicalHostFromEnv } from './canonicalHost';
+import { canonicalHostRedirect, canonicalHostFromEnv, isWellKnownPath } from './canonicalHost';
 
 /**
  * ADMIN'S BROWSER CONSOLE, 2026-08-22:
@@ -59,5 +59,30 @@ describe('canonicalHostRedirect', () => {
     expect(canonicalHostRedirect({ host: 'www.navbharatai.com', originalUrl: '/', canonical: '' }).redirectTo).toBeNull();
     expect(canonicalHostFromEnv({} as NodeJS.ProcessEnv)).toBe('');
     expect(canonicalHostFromEnv({ CANONICAL_HOST: ' navbharatai.com ' } as never)).toBe('navbharatai.com');
+  });
+
+  describe('🔒 /.well-known/ is served on the www host too — verifiers do not follow redirects', () => {
+    // Play Console, 2026-09-22: "2 domains not verified · 8 links not working", every row "Failed domain
+    // checks". The manifest claims BOTH hosts; Android verifies each one by fetching ITS OWN
+    // /.well-known/assetlinks.json, and the Digital Asset Links verifier does not follow a redirect.
+    // With this middleware mounted first, the www copy was a 308 — a domain that could never verify.
+    it('THE REPORTED CASE: www + assetlinks.json is served where it was asked, not moved', () => {
+      expect(dec('www.navbharatai.com', '/.well-known/assetlinks.json').redirectTo).toBeNull();
+    });
+
+    it("Apple's statement file is the same class", () => {
+      expect(dec('www.navbharatai.com', '/.well-known/apple-app-site-association').redirectTo).toBeNull();
+    });
+
+    it('the exemption is the PREFIX at the root — the app itself still has one canonical origin', () => {
+      expect(dec('www.navbharatai.com', '/').redirectTo).toBe('https://navbharatai.com/');
+      expect(dec('www.navbharatai.com', '/store/.well-known/x').redirectTo).toBe('https://navbharatai.com/store/.well-known/x');
+      expect(dec('www.navbharatai.com', '/api/agentv3/chat?p=/.well-known/').redirectTo)
+        .toBe('https://navbharatai.com/api/agentv3/chat?p=/.well-known/');
+      expect(isWellKnownPath('/.well-known')).toBe(true);
+      expect(isWellKnownPath('/.well-known/assetlinks.json?v=1')).toBe(true);
+      expect(isWellKnownPath('/.well-knownx')).toBe(false);
+      expect(isWellKnownPath('')).toBe(false);
+    });
   });
 });

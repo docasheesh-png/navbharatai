@@ -78310,3 +78310,59 @@ ungli se khich ke kahi bhi rakh sake! expand (full screen on) wala theek hai."*
   `nbai.focusExit.pos` and clamped to whatever screen it is next shown on. Keyboard still exits.
 - The header's ENTER button is untouched. Locked by `tests/theExitButtonGoesWhereTheFingerPutsIt.test.ts`
   and two `topRightPosition` cases in `floatingButtonPosition.test.ts`.
+
+## 2026-09-22 — 🎁 ₹50 for a new account: the Play rejection was an empty wallet
+
+Google rejected the Android release under the **Broken Functionality** policy. Their label says
+*"Loading problems: Your app doesn't open or load"* — their own evidence screenshots show the app OPEN,
+on the AI Image Generator, carrying *"Image generation failed — please try again"* three times. The
+chain behind that, read out of the code rather than reasoned about:
+
+1. a brand-new account receives **₹0** — `flatWelcomeGiftAllowed()` has been a hardcoded `false` since
+   2026-09-17 and `weeklyTopUpAllowed()` likewise, while `REFERRAL_REWARDS` — the ladder meant to pay
+   instead — is deliberately unset until the app is live on Play;
+2. free images come from Pollinations, a keyless third party with no SLA;
+3. when it fails, the ladder falls to a **paid** rung;
+4. `gateToolAction` refuses a paid rung on an empty wallet (402), and the client shows one generic line.
+
+So image generation worked for a new user only while a free third party happened to be up. **A Play
+reviewer is exactly that user** — and it was a deadlock: the referral ladder was gated on being live on
+Play, and Play would not pass because a new account could not use the product.
+
+Admin's ruling, verbatim: *"new account me 50₹ credit do. jab tak, refral system activate na hota hai,
+tab tak. uske baad 100x4=400 denge.(after refral system activation)"*
+
+- **`src/server/lib/interimWelcomeGift.ts`** (new) — ₹50 = 5,000 tokens at signup. It is its own module
+  for a real reason: `referralRewards.ts` already imports `giftPolicy.ts`, so putting this in
+  `giftPolicy` would have closed a `giftPolicy → welcomeGiftExclusion → referralRewards → giftPolicy`
+  cycle.
+- 🔒 **The 2026-09-17 retirement is NOT reversed — only scoped.** `flatWelcomeGiftAllowed()` gates three
+  things: the signup grant, the retired **₹250 phone bonus** claim route, and the v2 gift summary.
+  Flipping it to reach the first would have silently re-opened a claim the admin retired — one problem
+  traded for another. It stays a hardcoded `false`; the interim grant is a separate, smaller, signup-only
+  predicate, and the phone route and the summary stand down exactly as they do today.
+- 🔒 **It stands down by itself.** The live test is `flatWelcomeGiftSuppressed` — the module that already
+  owns *"is the referral ladder paying instead?"* — so the moment `REFERRAL_REWARDS` is on this grant
+  returns 0, with no second copy of that rule and nothing for anyone to remember to switch off. That is
+  the admin's "jab tak … tab tak", in code.
+- 🔒 **It counts against the ₹400 lifetime ceiling** (`capSelfGift`, recorded in `freeGiftedTokens` in the
+  same write), so ₹50 today plus referral steps later tops out at ₹400, never ₹450.
+- ⚠️ **An unreadable `INTERIM_WELCOME_TOKENS` falls back to ₹50, never to zero.** `Number('')` is `0`, so
+  a key present-but-empty in a console would otherwise read as a deliberate "give nobody anything" and
+  silently restore the very bug this closes. An explicit `0` is honoured.
+- `alreadyGranted` still wins, so a re-created wallet document collects nothing; `retiredGiftSummary`
+  already reports the ₹50 as gifted with nothing claimable, so no screen promises a second instalment.
+- **AppKnowledgeBase:** the billing entry now states what a new account starts with and that the amount
+  is interim; the referral entry now leads with the fact that referral rewards are **not switched on
+  yet** — the Promo screen already says so, and the entry had been describing the ₹400 ladder as if it
+  were paying.
+- Test-locked and reversion-proven three ways in `tests/aNewAccountCanActuallyUseTheApp.test.ts`
+  (12 cases): removing the ladder stand-down, treating a blank env as zero, and reaching the grant
+  through `flatWelcomeGiftAllowed` (which would re-open the ₹250 phone bonus) each fail it.
+
+✅ **It is entirely server-side, so it reaches every installed app on the next merge to `main`** — no
+new `.aab` is needed for the credit itself (nothing user-facing in `dist/` changed).
+⚠️ **It does not by itself clear the rejection.** Play re-reviews on a resubmission, and what this
+changes is the reviewer's account having credit when Pollinations is down — the paid rung of the image
+ladder can now serve instead of refusing. The rejection is cleared by a resubmission that a reviewer
+gets through, not by this merge.

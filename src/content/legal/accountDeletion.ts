@@ -64,6 +64,9 @@ When your deletion request is completed, we remove:
 - your **saved connected services** — the MCP services you saved on your account to reuse across apps
   (this removes NavBharatAI's saved copy of the address and key; it does **not** touch anything in the
   service's own account, which stays yours);
+- your **gift-code purchase tally** — the running count of how many gift codes you bought on a given
+  day. (The codes themselves are **not** deleted: once you have given a code to somebody, it is theirs
+  to redeem, and a payment record is one of the things we are required to keep — see below.);
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
 

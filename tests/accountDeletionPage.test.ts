@@ -76,6 +76,9 @@ describe('the page and the deletion code do not drift apart', () => {
       // Added to the eraser on 2026-09-17; the policy promised erasure and nothing erased them.
       user_vault_pin: /App Lock PIN/i,
       agentv3_mcp_library: /saved connected services/i,
+      // Added 2026-09-22 with "gift a promo code". Note what the page ALSO has to say: the codes
+      // themselves survive, because a code already given away is somebody else's to redeem.
+      gift_code_daily: /gift-code purchase tally/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

@@ -143,7 +143,12 @@ const paymentRoute = readFileSync(join(__dirname, '..', 'src/server/routes/payme
 
 describe('where the fee is and is NOT applied', () => {
   it('the Cashfree create-order records the split on the transaction', () => {
-    expect(paymentRoute).toContain('const feeSplit = splitPayment(orderAmount)');
+    // The recharge still takes the DEDUCTING split. Since 2026-09-22 the line is a ternary, because
+    // a GIFT code prices the other way round (the fee is added on top of the face value, so the
+    // friend receives the full amount) — `aBoughtCodeIsSpentOnce.test.ts` holds that half, and this
+    // case holds that a recharge did not quietly inherit it.
+    expect(paymentRoute).toContain(': splitPayment(orderAmount);');
+    expect(paymentRoute).toContain('{ paidInr: orderAmount, feeInr: giftFee, creditInr: 0 }');
     expect(paymentRoute).toContain('balanceAdded: feeSplit.creditInr');
     expect(paymentRoute).toContain('platformFeeInr: feeSplit.feeInr');
   });

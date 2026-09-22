@@ -78366,3 +78366,44 @@ new `.aab` is needed for the credit itself (nothing user-facing in `dist/` chang
 changes is the reviewer's account having credit when Pollinations is down — the paid rung of the image
 ladder can now serve instead of refusing. The rejection is cleared by a resubmission that a reviewer
 gets through, not by this merge.
+
+## 2026-09-22 — 💳 "This is a paid service": an empty balance now says what it means
+
+Admin, the same hour as the ₹50 credit: *"agar user ke pas balance khatam hai, to proper likh kar ana
+chahiye. this is paid service!!"* Two defects were behind it, and neither was a missing message — both
+were about what the message actually said and what the screen then did with it.
+
+**🔴 1. The sentence was a drifted copy, three times.** `professionals/passGate.ts`, `tools/toolGate.ts`
+and the Pro image route each carried their own wording of the same refusal, already diverging
+("Add credit" / "Add credits", "balance is empty" / "credits are used up"). The drifted-copy class this
+repo has paid for four times over. One builder now: `src/server/lib/walletEmptyNotice.ts`, and a source
+guard fails if a fourth copy appears.
+
+**🔴 2. And for a wallet in DEBT the sentence was simply false.** The refusal fires at
+`balanceInr <= 0` (`walletTooEmptyForTurn`), and a build may legitimately leave a wallet down to −₹50
+(`WALLET_OVERDRAFT_FLOOR_INR`) — a real account was found at **−₹506**. Telling that person *"your
+balance is empty. Add credit"* is not a rounding of the truth: they top up ₹20, meet the identical
+refusal, and nothing anywhere tells them the real figure. The notice now names what was overspent and
+the amount that actually clears it, states the price of the refused thing where the caller knows it,
+and — when the balance could not be read at all — says so rather than inventing a zero.
+
+**🔴 3. The image studio treated a bill as a breakage.** The server's honest sentence landed in a red
+error line beside a **Try again** button, and retrying an empty wallet cannot work — the one control
+offered was the one guaranteed to fail. It now renders an *Add credit to carry on* card with a real
+button, through `navbharat:navigate`, the channel `AgentV3Panel` already uses. The generic error card
+stands down while a balance block is set, so a retry is never offered for a condition retrying cannot
+clear.
+
+- **`src/lib/walletEmptyRefusal.ts`** — the client half: `isWalletEmptyRefusal` switches on the server's
+  `wallet_empty` CODE, never on its prose (the sentence is written for a person and will be reworded).
+  ⚠️ A 402 alone is not enough — hosting plans and custom domains answer 402 with different offers.
+- 🔒 Test-locked and **reversion-proven twice** in `tests/anEmptyBalanceIsSaidProperly.test.ts`
+  (18 cases): moving the wallet check after the generic throw that swallows it, and treating a debt as
+  "empty" again, each fail it. Both guards are SOURCE-level — `tsc` and `vitest` cannot see either,
+  which is exactly how both shipped.
+- 🔒 White-label locked: no vendor, model or routing word can reach the text.
+
+⚠️ **What this does NOT do, said plainly.** The build panel and the Professional chat already had a
+proper card with an Add-credit button and are untouched. Doctor AI and the AI tool panels (Debugger,
+Design System, App Scan) still show the refusal as plain text with no button — honest, and better than
+before because the sentence itself improved, but not one tap from the fix. That is the next slice.

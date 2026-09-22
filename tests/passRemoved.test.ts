@@ -35,12 +35,15 @@ function codeOnly(src: string): string {
 describe('the two LIVE refusals no longer advertise a product we do not sell', () => {
   // These are the exact strings a real user hits today with an empty balance.
   for (const file of ['src/server/professionals/passGate.ts', 'src/server/tools/toolGate.ts']) {
-    it(`${file} — the wallet-empty message says add credit, and nothing else`, () => {
+    it(`${file} — still refuses an empty wallet, through the ONE shared notice`, () => {
+      // 🔴 RE-AIMED 2026-09-22, and the re-aim is the point rather than a repair. This used to grep
+      // each file for its OWN copy of the sentence — which is exactly the drift that copy caused
+      // (three files, three wordings). The wording now lives in `walletEmptyNotice.ts`, so what each
+      // gate must still prove is that it REFUSES and that it builds the message rather than writing
+      // one; the text itself is asserted once, below, where it is now defined.
       const src = codeOnly(read(file));
-      const line = src.split('\n').find((l) => l.includes('Your balance is empty'));
-      expect(line, 'the wallet-empty refusal must still exist').toBeTruthy();
-      expect(line!).not.toMatch(/pass/i);
-      expect(line!).toMatch(/add credit/i);
+      expect(src, 'the wallet-empty refusal must still exist').toContain('walletTooEmptyForTurn(balanceInr)');
+      expect(src, 'it must build the shared notice, never restate it').toContain('walletEmptyBody(');
     });
 
     it(`${file} — no Pass price or duration is sent to the client any more`, () => {
@@ -50,6 +53,25 @@ describe('the two LIVE refusals no longer advertise a product we do not sell', (
       expect(src).not.toMatch(/passDays:/);
     });
   }
+});
+
+describe('the one place the refusal text now lives', () => {
+  it('says add credit, and never offers the Pass — for an empty wallet AND for a wallet in debt', async () => {
+    const { walletEmptyNotice } = await import('../src/server/lib/walletEmptyNotice');
+    // Both shapes, because a debt takes a different branch and an offer could hide in either.
+    for (const balanceInr of [0, -506.03, null]) {
+      const text = walletEmptyNotice({ balanceInr, what: 'this answer' });
+      expect(text, `balance ${balanceInr}`).toMatch(/add (credit|more than)/i);
+      // "pay-as-you-go" and "pass" do not overlap; a Pass offer would.
+      expect(text, `balance ${balanceInr}`).not.toMatch(/\bpass\b/i);
+    }
+  });
+
+  it('the client fallback carries no Pass offer either', async () => {
+    const { walletEmptyMessage } = await import('../src/lib/walletEmptyRefusal');
+    expect(walletEmptyMessage(null)).not.toMatch(/\bpass\b/i);
+    expect(walletEmptyMessage(null)).toMatch(/add credit/i);
+  });
 });
 
 describe('no user-facing screen offers the Pass', () => {

@@ -78311,6 +78311,33 @@ ungli se khich ke kahi bhi rakh sake! expand (full screen on) wala theek hai."*
 - The header's ENTER button is untouched. Locked by `tests/theExitButtonGoesWhereTheFingerPutsIt.test.ts`
   and two `topRightPosition` cases in `floatingButtonPosition.test.ts`.
 
+## 2026-09-22 — 🗂️ The Mode list is the window switcher; a mode switch grows no header tab
+
+Admin: *"navbharatai free me koi user mode se professionals, image generator change kare to, abhi header me
+new window me aa jate hai, isko badalna hai. mode par click karne se jo list ati hai, wahi par 2 type ke colom
+hai, upar recent chat, niche new chat … recent me woh chat jo abhi open hai, up to 5, niche new me baki sabhi
+… recent chat ke sabhi chat waise hi switch hone chahiye jaise multi window se hote hai … navbharatai me mode
+switch karne se header me new window/tab na create ho."* Plan put to the admin first (*"pagle samjh lena"*),
+two assumptions stated, approved with "haan".
+
+- **The Mode list has TWO GROUPS** (`modePicker.ts`: `recentModeEntries` + `newModeEntries`). *Recent chat* =
+  every open chat, one row each — FREE, the image studio, Doctor AI, and every professional WINDOW keyed by
+  its conversation (`recent:teacher_ai#<id>`, labelled by the same `windowLabel` the chips used) — each with
+  its own ✕. A line. *New chat* = everything that starts something. The per-row "Recent"/"New chat" tags are
+  gone; the headings say it. A recent row switches through `toggleTab(view, true, conversationId)`, the SAME
+  path the header chip used, so there is one switch, not two.
+- **The header's per-conversation chips (2026-09-21) are GONE**, and a view entered through a chat tab's Mode
+  button draws no chip: `lib/headerTab.ts` (pure) decides `hiddenHeaderTabs` (every open tab whose opener is
+  a mode surface) and `headerTabFor` (the tab a chat was entered through stays lit — a user in Teacher AI
+  still sees "NavBharatAI FREE" lit). The DOOR decides: the image studio picked from Mode is parented to that
+  chat tab and hidden; opened from Other Tools it keeps its chip exactly as before (assumption (b), approved).
+- **The five are counted across every chat the list can switch to** (`chatSlotsUsed`, `SLOT_VIEWS =
+  ['sda_chat', 'imagegen']`; assumption (a), approved — "doctor + 4 = 5"; the FREE chat is the tab's home and
+  is never counted). `openWindow` takes the open tabs; `toggleTab`, the image pick and the Doctor pick all
+  ask `chatSlotFree`. A fresh Doctor case REPLACES the open one and takes no new slot.
+- Locked by `tests/theModeListIsTheWindowSwitcher.test.ts` (pure `headerTab` + source pins), new cases in
+  `modePicker.test.ts` and `chatWindows.test.ts`; the 2026-09-21 chip pins in
+  `fiveChatsAtOnceEachItsOwnWindow.test.ts` re-pointed in place with the reason. KB `professionals` updated.
 ## 2026-09-22 — 🎁 ₹50 for a new account: the Play rejection was an empty wallet
 
 Google rejected the Android release under the **Broken Functionality** policy. Their label says
@@ -78576,3 +78603,119 @@ updated in the same commit, per the sync rule.
   exam would be an engine decision about somebody else's instruction. Raised here rather than taken.
 - **No exam-specific time limit, sectional lock or paper pattern** (subject splits, section cut-offs).
   Real, and a bigger feature than this; not asked for.
+## 2026-09-22 — The image studio opens FREE, and the text can fade without the bar fading
+
+**Two admin requests on the image generator, both small on the surface and both with one real trap
+underneath.**
+
+### 1 · Every open starts on FREE (`AIImageGenerator.tsx`)
+
+Admin: *"jab koi user navbharatai free me mode badal kar image genrator ai me swich kare, to default
+free mode open hona chahiye. abhi paid mode open ho raha hai."*
+
+🔴 **NOTHING WAS BROKEN — `readTier()` already defaulted to `'free'`.** What produced the report is
+that the tier was **persisted**, so anybody who pressed Pro once was on the paid tier on every visit
+afterwards, having chosen it only on the first. The component said so in its own words, quoting an
+earlier instruction: *"the toggle is a PREFERENCE — 'user uske kabhi bhi free aur paid me convert kar
+sake', and a preference that resets on every panel open is not one."*
+
+**That reading was fair, and this REVERSES it** — recorded rather than quietly changed, with the old
+reasoning kept in the file. The half of the older instruction that still binds is *"kabhi bhi convert
+kar sake"*, and it is untouched: the toggle still switches instantly for as long as the panel is open.
+
+🔑 **MONEY POINTS THE SAME WAY, which is what makes free the SAFE default and not merely the requested
+one.** A Pro image costs ₹1 of the user's balance per press, so a remembered Pro is a charge nobody
+decided on this visit. A remembered FREE would be harmless — but "remember only the cheap one" is a
+rule nobody can predict, so the tier is not stored at all. **`nbai.imagegen.tier` and both its read
+and write are deleted**, not left in place: a value nothing reads is a value the next reader trusts.
+
+🔒 **The options-fold preference is deliberately LEFT persisting.** That is what makes this a decision
+about money rather than a blanket "stop remembering things", which would have been a different and
+worse change. A test asserts both halves.
+
+### 2 · A text-opacity slider, directly under Size (`textOverlay.ts`, `TextOverlayEditor.tsx`)
+
+Admin: *"image me jab, add text pess kiya jaye, to size ke just niche ek aur controller aye, text
+opacity ka … jisko kam jyada karne se text ki poacity kam jyada ko ja sake."*
+
+🔑 **WHAT WAS MISSING, precisely.** `band` carries its own alpha inside its `rgba(...)`, and the
+editor's existing Opacity slider edits exactly that — so the **BAR** could always be faded and the
+**WORDS** never could. A watermark, or a caption meant to sit under a photograph rather than on top of
+it, was not expressible at all.
+
+**`TextLayer.opacity` (0..1, default 1)**, applied as `ctx.globalAlpha` in `drawTextLayers` — and
+**the POSITION of that one line is the whole feature**: after the background and the border, before
+the outline, the fill and a rate card's leader dots. One line either side is a visible bug — a bar the
+user set to 55% quietly dimming, or a solid outline ringing faded letters. `ctx.save()`/`restore()`
+already bracket each layer, so two layers with different opacities cannot bleed. The preview and the
+export call the same function, so the slider is live with no second code path.
+
+⚠️ **NOT folded into `color` as an rgba**, tempting as that is: the swatch row compares
+`active.color === c` against a hex, and `outlineFor` reads the colour's LUMINANCE to pick a
+contrasting outline. One meaning per field.
+
+🔴 **THE TRAP MY OWN TEST CAUGHT, and it is this repo's most-repeated arithmetic: `Number(null)` is
+0, which is FINITE.** `clamp(v, 0, 1, 1)` routes to its fallback only on a non-finite number, so a
+layer round-tripped through JSON — where `undefined` becomes `null` — would have read "absent" as
+"fully transparent" and **the caption would have vanished from a stored banner**. `Number('')` is 0
+too. Absence is now tested by VALUE before any number is taken; an explicit 0 is still honoured,
+because a user who slides the text to invisible meant it. This is the same shape as
+`REFERRER_LIFETIME_CAP_TOKENS` and the rollout percentages, both already recorded in `CLAUDE.md` —
+the third time, and the first where the cost would have been a user's own picture.
+
+⚠️ **Two sliders on one panel now say "opacity" and they fade different things**, so the new one
+carries the word **"Text"** in its VISIBLE label — not only in its `aria-label`. Naming just one of
+them would leave a shopkeeper guessing which slider moves the words, which is the kind of second
+problem a fix is not allowed to trade for the first. Shipped copy on the background row is untouched.
+
+### Verification
+
+`tests/theTextFadesButTheBarDoesNot.test.ts` (16 cases) asserts the real DRAW CALLS through a
+recording context — text at the layer's alpha, **bar and border at 1** — plus the legacy-layer,
+null and clamp cases, and source-level guards on the slider's position and the assignment's
+ordering. `tests/theImageStudioOpensFree.test.ts` (9 cases) covers the tier and the knowledge base.
+**Reversion-proven five ways:** move the alpha above the background → 3 fail; drop the null guard →
+1; default the opacity to 0 → 1; delete the slider → 3; restore the tier persistence → 1.
+
+⚠️ **Two existing suites pinned the persistence and were rewritten, not deleted.**
+`ImageStudioPro.render.test.tsx`'s case was named *"defaults to free, and an unreadable stored value
+also means free"* — its REASON is unchanged and now holds unconditionally; only its localStorage
+assertions went. `proTellsYouBeforeYouType.test.ts` asserted `setItem(TIER_KEY, chosenTier)` and never
+`effectiveTier`; that protection (never persist a FALLBACK over a real choice) is now unreachable
+because nothing persists the tier, so the `effectiveTier` half is kept as its own case and the
+storage half is replaced by an assertion that no writer exists.
+
+⚠️ **AND THE FIRST THING THIS SESSION DID WAS READ A STALE TREE.** The screenshot showed Font,
+Opacity and Border rows that `TextOverlayEditor.tsx` did not have, and the honest conclusion was not
+"the admin is describing something else" but that my branch was based on a `main` from before #3224.
+Re-branching from `origin/main` produced the file the admin was looking at. Safeguard #1, hitting a
+component rather than a roadmap.
+
+---
+
+## 2026-09-22 — Play "Deep links": 2 domains not verified, 8 links not working — one cause, one value, and a www defect the fingerprint alone would not have fixed
+
+Admin, with a Play Console screenshot (App version 126): *"yeh sabhi error fix karwao, app update publish
+nahi ho raha hai."* Every one of the 8 rows (4 paths × 2 domains) reads **Failed domain checks**.
+
+**Cause 1 — expected, and the admin's to close:** `ANDROID_CERT_SHA256` is NOT set in Cloud Run, so
+`/.well-known/assetlinks.json` answers 404 (verified in code; the live fetch is refused by this environment's
+egress policy). That is exactly the state the registry entry records. Setting the value — BOTH certificates
+from Play Console → Setup → App signing, comma-separated — turns the file on with no deploy.
+
+**Cause 2 — a real defect, found by reading the request path end to end (rule 1), fixed here:** the
+`CANONICAL_HOST` middleware is mounted FIRST and 308s every `www.navbharatai.com` path to the apex, the
+statement file included. Android verifies EACH claimed host by fetching ITS OWN `/.well-known/assetlinks.json`,
+and the Digital Asset Links verifier does not follow redirects. So with `CANONICAL_HOST` set (the admin was
+asked to set it on 2026-08-22), the `www` domain could never verify however correct the fingerprint — one of
+the "2 domains not verified" was structural. `isWellKnownPath` in `src/server/lib/canonicalHost.ts` now exempts
+the `/.well-known/` prefix at the root (Apple's `apple-app-site-association` is the same class); every other
+`www` path is still moved, so the one-canonical-origin rule that fixed the 2026-08-22 login split is untouched.
+
+Tests: three cases added to `src/server/lib/canonicalHost.test.ts` (the reported case, the Apple twin, and the
+prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** (guard removed → the two
+"served" cases fail). `tests/aLinkOpensTheApp.test.ts` and `tests/domainWwwApex.test.ts` still green.
+
+⚠️ **Said to the admin, per the third absolute rule:** the Deep-links page is ADVISORY. Red rows there never
+block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
+which this session cannot see — asked for that screen rather than pretending the two are the same problem.

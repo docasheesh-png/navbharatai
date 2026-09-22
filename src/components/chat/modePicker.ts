@@ -33,9 +33,31 @@
 // declarations say those features do not exist, so no surface may offer them (playCompliance.ts).
 //
 // PURE: config in, list out — so the composition rules are pinned by tests.
+//
+// 🔴 REDESIGNED AGAIN 2026-09-22 — THE MODE LIST IS NOW THE WINDOW SWITCHER. Admin, verbatim:
+//
+//   "mode par click karne se jo list ati hai, wahi par 2 type ke colom hai, upar recent chat, niche
+//    new chat (har option ke age new likhne ki need nahi hai, 2 alag alag group hi bana do, recent me
+//    woh chat jo abhi open hai, up to 5, niche new me baki sabhi" … "recent chat ke sabhi chat waise
+//    hi switch hone chahiye jaise multi window se hote hai" … "navbharatai me mode switch karne se
+//    header me new window/tab na create ho".
+//
+// So the ONE recent row became a GROUP, and the header's per-chat chips (2026-09-21) are gone:
+//   RECENT CHAT — every chat that is open right now, one row each: the FREE chat, the image studio,
+//                 Doctor AI, and every professional WINDOW ("Teacher AI (1)", "Teacher AI (2)" — a
+//                 window is a conversation, so two chats with one expert are two rows). Tapping a row
+//                 switches to that exact conversation, the way the header chip used to; each row
+//                 carries its own ✕. Up to five (the FREE chat is the tab's home and is not counted —
+//                 `chatSlotsUsed` in lib/chatWindows.ts is the arithmetic).
+//   NEW CHAT    — everything that STARTS something: FREE, the image studio, Doctor AI, every expert.
+//                 The group heading says "new", so the rows no longer carry a tag each.
+//
+// A recent row's id carries the CONVERSATION when the chat is a window (`recent:teacher_ai#<id>`),
+// because "go back to Teacher AI" is no longer enough to say which of two Teacher chats is meant.
 
 import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
 import { isMedicalProfessionalId } from '../../lib/playCompliance';
+import { windowLabel, type ChatWindow } from '../../lib/chatWindows';
 
 export type ModeKind = 'recent' | 'free' | 'image' | 'professional';
 
@@ -53,6 +75,10 @@ export interface ModeEntry {
   kind: ModeKind;
   /** The row's emoji logo (admin 2026-08-25: "emoji logo bhi sath me hon, maja aa jayega"). */
   emoji: string;
+  /** Recent rows only: the view the row switches to (the id above is prefixed; this is the bare view). */
+  view?: string;
+  /** Recent rows of a WINDOW only: the conversation the row switches to. */
+  conversationId?: string;
 }
 
 /**
@@ -97,17 +123,36 @@ export const IMAGE_MODE_ID = 'imagegen';
 
 export const IMAGE_MODE_NAME = 'Image Generator AI';
 
-/** What the recent row's id is built from. See ModeEntry.id for why it cannot be the bare view id. */
+/** What a recent row's id is built from. See ModeEntry.id for why it cannot be the bare view id. */
 export const RECENT_MODE_PREFIX = 'recent:';
+/** Separates the view from the conversation inside a recent WINDOW row's id. */
+const RECENT_CONVERSATION_SEP = '#';
 
-export const recentModeId = (viewId: string): string => `${RECENT_MODE_PREFIX}${viewId}`;
-// Deliberately NOT exported: `viewFromRecentId` is the ONE public way to ask. A caller handed a bare
+/** Where a recent row switches to: a view, and — for a professional window — the conversation. */
+export interface RecentTarget {
+  view: string;
+  conversationId?: string;
+}
+
+/**
+ * `recent:teacher_ai` for a view that is one chat (FREE, the studio, Doctor AI);
+ * `recent:teacher_ai#<conversationId>` for a window, so two Teacher chats are two distinct rows.
+ */
+export const recentModeId = (viewId: string, conversationId?: string): string =>
+  conversationId ? `${RECENT_MODE_PREFIX}${viewId}${RECENT_CONVERSATION_SEP}${conversationId}` : `${RECENT_MODE_PREFIX}${viewId}`;
+// Deliberately NOT exported: `recentTargetFromId` is the ONE public way to ask. A caller handed a bare
 // predicate has to slice the prefix off itself, and a hand-rolled slice is exactly the drift that put a
 // bare view id through onPick once already.
 const isRecentModeId = (id: string): boolean => id.startsWith(RECENT_MODE_PREFIX);
-/** The view a recent-row id points at, or null when the id is not a recent row. */
-export const viewFromRecentId = (id: string): string | null =>
-  isRecentModeId(id) ? id.slice(RECENT_MODE_PREFIX.length) : null;
+/** The view (and conversation) a recent-row id points at, or null when the id is not a recent row. */
+export function recentTargetFromId(id: string): RecentTarget | null {
+  if (!isRecentModeId(id)) return null;
+  const body = id.slice(RECENT_MODE_PREFIX.length);
+  const at = body.indexOf(RECENT_CONVERSATION_SEP);
+  if (at < 0) return { view: body };
+  const conversationId = body.slice(at + 1);
+  return conversationId ? { view: body.slice(0, at), conversationId } : { view: body.slice(0, at) };
+}
 
 /**
  * What is this view's AI called, in the list's own words? Null when the view is not an AI at all.
@@ -128,32 +173,80 @@ export function modeEmojiFor(viewId: string): string {
   return MODE_EMOJI[viewId] ?? FALLBACK_EMOJI;
 }
 
-export function modePickerEntries(opts: { hideMedical: boolean; activeView?: string }): ModeEntry[] {
+export interface ModePickerInput {
+  hideMedical: boolean;
+  /** The view on screen — decides which recent row carries the ✓ (with `activeChatId` for a window). */
+  activeView?: string;
+  /** The open tab ids (`openTabs`): which single-chat views (FREE, the studio, Doctor AI) are open. */
+  openViews?: readonly string[];
+  /** The open professional windows, in the order they were opened. */
+  openChats?: readonly ChatWindow[];
+}
+
+/** The single-chat views the Recent group lists, in the order the New group lists them too. */
+const RECENT_SINGLE_VIEWS: readonly string[] = ['nbi_chat', IMAGE_MODE_ID, 'sda_chat'];
+
+/**
+ * THE RECENT GROUP: every chat that is open right now, one row each (2026-09-22). PURE.
+ *
+ * Order is the New group's order — FREE, the studio, Doctor AI — then the professional windows in the
+ * order they were opened, so the same list reads the same way whichever group the eye is on. A window
+ * is labelled with `windowLabel` ("Teacher AI (1)", "Teacher AI (2)"), the same words the header chip
+ * used to carry, so nothing the user learned is renamed.
+ */
+export function recentModeEntries(opts: ModePickerInput): ModeEntry[] {
+  const openViews = opts.openViews ?? [];
+  const windows = opts.openChats ?? [];
   const entries: ModeEntry[] = [];
-
-  // 1. WHERE YOU ARE. Only when an AI is genuinely open — the Professionals hub has no conversation to
-  //    return to, and a row offering to resume nothing would be the fake-button class.
-  const active = opts.activeView ?? '';
-  const activeName = modeNameFor(active);
-  const activeHidden = opts.hideMedical && (active === 'sda_chat' || isMedicalProfessionalId(active));
-  if (activeName && !activeHidden) {
-    entries.push({ id: recentModeId(active), name: activeName, kind: 'recent', emoji: modeEmojiFor(active) });
+  for (const view of RECENT_SINGLE_VIEWS) {
+    if (!openViews.includes(view)) continue;
+    if (opts.hideMedical && (view === 'sda_chat' || isMedicalProfessionalId(view))) continue;
+    const name = modeNameFor(view);
+    if (!name) continue;
+    entries.push({ id: recentModeId(view), name, kind: 'recent', emoji: modeEmojiFor(view), view });
   }
+  for (const win of windows) {
+    const cfg = PROFESSIONAL_CHATS[win.professionalId];
+    if (!cfg) continue;
+    if (opts.hideMedical && isMedicalProfessionalId(win.professionalId)) continue;
+    entries.push({
+      id: recentModeId(win.professionalId, win.id),
+      name: windowLabel(windows as ChatWindow[], win.id, cfg.name),
+      kind: 'recent',
+      emoji: modeEmojiFor(win.professionalId),
+      view: win.professionalId,
+      conversationId: win.id,
+    });
+  }
+  return entries;
+}
 
-  // 2. A NEW free chat. The old one stays in History — `startNewChat` mints a new session id and the
-  //    previous record keeps its own, so nothing is overwritten.
+/**
+ * THE NEW GROUP: everything that starts something. PURE, and unchanged in order since 2026-09-19:
+ * FREE, the image studio, Doctor AI, then every professional.
+ */
+export function newModeEntries(opts: { hideMedical: boolean }): ModeEntry[] {
+  const entries: ModeEntry[] = [];
+  // A NEW free chat. The old one stays in History — `startNewChat` mints a new session id and the
+  // previous record keeps its own, so nothing is overwritten.
   entries.push({ id: FREE_MODE_ID, name: 'NavBharatAI FREE', kind: 'free', emoji: '💬' });
-
-  // 3. The image studio, above Doctor AI (admin: "images generator ai … doctor ai se upar").
+  // The image studio, above Doctor AI (admin: "images generator ai … doctor ai se upar").
   entries.push({ id: IMAGE_MODE_ID, name: IMAGE_MODE_NAME, kind: 'image', emoji: modeEmojiFor(IMAGE_MODE_ID) });
-
-  // 4. Doctor AI, then every professional.
+  // Doctor AI, then every professional.
   if (!opts.hideMedical) entries.push({ id: 'sda_chat', name: 'Doctor AI', kind: 'professional', emoji: MODE_EMOJI.sda_chat });
   for (const [id, config] of Object.entries(PROFESSIONAL_CHATS)) {
     if (opts.hideMedical && isMedicalProfessionalId(id)) continue;
     entries.push({ id, name: config.name, kind: 'professional', emoji: MODE_EMOJI[id] ?? FALLBACK_EMOJI });
   }
   return entries;
+}
+
+/**
+ * The whole list, Recent group first then New — kept as ONE array because the search filter and the
+ * ✓ read one list. The sheet draws the group headings from `kind`.
+ */
+export function modePickerEntries(opts: ModePickerInput): ModeEntry[] {
+  return [...recentModeEntries(opts), ...newModeEntries({ hideMedical: opts.hideMedical })];
 }
 
 /**
@@ -208,11 +301,16 @@ export function filterModeEntries(entries: ModeEntry[], query: string): ModeEntr
 /**
  * Which entry should show the ✓ for the surface the user is on right now? PURE.
  *
- * It is the RECENT row, never the list row of the same AI: the list row means "start a new one", which
+ * It is the RECENT row, never the New row of the same AI: the New row means "start a new one", which
  * is not the state the user is in. When no AI is open there is no recent row and nothing is ticked.
+ * For a professional the ✓ is on the window on screen (`activeConversationId`), never its sibling.
  */
-export function activeModeId(activeView: string): string {
-  return modeNameFor(activeView) ? recentModeId(activeView) : '';
+export function activeModeId(activeView: string, activeConversationId?: string | null): string {
+  if (!modeNameFor(activeView)) return '';
+  // A windowed professional's ✓ names the WINDOW on screen; a single-chat view names itself.
+  return activeView in PROFESSIONAL_CHATS && activeConversationId
+    ? recentModeId(activeView, activeConversationId)
+    : recentModeId(activeView);
 }
 
 /** Every view id whose footer carries the live Mode button (the chat surfaces this picker serves). */

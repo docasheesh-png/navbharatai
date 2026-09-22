@@ -50,7 +50,7 @@ import {
   browserStore as professionalStore,
 } from './lib/professionalChatStore';
 import {
-  openWindow, closeWindow, windowsOf, nextActiveAfterClose, windowLabel, capMessage, isWindowedProfessional, MAX_OPEN_CHATS,
+  openWindow, closeWindow, windowsOf, nextActiveAfterClose, capMessage, isWindowedProfessional, chatSlotFree,
   type ChatWindow, type ConversationRef,
 } from './lib/chatWindows';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
@@ -59,7 +59,8 @@ import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
-import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, viewFromRecentId, startsFreshOnPick, modeEmojiFor } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick } from './components/chat/modePicker';
+import { headerTabFor, hiddenHeaderTabs } from './lib/headerTab';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
 import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
@@ -1526,14 +1527,14 @@ export default function App() {
         // Cap BEFORE the archive is touched (review finding 2026-09-21): a resume that is then refused
         // would leave the row "ongoing" with no window, and could shed an on-screen window's own
         // conversation from the store's open list.
-        if (openChats.length >= MAX_OPEN_CHATS) { addToast(capMessage(), 'warning'); return false; }
+        if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return false; }
         wanted = store ? resumeArchived(store, view, resumeEndedAt) : null;
         if (!wanted) return false; // the record is gone — the view re-reads rather than opening a blank chat
       }
       if (!wanted && existing.length === 0) wanted = (store && latestOpenConversationId(store, view)) || newConversationId();
       if (wanted) {
         if (!existing.some((w) => w.id === wanted)) {
-          const opened = openWindow(openChats, { id: wanted, professionalId: view });
+          const opened = openWindow(openChats, { id: wanted, professionalId: view }, openTabs);
           if (!opened.opened) { addToast(capMessage(), 'warning'); return false; }
           setOpenChats(opened.windows);
         }
@@ -2645,6 +2646,11 @@ export default function App() {
     { id: 'diff',         label: 'Diff',              icon: FileDiff },
     { id: 'imagegen',     label: 'AI Image Gen',      icon: Wand2 },
   ], []);
+  /**
+   * Which ids the header can draw a chip for — its registered menu items. `lib/headerTab.ts` asks this
+   * rather than restating the list: a view with no chip lights the tab it was entered through.
+   */
+  const hasHeaderChip = useCallback((id: string) => menuItems.some((m) => m.id === id), [menuItems]);
 
   // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
   
@@ -3390,19 +3396,12 @@ export default function App() {
           toggleTab={toggleTab}
           closeTab={closeTab}
           menuItems={menuItems as any}
-          chatWindows={openChats.map((w) => ({
-            id: w.id,
-            label: windowLabel(openChats, w.id, PROFESSIONAL_CHATS[w.professionalId]?.name ?? w.professionalId),
-            emoji: modeEmojiFor(w.professionalId),
-            active: activeChat?.id === w.id,
-          }))}
-          onSelectChatWindow={(id) => {
-            const win = openChats.find((w) => w.id === id);
-            if (!win) return;
-            setActiveChatId(id);
-            setActiveView(win.professionalId as ViewType);
-          }}
-          onCloseChatWindow={closeChatWindow}
+          // NO per-chat chips since 2026-09-22 (admin: "mode switch karne se header me new window/tab
+          // na create ho"): a view entered through a chat tab's Mode button draws nothing here, and the
+          // tab it was entered through stays lit while it is on screen. The Mode list's Recent group is
+          // the switcher now — see lib/headerTab.ts.
+          hiddenTabs={hiddenHeaderTabs(openTabs, tabOpeners)}
+          highlightedTab={headerTabFor(activeView, tabOpeners, hasHeaderChip)}
           hasGeneratedCode={hasGeneratedCode}
           canUndo={canUndo}
           canRedo={canRedo}
@@ -4022,31 +4021,50 @@ export default function App() {
           {showModePicker && (
             <ModePickerSheet
               activeView={activeView}
+              activeChatId={activeChat?.id ?? null}
+              openViews={openTabs}
+              openChats={openChats}
               hideMedical={medicalFeaturesHidden(isNativeApp())}
               onClose={() => setShowModePicker(false)}
-              // ✕ ON THE RECENT ROW (admin 2026-09-21). It closes the conversation that row names —
-              // the SAME `closeTab` the header tab's ✕ calls, so there is one way to close a chat
-              // rather than a second copy of the rule (which is what would decide, differently, what
-              // happens to the preview, the draft and the session id).
+              // ✕ ON A RECENT ROW (admin 2026-09-21, one row; 2026-09-22, every open chat). It closes
+              // the conversation that row names — a WINDOW through `closeChatWindow` (its sibling
+              // windows with the same expert stay open), a single-chat view through the SAME `closeTab`
+              // the header tab's ✕ calls, so there is one teardown for a chat rather than a second copy
+              // of the rule (which is what would decide, differently, what happens to the preview,
+              // the draft and the session id).
               onCloseRecent={(recentId) => {
-                const view = viewFromRecentId(recentId);
-                if (!view) return;
+                const target = recentTargetFromId(recentId);
+                if (!target) return;
                 setShowModePicker(false);
-                // For an expert the recent row names the WINDOW on screen — close that conversation
-                // only; its sibling windows with the same expert stay open (2026-09-21).
-                if (activeChat && activeChat.professionalId === view) { closeChatWindow(undefined, activeChat.id); return; }
-                closeTab(undefined, view as ViewType);
+                if (target.conversationId) { closeChatWindow(undefined, target.conversationId); return; }
+                closeTab(undefined, target.view as ViewType);
               }}
               onPick={(id) => {
                 setShowModePicker(false);
-                // ROW 1 — the only row that starts nothing. It names the AI already open and takes the
-                // user back to THAT conversation (admin: "1st option, jo ki open kon sa yeh batata hai").
-                const resume = viewFromRecentId(id);
-                if (resume) { toggleTab(resume as ViewType); return; }
+                // A RECENT ROW starts nothing: it switches to the chat it names — the exact WINDOW for
+                // a professional — the way the header chip did until 2026-09-22 (admin: "recent chat
+                // ke sabhi chat waise hi switch hone chahiye jaise multi window se hote hai").
+                // `toggleTab` with the conversation id focuses that window; no second switch path.
+                const resume = recentTargetFromId(id);
+                if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }
                 // Everything else opens a NEW chat, which is the whole point of the change.
                 if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
                 // The image studio is Other Tools' own view — free and paid together, nothing forked.
-                if (id === IMAGE_MODE_ID) { toggleTab(IMAGE_MODE_ID as ViewType); return; }
+                // Opened from HERE it lives inside the chat tab the user is in (no header chip of its
+                // own, that tab stays lit) and takes one of the five slots; already open, it is simply
+                // shown, through whichever door it came in by (from Other Tools it keeps its own tab).
+                if (id === IMAGE_MODE_ID) {
+                  if (!openTabs.includes(IMAGE_MODE_ID as ViewType)) {
+                    if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return; }
+                    const host = headerTabFor(activeView, tabOpeners, hasHeaderChip);
+                    if (toggleTab(IMAGE_MODE_ID as ViewType) && isModeSurface(host)) {
+                      setTabOpeners(prev => ({ ...prev, [IMAGE_MODE_ID]: host as ViewType }));
+                    }
+                    return;
+                  }
+                  toggleTab(IMAGE_MODE_ID as ViewType);
+                  return;
+                }
                 if (medicalViewBlocked(id, isNativeApp())) return; // defense in depth behind the filter
                 // ✅ DOCTOR AI NOW STARTS FRESH TOO (2026-09-19). It was the one row still resuming,
                 // because every case shared one Firestore document and one transcript key — so "new
@@ -4055,6 +4073,9 @@ export default function App() {
                 // its own row in History → SDA. Same call the ✕ makes, so there is one way to begin a
                 // case rather than a second copy of the rule.
                 if (id === 'sda_chat') {
+                  // Doctor AI holds one case, so a fresh case REPLACES the open one and takes no new
+                  // slot; only opening it when it is closed is a sixth chat the cap may refuse.
+                  if (!openTabs.includes('sda_chat') && !chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return; }
                   setSdaOpenCaseId(undefined);
                   startFreshCase(typeof window !== 'undefined' ? window.localStorage : null, newSdaCaseId(), user?.uid);
                   setSdaResetKey(k => k + 1);

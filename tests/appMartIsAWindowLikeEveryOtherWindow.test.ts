@@ -261,7 +261,9 @@ describe('the ratchet — no new window without a chip', () => {
     // `nbi_pro_chat` have both carried `Bot` since long before this change without ever colliding on
     // screen. Asserting over the whole list would fail on that pair and invite a "fix" to an icon
     // nobody can see, i.e. a change to a shipped surface for no reason.
-    expect(topNav).toMatch(/openTabs\.filter\(id => id !== 'home'\)/);
+    // (Since 2026-09-22 the same filter also drops the tabs App hides — a view entered through a chat
+    // tab's Mode button — so the match is on the `home` clause, not the whole predicate.)
+    expect(topNav).toMatch(/openTabs\.filter\(id => id !== 'home'/);
     const chipIcons = menuEntries().filter((e) => e.id !== 'home').map((e) => e.icon);
     expect(new Set(chipIcons).size, `two chips must not share one icon: ${chipIcons.join(', ')}`).toBe(chipIcons.length);
   });

@@ -205,7 +205,11 @@ import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStor
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
-import { notifyBuildComplete, notifyLowBalance } from '../lib/PushNotificationService';
+import { notifyBuildComplete } from '../lib/PushNotificationService';
+// The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
+// branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
+// caller at all, so the first warning a user ever got arrived at the wall.
+import { warnAboutBalance, balanceLooksHealthy } from '../lib/balanceAlert';
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
@@ -9871,7 +9875,10 @@ async function noteBuildOutcome(
       if (gate.action === 'block') {
         activeBuilds.delete(buildKey); // release the lock acquired above; the build never starts.
         audit('AGENTV3_BUILD_BLOCKED_NO_CREDITS', { userId, balanceInr, estimateInr: estimate.inr }, 'warn');
-        void notifyLowBalance(userId, true);
+        // Bounded now: at most two notices per episode, the second 48 h later. The refusal itself is
+        // still shown on EVERY press (it is the answer to the request); what is rationed is the
+        // notification, which is the thing that used to arrive five times.
+        void warnAboutBalance(userId, email, 'blocked');
         res.status(402).json({
           error: gate.notice || 'Your credits are used up. Add credits to start a new build.',
           code: 'INSUFFICIENT_CREDITS',
@@ -9891,6 +9898,15 @@ async function noteBuildOutcome(
         paidEconomyNotice =
           'Low balance — your build will continue as normal. Add credits to keep full speed on every build.';
         audit('AGENTV3_BUILD_LOW_BALANCE_ECONOMY', { userId, balanceInr, estimateInr: estimate.inr }, 'info');
+        // 🔴 THE WARNING THAT DID NOT EXIST. This branch means the balance no longer covers the build
+        // — the platform's own verdict that the user is short, arrived at while their work still
+        // runs. Warning here is what makes the ₹0 wall stop being a surprise.
+        void warnAboutBalance(userId, email, 'low');
+      } else if (gate.action === 'proceed') {
+        // Healthy: start the clock that ends an episode. It never clears the record outright — a
+        // balance wobbles (a small build is affordable, the next big one is not), and clearing on one
+        // good reading is exactly how `monitorAlerts.ts` came to alert on every crossing.
+        void balanceLooksHealthy(userId);
       }
     }
 

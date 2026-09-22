@@ -78770,3 +78770,63 @@ prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** 
 ⚠️ **Said to the admin, per the third absolute rule:** the Deep-links page is ADVISORY. Red rows there never
 block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
 which this session cannot see — asked for that screen rather than pretending the two are the same problem.
+
+## 2026-09-22 — 🔔 The warning that comes BEFORE the wall (item 1 of 2)
+
+Admin: *"banao!! dono! ek ek kar ke"* — the two gaps left open after the ₹50 credit shipped. This is
+the first.
+
+**🔴 The first warning a user ever got arrived at the wall.** `notifyLowBalance(uid, blocked)` has
+shipped since 2026-07-26 with a `blocked: false` branch reading *"Your balance is running low — add
+credits to avoid interruption."* **Nothing in this repo has ever called it with `false`** — while its
+own docblock claims it fires *"from the paid-tier affordability gate (economy or block branch)"*. The
+economy branch called nothing at all. A message written, shipped, documented as live, and sent by
+nobody.
+
+**🔴 And the one call that did exist was unbounded.** The block branch fired a push on EVERY refused
+build, so a user at ₹0 pressing Build five times was pushed five times — precisely the noise the admin
+ended in September (*"ek information ke liye bas 1 mail only… maximum 2 — woh bhi 48hr baad"*),
+reproduced in a second subsystem that the monitor's fix never touched.
+
+- **`balanceAlertPolicy.ts`** (pure) + **`balanceAlertStore.ts`** (durable) + **`balanceAlert.ts`**
+  (the one delivery door). All three gate branches now go through it: `economy` → warn *low*,
+  `block` → warn *blocked*, `proceed` → end the episode.
+- 🔑 **The trigger is the platform's own verdict, not an invented threshold.** `decideAffordability`'s
+  `economy` branch already means *the balance no longer covers this build*. Warning there is
+  self-calibrating and adds no number anyone has to defend.
+- 🔒 **The budget is the admin's own, verbatim:** 2 per episode, the second ≥48 h later, and an
+  **escalation spends the second slot** rather than being exempt.
+- 🔒 **An episode ends on a COOLING period, never on one healthy reading** — the exact bug
+  `monitorAlerts.ts` records, where resolving deleted the state and the cooldown was bypassed by the
+  thing it existed to survive. A balance wobbles (a small build is affordable, the next big one is
+  not), so a healthy reading starts a clock instead of clearing the record. The 120-minute window is
+  this repo's own existing answer (`MONITOR_ALERT_RESOLVE_AFTER_MINUTES`), not a new number.
+- 🔒 **The slot is claimed in a Firestore TRANSACTION.** Many Cloud Run instances: a read-then-write
+  lets two concurrent builds both decide to send. "At most 2" is true by construction.
+- ⚠️ **It fails CLOSED** — unlike `jobLease.ts`, deliberately. A missed warning costs one notice;
+  sending on an unreadable record is unbounded noise on every build, which is the defect being fixed.
+- 📬 **The in-app inbox comes FIRST, the push second.** A push needs the native shell, a device token
+  and an OS permission; most users are on the website, where it reaches nobody. The in-app notice
+  works everywhere — and its unread count already draws the ☰ dot, so the warning lands on the same
+  trail the empty-balance dot uses. It is **tappable**: `open-billing`, a name from the closed set,
+  resolved by the client into the existing `navbharat:navigate` channel — never a stored URL.
+- Env: `BALANCE_ALERT_COOLDOWN_HOURS` (48) · `BALANCE_ALERT_MAX_PER_EPISODE` (2) ·
+  `BALANCE_ALERT_COOLING_MINUTES` (120). A blank, zero, negative or junk value takes the DEFAULT,
+  never "no limit".
+
+🔴 **A REVERSION FOUND A REAL HOLE IN MY OWN SUITE, and that is the entry worth keeping.** The first
+draft proved an escalation *costs* a slot and never that it is *refused* once the slots are gone —
+so exempting `blocked` from the cap passed every case. That is exactly the shape of "a cap quietly
+becomes a suggestion", and it survived a review that had just written that sentence down. Reversion
+caught what reasoning did not; the case is now `tests/theWarningComesBeforeTheWall.test.ts`'s
+`🔴 AND A SPENT BUDGET SILENCES THE WALL ITSELF`.
+
+- Test-locked and reversion-proven four ways (23 cases): removing the economy warning, exempting an
+  escalation, clearing the record on one healthy reading, and failing open on an unreadable record.
+- `tests/reportInbox.test.ts` re-aimed, not repaired: it pinned the exact list `['open-reports']`,
+  which forbade a second legitimate name while protecting nothing — the danger was never the SIZE of
+  the set but whether a member can be a link. It now asserts the PROPERTY (every member is a plain
+  lowercase name, no scheme, no slash, no dot), re-proven by putting a URL in the set.
+
+⏭️ **Next:** item 2 — Doctor AI and the AI tool panels still show the empty-balance refusal as plain
+text with no Add-credit button.

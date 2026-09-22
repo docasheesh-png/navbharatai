@@ -1947,9 +1947,22 @@ the code (it is actually read somewhere) on 2026-07-11.
   as the 2026-09-02 incident where the policy said "we never share your data with advertisers" while
   the Meta pixel was being built.
 - **🔗 ANDROID APP LINKS — a navbharatai.com link opens the APP, not a browser (built 2026-09-19).
-  ⚠️ `ANDROID_CERT_SHA256` is NOT set, and unset means today's behaviour exactly** — the
+  ✅ `ANDROID_CERT_SHA256` IS SET, WITH BOTH CERTIFICATES (admin, 2026-09-22)** — recorded hand-to-hand
+  the same session, per this registry's own rule. Verified rather than taken on trust: both hosts were
+  fetched and returned IDENTICAL JSON carrying TWO well-formed fingerprints, the app signing key and
+  the upload key, and `package_name` `com.navbharat.ai` — which matches `capacitor.config.ts`'s
+  `appId` and `build.gradle`'s `applicationId`. The values are not written here (names only), but note
+  that a fingerprint is public by construction: it is published at that URL by every app on earth with
+  App Links on. **The keystore is the secret; the fingerprint is its public identity.**
+  ⚠️ **THE SERVER HALF IS DONE; THE APP HALF IS NOT, AND THAT IS THE THING TO CHECK FIRST if links
+  still open a browser.** The manifest claim landed on 2026-09-19 (`23e81dc9`), and the build LIVE on
+  Play at that moment was **116, built 2026-09-15** — verified by reading its manifest at that commit,
+  not inferred from the date: it carries **no `autoVerify` intent filter at all**. So on 116 the app
+  never asks Android for those links and no server-side fix can change that. It takes a build from
+  2026-09-19 or later to test any of this.
+  ⚠️ **The old wording of this entry said the key was NOT set, and unset meant** — the
   `/.well-known/assetlinks.json` route answers 404, Android's verification fails, and every link keeps
-  going to the browser as it does now. Read by `src/server/lib/assetLinks.ts`; the route is mounted in
+  going to the browser. Read by `src/server/lib/assetLinks.ts`; the route is mounted in
   `server.ts` BESIDE the Apple one and for the same reason (`express.static`'s `dotfiles` default is
   `ignore`, so a `.well-known` path never reaches it).
   🔴 **THE VALUE IS NOT A SECRET, which is why it may be discussed here at all.** It is the SHA-256

@@ -79612,3 +79612,43 @@ each started from something that compiled". Whether a fourth is worth the minute
 **C and D are deliberately NOT built yet.** If the aggregate says most failures are the credentials
 class, their benefit is ZERO and the whole plan should change — which is what Step 0 exists to find out,
 and what the admin's own brief instructs.
+
+## 2026-09-22 — The Play upload failed on its LAST line, and the log read like a success
+
+`upload_to_play` was ticked for the first time (run **#127**, built from `main`). The bundle built,
+signed and **uploaded**:
+
+```
+Validating tracks: 'internal'
+Uploading android/app/build/outputs/bundle/release/app-release.aab
+Successfully uploaded 1 artifacts
+Committing the Edit
+##[error]Changes cannot be sent for review automatically. Please set the query parameter
+         changesNotSentForReview to true.
+```
+
+**The edit was never committed, so the "successful" upload landed NOTHING.** Google refuses to
+auto-submit an edit for review while an app has a change it will not take automatically — and on this
+day the app was under a **Broken Functionality** enforcement with its previous release rejected. The
+fix is one input, `changesNotSentForReview: true`: the bundle is committed to the internal track and
+the admin presses *Send for review* in the Console. Internal testing needs no review to be installable,
+which is the whole point of uploading there.
+
+⚠️ **It is not a workaround for the rejection and does not make one less likely** — it only stops the
+upload itself from failing. What reaches users stays the admin's decision, taken in the Console.
+
+📌 **What the rejection actually was, and it was NOT the policy strike this session first guessed.**
+Google's label reads *"Loading problems: Your app doesn't open or load"*; their own evidence shows the
+app OPEN on the AI Image Generator with *"Image generation failed — please try again"* three times.
+`interimWelcomeGift.ts` (same day, another session) had already root-caused it: a new account received
+₹0, free images come from a keyless third party with no SLA, its failure falls to a PAID rung, and a
+paid rung is refused on an empty wallet. **A Play reviewer is exactly that user.** All three of the
+fixes that break that chain — the ₹50 interim welcome credit, the client-fetched free image, and the
+free-tier paid-rung ceiling — were verified ABSENT from rejected build 125 (`6a5a6085`) and PRESENT in
+`main`, so build 127 is the first bundle that does not have the defect.
+
+📌 **And the App Links work cannot be tested on the live app at all.** The manifest claim landed
+2026-09-19; build **116**, the one live on Play, was built 2026-09-15 and — read at its own commit —
+carries no `autoVerify` intent filter. Today's server-side work (both certificates published, the
+`/.well-known/` redirect exemption) is correct and verified on both hosts, but it takes a build from
+2026-09-19 or later to demonstrate it.

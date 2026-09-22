@@ -78879,3 +78879,59 @@ den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebu
 - Locked in `modePicker.test.ts` (`recentRowClosable`, `lastChatClosed`, the FREE-above case) and
   `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
   the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.
+
+## 2026-09-22 — "Purchage promo code": buy a code with real money and give it away (PR pending)
+
+**Admin, verbatim:** *"promocode credit ke andar ek option aur add karo! **purchage promo code** —
+yaha user promocode purchage kar ke apne family/friend ko gift kar sakta hai! rate wahi jo ham
+charge karte hai, plus 2% pletform fee (hamare liye) + cashfree charges!"*, with the condition
+*"note: yaha jo purchage honge promocode woh real ₹ se honge navbharatai dwara gift kiye gaye
+welcome bonus se nahi!"* — and, after the fee was put to them: ***"2% hi kaafi hai!!"***.
+
+**ONE FEE LINE, NOT TWO — the admin's own decision after the honest objection.** The first request
+named "2% platform fee + cashfree charges". The gateway's real charge cannot be known in advance
+(UPI is **₹0 by regulation**, cards ~2%+GST, and the method is chosen on a later screen), so a
+second line would be a number no statement will ever match — which THE ONE-WALLET LAW forbids even
+when it flatters us. The flat rate already exists to cover it.
+
+**🔴 The fee is ADDED here and DEDUCTED on a recharge, and that is not an inconsistency.** Same 2%,
+two different products: a recharge's amount is what the user is willing to pay (₹500 → ₹490 of
+credit); a gift's FACE VALUE is the product, so a ₹500 code must be worth ₹500 when redeemed
+(₹510 → ₹500). `giftPriceAtPct` lives beside `splitPaymentAtPct` in the shared module, so the buyer
+is shown the exact arithmetic the server charges.
+
+**The admin's "real ₹, not welcome bonus" condition is satisfied BY CONSTRUCTION, not by a check.**
+A code is minted only by the payment-fulfilment path, after Cashfree confirms the money; the buy
+path reads no balance and writes no debit. Paying with the welcome gift is not a case that can arise
+and then be refused — which is the difference between a rule and a guard.
+
+**Three things that would have cost real money, each one line away from the obvious mistake:**
+1. **The claim is on the CODE, not `(code, user)`.** The marketing-coupon path deliberately claims
+   `coupon_<CODE>_<uid>` — one per USER, right for a poster, catastrophic here: ten friends could
+   each redeem the same ₹500. `claimGiftCode` flips the code's own document in a transaction.
+2. **A redeemed gift credits `'paid'`, not `'gift'`.** Every other coupon credit in this repo is
+   `'gift'`, so `'gift'` is what a copied line would say — and `giftSpend` would then tell the
+   recipient their friend's real money cannot buy a hosting plan. It does NOT move
+   `totalMoneySpent` / `lastRechargeAt`, because the RECIPIENT did not pay us.
+3. **The buyer is credited nothing** — the order is written `creditInr: 0` AND fulfilment returns
+   before the wallet block. Either alone is one edit from paying out twice.
+
+**Also:** codes use an alphabet with no `0/O/1/I/L` (10 chars ≈ 2^49, and it gets read aloud);
+randomness is a PARAMETER so it cannot quietly become `Math.random()`; a buyer may not redeem their
+own code; the daily cap (5 codes / ₹5,000) bounds chargeback exposure and **fails CLOSED** on an
+unreadable tally; `GIFT_REDEEM` now counts toward the Promocode capsule; and the share text names no
+vendor, because it leaves the app.
+
+Test-locked in `tests/aBoughtCodeIsSpentOnce.test.ts` (31 cases) and **reversion-proven four ways**
+— crediting `'gift'`, trusting the client's amount, crediting the buyer's wallet, and pricing the
+gift with the recharge split each turn it red. New collections `gift_codes` and `gift_code_daily`
+are classified in `everyCollectionIsClassified`; `gift_code_daily` is erased on account deletion and
+`gift_codes` deliberately is NOT (a code already given away is a third party's property, and a
+payment record is the first of Privacy Policy §9's four stated exceptions). `AppKnowledgeBase` has
+its entry, per the sync rule.
+
+⚠️ **Not verified against a live gateway from any session** — Cashfree cannot be reached from here.
+The first real purchase is the first real evidence, and the honest failure paths are in place: an
+order that somehow carries no face value refunds rather than minting a free code
+(`gift_face_missing` in the server log), and a redemption that loses its claim says which of the
+three reasons applied.

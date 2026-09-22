@@ -4,6 +4,8 @@ import { injectStyleBlock, canCarryStylesheet } from '../../lib/cssInjection';
 import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
 import { mergePalette, paletteSummary } from '../../lib/paletteMerge';
 import { authedFetch } from '../../lib/authedFetch';
+import { AddCreditNotice } from '../common/AddCreditNotice';
+import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 
 interface ColorToken {
   name: string;
@@ -145,12 +147,16 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
   const [brand, setBrand] = useState('');
   const [paletteBusy, setPaletteBusy] = useState(false);
   const [paletteMsg, setPaletteMsg] = useState<string>('');
+  // The empty-balance refusal. Separate from `paletteMsg` on purpose — that one is also the
+  // success summary, so sharing it would make a price and a result the same field.
+  const [paletteNoCredit, setPaletteNoCredit] = useState<string>('');
 
   const applyBrandPalette = async () => {
     const description = brand.trim();
     if (!description || paletteBusy) return;
     setPaletteBusy(true);
     setPaletteMsg('');
+    setPaletteNoCredit('');
     try {
       const res = await authedFetch('/api/design/palette', {
         method: 'POST',
@@ -158,9 +164,14 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
         body: JSON.stringify({ brand: description }),
       }, 60_000);
       const data = await res.json().catch(() => null);
+      // An empty wallet is a PRICE, not a fault. `paletteMsg` also carries SUCCESS summaries, so the
+      // refusal gets its own state rather than a sentence that a later success would silently erase
+      // the button from.
+      const noCredit = walletEmptyRefusalMessage(res.status, data);
+      if (noCredit) { setPaletteNoCredit(noCredit); return; }
       if (!res.ok) {
-        // The server's own words — a daily-allowance or empty-wallet refusal names the exact next
-        // step, and replacing it with a generic line would strand the user.
+        // The server's own words — a daily-allowance refusal names the exact next step, and
+        // replacing it with a generic line would strand the user.
         setPaletteMsg(data?.error || 'Could not create a palette just now. Please try again in a moment.');
         return;
       }
@@ -340,7 +351,10 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
                   {paletteBusy ? <><Loader2 size={12} className="animate-spin" /> Creating…</> : 'Create palette'}
                 </button>
               </div>
-              {paletteMsg && (
+              {paletteNoCredit && (
+                <AddCreditNotice message={paletteNoCredit} />
+              )}
+              {paletteMsg && !paletteNoCredit && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{paletteMsg}</div>
               )}
             </div>

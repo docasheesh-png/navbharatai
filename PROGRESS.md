@@ -78838,6 +78838,127 @@ prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** 
 block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
 which this session cannot see — asked for that screen rather than pretending the two are the same problem.
 
+## 2026-09-22 — 🔔 The warning that comes BEFORE the wall (item 1 of 2)
+
+Admin: *"banao!! dono! ek ek kar ke"* — the two gaps left open after the ₹50 credit shipped. This is
+the first.
+
+**🔴 The first warning a user ever got arrived at the wall.** `notifyLowBalance(uid, blocked)` has
+shipped since 2026-07-26 with a `blocked: false` branch reading *"Your balance is running low — add
+credits to avoid interruption."* **Nothing in this repo has ever called it with `false`** — while its
+own docblock claims it fires *"from the paid-tier affordability gate (economy or block branch)"*. The
+economy branch called nothing at all. A message written, shipped, documented as live, and sent by
+nobody.
+
+**🔴 And the one call that did exist was unbounded.** The block branch fired a push on EVERY refused
+build, so a user at ₹0 pressing Build five times was pushed five times — precisely the noise the admin
+ended in September (*"ek information ke liye bas 1 mail only… maximum 2 — woh bhi 48hr baad"*),
+reproduced in a second subsystem that the monitor's fix never touched.
+
+- **`balanceAlertPolicy.ts`** (pure) + **`balanceAlertStore.ts`** (durable) + **`balanceAlert.ts`**
+  (the one delivery door). All three gate branches now go through it: `economy` → warn *low*,
+  `block` → warn *blocked*, `proceed` → end the episode.
+- 🔑 **The trigger is the platform's own verdict, not an invented threshold.** `decideAffordability`'s
+  `economy` branch already means *the balance no longer covers this build*. Warning there is
+  self-calibrating and adds no number anyone has to defend.
+- 🔒 **The budget is the admin's own, verbatim:** 2 per episode, the second ≥48 h later, and an
+  **escalation spends the second slot** rather than being exempt.
+- 🔒 **An episode ends on a COOLING period, never on one healthy reading** — the exact bug
+  `monitorAlerts.ts` records, where resolving deleted the state and the cooldown was bypassed by the
+  thing it existed to survive. A balance wobbles (a small build is affordable, the next big one is
+  not), so a healthy reading starts a clock instead of clearing the record. The 120-minute window is
+  this repo's own existing answer (`MONITOR_ALERT_RESOLVE_AFTER_MINUTES`), not a new number.
+- 🔒 **The slot is claimed in a Firestore TRANSACTION.** Many Cloud Run instances: a read-then-write
+  lets two concurrent builds both decide to send. "At most 2" is true by construction.
+- ⚠️ **It fails CLOSED** — unlike `jobLease.ts`, deliberately. A missed warning costs one notice;
+  sending on an unreadable record is unbounded noise on every build, which is the defect being fixed.
+- 📬 **The in-app inbox comes FIRST, the push second.** A push needs the native shell, a device token
+  and an OS permission; most users are on the website, where it reaches nobody. The in-app notice
+  works everywhere — and its unread count already draws the ☰ dot, so the warning lands on the same
+  trail the empty-balance dot uses. It is **tappable**: `open-billing`, a name from the closed set,
+  resolved by the client into the existing `navbharat:navigate` channel — never a stored URL.
+- Env: `BALANCE_ALERT_COOLDOWN_HOURS` (48) · `BALANCE_ALERT_MAX_PER_EPISODE` (2) ·
+  `BALANCE_ALERT_COOLING_MINUTES` (120). A blank, zero, negative or junk value takes the DEFAULT,
+  never "no limit".
+
+🔴 **A REVERSION FOUND A REAL HOLE IN MY OWN SUITE, and that is the entry worth keeping.** The first
+draft proved an escalation *costs* a slot and never that it is *refused* once the slots are gone —
+so exempting `blocked` from the cap passed every case. That is exactly the shape of "a cap quietly
+becomes a suggestion", and it survived a review that had just written that sentence down. Reversion
+caught what reasoning did not; the case is now `tests/theWarningComesBeforeTheWall.test.ts`'s
+`🔴 AND A SPENT BUDGET SILENCES THE WALL ITSELF`.
+
+- Test-locked and reversion-proven four ways (23 cases): removing the economy warning, exempting an
+  escalation, clearing the record on one healthy reading, and failing open on an unreadable record.
+- `tests/reportInbox.test.ts` re-aimed, not repaired: it pinned the exact list `['open-reports']`,
+  which forbade a second legitimate name while protecting nothing — the danger was never the SIZE of
+  the set but whether a member can be a link. It now asserts the PROPERTY (every member is a plain
+  lowercase name, no scheme, no slash, no dot), re-proven by putting a URL in the set.
+
+⏭️ **Next:** item 2 — Doctor AI and the AI tool panels still show the empty-balance refusal as plain
+text with no Add-credit button.
+
+## 2026-09-22 — "banao!! dono! ek ek kar ke" (2 of 2): the wall is a BUTTON, not a sentence
+
+**Admin:** *"agar user ke pas balance khatam hai, to proper likh kar ana chahiye. this is paid
+service!!"* — and then, of the two gaps left after the ₹50 credit shipped, *"banao!! dono! ek ek kar
+ke"*. This is the second. (The first, the low-balance warning that arrives BEFORE the wall, is
+PR #3248.)
+
+**🔴 THE DEFECT: a PRICE was drawn as a FAULT, beside the one control guaranteed to fail.** The
+server has answered an empty wallet with an honest sentence and a machine-readable `wallet_empty`
+code since earlier the same day (`walletEmptyNotice.ts`, three gates: `passGate` → Doctor AI and the
+Professionals, `toolGate` → the AI tools, `imageGen`). The image studio was wired to it. **Four
+screens were not** — Doctor AI (`SDAChat`), the App Debugger (`AIDebugger`), the Design System
+palette and the App Scanner (`AppScanPanel`) all folded the 402 into their generic failure path, so
+the user saw a red error and a **Try again** button that the same gate refuses every single time.
+A user with an empty wallet could press it for ever and never once be shown the thing that resolves it.
+
+**The fix, in three pieces:**
+- **`src/components/common/AddCreditNotice.tsx` (new) — ONE card.** The image studio had hand-written
+  it; four more screens needed the same one. Five copies of a price explanation is the drifted-copy
+  class this repo has already paid for five times (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot
+  guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2, and the empty-balance SENTENCE itself ×3 — which is what
+  `walletEmptyNotice.ts` exists to have ended). The image studio was refactored ONTO it, so there is
+  one definition and not six.
+- **`walletEmptyRefusalMessage(status, body)`** — one call replacing the two-call shape
+  (`isWalletEmptyRefusal` then `walletEmptyMessage`). A screen can no longer recognise the refusal
+  and forget to take the server's own wording.
+- **Four screens wired**, each reading the wallet BEFORE its generic throw — the whole defect is that
+  a `throw` keeps only the sentence and the catch has no status left to judge by.
+
+**⚠️ Deliberate decisions worth not re-deriving:**
+- **No "Try again" on the card.** The next press meets the same gate; offering a retry is what made a
+  bill look like a bug.
+- **Doctor AI draws the button inside its chat bubble**, not the card — a card would break the bubble
+  — and still calls the shared `openAddCredit`, never a hand-rolled navigation.
+- **`SDAMessage.needsCredit` is NEVER PERSISTED.** The Firestore autosave maps its fields by name and
+  this is not among them, so a refusal from last week can never return as a live offer after the
+  doctor has topped up. A test fails if that save is ever "tidied" into a spread.
+- **The Design System's refusal gets its OWN state** (`paletteNoCredit`): `paletteMsg` also carries
+  SUCCESS summaries, so sharing it would make a price and a result the same field.
+- **Switch on the CODE, never the prose.** A `.includes('balance')` check is how a copy edit silently
+  turns the card back into a red error — guarded, with comments stripped first so the files may
+  document the very check they forbid.
+
+**🔒 `tests/theWallIsAButtonNotASentence.test.ts` (24 cases), six reversion proofs:** the check moved
+after the throw; the retry banner and the price card drawn together; the flag persisted; the status
+read without the code; a sixth hand-written copy of the card; the card stripped from the studio.
+
+**⚠️ THE SECOND PROOF DID NOT BITE, AND THE TEST WAS WRONG, NOT THE CODE.** The guard asked whether
+`!balanceBlock` appeared ANYWHERE in the file — and every one of these files says it in two or three
+other places, so deleting it from the failure banner (the exact regression) left the suite green. It
+now pins each banner's OWN condition. Found by reversion, not by reasoning — the same shape as the
+hole found in PR #3248's suite the day before, which is twice now that a file-wide `toContain` has
+posed as a guard.
+
+**Also re-aimed (not weakened), with the reason recorded in place:** two assertions in
+`anEmptyBalanceIsSaidProperly.test.ts` that pinned the OLD call name and the studio's hand-written
+button. Both properties survive; both re-proven by reversion.
+
+**Gate, on the final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ · typecheck:server ✅
+· **vitest 28,933 passed | 1 skipped, 0 FAIL** ✅ · build ✅ · test:bundle (1499.2 KB / 1720) ✅ ·
+boot:check ✅ · deps:server-gate ✅.
 ## 2026-09-22 — Wallet & Billing: the three tiles become three horizontal capsules (PR pending)
 
 **Admin, verbatim:** *"wallet and billing me all 3 options ko horizontal 3 capsule ke jaise banao!

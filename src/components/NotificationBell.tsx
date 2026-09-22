@@ -49,7 +49,7 @@ interface NotificationItem {
    * — a free-form link on a broadcast record would turn the admin's message form into a way to send
    * every user a tappable address. An unrecognised value simply renders as a plain message.
    */
-  action?: 'open-reports';
+  action?: 'open-reports' | 'open-billing';
 }
 
 export interface NotificationInbox {
@@ -330,6 +330,23 @@ export function NotificationPanel({ inbox, onClose, onOpenReports }: {
               // action this build can perform — a row that looks tappable and does nothing is
               // worse than one that never invited the tap.
               if (!selecting) {
+                // Wallet & Billing, through the SAME channel the build panel's Add-credits button
+                // uses — a second navigation path would be a second thing to keep working.
+                if (n.action === 'open-billing') {
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => {
+                        close();
+                        window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }));
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-raised transition-colors"
+                    >
+                      {row}
+                      <span className="block text-[10px] font-bold text-warn mt-1">Tap to add credit →</span>
+                    </button>
+                  );
+                }
                 if (n.action === 'open-reports' && onOpenReports) {
                   return (
                     <button

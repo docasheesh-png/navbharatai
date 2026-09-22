@@ -153,7 +153,11 @@ describe('🔒 source guards — what tsc and vitest cannot see', () => {
 
   it('🔴 the image studio checks the refusal BEFORE the generic throw that would swallow it', () => {
     const code = src('src/components/ide/AIImageGenerator.tsx');
-    const check = code.indexOf('isWalletEmptyRefusal(res.status');
+    // RE-AIMED 2026-09-22, not weakened: the two-call shape (`isWalletEmptyRefusal` then
+    // `walletEmptyMessage`) became ONE call, `walletEmptyRefusalMessage`, when four more screens
+    // needed it and each would otherwise have copied the half-pattern. The PROPERTY under test is
+    // unchanged — the wallet is read before the throw that swallows it.
+    const check = code.indexOf('walletEmptyRefusalMessage(res.status');
     const generic = code.indexOf('if (!res.ok || !data) {');
     expect(check, 'the wallet check must exist').toBeGreaterThan(-1);
     expect(generic, 'the generic throw must exist').toBeGreaterThan(-1);
@@ -166,7 +170,12 @@ describe('🔒 source guards — what tsc and vitest cannot see', () => {
     // so a user is never shown a retry button for a condition retrying cannot clear.
     expect(code).toContain('{!isLoading && balanceBlock && (');
     expect(code).toContain('{!isLoading && imageError && !balanceBlock && (');
-    expect(code).toContain('onClick={openAddCredit}');
+    // RE-AIMED 2026-09-22: the button itself moved into `AddCreditNotice`, the ONE card five
+    // screens now share — a hand-written copy per screen is the drifted-copy class this repo has
+    // already paid for five times. The studio must still SHOW it, and the card must still carry
+    // the button; `theWallIsAButtonNotASentence.test.ts` holds the rest.
+    expect(code).toContain('<AddCreditNotice');
+    expect(src('src/components/common/AddCreditNotice.tsx')).toContain('onClick={openAddCredit}');
     // A fresh attempt must clear it, or a topped-up wallet keeps showing yesterday's refusal.
     expect(code).toContain("setBalanceBlock('')");
   });

@@ -124,7 +124,17 @@ describe('the notification: short words, and a tap that arrives somewhere', () =
     expect(readNotificationAction('')).toBeUndefined();
     expect(readNotificationAction(undefined)).toBeUndefined();
     expect(readNotificationAction({ url: 'x' })).toBeUndefined();
-    expect(NOTIFICATION_ACTIONS).toEqual(['open-reports']);
+    // 🔴 RE-AIMED 2026-09-22. This pinned the exact list `['open-reports']`, which forbade a second
+    // legitimate name (`open-billing`, the low-balance warning's tap target) while protecting
+    // nothing — the danger was never the SIZE of the set but whether a member can be a link. So the
+    // assertion is now the PROPERTY: every member is a plain lowercase name the client resolves
+    // itself, with no scheme, no slash and no dot. A stored URL fails this however short the list is.
+    expect(NOTIFICATION_ACTIONS).toContain('open-reports');
+    expect(NOTIFICATION_ACTIONS.length).toBeGreaterThan(0);
+    for (const a of NOTIFICATION_ACTIONS) {
+      expect(a, `"${a}" must be a plain name, never a link`).toMatch(/^[a-z][a-z-]*[a-z]$/);
+      expect(readNotificationAction(a)).toBe(a);
+    }
   });
 });
 

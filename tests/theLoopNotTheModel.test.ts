@@ -167,6 +167,13 @@ describe('3 · it ITERATES on the real error, with its own change in view', () =
     expect(llm.prompts[1]).toContain('<div>{count}</div>');
   });
 
+  it('what happened on EARLIER GitHub runs is shown ahead of the log, so a repeat is corrected, not repeated', async () => {
+    const llm = scripted([fix({ 'src/App.tsx': 'export const App = () => null;' })]);
+    await runAiRepairLoop(llm, [RUNG], ctx({ history: 'On the previous attempt YOUR change to src/App.tsx was committed and the build failed the SAME way.' }), { fetchFiles });
+    expect(llm.prompts[0]).toContain('=== WHAT HAPPENED ON EARLIER ATTEMPTS ===');
+    expect(llm.prompts[0].indexOf('EARLIER ATTEMPTS')).toBeLessThan(llm.prompts[0].indexOf('=== FAILING STEP LOG ==='));
+  });
+
   it('a round that only undoes an earlier change commits nothing for it', async () => {
     const llm = scripted([
       fix({ 'src/App.tsx': 'export const App = () => <div>1</div>;' }),
@@ -333,12 +340,15 @@ describe('the route and the panel', () => {
 
   it('the workspace comes from the VERIFIED identity plus the session — never from the body alone', () => {
     expect(route).toContain("workspaceId = sessionWorkspaceId(identity.uid, typeof sessionId === 'string' ? sessionId : '');");
-    expect(route).toContain("makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath)");
+    expect(route).toContain("makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath, toWorkspace)");
   });
 
   it('a VERIFIED fix heals the workspace too; an unverified one never touches it; a rejected one commits nothing', () => {
     expect(route).toContain('if (loop.verified && workspaceId) {');
-    expect(route).toContain('.filter(([p]) => isAppSourcePath(p))');
+    // A repository path is mapped to its WORKSPACE path first (a static repo keeps its source under
+    // `www/`; a prebuilt one keeps its build there), and only app source that has a home is healed.
+    expect(route).toContain('const local = toWorkspace(repoPath);');
+    expect(route).toContain('if (local && isAppSourcePath(local)) source[local] = content;');
     expect(route).toContain("if (loop.outcome === 'gave-up') {");
     expect(route).toContain('verified: loop.verified,');
   });

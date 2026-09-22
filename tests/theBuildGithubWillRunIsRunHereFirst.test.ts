@@ -158,6 +158,15 @@ describe('rule 3 — it is NOT stricter than the runner it is predicting', () =>
     expect(v.blocking).toBe(true);
   });
 
+  it('🔴 a failure the classifier cannot NAME is not blocking — only a POSITIVE app fault refuses (review, 2026-09-22)', () => {
+    // UNKNOWN is the classifier\'s honest "I could not name this": a machine killed mid-build, a registry
+    // blip, an out-of-memory. None of those is the runner\'s known answer, so the ship proceeds and the
+    // runner judges. Blocking on "anything not rescued" turned every one into "your app did not compile".
+    const v = readRealBuildFailure('nonsense nobody can classify');
+    expect(v.code).toBe('UNKNOWN');
+    expect(v.blocking).toBe(false);
+  });
+
   it('the verdict names the class with the SAME classifier the remote repair loop uses', () => {
     // One rule, two places. A second copy here would drift, and then our prediction and the runner's
     // own diagnosis would disagree about the same log.
@@ -217,9 +226,21 @@ describe('the wiring', () => {
   const route = codeOnly(read('src/server/routes/mobileSetup.ts'));
 
   it('runs AFTER the heal, on the healed files, and refuses only a BLOCKING failure', () => {
-    expect(route).toContain('const realBuild = await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)');
+    expect(route).toContain('await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)');
     expect(route).toContain('if (realBuild.ran && !realBuild.ok && realBuild.blocking) {');
     expect(route).toContain("code: 'real-build-failed',");
+  });
+
+  it('since 2026-09-22 the ship BUILDS the app here first; the check runs only where that never started a build', () => {
+    // The prebuild is the ship's own production build. Where it ran — shipped, timed out, or produced
+    // nothing readable — a second build in the same machine proves nothing and doubles the cost.
+    expect(route).toContain('const prebuild = await prebuildForShip(buildActuator(), workspaceId, appFiles, preflight.changed)');
+    expect(route.indexOf('prebuildForShip(')).toBeLessThan(route.indexOf('await runRealBuildCheck('));
+    expect(route).toContain("prebuild.kind === 'skip' && !prebuild.buildRan");
+    expect(route).toContain("{ ran: false, reason: 'prebuilt' }");
+    // A blocking failure of the prebuild is the SAME refusal, so the counter and the message tell one story.
+    expect(route).toContain("if (prebuild.kind === 'refuse') {");
+    expect(route).toContain('failureCode: prebuild.code,');
   });
 
   it('🔒 a thrown check can never fail the ship', () => {

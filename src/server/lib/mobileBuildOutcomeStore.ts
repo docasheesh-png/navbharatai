@@ -82,7 +82,17 @@ export interface DailyBuildOutcomes {
   codes: Partial<Record<BuildLane, Record<string, number>>>;
   /** Per lane: how the AI repair loop ended. Counts model-backed repairs only, never the free rule tier. */
   repairs?: Partial<Record<BuildLane, Partial<Record<RepairKind, number>>>>;
+  /**
+   * How the app reached GitHub: BUILT HERE (its own production output shipped as `www/`, so the runner
+   * compiles nothing) or as SOURCE (the runner compiles it, as every ship did before 2026-09-22).
+   * Counts SHIP presses, not runs — a press that reached the commit.
+   */
+  ships?: Partial<Record<ShipKind, number>>;
+  /** Why a ship went as source when it could have gone built — the number that says which fallback fires. */
+  prebuildSkips?: Record<string, number>;
 }
+
+export type ShipKind = 'prebuilt' | 'source';
 
 /** UTC day key. The SERVER's clock, never a device's — the same rule the wallet rollup follows. */
 export function outcomeDayKey(atMs: number = Date.now()): string {
@@ -195,6 +205,33 @@ export async function recordRepairOutcome(
   }
 }
 
+/**
+ * Count ONE ship — how the app reached GitHub, and, when it went as source, why the built path stood
+ * down. Best-effort; never throws. Called once per setup request that reached the commit, so a press is
+ * a press: a user who prepares the same app twice is two ships, which is what the number measures.
+ */
+export async function recordShip(
+  kind: ShipKind, prebuildSkip: string | null = null, atMs: number = Date.now(),
+): Promise<boolean> {
+  const store = db();
+  if (!store) return false;
+  try {
+    const day = outcomeDayKey(atMs);
+    const reason = prebuildSkip && /^[a-z-]{1,32}$/.test(prebuildSkip) ? prebuildSkip : null;
+    await store.collection(MOBILE_BUILD_OUTCOME_COLLECTION).doc(day).set(
+      {
+        day,
+        ships: { [kind]: admin.firestore.FieldValue.increment(1) },
+        ...(reason ? { prebuildSkips: { [reason]: admin.firestore.FieldValue.increment(1) } } : {}),
+      },
+      { merge: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The last `days` UTC days of counters, newest first. Bounded; never throws. */
 export async function listDailyBuildOutcomes(days = 30): Promise<DailyBuildOutcomes[]> {
   const store = db();
@@ -207,7 +244,7 @@ export async function listDailyBuildOutcomes(days = 30): Promise<DailyBuildOutco
     return snap.docs
       .map((d) => d.data() as Partial<DailyBuildOutcomes>)
       .filter((r): r is DailyBuildOutcomes => !!r && typeof r.day === 'string')
-      .map((r) => ({ day: r.day, outcomes: r.outcomes ?? {}, codes: r.codes ?? {}, repairs: r.repairs ?? {} }));
+      .map((r) => ({ day: r.day, outcomes: r.outcomes ?? {}, codes: r.codes ?? {}, repairs: r.repairs ?? {}, ships: r.ships ?? {}, prebuildSkips: r.prebuildSkips ?? {} }));
   } catch {
     return [];
   }
@@ -247,6 +284,10 @@ export interface OutcomeSummary {
   diagnosisGap: number;
   /** How the AI repairs ended, summed across lanes. All zero until the loop has run for real. */
   repairs: Record<RepairKind, number>;
+  /** How apps reached GitHub: built here first, or as source for the runner to compile. */
+  ships: Record<ShipKind, number>;
+  /** Why the built path stood down, commonest first. Empty until a ship has gone as source with a reason. */
+  prebuildSkips: Array<{ reason: string; count: number }>;
 }
 
 const LANES: readonly BuildLane[] = ['apk', 'aab', 'ipa', 'other'];
@@ -313,6 +354,20 @@ export function summariseBuildOutcomes(rows: readonly DailyBuildOutcomes[]): Out
     }
   }
 
+  const ships: Record<ShipKind, number> = { prebuilt: 0, source: 0 };
+  const skipCounts = new Map<string, number>();
+  for (const r of rows) {
+    ships.prebuilt += Math.max(0, Number(r.ships?.prebuilt ?? 0) || 0);
+    ships.source += Math.max(0, Number(r.ships?.source ?? 0) || 0);
+    for (const [reason, n] of Object.entries(r.prebuildSkips ?? {})) {
+      const count = Math.max(0, Number(n ?? 0) || 0);
+      if (count > 0) skipCounts.set(reason, (skipCounts.get(reason) ?? 0) + count);
+    }
+  }
+  const prebuildSkips = [...skipCounts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+
   return {
     days: rows.length,
     success, failure, cancelled, finished,
@@ -321,6 +376,8 @@ export function summariseBuildOutcomes(rows: readonly DailyBuildOutcomes[]): Out
     topCodes,
     diagnosed,
     repairs,
+    ships,
+    prebuildSkips,
     // Never negative: more diagnoses than failures would mean a repeat slipped a guard, and reporting
     // a negative gap would hide that behind a tidy-looking zero.
     diagnosisGap: Math.max(0, failure - diagnosed),

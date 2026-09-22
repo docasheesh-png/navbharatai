@@ -44,6 +44,8 @@ interface SetupResult {
   fileCount: number;
   kind: 'built' | 'static';
   webDir: string;
+  /** True when `www/` is the app's own production build, made here — GitHub packages it and compiles nothing. */
+  prebuilt?: boolean;
   notes: string[];
   // Each secret is an OBJECT, not a string. This was declared as `string[]`, so the panel rendered
   // "add your signing key as 4 secrets: [object Object], [object Object], …" to real users — the type
@@ -249,7 +251,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     // The prepare step now includes the compile pre-flight: the server verifies the app compiles and
     // heals it if not, BEFORE anything reaches GitHub — so this can take up to a minute or two when a
     // repair runs, and the note must not pretend it is only an upload.
-    setBusyNote('Checking your app compiles, fixing anything broken, and sending it to your GitHub…');
+    // The prepare step builds the app HERE first (its own production build, in its own machine), so
+    // GitHub only packages it — which is why this can take a few minutes, and why the note says so.
+    setBusyNote('Building your app here first, fixing anything broken, and sending the built app to your GitHub…');
     try {
       const res = await fetch('/api/mobile-ship/setup', {
         method: 'POST',
@@ -405,8 +409,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       seen = new Set<number>((data?.runs || []).map((r: RunInfo) => r.id));
     } catch { /* no history readable — every run we see next is new by definition */ }
 
-    // How many repairs really landed in the repository this cycle — what the final sentence is about.
+    // How many repairs really landed in the repository this cycle — what the final sentence is about —
+    // and how many of them were built here first and passed, which is the half that is a fact.
     let fixesApplied = 0;
+    let fixesVerified = 0;
+    // …and how many were packaging steps the sandbox cannot judge at all (a Gradle or Xcode stage) —
+    // a different sentence from "could not be checked on this request".
+    let fixesUnjudgeable = 0;
+    // What happened on each earlier attempt, carried to the next autofix so the server can tell a
+    // failure that CAME BACK from a new one (and the model can correct its own change rather than
+    // repeat it). One record per answer; the server trusts only its shape.
+    const history: Array<{ code?: string; error?: string | null; fixedBy?: 'rules' | 'ai' | null; verified?: boolean; changed?: string[] }> = [];
     for (let attempt = 0; attempt < MAX_AUTO_ATTEMPTS && liveRef.current; attempt++) {
       setAttempt(attempt);
       setProgressNote(attempt === 0 ? 'Sending your app to be built…' : 'Starting the build again…');
@@ -509,7 +522,12 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         // 🔴 This sentence used to claim a repair on EVERY exhausted cycle — including one where each
         // autofix had answered `fixed: false` and nothing was ever changed. It now says which happened.
         setError(fixesApplied > 0
-          ? `NavBharatAI applied ${fixesApplied} repair${fixesApplied === 1 ? '' : 's'} and tried again, but the build still did not finish.`
+          ? `NavBharatAI applied ${fixesApplied} repair${fixesApplied === 1 ? '' : 's'} and tried again, but the build still did not finish.${
+            fixesVerified > 0
+              ? ''
+              : fixesUnjudgeable === fixesApplied
+                ? ' None of them could be checked here first — they were packaging-step changes only the phone build can judge.'
+                : ' None of them could be checked here first.'}`
           : 'The build did not finish, and NavBharatAI could not find a repair it could verify.');
         void fetchFailReport(finished.id, kind);
         return;
@@ -517,19 +535,30 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       setProgressNote('Something went wrong — NavBharatAI is looking at it…');
       // `detail` carries the classifier's facts — `missing` is every signing secret the repository
       // lacks, which is what raises the one-press key offer below.
-      let fix: { fixed?: boolean; verified?: boolean; summary?: string; code?: string; report?: string;
+      let fix: { fixed?: boolean; verified?: boolean; judgeable?: boolean; fixedBy?: 'rules' | 'ai'; failureLine?: string;
+        changed?: string[]; summary?: string; code?: string; report?: string;
         detail?: Record<string, string | string[]> | null } | null = null;
       try {
         const fRes = await fetch('/api/mobile-ship/autofix', {
           method: 'POST',
           headers: await ghHeaders({ 'Content-Type': 'application/json' }),
           // `sessionId` names the app's workspace, where its own sandbox can run the build a repair would
-          // face on GitHub — so only a change that compiles is committed (2026-09-22).
-          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, runId: finished.id, powerLevel, sessionId }),
+          // face on GitHub — so only a change that compiles is committed (2026-09-22). `history` is what
+          // the earlier attempts of THIS cycle did, so the same failure coming back is recognised.
+          body: JSON.stringify({ owner, repo, ref: setup.branch, workflow, history, runId: finished.id, powerLevel, sessionId }),
         });
         fix = await fRes.json().catch(() => null);
       } catch { /* handled as "could not fix" below */ }
       if (!liveRef.current) return;
+      if (fix && typeof fix === 'object') {
+        history.push({
+          code: fix.code,
+          error: fix.failureLine ?? null,
+          fixedBy: fix.fixed ? (fix.fixedBy ?? null) : null,
+          verified: fix.verified === true,
+          changed: Array.isArray(fix.changed) ? fix.changed : [],
+        });
+      }
 
       if (!fix?.fixed) {
         setPhase('failed');
@@ -566,9 +595,17 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         return;
       }
       fixesApplied += 1;
+      if (fix.verified) fixesVerified += 1;
+      if (fix.judgeable === false) fixesUnjudgeable += 1;
+      // Three honest sentences, not one. A repair that was BUILT here first and passed is a fact; one
+      // the sandbox could not judge (a Gradle or Xcode step — packaging, not the app) is a change only
+      // the phone build can test; and one that could have been checked but was not (no workspace on
+      // this request) is said as such, rather than "fixed".
       setProgressNote(fix.verified
         ? `${fix.summary} Building the phone app again…`
-        : `${fix.summary} NavBharatAI fixed it and is building again…`);
+        : fix.judgeable === false
+          ? `${fix.summary} This is a packaging step NavBharatAI cannot test here, so the phone build will tell us. Building again…`
+          : `${fix.summary} NavBharatAI could not check this one here first. Building again to find out…`);
     }
   }, [setup, sessionId, ghHeaders, dispatch, fetchFailReport]);
 
@@ -843,7 +880,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
               {setup.createdRepo ? 'Created' : 'Updated'} {setup.owner}/{setup.repo}
             </p>
             <p className="text-muted leading-relaxed">
-              {setup.fileCount} files sent{setup.kind === 'static' ? ' (your pages are packaged as they are)' : ' (your app builds itself first)'}.
+              {setup.fileCount} files sent{setup.prebuilt
+                ? ' (your app was built here first — GitHub only packages it)'
+                : setup.kind === 'static' ? ' (your pages are packaged as they are)' : ' (your app builds itself first)'}.
             </p>
             {setup.notes.map((n, i) => (
               <p key={i} className="text-faint leading-relaxed mt-1.5">• {n}</p>

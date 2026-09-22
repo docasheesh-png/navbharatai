@@ -182,6 +182,18 @@ export interface IEngineerActuator {
    */
   setBuildActive?(workspaceId: string, active: boolean): void;
   /**
+   * Is a build currently marked active on this workspace? A second actor (the phone-ship's own
+   * production build) asks this BEFORE setting the flag, so it never clears a flag that is not its own
+   * and never builds beside a build already in flight. Optional, like the flag itself.
+   */
+  isBuildActive?(workspaceId: string): boolean;
+  /**
+   * Take the flag for a build of your own and get back the ONE way to release it. The release is a
+   * no-op once a direct `setBuildActive` has taken the flag over — so a build that starts during
+   * yours is never stripped of its protection when yours ends. Optional, like the flag.
+   */
+  holdBuildActive?(workspaceId: string): () => void;
+  /**
    * Record that a real person is looking at this workspace's preview right now, so the idle sweep does
    * not pause a machine somebody is actively using. Optional: an actuator with no idle sweep (Local)
    * has nothing to tell. See E2BActuator.noteUserActivity.

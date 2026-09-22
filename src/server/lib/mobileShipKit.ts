@@ -424,6 +424,74 @@ const gradleBuildRun = (gradleCmd: string): string => `          cd android
 // syntax error fails the bundler too, so a genuinely broken app still stops here — nothing broken can
 // ride the fallback. The heap is forced up front for the same reason the Gradle step forces 4g: a large
 // app must not die on Node's default.
+// ── CACHES (2026-09-22, "toote hi na"): a retry should not pay for the runner's downloads twice ──
+//
+// Nothing here was cached. Every attempt — the first AND each repair's re-run — downloaded the app's
+// npm packages, Gradle's distribution and every Android dependency from scratch, which is most of a
+// five-minute run. The user's own workflows in this repository never cached either, so there was no
+// proven pattern to copy; `actions/cache` IS proven here (image-scan.yml).
+//
+// 🔒 TWO THINGS THE OBVIOUS SHAPE GETS WRONG, and why this shape avoids them:
+//   • `actions/setup-node` with `cache: npm` HARD-FAILS with no lock file, and NavBharatAI never
+//     pushes one (see the comment on the setup-node step). So the npm cache is `~/.npm` itself,
+//     keyed on package.json — restored before the install, saved after it — which needs no lock file
+//     and is content the install step reads anyway.
+//   • The Android project does not exist when the job starts (`npx cap add android` creates it), so
+//     a Gradle cache cannot key on the wrapper file. It keys on the Java pin and package.json — the
+//     two things that decide what Gradle will fetch — and restores by prefix so a near miss still
+//     lands most of it. Saved after a run that FAILED too (`!cancelled()`): a run that died at Gradle
+//     still downloaded Gradle, and the retry after the repair is exactly the run that should not pay
+//     for it again — but never after a cancel, and never when the restore step itself never ran (a job
+//     that died at its pre-flight has nothing to save, and `outcome != 'skipped'` says so).
+// A cache miss changes nothing; a corrupt cache is npm's and Gradle's own problem to detect, which
+// they do — neither trusts a cached artefact without its checksum.
+// 🔒 `continue-on-error: true` on all four: a cache is a speed-up, and a cache service outage, a
+// reserve conflict or a corrupt archive must never turn a build that would have passed into a red run.
+const NPM_CACHE_RESTORE = `      - name: Restore the library cache
+        id: nbai-npm-cache
+        uses: actions/cache/restore@v6
+        continue-on-error: true
+        with:
+          path: ~/.npm
+          key: nbai-npm-\${{ runner.os }}-\${{ hashFiles('package.json') }}
+          restore-keys: |
+            nbai-npm-\${{ runner.os }}-
+`;
+
+const NPM_CACHE_SAVE = `      - name: Save the library cache
+        if: \${{ !cancelled() && steps.nbai-npm-cache.outcome != 'skipped' && steps.nbai-npm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        continue-on-error: true
+        with:
+          path: ~/.npm
+          key: nbai-npm-\${{ runner.os }}-\${{ hashFiles('package.json') }}
+`;
+
+const gradleCacheRestore = (java: number): string => `      - name: Restore the Gradle cache
+        id: nbai-gradle-cache
+        uses: actions/cache/restore@v6
+        continue-on-error: true
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
+          restore-keys: |
+            nbai-gradle-\${{ runner.os }}-java${java}-
+            nbai-gradle-\${{ runner.os }}-
+`;
+
+const gradleCacheSave = (java: number): string => `      - name: Save the Gradle cache
+        if: \${{ !cancelled() && steps.nbai-gradle-cache.outcome != 'skipped' && steps.nbai-gradle-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        continue-on-error: true
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
+`;
+
 const WEB_BUILD_STEP = `      - name: Build the web app
         env:
           NODE_OPTIONS: --max-old-space-size=4096
@@ -481,7 +549,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-      - name: Install the app's libraries
+${NPM_CACHE_RESTORE}      - name: Install the app's libraries
         run: |
           set -e
           if [ -f package-lock.json ]; then
@@ -490,7 +558,7 @@ jobs:
             npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
           fi
 
-${WEB_BUILD_STEP}
+${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
       #
@@ -502,14 +570,14 @@ ${WEB_BUILD_STEP}
       #
       # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
       # project is what actually broke, it is verified before anything downstream depends on it.
-${ENSURE_ANDROID_STEP}
+${gradleCacheRestore(java)}${ENSURE_ANDROID_STEP}
 
       # assembleDebug signs with Android's universal debug key, so no keystore and no secrets are
       # needed — this is what makes the whole flow one click for a non-technical user.
       - name: Build the installable APK
         run: |
 ${gradleBuildRun('assembleDebug --no-daemon')}
-
+${gradleCacheSave(java)}
       - name: Upload the .apk
         uses: actions/upload-artifact@v4
         with:
@@ -595,7 +663,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-      - name: Install the app's libraries
+${NPM_CACHE_RESTORE}      - name: Install the app's libraries
         run: |
           set -e
           if [ -f package-lock.json ]; then
@@ -604,7 +672,7 @@ jobs:
             npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
           fi
 
-${WEB_BUILD_STEP}
+${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
       #
@@ -616,7 +684,7 @@ ${WEB_BUILD_STEP}
       #
       # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
       # project is what actually broke, it is verified before anything downstream depends on it.
-${ENSURE_ANDROID_STEP}
+${gradleCacheRestore(java)}${ENSURE_ANDROID_STEP}
 
       # Play REJECTS a re-used versionCode, so stamp it with the always-increasing run number.
       - name: Stamp a unique versionCode
@@ -661,7 +729,7 @@ ${ENSURE_ANDROID_STEP}
           KEY_PASS: \${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
 ${gradleBuildRun('bundleRelease assembleRelease')}
-
+${gradleCacheSave(java)}
       - name: Upload the .aab (for Google Play)
         uses: actions/upload-artifact@v4
         with:
@@ -770,7 +838,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-      - name: Install the app's libraries
+${NPM_CACHE_RESTORE}      - name: Install the app's libraries
         run: |
           set -e
           if [ -f package-lock.json ]; then
@@ -779,7 +847,7 @@ jobs:
             npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
           fi
 
-${WEB_BUILD_STEP}
+${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
       #

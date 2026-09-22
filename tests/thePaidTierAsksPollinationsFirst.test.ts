@@ -229,46 +229,70 @@ describe('the FREE link (private now, still keyless)', () => {
   });
 });
 
-describe('🔒 SOURCE — the route asks this rung FIRST, for words only, and hides its wording from the user', () => {
+describe('🔒 SOURCE — the rung is asked FIRST, for words only, and its wording is hidden from the user', () => {
+  // ⚠️ MOVED 2026-09-22, NOT WEAKENED. The two rungs were lifted out of this route into
+  // `lib/imageProEngine.ts` so the NavBharatAI API's `POST /api/v1/images/generations` could call the
+  // SAME code instead of carrying a copy. Every guarantee below is the one that stood before; each
+  // assertion now reads whichever file the line it guards actually lives in, and the split is stated
+  // per case. The route keeps the gates that decide WHETHER to generate; the engine keeps the order
+  // in which the two rungs are tried.
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/imageGen.ts'), 'utf8');
   const pro = route.slice(route.indexOf("app.post('/api/image/pro/generate'"));
+  const engine = readFileSync(join(__dirname, '..', 'src/server/lib/imageProEngine.ts'), 'utf8');
+  /**
+   * The engine with its prose removed.
+   *
+   * ⚠️ Needed because the "no `res` in the engine" guard below is about CODE, and the file's own
+   * header explains the refactor by naming the very expression it forbids. A guard that reads
+   * comments fails on an accurate explanation of itself — which is exactly what it did, first run.
+   */
+  const engineCode = engine.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
   const health = readFileSync(join(__dirname, '..', 'src/server/routes/health.ts'), 'utf8');
 
-  it('the 503 gate asks the one owner, not the host alone', () => {
+  it('the 503 gate asks the one owner, not the host alone — and still runs BEFORE the engine', () => {
     expect(pro).toContain('if (!imageProAvailable())');
-    expect(pro.indexOf('if (!imageProAvailable())')).toBeLessThan(pro.indexOf('fetchPollinationsPaidImage('));
+    expect(pro.indexOf('if (!imageProAvailable())')).toBeLessThan(pro.indexOf('generateProImages('));
     expect(health).toContain('imageProAvailable()');
   });
 
   it('an edit needs the host — the rung is words-only, and a photograph never becomes a link', () => {
+    // The refusal is the ROUTE's (it answers the user); the words-only rung is the ENGINE's.
     expect(pro).toMatch(/mode !== 'text-to-image' && !imageProConfigured\(\)/);
-    expect(pro).toMatch(/if \(mode === 'text-to-image'\) \{\s*const pr = await fetchPollinationsPaidImage\(/);
+    expect(engine).toMatch(/if \(mode === 'text-to-image'\) \{\s*const pr = await fetchPollinationsPaidImage\(/);
   });
 
   it('the rung is tried BEFORE the host fetch, and the host runs only when nothing was delivered', () => {
-    const rung = pro.indexOf('fetchPollinationsPaidImage(');
-    const host = pro.indexOf('await fetch(imageProEndpoint()');
+    const rung = engine.indexOf('fetchPollinationsPaidImage(');
+    const host = engine.indexOf('await fetch(imageProEndpoint()');
     expect(rung).toBeGreaterThan(0);
     expect(host).toBeGreaterThan(rung);
-    const between = pro.slice(rung, host);
+    const between = engine.slice(rung, host);
     expect(between).toContain('if (delivered.length === 0) {');
     expect(between).toContain('if (!imageProConfigured()) {');
   });
 
-  it('🔒 the vendor\'s error wording goes to the LOG, never to `res`', () => {
-    // `pr.error` names the vendor and the status on purpose (admin-only). The only `res.` calls in
-    // the rung's own block are none — every response after it uses the branded message.
-    const start = pro.indexOf('// RUNG 1');
-    const end = pro.indexOf('// RUNG 2');
+  it('🔒 the vendor\'s error wording goes to the LOG, never to a response', () => {
+    // `pr.error` names the vendor and the status on purpose (admin-only). The engine cannot leak it
+    // to a user by construction now: it holds no `res` at all, and returns a BRANDED message instead.
+    const start = engine.indexOf('// RUNG 1');
+    const end = engine.indexOf('// RUNG 2');
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
-    const rungBlock = pro.slice(start, end);
+    const rungBlock = engine.slice(start, end);
     expect(rungBlock).not.toMatch(/res\.(status|json)\(/);
     expect(rungBlock).toMatch(/console\.warn\(.*pr\.error/);
     expect(rungBlock).toMatch(/console\.log\(.*pr\.usage/);
+    // 🔒 The whole engine, not just that block: no response object may ever reach it.
+    expect(engineCode).not.toMatch(/\bres\.(status|json)\(/);
   });
 
   it('the rung is charged at the same ₹1 and only on delivery — the charge reads `delivered`, not the engine', () => {
     expect(pro).toMatch(/const chargedInr = freeListed \? 0 : delivered\.length \* IMAGE_PRO_PRICE_INR;/);
+  });
+
+  it('🔒 the engine NEVER charges and never reads a wallet — that is the caller\'s job, and each caller pays differently', () => {
+    for (const forbidden of ['debitWalletRolledUp', 'readWalletBalanceInr', 'chargeForAiTurn', 'IMAGE_PRO_PRICE_INR']) {
+      expect(engineCode, `${forbidden} must not be in the engine`).not.toContain(forbidden);
+    }
   });
 });

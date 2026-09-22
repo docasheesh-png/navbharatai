@@ -76,7 +76,7 @@ import { qualityNote } from './writeTimeQualityCheck';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
-  shouldProbeTsconfig, tsProjectSettled, isMissingFileError, type TsProjectVerdict,
+  shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
 } from './writeTimeTypecheck';
@@ -2303,15 +2303,26 @@ export class ToolDispatcher {
           s.probeFailures += 1;
           if (isMissingFileError(err)) this._tsProject = 'no';
         }
+        s.projectVerdict = this._tsProject;
       }
-      if (this._tsProject !== 'yes') {
+      // A REAL 'no' is the only thing that may stand the compiler down. Everything else either still
+      // has probes left (skip this write, ask again on the next one) or has spent them all without an
+      // answer — and an unanswered question is not a verdict about the user's project. See
+      // `probeExhausted`: we are, by construction, in the middle of writing TypeScript, so the
+      // compiler itself is asked in the probe's place.
+      if (this._tsProject === 'no') {
         s.skipped += tsPaths.length;
-        // Only counted as a PROJECT skip once the question is settled — while it is still being retried
-        // the write is skipped, but calling that "the project is not TypeScript" would be the same
-        // overstatement this autopsy is about.
-        if (tsProjectSettled(this._tsProject, this._tsProbeAttempts)) s.skippedNoTsconfig += tsPaths.length;
+        s.skippedNoTsconfig += tsPaths.length;
         return '';
       }
+      const unprobed = probeExhausted(this._tsProject, this._tsProbeAttempts);
+      if (this._tsProject !== 'yes' && !unprobed) {
+        // Still being retried. The write is skipped, but calling that "the project is not TypeScript"
+        // would be the overstatement this whole module exists to refuse.
+        s.skipped += tsPaths.length;
+        return '';
+      }
+      if (unprobed) s.compiledUnprobed += 1;
       const errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();

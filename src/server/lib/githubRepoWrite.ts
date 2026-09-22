@@ -118,3 +118,39 @@ export async function readRepoFiles(
   }
   return out;
 }
+
+/**
+ * The repository's file paths on a branch — what the repair loop shows the model so it can ASK for a
+ * file it needs, the way a developer opens the import target next to the file that failed.
+ *
+ * Bounded and text-only by construction: the tree API is one request, blobs only (no directories or
+ * submodules), and anything that could never be a source file a repair would read is dropped here so
+ * it is never even listed. A tree the API truncates is still returned — a partial list means a partial
+ * menu, which is safe, because a path the model asks for is checked against THIS list before any read.
+ */
+export async function listRepoTree(
+  headers: GhHeaders,
+  owner: string,
+  repo: string,
+  branch: string,
+  cap = 400,
+): Promise<string[]> {
+  try {
+    const r = await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      { headers },
+    );
+    const tree = Array.isArray(r.data?.tree) ? (r.data.tree as Array<{ path?: unknown; type?: unknown; size?: unknown }>) : [];
+    const out: string[] = [];
+    for (const t of tree) {
+      if (t.type !== 'blob' || typeof t.path !== 'string') continue;
+      if (/(^|\/)(node_modules|dist|build|\.git|android|ios|www|\.gradle)\//.test(t.path)) continue;
+      if (typeof t.size === 'number' && t.size > 400_000) continue;
+      out.push(t.path);
+      if (out.length >= cap) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}

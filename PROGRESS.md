@@ -78547,3 +78547,23 @@ prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** 
 ⚠️ **Said to the admin, per the third absolute rule:** the Deep-links page is ADVISORY. Red rows there never
 block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
 which this session cannot see — asked for that screen rather than pretending the two are the same problem.
+
+## 2026-09-22 — 🧹 Closing FREE from the Mode list no longer closes the tab and every AI inside it
+
+Admin, the same evening, with screenshots: *"recent chat me navbharatai free ko x karte hai, to navbharatai
+free pura window hi band ho jata hai, chahe 3-5 kitne bhi ai open ho! isko badlo. mode navbharatai free ko
+agar band kiya jaye, to uske niche jo on ho woh open ho jaye. aur agar mode me kebal ek hi AI open hai, aur
+user usko bhi band kar de! to mode list band ho jaye aur navbharatai free ka page open ho jaye, starting
+jaisa!!"*
+
+- **Root cause:** the FREE row's ✕ called `closeTab('nbi_chat')` — the header tab's teardown, which by design
+  (`computeTabClose` + `tabOpeners`) closes every child opened through that tab. After #3243 every AI picked
+  from Mode is such a child, so one ✕ emptied the whole workspace.
+- **Fix:** `resetFreeChatSurface` (the free-chat reset extracted out of `closeTab`, so the header ✕ and the
+  Mode ✕ share ONE teardown) plus a `freeChatClosed` flag that takes FREE out of the Recent group while its
+  tab stays open; being on the FREE chat again clears the flag (one effect, whichever door). The screen goes
+  to the row BELOW the closed one, else above (`nextRecentAfterClose`, pure), and the list stays open; when
+  the LAST chat closes the sheet dismisses, `startNewChat()` runs and FREE opens — the app's starting page.
+- Locked in `modePicker.test.ts` (two pure cases) and `theModeListIsTheWindowSwitcher.test.ts` (source pins:
+  the FREE row never reaches `closeTab('nbi_chat')`; the only `setShowModePicker(false)` in the close path
+  is the last-close branch). KB `professionals` howToUse updated.

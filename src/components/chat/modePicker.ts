@@ -181,6 +181,12 @@ export interface ModePickerInput {
   openViews?: readonly string[];
   /** The open professional windows, in the order they were opened. */
   openChats?: readonly ChatWindow[];
+  /**
+   * The FREE chat has been closed from the Recent group while its tab stays open as the home of the
+   * other chats (admin 2026-09-22: closing FREE must not close the tab and everything inside it). It is
+   * open again the moment the user is back on it — App clears this when `activeView` is the FREE chat.
+   */
+  freeChatClosed?: boolean;
 }
 
 /** The single-chat views the Recent group lists, in the order the New group lists them too. */
@@ -200,6 +206,7 @@ export function recentModeEntries(opts: ModePickerInput): ModeEntry[] {
   const entries: ModeEntry[] = [];
   for (const view of RECENT_SINGLE_VIEWS) {
     if (!openViews.includes(view)) continue;
+    if (view === 'nbi_chat' && opts.freeChatClosed) continue;
     if (opts.hideMedical && (view === 'sda_chat' || isMedicalProfessionalId(view))) continue;
     const name = modeNameFor(view);
     if (!name) continue;
@@ -219,6 +226,22 @@ export function recentModeEntries(opts: ModePickerInput): ModeEntry[] {
     });
   }
   return entries;
+}
+
+/**
+ * Which chat the screen goes to after `closedId` is closed from the Recent group (admin 2026-09-22:
+ * *"mode navbharatai free ko agar band kiya jaye, to uske niche jo on ho woh open ho jaye"*). PURE.
+ *
+ * The row BELOW the closed one, else the row above it, else null — and null is the caller's signal that
+ * the last chat just closed, which lands on a fresh FREE page (*"starting jaisa"*). A closed id that is
+ * not in the list at all leaves the user where they are (null with nothing else open, else the first).
+ */
+export function nextRecentAfterClose(recent: readonly ModeEntry[], closedId: string): ModeEntry | null {
+  const idx = recent.findIndex((e) => e.id === closedId);
+  const remaining = recent.filter((e) => e.id !== closedId);
+  if (remaining.length === 0) return null;
+  if (idx < 0) return remaining[0];
+  return recent[idx + 1] ?? recent[idx - 1] ?? null;
 }
 
 /**

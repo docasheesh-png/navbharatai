@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  modePickerEntries, recentModeEntries, filterModeEntries, activeModeId, isModeSurface,
+  modePickerEntries, recentModeEntries, nextRecentAfterClose, filterModeEntries, activeModeId, isModeSurface,
   FREE_MODE_ID, IMAGE_MODE_ID, recentModeId, recentTargetFromId, startsFreshOnPick,
 } from './modePicker';
 import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
@@ -90,6 +90,36 @@ describe('modePickerEntries — what the Mode button offers', () => {
     // The image studio is a recent row while its view is open, wherever it was opened from.
     const withImage = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', IMAGE_MODE_ID], openChats: [] });
     expect(withImage.map((e) => e.view)).toEqual(['nbi_chat', IMAGE_MODE_ID]);
+  });
+
+  it('🔴 a CLOSED free chat leaves the Recent group while its tab stays open (admin 2026-09-22)', () => {
+    // "recent chat me navbharatai free ko x karte hai, to navbharatai free pura window hi band ho jata
+    // hai, chahe 3-5 kitne bhi ai open ho!" — the tab is home to the others, so closing the FREE
+    // conversation must not close it; the flag is what takes FREE out of the list instead.
+    const openChats = [{ id: 't1', professionalId: 'teacher_ai' }];
+    const open = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat', 'teacher_ai'], openChats });
+    expect(open.map((e) => e.view)).toEqual(['nbi_chat', 'sda_chat', 'teacher_ai']);
+    const closed = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat', 'teacher_ai'], openChats, freeChatClosed: true });
+    expect(closed.map((e) => e.view)).toEqual(['sda_chat', 'teacher_ai']);
+  });
+
+  it('🔴 after a close the screen goes to the row BELOW, else above, and null means the last chat closed', () => {
+    // "mode navbharatai free ko agar band kiya jaye, to uske niche jo on ho woh open ho jaye … agar
+    // kebal ek hi AI open hai, aur user usko bhi band kar de! to … navbharatai free ka page open ho jaye"
+    const openChats = [{ id: 't1', professionalId: 'teacher_ai' }, { id: 't2', professionalId: 'teacher_ai' }];
+    const recent = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat', 'teacher_ai'], openChats });
+    expect(recent.map((e) => e.id)).toEqual([recentModeId('nbi_chat'), recentModeId('sda_chat'), recentModeId('teacher_ai', 't1'), recentModeId('teacher_ai', 't2')]);
+    // FREE closed → Doctor AI (below).
+    expect(nextRecentAfterClose(recent, recentModeId('nbi_chat'))?.id).toBe(recentModeId('sda_chat'));
+    // The last row closed → the one above it.
+    expect(nextRecentAfterClose(recent, recentModeId('teacher_ai', 't2'))?.id).toBe(recentModeId('teacher_ai', 't1'));
+    // A middle row closed → the one below it, never the one above.
+    expect(nextRecentAfterClose(recent, recentModeId('teacher_ai', 't1'))?.id).toBe(recentModeId('teacher_ai', 't2'));
+    // The only chat closed → null: the caller opens a fresh FREE page.
+    expect(nextRecentAfterClose([recent[0]], recentModeId('nbi_chat'))).toBeNull();
+    // An id not in the list closes nothing that was listed: stay somewhere real.
+    expect(nextRecentAfterClose(recent, 'recent:ghost')?.id).toBe(recentModeId('nbi_chat'));
+    expect(nextRecentAfterClose([], 'recent:ghost')).toBeNull();
   });
 
   it('a recent WINDOW row round-trips its view AND conversation through its id', () => {
@@ -291,8 +321,8 @@ describe('ModePickerSheet — the rows say which is which', () => {
   });
 
   it('it builds the list from the OPEN TABS and OPEN WINDOWS, or the Recent group could never know what is open', () => {
-    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats })');
-    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats]');
+    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats, freeChatClosed })');
+    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats, freeChatClosed]');
     expect(sheet).toContain('activeModeId(activeView, activeChatId)');
   });
 

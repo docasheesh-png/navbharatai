@@ -19,6 +19,7 @@ export function ModePickerSheet({
   activeChatId,
   openViews,
   openChats,
+  freeChatClosed = false,
   hideMedical,
   onPick,
   onCloseRecent,
@@ -32,6 +33,8 @@ export function ModePickerSheet({
   openViews: readonly string[];
   /** The open professional windows, in the order they were opened. */
   openChats: readonly ChatWindow[];
+  /** The FREE chat was closed from this list while its tab stays open (see modePicker.ts). */
+  freeChatClosed?: boolean;
   /** Native-shell Play compliance: hides the medical-class experts (same rule as the hub). */
   hideMedical: boolean;
   /**
@@ -54,8 +57,8 @@ export function ModePickerSheet({
 }) {
   const [query, setQuery] = useState('');
   const entries = useMemo(
-    () => modePickerEntries({ hideMedical, activeView, openViews, openChats }),
-    [hideMedical, activeView, openViews, openChats],
+    () => modePickerEntries({ hideMedical, activeView, openViews, openChats, freeChatClosed }),
+    [hideMedical, activeView, openViews, openChats, freeChatClosed],
   );
   const visible = useMemo(() => filterModeEntries(entries, query), [entries, query]);
   const current = activeModeId(activeView, activeChatId);

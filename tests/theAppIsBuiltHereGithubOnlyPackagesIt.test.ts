@@ -510,6 +510,10 @@ describe('the workflows cache what they download, so a retry after a repair does
       expect(wf, path).toContain('- name: Restore the library cache');
       expect(wf, path).toContain('- name: Save the library cache');
       expect(wf, path).toContain("if: always() && steps.nbai-npm-cache.outputs.cache-hit != 'true'");
+      // A cache is a speed-up: a cache-service problem must never fail a build that would have passed.
+      const cacheSteps = wf.split(/\n(?=      - name: )/).filter((step) => /uses: actions\/cache\//.test(step));
+      expect(cacheSteps.length, path).toBe(/android/.test(path) ? 4 : 2);
+      for (const step of cacheSteps) expect(step, path).toContain('continue-on-error: true');
       expect(wf.indexOf('Restore the library cache'), path).toBeLessThan(wf.indexOf("Install the app's libraries"));
       // Keyed on package.json — the one manifest that IS pushed. NEVER setup-node's `cache: npm`,
       // which hard-fails without a lock file (the 2026-08-02 autopsy that this test file already pins).

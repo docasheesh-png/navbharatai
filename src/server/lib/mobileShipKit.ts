@@ -443,9 +443,12 @@ const gradleBuildRun = (gradleCmd: string): string => `          cd android
 //     Gradle, and the retry after the repair is exactly the run that should not pay for it again.
 // A cache miss changes nothing; a corrupt cache is npm's and Gradle's own problem to detect, which
 // they do — neither trusts a cached artefact without its checksum.
+// 🔒 `continue-on-error: true` on all four: a cache is a speed-up, and a cache service outage, a
+// reserve conflict or a corrupt archive must never turn a build that would have passed into a red run.
 const NPM_CACHE_RESTORE = `      - name: Restore the library cache
         id: nbai-npm-cache
         uses: actions/cache/restore@v6
+        continue-on-error: true
         with:
           path: ~/.npm
           key: nbai-npm-\${{ runner.os }}-\${{ hashFiles('package.json') }}
@@ -456,6 +459,7 @@ const NPM_CACHE_RESTORE = `      - name: Restore the library cache
 const NPM_CACHE_SAVE = `      - name: Save the library cache
         if: always() && steps.nbai-npm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
+        continue-on-error: true
         with:
           path: ~/.npm
           key: nbai-npm-\${{ runner.os }}-\${{ hashFiles('package.json') }}
@@ -464,6 +468,7 @@ const NPM_CACHE_SAVE = `      - name: Save the library cache
 const gradleCacheRestore = (java: number): string => `      - name: Restore the Gradle cache
         id: nbai-gradle-cache
         uses: actions/cache/restore@v6
+        continue-on-error: true
         with:
           path: |
             ~/.gradle/caches
@@ -477,6 +482,7 @@ const gradleCacheRestore = (java: number): string => `      - name: Restore the 
 const gradleCacheSave = (java: number): string => `      - name: Save the Gradle cache
         if: always() && steps.nbai-gradle-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
+        continue-on-error: true
         with:
           path: |
             ~/.gradle/caches

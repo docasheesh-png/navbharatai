@@ -47,7 +47,7 @@ const q = (n: number, correctIndex: number, topic = 'Topic A'): ExamQuestion => 
   n, question: `Q${n}?`, options: [`a${n}`, `b${n}`, `c${n}`, `d${n}`], correctIndex,
   explanation: `Because ${n}.`, topic,
 });
-const SPEC: ExamSpec = { subject: 'Physics', topic: 'Thermodynamics', level: 'mix', count: 3 };
+const SPEC: ExamSpec = { subject: 'Physics', topic: 'Thermodynamics', level: 'mix', count: 3, targetExam: 'other', targetExamOther: '' };
 
 describe('the marks are exactly what the admin set', () => {
   it('+4, −1, 0', () => {
@@ -212,7 +212,10 @@ describe('the setup, and what each level actually means', () => {
   });
 
   it('a blank topic asks for the whole subject rather than inventing one', () => {
-    expect(examPaperInstruction({ ...SPEC, topic: '' })).toContain('cover the subject broadly');
+    // ⚠️ SUPERSEDED WORDING (2026-09-22): this read 'cover the subject broadly'. Once the scope can
+    // come from the chosen EXAM instead of a typed subject, "the subject" is a noun the sentence may
+    // not have — so the phrase is now 'cover it broadly'. The behaviour under test is unchanged.
+    expect(examPaperInstruction({ ...SPEC, topic: '' })).toContain('cover it broadly');
   });
 });
 
@@ -385,7 +388,9 @@ describe('🔒 THE WIRING — one wallet, one gate, one call for the paper', () 
 
   it('🔒 the result hands its message back to the CHAT — the exam is not a dead end', () => {
     expect(code(CHAT)).toContain('onAskTeacher={(m) => { setExamOpen(false); void send(m); }}');
-    expect(code(EXAM_UI)).toContain('onAskTeacher(teachMyMistakesPrompt(questions, answers, spec))');
+    // ⚠️ SUPERSEDED (2026-09-22): the argument is now `teachSpec` — the spec with the subject as the
+    // generator UNDERSTOOD it, so a student who typed "trignometry" is not taught "trignometry".
+    expect(code(EXAM_UI)).toContain('onAskTeacher(teachMyMistakesPrompt(questions, answers, teachSpec))');
   });
 
   it('🔒 WHITE-LABEL — no vendor or model name anywhere in the feature', () => {

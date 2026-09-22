@@ -265,8 +265,10 @@ export function registerProfessionalsRoutes(app: Express): void {
         return;
       }
       // ⚠️ `asked` and `dropped` both travel, so the surface can say "7 of the 10 you asked for"
-      // instead of quietly renumbering the test the student chose.
-      res.json({ professionalId: config.id, spec, questions: paper.questions, asked: spec.count, dropped: paper.dropped });
+      // instead of quietly renumbering the test the student chose. `read` travels beside `spec` and
+      // never replaces it: what the student typed stays what they typed, and `read` is what the
+      // paper was actually set on — the surface shows the difference when there is one.
+      res.json({ professionalId: config.id, spec, read: paper.read, questions: paper.questions, asked: spec.count, dropped: paper.dropped });
     } catch (err: any) {
       sendSafeError(res, 503, 'Could not set the paper right now. Please try again.', err, 'professional exam');
     }

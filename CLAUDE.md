@@ -1975,6 +1975,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   browser (JSON back ⇒ configured; 404 ⇒ unset or every entry malformed), then reinstall the app and
   tap a navbharatai.com link. Android re-checks the file on install and periodically, so an app already
   installed may take a while — a reinstall settles it immediately.
+  🔴 **THE `www` HALF COULD NEVER VERIFY UNTIL 2026-09-22, WHATEVER THE FINGERPRINT (Play Console:
+  "2 domains not verified · 8 links not working", every row "Failed domain checks").** The manifest
+  claims BOTH `navbharatai.com` and `www.navbharatai.com`, Android verifies each by fetching ITS OWN
+  `/.well-known/assetlinks.json`, and the Digital Asset Links verifier does NOT follow redirects — yet
+  the `CANONICAL_HOST` middleware (mounted first) 308'd every `www` path to the apex, the statement
+  file included. `isWellKnownPath` in `canonicalHost.ts` now exempts the whole `/.well-known/` prefix
+  (Apple's `apple-app-site-association` is the same class); the app itself keeps one canonical origin.
+  **Two things must both be true for the Play "Deep links" page to go green: `ANDROID_CERT_SHA256`
+  set (both certificates), AND the file answering 200 on BOTH hosts without a redirect.** ⚠️ And say
+  it plainly when asked: a red Deep-links page is ADVISORY — it never blocks a release. An update that
+  "will not publish" has its reason on Publishing overview or the release page, not here.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,
@@ -2627,6 +2638,22 @@ the flag entries above promise.
   compiles) and each run reaches the release gate's typecheck evidence through `onCommand`. Report
   line `WRITE_TIME_TYPECHECK`. Logic in `writeTimeTypecheck.ts`; test-locked in
   `tests/writeTimeTypecheck.test.ts`.
+  🔴 **IT WATCHES ONE LANE, AND ITS REPORT LINE USED TO DENY THE OTHER (corrected 2026-09-22).** All
+  four call sites are in `ToolDispatcher`, so the check sees the ARCHITECT's writes; the FAST LANE
+  writes through `deps.writeFiles` and verifies once with a `tsc` of its own — by design, since its
+  files are generated concurrently and a per-file compile would quote errors from files not yet
+  written. So a successful fast-lane build leaves the counters untouched, which is correct, and the
+  summary read that silence as **"no TypeScript source was written this build (0 write(s) skipped as
+  not TypeScript)"** — about a build that had just written a whole app. ⚠️ **`sharedWriteTypecheckStats`
+  had ALREADY named the all-zero state as the tell** (*"that object was never touched, not that
+  nothing happened"*, autopsy 3ce8459b) for the SUB-AGENT cause of it; that instance was fixed by
+  sharing the object and the fast-lane sibling was never hunted — the headline class again, and the
+  third time this one sentence has been wrong. **Fixed with EVIDENCE, not wording:** the route passes
+  `modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length` — `writtenFiles` being the
+  one set every lane feeds — so "no TypeScript source was written" is said only when a real count
+  says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
+  silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
+  `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks

@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  modePickerEntries, filterModeEntries, activeModeId, isModeSurface,
-  FREE_MODE_ID, IMAGE_MODE_ID, recentModeId, startsFreshOnPick,
+  modePickerEntries, recentModeEntries, filterModeEntries, activeModeId, isModeSurface,
+  FREE_MODE_ID, IMAGE_MODE_ID, recentModeId, recentTargetFromId, startsFreshOnPick,
 } from './modePicker';
 import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
 
@@ -16,13 +16,19 @@ import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
  * pinned "FREE resumes, FREE + starts a new one, an expert resumes" — the exact behaviour the admin
  * replaced. Each such case is updated in place with the reason, never deleted: the old assertion was
  * right about the old rule, and a test removed silently is a rule nobody can see was withdrawn.
+ *
+ * ⚠️ AND AGAIN 2026-09-22: the ONE recent row became a GROUP of every open chat (admin: "upar recent
+ * chat, niche new chat … recent me woh chat jo abhi open hai, up to 5"), keyed by CONVERSATION so two
+ * Teacher chats are two rows, and the header's chips went away. The Recent group is built from the
+ * OPEN TABS and the OPEN WINDOWS, not from `activeView` alone — the cases below say so.
  */
 describe('modePickerEntries — what the Mode button offers', () => {
   // The admin's own numbering: "1. recent chat, 2. navbharatai free, 3. images generator ai,
   // 4. doctor ai,........ and so on!"
-  it('with an AI open: recent, FREE, Image Generator, Doctor, then every professional', () => {
-    const entries = modePickerEntries({ hideMedical: false, activeView: 'teacher_ai' });
-    expect(entries[0]).toMatchObject({ id: recentModeId('teacher_ai'), name: 'Teacher AI', kind: 'recent' });
+  it('with an AI open: its recent row, then FREE, Image Generator, Doctor, then every professional', () => {
+    const win = { id: 'c1', professionalId: 'teacher_ai' };
+    const entries = modePickerEntries({ hideMedical: false, activeView: 'teacher_ai', openViews: ['teacher_ai'], openChats: [win] });
+    expect(entries[0]).toMatchObject({ id: recentModeId('teacher_ai', 'c1'), name: 'Teacher AI', kind: 'recent', view: 'teacher_ai', conversationId: 'c1' });
     expect(entries[1]).toMatchObject({ id: FREE_MODE_ID, kind: 'free' });
     expect(entries[2]).toMatchObject({ id: IMAGE_MODE_ID, name: 'Image Generator AI', kind: 'image' });
     expect(entries[3]).toMatchObject({ id: 'sda_chat', name: 'Doctor AI' });
@@ -37,7 +43,8 @@ describe('modePickerEntries — what the Mode button offers', () => {
     // teacher ai dikhega, aur list me bhi teacher ai hoga, user list me teacher ai par tap kare to
     // teacher ai ki NEW chat open hogi." Two rows, one name, opposite actions — so the IDS must differ
     // or the caller cannot tell them apart.
-    const entries = modePickerEntries({ hideMedical: false, activeView: 'teacher_ai' });
+    const win = { id: 'c1', professionalId: 'teacher_ai' };
+    const entries = modePickerEntries({ hideMedical: false, activeView: 'teacher_ai', openViews: ['teacher_ai'], openChats: [win] });
     const rows = entries.filter((e) => e.name === 'Teacher AI');
     expect(rows).toHaveLength(2);
     expect(rows[0].id).not.toBe(rows[1].id);
@@ -45,24 +52,55 @@ describe('modePickerEntries — what the Mode button offers', () => {
     expect(rows[1].kind).toBe('professional');
   });
 
-  it('NO recent row when no AI is open — a row offering to resume nothing is a fake button', () => {
+  it('NO recent row when no chat is open — a row offering to resume nothing is a fake button', () => {
     for (const view of ['professionals', 'home', '']) {
-      const entries = modePickerEntries({ hideMedical: false, activeView: view });
+      const entries = modePickerEntries({ hideMedical: false, activeView: view, openViews: [view, 'settings'], openChats: [] });
       expect(entries.some((e) => e.kind === 'recent'), view).toBe(false);
       expect(entries[0]).toMatchObject({ id: FREE_MODE_ID, kind: 'free' });
     }
   });
 
-  it('the recent row names the FREE chat when that is what is open', () => {
-    const entries = modePickerEntries({ hideMedical: false, activeView: 'nbi_chat' });
-    expect(entries[0]).toMatchObject({ kind: 'recent', name: 'NavBharatAI FREE' });
+  it('the recent group names the FREE chat when that tab is open', () => {
+    const entries = modePickerEntries({ hideMedical: false, activeView: 'nbi_chat', openViews: ['nbi_chat'] });
+    expect(entries[0]).toMatchObject({ id: recentModeId('nbi_chat'), kind: 'recent', name: 'NavBharatAI FREE', view: 'nbi_chat' });
     // …and the row beneath it is still the NEW free chat. Same words, different jobs — which is why
-    // the sheet tags them.
+    // the sheet puts them under different group headings.
     expect(entries[1]).toMatchObject({ id: FREE_MODE_ID, kind: 'free' });
   });
 
-  it('a medical expert never becomes the recent row on the native shell', () => {
-    const entries = modePickerEntries({ hideMedical: true, activeView: 'sda_chat' });
+  it('🔴 THE RECENT GROUP IS EVERY OPEN CHAT, in the New group\'s order then window order (2026-09-22)', () => {
+    // Admin's own example: "doctor ai, teacher ai (1), teacher ai (2), other (1), other (2)".
+    const openChats = [
+      { id: 't1', professionalId: 'teacher_ai' },
+      { id: 'l1', professionalId: 'lawyer_ai' },
+      { id: 't2', professionalId: 'teacher_ai' },
+    ];
+    const recent = recentModeEntries({ hideMedical: false, activeView: 'lawyer_ai', openViews: ['nbi_chat', 'sda_chat', 'teacher_ai', 'lawyer_ai', 'settings'], openChats });
+    expect(recent.map((e) => [e.id, e.name])).toEqual([
+      [recentModeId('nbi_chat'), 'NavBharatAI FREE'],
+      [recentModeId('sda_chat'), 'Doctor AI'],
+      [recentModeId('teacher_ai', 't1'), 'Teacher AI (1)'],
+      [recentModeId('lawyer_ai', 'l1'), PROFESSIONAL_CHATS.lawyer_ai.name],
+      [recentModeId('teacher_ai', 't2'), 'Teacher AI (2)'],
+    ]);
+    // A view that is open but is not a chat (settings) is not a recent row; a professional VIEW that
+    // is open contributes rows only through its WINDOWS, never as a bare view.
+    expect(recent.some((e) => e.view === 'settings')).toBe(false);
+    expect(recent.filter((e) => e.view === 'teacher_ai').every((e) => e.conversationId)).toBe(true);
+    // The image studio is a recent row while its view is open, wherever it was opened from.
+    const withImage = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', IMAGE_MODE_ID], openChats: [] });
+    expect(withImage.map((e) => e.view)).toEqual(['nbi_chat', IMAGE_MODE_ID]);
+  });
+
+  it('a recent WINDOW row round-trips its view AND conversation through its id', () => {
+    expect(recentTargetFromId(recentModeId('teacher_ai', 'abc#1'))).toEqual({ view: 'teacher_ai', conversationId: 'abc#1' });
+    expect(recentTargetFromId(recentModeId('nbi_chat'))).toEqual({ view: 'nbi_chat' });
+    expect(recentTargetFromId('teacher_ai')).toBeNull();
+    expect(recentTargetFromId(FREE_MODE_ID)).toBeNull();
+  });
+
+  it('a medical expert never becomes a recent row on the native shell', () => {
+    const entries = modePickerEntries({ hideMedical: true, activeView: 'sda_chat', openViews: ['sda_chat', 'pharmacist_ai'], openChats: [{ id: 'p1', professionalId: 'pharmacist_ai' }] });
     expect(entries.some((e) => e.kind === 'recent')).toBe(false);
   });
 
@@ -89,9 +127,10 @@ describe('filterModeEntries — search never hides the way back', () => {
     expect(out.some((e) => e.id === 'chef_ai')).toBe(false);
   });
 
-  it('the fixed rows survive every search — recent, FREE and the image studio', () => {
-    const out = filterModeEntries(modePickerEntries({ hideMedical: false, activeView: 'teacher_ai' }), 'zzzz-no-match');
-    expect(out.map((e) => e.id)).toEqual([recentModeId('teacher_ai'), FREE_MODE_ID, IMAGE_MODE_ID]);
+  it('the fixed rows survive every search — every recent row, FREE and the image studio', () => {
+    const win = { id: 'c1', professionalId: 'teacher_ai' };
+    const out = filterModeEntries(modePickerEntries({ hideMedical: false, activeView: 'teacher_ai', openViews: ['nbi_chat', 'teacher_ai'], openChats: [win] }), 'zzzz-no-match');
+    expect(out.map((e) => e.id)).toEqual([recentModeId('nbi_chat'), recentModeId('teacher_ai', 'c1'), FREE_MODE_ID, IMAGE_MODE_ID]);
   });
 });
 
@@ -101,7 +140,11 @@ describe('activeModeId / isModeSurface — the ✓ and the footer', () => {
     // say the opposite of what tapping it does.
     expect(activeModeId('nbi_chat')).toBe(recentModeId('nbi_chat'));
     expect(activeModeId('sda_chat')).toBe(recentModeId('sda_chat'));
+    // A professional's ✓ names the WINDOW on screen — never its sibling window (2026-09-22).
+    expect(activeModeId('teacher_ai', 'c2')).toBe(recentModeId('teacher_ai', 'c2'));
     expect(activeModeId('teacher_ai')).toBe(recentModeId('teacher_ai'));
+    // A single-chat view ignores a stale window id: the FREE chat has no windows.
+    expect(activeModeId('nbi_chat', 'c2')).toBe(recentModeId('nbi_chat'));
     expect(activeModeId('home')).toBe('');
   });
 
@@ -130,9 +173,11 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
     expect(app).toContain("if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }");
   });
 
-  it('the recent row RESUMES and starts nothing', () => {
-    expect(app).toContain('const resume = viewFromRecentId(id);');
-    expect(app).toContain('if (resume) { toggleTab(resume as ViewType); return; }');
+  it('a recent row SWITCHES to its exact conversation and starts nothing', () => {
+    // The conversation id rides into `toggleTab`, which focuses that window — the same path the header
+    // chip used until 2026-09-22, so there is one switch, not two.
+    expect(app).toContain('const resume = recentTargetFromId(id);');
+    expect(app).toContain('if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }');
   });
 
   it('a professional\'s "New chat" opens a NEW WINDOW with a fresh conversation — the open one is neither archived nor dropped', () => {
@@ -146,7 +191,8 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
   });
 
   it('the image row opens Other Tools\' OWN view — free and paid together, not a fork', () => {
-    expect(app).toContain("if (id === IMAGE_MODE_ID) { toggleTab(IMAGE_MODE_ID as ViewType); return; }");
+    expect(app).toContain('if (id === IMAGE_MODE_ID) {');
+    expect(app).toContain('toggleTab(IMAGE_MODE_ID as ViewType);');
     const panels = readFileSync(join(__dirname, '..', 'panels', 'ViewPanels.tsx'), 'utf8');
     expect(panels).toContain("activeView === 'imagegen'");
     expect(panels).toContain('<AIImageGenerator');
@@ -206,7 +252,7 @@ describe('every mode entry carries its own emoji logo', () => {
   });
 
   it('the built entries all carry one — the recent, FREE and image rows included', () => {
-    for (const e of modePickerEntries({ hideMedical: false, activeView: 'teacher_ai' })) {
+    for (const e of modePickerEntries({ hideMedical: false, activeView: 'teacher_ai', openViews: ['nbi_chat', 'teacher_ai'], openChats: [{ id: 'c1', professionalId: 'teacher_ai' }] })) {
       expect(e.emoji, `${e.id} lost its emoji`).toBeTruthy();
     }
   });
@@ -228,16 +274,26 @@ describe('every mode entry carries its own emoji logo', () => {
 describe('ModePickerSheet — the rows say which is which', () => {
   const sheet = readFileSync(join(__dirname, 'ModePickerSheet.tsx'), 'utf8');
 
-  it('the recent row is tagged Recent, and the ones that start something are tagged New chat', () => {
-    expect(sheet).toContain(">Recent<");
-    expect(sheet).toContain(">New chat<");
-    expect(sheet).toContain("e.kind === 'recent' &&");
-    expect(sheet).toContain("(e.kind === 'free' || e.kind === 'professional') &&");
+  it('the list is TWO GROUPS with headings — Recent chat over New chat — and no per-row tags (2026-09-22)', () => {
+    // Admin: "har option ke age new likhne ki need nahi hai, 2 alag alag group hi bana do". The per-row
+    // "Recent" / "New chat" tags that told the two rows of one AI apart until now are replaced by the
+    // heading each group sits under.
+    expect(sheet).toContain("groupHeading('Recent chat')");
+    expect(sheet).toContain("groupHeading('New chat')");
+    expect(sheet).toContain('aria-label="Recent chat"');
+    expect(sheet).toContain('aria-label="New chat"');
+    expect(sheet).not.toContain('>Recent<');
+    expect(sheet).not.toContain('>New chat<');
+    // The Recent group is hidden entirely when empty — a heading over nothing promises a way back to nothing.
+    expect(sheet).toContain('{recent.length > 0 && (');
+    // Every recent row carries the ✕; no New row does.
+    expect(sheet).toContain("{e.kind === 'recent' && onCloseRecent && (");
   });
 
-  it('it builds the list with the ACTIVE view, or row 1 could never know what is open', () => {
-    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView })');
-    expect(sheet).toContain('[hideMedical, activeView]');
+  it('it builds the list from the OPEN TABS and OPEN WINDOWS, or the Recent group could never know what is open', () => {
+    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats })');
+    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats]');
+    expect(sheet).toContain('activeModeId(activeView, activeChatId)');
   });
 
   it('the FREE styling follows the NAME, so the same chat is painted the same way in both rows', () => {

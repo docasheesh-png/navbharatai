@@ -98,10 +98,22 @@ describe('🔒 the toggle is a control, reachable from BOTH tiers', () => {
     expect(toggle, 'the toggle must be in the header, above the body swap').toBeLessThan(bodySwap);
   });
 
-  it('defaults to free, and an unreadable stored value also means free', () => {
+  it('🔴 defaults to free on EVERY open — the tier is not stored at all (admin 2026-09-22)', () => {
+    // The REASON this test has always carried is unchanged: opening the panel must never put
+    // somebody on the paid tier they did not choose. What changed is that it is now true
+    // unconditionally instead of true-unless-a-stored-value-says-otherwise.
+    //
+    // It used to assert the localStorage read (`getItem(TIER_KEY) === 'pro' ? 'pro' : 'free'`) and
+    // its `catch { return 'free' }`. Both are gone because the whole read is gone: the admin
+    // reported the paid tier opening by itself, which is precisely what a remembered choice does
+    // to a user who tried Pro once. A Pro image costs real rupees, so free is the only default
+    // that cannot spend a balance by being forgotten about.
     const src = code(GEN);
-    expect(src).toMatch(/localStorage\.getItem\(TIER_KEY\) === 'pro' \? 'pro' : 'free'/);
-    expect(src).toMatch(/catch \{\s*return 'free';/);
+    expect(src).toMatch(/useState<'free' \| 'pro'>\('free'\)/);
+    // No storage read and no storage write for the tier — a key nothing reads is a key the next
+    // reader would trust.
+    expect(src).not.toMatch(/TIER_KEY/);
+    expect(src).not.toMatch(/imagegen\.tier/);
   });
 });
 

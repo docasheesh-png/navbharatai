@@ -35,7 +35,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
-import { writeTypecheckSummary, writeTypecheckEnabled } from '../AgentV3/writeTimeTypecheck';
+import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
@@ -16435,9 +16435,17 @@ async function noteBuildOutcome(
       // so the next autopsy can say whether the 7-minute endgame grind actually went away.
       try {
         const wt = dispatcher.writeTypecheckStats();
+        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
+        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
+        // its stats untouched — and the line then read "no TypeScript source was written this build"
+        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
+        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
+        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
+        // only inherited our template is not credited with having written it.
+        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
-          message: writeTypecheckSummary(wt, writeTypecheckEnabled()), autoResolved: true,
+          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
 

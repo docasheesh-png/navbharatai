@@ -21,17 +21,26 @@ import {
  * was wrong".
  *
  * The three buttons are the admin's own list: − one step down, ⟲ back to the default, + one step up.
+ *
+ * ⚠️ `idPrefix` — TWO OF THESE CAN BE ON THE PAGE AT ONCE. The composer shows one when its size is
+ * "Custom", and the Resize sheet (portalled to the body, over that composer) shows another. With one
+ * shared id, the sheet's "W" label pointed at the composer's input BEHIND it (`getElementById` returns
+ * the first match), so a tap on the label focused a field the user could not see. Every mount that is
+ * not the composer's must pass its own prefix.
  */
 export function CustomSizeFields({
   width,
   height,
   onChange,
   className,
+  idPrefix = 'nbai-custom',
 }: {
   width: number;
   height: number;
   onChange: (w: number, h: number) => void;
   className?: string;
+  /** Distinct per mount — see the note above. */
+  idPrefix?: string;
 }) {
   const real = resolveCustomSize(width, height);
   const asked = describeSize(width, height);
@@ -84,9 +93,9 @@ export function CustomSizeFields({
   return (
     <div className={className}>
       <div className="flex flex-wrap items-center gap-2">
-        {field('W', width, (n) => onChange(n, height), 'nbai-custom-w')}
+        {field('W', width, (n) => onChange(n, height), `${idPrefix}-w`)}
         <span aria-hidden="true" className="text-xs text-faint">&#215;</span>
-        {field('H', height, (n) => onChange(width, n), 'nbai-custom-h')}
+        {field('H', height, (n) => onChange(width, n), `${idPrefix}-h`)}
         <button
           type="button"
           aria-label="Reset to the default size"

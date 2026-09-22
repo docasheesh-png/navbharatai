@@ -78520,6 +78520,89 @@ Tests: `tests/theFrameGrowsOnTheAxisYouPressed.test.ts` (10) — the pure rule (
 constant reference across every preset and custom frame, shape kept past the reference, junk → 0) and source
 guards (percent-sized canvas, square stage, distinct ids). **Proven by reversion three ways:** reference
 following the frame; the width-pinned canvas restored; shared ids restored.
+
+---
+
+## 2026-09-22 — 🎯 Exam mode: WHICH exam, and wrong spelling that still gets the right paper
+
+**Admin, after using exam mode the day it shipped, two follow-ups:**
+
+> *"1. student spelling mistacks kar sakte hai, jaise maine ki. to llm call ke jariye isko sahi liya
+> jaye aur user ko paresani na ho (navbharat ai, galat spelling bhi samajh le)"*
+
+> *"2. subject topics level ke sath kon se exam ki prepration karni hai, woh dropdown se selection
+> karne ko aye. jaise neet jee, upsc 12th, 10th (iske alawa india me hone wala sabhi famus exam aap
+> is list me add karoge!!!) aur sab alfavetical honge, 1st number par other hoga"*
+
+Both shipped. PR opened from `claude/vigilant-feynman-9aobjz`.
+
+### 1 · The exam dropdown — 87 Indian exams, alphabetical, `Other` first
+
+`EXAM_TARGETS` in `src/server/professionals/examMode.ts`. Exactly the shape asked for: **`other` is
+index 0 and is the DEFAULT**, everything after it is sorted **by code** (`sortTargets`, numeric
+collation so *Class 10* precedes *Class 12*) rather than by hand — a hand-ordered list drifts on the
+first append and nothing fails.
+
+**Why this field is worth more than any other on that screen:** "ten medium questions on
+Thermodynamics" is four different papers for a Class 11 student, a JEE Advanced candidate, a GATE
+candidate and a UPSC candidate. *Difficulty cannot express that* — hard-for-Class-11 and hard-for-JEE
+are different **kinds** of hard, not different amounts. Each entry carries a real `brief` (its
+standard, scope and question style) that goes into the generator's prompt.
+
+Three rules the list keeps, each of them a way it could have gone wrong quietly:
+
+- **An unrecognised id reads as `other`, never as an exam we then describe.** A typed exam under
+  `other` gets its NAME into the prompt and **no invented syllabus** — the generator is told to say
+  nothing about an exam it does not know. Describing a paper confidently from its name alone is the
+  same plausible-looking falsehood this module already refuses for questions.
+- **No discontinued exam is listed.** NTSE and KVPY are the two students still search for; both were
+  withdrawn, and offering to prepare somebody for an exam that no longer exists costs trust. They can
+  still be typed under `other`.
+- **Twenty exams carry their real `subjects`**, offered as one TAP — which is also half the answer to
+  the spelling request, because a subject that is tapped is never mistyped.
+
+🔑 **A named exam now stands in for the subject** (`examSpecIsUsable`): *"set me a NEET paper"* is a
+complete request, because a real NEET paper already is a mixed Physics/Chemistry/Biology paper.
+`setupReady` on the client mirrors it, and a table test asserts the two **agree on every case** — a
+Start button that enables where the server refuses is a dead button, and one that refuses where the
+server would have worked hides a feature.
+
+### 2 · Wrong spelling — understood by the call that was already being made
+
+The paper is generated in ONE call. So the correction is **rule 11 of that same call's contract**,
+not a second call: *the scope may be misspelled or phonetic ("trignometry", "bayology", "mugal
+empire") — work out what they meant and set the paper on THAT*, with the guard that an genuinely
+unfamiliar word is **kept exactly as written** rather than turned into a lookalike. **Zero extra
+cost, zero extra wait**, and the model that must understand the subject to write questions is the one
+interpreting it, so the correction and the paper can never disagree.
+
+🔒 **And it is never silent.** Rule 12 makes the generator report `read: { subject, topic }` — what it
+actually set the paper on. That travels beside `spec` and **never replaces it**: what the student
+typed stays what they typed. `readingNote` shows *"I read that as Trigonometry, and set the paper on
+it"* on the first question, with **one press back to the form** if it read wrong. It says nothing
+when the reading agrees (ignoring case, spacing and punctuation, in Devanagari too) — a note on every
+paper is noise, and noise is how a useful note stops being read. A topic the student never typed is
+not a correction. The follow-up lesson (`teachMyMistakesPrompt`) uses the UNDERSTOOD subject, so a
+student who typed "trignometry" is not then taught "trignometry" — and it now also tells the teacher
+**which exam**, because the same wrong answer needs a different explanation for a Class 12 student
+and a JEE candidate.
+
+### Locked
+
+`tests/theExamKnowsWhichExam.test.ts` — 46 cases, **proven by reversion six ways**: `other` moved off
+index 0, the spelling rule deleted from the prompt, `read` not sent to the client, `readingNote`
+comparing raw strings, the dropdown's choice not put in the request body, and the exam no longer
+standing in for the subject. Each of those breaks **nothing** that `tsc` or the existing suite can
+see, which is why the guards are source-level. `AppKnowledgeBase.ts` and the Teacher AI persona both
+updated in the same commit, per the sync rule.
+
+### What was deliberately NOT done
+
+- **Marks are still +4 / −1 / 0 for every exam.** UPSC prelims is really +2/−0.66 and some papers have
+  no negative marking at all — but the admin SET those three numbers, and quietly changing them per
+  exam would be an engine decision about somebody else's instruction. Raised here rather than taken.
+- **No exam-specific time limit, sectional lock or paper pattern** (subject splits, section cut-offs).
+  Real, and a bigger feature than this; not asked for.
 ## 2026-09-22 — The image studio opens FREE, and the text can fade without the bar fading
 
 **Two admin requests on the image generator, both small on the surface and both with one real trap

@@ -61,12 +61,180 @@ export const EXAM_DEFAULT_QUESTIONS = 10;
 /** The counts the surface offers as one tap. A student may still type any number in range. */
 export const EXAM_COUNT_PRESETS: readonly number[] = [5, 10, 20, 30];
 
+/**
+ * 🎯 WHICH EXAM IS THIS FOR? (admin 2026-09-22)
+ *
+ * Admin: *"subject topics level ke sath kon se exam ki prepration karni hai, woh dropdown se
+ * selection karne ko aye … india me hone wala sabhi famus exam aap is list me add karoge!! aur sab
+ * alfavetical honge, 1st number par other hoga."*
+ *
+ * ## Why this is the single highest-value field on the setup screen
+ *
+ * "Ten medium questions on Thermodynamics" is four completely different papers depending on who is
+ * asking. A Class 11 student needs the chapter as the textbook teaches it; a JEE Advanced candidate
+ * needs multi-step numericals with a trap in the algebra; a GATE candidate needs the mechanical
+ * engineering treatment; a UPSC candidate needs the one conceptual line that actually gets asked.
+ * Difficulty ("hard") cannot express that, because hard-for-Class-11 and hard-for-JEE are different
+ * *kinds* of hard, not different amounts. **The exam is the missing variable, and nothing else on the
+ * screen can stand in for it.**
+ *
+ * ## 🔒 Three rules this list keeps
+ *
+ * 1. **`other` is FIRST and is the DEFAULT**, exactly as asked — so the dropdown never forces a
+ *    student who just wants a plain paper to pick something untrue, and today's behaviour (no exam
+ *    targeting at all) is what an untouched form still produces. When `other` is chosen the student
+ *    may type their own exam, which is threaded through identically.
+ * 2. **Everything after `other` is sorted BY CODE, never by hand** (`sortTargets`), with numeric
+ *    collation so "Class 10" comes before "Class 12". A hand-ordered list drifts the first time
+ *    somebody appends an entry, and nothing would fail.
+ * 3. **No discontinued exam is listed.** NTSE and KVPY are the ones students still search for; both
+ *    were withdrawn, and offering to prepare somebody for an exam that no longer exists is the kind
+ *    of plausible-looking falsehood that costs trust. A student who wants one can still type it
+ *    under `other`.
+ *
+ * `subjects` is the second half of the spelling answer below: for the exams where the subject list
+ * is genuinely fixed, the student TAPS the subject instead of typing it, so the commonest
+ * misspelling never gets a chance to happen.
+ */
+export interface ExamTarget {
+  id: string;
+  label: string;
+  /** What a paper for this exam is actually like — the standard, the scope and the question style. */
+  brief: string;
+  /** The subjects this exam really tests, offered as one tap. Omitted where there is no fixed list. */
+  subjects?: readonly string[];
+}
+
+/** The neutral choice: no exam targeting. First in the list and the default, as the admin set it. */
+export const EXAM_TARGET_OTHER = 'other';
+
+const OTHER_TARGET: ExamTarget = {
+  id: EXAM_TARGET_OTHER,
+  label: 'Other / not for a specific exam',
+  brief: '',
+};
+
+/** Source order is irrelevant — `sortTargets` below is what the surface and the tests read. */
+const NAMED_TARGETS: readonly ExamTarget[] = [
+  { id: 'afcat', label: 'AFCAT (Air Force)', brief: 'Air Force Common Admission Test: general awareness, verbal ability, numerical ability and military aptitude, at graduate level.', subjects: ['General Awareness', 'Verbal Ability', 'Numerical Ability', 'Reasoning & Military Aptitude'] },
+  { id: 'aibe', label: 'AIBE (Bar exam)', brief: 'All India Bar Examination: practical, open-book questions across the bare acts an advocate uses daily.' },
+  { id: 'ailet', label: 'AILET (NLU Delhi)', brief: 'NLU Delhi law entrance: English, current affairs, and logical and legal reasoning, harder and shorter than CLAT.' },
+  { id: 'agniveer_army', label: 'Agniveer — Indian Army', brief: 'Army Agniveer CEE: general knowledge, general science, elementary mathematics and logical reasoning, at Class 10 standard.' },
+  { id: 'agniveer_navy', label: 'Agniveer — Indian Navy (SSR/MR)', brief: 'Navy Agniveer: Class 12 science and mathematics, English and general awareness.' },
+  { id: 'ap_eapcet', label: 'AP EAPCET', brief: 'Andhra Pradesh engineering and agriculture entrance, on the state Class 11–12 syllabus.' },
+  { id: 'bitsat', label: 'BITSAT', brief: 'BITS Pilani entrance: NCERT Class 11–12 Physics, Chemistry and Mathematics, plus English proficiency and logical reasoning, under heavy time pressure.', subjects: ['Physics', 'Chemistry', 'Mathematics', 'English Proficiency', 'Logical Reasoning'] },
+  { id: 'bpsc', label: 'BPSC (Bihar PSC)', brief: 'Bihar Public Service Commission: general studies with a strong Bihar-specific history, geography and current-affairs weighting.' },
+  { id: 'ca_foundation', label: 'CA Foundation', brief: 'ICAI entry level: accounting principles, business laws, business mathematics and logical reasoning, and economics.', subjects: ['Accounting', 'Business Laws', 'Business Mathematics & Logical Reasoning', 'Business Economics'] },
+  { id: 'ca_inter', label: 'CA Intermediate', brief: 'ICAI intermediate: advanced accounting, corporate law, taxation, cost accounting, auditing and financial management.' },
+  { id: 'ca_final', label: 'CA Final', brief: 'ICAI final: financial reporting, strategic financial management, advanced auditing, direct and indirect tax laws, at professional standard.' },
+  { id: 'cat', label: 'CAT (IIM / MBA)', brief: 'Common Admission Test: quantitative aptitude, data interpretation and logical reasoning, and verbal ability, all aptitude and no syllabus recall.', subjects: ['Quantitative Aptitude', 'Data Interpretation & Logical Reasoning', 'Verbal Ability & Reading Comprehension'] },
+  { id: 'cds', label: 'CDS (UPSC Defence)', brief: 'UPSC Combined Defence Services: English, general knowledge and elementary mathematics at Class 10–12 standard.', subjects: ['English', 'General Knowledge', 'Elementary Mathematics'] },
+  { id: 'clat', label: 'CLAT (Law)', brief: 'Common Law Admission Test: comprehension-led passages in English, current affairs, legal reasoning, logical reasoning and quantitative techniques. Every question follows a passage — no bare recall.', subjects: ['English Language', 'Current Affairs & General Knowledge', 'Legal Reasoning', 'Logical Reasoning', 'Quantitative Techniques'] },
+  { id: 'class10', label: 'Class 10 board exam', brief: 'Class 10 board standard, on the NCERT syllabus, in the style the board itself asks.', subjects: ['Mathematics', 'Science', 'Social Science', 'English', 'Hindi'] },
+  { id: 'class11', label: 'Class 11 exam', brief: 'Class 11 standard on the NCERT syllabus — the foundation year, so concepts before shortcuts.' },
+  { id: 'class12', label: 'Class 12 board exam', brief: 'Class 12 board standard, on the NCERT syllabus, in the style the board itself asks.', subjects: ['Physics', 'Chemistry', 'Mathematics', 'Biology', 'English', 'Accountancy', 'Business Studies', 'Economics'] },
+  { id: 'cmat', label: 'CMAT', brief: 'NTA Common Management Admission Test: quantitative technique, logical reasoning, language comprehension, general awareness and innovation & entrepreneurship.' },
+  { id: 'comedk', label: 'COMEDK UGET', brief: 'Karnataka private-engineering entrance on Class 11–12 Physics, Chemistry and Mathematics.', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
+  { id: 'cs_executive', label: 'CS Executive (ICSI)', brief: 'Company Secretary executive level: company law, tax laws, economic and commercial laws, and corporate accounting.' },
+  { id: 'csir_net', label: 'CSIR NET', brief: 'CSIR-UGC NET for science: research-level depth in the chosen science subject, with a part-A of general aptitude.' },
+  { id: 'ctet', label: 'CTET (Teaching)', brief: 'Central Teacher Eligibility Test: child development and pedagogy alongside the subject, always asked from a teaching point of view rather than as bare content.', subjects: ['Child Development & Pedagogy', 'Language I', 'Language II', 'Mathematics', 'Environmental Studies'] },
+  { id: 'cuet_ug', label: 'CUET UG', brief: 'Common University Entrance Test (undergraduate): strictly NCERT Class 12, domain subject plus general test.' },
+  { id: 'cuet_pg', label: 'CUET PG', brief: 'Common University Entrance Test (postgraduate): graduation-level depth in the chosen domain subject.' },
+  { id: 'delhi_police', label: 'Delhi Police Constable', brief: 'Delhi Police constable recruitment: general knowledge, reasoning, numerical ability and computer awareness at Class 12 standard.' },
+  { id: 'fmge', label: 'FMGE (Screening Test)', brief: 'Foreign Medical Graduate Examination: the full MBBS syllabus at Indian licensing standard.' },
+  { id: 'gate', label: 'GATE', brief: 'Graduate Aptitude Test in Engineering: undergraduate engineering depth in the chosen branch, plus engineering mathematics and general aptitude. Numerical-answer and multi-select questions are normal here.', subjects: ['General Aptitude', 'Engineering Mathematics'] },
+  { id: 'gmat', label: 'GMAT', brief: 'GMAT: quantitative reasoning, verbal reasoning and data insights, adaptive and aptitude-led.' },
+  { id: 'gre', label: 'GRE', brief: 'GRE General: verbal reasoning with demanding vocabulary in context, quantitative reasoning and analytical writing.' },
+  { id: 'ibps_clerk', label: 'IBPS Clerk', brief: 'IBPS clerical cadre: reasoning ability, numerical ability, English language and banking awareness, speed-led at Class 12 standard.' },
+  { id: 'ibps_po', label: 'IBPS PO', brief: 'IBPS Probationary Officer: reasoning and computer aptitude, quantitative aptitude, English, and general and banking awareness.', subjects: ['Reasoning Ability', 'Quantitative Aptitude', 'English Language', 'General & Banking Awareness'] },
+  { id: 'ibps_rrb', label: 'IBPS RRB', brief: 'Regional Rural Banks officer and office assistant: reasoning and numerical ability, with rural banking and financial awareness.' },
+  { id: 'icar', label: 'ICAR AIEEA (Agriculture)', brief: 'ICAR agricultural university entrance: agriculture, biology, chemistry, physics and mathematics at Class 12 standard.' },
+  { id: 'ielts', label: 'IELTS', brief: 'IELTS: listening, reading, writing and speaking in academic English, scored by band rather than by marks.' },
+  { id: 'iift', label: 'IIFT (MBA)', brief: 'Indian Institute of Foreign Trade entrance: quantitative analysis, reading comprehension, logical reasoning, and general awareness with a strong international-trade slant.' },
+  { id: 'iit_jam', label: 'IIT JAM', brief: 'Joint Admission Test for MSc: bachelor-level depth in the chosen science subject.' },
+  { id: 'ini_cet', label: 'INI CET (AIIMS PG)', brief: 'Institutes of National Importance Combined Entrance Test: clinically-led postgraduate medicine at the hardest Indian standard.' },
+  { id: 'isro', label: 'ISRO Scientist / Engineer', brief: 'ISRO recruitment: core engineering depth in the chosen branch, at a standard comparable to GATE but more applied.' },
+  { id: 'jee_advanced', label: 'JEE Advanced', brief: 'JEE Advanced: multi-concept, multi-step Physics, Chemistry and Mathematics problems where the difficulty is in seeing the approach, not in recall. Questions should genuinely take a few minutes each.', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
+  { id: 'jee_main', label: 'JEE Main', brief: 'JEE Main: NCERT Class 11–12 Physics, Chemistry and Mathematics, application-led with clean numerical answers and standard traps.', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
+  { id: 'kcet', label: 'KCET (Karnataka)', brief: 'Karnataka Common Entrance Test on the state Class 11–12 syllabus for engineering and allied courses.' },
+  { id: 'kvs', label: 'KVS / NVS Teacher', brief: 'Kendriya Vidyalaya and Navodaya teacher recruitment: the subject plus pedagogy and general awareness.' },
+  { id: 'lic_aao', label: 'LIC AAO', brief: 'LIC Assistant Administrative Officer: reasoning, quantitative aptitude, English, general knowledge and insurance awareness.' },
+  { id: 'mat', label: 'MAT (AIMA)', brief: 'Management Aptitude Test: language comprehension, mathematical skills, data analysis, intelligence and critical reasoning, and Indian and global environment.' },
+  { id: 'mht_cet', label: 'MHT CET (Maharashtra)', brief: 'Maharashtra CET on the state Class 11–12 syllabus, more speed-led than JEE Main.' },
+  { id: 'mppsc', label: 'MPPSC (Madhya Pradesh PSC)', brief: 'Madhya Pradesh Public Service Commission: general studies with a strong Madhya Pradesh history, geography and policy weighting.' },
+  { id: 'mpsc', label: 'MPSC (Maharashtra PSC)', brief: 'Maharashtra Public Service Commission: general studies with a strong Maharashtra history, geography and polity weighting.' },
+  { id: 'nabard', label: 'NABARD Grade A', brief: 'NABARD Grade A: agriculture and rural development, economic and social issues, reasoning, quantitative aptitude and English.' },
+  { id: 'nata', label: 'NATA (Architecture)', brief: 'National Aptitude Test in Architecture: visual and spatial reasoning, architectural awareness, and basic mathematics.' },
+  { id: 'nda', label: 'NDA (UPSC Defence)', brief: 'UPSC National Defence Academy: Class 11–12 mathematics, and a general ability paper of English and general knowledge.', subjects: ['Mathematics', 'English', 'General Knowledge'] },
+  { id: 'neet_mds', label: 'NEET MDS', brief: 'NEET for dental postgraduates: the full BDS syllabus at postgraduate entrance standard.' },
+  { id: 'neet_pg', label: 'NEET PG', brief: 'NEET Postgraduate: clinically-framed questions across the whole MBBS syllabus, most of them a short case rather than a bare fact.' },
+  { id: 'neet_ss', label: 'NEET SS (Super Speciality)', brief: 'NEET Super Speciality: super-specialist depth in the chosen branch.' },
+  { id: 'neet_ug', label: 'NEET UG (Medical)', brief: 'NEET undergraduate: strictly NCERT Class 11–12 Physics, Chemistry and Biology, fact-dense in Biology and application-led in Physics. Biology carries half the paper.', subjects: ['Physics', 'Chemistry', 'Biology (Botany & Zoology)'] },
+  { id: 'nest', label: 'NEST (NISER / CEBS)', brief: 'National Entrance Screening Test: conceptual Class 11–12 science, closer to a reasoning paper than a recall one.' },
+  { id: 'nid', label: 'NID DAT (Design)', brief: 'National Institute of Design aptitude test: design thinking, visual perception, material awareness and creative reasoning.' },
+  { id: 'nift', label: 'NIFT Entrance', brief: 'NIFT entrance: general ability, quantitative and communication ability, plus fashion and design awareness.' },
+  { id: 'nmat', label: 'NMAT', brief: 'NMAT by GMAC: language skills, quantitative skills and logical reasoning, strictly sectionally timed.' },
+  { id: 'rbi_assistant', label: 'RBI Assistant', brief: 'RBI Assistant: reasoning, numerical ability, English and general awareness, speed-led.' },
+  { id: 'rbi_grade_b', label: 'RBI Grade B', brief: 'RBI Grade B: economic and social issues, finance and management, English, and a demanding general-awareness load.' },
+  { id: 'rpsc', label: 'RPSC (Rajasthan PSC)', brief: 'Rajasthan Public Service Commission: general studies with a strong Rajasthan history, art, culture and geography weighting.' },
+  { id: 'rrb_alp', label: 'RRB ALP', brief: 'Railway Assistant Loco Pilot: mathematics, general intelligence, basic science and engineering, and general awareness, plus the trade aptitude.' },
+  { id: 'rrb_group_d', label: 'RRB Group D', brief: 'Railway Group D: general science, mathematics, general intelligence and reasoning, and current affairs at Class 10 standard.' },
+  { id: 'rrb_je', label: 'RRB JE', brief: 'Railway Junior Engineer: engineering discipline depth plus mathematics, reasoning and general awareness.' },
+  { id: 'rrb_ntpc', label: 'RRB NTPC', brief: 'Railway NTPC: mathematics, general intelligence and reasoning, and general awareness at Class 12 standard.', subjects: ['Mathematics', 'General Intelligence & Reasoning', 'General Awareness'] },
+  { id: 'sat', label: 'SAT', brief: 'SAT: evidence-based reading and writing, and mathematics, all passage- or context-led.' },
+  { id: 'sbi_clerk', label: 'SBI Clerk', brief: 'SBI clerical cadre: reasoning, numerical ability, English and banking awareness, speed-led.' },
+  { id: 'sbi_po', label: 'SBI PO', brief: 'SBI Probationary Officer: reasoning and computer aptitude, data interpretation, English, and banking and economic awareness — harder than IBPS PO, especially in reasoning.' },
+  { id: 'snap', label: 'SNAP (Symbiosis)', brief: 'Symbiosis National Aptitude Test: general English, analytical and logical reasoning, and quantitative and data interpretation.' },
+  { id: 'ssc_cgl', label: 'SSC CGL', brief: 'SSC Combined Graduate Level: quantitative aptitude, general intelligence and reasoning, English, and general awareness — graduate level but speed-led.', subjects: ['Quantitative Aptitude', 'General Intelligence & Reasoning', 'English Language', 'General Awareness'] },
+  { id: 'ssc_chsl', label: 'SSC CHSL', brief: 'SSC Combined Higher Secondary Level: the CGL subjects at Class 12 standard.' },
+  { id: 'ssc_gd', label: 'SSC GD Constable', brief: 'SSC General Duty Constable: general intelligence, general knowledge, elementary mathematics and language, at Class 10 standard.' },
+  { id: 'ssc_je', label: 'SSC JE', brief: 'SSC Junior Engineer: civil, electrical or mechanical engineering depth plus general intelligence and awareness.' },
+  { id: 'ssc_mts', label: 'SSC MTS', brief: 'SSC Multi-Tasking Staff: numerical aptitude, reasoning, English and general awareness at Class 10 standard.' },
+  { id: 'state_psc', label: 'State PSC (general)', brief: 'A state Public Service Commission paper: national general studies with a substantial state-specific history, geography, polity and current-affairs share.' },
+  { id: 'state_tet', label: 'State TET', brief: 'A state Teacher Eligibility Test: the subject taught through pedagogy, with the state-specific language and environment papers.' },
+  { id: 'toefl', label: 'TOEFL', brief: 'TOEFL iBT: academic English reading, listening, speaking and writing.' },
+  { id: 'ts_eapcet', label: 'TS EAPCET', brief: 'Telangana engineering and agriculture entrance, on the state Class 11–12 syllabus.' },
+  { id: 'ugc_net', label: 'UGC NET', brief: 'UGC NET: paper 1 teaching and research aptitude, plus postgraduate depth in the chosen subject.', subjects: ['Teaching & Research Aptitude'] },
+  { id: 'up_police', label: 'UP Police Constable', brief: 'Uttar Pradesh Police constable recruitment: general knowledge, general Hindi, numerical and mental ability, and reasoning.' },
+  { id: 'uppsc', label: 'UPPSC (Uttar Pradesh PSC)', brief: 'Uttar Pradesh Public Service Commission: general studies with a strong Uttar Pradesh history, geography and polity weighting.' },
+  { id: 'upsc_capf', label: 'UPSC CAPF (Assistant Commandant)', brief: 'Central Armed Police Forces: general ability and intelligence, plus general studies, essay and comprehension.' },
+  { id: 'upsc_cse', label: 'UPSC Civil Services (IAS / IPS)', brief: 'UPSC Civil Services prelims standard: conceptual, multi-statement and assertion-reason questions across polity, history, geography, economy, environment and science, always tied to relevance rather than trivia.', subjects: ['Indian Polity', 'Modern & Ancient History', 'Geography', 'Economy', 'Environment & Ecology', 'Science & Technology', 'Current Affairs'] },
+  { id: 'upsc_ese', label: 'UPSC ESE (Engineering Services)', brief: 'Engineering Services Examination: deep, conceptual engineering in the chosen branch, plus a general studies and engineering aptitude paper.' },
+  { id: 'viteee', label: 'VITEEE', brief: 'VIT engineering entrance on Class 11–12 Physics, Chemistry and Mathematics or Biology, plus aptitude and English.' },
+  { id: 'wbjee', label: 'WBJEE', brief: 'West Bengal Joint Entrance: Class 11–12 Physics, Chemistry and Mathematics on the state syllabus, with multi-correct questions.' },
+  { id: 'xat', label: 'XAT (XLRI)', brief: 'Xavier Aptitude Test: verbal and logical ability, decision making, quantitative ability and data interpretation, with the decision-making section unique to this paper.' },
+];
+
+/**
+ * Alphabetical BY CODE, so appending an entry can never leave the list out of order.
+ *
+ * `numeric: true` is what puts "Class 10" before "Class 12" instead of ordering them as strings, and
+ * `sensitivity: 'base'` keeps the sort stable regardless of how an entry happens to be capitalised.
+ */
+function sortTargets(list: readonly ExamTarget[]): ExamTarget[] {
+  return [...list].sort((a, b) => a.label.localeCompare(b.label, 'en', { numeric: true, sensitivity: 'base' }));
+}
+
+/** The list the dropdown renders: `other` first, everything else alphabetical. */
+export const EXAM_TARGETS: readonly ExamTarget[] = [OTHER_TARGET, ...sortTargets(NAMED_TARGETS)];
+
+/** A known target, or `null` for `other` / anything unrecognised. Never throws on junk. */
+export function examTarget(id: unknown): ExamTarget | null {
+  const key = String(id ?? '').trim().toLowerCase();
+  if (!key || key === EXAM_TARGET_OTHER) return null;
+  return NAMED_TARGETS.find((t) => t.id === key) ?? null;
+}
+
 export interface ExamSpec {
   subject: string;
   /** '' is legitimate — a whole-subject paper. Never invented to fill the field. */
   topic: string;
   level: ExamLevel;
   count: number;
+  /** An id from `EXAM_TARGETS`, or `other`. `other` means no exam targeting at all. */
+  targetExam: string;
+  /** What the student typed when they chose `other`. '' otherwise, and ignored otherwise. */
+  targetExamOther: string;
 }
 
 function text(v: unknown, max: number): string {
@@ -82,6 +250,7 @@ function text(v: unknown, max: number): string {
  */
 export function normalizeExamSpec(raw: {
   subject?: unknown; topic?: unknown; level?: unknown; count?: unknown;
+  targetExam?: unknown; targetExamOther?: unknown;
 } | null | undefined): ExamSpec {
   const r = raw || {};
   const level = EXAM_LEVELS.includes(r.level as ExamLevel) ? (r.level as ExamLevel) : 'mix';
@@ -89,12 +258,53 @@ export function normalizeExamSpec(raw: {
   const count = Number.isFinite(asked)
     ? Math.min(EXAM_MAX_QUESTIONS, Math.max(EXAM_MIN_QUESTIONS, Math.round(asked)))
     : EXAM_DEFAULT_QUESTIONS;
-  return { subject: text(r.subject, 80), topic: text(r.topic, 120), level, count };
+  // An id we do not know reads as `other`, never as an exam we then describe to the generator —
+  // inventing a standard for a name nobody recognised is the one failure this field could produce.
+  const targetExam = examTarget(r.targetExam)?.id ?? EXAM_TARGET_OTHER;
+  return {
+    subject: text(r.subject, 80),
+    topic: text(r.topic, 120),
+    level,
+    count,
+    targetExam,
+    targetExamOther: targetExam === EXAM_TARGET_OTHER ? text(r.targetExamOther, 80) : '',
+  };
 }
 
-/** Is there enough here to set a paper at all? A subject is the one thing nothing can substitute. */
+/**
+ * Is there enough here to set a paper at all?
+ *
+ * 🔑 **A named exam stands in for the subject, and that is deliberate.** "Set me a NEET paper" is a
+ * complete request — a real NEET paper is a mixed Physics, Chemistry and Biology paper, so the exam
+ * already says what to ask about. Refusing it for want of a subject would be refusing the most
+ * natural thing a student will type. With neither an exam nor a subject there is genuinely nothing
+ * to set a paper on, and that is the one case this returns false for.
+ */
 export function examSpecIsUsable(spec: ExamSpec): boolean {
-  return spec.subject.length > 0;
+  return spec.subject.length > 0 || examTargetLabel(spec).length > 0;
+}
+
+/** What to call the chosen exam on screen and in the prompt. '' when no exam was chosen. */
+export function examTargetLabel(spec: Pick<ExamSpec, 'targetExam' | 'targetExamOther'>): string {
+  return examTarget(spec.targetExam)?.label || String(spec.targetExamOther || '').trim();
+}
+
+/**
+ * How the chosen exam reads to the generator. '' when none was chosen — the whole exam clause then
+ * disappears from the prompt rather than becoming a sentence saying nothing.
+ *
+ * ⚠️ **A typed `other` gets no brief, only its name**, because we have no verified description of an
+ * exam we do not carry. Handing the generator an invented syllabus for a name we do not recognise is
+ * exactly the plausible-looking falsehood this module refuses everywhere else.
+ */
+export function examTargetBrief(spec: Pick<ExamSpec, 'targetExam' | 'targetExamOther'>): string {
+  const known = examTarget(spec.targetExam);
+  if (known) {
+    return `The student is preparing for ${known.label}. ${known.brief} Pitch every question at exactly that exam's standard, syllabus scope and question style — not harder, not easier, and not a different board's treatment of the same chapter.`;
+  }
+  const typed = String(spec.targetExamOther || '').trim();
+  if (!typed) return '';
+  return `The student is preparing for: ${typed}. Pitch every question at that exam's own standard, scope and question style. If you do not know that exam, say nothing about it and simply set a sound paper on the scope below.`;
 }
 
 /** How each level reads to the generator. `mix` is a DISTRIBUTION, which is why it is spelled out. */
@@ -127,11 +337,30 @@ export interface ExamQuestion {
   level?: 'low' | 'medium' | 'hard';
 }
 
+/**
+ * The subject and topic AS THE GENERATOR UNDERSTOOD THEM — the spelling answer, reported back.
+ *
+ * 🔑 Admin: *"student spelling mistacks kar sakte hai … llm call ke jariye isko sahi liya jaye aur
+ * user ko paresani na ho."* The correction is done by the SAME call that writes the paper (rule 11
+ * above), not by a second one, and this is that call telling us what it read.
+ *
+ * ⚠️ **It is never used to overwrite what the student typed.** Both are kept: what they wrote is
+ * what they wrote, and this is what the paper was actually set on. The surface shows the difference
+ * when there is one, so a wrong guess is visible and one press away from being corrected — the
+ * opposite of a silent "correction" that hands a student a paper on the wrong subject.
+ */
+export interface ExamReading {
+  subject: string;
+  topic: string;
+}
+
 /** What a paper came back as. `dropped` is never hidden — see the module header. */
 export interface ExamPaper {
   questions: ExamQuestion[];
   /** Malformed entries that were refused. > 0 means the surface must say the paper is short. */
   dropped: number;
+  /** What the generator says it read the scope as. `null` when it did not say. */
+  read: ExamReading | null;
 }
 
 /**
@@ -143,15 +372,18 @@ export interface ExamPaper {
  * three-option question.
  */
 export function examPaperInstruction(spec: ExamSpec): string {
-  const scope = spec.topic ? `${spec.subject} — specifically: ${spec.topic}` : `${spec.subject} (cover the subject broadly)`;
+  const exam = examTargetBrief(spec);
+  const subject = spec.subject || (exam ? 'the subjects that exam itself tests — spread the paper across them as the real paper does' : '');
+  const scope = spec.topic ? `${subject} — specifically: ${spec.topic}` : `${subject} (cover it broadly)`;
   return [
     `Set an objective (multiple-choice) test paper. Return ONLY JSON — no prose before or after, no markdown fence.`,
     ``,
+    ...(exam ? [`EXAM: ${exam}`] : []),
     `SCOPE: ${scope}`,
     `DIFFICULTY: ${levelBrief(spec.level)}`,
     `NUMBER OF QUESTIONS: exactly ${spec.count}.`,
     ``,
-    `SHAPE — a JSON object: { "questions": [ { "question": string, "options": [string, string, string, string], "correctIndex": 0-3, "explanation": string, "topic": string, "level": "low" | "medium" | "hard" } ] }`,
+    `SHAPE — a JSON object: { "read": { "subject": string, "topic": string }, "questions": [ { "question": string, "options": [string, string, string, string], "correctIndex": 0-3, "explanation": string, "topic": string, "level": "low" | "medium" | "hard" } ] }`,
     ``,
     `RULES, all of them required:`,
     `1. EXACTLY four options per question. Never three, never five.`,
@@ -164,6 +396,8 @@ export function examPaperInstruction(spec: ExamSpec): string {
     `8. Factually correct, at the stated standard, and answerable without a diagram unless the question text itself contains everything needed.`,
     `9. No duplicate or near-duplicate questions.`,
     `10. Write in the language the student has been using with you.`,
+    `11. SPELLING — the SCOPE above was typed by a student and may be MISSPELLED, run together or written phonetically ("trignometry", "bayology", "mugal empire", "thermodynmics"). Work out what they meant and set the paper on THAT. Correct only what is plainly a typo or a phonetic spelling of a real subject; if a word is genuinely unfamiliar, keep it exactly as written rather than turning it into a different subject that happens to look similar.`,
+    `12. "read" reports the subject and topic BACK, spelled correctly, as you understood them. Put "" for the topic if none was given, and "" for the subject if you set the paper from the exam rather than from a subject. The student is shown this, so it must be what you actually set the paper on — never a tidied-up echo of something you ignored.`,
   ].join('\n');
 }
 
@@ -221,6 +455,12 @@ export function parseExamPaper(raw: string, cap = EXAM_MAX_QUESTIONS): ExamPaper
   const list = parsed && typeof parsed === 'object' && Array.isArray((parsed as { questions?: unknown }).questions)
     ? (parsed as { questions: unknown[] }).questions
     : [];
+  const readRaw = parsed && typeof parsed === 'object' ? (parsed as { read?: unknown }).read : null;
+  const readSubject = readRaw && typeof readRaw === 'object' ? text((readRaw as Record<string, unknown>).subject, 80) : '';
+  const readTopic = readRaw && typeof readRaw === 'object' ? text((readRaw as Record<string, unknown>).topic, 120) : '';
+  // A reading with no subject in it says nothing, so it is `null` rather than an empty shape the
+  // surface would then have to special-case.
+  const read: ExamReading | null = readSubject || readTopic ? { subject: readSubject, topic: readTopic } : null;
   const out: ExamQuestion[] = [];
   let dropped = 0;
   const seen = new Set<string>();
@@ -233,7 +473,7 @@ export function parseExamPaper(raw: string, cap = EXAM_MAX_QUESTIONS): ExamPaper
     if (key) seen.add(key);
     out.push(q);
   }
-  return { questions: out, dropped };
+  return { questions: out, dropped, read };
 }
 
 /**
@@ -367,8 +607,12 @@ export function teachMyMistakesPrompt(
     return `${q.n}. ${q.question} — I ${mine}; the answer was "${q.options[q.correctIndex]}"${q.topic ? ` (${q.topic})` : ''}`;
   });
   const scope = spec.topic ? `${spec.subject} (${spec.topic})` : spec.subject;
+  const exam = examTargetLabel(spec);
   return [
-    `I just took an exam-mode test on ${scope} and got these wrong or left them blank:`,
+    // The exam travels with the request, because how to teach a missed question depends on it: the
+    // same wrong answer needs a different explanation for a Class 12 student and a JEE candidate.
+    exam ? `I am preparing for ${exam}.` : '',
+    `I just took an exam-mode test on ${scope || exam} and got these wrong or left them blank:`,
     '',
     ...lines,
     missed.length > 10 ? `…and ${missed.length - 10} more.` : '',

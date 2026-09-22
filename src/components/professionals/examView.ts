@@ -111,9 +111,57 @@ export function shortPaperNote(asked: number, got: number): string {
   return `This paper has ${got} questions, not the ${asked} you asked for — the rest did not come back in a usable form, and I would rather be short than make them up. Your score is out of ${got}.`;
 }
 
-/** Is the setup complete enough to start? The subject is the one thing nothing can stand in for. */
-export function setupReady(subject: string): boolean {
-  return String(subject || '').trim().length > 0;
+/**
+ * Is the setup complete enough to start?
+ *
+ * 🔑 **A chosen exam stands in for the subject.** "Set me a NEET paper" is a complete request — the
+ * exam already says what to ask about. This mirrors `examSpecIsUsable` on the server, which is the
+ * authority; this one exists only so the Start button can be disabled before a round trip. Keep the
+ * two in step: a button that enables where the server refuses is a dead button, and a button that
+ * refuses where the server would have worked is a feature the student cannot reach.
+ */
+export function setupReady(subject: string, targetExamLabel = ''): boolean {
+  return String(subject || '').trim().length > 0 || String(targetExamLabel || '').trim().length > 0;
+}
+
+/** Same shape as the core's `ExamReading`, restated here so the view layer imports no server type. */
+export interface ExamReadingView {
+  subject: string;
+  topic: string;
+}
+
+function sameWord(a: string, b: string): boolean {
+  const key = (v: string) => String(v || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, '');
+  return key(a) === key(b);
+}
+
+/**
+ * 🔤 "I read that as …" — the visible half of the spelling answer (admin 2026-09-22).
+ *
+ * Admin: *"student spelling mistacks kar sakte hai … user ko paresani na ho (navbharat ai, galat
+ * spelling bhi samajh le)."* The understanding happens inside the paper call itself; this is the
+ * student being TOLD what was understood, and it is what keeps the correction honest rather than
+ * silent.
+ *
+ * ## 🔒 Two rules
+ *
+ * 1. **Silent when it agrees.** A note on every paper would be noise on the 95% of papers where the
+ *    student spelled it perfectly well, and noise is how a genuinely useful note stops being read.
+ *    Comparison ignores case, spacing and punctuation (and works in Devanagari), because "class 10"
+ *    and "Class-10" are not a correction anybody needs telling about.
+ * 2. **It never claims a correction that was not made.** '' when the generator said nothing, so the
+ *    surface shows nothing rather than an "I read that as" echoing the student back at themselves.
+ */
+export function readingNote(
+  typed: { subject: string; topic: string },
+  read: ExamReadingView | null | undefined,
+): string {
+  if (!read || !read.subject) return '';
+  const subjectMoved = !sameWord(typed.subject, read.subject);
+  const topicMoved = !!String(typed.topic || '').trim() && !sameWord(typed.topic, read.topic);
+  if (!subjectMoved && !topicMoved) return '';
+  const scope = read.topic ? `${read.subject} — ${read.topic}` : read.subject;
+  return `I read that as ${scope}, and set the paper on it.`;
 }
 
 /** How each level reads on its chip — the student's words, not the generator's brief. */

@@ -79612,3 +79612,59 @@ each started from something that compiled". Whether a fourth is worth the minute
 **C and D are deliberately NOT built yet.** If the aggregate says most failures are the credentials
 class, their benefit is ZERO and the whole plan should change — which is what Step 0 exists to find out,
 and what the admin's own brief instructs.
+
+### 🏗️ THE APP IS BUILT HERE; GITHUB ONLY PACKAGES IT (2026-09-22, same day, admin: *"aapne 5 point bataye hai, sab karo … toote hi na wala banao"*)
+
+The admin granted full authority on the five points proposed after C, and all five shipped in one PR
+(the third of the day on this pipeline), plus what was found on the way.
+
+1. **Ship the sandbox's own production build as `www/`** (`mobileShipPrebuilt.ts`, `prebuildForShip`):
+   the app's `npm run build` runs in its own sandbox (with the same `npx vite build` rescue for a
+   type-only failure the runner has), the output is read with `downloadDistFiles` (the one reader; it
+   strips the preview bridge), and the assembler ships it as a STATIC repository — source at its own
+   paths, the build under `www/`, `www/.nbai-prebuilt` as the stamp, the sentinel build script — so every
+   static-path mechanism applies by construction and the runner compiles nothing. Stale output dirs are
+   `rm -rf`'d (quoted) before the build so the first-non-empty-candidate reader can never ship last
+   week's `dist/`. The pushed package.json keeps only Capacitor and the plugins the machine named
+   (`capacitorPluginScanCommand` reads `node_modules/<dep>/package.json` for the `capacitor` field;
+   `null` ⇒ nothing trimmed); lifecycle scripts go too, or `"prepare": "husky"` runs on an install with
+   no husky. Large text bundles ride as blobs (`PREBUILT_INLINE_TEXT_MAX`) so one trees POST cannot carry
+   megabytes inline. `www/` is OWNED by the push: `commitFiles(..., removePaths)` + `listRepoPathsUnder`
+   remove what an earlier push left there. Keys `MOBILE_SHIP_PREBUILT` (on) / `_MS` (240 s).
+2. **The ship's build wakes a paused sandbox and seeds an empty one** — inside the prebuild, not inside
+   `runRealBuildCheck`, whose "never starts a machine" contract and tests stand; the check now runs only
+   where the prebuild never STARTED a build (`buildRan`), so a timed-out build is never followed by a
+   second one in the same machine. `hasLiveSandbox`'s PRESENCE marks a sandbox-backed actuator; the local
+   actuator has none, so `tests/mobileSetupRoute.test.ts` never seeds or builds on disk.
+3. **npm + Gradle caching in the generated workflows** (`actions/cache/restore` + `save`, keyed on
+   `package.json` and the Java pin, saved `if: always()`), never setup-node's `cache: npm`. Cache steps are
+   hidden from the user's step list (`friendlyBuildStep`) and documented in `MOBILE_APK_PIPELINE.md`.
+4. **The panel says which of three things a repair was**: built and checked here first; a packaging step
+   the sandbox cannot judge (`judgeable: false`, from `sandboxCanJudge`); or one it could not check on
+   this request. The exhausted-cycle sentence says when none of the repairs could be checked here.
+5. **Cross-run memory** (`mobileRepairHistory.ts`): the panel carries one record per autofix answer and
+   sends it with the next; the server judges `new` / `repeat-after-rules` (skip the rules tier) /
+   `repeat-after-ai` (the model is told its own committed change failed, in the build's words) /
+   `repeat-after-nothing` (end the cycle honestly). Every answer carries `failureLine`
+   (`failureSignature`: the tool's last words, markers and timestamps stripped) so a repeat is recognisable.
+
+**Found and fixed on the way (rule 3):** the verifier and the workspace heal took a REPOSITORY path as a
+WORKSPACE path — a static repo's `www/index.html` was "nothing to test" and a root `index.html` /
+`vite.config.ts` was never app source. `detectRepoLayout` + `workspacePathForRepoPath` (assembler) map
+the path first, and `isAppSourcePath` is now "not a packaging file" (`REPO_ONLY_PATH`) rather than a
+prefix list of source folders.
+
+**Measured from here on:** `ships.prebuilt / source` and `prebuildSkips.<reason>` per day, on the admin's
+card as "How the app reached GitHub". Nothing before this entry shipped prebuilt, so the first real
+number is the first ship after it merges.
+
+**Still open, said plainly:** a verified AI fix to the repository's package.json is never merged into the
+workspace (the assembled file would break the app's own build), so the next ship regenerates it; the
+prebuild reads `buildOutputCandidates`' FIRST non-empty dir, so a framework whose real output dir the
+config reader does not understand ships nothing prebuilt (an honest fall-through, counted as `no-output`);
+and the plugin scan runs `node` in the sandbox — a machine without it (Python apps never reach here) answers
+`null` and nothing is trimmed.
+
+Tests: `tests/theAppIsBuiltHereGithubOnlyPackagesIt.test.ts` (42 cases, incl. source-level reversion
+guards), `tests/anAttemptIsOnlySpentOnSomethingNew.test.ts` (extended), pins updated in
+`theBuildGithubWillRunIsRunHereFirst` and `theLoopNotTheModel`.

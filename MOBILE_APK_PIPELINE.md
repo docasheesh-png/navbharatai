@@ -36,6 +36,8 @@ in-process.
 | A4.2 | · **Unresolved local imports** — `import x from './Missing'` via the shared resolver (extensions, index files, aliases); binary assets deliberately NOT claimed missing (the text store cannot see them) | Vite "Could not resolve …" — the single most common build death for generated apps | Problem list |
 | A4.3 | · **Missing npm packages** — imported but not declared in package.json | npm/Vite "Cannot find package …" | Problem list |
 | A4.4 | · **Tailwind setup** — the app USES Tailwind (`@tailwind` directives, a v4 `@import "tailwindcss"`, or a tailwind.config) but package.json does not carry a working v3 setup | The web build dies in PostCSS, or ships with zero styling | Problem list (added 2026-08-27) |
+| A4.5 | **THE APP IS BUILT HERE; GITHUB ONLY PACKAGES IT** (`mobileShipPrebuilt.ts`, 2026-09-22, admin: *"toote hi na" wala banao*) — the app's own PRODUCTION build (`npm run build`, with the same `npx vite build` rescue for a type-only failure that Step B5 has) runs in the app's sandbox, the output is read out with the one reader the platform already has (`downloadDistFiles`, bridge-stripped), and it ships as `www/` with the honest no-op build script — so Step B5 is a no-op and the runner compiles nothing. `www/.nbai-prebuilt` is the stamp. The pushed package.json keeps only Capacitor and the plugins the machine named (read from `node_modules`, never guessed), so Step B4 installs seconds of packages, not the app's whole tree. May WAKE a paused sandbox and seed an empty one (unlike A4.6); bounded by `MOBILE_SHIP_PREBUILT_MS` (default 240 s); `MOBILE_SHIP_PREBUILT=off` reverts | `APP_CODE_BUILD_FAILED` on the runner, on an app that already built here | A built app is shipped built; every stand-down (static app, no machine, timed out, output unreadable or too large) falls back to the source ship below, exactly as before; the ONE refusal is a build that failed here in a way the runner would fail too — the same 422 as A4.6 |
+| A4.6 | **Ship-time build check** (`mobileShipRealBuild.ts`) — where the prebuild never STARTED a build, run the app's own `npm run build` in its WARM sandbox (never wakes a machine) and refuse a blocking failure | The same five minutes later | 422 `real-build-failed` |
 | A4.H | **Healing tiers**, each re-verified — Tier 0a: scaffold the shadcn/ui primitives the app imports but never wrote; Tier 0: add allowlisted missing packages at curated pinned ranges; Tier 0b: complete the Tailwind v3 setup deterministically (declare tailwindcss/postcss/autoprefixer, write missing configs, rewrite v4 import syntax to v3 directives); Tier 1: bounded AI repair (≤2 rounds), success judged ONLY by re-verification, never by the model's own claim. Heals merge back into the user's v5 workspace so the app inside NavBharatAI is fixed too | — | ok, or an honest 422 naming the exact file/line |
 | A5 | **Screens gate** (`apkRefusalForProject`) — nine of the 24 supported frameworks build a JSON server with no screens; packaged, they produce an APK that installs and shows a blank page | A "successful" but useless APK on someone's phone (fake success, rule 2) | 422 `no-ui`, refused before any repo is created |
 | A6 | **Capacitor major → JDK pin (G2)** — read from the app's own package.json; Capacitor 6 needs Java 17, 7/8 need 21 | Gradle/AGP "requires Java …" on the runner | The generated workflow pins the right JDK |
@@ -56,9 +58,15 @@ daemon must not idle to GitHub's 6-hour default burning the user's minutes).
 Clones the repo NavBharatAI pushed. Fails only on GitHub-side outage. Not our failure class.
 
 ### Step B2 — `actions/setup-node` (Node 22)
-**Deliberately configured WITHOUT the npm cache.** NavBharatAI pushes source but never a
+**Deliberately configured WITHOUT setup-node's own npm cache.** NavBharatAI pushes source but never a
 package-lock.json, and `cache: 'npm'` HARD-FAILS when no lock file exists — killing the run ~18 s in,
 before one line of the app is built. Classifier code for old repos still carrying it: `NPM_LOCK_CACHE`.
+Caching is done instead by two steps around B4 — "Restore the library cache" and
+"Save the library cache" (`actions/cache/restore` + `actions/cache/save`, `~/.npm` keyed on
+`hashFiles('package.json')`, the one manifest that IS pushed, with a prefix fallback key). Saved with `if: always()`, so a run that
+FAILED after installing still leaves its downloads for the retry after the repair — which is exactly
+the run that should not pay for them again (2026-09-22). A cache step is the runner's housekeeping and
+never appears in the user's step list (`friendlyBuildStep`).
 
 ### Step B3 — `actions/setup-java` (Temurin, version pinned per Capacitor major — G2)
 Wrong JDK for the app's Capacitor major → Gradle dies later. Classifier: `JAVA_VERSION_TOO_OLD`; the
@@ -77,6 +85,9 @@ repair raises the pin to what the governed toolchain says THIS app needs.
 - **Private-registry auth demanded** → `NPM_REGISTRY_AUTH` (honest, not auto-fixable — the credentials are the user's)
 
 ### Step B5 — "Build the web app"
+**On a prebuilt ship (A4.5) this step is the honest no-op** — the sentinel build script echoes and exits
+0, `www/` already holds the production build, and none of the failure classes below can occur. What
+follows describes the SOURCE ship.
 `NODE_OPTIONS: --max-old-space-size=4096` up front (a large app must not die on Node's default heap —
 `NODE_OUT_OF_MEMORY`). Runs `npm run build`; if it fails and the log shows ONLY `error TS…` type findings
 and Vite is present, it packages straight from the bundler — the preview never enforced the type gate, so
@@ -118,6 +129,11 @@ the packaging bar must not be silently stricter than the bar the app was verifie
 Post-hoc classifier for resource-linking failures on repos predating these heals: `ANDROID_RESOURCE_LINKING` → refresh to the current workflow.
 
 ### Step B7 — "Build the installable APK"
+Bracketed by "Restore the Gradle cache" (before B6, so `cap add android`'s first Gradle run finds the
+wrapper and the dependency cache) and "Save the Gradle cache" (after B7, `if: always()`): `~/.gradle/caches`
++ `~/.gradle/wrapper`, keyed on the Java pin and `hashFiles('package.json')` — the two things that decide
+what Gradle will fetch — with prefix fallback keys, so a near miss still lands most of it. The Gradle
+wrapper jar is written by the workflow itself (G14), so the key deliberately does not hash it.
 `chmod +x ./gradlew` (`GRADLEW_NOT_EXECUTABLE` for old repos), then `./gradlew assembleDebug --no-daemon`
 with **up to 3 attempts, retried ONLY when the log matches a transient-network pattern** (G10) — a
 deterministic compile failure exits immediately, never burning the user's Actions minutes on a bug.

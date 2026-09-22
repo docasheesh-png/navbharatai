@@ -46,13 +46,17 @@ import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { commitFiles, githubApiHeaders, readRepoFiles, listRepoTree } from '../lib/githubRepoWrite';
 // The repair loop's verifier: the app's own sandbox runs the build a candidate change would face on
 // GitHub, so only a change that compiles is ever committed (2026-09-22, "the loop, not the model").
-import { makeRepairVerifier } from '../lib/mobileShipRealBuild';
+import { makeRepairVerifier, sandboxCanJudge } from '../lib/mobileShipRealBuild';
+// Cross-run memory (2026-09-22): the client carries what happened on earlier attempts, and the server
+// asks one pure question of it — new failure, or the same one back after a rules refresh, an AI change,
+// or nothing at all — so an attempt is only ever spent on something new.
+import { parseAttemptHistory, judgeRepeat, historyForModel, repeatStopMessage, failureSignature } from '../lib/mobileRepairHistory';
 import { buildActuator } from './actuatorFactory';
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { failedStage } from '../lib/mobileBuildRepair';
 import { cureFamily, recordRepairOutcome } from '../lib/mobileBuildOutcomeStore';
-import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
+import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles, detectRepoLayout, workspacePathForRepoPath, PREBUILT_STAMP_PATH } from '../lib/mobileProjectAssembler';
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
 import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
@@ -723,7 +727,7 @@ export function registerMobileShipRoutes(app: Express): void {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
 
-    const { owner, repo, workflow, runId, ref = 'main', powerLevel, sessionId } = (req.body || {}) as Record<string, unknown>;
+    const { owner, repo, workflow, runId, ref = 'main', powerLevel, sessionId, history: rawHistory } = (req.body || {}) as Record<string, unknown>;
     // The user's selected NavBharatAI Pro tier decides which models the AI repair may use — weak stays
     // GLM/Kimi (never Claude), paid tiers escalate to Sonnet/Opus, exactly like the main build.
     const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
@@ -746,6 +750,13 @@ export function registerMobileShipRoutes(app: Express): void {
     }
 
     const diag = classifyBuildFailure(log, wfPath);
+    // The tool's own last words, so the client can carry them to the next attempt and this route can
+    // tell a failure that CAME BACK from one that is new. Returned on every answer as `failureLine`.
+    const failureLine = failureSignature(failedStepSection(normalizeLog(log)));
+    const repeat = judgeRepeat(parseAttemptHistory(rawHistory), { code: diag.code, error: failureLine });
+    // Whether the app's own sandbox build can judge a repair of THIS failure at all — an install or
+    // web-build stage, yes; a Gradle or Xcode stage, no. The panel says which, instead of "fixed".
+    const judgeable = sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });
     // The classified code is the highest-signal telemetry this pipeline produces: it names WHICH class
     // actually fired on a real user build. Written before any repair is attempted, so an unfixable
     // failure is counted exactly like a fixable one.
@@ -815,7 +826,12 @@ export function registerMobileShipRoutes(app: Express): void {
     // AI pass, which spent a round to conclude the obvious and then the client spent a five-minute run
     // on the same certainty. The family is `cureFamily`'s, the ONE list the admin's card also reads.
     if (cureFamily(diag.code) === 'user-credentials') {
-      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
+      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, failureLine });
+    }
+    // The same failure is back and NOTHING was changed after it last time — so nothing will change
+    // this time either. The cycle ends here, before a model or a five-minute run is spent on it.
+    if (repeat.kind === 'repeat-after-nothing') {
+      return res.json({ fixed: false, code: diag.code, summary: repeatStopMessage(repeat), detail: diag.detail, report: failureReport(), failureLine });
     }
 
     /**
@@ -859,12 +875,22 @@ export function registerMobileShipRoutes(app: Express): void {
       if (Object.keys(aiFiles).length === 0) return false;
       const tree = await listRepoTree(headers, String(owner), String(repo), ref);
       const stage = failedStage(normalizeLog(log));
-      const verify = makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath);
+      // How this repository lays the app out decides where a repository path lives in the workspace:
+      // a static repo keeps its source under `www/`, a prebuilt one keeps its BUILD there. The stamp is
+      // read only when the sentinel says static — a built repo costs no extra call.
+      const staticSentinel = detectRepoLayout({ 'package.json': aiFiles['package.json'] }) === 'static';
+      const layout = detectRepoLayout({
+        ...aiFiles,
+        ...(staticSentinel ? await readRepoFiles(headers, String(owner), String(repo), ref, [PREBUILT_STAMP_PATH]) : {}),
+      });
+      const toWorkspace = (repoPath: string): string | null => workspacePathForRepoPath(repoPath, layout);
+      const verify = makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath, toWorkspace);
       const loop = await runAiRepairLoop(callRepairModel, chain, {
         log: failingStep,
         files: aiFiles,
         ruleSummary: diag.summary,
         tree,
+        history: historyForModel(repeat),
       }, {
         fetchFiles: (paths) => readRepoFiles(headers, String(owner), String(repo), ref, paths),
         verify,
@@ -874,7 +900,7 @@ export function registerMobileShipRoutes(app: Express): void {
       if (loop.outcome === 'gave-up') {
         // Every change the model made was proven not to compile. Nothing is committed, and the user is
         // told that rather than watching one more five-minute run fail the same way.
-        res.json({ fixed: false, code: diag.code, summary: loop.reason, detail: diag.detail, report: failureReport(), rounds: loop.rounds });
+        res.json({ fixed: false, code: diag.code, summary: loop.reason, detail: diag.detail, report: failureReport(), rounds: loop.rounds, judgeable, failureLine });
         return true;
       }
       if (!loop.fix) return false;
@@ -889,16 +915,23 @@ export function registerMobileShipRoutes(app: Express): void {
       // compile pre-flight's rule, applied from the other end. Never an unverified one: the workspace
       // is the app the user works on, and a guess does not belong in it. Best-effort.
       if (loop.verified && workspaceId) {
-        const source = Object.fromEntries(Object.entries(loop.fix.files).filter(([p]) => isAppSourcePath(p)));
+        const source: Record<string, string> = {};
+        for (const [repoPath, content] of Object.entries(loop.fix.files)) {
+          const local = toWorkspace(repoPath);
+          if (local && isAppSourcePath(local)) source[local] = content;
+        }
         if (Object.keys(source).length > 0) await mergeWorkspaceFiles(workspaceId, source).catch(() => undefined);
       }
       res.json({
         fixed: true,
         fixedBy: 'ai',
         verified: loop.verified,
+        judgeable,
+        failureLine,
         rounds: loop.rounds,
         asked: loop.asked,
         code: diag.code,
+        detail: diag.detail,
         summary: loop.verified
           ? `${loop.fix.explanation} NavBharatAI built your app with this change first, and it compiled.`
           : loop.fix.explanation,
@@ -908,10 +941,12 @@ export function registerMobileShipRoutes(app: Express): void {
     };
 
     try {
-      if (!diag.autoFixable) {
-        // The rules cannot fix this class — the AI pass is exactly for this case.
+      // The rules cannot fix this class — the AI pass is exactly for this case. And when the rules
+      // ALREADY refreshed the files for this exact failure and it came back, running them again would
+      // write the same bytes and reach the AI anyway, one wasted comparison later.
+      if (!diag.autoFixable || repeat.kind === 'repeat-after-rules') {
         if (await tryAiRepair()) return;
-        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport() });
+        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport(), failureLine });
       }
 
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
@@ -942,6 +977,7 @@ export function registerMobileShipRoutes(app: Express): void {
           code: diag.code,
           summary: `${diag.summary} NavBharatAI could not correct it automatically.`,
           report: failureReport(),
+          failureLine,
         });
       }
       await commitFix(repair.files, repair.message);
@@ -949,8 +985,10 @@ export function registerMobileShipRoutes(app: Express): void {
         fixed: true,
         fixedBy: 'rules',
         verified: false,
+        failureLine,
         code: diag.code,
         summary: diag.summary,
+        detail: diag.detail,
         changed: Object.keys(repair.files),
         commitMessage: repair.message,
       });

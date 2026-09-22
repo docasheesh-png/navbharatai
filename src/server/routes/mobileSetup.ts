@@ -33,7 +33,7 @@ import { generateShipKit } from '../lib/mobileShipKit';
 import { assembleMobileProject, capacitorMajorFromFiles, missingWebPageRefusal } from '../lib/mobileProjectAssembler';
 // One repository-write implementation, shared with the self-healing build loop so the two can never
 // drift apart on branch handling, blob encoding or ref updates (rule 4).
-import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
+import { commitFiles, ensureRepo, githubApiHeaders, listRepoPathsUnder, type GhHeaders } from '../lib/githubRepoWrite';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // COMPILE PRE-FLIGHT (admin 2026-08-04: "v5 live banaye, fix kare — GitHub par bas download ho"): the
@@ -42,7 +42,11 @@ import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
 import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
 // The app's OWN build, run in the warm sandbox before GitHub ever sees it (2026-09-22).
-import { runRealBuildCheck } from '../lib/mobileShipRealBuild';
+import { runRealBuildCheck, type RealBuildVerdict } from '../lib/mobileShipRealBuild';
+// THE APP IS BUILT HERE; GITHUB ONLY PACKAGES IT (2026-09-22, "toote hi na"): the production build runs
+// in the app's own sandbox and its output ships as `www/`, so the runner never compiles the app.
+import { prebuildForShip, type PrebuiltOutcome } from '../lib/mobileShipPrebuilt';
+import { recordShip } from '../lib/mobileBuildOutcomeStore';
 import { buildActuator } from './actuatorFactory';
 import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
@@ -159,8 +163,36 @@ export function registerMobileSetupRoutes(app: Express): void {
      * 🔒 It NEVER starts a machine, it is bounded, and it is not stricter than the runner — see
      * `mobileShipRealBuild.ts`. A skip means the ship proceeds exactly as it did before this existed.
      */
-    const realBuild = await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)
-      .catch(() => ({ ran: false as const, reason: 'unavailable' as const }));
+    /**
+     * 🔴 AND NOW THE APP IS BUILT HERE, AND GITHUB ONLY PACKAGES IT (2026-09-22, admin: *"toote hi na"
+     * wala banao*). The check above asks "would the runner's build fail?" — this goes one step further
+     * and RUNS the production build the runner would have run, in the app's own sandbox, and ships its
+     * output as `www/` with the honest no-op build script. The runner then compiles nothing, so the
+     * step that most phone builds died in does not exist for that repository.
+     *
+     * Every outcome but two is a fall-through to the source ship below, exactly as before this existed.
+     * The two: a BUILT app (shipped prebuilt), and a build that FAILED here in a way the runner would
+     * fail too — refused with the same 422 the check sends, because the five-minute run to learn the
+     * same thing is the cost this removes. Unlike the check, this path MAY wake the app's machine —
+     * see `mobileShipPrebuilt.ts` for why that trade is the right one here.
+     */
+    const prebuild = await prebuildForShip(buildActuator(), workspaceId, appFiles, preflight.changed)
+      .catch((): PrebuiltOutcome => ({ kind: 'skip', reason: 'unavailable', buildRan: false }));
+    if (prebuild.kind === 'refuse') {
+      return res.status(422).json({
+        error: `Your app did not compile, so the phone build would have failed too. ${prebuild.summary}`,
+        code: 'real-build-failed',
+        failureCode: prebuild.code,
+        buildLog: prebuild.log.slice(-2000),
+      });
+    }
+    // The check only runs where the prebuild never STARTED a build: a build that ran here — whether it
+    // shipped, timed out, or produced nothing readable — is the check's answer, and a second one in the
+    // same machine would only double the cost (a timed-out build is still running in there).
+    const realBuild: RealBuildVerdict = prebuild.kind === 'skip' && !prebuild.buildRan
+      ? await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)
+        .catch(() => ({ ran: false as const, reason: 'unavailable' as const }))
+      : { ran: false, reason: 'prebuilt' };
     if (realBuild.ran && !realBuild.ok && realBuild.blocking) {
       // The runner would have failed too, with this exact error. Saying so now costs seconds; letting
       // it through costs five minutes, a remote log the user cannot act on, and an attempt they only
@@ -214,6 +246,7 @@ export function registerMobileSetupRoutes(app: Express): void {
       ios: includeIos,
       appAssets,
       appAssetsComplete: assetLoad.complete,
+      prebuilt: prebuild.kind === 'built' ? prebuild.prebuilt : undefined,
     });
 
     /**
@@ -230,7 +263,9 @@ export function registerMobileSetupRoutes(app: Express): void {
      *
      * Checked AFTER the heal, so a repair that removed the import clears the block by itself.
      */
-    const missingAssets = findMissingImportedAssets(appFiles, Object.keys(appAssets));
+    // On a prebuilt ship the bundle already resolved every import — the build that produced it would
+    // have failed on a missing picture — so this check is the SOURCE ship's, not a second gate.
+    const missingAssets = project.prebuilt ? [] : findMissingImportedAssets(appFiles, Object.keys(appAssets));
     if (missingAssets.length > 0) {
       return res.status(422).json({
         error: missingAssetUserMessage(missingAssets),
@@ -256,11 +291,21 @@ export function registerMobileSetupRoutes(app: Express): void {
 
     try {
       const { created, defaultBranch } = await ensureRepo(headers, owner, repoName, `${name} — mobile app, prepared by NavBharatAI`);
+      // `www/` is OWNED by this push — the build output on a prebuilt ship, the page files on a static
+      // one, nothing at all on a built one — so whatever an earlier push left there and this one does
+      // not carry is removed in the same commit. Otherwise a hashed bundle from last week is packaged
+      // into the phone app for ever. A tree we cannot read removes nothing.
+      const shipped = new Set([...Object.keys(project.files), ...Object.keys(project.binaryFiles)]);
+      const stale = created
+        ? []
+        : ((await listRepoPathsUnder(headers, owner, repoName, defaultBranch, 'www')) ?? []).filter((p) => !shipped.has(p));
       const sha = await commitFiles(
         headers, owner, repoName, defaultBranch,
         project.files, project.binaryFiles,
         `Prepare ${name} for the app stores (NavBharatAI)`,
+        stale,
       );
+      void recordShip(project.prebuilt ? 'prebuilt' : 'source', prebuild.kind === 'skip' ? prebuild.reason : null);
       // ── THE KEY IS MADE NOW, NOT AFTER A FAILED BUILD (autopsy 2026-09-19) ────────────────────────
       //
       // One-press upload-key creation has existed since 2026-09-15, and the button that offers it only
@@ -307,6 +352,8 @@ export function registerMobileSetupRoutes(app: Express): void {
         fileCount: Object.keys(project.files).length + Object.keys(project.binaryFiles).length,
         kind: project.kind,
         webDir: project.webDir,
+        // True when `www/` is the app's own production build — the runner packages it and compiles nothing.
+        prebuilt: project.prebuilt,
         notes: [...preflight.notes, ...project.notes],
         requiredSecrets: kit.requiredSecrets,
         // Derived from the ONE workflow registry, never re-typed — a hand-written copy here is exactly

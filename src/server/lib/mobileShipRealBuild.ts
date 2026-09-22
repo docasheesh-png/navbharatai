@@ -49,7 +49,9 @@ export type RealBuildSkip =
   | 'no-sandbox'
   | 'static-app'
   | 'timed-out'
-  | 'unavailable';
+  | 'unavailable'
+  /** The ship's own production build already ran here (`mobileShipPrebuilt.ts`); a second build proves nothing. */
+  | 'prebuilt';
 
 export type RealBuildVerdict =
   /** The check did not run. The ship proceeds exactly as it would have without it. */
@@ -237,12 +239,25 @@ export function makeRepairVerifier(
   workspaceId: string,
   opts: RepairVerifyOptions,
   isAppSource: (path: string) => boolean,
+  /**
+   * Where a REPOSITORY path lives in the sandbox, or `null` for a path that lives nowhere there (a
+   * prebuilt `www/` bundle). Defaults to identity, which is right for a `built` repository. A `static`
+   * one keeps its source under `www/` in the repository and at the workspace root — without this map
+   * every candidate for such an app was "nothing to test". See `workspacePathForRepoPath`.
+   */
+  mapPath: (repoPath: string) => string | null = (p) => p,
 ): VerifyFix | undefined {
   if (!actuator || !workspaceId) return undefined;
   if (!sandboxCanJudge(opts)) return undefined;
   const budgetMs = opts.budgetMs ?? realBuildBudgetMs();
 
-  return async (changed) => {
+  return async (repoChanged) => {
+    // The candidate, re-keyed by SANDBOX path. A repository path with no sandbox home is dropped here.
+    const changed: Record<string, string> = {};
+    for (const [repoPath, content] of Object.entries(repoChanged)) {
+      const local = mapPath(repoPath);
+      if (local) changed[local] = content;
+    }
     // Presence, then seed, then presence again — a read that still fails means no machine holds the app.
     if (!(await sandboxHoldsApp(actuator, workspaceId))) {
       if (typeof actuator.listFiles === 'function') {

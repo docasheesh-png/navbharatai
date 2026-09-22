@@ -54,13 +54,26 @@ export async function commitFiles(
   files: Record<string, string>,
   binaryFiles: Record<string, string>,
   message: string,
+  /**
+   * Paths to DELETE in the same commit (a tree entry with `sha: null`). The tree is built on
+   * `base_tree`, so a file this push does not mention survives from the previous commit — which is
+   * right for everything except a folder this push OWNS outright: `www/` on a prebuilt ship is exactly
+   * this build's output, and a hashed bundle left over from the previous one would otherwise be
+   * packaged into the phone app for ever. Only paths the caller has SEEN in the repository belong here.
+   */
+  removePaths: readonly string[] = [],
 ): Promise<string> {
   const refRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${branch}`, { headers });
   const parentSha = refRes.data.object.sha;
 
-  const tree: Array<Record<string, string>> = Object.entries(files).map(([path, content]) => ({
+  const tree: Array<Record<string, string | null>> = Object.entries(files).map(([path, content]) => ({
     path, mode: '100644', type: 'blob', content,
   }));
+  const present = new Set([...Object.keys(files), ...Object.keys(binaryFiles)]);
+  for (const path of removePaths) {
+    if (!path || present.has(path)) continue;
+    tree.push({ path, mode: '100644', type: 'blob', sha: null });
+  }
 
   for (const [path, base64] of Object.entries(binaryFiles)) {
     const blob = await axios.post(
@@ -117,6 +130,39 @@ export async function readRepoFiles(
     }
   }
   return out;
+}
+
+/**
+ * Every blob under `prefix/` in the repository — the WHOLE subtree, unfiltered — so a caller that owns
+ * that folder can say which of its files this push should remove. `null` when the tree could not be
+ * read: then the caller removes nothing, which only leaves a stale file behind, never deletes a live one.
+ * A truncated tree is treated the same way, for the same reason.
+ */
+export async function listRepoPathsUnder(
+  headers: GhHeaders,
+  owner: string,
+  repo: string,
+  branch: string,
+  prefix: string,
+): Promise<string[] | null> {
+  const dir = String(prefix || '').replace(/^\/+|\/+$/g, '');
+  if (!dir) return null;
+  try {
+    const r = await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      { headers },
+    );
+    if (r.data?.truncated === true) return null;
+    const tree = Array.isArray(r.data?.tree) ? (r.data.tree as Array<{ path?: unknown; type?: unknown }>) : [];
+    const out: string[] = [];
+    for (const t of tree) {
+      if (t.type !== 'blob' || typeof t.path !== 'string') continue;
+      if (t.path.startsWith(`${dir}/`)) out.push(t.path);
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 /**

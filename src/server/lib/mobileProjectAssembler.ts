@@ -79,7 +79,36 @@ export interface AssembleOptions {
    * then means "we could not look", not "there is nothing there". See the note this guards.
    */
   appAssetsComplete?: boolean;
+  /**
+   * The app's OWN production build, made in its sandbox before the ship (2026-09-22, "toote hi na").
+   * When present for a BUILT app, the output is shipped as `www/` and the repository is assembled the
+   * way a static app is — the no-op build script, `webDir: 'www'` — so the GitHub runner never
+   * compiles the app. The source still ships at its own paths, for reference; the packaged app is
+   * the one the user already saw in their preview. Ignored for an app that is static anyway.
+   */
+  prebuilt?: PrebuiltWeb;
 }
+
+/** A finished production build, read out of the app's sandbox. Paths are relative to the output dir. */
+export interface PrebuiltWeb {
+  /** Text files, path → content. Already free of NavBharatAI's preview bridge. */
+  files: Record<string, string>;
+  /** Binary files, path → base64. */
+  binaryFiles: Record<string, string>;
+  /** What it was built from and when — written to `www/.nbai-prebuilt` so the repository says so. */
+  stamp: string;
+  /**
+   * The app's dependencies that are Capacitor plugins — the ONLY packages the runner still needs once
+   * the app ships built (native code is wired from `node_modules` by `cap sync`; everything else is in
+   * the bundle). A LIST trims the shipped package.json to them; `null`/absent means the machine did not
+   * answer, and nothing is trimmed — the safe direction, because a plugin left out is a feature that
+   * dies on the phone, while a dependency left in only costs the runner an install.
+   */
+  pluginDeps?: string[] | null;
+}
+
+/** The stamp's path inside the repository. A pipeline that finds it knows GitHub did not compile the app. */
+export const PREBUILT_STAMP_PATH = 'www/.nbai-prebuilt';
 
 export interface AssembledProject {
   /** Every file to push, path → text content. Binary assets are returned separately. */
@@ -88,6 +117,8 @@ export interface AssembledProject {
   binaryFiles: Record<string, string>;
   /** 'built' when the app has its own build step, 'static' when the files are served as-is. */
   kind: 'built' | 'static';
+  /** True when `www/` is the app's own production build from its sandbox — the pipeline sees a static app. */
+  prebuilt: boolean;
   /** What Capacitor will package — `dist` for a built app, `www` for a static one. */
   webDir: string;
   /** Things the user should know that are true but not failures. Never silently swallowed. */
@@ -115,6 +146,11 @@ const NEVER_PUSH = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lo
 
 function isTextPath(path: string): boolean {
   return !BINARY_OR_JUNK.test(path) && !NEVER_PUSH.test(path);
+}
+
+/** Is this a file whose bytes cannot survive as text? ONE list, shared with the sandbox output reader. */
+export function isBinaryPath(path: string): boolean {
+  return BINARY_OR_JUNK.test(path);
 }
 
 /**
@@ -326,6 +362,90 @@ export function buildPackageJson(
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 
+/** The packages a phone build needs even when the app ships built: Capacitor itself, on every platform. */
+const CAPACITOR_RUNTIME = /^@capacitor\/(core|android|ios|cli)$/;
+
+/**
+ * The package.json a PREBUILT ship carries: the assembled one, with the runner's install cut down to what
+ * `cap sync` needs. PURE.
+ *
+ * WHY. The bundle in `www/` already contains React, the router, the date library — the runner installing
+ * them again buys nothing and can still fail (a registry blip, a peer conflict, a `prepare` script that
+ * wants a tool the app no longer ships). What the runner DOES need from `node_modules` is native code:
+ * `@capacitor/*` and every plugin, which `cap sync` copies into the Android project. So `pluginDeps`
+ * (read from the machine that just built the app, never guessed from names) keeps exactly those, the
+ * scripts shrink to the honest no-op build — a lifecycle script such as `"prepare": "husky"` would
+ * otherwise run on an install that no longer has husky — and `devDependencies` keep only the CLI.
+ *
+ * `pluginDeps === null` ⇒ the machine did not answer ⇒ the assembled package.json is returned UNCHANGED.
+ * Trimming on a guess is how a plugin goes missing on the phone; not trimming only costs the runner an
+ * install it used to do anyway.
+ */
+export function prebuiltPackageJson(assembled: string, pluginDeps: readonly string[] | null): string {
+  if (pluginDeps === null) return assembled;
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(assembled) as Record<string, unknown>;
+  } catch {
+    return assembled;
+  }
+  const keep = new Set(pluginDeps);
+  const deps = (pkg.dependencies as Record<string, string> | undefined) || {};
+  const devDeps = (pkg.devDependencies as Record<string, string> | undefined) || {};
+  const trimmed: Record<string, string> = {};
+  for (const [name, range] of Object.entries(deps)) {
+    if (CAPACITOR_RUNTIME.test(name) || keep.has(name)) trimmed[name] = range;
+  }
+  // A plugin the app listed under devDependencies is still a plugin the phone needs.
+  for (const [name, range] of Object.entries(devDeps)) {
+    if (keep.has(name) && !CAPACITOR_RUNTIME.test(name) && !(name in trimmed)) trimmed[name] = range;
+  }
+  pkg.dependencies = trimmed;
+  pkg.devDependencies = devDeps['@capacitor/cli'] ? { '@capacitor/cli': devDeps['@capacitor/cli'] } : {};
+  // ⚠️ THE CONSTANT, never a copy of its text — `detectProjectKind` reads this exact string back.
+  pkg.scripts = { build: STATIC_NO_OP_BUILD };
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+/**
+ * How a repository NavBharatAI prepared lays the app out, read from the two files that decide it.
+ *
+ *   built     — the source at its own paths; the runner compiles it into `dist/` (or the framework's dir).
+ *   static    — the source itself lives under `www/` (a hand-written page, no build step).
+ *   prebuilt  — `www/` is the production BUILD of the source that sits beside it; GitHub compiles nothing.
+ *
+ * The stamp decides prebuilt; the sentinel decides static; everything else is built. PURE.
+ */
+export type RepoLayout = 'built' | 'static' | 'prebuilt';
+
+export function detectRepoLayout(repoFiles: Record<string, string | undefined | null>): RepoLayout {
+  if (typeof repoFiles[PREBUILT_STAMP_PATH] === 'string') return 'prebuilt';
+  const pkg = repoFiles['package.json'];
+  if (typeof pkg === 'string' && isAssembledStaticApp({ 'package.json': pkg })) return 'static';
+  return 'built';
+}
+
+/**
+ * Where a REPOSITORY path lives in the user's WORKSPACE — the inverse of what `assembleMobileProject`
+ * did — or `null` when it lives nowhere there. PURE.
+ *
+ * 🔴 WHY THIS EXISTS. The repair loop verifies a candidate change by writing it into the app's own
+ * sandbox and building, and heals the workspace with a change that passed. Both took the repository path
+ * as the workspace path. For a `built` repo that is true. For a `static` repo the source sits under
+ * `www/` in the repository and at the ROOT of the workspace, so `www/index.html` was written to a path
+ * the sandbox does not have, judged "nothing to test", and never healed. For a `prebuilt` repo a file
+ * under `www/` is compiler OUTPUT: it has no workspace path at all, and writing one into the workspace
+ * would plant a bundle beside the source it came from.
+ */
+export function workspacePathForRepoPath(repoPath: string, layout: RepoLayout): string | null {
+  const p = String(repoPath || '').replace(/^\.?\//, '');
+  if (!p || p.includes('..')) return null;
+  if (p === PREBUILT_STAMP_PATH) return null;
+  if (layout === 'prebuilt' && /^www\//.test(p)) return null;
+  if (layout === 'static' && /^www\//.test(p)) return p.slice('www/'.length) || null;
+  return p;
+}
+
 /** First major version number in a semver range, or null when there is nothing readable in it. */
 export function majorOfRange(range: string): number | null {
   const m = /(\d+)\s*\./.exec(String(range || ''));
@@ -428,12 +548,44 @@ export function assembleMobileProject(
   }
 
   const usable = Object.entries(appFiles).filter(([p, c]) => !SKIP_PATH.test(p) && typeof c === 'string');
-  const kind = detectProjectKind(Object.fromEntries(usable));
-  const webDir = detectWebDir(Object.fromEntries(usable), kind);
+  const sourceKind = detectProjectKind(Object.fromEntries(usable));
+  // A production build made here turns a BUILT app into a STATIC ship: the pipeline's view is "static",
+  // because that is exactly what the runner should do with it — nothing.
+  const prebuilt = sourceKind === 'built' && opts.prebuilt ? opts.prebuilt : null;
+  const kind: 'built' | 'static' = prebuilt ? 'static' : sourceKind;
+  const webDir = prebuilt ? 'www' : detectWebDir(Object.fromEntries(usable), kind);
 
   const files: Record<string, string> = {};
 
-  if (kind === 'static') {
+  if (prebuilt) {
+    // THE APP WAS BUILT HERE; GITHUB ONLY PACKAGES IT (admin 2026-09-22, "toote hi na"). The runner's
+    // `npm run build` was where most phone builds died — on an app that had ALREADY built and rendered
+    // in its own sandbox minutes earlier. So the sandbox's production output ships as `www/`, the
+    // build script is the honest no-op, and the runner meets an app it cannot fail to compile.
+    //
+    // The source still goes to the repository at its own paths — it is the user's, and a repository
+    // holding only a bundle is one they cannot read — but nothing on the runner builds it. `www/`
+    // carries what the bundler produced and nothing else.
+    for (const [path, content] of usable) {
+      if (path === 'package.json') continue; // merged below, with the no-op build script
+      if (!isTextPath(path)) continue;
+      files[path] = content;
+    }
+    let hasRootIndex = false;
+    for (const [path, content] of Object.entries(prebuilt.files)) {
+      const rel = path.replace(/^\.?\//, '');
+      if (!rel || rel.includes('..') || typeof content !== 'string') continue;
+      if (/^index\.html?$/i.test(rel)) hasRootIndex = true;
+      files[`www/${rel}`] = content;
+    }
+    files[PREBUILT_STAMP_PATH] = prebuilt.stamp;
+    if (!hasRootIndex) {
+      // The bundler's output has no page at its root — `missingWebPageRefusal` acts on this exactly as
+      // it does for a hand-written static app, because to Capacitor they are the same thing.
+      notes.push('The build output has no index.html at its top level, so there is no page for the app to open.');
+    }
+    notes.push('Your app was built here first, and that built app is what gets packaged. GitHub does not compile it again.');
+  } else if (kind === 'static') {
     // Nothing here compiles, so the web files ARE the app: they go where Capacitor will look.
     //
     // 🔴 THE QUESTION IS "AT THE ROOT?", NOT "ANYWHERE?" (same autopsy, 2026-09-22). This used to set
@@ -482,7 +634,9 @@ export function assembleMobileProject(
     }
   }
 
-  files['package.json'] = buildPackageJson(appFiles['package.json'], opts.appName, kind);
+  files['package.json'] = prebuilt
+    ? prebuiltPackageJson(buildPackageJson(appFiles['package.json'], opts.appName, kind), prebuilt.pluginDeps ?? null)
+    : buildPackageJson(appFiles['package.json'], opts.appName, kind);
   files['capacitor.config.ts'] = buildCapacitorConfig(appId, opts.appName, webDir, opts.backgroundColor);
   files['.gitignore'] = 'node_modules/\ndist/\nandroid/\nios/\n.DS_Store\n*.keystore\n*.jks\n';
 
@@ -494,6 +648,16 @@ export function assembleMobileProject(
   }
 
   const binaryFiles: Record<string, string> = {};
+
+  // The production build's own binaries (hashed images, fonts) go under www/ exactly as the bundler
+  // laid them out — the HTML it wrote already points at these paths.
+  if (prebuilt) {
+    for (const [path, base64] of Object.entries(prebuilt.binaryFiles)) {
+      const rel = path.replace(/^\.?\//, '');
+      if (!rel || rel.includes('..') || typeof base64 !== 'string' || !base64) continue;
+      binaryFiles[`www/${rel}`] = base64;
+    }
+  }
 
   // THE APP'S OWN ASSETS FIRST (see AssembleOptions.appAssets). Written before the icon so the icon,
   // which is generated from the user's explicit choice on this screen, always wins a name collision.
@@ -507,7 +671,9 @@ export function assembleMobileProject(
     if (SKIP_PATH.test(path)) continue;
     const parsed = parseDataUri(dataUri);
     if (!parsed) { skippedAssets.push(path); continue; }
-    binaryFiles[kind === 'static' ? `${webDir}/${path}` : path] = parsed.base64;
+    // A prebuilt ship keeps the SOURCE layout for the app's own assets: the bundle under www/ already
+    // holds every asset it uses, at the paths its HTML names; the originals sit beside the source.
+    binaryFiles[kind === 'static' && !prebuilt ? `${webDir}/${path}` : path] = parsed.base64;
   }
   if (skippedAssets.length > 0) {
     // NEVER SILENT. A dropped asset means a missing image in the shipped app, and the user must hear it
@@ -548,7 +714,7 @@ export function assembleMobileProject(
     );
   }
 
-  return { files, binaryFiles, kind, webDir, notes };
+  return { files, binaryFiles, kind, prebuilt: !!prebuilt, webDir, notes };
 }
 
 /**

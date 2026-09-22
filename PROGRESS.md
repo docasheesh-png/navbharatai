@@ -78875,6 +78875,11 @@ Test-locked and **reversion-proven four ways** in `tests/theThreeCapsulesFitAPho
 cases); `theWalletTilesAreReadable` and `theRedDotLeadsToTheTopUp` updated to the new selectors
 with their intent intact (the latter now also asserts no dot may sit inside anything a phone hides).
 
+**Same day, admin's follow-up:** *"2% hi kaafi hai!!"* (the single fee line is confirmed for the
+gift slice) and *"promocode credit ka naam badal kar promocode karo — isse nhi baat na bane to only
+promo"*. Re-measured: **"Promocode" fits** at 360px with room, so the fallback "Promo" was not
+needed, and the row is better balanced for it (96 / 100 / 100px, against 80 / 99 / 117px before).
+
 **Still to come in this line of work (planned, not built):** *"promocode credit ke andar ek option
 aur add karo — **purchage promo code**"*, so a user can buy a code with real ₹ and gift it. Recorded
 as the next slice, with two open recommendations put to the admin: ONE disclosed fee line at the

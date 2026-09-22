@@ -91,7 +91,9 @@ describe('🔴 the four width savings the measurement forced — each is worth r
 
   it('labels are sentence case on a phone and uppercase only from `sm`', () => {
     // ~12px each: uppercase is ~15% wider, and `tracking-widest` adds a pixel per character.
-    // "PROMOCODE CREDIT" does not fit a 104px capsule; "Promocode credit" does.
+    // "PROMOCODE" does not fit a 104px capsule; "Promocode" does. (The label was "Promocode
+    // credit" until the admin shortened it — *"promocode credit ka naam badal kar promocode
+    // karo"* — which is what balanced the row at 96/100/100px instead of 80/99/117px.)
     const block = row();
     expect(block.match(/tracking-wide sm:uppercase sm:tracking-widest/g) ?? []).toHaveLength(3);
     expect(block, 'unconditional uppercase is what did not fit').not.toMatch(/font-extrabold uppercase/);

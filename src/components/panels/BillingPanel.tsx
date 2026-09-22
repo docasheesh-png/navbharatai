@@ -271,7 +271,7 @@ export function BillingPanel(props: BillingPanelProps) {
                 <Gift className="w-4 h-4" />
               </span>
               <span className="whitespace-nowrap">
-                <span className="block text-[9px] font-extrabold tracking-wide sm:uppercase sm:tracking-widest text-muted">Promocode credit</span>
+                <span className="block text-[9px] font-extrabold tracking-wide sm:uppercase sm:tracking-widest text-muted">Promocode</span>
                 <span className="block text-sm sm:text-base font-black text-ink tracking-tight">
                   ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
                 </span>

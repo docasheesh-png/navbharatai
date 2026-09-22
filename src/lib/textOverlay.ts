@@ -81,6 +81,22 @@ export interface TextLayer {
    */
   band: string;
   /**
+   * How opaque the TEXT itself is, 0..1 — 1 is solid, which is what every layer made before this
+   * field existed normalizes to.
+   *
+   * 🔑 IT IS A SEPARATE NUMBER FROM THE BACKGROUND'S ALPHA, AND THAT IS THE WHOLE POINT (admin
+   * 2026-09-22: *"text opacity ka … jisko kam jyada karne se text ki poacity kam jyada ko ja
+   * sake"*). `band` already carries its own alpha inside its `rgba(...)`, so the editor's existing
+   * Opacity slider fades the BAR. There was no way to fade the words — a watermark, or a caption
+   * meant to sit under a photograph rather than on top of it, was not expressible at all.
+   *
+   * ⚠️ NOT folded into `color` as an rgba. It is tempting, and it would break two things that
+   * already work: the swatch row compares `active.color === c` against a hex, and `outlineFor`
+   * reads the colour's LUMINANCE to choose a contrasting outline — an alpha in that string would
+   * make a faded white read as a colour it is not. One meaning per field.
+   */
+  opacity: number;
+  /**
    * Which face draws this layer — an id from `imageFonts.ts`, never a raw family name.
    *
    * An id rather than a family string because the family alone cannot say whether the face has to be
@@ -191,6 +207,9 @@ export function defaultLayer(id: string, text = '', kind: LayerKind = 'text'): T
     color: DEFAULT_TEXT_COLOR,
     outline: true,
     band: DEFAULT_BAND,
+    // Solid. A caption the user did not ask to fade must arrive at full strength — a default of
+    // anything less would make every first banner look like a mistake.
+    opacity: 1,
     // A list reads left-to-right against its own box, so centring its labels would undo the column.
     align: kind === 'list' ? 'left' : 'center',
     bold: true,
@@ -216,6 +235,21 @@ export function normalizeLayer(layer: TextLayer): TextLayer {
     bold: !!layer.bold,
     color: typeof layer.color === 'string' && layer.color ? layer.color : DEFAULT_TEXT_COLOR,
     band: typeof layer.band === 'string' ? layer.band : '',
+    // ⚠️ THE FALLBACK IS 1, NOT 0, AND THE DIFFERENCE IS THE WHOLE LAYER. Every layer saved before
+    // this field existed has `opacity: undefined`, so a fallback of 0 would make each one of them
+    // draw nothing at all — a stored banner would open blank and the text would look deleted.
+    //
+    // 🔴 AND `clamp` ALONE IS NOT ENOUGH, which its own signature hides: it routes to the fallback
+    // only on a NON-FINITE number, and `Number(null)` is **0** — finite. A layer round-tripped
+    // through JSON can carry `opacity: null` (JSON has no undefined), so the clamp would have read
+    // "absent" as "fully transparent" and the caption would vanish. `Number('')` is 0 too. This
+    // repo has already paid for that exact arithmetic twice, in `REFERRER_LIFETIME_CAP_TOKENS` and
+    // in the rollout percentages — so absence is tested for BY VALUE before any number is taken,
+    // and only a real number reaches the clamp. An explicit 0 is still honoured: a user who slides
+    // the text to invisible meant it.
+    opacity: layer.opacity === null || layer.opacity === undefined || (layer.opacity as unknown) === ''
+      ? 1
+      : clamp(layer.opacity, 0, 1, 1),
     // Never 0 — a zero-width box would divide by nothing in the wrap and produce an endless loop of
     // one-character lines. 0.1 is narrow enough to be a deliberate choice and wide enough to draw.
     widthPct: clamp(layer.widthPct, 0.1, 1, 0.86),
@@ -566,6 +600,8 @@ export function bandRect(
 /** The small, honest subset of a 2D context this module uses. Keeps the tests free of a real canvas. */
 export interface TextContext {
   font: string;
+  /** 0..1, multiplied into everything drawn after it — how the text's own opacity is applied. */
+  globalAlpha: number;
   // The real context's own union, not a narrowed `string`: narrowing it would make a genuine
   // CanvasRenderingContext2D fail to satisfy this interface, and the whole point is that the same
   // function serves the real canvas and the test's recorder.
@@ -629,6 +665,16 @@ export function drawTextLayers(ctx: TextContext, layers: TextLayer[], w: number,
         ctx.strokeRect(rect.x + lw / 2, rect.y + lw / 2, Math.max(0, rect.w - lw), Math.max(0, rect.h - lw));
       }
     }
+
+    // 🔒 SET HERE, AND THE POSITION IS THE DESIGN. Everything above this line is the BOX — the
+    // background bar and its border — and each already carries its own alpha, the background's being
+    // the slider the editor has always had. Everything below is the TEXT: outline, fill, and a rate
+    // card's leader dots, which belong to the words and must fade with them or a faded menu keeps a
+    // row of solid dots across it. Raising this line would dim the bar the user set to 55%; lowering
+    // it past the fill would leave the outline solid around faded letters, which reads as a bug.
+    // `ctx.save()` above and `ctx.restore()` below bound it to this layer, so two layers with
+    // different opacities cannot bleed into each other.
+    ctx.globalAlpha = layer.opacity;
 
     const paint = (draw: (text: string, x: number, y: number) => void) => {
       for (const line of lines) {

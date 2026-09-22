@@ -94,11 +94,16 @@ describe('every other branch is untouched', () => {
   it('OFF, stood-down and no-tsconfig read exactly as before, whatever the count', () => {
     expect(writeTypecheckSummary(emptyWriteTypecheckStats(), false, 7)).toContain('OFF');
     expect(writeTypecheckSummary(stats({ disabledReason: 'x' }), true, 7)).toContain('never ran — x');
+    // ⚠️ THE FIXTURE CHANGED BECAUSE THE STATE DID (autopsy 21b431e1, 2026-09-22). This used to pass
+    // `skippedNoTsconfig: 4` TOGETHER WITH `probeFailures: 3` — the shape of a check that switched
+    // itself off on a read error, which `probeFailures`' own comment already named as a defect. The
+    // dispatcher can no longer produce it: a failed probe never settles the verdict, so
+    // `skippedNoTsconfig` now means one thing only — we looked and there is no tsconfig.
     const noTsconfig = writeTypecheckSummary(
-      stats({ skipped: 4, skippedNoTsconfig: 4, probeFailures: 3 }), true, 4,
+      stats({ skipped: 4, skippedNoTsconfig: 4, projectVerdict: 'no' }), true, 4,
     );
     expect(noTsconfig).toContain('4 TypeScript write(s) happened');
-    expect(noTsconfig).toContain('probe could not be read');
+    expect(noTsconfig).toContain('no tsconfig.json was found');
   });
 
   it('a run that happened reports its numbers and ignores the count', () => {

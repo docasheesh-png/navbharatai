@@ -41,6 +41,9 @@ import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // receives an app already proven to compile, and every heal is written back into the user's v5
 // workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
 import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
+// The app's OWN build, run in the warm sandbox before GitHub ever sees it (2026-09-22).
+import { runRealBuildCheck } from '../lib/mobileShipRealBuild';
+import { buildActuator } from './actuatorFactory';
 import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { apkRefusalForProject } from '../lib/frameworkCapability';
@@ -143,6 +146,32 @@ export function registerMobileSetupRoutes(app: Express): void {
       try { await mergeWorkspaceFiles(workspaceId, preflight.changed); } catch { /* the push still proceeds */ }
     }
     appFiles = preflight.files;
+
+    /**
+     * 🔴 AND NOW THE BUILD GITHUB WILL ACTUALLY RUN (2026-09-22).
+     *
+     * The three checks above are STATIC — parse, resolve, declare. The thing that really decides a
+     * phone build is the app's OWN `npm run build`, and until now its first execution anywhere was
+     * five minutes into a GitHub run that costs one of the user's three repair attempts. The app is
+     * already alive in a sandbox with its dependencies installed, so the same question is asked in the
+     * cheap place instead of the expensive one.
+     *
+     * 🔒 It NEVER starts a machine, it is bounded, and it is not stricter than the runner — see
+     * `mobileShipRealBuild.ts`. A skip means the ship proceeds exactly as it did before this existed.
+     */
+    const realBuild = await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)
+      .catch(() => ({ ran: false as const, reason: 'unavailable' as const }));
+    if (realBuild.ran && !realBuild.ok && realBuild.blocking) {
+      // The runner would have failed too, with this exact error. Saying so now costs seconds; letting
+      // it through costs five minutes, a remote log the user cannot act on, and an attempt they only
+      // have three of.
+      return res.status(422).json({
+        error: `Your app did not compile, so the phone build would have failed too. ${realBuild.summary}`,
+        code: 'real-build-failed',
+        failureCode: realBuild.code,
+        buildLog: realBuild.log.slice(-2000),
+      });
+    }
 
     /**
      * 🔒 IS THERE ANYTHING FOR AN APP TO SHOW? (admin 2026-08-24, the 24-framework sweep.)

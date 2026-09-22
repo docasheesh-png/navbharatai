@@ -53,6 +53,19 @@ export interface IEngineerActuator {
    */
   runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /**
+   * Is a sandbox for this workspace ALIVE IN THIS PROCESS right now? Synchronous, in-memory, no I/O.
+   *
+   * 🔑 THE POINT IS WHAT IT DOES NOT DO (2026-09-22). Every other entry point here goes through
+   * `getSandbox`, which CREATES or RESUMES a machine — so an opportunistic check that "just runs a
+   * command" would silently start a billable VM, and the cheap pre-flight it was added for would
+   * become the most expensive step in the ship. This answers "can I use one that is already warm?"
+   * without touching the provider at all.
+   *
+   * Optional, and its ABSENCE means "unknown": a caller must treat that as NO, never as yes. A wrong
+   * "yes" starts a machine; a wrong "no" costs one skipped check that the GitHub runner still does.
+   */
+  hasLiveSandbox?(workspaceId: string): boolean;
+  /**
    * Make sure the project's dependencies are installed BEFORE a command that needs its binaries.
    *
    * WHY THIS EXISTS AS A WORKSPACE-LEVEL GUARANTEE (build report d6deaaf0, Mitrify, 2026-08-09):

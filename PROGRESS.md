@@ -78994,3 +78994,100 @@ claim about our own output and nothing else, which is all the repair path is ent
   the same repo. Harmless on the ship path (the assembler's config wins) and a real default elsewhere.
 These are two classes — the loop's honesty and its bounds, and platform parity — and both are separate
 changes, deliberately not piled onto this one.
+
+## 2026-09-22 — 📊 THE NUMBER THIS PIPELINE WROTE DOWN EVERY DAY AND NEVER ONCE READ
+
+Admin: *"jab main Claude se NavBharatAI ka .aab banwata hoon woh har baar ban jaata hai… lekin
+NavBharatAI ka user jab apni app ka APK banata hai to 80% baar fail hoti hai aur theek nahi hoti."*
+Aim: **NavBharatAI apk building = Claude Code apk building.**
+
+### STEP 0 — measured before anything was built, because "80%" is an impression
+
+🔴 **THE IRONY, VERIFIED BY GREP RATHER THAN TAKEN FROM A DOC:** `routes/mobileShip.ts` classifies every
+real failure and writes the class down — `setOutcome(uid, owner, repo, 'failure', diag.code)` — and
+`failureCode` appears in this repository at **exactly four places, all four inside `AppBuildStore.ts`
+itself**: the field, its comment, the parameter, the write. **Nothing has ever read it.**
+
+🔑 **AND THAT RECORD COULD NOT HAVE ANSWERED THE QUESTION ANYWAY**, which is why this is a new counter
+rather than a query. `setOutcome` holds the LATEST outcome for one (user, owner, repo) and a SUCCESS
+explicitly CLEARS the previous failure's code — so an app that failed nine times and then worked
+contributes **zero** failures to any scan of those rows. A biased sample reads as an ABSENCE of the
+problem, which is worse than no measurement because nobody doubts it.
+
+**What shipped (`mobileBuildOutcomeStore.ts`, patterned on `agentv3_engine_use` → `agentv3_sandbox_starts`
+— one document per UTC day, `FieldValue.increment` per key, no new storage idea):**
+- **The denominator** — every finished run, counted ONCE, at the status-poll site. ⚠️ That endpoint is
+  POLLED: `setOutcome` beside it survives a repeat because it overwrites one document, an INCREMENT does
+  not, so the claim is keyed by the RUN ID (`create()`, the same shape `hosting-daily-bill` uses before
+  it moves money).
+- **The numerator** — which class failed, riding the automatic failure report's OWN `create()` claim,
+  which returns true exactly once per run. No second guard to keep in step with the first.
+- **The class now travels on the report at all**: `buildMobileBuildReport` computed `diag.code` on every
+  automatic failure report and dropped it, so the admin's inbox could describe a failure in prose and
+  never say which of the 21 named classes it was.
+- **The cure split** — `repairable` / `user-credentials` / `unclassified`, because the admin's "80%" can
+  be three different problems with three different answers and only one of them is the repair loop. A
+  missing signing key does not move however good the loop gets.
+- **Admin → Reports → "Phone build outcomes"**, deliberately beside `FailureCategoryCard` and NOT merged
+  into it: that card is the AgentV3 **app** build (does the generated app compile?), this is the GitHub
+  **phone** build (does the .apk/.aab/.ipa come out?). Reading either as the other is exactly what an
+  impression like "80%" is made of.
+
+🔒 **THE HONESTY HALF IS STRUCTURAL, not a caveat in a comment.** The class list is a SUBSET of the
+failures (a diagnosis needs a client still polling when the run goes red), so `diagnosisGap` is computed
+and the card prints it ABOVE the breakdown — a reader who has already read the list has already formed
+the impression the sentence exists to bound. A CANCELLED run is in neither side of the rate: a user who
+pressed Stop did not meet a broken build, and counting them would make the number move with impatience
+rather than with reliability. Nothing counted yet reads as *"no finished build has been counted"*, never
+as 0%.
+
+### THE SECOND CHANGE — run the build GitHub will run, here, first
+
+`mobileShipPreflight` already refuses to push an app that cannot parse, whose imports do not resolve, or
+whose packages are undeclared, and its own header says the worst place to find a compile error is a
+GitHub runner. **All three of those checks are STATIC.** The thing that really decides a phone build is
+the app's own `npm run build` — and its first execution anywhere was five minutes into a remote run that
+costs one of the user's three repair attempts. The app is already alive in a sandbox with its
+dependencies installed, because that is where it was built seconds earlier.
+
+`mobileShipRealBuild.ts` runs it there. **Three rules keep it from costing more than it saves, each
+proven by reversion:**
+1. **It NEVER starts a machine.** `hasLiveSandbox` is a new in-memory map lookup on the actuator — no
+   I/O, no provider call. Every other entry point goes through `getSandbox`, which CREATES or RESUMES a
+   billable VM, so an opportunistic check that "just ran a command" would have become the most expensive
+   step in the ship. An actuator that cannot answer counts as NO: a wrong yes starts a machine.
+2. **It is bounded** (180 s default, malformed value takes the default and never "no limit"), and a
+   build that outruns it is *"could not tell"*, never *"your app is broken"*.
+3. 🔴 **It is NOT stricter than the runner it predicts.** `WEB_BUILD_STEP` packages straight from the
+   bundler when only TYPE findings stopped the strict script, so `error TS…` is not a ship blocker there
+   and must not be one here. That judgement is `classifyBuildFailure`'s — the SAME classifier the remote
+   repair loop uses, never a copy — so our prediction and the runner's own diagnosis cannot disagree
+   about the same log. Being stricter than the thing you are predicting refuses apps that really build.
+
+A skip says NOTHING to the user: *"we could not check"* is not information anybody can act on, and it
+would turn a silent optimisation into a worry. The ship proceeds exactly as it did before.
+
+### ⚠️ ONE THEORY I RAISED AND KILLED MYSELF, recorded so nobody re-derives it
+
+I expected `autoFixable: false` to short-circuit the AI tier — which would have made
+`APP_CODE_BUILD_FAILED` (the user's own app not compiling) never reach a model at all, and would have
+been THE root cause. **It is false.** `routes/mobileShip.ts` reads *"the rules cannot fix this class —
+the AI pass is exactly for this case"* and calls `tryAiRepair()` first. The loop's real gaps are the
+ones the brief names, not this.
+
+### 🔴 STILL OPEN — and the numbers decide the order, which is the brief's own instruction
+
+- **C — the AI repair is a one-shot blind patch, not a loop.** It sees the failing step's log and a
+  capped set of files whose names appear in it, answers once in JSON, and that answer is COMMITTED
+  without being verified — while `mobileShipPreflight` re-verifies every one of its own AI rounds and
+  calls an unverified fix a MISS. The same discipline does not exist on the GitHub side.
+- **D — three blind attempts.** `ATTEMPT_BANDS` gives every app exactly 3, whatever the class. Ten
+  rounds on a missing signing key are ten wasted rounds; the cure there is the one-press key button that
+  already exists.
+- And from the earlier autopsy the same day: the loop has **no server-side bound**, starts **two** GitHub
+  runs per repair, reports `fixed: true` for a comment-only rewrite, and the panel claims a repair
+  happened when every autofix returned `fixed: false`.
+
+**C and D are deliberately NOT built yet.** If the aggregate says most failures are the credentials
+class, their benefit is ZERO and the whole plan should change — which is what Step 0 exists to find out,
+and what the admin's own brief instructs.

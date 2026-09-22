@@ -1785,6 +1785,16 @@ export class E2BActuator implements IEngineerActuator {
    * no call site can run a command on a sandbox without the hold, and no two callers can install into
    * the same node_modules at the same time.
    */
+  /**
+   * A sandbox for this workspace is already in THIS process's map — see IEngineerActuator for why this
+   * must never reach the provider. `sandboxes` is populated by `getSandbox`, so a true here means a
+   * machine this process created or resumed is still held; a paused or reclaimed one is dropped from
+   * the map by the same paths that notice it is dead.
+   */
+  hasLiveSandbox(workspaceId: string): boolean {
+    return this.sandboxes.has(workspaceId);
+  }
+
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const release = this._holdSandboxOp(workspaceId);
     try {

@@ -103,6 +103,30 @@ export async function commitFiles(
 }
 
 /**
+ * Does ONE path exist in the repository? `true` / `false` (a real 404) / `null` when GitHub could not
+ * say (a 5xx, a rate limit, the network) — because "I could not check" and "it is not there" lead to
+ * different decisions, and `readRepoFiles` folds both into an absent key.
+ */
+export async function repoFileExists(
+  headers: GhHeaders,
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+): Promise<boolean | null> {
+  try {
+    await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
+      { headers },
+    );
+    return true;
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    return status === 404 ? false : null;
+  }
+}
+
+/**
  * Read text files back out of a branch.
  *
  * A path that is absent is simply omitted rather than throwing: the self-healing loop asks for the files
@@ -130,39 +154,6 @@ export async function readRepoFiles(
     }
   }
   return out;
-}
-
-/**
- * Every blob under `prefix/` in the repository — the WHOLE subtree, unfiltered — so a caller that owns
- * that folder can say which of its files this push should remove. `null` when the tree could not be
- * read: then the caller removes nothing, which only leaves a stale file behind, never deletes a live one.
- * A truncated tree is treated the same way, for the same reason.
- */
-export async function listRepoPathsUnder(
-  headers: GhHeaders,
-  owner: string,
-  repo: string,
-  branch: string,
-  prefix: string,
-): Promise<string[] | null> {
-  const dir = String(prefix || '').replace(/^\/+|\/+$/g, '');
-  if (!dir) return null;
-  try {
-    const r = await axios.get(
-      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
-      { headers },
-    );
-    if (r.data?.truncated === true) return null;
-    const tree = Array.isArray(r.data?.tree) ? (r.data.tree as Array<{ path?: unknown; type?: unknown }>) : [];
-    const out: string[] = [];
-    for (const t of tree) {
-      if (t.type !== 'blob' || typeof t.path !== 'string') continue;
-      if (t.path.startsWith(`${dir}/`)) out.push(t.path);
-    }
-    return out;
-  } catch {
-    return null;
-  }
 }
 
 /**

@@ -30,13 +30,24 @@
 // reader here would be the drifted-copy class this repository has paid for four times, and the one
 // bug it would reintroduce is the worst: 18 KB of our own debug code inside the user's published app.
 //
-// 🔒 A STALE OUTPUT IS NEVER SHIPPED. The reader takes the FIRST non-empty candidate directory, so a
-// `dist/` left by an earlier build in the same machine would be read even if this build wrote nowhere.
-// Every candidate directory is removed BEFORE the build runs, so what the reader finds afterwards is
-// what THIS build produced — or nothing, which is an honest fallback to the source ship.
+// 🔒 A STALE OUTPUT IS NEVER SHIPPED — AND NOTHING OF THE USER'S IS EVER DELETED TO ENSURE IT. The reader
+// takes the FIRST non-empty candidate directory, so a `dist/` left by an earlier build in the same
+// machine would be read even if this build wrote nowhere. The first draft removed every candidate
+// directory before the build; the review caught what that does to a project that keeps SOURCE under
+// `build/` (webpack's `build/webpack.*.conf.js`), a directory the candidate list always carries. So
+// instead a MARKER file is placed in every candidate directory that exists, before the build. A bundler
+// rewrites its output directory (Vite, CRA, Next export and Angular all empty it), so the marker is gone
+// from an output this build produced and still there in one it did not — and an output that still
+// carries it is refused as stale, never shipped. Nothing is removed from the machine, ever.
+//
+// 🔒 IT NEVER RUNS BESIDE ANOTHER BUILD OF THE SAME APP. A v5 build in flight on this workspace (the
+// actuator's own active-build flag, or a Green Freeze latch) is a machine whose files are changing under
+// us; the ship stands down to the source path rather than build a moving target — and it never clears an
+// active-build flag it did not set, which would strip that other build of its idle-sweep protection.
 
 import { workspaceContentHash } from '../AgentV3/snapshotIdentity';
 import { ensureWorkspaceFilesInSandbox } from '../AgentV3/sandboxSeed';
+import { isGreenLatched } from '../AgentV3/greenFreeze';
 import { buildOutputCandidates } from '../AgentV3/builtSiteCheck';
 import { detectProjectKind, detectWebDir, isBinaryPath, type PrebuiltWeb } from './mobileProjectAssembler';
 import { readRealBuildFailure, sandboxHoldsApp } from './mobileShipRealBuild';
@@ -68,6 +79,12 @@ export const PREBUILT_MAX_FILES = 600;
  * tree API does not care that a "binary" blob is really JavaScript.
  */
 export const PREBUILT_INLINE_TEXT_MAX = 200 * 1024;
+/** …and the inline text of a whole ship is bounded too: 250 chunks of 150 KB is one 37 MB JSON body. */
+export const PREBUILT_INLINE_TOTAL_MAX = 3 * 1024 * 1024;
+/** Less than this left on the clock and the build is not started — it could only be abandoned. */
+export const PREBUILT_MIN_BUILD_MS = 45_000;
+/** Placed in every existing output directory before the build; an output that still carries it is stale. */
+export const STALE_MARKER = '.nbai-prebuild-stale';
 
 /** Just enough of the actuator, so a test needs no sandbox and no E2B key. */
 export interface PrebuiltActuator {
@@ -86,12 +103,21 @@ export interface PrebuiltActuator {
   downloadDistFiles(workspaceId: string): Promise<Map<string, Buffer>>;
   /** Marks the build for the idle sweep, so a four-minute production build is never paused mid-way. */
   setBuildActive?(workspaceId: string, active: boolean): void;
+  /** Is a build already marked active on this workspace — somebody else's, whose flag we must not touch. */
+  isBuildActive?(workspaceId: string): boolean;
+  /**
+   * Preferred over `setBuildActive`: takes the flag and returns the one release for it, which does
+   * nothing once another build has taken the flag over. A build that starts DURING the prebuild is
+   * then never stripped of its protection when the prebuild ends.
+   */
+  holdBuildActive?(workspaceId: string): () => void;
 }
 
 export type PrebuiltSkip =
   | 'flag-off'
   | 'static-app'
   | 'no-sandbox'
+  | 'build-in-flight'
   | 'unavailable'
   | 'timed-out'
   | 'no-output'
@@ -137,14 +163,30 @@ export function splitBuiltOutput(dist: ReadonlyMap<string, Buffer>): { files: Re
   const files: Record<string, string> = {};
   const binaryFiles: Record<string, string> = {};
   let bytes = 0;
+  let inline = 0;
   for (const [path, buf] of dist) {
     const rel = String(path).replace(/^\.?\//, '');
     if (!rel || rel.includes('..') || rel.startsWith('/')) continue;
+    if (rel === STALE_MARKER || rel.endsWith(`/${STALE_MARKER}`)) continue; // ours, never the app's
     bytes += buf.length;
-    if (isBinaryPath(rel) || buf.length > PREBUILT_INLINE_TEXT_MAX) binaryFiles[rel] = buf.toString('base64');
-    else files[rel] = buf.toString('utf8');
+    const asBlob = isBinaryPath(rel) || buf.length > PREBUILT_INLINE_TEXT_MAX || inline + buf.length > PREBUILT_INLINE_TOTAL_MAX;
+    if (asBlob) {
+      binaryFiles[rel] = buf.toString('base64');
+    } else {
+      inline += buf.length;
+      files[rel] = buf.toString('utf8');
+    }
   }
   return { files, binaryFiles, bytes };
+}
+
+/** Did the reader hand back an output THIS build did not rewrite? The marker says so. */
+export function outputIsStale(dist: ReadonlyMap<string, Buffer>): boolean {
+  for (const path of dist.keys()) {
+    const rel = String(path).replace(/^\.?\//, '');
+    if (rel === STALE_MARKER || rel.endsWith(`/${STALE_MARKER}`)) return true;
+  }
+  return false;
 }
 
 /** The stamp the repository carries at `www/.nbai-prebuilt`. Says WHAT was built, never who. */
@@ -198,10 +240,14 @@ export function parseCapacitorPluginScan(stdout: string): string[] | null {
   }
 }
 
-/** `rm -rf` of every directory the reader would look in — quoted, because one of them comes from the user's own config. */
-export function clearOutputDirsCommand(files: Record<string, string>): string {
+/**
+ * Place the stale marker in every candidate output directory that EXISTS — quoted, because one of the
+ * names comes from the user's own vite config. Creates nothing and deletes nothing: a directory that is
+ * not there is left alone, and a marker is a zero-byte dotfile the bundler removes with the rest.
+ */
+export function markStaleOutputCommand(files: Record<string, string>): string {
   const dirs = buildOutputCandidates(files).filter((d) => d && !d.startsWith('/') && !d.includes('..'));
-  return `rm -rf ${dirs.map((d) => shellQuote(d)).join(' ')}`;
+  return dirs.map((d) => `if [ -d ${shellQuote(d)} ]; then touch ${shellQuote(`${d}/${STALE_MARKER}`)}; fi`).join('; ');
 }
 
 /**
@@ -216,6 +262,7 @@ export async function prebuildForShip(
   files: Record<string, string>,
   changed: Record<string, string> = {},
   budgetMs: number = prebuiltBudgetMs(),
+  minBuildMs: number = PREBUILT_MIN_BUILD_MS,
 ): Promise<PrebuiltOutcome> {
   const skip = (reason: PrebuiltSkip, buildRan: boolean, log?: string): PrebuiltOutcome =>
     ({ kind: 'skip', reason, buildRan, ...(log ? { log: log.slice(-6000) } : {}) });
@@ -224,13 +271,22 @@ export async function prebuildForShip(
   if (!actuator || !workspaceId) return skip('unavailable', false);
   if (typeof actuator.hasLiveSandbox !== 'function') return skip('no-sandbox', false);
   if (detectProjectKind(files) === 'static') return skip('static-app', false);
+  // Another build of this very app is in flight — its files are changing and its flag is its own.
+  if (actuator.isBuildActive?.(workspaceId) || isGreenLatched(workspaceId)) return skip('build-in-flight', false);
   const started = Date.now();
   const left = (): number => Math.max(1_000, budgetMs - (Date.now() - started));
 
   // The machine must hold the app before its build means anything: `build()` says success for a machine
-  // with no package.json. Seed an empty one from the durable store — publish's own path — then ask again.
-  if (!(await sandboxHoldsApp(actuator, workspaceId))) {
-    await raced(ensureWorkspaceFilesInSandbox(actuator, workspaceId), left()).catch(() => null);
+  // with no package.json. The presence read itself may WAKE or CREATE the machine (that is the point of
+  // this path), so it is on the clock too. Seed an empty one from the durable store — publish's own
+  // path — and only build once the seed has finished: a build started while files are still arriving
+  // fails on a file that is not there yet, and that failure would read as the app's own.
+  const holds = await raced(sandboxHoldsApp(actuator, workspaceId), left());
+  if (holds === null) return skip('timed-out', false);
+  if (!holds) {
+    const seed = await raced(ensureWorkspaceFilesInSandbox(actuator, workspaceId), left()).catch(() => null);
+    if (seed === null) return skip('timed-out', false);
+    if (!seed.ready) return skip('no-sandbox', false);
     if (!(await sandboxHoldsApp(actuator, workspaceId))) return skip('no-sandbox', false);
   }
 
@@ -240,21 +296,28 @@ export async function prebuildForShip(
     return skip('unavailable', false);
   }
 
-  // Never a stale output — see the header. Best-effort: a machine that cannot even remove a directory
-  // will not build either, and that failure is the honest one to report.
-  await actuator.runCommand(workspaceId, clearOutputDirsCommand(files)).catch(() => undefined);
+  // A build that could only be abandoned is not started: the check below can still run in its own budget.
+  if (left() < minBuildMs) return skip('timed-out', false);
 
-  actuator.setBuildActive?.(workspaceId, true);
+  // The stale marker — see the header. Best-effort: a machine that cannot touch a file will not build
+  // either, and that failure is the honest one to report.
+  await actuator.runCommand(workspaceId, markStaleOutputCommand(files)).catch(() => undefined);
+
+  // The flag, and the one release for it — which leaves the flag alone if a build of the app's own
+  // engine took it over while ours ran (see `holdBuildActive`).
+  const release: () => void = typeof actuator.holdBuildActive === 'function'
+    ? actuator.holdBuildActive(workspaceId)
+    : (actuator.setBuildActive?.(workspaceId, true), () => actuator.setBuildActive?.(workspaceId, false));
   let result: { success: boolean; logs: string } | null;
   try {
     result = await raced(actuator.build(workspaceId), left());
   } catch {
-    actuator.setBuildActive?.(workspaceId, false);
+    release();
     return skip('unavailable', true);
   }
   if (!result) {
-    // The command keeps running in the machine; the flag is cleared when this request lets go of it.
-    actuator.setBuildActive?.(workspaceId, false);
+    // The command keeps running in the machine; the flag is released when this request lets go of it.
+    release();
     return skip('timed-out', true);
   }
 
@@ -263,9 +326,10 @@ export async function prebuildForShip(
     if (!result.success) {
       const read = readRealBuildFailure(log);
       // The runner rescues a TYPE-ONLY failure by running the bundler directly, and so do we — the same
-      // command, so a pass here means the same thing it would mean there. If even that fails, the runner
-      // would fail too, and saying so now is the whole point.
-      if (!read.blocking && declaresVite(files)) {
+      // command, on the same class and no other, so a pass here means the same thing it would mean
+      // there. If even that fails on the app's own fault, the runner would fail too, and saying so now
+      // is the whole point.
+      if (read.code === 'TYPE_GATE_BLOCKED_PACKAGING' && declaresVite(files)) {
         let direct: { exitCode: number; stdout: string; stderr: string } | null;
         try {
           direct = await raced(actuator.runCommand(workspaceId, 'npx vite build'), left());
@@ -275,14 +339,18 @@ export async function prebuildForShip(
         if (!direct) return skip('timed-out', true, log);
         log = `${log}\n--- npx vite build ---\n${direct.stdout}${direct.stderr}`;
         if (direct.exitCode !== 0) {
+          // Refused only on a POSITIVE app fault — a failure the classifier cannot name is not one the
+          // runner is known to share, so the source ship gets to find out.
           const again = readRealBuildFailure(`${direct.stdout}${direct.stderr}`);
-          return { kind: 'refuse', code: again.code, summary: again.summary, log: log.slice(-6000) };
+          if (again.blocking) return { kind: 'refuse', code: again.code, summary: again.summary, log: log.slice(-6000) };
+          return skip('unavailable', true, log);
         }
       } else if (read.blocking) {
         return { kind: 'refuse', code: read.code, summary: read.summary, log: log.slice(-6000) };
       } else {
-        // Type-only, and no Vite to rescue with: the runner has no rescue for it either. Its strict
-        // script failing is not a broken app, though — the source ship carries it exactly as today.
+        // Not a fault the classifier can pin on the app (type-only with no Vite to rescue with, an
+        // unnamed failure, a machine that ran out of memory): the runner has its own answer, and the
+        // source ship carries the app to it exactly as today.
         return skip('unavailable', true, log);
       }
     }
@@ -295,6 +363,8 @@ export async function prebuildForShip(
     }
     if (!dist) return skip('timed-out', true, log);
     if (dist.size === 0) return skip('no-output', true, log);
+    // The output still carries the marker ⇒ this build did not rewrite it ⇒ it is somebody else's.
+    if (outputIsStale(dist)) return skip('no-output', true, log);
     if (dist.size > PREBUILT_MAX_FILES) return skip('too-large', true);
 
     const split = splitBuiltOutput(dist);
@@ -331,6 +401,6 @@ export async function prebuildForShip(
       log: log.slice(-6000),
     };
   } finally {
-    actuator.setBuildActive?.(workspaceId, false);
+    release();
   }
 }

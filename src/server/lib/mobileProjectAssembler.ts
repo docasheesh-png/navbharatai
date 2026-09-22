@@ -109,6 +109,21 @@ export interface PrebuiltWeb {
 
 /** The stamp's path inside the repository. A pipeline that finds it knows GitHub did not compile the app. */
 export const PREBUILT_STAMP_PATH = 'www/.nbai-prebuilt';
+/**
+ * Every `www/` path NavBharatAI wrote in a ship, one per line — so the NEXT ship can remove exactly what
+ * this one left behind and nothing else. A repository the user already owned may carry a `www/` of its
+ * own; a push that listed the folder and deleted "whatever is not ours now" would delete theirs. Only a
+ * path recorded here is ever removed (the review's catch, 2026-09-22).
+ */
+export const WWW_MANIFEST_PATH = 'www/.nbai-shipped';
+
+/** Read the manifest back. Malformed lines are dropped, never guessed into a path. */
+export function parseWwwManifest(text: string | undefined | null): string[] {
+  return String(text || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^www\/[^\s]+$/.test(l) && !l.includes('..'));
+}
 
 export interface AssembledProject {
   /** Every file to push, path → text content. Binary assets are returned separately. */
@@ -353,6 +368,13 @@ export function buildPackageJson(
   const major = capacitorMajor({ ...deps, ...devDeps }) ?? DEFAULT_CAPACITOR_MAJOR;
   const range = `^${major}.0.0`;
   devDeps['@capacitor/cli'] = alignCapacitor(devDeps['@capacitor/cli'], major, range);
+  // 🔴 THE CONFIG IS A `.ts` FILE, AND CAPACITOR'S CLI READS IT WITH THE PROJECT'S OWN TYPESCRIPT
+  // (`@capacitor/cli` config.js: "Could not find installation of TypeScript … npm install -D
+  // typescript"). A TypeScript app carries it already; a hand-written static app, or a prebuilt ship
+  // trimmed to Capacitor and its plugins, does NOT — and `npx cap add android` then dies on the runner
+  // before a single Gradle line. Found by the 2026-09-22 review of the prebuilt ship, and true of every
+  // static ship before it. Declared here, once, for every kind, and never overriding a range the app chose.
+  if (!devDeps.typescript && !deps.typescript) devDeps.typescript = TYPESCRIPT_FOR_CONFIG;
   deps['@capacitor/core'] = alignCapacitor(deps['@capacitor/core'], major, range);
   deps['@capacitor/android'] = alignCapacitor(deps['@capacitor/android'], major, range);
 
@@ -364,6 +386,8 @@ export function buildPackageJson(
 
 /** The packages a phone build needs even when the app ships built: Capacitor itself, on every platform. */
 const CAPACITOR_RUNTIME = /^@capacitor\/(core|android|ios|cli)$/;
+/** The range declared when an app does not carry TypeScript of its own — Capacitor's CLI needs it for a `.ts` config. */
+export const TYPESCRIPT_FOR_CONFIG = '^5.4.0';
 
 /**
  * The package.json a PREBUILT ship carries: the assembled one, with the runner's install cut down to what
@@ -396,12 +420,19 @@ export function prebuiltPackageJson(assembled: string, pluginDeps: readonly stri
   for (const [name, range] of Object.entries(deps)) {
     if (CAPACITOR_RUNTIME.test(name) || keep.has(name)) trimmed[name] = range;
   }
-  // A plugin the app listed under devDependencies is still a plugin the phone needs.
+  // A plugin the app listed under devDependencies is still a plugin the phone needs — and so is a
+  // Capacitor platform added with `npm i -D @capacitor/ios`: the runtime packages move to dependencies
+  // rather than vanish with the rest of devDependencies (the review's catch, 2026-09-22).
   for (const [name, range] of Object.entries(devDeps)) {
-    if (keep.has(name) && !CAPACITOR_RUNTIME.test(name) && !(name in trimmed)) trimmed[name] = range;
+    if (name === '@capacitor/cli') continue;
+    if ((keep.has(name) || CAPACITOR_RUNTIME.test(name)) && !(name in trimmed)) trimmed[name] = range;
   }
   pkg.dependencies = trimmed;
-  pkg.devDependencies = devDeps['@capacitor/cli'] ? { '@capacitor/cli': devDeps['@capacitor/cli'] } : {};
+  // The CLI, and the TypeScript it needs to read capacitor.config.ts — see buildPackageJson.
+  const keptDev: Record<string, string> = {};
+  if (devDeps['@capacitor/cli']) keptDev['@capacitor/cli'] = devDeps['@capacitor/cli'];
+  keptDev.typescript = devDeps.typescript || deps.typescript || TYPESCRIPT_FOR_CONFIG;
+  pkg.devDependencies = keptDev;
   // ⚠️ THE CONSTANT, never a copy of its text — `detectProjectKind` reads this exact string back.
   pkg.scripts = { build: STATIC_NO_OP_BUILD };
   return `${JSON.stringify(pkg, null, 2)}\n`;
@@ -440,7 +471,12 @@ export function detectRepoLayout(repoFiles: Record<string, string | undefined | 
 export function workspacePathForRepoPath(repoPath: string, layout: RepoLayout): string | null {
   const p = String(repoPath || '').replace(/^\.?\//, '');
   if (!p || p.includes('..')) return null;
-  if (p === PREBUILT_STAMP_PATH) return null;
+  if (p === PREBUILT_STAMP_PATH || p === WWW_MANIFEST_PATH) return null;
+  // On a static or prebuilt repository package.json and capacitor.config.* are NavBharatAI's files, not
+  // the app's: the repository's package.json carries the no-op build sentinel, so writing it over the
+  // workspace's real one would make the sandbox's `npm run build` an echo — and a packaging-only edit
+  // "verified" against an echo is verified against nothing (the review's catch, 2026-09-22).
+  if (layout !== 'built' && /^(package\.json|capacitor\.config\.[tj]s(on)?)$/.test(p)) return null;
   if (layout === 'prebuilt' && /^www\//.test(p)) return null;
   if (layout === 'static' && /^www\//.test(p)) return p.slice('www/'.length) || null;
   return p;
@@ -713,6 +749,10 @@ export function assembleMobileProject(
             : 'Those images will be blank in the app.'),
     );
   }
+
+  // The manifest of what this push puts under `www/` — the only thing a later push may remove.
+  const wwwPaths = [...Object.keys(files), ...Object.keys(binaryFiles)].filter((p) => p.startsWith('www/') && p !== WWW_MANIFEST_PATH).sort();
+  if (wwwPaths.length > 0) files[WWW_MANIFEST_PATH] = `${wwwPaths.join('\n')}\n`;
 
   return { files, binaryFiles, kind, prebuilt: !!prebuilt, webDir, notes };
 }

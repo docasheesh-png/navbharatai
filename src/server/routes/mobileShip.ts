@@ -43,7 +43,7 @@ import {
   isAppSourcePath,
 } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
-import { commitFiles, githubApiHeaders, readRepoFiles, listRepoTree } from '../lib/githubRepoWrite';
+import { commitFiles, githubApiHeaders, readRepoFiles, listRepoTree, repoFileExists } from '../lib/githubRepoWrite';
 // The repair loop's verifier: the app's own sandbox runs the build a candidate change would face on
 // GitHub, so only a change that compiles is ever committed (2026-09-22, "the loop, not the model").
 import { makeRepairVerifier, sandboxCanJudge } from '../lib/mobileShipRealBuild';
@@ -754,9 +754,22 @@ export function registerMobileShipRoutes(app: Express): void {
     // tell a failure that CAME BACK from one that is new. Returned on every answer as `failureLine`.
     const failureLine = failureSignature(failedStepSection(normalizeLog(log)));
     const repeat = judgeRepeat(parseAttemptHistory(rawHistory), { code: diag.code, error: failureLine });
-    // Whether the app's own sandbox build can judge a repair of THIS failure at all — an install or
-    // web-build stage, yes; a Gradle or Xcode stage, no. The panel says which, instead of "fixed".
-    const judgeable = sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });
+    // How this repository lays the app out decides two things: where a repository path lives in the
+    // workspace (a static repo keeps its source under `www/`, a prebuilt one keeps its BUILD there), and
+    // whether the app's own sandbox build can judge a repair of THIS failure at all. It can only where
+    // the runner BUILDS — on a prebuilt or static repository the runner compiles nothing, so a sandbox
+    // build answers a question the runner never asked. And then only for an install or web-build stage,
+    // never a Gradle or Xcode one. The panel says which, instead of "fixed".
+    //
+    // The stamp is read only when the sentinel says static. A read that could NOT be made (a 5xx, a
+    // rate limit) is not "no stamp": the layout then falls to PREBUILT, the side on which `www/` maps
+    // nowhere — a bundle file must never be written into the workspace on a guess.
+    const repoPkg = await readRepoFiles(headers, String(owner), String(repo), ref, ['package.json']).catch(() => ({} as Record<string, string>));
+    const staticSentinel = detectRepoLayout({ 'package.json': repoPkg['package.json'] }) === 'static';
+    const stamp = staticSentinel ? await repoFileExists(headers, String(owner), String(repo), ref, PREBUILT_STAMP_PATH) : false;
+    const layout = detectRepoLayout({ ...repoPkg, ...(stamp === false ? {} : { [PREBUILT_STAMP_PATH]: 'present-or-unknown' }) });
+    const toWorkspace = (repoPath: string): string | null => workspacePathForRepoPath(repoPath, layout);
+    const judgeable = layout === 'built' && sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });
     // The classified code is the highest-signal telemetry this pipeline produces: it names WHICH class
     // actually fired on a real user build. Written before any repair is attempted, so an unfixable
     // failure is counted exactly like a fixable one.
@@ -875,16 +888,11 @@ export function registerMobileShipRoutes(app: Express): void {
       if (Object.keys(aiFiles).length === 0) return false;
       const tree = await listRepoTree(headers, String(owner), String(repo), ref);
       const stage = failedStage(normalizeLog(log));
-      // How this repository lays the app out decides where a repository path lives in the workspace:
-      // a static repo keeps its source under `www/`, a prebuilt one keeps its BUILD there. The stamp is
-      // read only when the sentinel says static — a built repo costs no extra call.
-      const staticSentinel = detectRepoLayout({ 'package.json': aiFiles['package.json'] }) === 'static';
-      const layout = detectRepoLayout({
-        ...aiFiles,
-        ...(staticSentinel ? await readRepoFiles(headers, String(owner), String(repo), ref, [PREBUILT_STAMP_PATH]) : {}),
-      });
-      const toWorkspace = (repoPath: string): string | null => workspacePathForRepoPath(repoPath, layout);
-      const verify = makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath, toWorkspace);
+      // No verifier where the sandbox cannot judge (see `judgeable` above): the loop then commits as it
+      // did before verification existed, LABELLED unverified.
+      const verify = judgeable
+        ? makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath, toWorkspace)
+        : undefined;
       const loop = await runAiRepairLoop(callRepairModel, chain, {
         log: failingStep,
         files: aiFiles,
@@ -946,7 +954,7 @@ export function registerMobileShipRoutes(app: Express): void {
       // write the same bytes and reach the AI anyway, one wasted comparison later.
       if (!diag.autoFixable || repeat.kind === 'repeat-after-rules') {
         if (await tryAiRepair()) return;
-        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport(), failureLine });
+        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport(), judgeable, failureLine });
       }
 
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
@@ -977,6 +985,7 @@ export function registerMobileShipRoutes(app: Express): void {
           code: diag.code,
           summary: `${diag.summary} NavBharatAI could not correct it automatically.`,
           report: failureReport(),
+          judgeable,
           failureLine,
         });
       }
@@ -985,6 +994,7 @@ export function registerMobileShipRoutes(app: Express): void {
         fixed: true,
         fixedBy: 'rules',
         verified: false,
+        judgeable,
         failureLine,
         code: diag.code,
         summary: diag.summary,

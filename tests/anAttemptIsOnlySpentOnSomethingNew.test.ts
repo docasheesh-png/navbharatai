@@ -114,9 +114,42 @@ describe('the tool\'s own last words are the signature that travels between runs
       '##[endgroup]',
     ].join('\n');
     const sig = failureSignature(step);
-    expect(sig).toBe('npm run build | src/App.tsx(3,1): error TS2322: Type string is not assignable to number.');
+    // The line that NAMES the error is the signature; "npm run build" says nothing about which failure.
+    expect(sig).toBe('src/App.tsx(3,1): error TS2322: Type string is not assignable to number.');
+    expect(failureSignature('just some output\nand more output')).toBe('just some output | and more output');
     expect(failureSignature('x'.repeat(1000)).length).toBe(300);
     expect(failureSignature('')).toBe('');
+  });
+
+  it('🔴 the signature is the tool\'s ERROR line, never the stack tail that every Vite failure shares (the review\'s catch)', () => {
+    const run = (imp: string) => [
+      '##[group]Build the web app',
+      `error during build:`,
+      `[vite]: Rollup failed to resolve import "${imp}" from "src/App.tsx".`,
+      '    at viteLog (file:///home/runner/work/app/app/node_modules/vite/dist/node/chunks/dep-abc.js:65123:15)',
+      '    at onRollupWarning (file:///home/runner/work/app/app/node_modules/vite/dist/node/chunks/dep-abc.js:65153:9)',
+      '    at Object.logger [as onLog] (file:///home/runner/work/app/app/node_modules/vite/dist/node/chunks/dep-abc.js:64801:13)',
+      '##[error]Process completed with exit code 1.',
+      '##[endgroup]',
+    ].join('\n');
+    const foo = failureSignature(run('foo'));
+    const bar = failureSignature(run('bar'));
+    expect(foo).toContain('Rollup failed to resolve import "foo"');
+    expect(foo).not.toContain('at viteLog');
+    expect(foo).not.toContain('Process completed');
+    expect(sameFailure({ code: 'APP_CODE_BUILD_FAILED', error: foo }, { code: 'APP_CODE_BUILD_FAILED', error: bar })).toBe(false);
+  });
+
+  it('npm\'s per-run log path and a duration do not make the same install failure look new', () => {
+    const run = (stamp: string, secs: string) => [
+      'npm error code ETARGET',
+      'npm error notarget No matching version found for zod@^99.0.0.',
+      `npm error A complete log of this run can be found in: /home/runner/.npm/_logs/${stamp}-debug-0.log`,
+      `added 0 packages in ${secs}`,
+    ].join('\n');
+    const a = failureSignature(run('2026-09-22T10_09_41_120Z', '12s'));
+    const b = failureSignature(run('2026-09-22T10_19_03_998Z', '9s'));
+    expect(sameFailure({ code: 'NPM_VERSION_NOT_FOUND', error: a }, { code: 'NPM_VERSION_NOT_FOUND', error: b })).toBe(true);
   });
 
   it('two runs of the same failure carry the same signature even when the timestamps differ', () => {
@@ -147,11 +180,16 @@ describe('the wiring — the route judges the repeat, the panel carries the hist
   });
 
   it('the route says whether the sandbox could judge the failure at all, and the panel says which of three things happened', () => {
-    expect(route).toContain('const judgeable = sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });');
+    // …and only where the runner BUILDS: a prebuilt or static repository compiles nothing on GitHub.
+    expect(route).toContain("const judgeable = layout === 'built' && sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });");
     expect(route).toContain('judgeable,');
     expect(panel).toContain('fix.judgeable === false');
     expect(panel).toContain('packaging step NavBharatAI cannot test here');
     expect(panel).toContain('could not check this one here first');
+    // The exhausted-cycle sentence says "packaging-step changes" ONLY when every repair was one — an AI
+    // change to app source that merely could not be checked on this request is not a packaging step.
+    expect(panel).toContain('fixesUnjudgeable === fixesApplied');
+    expect(panel).toContain("' None of them could be checked here first.'");
   });
 
   it('the panel carries one record per answer and sends it with the next autofix — before `runId`, so the pinned tail stands', () => {

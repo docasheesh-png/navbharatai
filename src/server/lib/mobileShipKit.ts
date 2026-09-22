@@ -439,8 +439,10 @@ const gradleBuildRun = (gradleCmd: string): string => `          cd android
 //   • The Android project does not exist when the job starts (`npx cap add android` creates it), so
 //     a Gradle cache cannot key on the wrapper file. It keys on the Java pin and package.json — the
 //     two things that decide what Gradle will fetch — and restores by prefix so a near miss still
-//     lands most of it. Saved with `if: always()`: a run that FAILED at Gradle still downloaded
-//     Gradle, and the retry after the repair is exactly the run that should not pay for it again.
+//     lands most of it. Saved after a run that FAILED too (`!cancelled()`): a run that died at Gradle
+//     still downloaded Gradle, and the retry after the repair is exactly the run that should not pay
+//     for it again — but never after a cancel, and never when the restore step itself never ran (a job
+//     that died at its pre-flight has nothing to save, and `outcome != 'skipped'` says so).
 // A cache miss changes nothing; a corrupt cache is npm's and Gradle's own problem to detect, which
 // they do — neither trusts a cached artefact without its checksum.
 // 🔒 `continue-on-error: true` on all four: a cache is a speed-up, and a cache service outage, a
@@ -457,7 +459,7 @@ const NPM_CACHE_RESTORE = `      - name: Restore the library cache
 `;
 
 const NPM_CACHE_SAVE = `      - name: Save the library cache
-        if: always() && steps.nbai-npm-cache.outputs.cache-hit != 'true'
+        if: \${{ !cancelled() && steps.nbai-npm-cache.outcome != 'skipped' && steps.nbai-npm-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         continue-on-error: true
         with:
@@ -480,7 +482,7 @@ const gradleCacheRestore = (java: number): string => `      - name: Restore the 
 `;
 
 const gradleCacheSave = (java: number): string => `      - name: Save the Gradle cache
-        if: always() && steps.nbai-gradle-cache.outputs.cache-hit != 'true'
+        if: \${{ !cancelled() && steps.nbai-gradle-cache.outcome != 'skipped' && steps.nbai-gradle-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         continue-on-error: true
         with:

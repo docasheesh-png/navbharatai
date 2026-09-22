@@ -79623,14 +79623,17 @@ The admin granted full authority on the five points proposed after C, and all fi
    type-only failure the runner has), the output is read with `downloadDistFiles` (the one reader; it
    strips the preview bridge), and the assembler ships it as a STATIC repository — source at its own
    paths, the build under `www/`, `www/.nbai-prebuilt` as the stamp, the sentinel build script — so every
-   static-path mechanism applies by construction and the runner compiles nothing. Stale output dirs are
-   `rm -rf`'d (quoted) before the build so the first-non-empty-candidate reader can never ship last
-   week's `dist/`. The pushed package.json keeps only Capacitor and the plugins the machine named
+   static-path mechanism applies by construction and the runner compiles nothing. A stale MARKER is placed
+   in every existing output dir before the build (nothing is deleted — the first draft's `rm -rf` would
+   have removed a webpack project's `build/` source, the review's catch) and an output that still carries
+   it is refused as stale, so the first-non-empty-candidate reader can never ship last week's `dist/`.
+   The pushed package.json keeps only Capacitor, TypeScript and the plugins the machine named
    (`capacitorPluginScanCommand` reads `node_modules/<dep>/package.json` for the `capacitor` field;
    `null` ⇒ nothing trimmed); lifecycle scripts go too, or `"prepare": "husky"` runs on an install with
    no husky. Large text bundles ride as blobs (`PREBUILT_INLINE_TEXT_MAX`) so one trees POST cannot carry
-   megabytes inline. `www/` is OWNED by the push: `commitFiles(..., removePaths)` + `listRepoPathsUnder`
-   remove what an earlier push left there. Keys `MOBILE_SHIP_PREBUILT` (on) / `_MS` (240 s).
+   megabytes inline (per file AND in aggregate). `www/` is OWNED by the push: `www/.nbai-shipped` records
+   every path written, and `commitFiles(..., removePaths)` removes exactly the recorded paths a later push
+   does not carry — never a `www/` the user already owned. Keys `MOBILE_SHIP_PREBUILT` (on) / `_MS` (240 s).
 2. **The ship's build wakes a paused sandbox and seeds an empty one** — inside the prebuild, not inside
    `runRealBuildCheck`, whose "never starts a machine" contract and tests stand; the check now runs only
    where the prebuild never STARTED a build (`buildRan`), so a timed-out build is never followed by a
@@ -79649,10 +79652,14 @@ The admin granted full authority on the five points proposed after C, and all fi
    (`failureSignature`: the tool's last words, markers and timestamps stripped) so a repeat is recognisable.
 
 **Found and fixed on the way (rule 3):** the verifier and the workspace heal took a REPOSITORY path as a
-WORKSPACE path — a static repo's `www/index.html` was "nothing to test" and a root `index.html` /
-`vite.config.ts` was never app source. `detectRepoLayout` + `workspacePathForRepoPath` (assembler) map
-the path first, and `isAppSourcePath` is now "not a packaging file" (`REPO_ONLY_PATH`) rather than a
-prefix list of source folders.
+WORKSPACE path — a static-LAYOUT repo's `www/index.html` mapped nowhere, a prebuilt repo's bundle would
+have mapped INTO the workspace, and a root `index.html` / `vite.config.ts` was never app source.
+`detectRepoLayout` + `workspacePathForRepoPath` (assembler) map the path first (and on a static or
+prebuilt repo `package.json` / `capacitor.config.*` map NOWHERE — they are ours, and the repository's
+package.json carries the no-op sentinel, so writing it over the workspace's would turn the sandbox build
+into an echo), and `isAppSourcePath` is now "not a packaging file" (`REPO_ONLY_PATH`) rather than a
+prefix list of source folders. Said plainly: a static APP still has no `npm run build` for the verifier
+to judge it by — a parse-level verifier for static apps is a separate change, not built here.
 
 **Measured from here on:** `ships.prebuilt / source` and `prebuildSkips.<reason>` per day, on the admin's
 card as "How the app reached GitHub". Nothing before this entry shipped prebuilt, so the first real
@@ -79795,3 +79802,48 @@ free-tier paid-rung ceiling — were verified ABSENT from rejected build 125 (`6
 carries no `autoVerify` intent filter. Today's server-side work (both certificates published, the
 `/.well-known/` redirect exemption) is correct and verified on both hosts, but it takes a build from
 2026-09-19 or later to demonstrate it.
+
+**The adversarial review (seven finders, three refuters each) found, and the same PR fixed:**
+- 🔴 **CRITICAL — the trimmed package.json dropped `typescript`, and Capacitor's CLI reads
+  `capacitor.config.ts` with the project's own TypeScript** (`@capacitor/cli` config.js: *"Could not find
+  installation of TypeScript … npm install -D typescript"*). Every prebuilt ship would have died at
+  `npx cap add android` — WORSE than the source ship. **And it was true of every hand-written static
+  ship before today**: `buildPackageJson` with no package.json declared only `@capacitor/cli`. Now every
+  pushed package.json declares `typescript` (never overriding a range the app chose), the trimmed one
+  keeps it, and a new classifier class `TYPESCRIPT_MISSING` + rules repair heals old repositories.
+  This may be a large share of the "80% fail" the admin reported — the card will say.
+- 🔴 **`UNKNOWN` was a refusal.** `readRealBuildFailure` blocked on "anything not rescued by the
+  workflow", so a killed build, an out-of-memory or a registry blip became "your app did not compile".
+  Now only a POSITIVE app fault refuses (`APP_FAULT_CODES`); everything else falls through to the source
+  ship, for the check AND the prebuild.
+- **`rm -rf` of every candidate output dir would have deleted a webpack project's `build/` source.**
+  Replaced by a stale MARKER in each existing dir; an output still carrying it is refused as stale.
+  Nothing is ever deleted from the machine.
+- **Stale-`www/` removal listed the folder and deleted "whatever is not ours now"** — a repository the
+  user already owned (a Cordova project, a static site) would have lost its `www/`. Now `www/.nbai-shipped`
+  records what each push wrote, and only recorded paths are ever removed.
+- **A concurrent v5 build's idle-sweep flag would have been cleared by the prebuild's `finally`**, and a
+  Green-Freeze-latched workspace would have been built beside a build in flight. `isBuildActive` on the
+  actuator + `isGreenLatched` ⇒ `build-in-flight` skip; the flag is only ever cleared by the one who set it.
+- **A seed abandoned by the clock kept writing while the build started on a half-seeded machine**, and a
+  cold machine's creation was not on the clock, so a build could start with one second left. The seed's
+  result is honoured, the presence read is raced, and a build is not started with under 45 s remaining.
+- **`@capacitor/ios` under devDependencies vanished with the trim**; runtime packages now move to
+  dependencies. **The screens gate ran after the machine was woken**; it runs first. **Two overlapping
+  setups could build in one sandbox**; a per-workspace in-flight guard answers 409. **Cache saves ran
+  `if: always()` even when the restore never ran**; now `!cancelled() && outcome != 'skipped'`, and every
+  cache step is `continue-on-error` so a cache-service problem can never fail a green build. **The inline
+  tree body was bounded per file but not in aggregate**; now both.
+- **`failureSignature` took the tail of the step, and every Vite failure's tail is the same three stack
+  lines** — two different errors read as one, and a correct AI fix would have been told it "did not fix
+  it". Now the line that NAMES the error is the signature (stack frames, the runner's exit line and npm's
+  boilerplate are noise), and npm's per-run log path and durations are normalised away. **The rules
+  tier's answer carried no `judgeable`**, so the panel said "could not check this one here first" about a
+  Gradle repair it could never have checked; every answer carries it now, and the exhausted-cycle
+  sentence says "packaging-step changes" only when every repair was one. **`repeat-after-nothing` is
+  defence in depth** — the shipped panel ends its cycle on the first `fixed: false`, so no client of
+  ours reaches it; the module header says so. **A stamp read that failed for a non-404 reason** used to
+  read as "no stamp" (prebuilt judged static, the bundle mapped into the workspace root); `repoFileExists`
+  tells a 404 from a failure to check, and an unknown answer falls to the prebuilt side. **The KB sentence
+  overclaimed** ("GitHub never compiles it again") — it now says when the source path still applies.
+

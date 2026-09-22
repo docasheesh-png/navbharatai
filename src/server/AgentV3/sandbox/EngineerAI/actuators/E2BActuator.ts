@@ -837,9 +837,34 @@ export class E2BActuator implements IEngineerActuator {
    * for a real user, which no amount of saved compute is worth.
    */
   private _activeBuilds = new Map<string, number>();
+  /**
+   * Who holds the flag through `holdBuildActive`. A v5 build calls `setBuildActive` directly and takes
+   * the flag over (the owner token is dropped), so a holder's release then leaves the flag alone — a
+   * build that started DURING the phone-ship's prebuild keeps its idle-sweep protection.
+   */
+  private _activeBuildOwners = new Map<string, object>();
+
+  /** @see IEngineerActuator.isBuildActive */
+  isBuildActive(workspaceId: string): boolean {
+    return this._activeBuilds.has(workspaceId);
+  }
+
+  /** @see IEngineerActuator.holdBuildActive */
+  holdBuildActive(workspaceId: string): () => void {
+    const token = {};
+    this.setBuildActive(workspaceId, true);
+    this._activeBuildOwners.set(workspaceId, token);
+    return () => {
+      if (this._activeBuildOwners.get(workspaceId) !== token) return; // somebody else owns it now
+      this._activeBuildOwners.delete(workspaceId);
+      this._activeBuilds.delete(workspaceId);
+    };
+  }
 
   /** @see IEngineerActuator.setBuildActive */
   setBuildActive(workspaceId: string, active: boolean): void {
+    // A direct set or clear is the build engine's own: it owns the flag from here on.
+    this._activeBuildOwners.delete(workspaceId);
     if (active) {
       this._activeBuilds.set(workspaceId, Date.now());
       // A build is about to write. Whatever copy exists will not describe the app it produces.

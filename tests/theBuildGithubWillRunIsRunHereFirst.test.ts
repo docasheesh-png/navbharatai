@@ -158,6 +158,15 @@ describe('rule 3 — it is NOT stricter than the runner it is predicting', () =>
     expect(v.blocking).toBe(true);
   });
 
+  it('🔴 a failure the classifier cannot NAME is not blocking — only a POSITIVE app fault refuses (review, 2026-09-22)', () => {
+    // UNKNOWN is the classifier\'s honest "I could not name this": a machine killed mid-build, a registry
+    // blip, an out-of-memory. None of those is the runner\'s known answer, so the ship proceeds and the
+    // runner judges. Blocking on "anything not rescued" turned every one into "your app did not compile".
+    const v = readRealBuildFailure('nonsense nobody can classify');
+    expect(v.code).toBe('UNKNOWN');
+    expect(v.blocking).toBe(false);
+  });
+
   it('the verdict names the class with the SAME classifier the remote repair loop uses', () => {
     // One rule, two places. A second copy here would drift, and then our prediction and the runner's
     // own diagnosis would disagree about the same log.

@@ -30,10 +30,10 @@ import { findMissingImportedAssets, missingAssetUserMessage } from '../AgentV3/m
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
-import { assembleMobileProject, capacitorMajorFromFiles, missingWebPageRefusal } from '../lib/mobileProjectAssembler';
+import { assembleMobileProject, capacitorMajorFromFiles, missingWebPageRefusal, parseWwwManifest, WWW_MANIFEST_PATH } from '../lib/mobileProjectAssembler';
 // One repository-write implementation, shared with the self-healing build loop so the two can never
 // drift apart on branch handling, blob encoding or ref updates (rule 4).
-import { commitFiles, ensureRepo, githubApiHeaders, listRepoPathsUnder, type GhHeaders } from '../lib/githubRepoWrite';
+import { commitFiles, ensureRepo, githubApiHeaders, readRepoFiles, type GhHeaders } from '../lib/githubRepoWrite';
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // COMPILE PRE-FLIGHT (admin 2026-08-04: "v5 live banaye, fix kare — GitHub par bas download ho"): the
@@ -74,6 +74,9 @@ export function repoNameFor(appName: string): string {
 // never again disagree about which header carries it (see lib/mobileShipAuth.ts).
 const githubToken = githubTokenFromRequest;
 
+/** Workspaces with a prepare in flight on THIS instance — see the 409 in the route. */
+const PREPARING = new Set<string>();
+
 export function registerMobileSetupRoutes(app: Express): void {
   /**
    * Assemble the user's app into a store-ready repository and push it.
@@ -101,6 +104,21 @@ export function registerMobileSetupRoutes(app: Express): void {
     const repoName = typeof repo === 'string' && repo.trim() ? repo.trim() : repoNameFor(name);
     if (!isValidRepoName(repoName)) {
       return res.status(400).json({ error: 'That repository name has characters GitHub does not allow. Use letters, numbers, dots, hyphens or underscores.' });
+    }
+
+    // ONE prepare per app at a time. The panel disables its button, but a second tab, a retried request
+    // after a network drop, or an older client can send a second setup while the first is still building
+    // in the app's machine — and two builds racing in one sandbox read each other's half-written output.
+    if (PREPARING.has(workspaceId)) {
+      return res.status(409).json({ error: 'This app is already being prepared — give it a moment and try again.', code: 'already-preparing' });
+    }
+    PREPARING.add(workspaceId);
+    const release = (): void => { PREPARING.delete(workspaceId); };
+    if (typeof res.once === 'function') {
+      res.once('finish', release);
+      res.once('close', release);
+    } else {
+      release(); // a response with no lifecycle events (a test double) cannot hold a lock
     }
 
     let appFiles: Record<string, string>;
@@ -164,6 +182,25 @@ export function registerMobileSetupRoutes(app: Express): void {
      * `mobileShipRealBuild.ts`. A skip means the ship proceeds exactly as it did before this existed.
      */
     /**
+     * 🔒 IS THERE ANYTHING FOR AN APP TO SHOW? (admin 2026-08-24, the 24-framework sweep.)
+     *
+     * Nine of the twenty-four frameworks in the picker — Express, Hono, NestJS, Fastify, FastAPI,
+     * Flask, Spring Boot, Go, Django — build a server that answers with JSON. They have no screens.
+     * Packaged into Capacitor they produce an APK that installs, opens, and shows a blank page: a file
+     * was created, and it is useless to whoever installs it. That is the fake success rule 2 forbids,
+     * and it is worse here than elsewhere because the artefact reaches somebody's phone.
+     *
+     * Refused BEFORE the GitHub repo is created, so a project that cannot become an app does not leave
+     * a half-prepared repository behind for the user to clean up — and BEFORE the production build
+     * below, so a server-only project never wakes a machine to be refused with the wrong reason.
+     *
+     * Refuses only on POSITIVE evidence — any screen at all, or any shape the classifier cannot call a
+     * server, proceeds exactly as before. See apkRefusalForProject.
+     */
+    const noUi = apkRefusalForProject(appFiles);
+    if (noUi) return res.status(422).json({ error: noUi, code: 'no-ui' });
+
+    /**
      * 🔴 AND NOW THE APP IS BUILT HERE, AND GITHUB ONLY PACKAGES IT (2026-09-22, admin: *"toote hi na"
      * wala banao*). The check above asks "would the runner's build fail?" — this goes one step further
      * and RUNS the production build the runner would have run, in the app's own sandbox, and ships its
@@ -205,23 +242,6 @@ export function registerMobileSetupRoutes(app: Express): void {
       });
     }
 
-    /**
-     * 🔒 IS THERE ANYTHING FOR AN APP TO SHOW? (admin 2026-08-24, the 24-framework sweep.)
-     *
-     * Nine of the twenty-four frameworks in the picker — Express, Hono, NestJS, Fastify, FastAPI,
-     * Flask, Spring Boot, Go, Django — build a server that answers with JSON. They have no screens.
-     * Packaged into Capacitor they produce an APK that installs, opens, and shows a blank page: a file
-     * was created, and it is useless to whoever installs it. That is the fake success rule 2 forbids,
-     * and it is worse here than elsewhere because the artefact reaches somebody's phone.
-     *
-     * Refused BEFORE the GitHub repo is created, so a project that cannot become an app does not leave
-     * a half-prepared repository behind for the user to clean up.
-     *
-     * Refuses only on POSITIVE evidence — any screen at all, or any shape the classifier cannot call a
-     * server, proceeds exactly as before. See apkRefusalForProject.
-     */
-    const noUi = apkRefusalForProject(appFiles);
-    if (noUi) return res.status(422).json({ error: noUi, code: 'no-ui' });
 
     const includeIos = ios !== false;
     // Pin the Android JDK to what THIS app's Capacitor major needs (read from its package.json), so the
@@ -292,13 +312,18 @@ export function registerMobileSetupRoutes(app: Express): void {
     try {
       const { created, defaultBranch } = await ensureRepo(headers, owner, repoName, `${name} — mobile app, prepared by NavBharatAI`);
       // `www/` is OWNED by this push — the build output on a prebuilt ship, the page files on a static
-      // one, nothing at all on a built one — so whatever an earlier push left there and this one does
-      // not carry is removed in the same commit. Otherwise a hashed bundle from last week is packaged
-      // into the phone app for ever. A tree we cannot read removes nothing.
+      // one, nothing at all on a built one — so whatever an EARLIER PUSH OF OURS left there and this one
+      // does not carry is removed in the same commit. Otherwise a hashed bundle from last week is
+      // packaged into the phone app for ever. Only paths the previous push RECORDED (`www/.nbai-shipped`)
+      // are candidates: a repository the user already owned may carry a `www/` of its own, and listing
+      // the folder and deleting "whatever is not ours now" would delete theirs. No manifest ⇒ nothing.
       const shipped = new Set([...Object.keys(project.files), ...Object.keys(project.binaryFiles)]);
-      const stale = created
-        ? []
-        : ((await listRepoPathsUnder(headers, owner, repoName, defaultBranch, 'www')) ?? []).filter((p) => !shipped.has(p));
+      const previous = created
+        ? {}
+        : await readRepoFiles(headers, owner, repoName, defaultBranch, [WWW_MANIFEST_PATH]).catch(() => ({} as Record<string, string>));
+      const stale = parseWwwManifest(previous[WWW_MANIFEST_PATH]).filter((p) => !shipped.has(p));
+      // The old manifest itself goes when this push writes no `www/` at all (a built ship after a static one).
+      if (!created && previous[WWW_MANIFEST_PATH] !== undefined && !shipped.has(WWW_MANIFEST_PATH)) stale.push(WWW_MANIFEST_PATH);
       const sha = await commitFiles(
         headers, owner, repoName, defaultBranch,
         project.files, project.binaryFiles,

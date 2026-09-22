@@ -79,6 +79,24 @@ const RESCUED_BY_THE_WORKFLOW: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The classes that are POSITIVELY the app's own fault — a failure the runner is KNOWN to share, so a
+ * refusal here saves the five-minute run rather than inventing one.
+ *
+ * 🔴 Everything else is NOT blocking, and this is the review's correction (2026-09-22): the first
+ * draft blocked on "anything not rescued by the workflow", which made `UNKNOWN` — the classifier's
+ * honest "I could not name this" — a 422 that blamed the user's app for a sandbox that ran out of
+ * memory, a machine killed mid-build, a registry blip. A failure we cannot name is one the runner gets
+ * to judge; the source ship carries the app to it exactly as before this check existed.
+ */
+const APP_FAULT_CODES: ReadonlySet<string> = new Set([
+  'APP_CODE_BUILD_FAILED',
+  'NPM_PACKAGE_NOT_FOUND',
+  'NPM_VERSION_NOT_FOUND',
+  'NPM_PEER_CONFLICT',
+  'BUILD_SCRIPT_MISSING',
+]);
+
+/**
  * Read a failed real build. PURE — the classifier does the naming, this only decides who acts.
  *
  * The log comes from OUR sandbox, so it carries no `NBAI_FAILED_STAGE` marker; `classifyBuildFailure`
@@ -87,7 +105,7 @@ const RESCUED_BY_THE_WORKFLOW: ReadonlySet<string> = new Set([
 export function readRealBuildFailure(log: string): { blocking: boolean; code: string; summary: string } {
   const diag = classifyBuildFailure(String(log || ''), '.github/workflows/android-apk.yml');
   return {
-    blocking: !RESCUED_BY_THE_WORKFLOW.has(diag.code),
+    blocking: APP_FAULT_CODES.has(diag.code) && !RESCUED_BY_THE_WORKFLOW.has(diag.code),
     code: diag.code,
     summary: diag.summary,
   };

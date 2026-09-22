@@ -47,17 +47,19 @@ vi.mock('axios', () => ({
 
 const {
   prebuildForShip, prebuiltShipEnabled, prebuiltBudgetMs, splitBuiltOutput, prebuiltStamp, declaresVite,
-  capacitorPluginScanCommand, parseCapacitorPluginScan, clearOutputDirsCommand,
-  PREBUILT_MAX_FILES, PREBUILT_INLINE_TEXT_MAX,
+  capacitorPluginScanCommand, parseCapacitorPluginScan, markStaleOutputCommand, outputIsStale,
+  PREBUILT_MAX_FILES, PREBUILT_MAX_BYTES, PREBUILT_INLINE_TEXT_MAX, PREBUILT_INLINE_TOTAL_MAX, PREBUILT_MIN_BUILD_MS, STALE_MARKER,
 } = await import('../src/server/lib/mobileShipPrebuilt');
 type PrebuiltActuator = import('../src/server/lib/mobileShipPrebuilt').PrebuiltActuator;
 const {
   assembleMobileProject, prebuiltPackageJson, detectRepoLayout, workspacePathForRepoPath, detectProjectKind,
-  STATIC_NO_OP_BUILD, PREBUILT_STAMP_PATH,
+  buildPackageJson, parseWwwManifest, STATIC_NO_OP_BUILD, PREBUILT_STAMP_PATH, WWW_MANIFEST_PATH, TYPESCRIPT_FOR_CONFIG,
 } = await import('../src/server/lib/mobileProjectAssembler');
-const { makeRepairVerifier } = await import('../src/server/lib/mobileShipRealBuild');
+const { makeRepairVerifier, readRealBuildFailure } = await import('../src/server/lib/mobileShipRealBuild');
 const { isAppSourcePath } = await import('../src/server/lib/mobileBuildAiRepair');
-const { commitFiles, listRepoPathsUnder } = await import('../src/server/lib/githubRepoWrite');
+const { classifyBuildFailure, repairFiles, repairTypescriptForConfig } = await import('../src/server/lib/mobileBuildRepair');
+const { commitFiles } = await import('../src/server/lib/githubRepoWrite');
+const { latchGreen, clearGreenLatch } = await import('../src/server/AgentV3/greenFreeze');
 const { summariseBuildOutcomes, recordShip } = await import('../src/server/lib/mobileBuildOutcomeStore');
 const { generateShipKit } = await import('../src/server/lib/mobileShipKit');
 const { friendlyBuildStep } = await import('../src/server/lib/mobileBuildReport');
@@ -89,6 +91,7 @@ interface Machine extends PrebuiltActuator {
   writes: string[];
   active: boolean[];
   builds: number;
+  activeNow: boolean;
 }
 
 function machine(over: {
@@ -98,6 +101,8 @@ function machine(over: {
   vite?: { exitCode: number; stdout: string; stderr: string };
   plugins?: string | null;
   sandboxBacked?: boolean;
+  activeNow?: boolean;
+  seedDelayMs?: number;
 } = {}): Machine {
   const m: Machine = {
     files: { ...(over.files ?? VITE_APP) },
@@ -105,6 +110,7 @@ function machine(over: {
     writes: [],
     active: [],
     builds: 0,
+    activeNow: over.activeNow ?? false,
     readFile: async (_w, p) => { if (!(p in m.files)) throw new Error(`no ${p}`); return m.files[p]; },
     writeFile: async (_w, p, c) => { m.writes.push(p); m.files[p] = c; },
     listFiles: async () => Object.keys(m.files),
@@ -124,8 +130,14 @@ function machine(over: {
       return { exitCode: 0, stdout: '', stderr: '' };
     },
     downloadDistFiles: async () => (typeof over.dist === 'function' ? over.dist() : (over.dist ?? DIST())),
-    setBuildActive: (_w, active) => { m.active.push(active); },
+    setBuildActive: (_w, active) => { m.active.push(active); m.activeNow = active; },
+    isBuildActive: () => m.activeNow,
   };
+  if (over.seedDelayMs) {
+    // A slow seed: listFiles is the seed's first call, so delaying it delays the whole seed.
+    const list = m.listFiles;
+    m.listFiles = async (w) => { await new Promise((r) => setTimeout(r, over.seedDelayMs)); return list(w); };
+  }
   if (over.sandboxBacked !== false) m.hasLiveSandbox = () => false; // present; the answer is not consulted
   return m;
 }
@@ -173,7 +185,7 @@ describe('the flag and the budget', () => {
 });
 
 describe('the happy path — built here, read out, handed to the assembler', () => {
-  it('builds, clears stale output FIRST, reads the output, scans the plugins, and returns the built app', async () => {
+  it('builds, marks the existing output dirs FIRST, reads the output, scans the plugins, and returns the built app', async () => {
     const m = machine();
     const out = await prebuildForShip(m, 'ws', VITE_APP, { 'src/main.tsx': 'export const healed = 1' });
     expect(out.kind).toBe('built');
@@ -184,11 +196,12 @@ describe('the happy path — built here, read out, handed to the assembler', () 
     expect(Object.keys(out.prebuilt.binaryFiles)).toEqual(['assets/logo-def456.png']);
     expect(out.prebuilt.pluginDeps).toEqual(['@capacitor/camera', 'capacitor-plugin-safe-area']);
     expect(out.prebuilt.stamp).toContain('output-dir: dist');
-    // The heal reached the machine before the build, and the output dirs were cleared before it too.
+    // The heal reached the machine before the build, and the stale marker was placed before it too —
+    // and nothing was ever removed from the machine.
     expect(m.writes).toEqual(['src/main.tsx']);
-    const rmAt = m.commands.findIndex((c) => c.startsWith('rm -rf '));
-    expect(rmAt).toBe(0);
-    expect(m.commands[0]).toContain("'dist'");
+    expect(m.commands[0]).toContain(`touch 'dist/${STALE_MARKER}'`);
+    expect(m.commands[0].startsWith("if [ -d 'dist' ]")).toBe(true);
+    expect(m.commands.some((c) => /\brm\b/.test(c))).toBe(false);
     expect(m.builds).toBe(1);
     // The idle sweep was told a build was in flight, and told again when it was not.
     expect(m.active).toEqual([true, false]);
@@ -234,11 +247,54 @@ describe('every stand-down is a skip to the source ship — and says whether a b
     expect(m.builds).toBe(0);
   });
 
-  it('a build that runs past the budget ⇒ timed-out, buildRan TRUE (the caller must not start a second one)', async () => {
-    // The clock never races a call at less than a second (a near-spent budget still gets one), so the
-    // build here takes longer than that floor.
-    const m = machine({ build: () => new Promise((r) => setTimeout(() => r({ success: true, logs: '' }), 1_300)) });
+  it('🔒 a seed that ran past the clock is NOT followed by a build on a half-seeded machine', async () => {
+    // The seed keeps writing in the background; a build started now fails on a file that is not there
+    // yet, and that failure would read as the app\'s own — a refusal with nothing behind it.
+    state.durable = { ...VITE_APP };
+    const m = machine({ files: {}, seedDelayMs: 1_300 });
     const out = await prebuildForShip(m, 'ws', VITE_APP, {}, 30);
+    expect(out).toEqual({ kind: 'skip', reason: 'timed-out', buildRan: false });
+    expect(m.builds).toBe(0);
+  });
+
+  it('🔒 another build of the same app in flight ⇒ build-in-flight, and its flag is never touched', async () => {
+    const m = machine({ activeNow: true });
+    expect(await prebuildForShip(m, 'ws', VITE_APP)).toEqual({ kind: 'skip', reason: 'build-in-flight', buildRan: false });
+    expect(m.active).toEqual([]);
+    expect(m.builds).toBe(0);
+    // …and a Green Freeze latch is the same signal from the other side.
+    latchGreen('ws-latched', ['src/main.tsx']);
+    try {
+      const n = machine();
+      expect(await prebuildForShip(n, 'ws-latched', VITE_APP)).toEqual({ kind: 'skip', reason: 'build-in-flight', buildRan: false });
+    } finally {
+      clearGreenLatch('ws-latched');
+    }
+  });
+
+  it('a build is not STARTED when less than the minimum remains on the clock — it could only be abandoned', async () => {
+    const m = machine();
+    // A budget under the floor is honoured by the floor (1 s), which is under PREBUILT_MIN_BUILD_MS.
+    expect(PREBUILT_MIN_BUILD_MS).toBeGreaterThan(1_000);
+    const out = await prebuildForShip(m, 'ws', VITE_APP, {}, 30);
+    expect(out).toEqual({ kind: 'skip', reason: 'timed-out', buildRan: false });
+    expect(m.builds).toBe(0);
+  });
+
+  it('an output that still carries the stale marker was NOT rewritten by this build ⇒ no-output, never shipped', async () => {
+    const stale = DIST();
+    stale.set(STALE_MARKER, Buffer.alloc(0));
+    const m = machine({ dist: stale });
+    expect(await prebuildForShip(m, 'ws', VITE_APP)).toMatchObject({ kind: 'skip', reason: 'no-output', buildRan: true });
+    expect(outputIsStale(stale)).toBe(true);
+    expect(outputIsStale(DIST())).toBe(false);
+  });
+
+  it('a build that runs past the budget ⇒ timed-out, buildRan TRUE (the caller must not start a second one)', async () => {
+    // The clock never races a call at less than a second (a near-spent budget still gets one); the
+    // minimum-remaining rule is lowered for this case so the build is STARTED and then outlives the clock.
+    const m = machine({ build: () => new Promise((r) => setTimeout(() => r({ success: true, logs: '' }), 1_300)) });
+    const out = await prebuildForShip(m, 'ws', VITE_APP, {}, 30, 0);
     expect(out).toMatchObject({ kind: 'skip', reason: 'timed-out', buildRan: true });
     expect(m.active[m.active.length - 1]).toBe(false);
   });
@@ -254,22 +310,25 @@ describe('every stand-down is a skip to the source ship — and says whether a b
     expect(await prebuildForShip(m, 'ws', VITE_APP)).toMatchObject({ kind: 'skip', reason: 'no-output', buildRan: true });
   });
 
-  it('too many files, or too many bytes ⇒ too-large', async () => {
+  it('too many files, or too many bytes ⇒ too-large (each cap exercised on its own)', async () => {
     const many = new Map<string, Buffer>();
     for (let i = 0; i <= PREBUILT_MAX_FILES; i++) many.set(`f${i}.txt`, Buffer.from('x'));
     expect(await prebuildForShip(machine({ dist: many }), 'ws', VITE_APP)).toMatchObject({ kind: 'skip', reason: 'too-large', buildRan: true });
+    const heavy = new Map<string, Buffer>([['index.html', Buffer.from('<p/>')], ['assets/huge.bin', Buffer.allocUnsafe(PREBUILT_MAX_BYTES)]]);
+    expect(await prebuildForShip(machine({ dist: heavy }), 'ws', VITE_APP)).toMatchObject({ kind: 'skip', reason: 'too-large', buildRan: true });
   });
 });
 
 describe('the ONE strict outcome — the app did not compile here, and the runner would fail too', () => {
   it('a real compile error ⇒ refuse, with the class and the log', async () => {
-    const m = machine({ build: { success: false, logs: 'src/App.tsx:3:1: error: Unexpected token\n[vite] build failed' } });
+    const m = machine({ build: { success: false, logs: 'error during build:\nCould not resolve "./Missing" from "src/App.tsx"' } });
     const out = await prebuildForShip(m, 'ws', VITE_APP);
     expect(out.kind).toBe('refuse');
     if (out.kind === 'refuse') {
-      expect(out.code).toBeTruthy();
-      expect(out.log).toContain('Unexpected token');
+      expect(out.code).toBe('APP_CODE_BUILD_FAILED');
+      expect(out.log).toContain('Could not resolve');
     }
+    expect(m.commands).not.toContain('npx vite build'); // the bundler rescue is for the TYPE-ONLY class alone
   });
 
   it('a TYPE-ONLY failure on a Vite app is rescued exactly as the runner rescues it — `npx vite build` — and ships', async () => {
@@ -279,12 +338,24 @@ describe('the ONE strict outcome — the app did not compile here, and the runne
     expect(m.commands).toContain('npx vite build');
   });
 
-  it('…and when even the bundler fails, that is a refusal too', async () => {
+  it('…and when even the bundler fails on the app\'s own fault, that is a refusal too', async () => {
     const m = machine({
       build: { success: false, logs: 'src/App.tsx(3,1): error TS2322: Type string is not assignable to number.' },
       vite: { exitCode: 1, stdout: '', stderr: 'error during build: Could not resolve "./Missing"' },
     });
     expect((await prebuildForShip(m, 'ws', VITE_APP)).kind).toBe('refuse');
+  });
+
+  it('🔴 a failure the classifier cannot NAME is never a refusal — the runner gets to judge it (the review\'s catch)', async () => {
+    // UNKNOWN, a machine killed mid-build, a registry blip: none of these is the app\'s own fault, and
+    // the first draft turned every one into "your app did not compile". The source ship carries it.
+    const m = machine({ build: { success: false, logs: 'Killed\nnpm error signal SIGKILL' } });
+    expect(await prebuildForShip(m, 'ws', VITE_APP)).toMatchObject({ kind: 'skip', reason: 'unavailable', buildRan: true });
+    expect(m.commands).not.toContain('npx vite build'); // not the type-only class ⇒ no rescue, no guess
+    expect(readRealBuildFailure('Killed').blocking).toBe(false);
+    expect(readRealBuildFailure('nonsense nobody can classify').code).toBe('UNKNOWN');
+    expect(readRealBuildFailure('nonsense nobody can classify').blocking).toBe(false);
+    expect(readRealBuildFailure('error during build:\nCould not resolve "./Missing" from "src/App.tsx"').blocking).toBe(true);
   });
 
   it('a type-only failure with NO Vite to rescue with is not a refusal: the source ship carries it (buildRan true)', async () => {
@@ -296,19 +367,32 @@ describe('the ONE strict outcome — the app did not compile here, and the runne
 });
 
 describe('the pure helpers', () => {
-  it('splitBuiltOutput: binaries go as base64, a LARGE text file goes as a blob too, sizes are summed', () => {
+  it('splitBuiltOutput: binaries go as base64, a LARGE text file goes as a blob too, the marker is never shipped, sizes are summed', () => {
     const big = Buffer.alloc(PREBUILT_INLINE_TEXT_MAX + 1, 'a');
     const dist = new Map<string, Buffer>([
       ['./index.html', Buffer.from('<p/>')],
       ['assets/big-1234.js', big],
       ['assets/x.woff2', Buffer.from([1, 2, 3])],
       ['../escape.html', Buffer.from('no')],
+      [STALE_MARKER, Buffer.alloc(0)],
     ]);
     const out = splitBuiltOutput(dist);
     expect(Object.keys(out.files)).toEqual(['index.html']);
     expect(Object.keys(out.binaryFiles).sort()).toEqual(['assets/big-1234.js', 'assets/x.woff2']);
     expect(out.binaryFiles['assets/x.woff2']).toBe(Buffer.from([1, 2, 3]).toString('base64'));
     expect(out.bytes).toBe(4 + big.length + 3);
+  });
+
+  it('…and the inline text of a WHOLE ship is bounded: past the total, chunks go as blobs (one trees body, not 37 MB)', () => {
+    const chunk = Buffer.alloc(PREBUILT_INLINE_TEXT_MAX - 1, 'b');
+    const dist = new Map<string, Buffer>();
+    const n = Math.ceil(PREBUILT_INLINE_TOTAL_MAX / chunk.length) + 3;
+    for (let i = 0; i < n; i++) dist.set(`assets/c${i}.js`, chunk);
+    const out = splitBuiltOutput(dist);
+    const inlineBytes = Object.values(out.files).reduce((a, t) => a + Buffer.byteLength(t), 0);
+    expect(inlineBytes).toBeLessThanOrEqual(PREBUILT_INLINE_TOTAL_MAX);
+    expect(Object.keys(out.binaryFiles).length).toBeGreaterThan(0);
+    expect(Object.keys(out.files).length + Object.keys(out.binaryFiles).length).toBe(n);
   });
 
   it('the stamp names WHAT was built and never who built it', () => {
@@ -331,13 +415,13 @@ describe('the pure helpers', () => {
     expect(cmd).toContain('node_modules/');
   });
 
-  it('🔒 the output dirs are cleared with QUOTED names — one of them comes from the user\'s own vite config', () => {
+  it('🔒 the stale marker is placed with QUOTED names, only where a directory EXISTS, and removes nothing — one name comes from the user\'s own vite config', () => {
     const files = { ...VITE_APP, 'vite.config.ts': "export default { build: { outDir: '$(touch pwned)' } }" };
-    const cmd = clearOutputDirsCommand(files);
-    expect(cmd.startsWith('rm -rf ')).toBe(true);
-    expect(cmd).toContain("'$(touch pwned)'");
-    expect(cmd).not.toMatch(/(^|\s)\$\(touch pwned\)/);
-    expect(cmd).toContain("'dist'");
+    const cmd = markStaleOutputCommand(files);
+    expect(cmd).toContain("if [ -d '$(touch pwned)' ]; then touch '$(touch pwned)/.nbai-prebuild-stale'; fi");
+    expect(cmd).not.toMatch(/(^|[\s;])\$\(touch pwned\)/);
+    expect(cmd).toContain("if [ -d 'dist' ]");
+    expect(cmd).not.toMatch(/\brm\b/);
   });
 });
 
@@ -368,12 +452,53 @@ describe('the assembler ships the build as a STATIC repository — every static-
     expect(p.notes.join(' ')).toContain('GitHub does not compile it again');
   });
 
-  it('the runner installs ONLY Capacitor and the plugins the machine named; lifecycle scripts are gone', () => {
+  it('the runner installs ONLY Capacitor, TypeScript (for the .ts config) and the plugins the machine named; lifecycle scripts are gone', () => {
     const p = assembleMobileProject(VITE_APP, kit(), { appName: 'Chai', appId: 'com.chai.app', prebuilt: prebuilt() });
     const pkg = JSON.parse(p.files['package.json']);
     expect(Object.keys(pkg.dependencies).sort()).toEqual(['@capacitor/android', '@capacitor/camera', '@capacitor/core']);
-    expect(Object.keys(pkg.devDependencies)).toEqual(['@capacitor/cli']);
+    expect(Object.keys(pkg.devDependencies).sort()).toEqual(['@capacitor/cli', 'typescript']);
+    expect(pkg.devDependencies.typescript).toBe('^5'); // the app\'s own range, never overridden
     expect(pkg.scripts.prepare).toBeUndefined(); // "prepare": "husky" would run on an install with no husky
+  });
+
+  it('🔴 TypeScript is declared in EVERY pushed package.json — Capacitor\'s CLI reads capacitor.config.ts with it (the review\'s critical catch)', () => {
+    // A hand-written static app has no TypeScript. `npx cap add android` then dies on the runner with
+    // "Could not find installation of TypeScript" — before a single Gradle line, on every such ship.
+    const staticPkg = JSON.parse(buildPackageJson(undefined, 'Chai', 'static'));
+    expect(staticPkg.devDependencies.typescript).toBe(TYPESCRIPT_FOR_CONFIG);
+    const builtPkg = JSON.parse(buildPackageJson(JSON.stringify({ devDependencies: { typescript: '~5.3' } }), 'Chai', 'built'));
+    expect(builtPkg.devDependencies.typescript).toBe('~5.3');
+    // The trimmed prebuilt package.json keeps it, and adds it when the app never had it.
+    const noTs = JSON.stringify({ dependencies: { '@capacitor/core': '^7' }, devDependencies: { '@capacitor/cli': '^7' }, scripts: { build: STATIC_NO_OP_BUILD } });
+    expect(JSON.parse(prebuiltPackageJson(noTs, [])).devDependencies.typescript).toBe(TYPESCRIPT_FOR_CONFIG);
+    // …and an old repository that dies this way is classified and repaired by the rules tier.
+    const diag = classifyBuildFailure('[error] Could not find installation of TypeScript.\nTo use capacitor.config.ts files, you must install TypeScript in your project', 'wf.yml');
+    expect(diag.code).toBe('TYPESCRIPT_MISSING');
+    expect(diag.autoFixable).toBe(true);
+    const fix = repairFiles(diag, { 'package.json': JSON.stringify({ devDependencies: { '@capacitor/cli': '^7' } }) }, 'wf.yml');
+    expect(fix && JSON.parse(fix.files['package.json']).devDependencies.typescript).toBe(TYPESCRIPT_FOR_CONFIG);
+    expect(repairTypescriptForConfig(JSON.stringify({ devDependencies: { typescript: '^5' } }))).toBeNull(); // nothing to change ⇒ no commit
+    for (const vendor of ['GLM', 'Kimi', 'Claude', 'Gemini', 'Grok']) expect(diag.summary).not.toContain(vendor);
+  });
+
+  it('a Capacitor platform added with `npm i -D @capacitor/ios` survives the trim — moved to dependencies', () => {
+    const assembled = JSON.stringify({ dependencies: { '@capacitor/core': '^7' }, devDependencies: { '@capacitor/cli': '^7', '@capacitor/ios': '^7', vite: '^5' }, scripts: { build: STATIC_NO_OP_BUILD } });
+    const pkg = JSON.parse(prebuiltPackageJson(assembled, []));
+    expect(pkg.dependencies['@capacitor/ios']).toBe('^7');
+    expect(pkg.devDependencies['@capacitor/ios']).toBeUndefined();
+    expect(pkg.devDependencies.vite).toBeUndefined();
+  });
+
+  it('every ship that writes www/ records what it wrote, so the next push can remove exactly that and nothing else', () => {
+    const p = assembleMobileProject(VITE_APP, kit(), { appName: 'Chai', appId: 'com.chai.app', prebuilt: prebuilt() });
+    const listed = parseWwwManifest(p.files[WWW_MANIFEST_PATH]);
+    expect(listed).toEqual([PREBUILT_STAMP_PATH, 'www/assets/index-abc.js', 'www/assets/logo.png', 'www/index.html']);
+    expect(listed).not.toContain(WWW_MANIFEST_PATH);
+    const s = assembleMobileProject({ 'index.html': '<p/>', 'app.js': '1' }, kit(), { appName: 'Chai', appId: 'com.chai.app' });
+    expect(parseWwwManifest(s.files[WWW_MANIFEST_PATH])).toEqual(['www/app.js', 'www/index.html']);
+    const built = assembleMobileProject(VITE_APP, kit(), { appName: 'Chai', appId: 'com.chai.app' });
+    expect(built.files[WWW_MANIFEST_PATH]).toBeUndefined();
+    expect(parseWwwManifest('www/ok.js\nnot-www/x\nwww/../etc\n\n')).toEqual(['www/ok.js']);
   });
 
   it('🔒 pluginDeps null ⇒ NOTHING is trimmed (a plugin left out dies on the phone; a dependency left in only costs an install)', () => {
@@ -417,10 +542,32 @@ describe('a repository path is not a workspace path — the map the repair loop 
     expect(workspacePathForRepoPath('www/assets/index-abc.js', 'prebuilt')).toBeNull();
     expect(workspacePathForRepoPath('src/App.tsx', 'prebuilt')).toBe('src/App.tsx');
     expect(workspacePathForRepoPath(PREBUILT_STAMP_PATH, 'prebuilt')).toBeNull();
+    expect(workspacePathForRepoPath(WWW_MANIFEST_PATH, 'static')).toBeNull();
     expect(workspacePathForRepoPath('../x', 'built')).toBeNull();
   });
 
-  it('the verifier writes the candidate at its WORKSPACE path — a static app\'s www/index.html is finally testable', async () => {
+  it('🔴 on a static or prebuilt repo package.json and capacitor.config.ts are OURS — never written over the workspace\'s real ones', async () => {
+    // The repository\'s package.json carries the no-op sentinel; written into the sandbox, `npm run build`
+    // becomes an echo and a packaging-only edit would be "verified" against nothing (the review\'s catch).
+    for (const layout of ['static', 'prebuilt'] as const) {
+      expect(workspacePathForRepoPath('package.json', layout)).toBeNull();
+      expect(workspacePathForRepoPath('capacitor.config.ts', layout)).toBeNull();
+      expect(workspacePathForRepoPath('capacitor.config.json', layout)).toBeNull();
+    }
+    expect(workspacePathForRepoPath('package.json', 'built')).toBe('package.json');
+    const writes: string[] = [];
+    const sandbox = {
+      hasLiveSandbox: () => true,
+      readFile: async (_w: string, p: string) => { if (p === 'package.json') return '{"scripts":{"build":"vite build"}}'; throw new Error('no'); },
+      writeFile: async (_w: string, p: string) => { writes.push(p); },
+      build: async () => ({ success: true, logs: 'ok' }),
+    };
+    const verify = makeRepairVerifier(sandbox, 'ws', { stage: 'install', code: 'UNKNOWN' }, isAppSourcePath, (p) => workspacePathForRepoPath(p, 'prebuilt'));
+    expect(await verify!({ 'package.json': JSON.stringify({ scripts: { build: STATIC_NO_OP_BUILD } }) })).toEqual({ ran: false, reason: 'nothing-to-test' });
+    expect(writes).toEqual([]);
+  });
+
+  it('the verifier writes the candidate at its WORKSPACE path — a static-LAYOUT repo\'s www/index.html reaches the workspace root (the layout map; a static app itself still has no `npm run build` to judge it by)', async () => {
     const writes: string[] = [];
     const sandbox = {
       hasLiveSandbox: () => true,
@@ -461,6 +608,12 @@ describe('a repository path is not a workspace path — the map the repair loop 
 describe('www/ is OWNED by the push — what an earlier push left there and this one does not carry is removed', () => {
   const headers = { Authorization: 'token t' } as never;
 
+  it('repoFileExists tells a 404 (absent) from a failure to check (unknown)', async () => {
+    const { repoFileExists } = await import('../src/server/lib/githubRepoWrite');
+    // The mock answers 404 for any contents URL — absent, with certainty.
+    expect(await repoFileExists(headers, 'ravi', 'chai', 'main', 'www/.nbai-prebuilt')).toBe(false);
+  });
+
   it('commitFiles adds a `sha: null` entry per removed path, never for a path the push still carries', async () => {
     await commitFiles(headers, 'ravi', 'chai', 'main', { 'www/index.html': '<p/>' }, { 'www/a.png': 'AA==' }, 'msg', ['www/old-abc.js', 'www/index.html', 'www/a.png', '']);
     const treePost = state.gh.find((c) => c.method === 'POST' && /\/git\/trees$/.test(c.url))!.body as { tree: Array<Record<string, unknown>> };
@@ -469,16 +622,6 @@ describe('www/ is OWNED by the push — what an earlier push left there and this
     expect(treePost.tree.find((t) => t.path === 'www/index.html')).toMatchObject({ content: '<p/>' });
   });
 
-  it('listRepoPathsUnder lists the WHOLE subtree, and answers null (remove nothing) when the tree is unreadable or truncated', async () => {
-    state.tree = [
-      { path: 'www/index.html', type: 'blob' }, { path: 'www/assets/old.js', type: 'blob' },
-      { path: 'www', type: 'tree' }, { path: 'src/App.tsx', type: 'blob' }, { path: 'wwwx/nope', type: 'blob' },
-    ];
-    expect(await listRepoPathsUnder(headers, 'ravi', 'chai', 'main', 'www')).toEqual(['www/index.html', 'www/assets/old.js']);
-    state.truncated = true;
-    expect(await listRepoPathsUnder(headers, 'ravi', 'chai', 'main', 'www')).toBeNull();
-    expect(await listRepoPathsUnder(headers, 'ravi', 'chai', 'main', '')).toBeNull();
-  });
 });
 
 describe('the number that says whether the runner still compiles apps at all', () => {
@@ -509,7 +652,9 @@ describe('the workflows cache what they download, so a retry after a repair does
     for (const [path, wf] of wfs) {
       expect(wf, path).toContain('- name: Restore the library cache');
       expect(wf, path).toContain('- name: Save the library cache');
-      expect(wf, path).toContain("if: always() && steps.nbai-npm-cache.outputs.cache-hit != 'true'");
+      // Saved after a FAILED build (the retry is the run that must not pay again), never after a cancel,
+      // and never when the restore never ran (a job that died at its pre-flight has nothing to save).
+      expect(wf, path).toContain("if: ${{ !cancelled() && steps.nbai-npm-cache.outcome != 'skipped' && steps.nbai-npm-cache.outputs.cache-hit != 'true' }}");
       // A cache is a speed-up: a cache-service problem must never fail a build that would have passed.
       const cacheSteps = wf.split(/\n(?=      - name: )/).filter((step) => /uses: actions\/cache\//.test(step));
       expect(cacheSteps.length, path).toBe(/android/.test(path) ? 4 : 2);
@@ -522,7 +667,7 @@ describe('the workflows cache what they download, so a retry after a repair does
       if (/android/.test(path)) {
         expect(wf, path).toContain('- name: Restore the Gradle cache');
         expect(wf, path).toContain('- name: Save the Gradle cache');
-        expect(wf, path).toContain("if: always() && steps.nbai-gradle-cache.outputs.cache-hit != 'true'");
+        expect(wf, path).toContain("if: ${{ !cancelled() && steps.nbai-gradle-cache.outcome != 'skipped' && steps.nbai-gradle-cache.outputs.cache-hit != 'true' }}");
         expect(wf, path).toMatch(/nbai-gradle-\$\{\{ runner\.os \}\}-java\d+-/);
         expect(wf.indexOf('Restore the Gradle cache'), path).toBeLessThan(wf.indexOf('Generate and sync the Android project'));
       } else {
@@ -544,6 +689,14 @@ describe('the wiring — read out of the source, so a refactor cannot quietly un
   const prebuiltSrc = codeOnly(read('src/server/lib/mobileShipPrebuilt.ts'));
   const assembler = codeOnly(read('src/server/lib/mobileProjectAssembler.ts'));
 
+  it('every autofix answer says whether the sandbox could judge the failure — the rules tier\'s too', () => {
+    // A Gradle-stage failure repaired by the rules tier used to arrive without `judgeable`, and the
+    // panel then said "could not check this one here first" — as if it could have.
+    const rulesFixed = autofix.slice(autofix.indexOf("fixedBy: 'rules',"), autofix.indexOf("fixedBy: 'rules',") + 400);
+    expect(rulesFixed).toContain('judgeable,');
+    expect((autofix.match(/\bjudgeable,/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
   it('the setup route hands the built app to the assembler, records the ship, and answers `prebuilt`', () => {
     expect(setup).toContain("prebuilt: prebuild.kind === 'built' ? prebuild.prebuilt : undefined,");
     expect(setup).toContain("void recordShip(project.prebuilt ? 'prebuilt' : 'source', prebuild.kind === 'skip' ? prebuild.reason : null);");
@@ -552,23 +705,66 @@ describe('the wiring — read out of the source, so a refactor cannot quietly un
     expect(setup).toContain('const missingAssets = project.prebuilt ? [] : findMissingImportedAssets(appFiles, Object.keys(appAssets));');
   });
 
-  it('the setup route removes what an earlier push left under www/ — only on a repo that already existed', () => {
-    expect(setup).toContain("((await listRepoPathsUnder(headers, owner, repoName, defaultBranch, 'www')) ?? []).filter((p) => !shipped.has(p))");
-    expect(setup).toMatch(/const stale = created\s*\?\s*\[\]/);
-    expect(setup.indexOf('const stale = created')).toBeLessThan(setup.indexOf('const sha = await commitFiles('));
+  it('the setup route removes ONLY what an earlier push of ours RECORDED under www/ — never a folder it merely found', () => {
+    expect(setup).toContain('const stale = parseWwwManifest(previous[WWW_MANIFEST_PATH]).filter((p) => !shipped.has(p));');
+    expect(setup).toContain('await readRepoFiles(headers, owner, repoName, defaultBranch, [WWW_MANIFEST_PATH])');
+    expect(setup).not.toContain('listRepoPathsUnder');
+    expect(setup.indexOf('const stale = parseWwwManifest')).toBeLessThan(setup.indexOf('const sha = await commitFiles('));
   });
 
-  it('🔒 reversion guards: the local-actuator guard, the stale-output clear, and the sentinel through the constant', () => {
+  it('the screens gate runs BEFORE the production build, so a server-only project never wakes a machine to be refused with the wrong reason', () => {
+    expect(setup.indexOf('const noUi = apkRefusalForProject(appFiles);')).toBeLessThan(setup.indexOf('const prebuild = await prebuildForShip('));
+  });
+
+  it('one prepare per app at a time — a second setup while one is building answers 409, never a second build in the same machine', () => {
+    expect(setup).toContain("code: 'already-preparing'");
+    expect(setup).toContain('PREPARING.add(workspaceId);');
+    expect(setup.indexOf('PREPARING.has(workspaceId)')).toBeLessThan(setup.indexOf('const prebuild = await prebuildForShip('));
+  });
+
+  it('🔒 reversion guards: the local-actuator guard, the in-flight guard, the stale marker, and the sentinel through the constant', () => {
     expect(prebuiltSrc).toContain("if (typeof actuator.hasLiveSandbox !== 'function') return skip('no-sandbox', false);");
-    expect(prebuiltSrc).toContain('await actuator.runCommand(workspaceId, clearOutputDirsCommand(files)).catch(() => undefined);');
-    expect(prebuiltSrc.indexOf('clearOutputDirsCommand(files)')).toBeLessThan(prebuiltSrc.indexOf('actuator.build(workspaceId)'));
+    expect(prebuiltSrc).toContain("if (actuator.isBuildActive?.(workspaceId) || isGreenLatched(workspaceId)) return skip('build-in-flight', false);");
+    expect(prebuiltSrc).toContain('await actuator.runCommand(workspaceId, markStaleOutputCommand(files)).catch(() => undefined);');
+    expect(prebuiltSrc.indexOf('markStaleOutputCommand(files)')).toBeLessThan(prebuiltSrc.indexOf('actuator.build(workspaceId)'));
+    expect(prebuiltSrc).toContain("if (outputIsStale(dist)) return skip('no-output', true, log);");
+    expect(prebuiltSrc).not.toMatch(/rm -rf/);
+    expect(prebuiltSrc).toContain("if (left() < minBuildMs) return skip('timed-out', false);");
+    expect(prebuiltSrc).toContain('minBuildMs: number = PREBUILT_MIN_BUILD_MS,');
+    expect(prebuiltSrc).toContain("if (read.code === 'TYPE_GATE_BLOCKED_PACKAGING' && declaresVite(files)) {");
     expect(assembler).toContain('pkg.scripts = { build: STATIC_NO_OP_BUILD };');
     expect(assembler).toContain('prebuiltPackageJson(buildPackageJson(');
+    expect(assembler).toContain('if (!devDeps.typescript && !deps.typescript) devDeps.typescript = TYPESCRIPT_FOR_CONFIG;');
   });
 
-  it('the autofix route maps repository paths through the layout before the verifier and the workspace heal', () => {
+  it('the autofix route maps repository paths through the layout before the verifier and the workspace heal — and a stamp it could not READ counts as present', () => {
     expect(autofix).toContain('const toWorkspace = (repoPath: string): string | null => workspacePathForRepoPath(repoPath, layout);');
-    expect(autofix).toContain('await readRepoFiles(headers, String(owner), String(repo), ref, [PREBUILT_STAMP_PATH])');
+    expect(autofix).toContain('await repoFileExists(headers, String(owner), String(repo), ref, PREBUILT_STAMP_PATH)');
+    // `stamp === false` (a real 404) is the ONLY answer that lets `www/` map into the workspace root.
+    expect(autofix).toContain("...(stamp === false ? {} : { [PREBUILT_STAMP_PATH]: 'present-or-unknown' })");
+    // The sandbox can judge the runner's build only where the runner BUILDS: a prebuilt or static
+    // repository compiles nothing there, so no verifier is built for it and `judgeable` says so.
+    expect(autofix).toContain("const judgeable = layout === 'built' && sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });");
+    expect(autofix).toContain('const verify = judgeable');
+    expect(autofix.indexOf('const layout = detectRepoLayout(')).toBeLessThan(autofix.indexOf("cureFamily(diag.code) === 'user-credentials'"));
+  });
+
+  it('🔒 the active-build flag is HELD, and the release leaves a flag another build took over (a v5 build that started during the ship keeps its protection)', async () => {
+    const m = machine();
+    let owner: string | null = null;
+    let active = false;
+    m.holdBuildActive = () => {
+      active = true; owner = 'prebuild';
+      return () => { if (owner !== 'prebuild') return; owner = null; active = false; };
+    };
+    // Simulate the app's own engine taking the flag over while the prebuild's build runs.
+    const build = m.build;
+    m.build = async (w) => { owner = 'v5'; return build(w); };
+    const out = await prebuildForShip(m, 'ws', VITE_APP);
+    expect(out.kind).toBe('built');
+    expect(active).toBe(true);          // the v5 build's flag survived the prebuild's release
+    expect(m.active).toEqual([]);       // setBuildActive was never used when a hold is available
+    expect(prebuiltSrc).toContain("typeof actuator.holdBuildActive === 'function'");
   });
 
   it('the panel says which of the three happened, and no vendor is ever named', () => {

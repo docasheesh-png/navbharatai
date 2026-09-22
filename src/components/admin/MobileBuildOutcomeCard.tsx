@@ -62,6 +62,7 @@ const SKIP_LABEL: Record<string, string> = {
   'flag-off': 'switched off',
   'static-app': 'already a static app',
   'no-sandbox': 'no machine held the app',
+  'build-in-flight': 'another build of the app was running',
   unavailable: 'the machine could not answer',
   'timed-out': 'the build ran past its budget',
   'no-output': 'the build wrote no readable page',

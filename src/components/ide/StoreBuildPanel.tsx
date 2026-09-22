@@ -413,6 +413,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     // and how many of them were built here first and passed, which is the half that is a fact.
     let fixesApplied = 0;
     let fixesVerified = 0;
+    // …and how many were packaging steps the sandbox cannot judge at all (a Gradle or Xcode stage) —
+    // a different sentence from "could not be checked on this request".
+    let fixesUnjudgeable = 0;
     // What happened on each earlier attempt, carried to the next autofix so the server can tell a
     // failure that CAME BACK from a new one (and the model can correct its own change rather than
     // repeat it). One record per answer; the server trusts only its shape.
@@ -520,7 +523,11 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
         // autofix had answered `fixed: false` and nothing was ever changed. It now says which happened.
         setError(fixesApplied > 0
           ? `NavBharatAI applied ${fixesApplied} repair${fixesApplied === 1 ? '' : 's'} and tried again, but the build still did not finish.${
-            fixesVerified === 0 ? ' None of them could be checked here first — they were packaging-step changes only the phone build can judge.' : ''}`
+            fixesVerified > 0
+              ? ''
+              : fixesUnjudgeable === fixesApplied
+                ? ' None of them could be checked here first — they were packaging-step changes only the phone build can judge.'
+                : ' None of them could be checked here first.'}`
           : 'The build did not finish, and NavBharatAI could not find a repair it could verify.');
         void fetchFailReport(finished.id, kind);
         return;
@@ -589,6 +596,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       }
       fixesApplied += 1;
       if (fix.verified) fixesVerified += 1;
+      if (fix.judgeable === false) fixesUnjudgeable += 1;
       // Three honest sentences, not one. A repair that was BUILT here first and passed is a fact; one
       // the sandbox could not judge (a Gradle or Xcode step — packaging, not the app) is a change only
       // the phone build can test; and one that could have been checked but was not (no workspace on

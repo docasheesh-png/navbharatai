@@ -1747,6 +1747,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   took a REPOSITORY path as a WORKSPACE path, so a static repo's `www/index.html` was "nothing to test"
   and a root `index.html` / `vite.config.ts` was never app source — `workspacePathForRepoPath` +
   `detectRepoLayout` (assembler) and `REPO_ONLY_PATH` (`isAppSourcePath`) now decide both.
+  🔴 **THE REVIEW'S CRITICAL CATCH, recorded because it is true of EVERY static ship before this
+  date: Capacitor's CLI reads `capacitor.config.ts` with the PROJECT's TypeScript** (`@capacitor/cli`
+  config.js fatals *"Could not find installation of TypeScript"*), and a package.json assembled for a
+  hand-written static app declared only `@capacitor/cli`. `buildPackageJson` now declares `typescript`
+  for every kind (never overriding the app's own range), and `TYPESCRIPT_MISSING` is a classifier class
+  with a rules repair for old repositories. Also from the review: a refusal needs a POSITIVE app fault
+  (`APP_FAULT_CODES` — `UNKNOWN` falls through to the source ship), nothing is ever deleted from the
+  machine (a stale MARKER replaces the first draft's `rm -rf`), only `www/` paths RECORDED in
+  `www/.nbai-shipped` are ever removed from a repository, and the prebuild stands down beside a build
+  in flight (`isBuildActive` / `isGreenLatched` ⇒ `build-in-flight`).
   ⚠️ **NOT done, said plainly:** a verified AI fix to the REPOSITORY's package.json (a dependency
   version) is still never merged into the workspace — the assembled file carries Capacitor deps and the
   sentinel script, so copying it back would break the app's own build — and the next ship regenerates

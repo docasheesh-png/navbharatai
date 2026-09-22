@@ -19,7 +19,10 @@
 //     change                 build's words, and corrects its change rather than starting over.
 //   • repeat after NOTHING → nothing was changed last time and the build failed the same way; nothing
 //                            will change this time either. The cycle ends honestly instead of spending
-//                            another five-minute run to learn the same thing.
+//                            another five-minute run to learn the same thing. ⚠️ The shipped panel ends
+//                            its cycle on every `fixed: false` answer, so from it this verdict is
+//                            unreachable — it is defence in depth for a client that continues anyway
+//                            (an older build, another surface), not a path the panel exercises.
 //
 // 🔒 The history is DATA the client sends, never an instruction: only its shape is trusted (bounded
 // list, bounded strings), and nothing in it can widen what the model may read or write.
@@ -90,13 +93,22 @@ export function sameFailure(a: { code: string; error?: string | null }, b: { cod
 function normalizeError(text?: string | null): string {
   return String(text ?? '')
     .replace(/\x1b\[[0-9;]*m/g, '')
-    .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/g, '')
+    // ISO timestamps, and npm's log-file spelling of one (2026-09-22T10_09_41_120Z-debug-0.log)
+    .replace(/\d{4}-\d{2}-\d{2}T[\d:._]+Z?(-debug-\d+\.log)?/g, '')
     .replace(/\/home\/runner\/work\/[^\s/]+\/[^\s/]+\//g, '')
+    .replace(/\/home\/runner\/\.npm\/_logs\/\S*/g, '')
+    // durations: "in 1.2s", "3m 12s", "412ms"
+    .replace(/\b\d+(\.\d+)?\s?(ms|s|m|min)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase()
     .slice(0, 300);
 }
+
+/** Lines that say nothing about WHICH failure this is: stack frames, the runner's exit line, npm's boilerplate. */
+const NOISE_LINE = /^(at\s|##\[(group|endgroup|error)\]Process completed|##\[(group|endgroup)\]|NBAI_FAILED_STAGE=|npm (ERR!|error) (A complete log|code ELIFECYCLE|path |command |signal |errno |workspace |location )|Error: Process completed with exit code|error Command failed with exit code)/i;
+/** A line that names an error, which is the line worth remembering. */
+const ERROR_LINE = /\b(error|failed|fatal|cannot|could not|unable|not found|missing|unexpected|exception)\b/i;
 
 /**
  * THE QUESTION: is this failure new, or the same one coming back — and after what?
@@ -137,11 +149,16 @@ export function historyForModel(verdict: RepeatVerdict): string | undefined {
  * the client stores it and sends it back.
  */
 export function failureSignature(stepText: string, lines = 3, maxChars = 300): string {
-  const meaningful = String(stepText || '')
+  const content = String(stepText || '')
     .split('\n')
-    .map((l) => l.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*/, '').trim())
-    .filter((l) => l && !/^##\[(group|endgroup)\]/.test(l) && !/^NBAI_FAILED_STAGE=/.test(l));
-  return meaningful.slice(-lines).join(' | ').slice(0, maxChars);
+    .map((l) => l.replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*/, '').replace(/^##\[error\]/, '').trim())
+    .filter((l) => l && !NOISE_LINE.test(l));
+  // The tool's own error line, when it printed one — a Vite failure is followed by a stack whose last
+  // three lines are the same for every failure, so "the last lines" alone would call two different
+  // errors one and the same. Fall back to the tail only when nothing names an error.
+  const named = content.filter((l) => ERROR_LINE.test(l));
+  const chosen = named.length > 0 ? named.slice(-lines) : content.slice(-lines);
+  return chosen.join(' | ').slice(0, maxChars);
 }
 
 /** The user's sentence when the cycle ends because nothing new can be tried. Branded, vendor-free. */

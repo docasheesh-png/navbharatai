@@ -79567,6 +79567,35 @@ before it shipped rather than three days after.
   inflates the very rate this feature was built to measure. The marker is also in `GROWING_COLLECTIONS`,
   so the Load board's storage warning can see it.
 
+### ✅ C IS BUILT (later the same day, admin: *"navbharatai, github se jo capacitor apk/aab banata hai, usko claude.code level karo"*)
+
+The admin repeated the request after #3249 merged, which under the standing rule is the decision. The
+numbers card exists and starts counting with the next build; C did not wait for it.
+
+**"Loop theek karo, model nahi."** `runAiRepairLoop` (`mobileBuildAiRepair.ts`) + `makeRepairVerifier`
+(`mobileShipRealBuild.ts`) + `listRepoTree` (`githubRepoWrite.ts`):
+- the model may ASK for a file (`{"needFiles": [...]}`), only from a listing we supplied — the allowlist is
+  a menu, never loosened;
+- every candidate is RUN through the app's own sandbox build before commit; a rejected change is never
+  committed, on any round, and once a verified failure exists a later unverifiable round is not committed
+  blind either;
+- a verified failure is fed back in the build's own words with the candidate in view;
+- bounded by `MOBILE_AUTOFIX_AI_ROUNDS` (4, clamped 1–8).
+
+**Siblings found and fixed in the same change:** `build()` passes a machine with no package.json, so the
+ship-time check merged that morning could have certified an empty sandbox — `sandboxHoldsApp` on both
+paths now; every repair started TWO GitHub runs (server dispatch + panel dispatch) — the server stopped;
+a comment-only rewrite reported `fixed: true` — `isMeaningfulChange`; three of the four credential classes
+still reached the AI pass — `cureFamily` ends them first; the panel claimed a repair on every exhausted
+cycle — it now counts what really landed.
+
+**Measured on the admin's card from here on:** `repairs.fixed / unverified-fix / gave-up / miss` per lane.
+The verified share is the number that says whether the sandbox is reaching real builds.
+
+**D (a per-class attempt budget) is deliberately still not built**: with credential classes ending at
+once and each remaining attempt carrying a VERIFIED fix, the fixed 3 already means "3 GitHub runs that
+each started from something that compiled". Whether a fourth is worth the minutes is the card's to say.
+
 ### 🔴 STILL OPEN — and the numbers decide the order, which is the brief's own instruction
 
 - **C — the AI repair is a one-shot blind patch, not a loop.** It sees the failing step's log and a

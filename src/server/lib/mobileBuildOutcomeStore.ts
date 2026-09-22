@@ -65,12 +65,23 @@ export function countedDocId(owner: string, repo: string, runId: string): string
 export type BuildLane = 'apk' | 'aab' | 'ipa' | 'other';
 export type BuildOutcome = 'success' | 'failure' | 'cancelled';
 
+/**
+ * How each AI repair ended (2026-09-22, the loop). `fixed` was RUN through the app's own build first and
+ * passed; `unverified-fix` was committed with no build to judge it (the old behaviour, now labelled);
+ * `gave-up` means every candidate the model made was proven not to compile and NOTHING was committed;
+ * `miss` means no rung answered in contract. The ratio of the first two is the number that says whether
+ * the verifier is reaching real builds at all.
+ */
+export type RepairKind = 'fixed' | 'unverified-fix' | 'gave-up' | 'miss';
+
 export interface DailyBuildOutcomes {
   day: string;
   /** Per lane: how every finished run of that lane ended. The DENOMINATOR. */
   outcomes: Partial<Record<BuildLane, Partial<Record<BuildOutcome, number>>>>;
   /** Per lane: which failure class was diagnosed. A SUBSET of the failures above — see `summarise`. */
   codes: Partial<Record<BuildLane, Record<string, number>>>;
+  /** Per lane: how the AI repair loop ended. Counts model-backed repairs only, never the free rule tier. */
+  repairs?: Partial<Record<BuildLane, Partial<Record<RepairKind, number>>>>;
 }
 
 /** UTC day key. The SERVER's clock, never a device's — the same rule the wallet rollup follows. */
@@ -162,6 +173,28 @@ export async function recordBuildFailureCode(
   }
 }
 
+/**
+ * Count ONE AI repair's outcome. Best-effort; never throws. Called once per autofix request, which the
+ * client makes once per failed run — so it needs no idempotency claim of its own.
+ */
+export async function recordRepairOutcome(
+  workflow: string, kind: RepairKind, atMs: number = Date.now(),
+): Promise<boolean> {
+  const store = db();
+  if (!store) return false;
+  try {
+    const day = outcomeDayKey(atMs);
+    const lane = buildLane(workflow);
+    await store.collection(MOBILE_BUILD_OUTCOME_COLLECTION).doc(day).set(
+      { day, repairs: { [lane]: { [kind]: admin.firestore.FieldValue.increment(1) } } },
+      { merge: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The last `days` UTC days of counters, newest first. Bounded; never throws. */
 export async function listDailyBuildOutcomes(days = 30): Promise<DailyBuildOutcomes[]> {
   const store = db();
@@ -174,7 +207,7 @@ export async function listDailyBuildOutcomes(days = 30): Promise<DailyBuildOutco
     return snap.docs
       .map((d) => d.data() as Partial<DailyBuildOutcomes>)
       .filter((r): r is DailyBuildOutcomes => !!r && typeof r.day === 'string')
-      .map((r) => ({ day: r.day, outcomes: r.outcomes ?? {}, codes: r.codes ?? {} }));
+      .map((r) => ({ day: r.day, outcomes: r.outcomes ?? {}, codes: r.codes ?? {}, repairs: r.repairs ?? {} }));
   } catch {
     return [];
   }
@@ -212,9 +245,12 @@ export interface OutcomeSummary {
    * exists to stop being possible.
    */
   diagnosisGap: number;
+  /** How the AI repairs ended, summed across lanes. All zero until the loop has run for real. */
+  repairs: Record<RepairKind, number>;
 }
 
 const LANES: readonly BuildLane[] = ['apk', 'aab', 'ipa', 'other'];
+const REPAIR_KINDS: readonly RepairKind[] = ['fixed', 'unverified-fix', 'gave-up', 'miss'];
 
 /**
  * Turn the day rows into the numbers the admin card shows. PURE — no clock, no I/O.
@@ -270,6 +306,13 @@ export function summariseBuildOutcomes(rows: readonly DailyBuildOutcomes[]): Out
     }))
     .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
 
+  const repairs: Record<RepairKind, number> = { fixed: 0, 'unverified-fix': 0, 'gave-up': 0, miss: 0 };
+  for (const r of rows) {
+    for (const l of LANES) {
+      for (const k of REPAIR_KINDS) repairs[k] += Math.max(0, Number(r.repairs?.[l]?.[k] ?? 0) || 0);
+    }
+  }
+
   return {
     days: rows.length,
     success, failure, cancelled, finished,
@@ -277,6 +320,7 @@ export function summariseBuildOutcomes(rows: readonly DailyBuildOutcomes[]): Out
     byLane,
     topCodes,
     diagnosed,
+    repairs,
     // Never negative: more diagnoses than failures would mean a repeat slipped a guard, and reporting
     // a negative gap would hide that behind a tidy-looking zero.
     diagnosisGap: Math.max(0, failure - diagnosed),

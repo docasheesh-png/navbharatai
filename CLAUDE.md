@@ -1653,6 +1653,61 @@ the code (it is actually read somewhere) on 2026-07-11.
   **What to watch:** `[IMAGE_GEN] free-tier PAID image cap reached` in the server log (once per process
   per day) — the number that says whether 300 is right, and how often the free provider is really failing.
 
+- **📱 THE PHONE-BUILD REPAIR LOOP — "loop theek karo, model nahi" (admin 2026-09-22; built the same
+  day, two PRs).** Three keys, none set, all with working code defaults. `MOBILE_SHIP_REAL_BUILD`
+  (**default ON**; `off` reverts) — before a repository is prepared, the app's own `npm run build` is
+  run in the sandbox it is already living in, so a compile error is met in seconds here rather than
+  five minutes into a GitHub run that costs one of the user's three attempts. It NEVER starts a machine
+  (`hasLiveSandbox`, an in-memory lookup), is bounded by `MOBILE_SHIP_REAL_BUILD_MS` (**180 s**, floor
+  10 s, cap 600 s; malformed ⇒ default, never "no limit"), and is not stricter than the runner (a
+  type-only failure is rescued there by the workflow's bundler fallback, judged by the SAME classifier).
+  Read by `src/server/lib/mobileShipRealBuild.ts`. ⚠️ Recorded here a PR late — #3249 shipped it and
+  this registry did not say so, the drift this registry exists to prevent.
+  `MOBILE_AUTOFIX_AI_ROUNDS` (**default 4**, clamped 1–8; malformed ⇒ 4) — how many model calls one
+  AI repair may spend. Read by `aiRepairMaxRounds` in `mobileBuildAiRepair.ts`.
+  🔴 **WHY THE LOOP AND NOT THE MODEL.** The admin's own `.aab` built through Claude works every time;
+  a user's APK *"80% baar fail hoti hai aur theek nahi hoti."* The difference was never which model
+  answers. The AI repair was a ONE-SHOT blind patch: one prompt over whichever files the log happened to
+  name, one reply, COMMITTED without being run, and a GitHub run to learn whether it worked — while
+  `mobileShipPreflight` re-verified every one of its own rounds and called an unverified fix a MISS.
+  `runAiRepairLoop` is Claude Code's loop, bounded: (1) the model may **ask for a file** with
+  `{"needFiles": [...]}`, chosen ONLY from a listing we supplied (`listRepoTree`), so the allowlist is
+  not loosened — it picks from a menu, it never invents a path; (2) every candidate is **run through the
+  app's own sandbox build** (`makeRepairVerifier`) before it is committed, and a change the build
+  rejected is NEVER committed on any round; (3) a verified failure is **fed back in the build's own
+  words**, with the candidate still in view, so the next round corrects the previous change.
+  🔒 **WHAT DID NOT CHANGE:** the allowlisted paths, the forbidden secrets/keystore/lockfile paths,
+  full-content-not-diff, the size caps, no delete / no new file / no shell, the named revertable commit,
+  the White-Label sentences, and the weak tier's chain (GLM→Kimi, never Sonnet/Opus) — the model
+  chain is untouched by design.
+  ⚠️ **THE SANDBOX CAN JUDGE ONLY THE APP'S OWN BUILD** (`sandboxCanJudge`: the `install` and
+  `webbuild` stages, or an unmarked log read as the app not compiling). A Gradle, Xcode or Capacitor
+  failure gets the old one-shot behaviour, now LABELLED `verified: false` in the response and counted as
+  `unverified-fix` on the admin's Phone-build-outcomes card — so the ratio of verified to unverified is
+  the number that says whether the verifier is reaching real builds. The repair MAY wake a paused
+  sandbox (a resume, seconds, a few paise) and seeds an empty one from the durable store: it holds a
+  real failure and a real five-minute cost to avoid, unlike the ship-time check above. The sandbox is
+  the user's workspace, BORROWED: every file written is snapshotted and put back — on failure, timeout,
+  throw AND success — except the app's own source on success, which the route also merges into the
+  durable workspace (the pre-flight's own rule, applied from the other end). Repository-only files
+  (the workflow, the assembled package.json, capacitor.config.ts) are never left in the workspace.
+  🔴 **`build()` SAYS SUCCESS FOR A MACHINE WITH NO package.json** ("no build step — static project"),
+  so an empty or paused sandbox would have PASSED the ship-time check without building anything.
+  `sandboxHoldsApp` reads the marker back first on both paths; a read that fails is "could not tell",
+  never a pass. Found while writing the verifier, in code merged that morning.
+  🔴 **EVERY REPAIR USED TO START TWO GITHUB RUNS.** The route dispatched the workflow after its commit,
+  and the panel dispatched again at the top of its next attempt — both billed against the user's
+  Actions minutes, the panel watching whichever appeared first. The panel has owned the dispatch since
+  the loop was written and an old bundled Android client will keep dispatching whatever the server
+  does, so the server stopped: `fixed: true` means "committed — build again", one run per repair for
+  every client. Also: a comment-only rewrite is no longer a `fixed: true` (`isMeaningfulChange`), the
+  four credential classes (`cureFamily === 'user-credentials'`) end the request before a model or an
+  attempt is spent, and the panel's last sentence says whether anything was really repaired instead of
+  claiming a repair on every exhausted cycle.
+  💸 **WHAT IT COSTS, plainly:** up to 4 model calls per autofix instead of 1, on the weak tier paid by
+  NavBharatAI, plus a sandbox resume per verification. The bet is the same as `AGENTV3_COMPLEX_TO_KIMI`'s:
+  a blind fix that fails is paid twice, once in the call and once in the five-minute run it triggers.
+  **Watch:** `fixed` vs `unverified-fix` vs `gave-up` on the card, and whether the failure rate moves.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

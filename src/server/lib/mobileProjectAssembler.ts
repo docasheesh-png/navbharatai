@@ -117,13 +117,60 @@ function isTextPath(path: string): boolean {
   return !BINARY_OR_JUNK.test(path) && !NEVER_PUSH.test(path);
 }
 
-/** Does this project build itself? Only a real `build` script counts — the workflow runs exactly that. */
+/**
+ * THE BUILD SCRIPT WE OURSELVES WRITE INTO A STATIC APP.
+ *
+ * ONE constant, written by `buildPackageJson` and read back by `detectProjectKind`, because a static
+ * app's package.json is OUR OWN OUTPUT and nothing should have to recognise it by eye. The exact text
+ * is load-bearing for every repository already shipped, so it is copied here unchanged rather than
+ * reworded: those repos carry this string and are re-classified by it.
+ */
+export const STATIC_NO_OP_BUILD = 'echo "Static app — the web files in www/ are used as they are."';
+
+/**
+ * IS THIS REPOSITORY ONE **WE** ASSEMBLED AS A STATIC APP? — narrower than `detectProjectKind`, on purpose.
+ *
+ * `detectProjectKind` also answers `static` for "there is no build script at all", which is right where it
+ * is asked (a user's workspace: nothing to build means the files ARE the site) and WRONG in the repair
+ * path, where a repository with no build script is a broken repository rather than a static app — its
+ * `npm run build` fails at the web-build step and never reaches a webDir question.
+ *
+ * So the repair asks THIS instead: does the package.json carry the exact no-op WE wrote? That is a fact
+ * about our own output and nothing else, which is the only claim the repair path is entitled to make.
+ */
+export function isAssembledStaticApp(files: Record<string, string>): boolean {
+  try {
+    const parsed = JSON.parse(files['package.json'] || '{}') as { scripts?: Record<string, string> };
+    return String(parsed.scripts?.build ?? '').trim() === STATIC_NO_OP_BUILD;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Does this project build itself? Only a real `build` script counts — the workflow runs exactly that.
+ *
+ * 🔴 OUR OWN OUTPUT MUST NOT FOOL US (autopsy 2026-09-22, user app `bharat-alpha`, dead in 24 seconds).
+ * This asked one question — "is there a build script?" — and `buildPackageJson` WRITES one into every
+ * static app, an honest no-op so that `npm run build` succeeds. So a static app was static exactly once:
+ * at assembly. Every later read of the shipped repository answered `built`, and each answer downstream
+ * flipped with it. Measured on the real functions: `detectProjectKind(assembled static repo)` returned
+ * `built`, and `detectWebDir(that repo, 'built')` returned `dist` — so the self-repair rewrote a CORRECT
+ * `webDir: 'www'` to `'dist'`, a folder a static app never produces, and the user's next press was
+ * guaranteed to fail exactly like the last one.
+ *
+ * A classifier whose input is manufactured by the thing it classifies has to recognise its own hand.
+ * `tests/theStaticAppStaysStatic.test.ts` asserts the round trip, so the sentinel and its writer can
+ * never drift apart.
+ */
 export function detectProjectKind(files: Record<string, string>): 'built' | 'static' {
   const pkg = files['package.json'];
   if (!pkg) return 'static';
   try {
     const parsed = JSON.parse(pkg) as { scripts?: Record<string, string> };
-    return typeof parsed.scripts?.build === 'string' && parsed.scripts.build.trim() ? 'built' : 'static';
+    const build = typeof parsed.scripts?.build === 'string' ? parsed.scripts.build.trim() : '';
+    if (!build) return 'static';
+    return build === STATIC_NO_OP_BUILD ? 'static' : 'built';
   } catch {
     // A package.json we cannot parse is worse than none — treating it as buildable would fail on the
     // runner with a confusing error. Static is the outcome that still produces a working app.
@@ -248,7 +295,9 @@ export function buildPackageJson(
   const scripts = { ...((pkg.scripts as Record<string, string>) || {}) };
   if (kind === 'static') {
     // An honest no-op: `npm run build` must succeed, and there is genuinely nothing to compile.
-    scripts.build = 'echo "Static app — the web files in www/ are used as they are."';
+    // ⚠️ THE CONSTANT, never a copy of its text — `detectProjectKind` reads this exact string back to
+    // recognise a static app it wrote itself (see the autopsy in that function).
+    scripts.build = STATIC_NO_OP_BUILD;
   }
   pkg.scripts = scripts;
 
@@ -386,15 +435,27 @@ export function assembleMobileProject(
 
   if (kind === 'static') {
     // Nothing here compiles, so the web files ARE the app: they go where Capacitor will look.
-    let sawIndex = false;
+    //
+    // 🔴 THE QUESTION IS "AT THE ROOT?", NOT "ANYWHERE?" (same autopsy, 2026-09-22). This used to set
+    // `sawIndex` from /(^|\/)index\.html?$/, which a NESTED path satisfies — `public/index.html` lands
+    // at `www/public/index.html`, and Capacitor opens `www/index.html` and nothing else. So the app
+    // shipped with no page AND the warning that would have named the cause was suppressed by the very
+    // file that caused it. Measured: `www/index.html? false, notes=[]`.
+    let hasRootIndex = false;
+    const nestedIndexes: string[] = [];
     for (const [path, content] of usable) {
       if (path === 'package.json') continue; // replaced below
       if (!isTextPath(path)) continue;
-      if (/(^|\/)index\.html?$/i.test(path)) sawIndex = true;
+      if (/^index\.html?$/i.test(path)) hasRootIndex = true;
+      else if (/(^|\/)index\.html?$/i.test(path)) nestedIndexes.push(path);
       files[`www/${path}`] = content;
     }
-    if (!sawIndex) {
-      notes.push('No index.html was found, so the app may open to a blank screen. Add one at the top level of your app.');
+    if (!hasRootIndex) {
+      // NOT a blank screen — there is no page at all, and the build cannot finish. The refusal that
+      // acts on this is `missingWebPageRefusal`; this note is what an admin reads in the ship record.
+      notes.push(nestedIndexes.length > 0
+        ? `The only index.html is at "${nestedIndexes[0]}", not at the top level, so there is no page for the app to open.`
+        : 'No index.html was found, so there is no page for the app to open.');
     }
   } else {
     for (const [path, content] of usable) {
@@ -488,6 +549,37 @@ export function assembleMobileProject(
   }
 
   return { files, binaryFiles, kind, webDir, notes };
+}
+
+/**
+ * IS THERE A PAGE FOR THE APP TO OPEN? — asked BEFORE the repository is pushed and a build is spent.
+ *
+ * Modelled on `signingReadiness` (2026-09-15), which exists because a user pressed a button that could
+ * never succeed and only GitHub knew. This is the same shape for the other half of the same promise:
+ * Capacitor wraps ONE file, `<webDir>/index.html`, and when a static app has none the run is dead
+ * before it starts. The admin's report of 2026-09-22 is exactly that run — 24 seconds, three green
+ * steps, and *"it produced no web page to wrap"*.
+ *
+ * 🔒 IT ANSWERS ONLY WHERE IT HAS A VERDICT, which is the rule that keeps a gate from becoming a
+ * nuisance. A STATIC app is decided here and now: nothing compiles, so the files we are about to push
+ * ARE the app, and `www/index.html` either exists or does not. A BUILT app is NOT decided — its page is
+ * produced on the runner by a build we have not run, so refusing one would be guessing, and the
+ * workflow's own guard already reports that case honestly with the folder named.
+ *
+ * PURE. The caller refuses; this decides.
+ */
+export function missingWebPageRefusal(project: AssembledProject): string | null {
+  if (project.kind !== 'static') return null;
+  if (project.files[`${project.webDir}/index.html`] || project.files[`${project.webDir}/index.htm`]) return null;
+  const nested = Object.keys(project.files)
+    .filter((p) => p.startsWith(`${project.webDir}/`) && /(^|\/)index\.html?$/i.test(p))
+    .map((p) => p.slice(project.webDir.length + 1))
+    .sort((a, b) => a.split('/').length - b.split('/').length)[0];
+  return nested
+    ? `Your app's index.html is at "${nested}", but a phone app opens the page at the top level. `
+      + 'Move index.html (and the files it uses) to the top level of your app, then press Build again.'
+    : 'Your app has no index.html, so there is no page to put inside the app. '
+      + 'Add an index.html at the top level of your app, then press Build again.';
 }
 
 /** Split a data: URL into its base64 payload and a file extension. Returns null for anything else. */

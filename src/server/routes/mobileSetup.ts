@@ -30,7 +30,7 @@ import { findMissingImportedAssets, missingAssetUserMessage } from '../AgentV3/m
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
-import { assembleMobileProject, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
+import { assembleMobileProject, capacitorMajorFromFiles, missingWebPageRefusal } from '../lib/mobileProjectAssembler';
 // One repository-write implementation, shared with the self-healing build loop so the two can never
 // drift apart on branch handling, blob encoding or ref updates (rule 4).
 import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
@@ -209,6 +209,21 @@ export function registerMobileSetupRoutes(app: Express): void {
         missingAssets: missingAssets.slice(0, 10),
       });
     }
+
+    /**
+     * 🔒 IS THERE A PAGE TO PUT IN THE APP? (autopsy 2026-09-22, user app `bharat-alpha`.)
+     *
+     * That run was green for three steps and then died in 24 seconds at the wrapper, because the app
+     * had no `index.html` where Capacitor opens one. Nothing was broken on the runner — the build could
+     * never have succeeded, and the assembler already knew it: the fact sat in `notes` as advice and
+     * was pushed anyway. This turns the fact into the refusal it always was, one sentence naming the
+     * file, before a repository is created and before the user waits on a run that cannot finish.
+     *
+     * Decided ONLY for a static app; a built app's page is made on the runner and is not ours to
+     * predict (see `missingWebPageRefusal`).
+     */
+    const noPage = missingWebPageRefusal(project);
+    if (noPage) return res.status(422).json({ error: noPage, code: 'no-web-page' });
 
     try {
       const { created, defaultBranch } = await ensureRepo(headers, owner, repoName, `${name} — mobile app, prepared by NavBharatAI`);

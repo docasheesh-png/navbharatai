@@ -78879,3 +78879,118 @@ den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebu
 - Locked in `modePicker.test.ts` (`recentRowClosable`, `lastChatClosed`, the FREE-above case) and
   `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
   the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.
+
+## 2026-09-22 — 🧩 THE STATIC APP THAT STOPPED BEING STATIC (autopsy: a real APK build, dead in 24 seconds)
+
+The admin forwarded a build report: user app `nagpurcity16-gif/bharat-alpha`, workflow `android-apk.yml`,
+**24 seconds**. Machine ready DONE, libraries DONE, *"Building your app"* DONE, *"Preparing the Android
+project"* FAILED with our own guard's words — *"Your app compiled, but it produced no web page to wrap:
+no index.html was found in \"$WEBDIR\" or in any of the usual build folders."* Three green steps, no app,
+and the report told the user the platform could fix it itself.
+
+**LEDGER (5 buckets):** ✅ self-heal 0 · 🔀 workaround 1 (the G17b fallback searched other folders and
+found nothing) · ⏭️ skipped 2 (compile, package) · ❌ still broken 3 (no APK; the warning that names the
+cause was suppressed; the self-repair makes it permanent) · 🥵 struggle 1 (the whole run, plus the advice
+to press Build again).
+
+🔴 **ROOT CAUSE, MEASURED ON THE REAL FUNCTIONS RATHER THAN REASONED ABOUT: our own assembler writes a
+`build` script into every STATIC app, and our own detector decided "is this app built?" by asking whether
+a build script exists.** `buildPackageJson` writes an honest no-op so that `npm run build` succeeds; from
+that moment the app's package.json looks buildable to everything that reads it back. A static app was
+therefore static exactly ONCE, at assembly. The probe output, on production code:
+
+    [nested index]   kind=static  webDir=www  www/index.html? false   notes=[]
+    [static pkg]     "build": "echo \"Static app — the web files in www/ are used as they are.\""
+    [detectProjectKind(our own assembled repo)] = built
+    [detectWebDir(that repo,'built')]           = dist
+    [repairWebDir]   webDir:'www'  →  webDir:'dist'
+
+**A classifier whose input is manufactured by the thing it classifies has to recognise its own hand.**
+
+**THE FOUR DEFECTS, all fixed at the class and each proven by REVERSION (`tests/theStaticAppStaysStatic.test.ts`,
+10 cases; every fix re-broken in turn and the suite confirmed to fail):**
+
+1. **`detectProjectKind` fooled by our own output.** The no-op script is now the exported constant
+   `STATIC_NO_OP_BUILD`, written by `buildPackageJson` and READ BACK by `detectProjectKind`. Every
+   repository already shipped carries that exact string, so this re-classifies them with no migration.
+2. **The self-repair rewrote a CORRECT `www` into a `dist` that never exists.** `WEB_DIR_MISSING` and
+   `webDirForPackageJson` both hardcoded `'built'`, on the reasoning *"this repair only fires once a build
+   has genuinely produced output"* — false for a static app, whose build is the no-op we wrote. Both now
+   ASK (`detectProjectKind(current)`). With (1) in place the repair returns null for a static app, so a
+   failed build can no longer be made permanently unbuildable. ⚠️ The `detail.expected` no-op guard beside
+   it is DEAD for this path (our own guard message never populates it) — the real guard is `repairWebDir`
+   returning null, which is what (1) makes effective.
+3. **A NESTED index.html counted as a page.** `sawIndex` matched `/(^|\/)index\.html?$/`, so
+   `public/index.html` satisfied it, landed at `www/public/index.html` — and Capacitor opens `www/index.html`
+   and nothing else. The app shipped with no page AND the warning was suppressed by the very file that
+   caused it. The question asked is now the one that matters: is there an index.html at the ROOT?
+4. **Two expressions of one fact had drifted across two files.** `detectWebDir` (TypeScript) names where a
+   framework builds; the generated workflow's G17b fallback (shell) searches for the page when the config
+   is wrong. Remix's `build/client` and Angular's nested `<outputPath>/browser` are real answers from the
+   first and were searched by neither. Added, plus a test that derives the invariant per framework, so a
+   rung added to one fails CI until the other knows it. **`public/` stays OUT** — in Create React App it is
+   the SOURCE template, and packaging it would ship a broken shell as a success.
+
+🔒 **THE MISSING SUBSYSTEM: a pre-flight that refuses a press that cannot succeed.** The precedent is in
+this repo already — `signingReadiness` (2026-09-15) exists because a user pressed a button only GitHub knew
+could not work. There was no equivalent for the page, although the assembler KNOWS at assembly time whether
+a static app has one: the fact sat in `notes` as advice and was pushed anyway. `missingWebPageRefusal`
+(pure) is that gate, wired into `/api/mobile-ship/setup` beside the existing `no-ui` and `missing-assets`
+refusals, and it names the file and the move. ⚠️ **It decides ONLY for a static app.** A built app's page is
+produced on the runner by a build we have not run, so refusing one would be a guess — the same asymmetry
+`signingReadiness` states in its own header.
+
+⚠️ **ONE CANDIDATE I RAISED AND THEN KILLED MYSELF, recorded so nobody re-derives it:** a re-ship does NOT
+flip anything. `assembleMobileProject` always reads the WORKSPACE (`loadWorkspaceFiles`), never the GitHub
+repo, so the round trip that would flip `static`→`built` on a second press does not exist on that path. It
+exists only on the REPAIR path, which does read the repo — which is defect 2.
+
+➕ **SIBLINGS FOUND BY THE SAME AUDIT AND FIXED IN THIS CHANGE (rule 3):**
+- **The iOS lane ran `cap sync ios` with NO page guard at all.** The same app Android self-healed, iOS
+  failed with Capacitor's raw path error — which `diagnose()` does not classify. The guard is ONE shared
+  constant (`ENSURE_WEB_PAGE_GUARD`) used by every `cap sync` lane now, never a copy, and its warning says
+  "app wrapper" rather than "Android wrapper" because it is no longer an Android-only sentence.
+- **The iOS lane had NO failure diagnostic either**, so every iOS failure reached the user with no stage
+  and left the repair loop with no `NBAI_FAILED_STAGE` to read. ⚠️ Bolting the Android step on would have
+  been worse than nothing: it tests for an `android` directory an iOS build never has, so every iOS
+  failure would have been labelled `capacitor`. `FAILURE_DIAGNOSTIC` takes the platform now, `failedStage`
+  knows `ios`, and the STALE_WORKFLOW summary stops saying "the Android project" to an iOS user.
+- **The WEB_DIR_MISSING repair was handed two files** while its own comment promised it honoured a custom
+  Vite `outDir` "from the app's own config". `needs` now fetches the vite/angular config it reads.
+- 🔴 **`failedStage` was reading the SCRIPT, not the answer.** GitHub PRINTS each step's whole `run:`
+  block into the log before running it, so the ensure step's own two `echo "NBAI_FAILED_STAGE=capacitor"`
+  lines appear in every log whether or not they execute — **the admin's own report carries them, colour
+  codes and all, beside the one real marker**. Taking the first match meant an Android build that died at
+  Gradle would have been reported as stopping at `capacitor` and repaired for a stage that never
+  happened. It was right in this report by luck, because both said the same word. Markers that are part
+  of an `echo` COMMAND are now skipped; what a step really emitted is not.
+
+⚠️ **AND ONE CORRECTION TO MY OWN FIRST CUT, recorded because it is the interesting half.** The repair
+first asked `detectProjectKind(current)` — and that function also answers `static` for "there is no build
+script at all", which is right in a WORKSPACE (nothing to build ⇒ the files are the site) and wrong in the
+REPAIR path, where such a repo is simply broken. Three existing tests caught it. The repair asks the
+narrow `isAssembledStaticApp` instead: does the package.json carry the exact no-op WE wrote? That is a
+claim about our own output and nothing else, which is all the repair path is entitled to make.
+
+🔴 **STILL OPEN (rule 6) — found by the same audit, NOT fixed here, and each one is real:**
+- The self-repair loop has **no server-side bound**; the only limit is React state that every Build press
+  resets. An unfixable failure can burn a user's Actions minutes without end.
+- **Every successful repair starts TWO GitHub runs** — `/autofix` dispatches the workflow and the client
+  dispatches it again at the top of the next attempt.
+- **`refresh()` reports `fixed: true` for a comment-only rewrite**, because the repair regenerates the
+  workflow under the REPO name while the original was written under the APP name — so the file always
+  differs and a no-op is reported as a fix.
+- **The build panel claims a repair happened on the final attempt even when every autofix returned
+  `fixed: false`.**
+- The **built** branch never asks whether the app can produce a page at all, and nothing ever looks at the
+  repo ROOT — a user-written `"build": "echo ok"` yields `dist` and the same dead run. Deciding that needs
+  a real "is this a FINISHED page or a source template?" test (`%PUBLIC_URL%`, `src="/src/…"`, does it
+  reference an asset that exists beside it), which is a change of its own and is NOT guessed at here.
+- The user's **icon and background colour reach the Android lanes only** — an iOS build silently ships
+  Capacitor's default icon.
+- `SKIP_PATH` drops any directory segment named `build`/`dist`/`coverage` anywhere in the tree, silently
+  and with no note, so an app folder genuinely called `build/` never reaches the repository.
+- All three export generators default `webDir` to `dist` without ever asking `detectWebDir`, which sits in
+  the same repo. Harmless on the ship path (the assembler's config wins) and a real default elsewhere.
+These are two classes — the loop's honesty and its bounds, and platform parity — and both are separate
+changes, deliberately not piled onto this one.

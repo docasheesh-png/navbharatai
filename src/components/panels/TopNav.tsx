@@ -13,22 +13,6 @@ interface MenuItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-/**
- * A CONVERSATION window in the strip (admin 2026-09-21: five professional chats at once). These are not
- * tabs: `openTabs` is one slot per view id and stays that way. A window is one conversation with one
- * expert, so two Teacher AI windows are two chips, each closing only ITS conversation.
- */
-export interface ChatWindowChip {
-  /** The conversation id — the chip's identity and what select/close act on. */
-  id: string;
-  /** "Teacher AI", or "Teacher AI (2)" when that expert has more than one window open. */
-  label: string;
-  /** The expert's emoji, from the same table the Mode picker draws. */
-  emoji: string;
-  /** True for the window on screen right now. */
-  active: boolean;
-}
-
 export interface TopNavProps {
   effectiveDeviceMode: string;
   isSidebarCollapsed: boolean;
@@ -40,10 +24,17 @@ export interface TopNavProps {
   toggleTab: (view: ViewType) => void;
   closeTab: (e: React.MouseEvent, tabId: string) => void;
   menuItems: MenuItem[];
-  /** The open professional conversations, in the order they were opened. Absent ⇒ none rendered. */
-  chatWindows?: ChatWindowChip[];
-  onSelectChatWindow?: (id: string) => void;
-  onCloseChatWindow?: (e: React.MouseEvent, id: string) => void;
+  /**
+   * Open tabs that must NOT be drawn as chips: views that live INSIDE a chat tab because they were
+   * entered through its Mode button (admin 2026-09-22: "mode switch karne se header me new window/tab
+   * na create ho"). Decided by `lib/headerTab.ts`, never here — the header draws what it is told.
+   */
+  hiddenTabs?: string[];
+  /**
+   * The chip to light. Usually `activeView`; while a chat lives inside another tab it is THAT tab, so
+   * a user in Teacher AI still sees "NavBharatAI FREE" lit — they are in a mode of it, not elsewhere.
+   */
+  highlightedTab?: string;
   hasGeneratedCode: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -52,8 +43,8 @@ export interface TopNavProps {
   user: FirebaseUser | null;
   /**
    * Unread notifications — drawn as a DOT on the ☰ button (admin 2026-09-22: *"agar notification aaye
-   * to 3-line menu button par dot dikhe"*). The bell itself left this bar: the row it took is the row
-   * the open chat windows need. The number lives on the sidebar's Notifications row; here only the fact.
+   * to 3-line menu button par dot dikhe"*). The bell itself left this bar to leave the row to the open
+   * tabs. The number lives on the sidebar's Notifications row; here only the fact.
    */
   unreadNotifications?: number;
   setShowAuth: (v: boolean) => void;
@@ -76,8 +67,10 @@ export function TopNav({
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
   onOpenProfile, onOpenSettings, isAdmin, unreadNotifications = 0,
-  chatWindows = [], onSelectChatWindow, onCloseChatWindow,
+  hiddenTabs = [], highlightedTab,
 }: TopNavProps) {
+  const hidden = new Set(hiddenTabs);
+  const lit = highlightedTab ?? activeView;
   /** The one dot both ☰ buttons draw — a fact, never a number; the number is in the sidebar. */
   const menuDot = unreadNotifications > 0 ? (
     <span aria-hidden className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-danger ring-2 ring-card" />
@@ -164,7 +157,7 @@ export function TopNav({
         {/* Open tabs — every pixel the fixed controls leave, scrolling inside it. */}
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-2 select-none flex-1 min-w-0">
           <AnimatePresence mode="popLayout">
-            {openTabs.filter(id => id !== 'home').map((tabId) => {
+            {openTabs.filter(id => id !== 'home' && !hidden.has(id)).map((tabId) => {
               const item = menuItems.find(m => m.id === tabId);
               if (!item) return null;
               const Icon = item.icon;
@@ -176,18 +169,18 @@ export function TopNav({
                   exit={{ opacity: 0, scale: 0.8, x: 10 }}
                   key={tabId}
                   className={`flex items-center shrink-0 h-9 rounded-xl px-3 gap-2 border transition-all cursor-pointer group ${
-                    activeView === tabId
+                    lit === tabId
                       ? 'bg-indigo-600 border-indigo-500 text-on-accent shadow-lg shadow-indigo-600/20'
                       : 'bg-surface border-line text-muted hover:border-line'
                   }`}
                   onClick={() => setActiveView(tabId as ViewType)}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${activeView === tabId ? 'text-ink' : 'text-accent-text'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${lit === tabId ? 'text-ink' : 'text-accent-text'}`} />
                   <span className="text-[11px] font-bold whitespace-nowrap">{item.label}</span>
                   <button
                     onClick={(e) => closeTab(e, tabId)}
                     className={`p-0.5 rounded-md transition-all ${
-                      activeView === tabId
+                      lit === tabId
                         ? 'hover:bg-raised text-muted hover:text-ink'
                         : 'hover:bg-raised text-faint hover:text-ink'
                     }`}
@@ -197,42 +190,10 @@ export function TopNav({
                 </motion.div>
               );
             })}
-            {/* CONVERSATION WINDOWS (admin 2026-09-21). A professional was never in `menuItems` — the
-                `if (!item) return null` above is deliberate, it is a child surface — so until now an
-                open expert chat had NO chip here at all, and a second chat with the same expert had
-                nowhere to exist. These chips are keyed by CONVERSATION, so "Teacher AI" and
-                "Teacher AI (2)" are two windows of one expert, and ✕ closes exactly that conversation. */}
-            {chatWindows.map((win) => (
-              <motion.div
-                layout
-                initial={{ opacity: 0, scale: 0.8, x: -10 }}
-                animate={{ opacity: 1, scale: 1, x: 0 }}
-                exit={{ opacity: 0, scale: 0.8, x: 10 }}
-                key={`chat:${win.id}`}
-                role="tab"
-                aria-selected={win.active}
-                className={`flex items-center shrink-0 h-9 rounded-xl px-3 gap-2 border transition-all cursor-pointer group ${
-                  win.active
-                    ? 'bg-indigo-600 border-indigo-500 text-on-accent shadow-lg shadow-indigo-600/20'
-                    : 'bg-surface border-line text-muted hover:border-line'
-                }`}
-                onClick={() => onSelectChatWindow?.(win.id)}
-              >
-                <span aria-hidden className="text-[13px] leading-none">{win.emoji}</span>
-                <span className="text-[11px] font-bold whitespace-nowrap">{win.label}</span>
-                {onCloseChatWindow && (
-                  <button
-                    onClick={(e) => onCloseChatWindow(e, win.id)}
-                    aria-label={`Close ${win.label}`}
-                    className={`p-0.5 rounded-md transition-all ${
-                      win.active ? 'hover:bg-raised text-muted hover:text-ink' : 'hover:bg-raised text-faint hover:text-ink'
-                    }`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </motion.div>
-            ))}
+            {/* NO PER-CONVERSATION CHIPS (admin 2026-09-22: "mode switch karne se header me new
+                window/tab na create ho"). The chips that stood here from 2026-09-21 to 2026-09-22
+                moved into the Mode list's Recent group, which is now the window switcher. A view
+                entered through a chat tab's Mode button is in `hiddenTabs` and draws nothing here. */}
           </AnimatePresence>
         </div>
       </div>

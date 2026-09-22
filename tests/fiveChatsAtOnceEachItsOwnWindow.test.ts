@@ -27,8 +27,10 @@ describe('windows live BESIDE the tab list, never inside it', () => {
   it('there is ONE answer to "which window is on screen", and every reader asks it', () => {
     expect(app).toMatch(/const activeChat = useMemo\(\(\) => \{[\s\S]{0,300}?same\[same\.length - 1\] \?\? null;/);
     expect(app).toContain('const onScreen = activeChat?.id === win.id;');
-    expect(app).toContain('active: activeChat?.id === w.id,');
-    expect(app).toContain("if (activeChat && activeChat.professionalId === view) { closeChatWindow(undefined, activeChat.id); return; }");
+    // The Mode sheet's ✓ and the header's chip both used to read it; since 2026-09-22 the sheet is the
+    // only switcher, and it reads the same answer.
+    expect(app).toContain('activeChatId={activeChat?.id ?? null}');
+    expect(app).not.toContain('active: activeChat?.id === w.id,');
   });
 });
 
@@ -70,7 +72,11 @@ describe('every door into an expert leads to a window', () => {
   it('an ENDED row is resumed only AFTER the cap is checked, and never by a history view itself (review finding)', () => {
     const at = app.indexOf('const toggleTab = useCallback');
     const body = app.slice(at, app.indexOf('const closeTab', at));
-    const capAt = body.indexOf("if (openChats.length >= MAX_OPEN_CHATS) { addToast(capMessage(), 'warning'); return false; }");
+    // The cap counts Doctor AI and the image studio too since 2026-09-22, so it asks `chatSlotFree`
+    // with the open tabs — never `openChats.length` alone.
+    const capAt = body.indexOf("if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return false; }");
+    expect(body).not.toContain('openChats.length >= MAX_OPEN_CHATS');
+    expect(body).toContain('openWindow(openChats, { id: wanted, professionalId: view }, openTabs)');
     const resumeAt = body.indexOf('resumeArchived(store, view, resumeEndedAt)');
     expect(capAt).toBeGreaterThan(0);
     expect(resumeAt).toBeGreaterThan(capAt);
@@ -98,13 +104,16 @@ describe('every door into an expert leads to a window', () => {
   });
 });
 
-describe('the header shows the windows', () => {
-  it('chips are keyed by CONVERSATION, labelled per window, and close exactly one conversation', () => {
-    expect(nav).toContain('key={`chat:${win.id}`}');
-    expect(nav).toContain('onClick={() => onSelectChatWindow?.(win.id)}');
-    expect(nav).toContain('onClick={(e) => onCloseChatWindow(e, win.id)}');
-    expect(app).toContain('label: windowLabel(openChats, w.id, PROFESSIONAL_CHATS[w.professionalId]?.name ?? w.professionalId),');
-    expect(app).toContain('onCloseChatWindow={closeChatWindow}');
+describe('the header shows NO window chips — the Mode list is the switcher (2026-09-22)', () => {
+  it('the per-conversation chips are gone from the header, and App hands it none', () => {
+    // Admin: "navbharatai me mode switch karne se header me new window/tab na create ho". The chips this
+    // block pinned from 2026-09-21 moved into the Mode list's Recent group (theModeListIsTheWindowSwitcher
+    // .test.ts locks that side).
+    expect(nav).not.toContain('chatWindows');
+    expect(nav).not.toContain('onSelectChatWindow');
+    expect(nav).not.toContain('onCloseChatWindow');
+    expect(app).not.toContain('chatWindows={');
+    expect(app).not.toContain('onCloseChatWindow=');
   });
 
   it('the professional tab-chip rule is untouched: an unregistered id still renders no tab chip', () => {
@@ -114,8 +123,4 @@ describe('the header shows the windows', () => {
     expect(app).not.toMatch(/\{ id: 'teacher_ai',\s*label:/);
   });
 
-  it('the chips are themed with tokens, not literals', () => {
-    const chips = nav.slice(nav.indexOf('{chatWindows.map((win) =>'), nav.indexOf('</AnimatePresence>', nav.indexOf('{chatWindows.map((win) =>')));
-    expect(chips).not.toMatch(/text-white|bg-\[#|text-gray-\d|#[0-9a-f]{6}/);
-  });
 });

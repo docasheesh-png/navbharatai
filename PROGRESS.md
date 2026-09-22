@@ -78213,3 +78213,31 @@ ungli se khich ke kahi bhi rakh sake! expand (full screen on) wala theek hai."*
   `nbai.focusExit.pos` and clamped to whatever screen it is next shown on. Keyboard still exits.
 - The header's ENTER button is untouched. Locked by `tests/theExitButtonGoesWhereTheFingerPutsIt.test.ts`
   and two `topRightPosition` cases in `floatingButtonPosition.test.ts`.
+
+## 2026-09-22 — 🗂️ The Mode list is the window switcher; a mode switch grows no header tab
+
+Admin: *"navbharatai free me koi user mode se professionals, image generator change kare to, abhi header me
+new window me aa jate hai, isko badalna hai. mode par click karne se jo list ati hai, wahi par 2 type ke colom
+hai, upar recent chat, niche new chat … recent me woh chat jo abhi open hai, up to 5, niche new me baki sabhi
+… recent chat ke sabhi chat waise hi switch hone chahiye jaise multi window se hote hai … navbharatai me mode
+switch karne se header me new window/tab na create ho."* Plan put to the admin first (*"pagle samjh lena"*),
+two assumptions stated, approved with "haan".
+
+- **The Mode list has TWO GROUPS** (`modePicker.ts`: `recentModeEntries` + `newModeEntries`). *Recent chat* =
+  every open chat, one row each — FREE, the image studio, Doctor AI, and every professional WINDOW keyed by
+  its conversation (`recent:teacher_ai#<id>`, labelled by the same `windowLabel` the chips used) — each with
+  its own ✕. A line. *New chat* = everything that starts something. The per-row "Recent"/"New chat" tags are
+  gone; the headings say it. A recent row switches through `toggleTab(view, true, conversationId)`, the SAME
+  path the header chip used, so there is one switch, not two.
+- **The header's per-conversation chips (2026-09-21) are GONE**, and a view entered through a chat tab's Mode
+  button draws no chip: `lib/headerTab.ts` (pure) decides `hiddenHeaderTabs` (every open tab whose opener is
+  a mode surface) and `headerTabFor` (the tab a chat was entered through stays lit — a user in Teacher AI
+  still sees "NavBharatAI FREE" lit). The DOOR decides: the image studio picked from Mode is parented to that
+  chat tab and hidden; opened from Other Tools it keeps its chip exactly as before (assumption (b), approved).
+- **The five are counted across every chat the list can switch to** (`chatSlotsUsed`, `SLOT_VIEWS =
+  ['sda_chat', 'imagegen']`; assumption (a), approved — "doctor + 4 = 5"; the FREE chat is the tab's home and
+  is never counted). `openWindow` takes the open tabs; `toggleTab`, the image pick and the Doctor pick all
+  ask `chatSlotFree`. A fresh Doctor case REPLACES the open one and takes no new slot.
+- Locked by `tests/theModeListIsTheWindowSwitcher.test.ts` (pure `headerTab` + source pins), new cases in
+  `modePicker.test.ts` and `chatWindows.test.ts`; the 2026-09-21 chip pins in
+  `fiveChatsAtOnceEachItsOwnWindow.test.ts` re-pointed in place with the reason. KB `professionals` updated.

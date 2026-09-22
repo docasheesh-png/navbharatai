@@ -78356,3 +78356,92 @@ Tests: `tests/theFrameGrowsOnTheAxisYouPressed.test.ts` (10) — the pure rule (
 constant reference across every preset and custom frame, shape kept past the reference, junk → 0) and source
 guards (percent-sized canvas, square stage, distinct ids). **Proven by reversion three ways:** reference
 following the frame; the width-pinned canvas restored; shared ids restored.
+## 2026-09-22 — The image studio opens FREE, and the text can fade without the bar fading
+
+**Two admin requests on the image generator, both small on the surface and both with one real trap
+underneath.**
+
+### 1 · Every open starts on FREE (`AIImageGenerator.tsx`)
+
+Admin: *"jab koi user navbharatai free me mode badal kar image genrator ai me swich kare, to default
+free mode open hona chahiye. abhi paid mode open ho raha hai."*
+
+🔴 **NOTHING WAS BROKEN — `readTier()` already defaulted to `'free'`.** What produced the report is
+that the tier was **persisted**, so anybody who pressed Pro once was on the paid tier on every visit
+afterwards, having chosen it only on the first. The component said so in its own words, quoting an
+earlier instruction: *"the toggle is a PREFERENCE — 'user uske kabhi bhi free aur paid me convert kar
+sake', and a preference that resets on every panel open is not one."*
+
+**That reading was fair, and this REVERSES it** — recorded rather than quietly changed, with the old
+reasoning kept in the file. The half of the older instruction that still binds is *"kabhi bhi convert
+kar sake"*, and it is untouched: the toggle still switches instantly for as long as the panel is open.
+
+🔑 **MONEY POINTS THE SAME WAY, which is what makes free the SAFE default and not merely the requested
+one.** A Pro image costs ₹1 of the user's balance per press, so a remembered Pro is a charge nobody
+decided on this visit. A remembered FREE would be harmless — but "remember only the cheap one" is a
+rule nobody can predict, so the tier is not stored at all. **`nbai.imagegen.tier` and both its read
+and write are deleted**, not left in place: a value nothing reads is a value the next reader trusts.
+
+🔒 **The options-fold preference is deliberately LEFT persisting.** That is what makes this a decision
+about money rather than a blanket "stop remembering things", which would have been a different and
+worse change. A test asserts both halves.
+
+### 2 · A text-opacity slider, directly under Size (`textOverlay.ts`, `TextOverlayEditor.tsx`)
+
+Admin: *"image me jab, add text pess kiya jaye, to size ke just niche ek aur controller aye, text
+opacity ka … jisko kam jyada karne se text ki poacity kam jyada ko ja sake."*
+
+🔑 **WHAT WAS MISSING, precisely.** `band` carries its own alpha inside its `rgba(...)`, and the
+editor's existing Opacity slider edits exactly that — so the **BAR** could always be faded and the
+**WORDS** never could. A watermark, or a caption meant to sit under a photograph rather than on top of
+it, was not expressible at all.
+
+**`TextLayer.opacity` (0..1, default 1)**, applied as `ctx.globalAlpha` in `drawTextLayers` — and
+**the POSITION of that one line is the whole feature**: after the background and the border, before
+the outline, the fill and a rate card's leader dots. One line either side is a visible bug — a bar the
+user set to 55% quietly dimming, or a solid outline ringing faded letters. `ctx.save()`/`restore()`
+already bracket each layer, so two layers with different opacities cannot bleed. The preview and the
+export call the same function, so the slider is live with no second code path.
+
+⚠️ **NOT folded into `color` as an rgba**, tempting as that is: the swatch row compares
+`active.color === c` against a hex, and `outlineFor` reads the colour's LUMINANCE to pick a
+contrasting outline. One meaning per field.
+
+🔴 **THE TRAP MY OWN TEST CAUGHT, and it is this repo's most-repeated arithmetic: `Number(null)` is
+0, which is FINITE.** `clamp(v, 0, 1, 1)` routes to its fallback only on a non-finite number, so a
+layer round-tripped through JSON — where `undefined` becomes `null` — would have read "absent" as
+"fully transparent" and **the caption would have vanished from a stored banner**. `Number('')` is 0
+too. Absence is now tested by VALUE before any number is taken; an explicit 0 is still honoured,
+because a user who slides the text to invisible meant it. This is the same shape as
+`REFERRER_LIFETIME_CAP_TOKENS` and the rollout percentages, both already recorded in `CLAUDE.md` —
+the third time, and the first where the cost would have been a user's own picture.
+
+⚠️ **Two sliders on one panel now say "opacity" and they fade different things**, so the new one
+carries the word **"Text"** in its VISIBLE label — not only in its `aria-label`. Naming just one of
+them would leave a shopkeeper guessing which slider moves the words, which is the kind of second
+problem a fix is not allowed to trade for the first. Shipped copy on the background row is untouched.
+
+### Verification
+
+`tests/theTextFadesButTheBarDoesNot.test.ts` (16 cases) asserts the real DRAW CALLS through a
+recording context — text at the layer's alpha, **bar and border at 1** — plus the legacy-layer,
+null and clamp cases, and source-level guards on the slider's position and the assignment's
+ordering. `tests/theImageStudioOpensFree.test.ts` (9 cases) covers the tier and the knowledge base.
+**Reversion-proven five ways:** move the alpha above the background → 3 fail; drop the null guard →
+1; default the opacity to 0 → 1; delete the slider → 3; restore the tier persistence → 1.
+
+⚠️ **Two existing suites pinned the persistence and were rewritten, not deleted.**
+`ImageStudioPro.render.test.tsx`'s case was named *"defaults to free, and an unreadable stored value
+also means free"* — its REASON is unchanged and now holds unconditionally; only its localStorage
+assertions went. `proTellsYouBeforeYouType.test.ts` asserted `setItem(TIER_KEY, chosenTier)` and never
+`effectiveTier`; that protection (never persist a FALLBACK over a real choice) is now unreachable
+because nothing persists the tier, so the `effectiveTier` half is kept as its own case and the
+storage half is replaced by an assertion that no writer exists.
+
+⚠️ **AND THE FIRST THING THIS SESSION DID WAS READ A STALE TREE.** The screenshot showed Font,
+Opacity and Border rows that `TextOverlayEditor.tsx` did not have, and the honest conclusion was not
+"the admin is describing something else" but that my branch was based on a `main` from before #3224.
+Re-branching from `origin/main` produced the file the admin was looking at. Safeguard #1, hitting a
+component rather than a roadmap.
+
+---

@@ -135,12 +135,28 @@ function labelOf(options: ImageOption[], id: string): string {
 }
 
 /**
- * Which tier the user is on. Persisted, because the toggle is a PREFERENCE — the admin's words were
- * "user uske kabhi bhi free aur paid me convert kar sake", and a preference that resets on every
- * panel open is not one. Free is the default and the fallback for any unreadable value: a storage
- * read that throws must never silently land somebody on the paid tier.
+ * 🔴 EVERY OPEN STARTS ON FREE — the tier is NOT remembered (admin-mandated 2026-09-22).
+ *
+ * Admin, verbatim: *"jab koi user navbharatai free me mode badal kar image genrator ai me swich
+ * kare, to default free mode open hona chahiye. abhi paid mode open ho raha hai."*
+ *
+ * ⚠️ THIS REVERSES A DOCUMENTED DECISION, so the old reasoning is kept here rather than deleted.
+ * It read: *"Persisted, because the toggle is a PREFERENCE — the admin's words were 'user uske
+ * kabhi bhi free aur paid me convert kar sake', and a preference that resets on every panel open is
+ * not one."* That was a fair reading, and it produced exactly the outcome reported: a user who
+ * tried Pro once landed on the paid tier on every visit afterwards, having chosen it only on the
+ * first. The half of the older instruction that still binds is "kabhi bhi convert kar sake" — and
+ * it is untouched, because the toggle still switches instantly, for as long as the panel is open.
+ *
+ * 🔑 AND MONEY POINTS THE SAME WAY, which is what makes this the safe direction rather than merely
+ * the requested one: a Pro image costs real rupees per press, so a REMEMBERED Pro is a charge the
+ * user did not decide on this visit. Free is the only default that cannot spend somebody's balance
+ * by being forgotten about. A remembered FREE would be harmless — but a rule of "remember only the
+ * cheap one" is a rule nobody can predict, so the tier is simply not stored at all.
+ *
+ * ⚠️ NOTHING IS LEFT WRITING TO STORAGE. The `nbai.imagegen.tier` key and its read/write are gone
+ * rather than kept "in case": a value nothing reads is a value the next reader will trust.
  */
-const TIER_KEY = 'nbai.imagegen.tier';
 /**
  * Whether the four selectors are shown or folded (admin 2026-09-21: "in charo ko bhi hide/expand ka
  * button do"). Remembered per device: somebody who folds them wants them folded next time too. The
@@ -165,20 +181,13 @@ function readOptionsOpen(): boolean {
  * places out of three.
  */
 const PRO_PRICE_INR = 1;
-function readTier(): 'free' | 'pro' {
-  try {
-    return localStorage.getItem(TIER_KEY) === 'pro' ? 'pro' : 'free';
-  } catch {
-    return 'free';
-  }
-}
-
 export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) {
-  // The user's REMEMBERED choice, and what is actually shown, are two different things — see
+  // What the user PRESSED this visit, and what is actually shown, are two different things — see
   // `effectiveTier` below. Keeping them separate is what lets a dead paid tier be hidden WITHOUT
-  // overwriting a preference the user really expressed: the day Pro is switched on, their choice
-  // returns by itself.
-  const [chosenTier, setChosenTier] = useState<'free' | 'pro'>(readTier);
+  // discarding a press the user really made: the moment Pro is switched on, their choice takes
+  // effect by itself. (It used to survive the panel closing; see the block above for why it no
+  // longer does — the two states are still separate, over a shorter life.)
+  const [chosenTier, setChosenTier] = useState<'free' | 'pro'>('free');
   const [optionsOpen, setOptionsOpen] = useState<boolean>(readOptionsOpen);
   useEffect(() => {
     try { localStorage.setItem(OPTIONS_KEY, optionsOpen ? 'open' : 'closed'); } catch { /* a private window; the fold simply is not remembered */ }
@@ -634,12 +643,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
     return `${Math.floor(diff / 86400000)}d ago`;
   };
-
-  // Persisted best-effort: a storage that refuses (private window, blocked site data) must leave the
-  // toggle working for this session rather than break the panel.
-  useEffect(() => {
-    try { localStorage.setItem(TIER_KEY, chosenTier); } catch { /* per-viewer convenience only */ }
-  }, [chosenTier]);
 
   // Ask the server whether the paid tier can serve, BEFORE the user writes anything. While the
   // answer is unknown (`null`) the panel behaves exactly as it did before this existed.

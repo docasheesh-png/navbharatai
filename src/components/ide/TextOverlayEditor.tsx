@@ -491,6 +491,33 @@ export function TextOverlayEditor({ imageUrl, initialLayers, extracted, onApply,
               />
             </div>
 
+            {/* ── TEXT OPACITY — directly under Size, which is where it was asked for ──────────
+                Admin 2026-09-22: *"size ke just niche ek aur controller aye, text opacity ka (same
+                size aur opacity ke taraha)"*. Two sliders on this panel now say "opacity" and they
+                fade DIFFERENT things, so this one carries the word "Text" in its visible label —
+                the row below Background keeps its own plain "Opacity" and its adjacency. Naming
+                only one of them would have left a shopkeeper guessing which slider moved the words.
+
+                The readout is the same shape as the background row's, minus its "None" case: a
+                background at 0 is genuinely absent, while text at 0% is still a layer the user is
+                editing and still selectable on the picture — calling it "None" would say it had
+                been removed. */}
+            <div className="flex items-center gap-3">
+              <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Text opacity</label>
+              <input
+                type="range"
+                aria-label="Text opacity"
+                min={0}
+                max={100}
+                value={Math.round(active.opacity * 100)}
+                onChange={(e) => patch(active.id, { opacity: Number(e.target.value) / 100 })}
+                className="flex-1 accent-[color:var(--accent)]"
+              />
+              <span className="text-[11px] text-faint w-10 text-right shrink-0">
+                {Math.round(active.opacity * 100)}%
+              </span>
+            </div>
+
             <div className="flex items-center gap-3">
               <label className="text-[11px] text-muted w-[4.5rem] shrink-0">Colour</label>
               <div className="flex flex-wrap items-center gap-1.5">

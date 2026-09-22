@@ -97,8 +97,23 @@ describe('🔒 the trail — all four steps, one predicate', () => {
     expect(bill).toContain("from '../../lib/walletNeedsTopUp'");
     // Read from the wallet this panel already holds — no second fetch, no second source of truth.
     expect(bill).toContain('const needsTopUp = walletNeedsTopUp({ wallet, loading: loadingWallet });');
-    expect(bill.match(/needsTopUp && <span aria-hidden className="w-2 h-2 rounded-full bg-danger" \/>/g) ?? [])
-      .toHaveLength(2);
+    // 🔴 THE DOT IS DRAWN TWICE, AND NEITHER MAY SIT INSIDE SOMETHING A PHONE HIDES. The capsule
+    // row (2026-09-22) stands its icon chip down below `sm` — it is the widest thing in the row
+    // that carries no information — and the first draft put the dot inside that chip, which
+    // removed it from every phone, i.e. from exactly the screens where a ₹0 balance matters most.
+    // Caught by measurement before it shipped; held here so it cannot come back.
+    const dots = bill.match(/needsTopUp && <span aria-hidden className="[^"]*rounded-full bg-danger" \/>/g) ?? [];
+    expect(dots).toHaveLength(2);
+    for (const dot of dots) {
+      // The CLASS LIST only — `aria-hidden` is the attribute that makes the dot decorative beside
+      // its own `sr-only` words, and must not be confused with the `hidden` display utility.
+      const classes = (dot.match(/className="([^"]*)"/)?.[1] ?? '').split(/\s+/);
+      const hides = classes.filter((c) => c === 'hidden' || c.endsWith(':hidden'));
+      expect(hides, `a dot that a phone hides is not a warning: ${dot}`).toEqual([]);
+    }
+    // The capsule's dot is positioned off the CAPSULE, which is why the capsule is `relative`.
+    expect(bill).toContain('absolute top-1.5 right-2 w-2 h-2 rounded-full bg-danger');
+    expect(bill).toMatch(/"relative flex-1 min-w-fit/);
     expect(bill).toContain('Purchase Wallet Tokens');
   });
 

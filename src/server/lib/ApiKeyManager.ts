@@ -14,18 +14,44 @@ import crypto from 'crypto';
  * The scopes a key can be granted. Keep this the single source of truth.
  *
  * 🔴 EVERY SCOPE HERE MUST HAVE AN ENDPOINT THAT REQUIRES IT (admin 2026-09-17: "api keys farzi nahi
- * ho"). Until this date `read:usage` and `read:builds` were tickable in the UI and required by NOTHING —
+ * ho"). Before that date `read:usage` and `read:builds` were tickable in the UI and required by NOTHING —
  * a user could grant them, and nothing anywhere changed. That is the second absolute rule's forbidden
  * state, the same one the inert "Provider Kill Switches" were removed for. `developerApi.test.ts`
- * asserts each scope against the route that enforces it, so a fifth scope cannot ship as a label.
+ * asserts each scope against the route that enforces it, so a new scope cannot ship as a label.
  *
- *   read:profile  → GET  /api/v1/me
- *   read:usage    → GET  /api/v1/usage   (and the usage half of /me)
- *   read:builds   → GET  /api/v1/builds
- *   ai:chat       → POST /api/v1/chat/completions — NavBharatAI's AI, on the holder's wallet
+ *   all               → every route below, AND anything added later. See `FULL_ACCESS_SCOPE`.
+ *   read:profile      → GET  /api/v1/me
+ *   read:usage        → GET  /api/v1/usage   (and the usage half of /me)
+ *   read:builds       → GET  /api/v1/builds
+ *   ai:chat           → POST /api/v1/chat/completions — NavBharatAI's AI, on the holder's wallet
+ *   ai:professionals  → POST /api/v1/professionals/:id/chat — the ~80 expert AIs, by id
+ *   ai:images         → POST /api/v1/images/generations — NavBharatAI Pro images, ₹1 each
  */
-export const API_SCOPES = ['read:profile', 'read:usage', 'read:builds', 'ai:chat'] as const;
+export const API_SCOPES = [
+  'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals', 'ai:images',
+] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
+
+/**
+ * 🔑 FULL ACCESS — one scope that satisfies every check, present and FUTURE (admin 2026-09-22).
+ *
+ * The admin asked for it, and it is what every API a developer already uses offers: a key you make
+ * once for your own backend and never revisit. Ticking six boxes to reach six endpoints is friction
+ * that buys nothing when the answer is "all of them".
+ *
+ * ⚠️ **THE HONEST COST, WRITTEN DOWN RATHER THAN DISCOVERED: it auto-grants scopes that do not exist
+ * yet.** A key made today carries whatever door NavBharatAI opens next, without the holder deciding.
+ * That is genuinely what "full access" means, so the answer is not to weaken it but to SAY it — the
+ * screen where the key is made spells it out, and the narrow scopes remain the recommended default
+ * for a key that leaves your own machine. The per-key daily ₹ cap still binds a full-access key
+ * exactly as it binds any other: `all` widens WHAT a key may do, never HOW MUCH it may spend.
+ */
+export const FULL_ACCESS_SCOPE = 'all';
+
+/** Every scope EXCEPT `all` — the ones that name exactly one door, which is what `SCOPE_ROUTES` maps. */
+export type SpecificApiScope = Exclude<ApiScope, 'all'>;
+export const SPECIFIC_API_SCOPES: readonly SpecificApiScope[] =
+  API_SCOPES.filter((s): s is SpecificApiScope => s !== FULL_ACCESS_SCOPE);
 
 /**
  * What each scope lets a key do, in the words the user reads when choosing it.
@@ -36,10 +62,15 @@ export type ApiScope = (typeof API_SCOPES)[number];
  * two cannot drift.
  */
 export const API_SCOPE_DESCRIPTIONS: Readonly<Record<ApiScope, { title: string; detail: string }>> = {
+  // ⚠️ The warning is part of the description, not a footnote elsewhere: this is the one scope whose
+  // meaning changes after the key is made, and the moment it is ticked is the only moment to say so.
+  all: { title: 'Full access', detail: 'Everything below, and anything added to the API later — without you editing this key. Convenient for your own backend; prefer the specific permissions for a key that leaves your machine. Your daily limit still applies.' },
   'read:profile': { title: 'Profile', detail: 'Your display name and account id.' },
   'read:usage': { title: 'Usage & balance', detail: "Your wallet balance and this month's builds and spend." },
   'read:builds': { title: 'Your apps', detail: 'The list of apps you have built, with their live links.' },
   'ai:chat': { title: "NavBharatAI's AI", detail: 'Ask NavBharatAI questions from your own program or app. Costs come from your wallet, up to the daily limit you set on the key.' },
+  'ai:professionals': { title: 'Expert AIs', detail: 'Ask any NavBharatAI expert by name — Teacher, Lawyer, Doctor-side health helpers, Kisan, Accountant and the rest. Same wallet, same daily limit.' },
+  'ai:images': { title: 'Image generation', detail: 'Make images from your own program, on the Pro engine. Each image costs ₹1 from your wallet and counts towards this key\u2019s daily limit.' },
 };
 
 export const KEY_PREFIX = 'nbai_';
@@ -98,9 +129,29 @@ export function normalizeScopes(requested: unknown): ApiScope[] {
   return [...set];
 }
 
-/** Whether a key's granted scopes include the one an endpoint requires. */
+/**
+ * Whether a key's granted scopes include the one an endpoint requires.
+ *
+ * 🔑 `all` satisfies EVERY check — that is the whole of what full access means, and putting it here
+ * (in the ONE function every guard already calls) is what makes it true for routes nobody has written
+ * yet. A route that asked `scopes.includes(x)` directly would silently refuse a full-access key, so
+ * there must be no second way to ask this question.
+ */
 export function hasScope(granted: readonly string[] | undefined, required: ApiScope): boolean {
-  return Array.isArray(granted) && granted.includes(required);
+  if (!Array.isArray(granted)) return false;
+  return granted.includes(FULL_ACCESS_SCOPE) || granted.includes(required);
+}
+
+/**
+ * The scopes a key really carries, expanded. `['all']` reads back as every scope.
+ *
+ * Used where a key must SHOW what it can do (`GET /api/v1/key`) rather than be checked against one
+ * requirement — a developer debugging a 403 needs the list, and "all" alone is not a list.
+ */
+export function effectiveScopes(granted: readonly string[] | undefined): ApiScope[] {
+  if (!Array.isArray(granted)) return [];
+  if (granted.includes(FULL_ACCESS_SCOPE)) return [...API_SCOPES];
+  return API_SCOPES.filter((s) => granted.includes(s));
 }
 
 /**

@@ -25,7 +25,7 @@
 //
 // PURE — no I/O, no clock, no env. The route owns every byte of I/O.
 
-import type { ApiScope } from './ApiKeyManager';
+import type { SpecificApiScope } from './ApiKeyManager';
 
 // ── Per-key daily cap ────────────────────────────────────────────────────────────────────────────
 
@@ -206,7 +206,9 @@ export function chatCompletionResponse(
 
 export type ApiErrorCode =
   | 'missing_scope' | 'invalid_request' | 'content_policy' | 'daily_cap_reached'
-  | 'insufficient_balance' | 'rate_limited' | 'engine_unavailable';
+  | 'insufficient_balance' | 'rate_limited' | 'engine_unavailable'
+  /** The thing addressed does not exist — an unknown expert id, or an unknown model name. */
+  | 'not_found';
 
 /** The error envelope every v1 route returns — one shape a client can branch on. PURE. */
 export function apiError(code: ApiErrorCode, message: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -254,13 +256,136 @@ export function takeRateSlot(prev: RateWindow | undefined, nowMs: number, limit 
 
 // ── Which scope guards which door ────────────────────────────────────────────────────────────────
 
-/** Stated here so a test can assert every scope is enforced by a real route. */
-export const SCOPE_ROUTES: Readonly<Record<ApiScope, { method: 'GET' | 'POST'; path: string }>> = {
+/**
+ * Stated here so a test can assert every scope is enforced by a real route.
+ *
+ * ⚠️ Keyed by `SpecificApiScope`, NOT `ApiScope`: `all` deliberately has no single route, because it
+ * is every route. Its enforcement is proven a different way — `hasScope(['all'], s)` for every `s` —
+ * and the two together keep the original guarantee whole: no scope on this screen is a label.
+ */
+export const SCOPE_ROUTES: Readonly<Record<SpecificApiScope, { method: 'GET' | 'POST'; path: string }>> = {
   'read:profile': { method: 'GET', path: '/api/v1/me' },
   'read:usage': { method: 'GET', path: '/api/v1/usage' },
   'read:builds': { method: 'GET', path: '/api/v1/builds' },
   'ai:chat': { method: 'POST', path: '/api/v1/chat/completions' },
+  'ai:professionals': { method: 'POST', path: '/api/v1/professionals/:id/chat' },
+  'ai:images': { method: 'POST', path: '/api/v1/images/generations' },
 };
+
+// ── Addressing an expert ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * 🧑‍🏫 THE ~80 EXPERT AIs, REACHABLE BY NAME (admin 2026-09-22: add "professionals").
+ *
+ * Two entry points, ONE handler, and that is the design rather than an accident:
+ *
+ *   • `POST /api/v1/professionals/:id/chat` — the plain, obvious door, and the one `ai:professionals`
+ *     guards on its own registration line (so the "every scope opens a real endpoint" test can see it).
+ *   • `model: "navbharatai/teacher_ai"` on `/chat/completions` — because a developer already holds an
+ *     SDK that speaks chat-completions, and asking them to hand-roll a second HTTP call to reach a
+ *     different persona is friction with nothing behind it. This is how every OpenAI-compatible router
+ *     addresses a model, so it needs no explaining.
+ *
+ * 🔒 The prefix is OUR OWN BRAND, never a vendor (White-Label Law). `navbharatai/teacher_ai` says
+ * which of NavBharatAI's experts answered; it says nothing about who built the engine underneath.
+ */
+export const PROFESSIONAL_MODEL_PREFIX = `${PUBLIC_MODEL_NAME}/`;
+
+/** `navbharatai/teacher_ai` → `teacher_ai`. Anything else → null (including the plain model name). */
+export function professionalIdFromModel(model: unknown): string | null {
+  const text = String(model ?? '').trim().toLowerCase();
+  if (!text.startsWith(PROFESSIONAL_MODEL_PREFIX)) return null;
+  const id = text.slice(PROFESSIONAL_MODEL_PREFIX.length).trim();
+  // An id is an internal identifier, so it is a narrow character set on purpose: this string reaches
+  // a registry lookup, and refusing anything unusual here is cheaper than trusting the lookup.
+  return /^[a-z0-9_]{1,64}$/.test(id) ? id : null;
+}
+
+/** The model name one expert answers under. */
+export function professionalModelName(id: string): string {
+  return `${PROFESSIONAL_MODEL_PREFIX}${id}`;
+}
+
+// ── Images ───────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 🖼️ ONE IMAGE, ONE RUPEE — the price this platform already charges, not a new one (admin 2026-09-22).
+ *
+ * 🔴 WHY THE API'S IMAGES ARE THE **PRO** TIER AND NOT THE FREE ONE, which is the whole decision here.
+ * THE ONE-WALLET LAW forbids inventing a cost, and **no image model is on the rate card** — so a free-
+ * tier image genuinely cannot be priced, and its paid rungs are bounded by a platform-wide daily COUNT
+ * that exists to stop NavBharatAI's own bill running away. Serving an API caller from that pool would
+ * spend a budget the app's own users are inside, for a caller we could not bill. The Pro tier has a
+ * real, already-published price (₹1), a real wallet debit and a real margin check — so it is the only
+ * honest engine for a door that bills. `IMAGE_PRO_PRICE_INR` stays the single source of that number.
+ */
+export const MAX_IMAGES_PER_REQUEST = 4;
+
+export type ImageResponseFormat = 'b64_json' | 'data_url';
+
+export type ImageRequestVerdict =
+  | { ok: true; prompt: string; n: number; size?: string; format: ImageResponseFormat }
+  | { ok: false; reason: 'no-prompt' | 'too-long' | 'bad-n' | 'bad-format' };
+
+export const MAX_IMAGE_PROMPT_CHARS = 2_000;
+
+/**
+ * Read an OpenAI-shaped `images/generations` body. PURE, total, never throws.
+ *
+ * ⚠️ `n` is CLAMPED nowhere — an out-of-range `n` is REFUSED instead, unlike the daily cap which is
+ * clamped. The difference is who pays for being wrong: a clamped cap costs the holder nothing, while
+ * silently turning `n: 50` into 4 would bill ₹4 for a request the caller believes cost ₹50 and will
+ * retry. When money is the unit, say no rather than guess.
+ */
+export function readImageRequest(body: unknown): ImageRequestVerdict {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const prompt = String(b.prompt ?? '').trim();
+  if (!prompt) return { ok: false, reason: 'no-prompt' };
+  if (prompt.length > MAX_IMAGE_PROMPT_CHARS) return { ok: false, reason: 'too-long' };
+
+  let n = 1;
+  if (b.n !== undefined && b.n !== null && b.n !== '') {
+    const asked = Number(b.n);
+    if (!Number.isInteger(asked) || asked < 1 || asked > MAX_IMAGES_PER_REQUEST) return { ok: false, reason: 'bad-n' };
+    n = asked;
+  }
+
+  let format: ImageResponseFormat = 'b64_json';
+  if (b.response_format !== undefined && b.response_format !== null && b.response_format !== '') {
+    const f = String(b.response_format).trim();
+    // `url` is deliberately NOT accepted: we never hand out a third-party origin (white-label is a
+    // network fact here, not only a wording one), and we host no public image bucket for this. An
+    // honest refusal beats a `url` field carrying something that is not a URL.
+    if (f !== 'b64_json' && f !== 'data_url') return { ok: false, reason: 'bad-format' };
+    format = f;
+  }
+
+  const size = typeof b.size === 'string' && b.size.trim() ? b.size.trim() : undefined;
+  return { ok: true, prompt, n, size, format };
+}
+
+/**
+ * An OpenAI-shaped image response. PURE.
+ *
+ * `b64_json` is bare base64, exactly as the standard has it, so an existing client's `b64_json`
+ * handling works untouched. `data_url` is the convenience form for a browser or a quick script —
+ * offered because the alternative is every caller writing the same six-line prefix by hand.
+ */
+export function imageGenerationResponse(
+  images: ReadonlyArray<{ image: string; mimeType: string }>,
+  opts: { createdMs: number; format: ImageResponseFormat; chargedInr: number },
+): Record<string, unknown> {
+  return {
+    created: Math.floor(opts.createdMs / 1000),
+    model: PUBLIC_MODEL_NAME,
+    data: images.map((img) => (opts.format === 'data_url'
+      ? { data_url: img.image, mime_type: img.mimeType }
+      : { b64_json: img.image.replace(/^data:[^;]+;base64,/, ''), mime_type: img.mimeType })),
+    // What this request actually took off the wallet. A developer metering their own users needs it,
+    // and it is the real debited figure — never the quote, and ₹0 on a free-listed account.
+    chargedInr: opts.chargedInr,
+  };
+}
 
 /** The day a key's spend is counted against — UTC, on the server's clock, like every other rollup. */
 export function keyDayKey(nowMs: number): string {

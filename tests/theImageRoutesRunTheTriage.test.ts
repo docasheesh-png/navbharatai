@@ -62,7 +62,12 @@ describe('🔒 SOURCE — both routes call it FIRST', () => {
   it('the paid route triages before the wallet and before either engine — a paid door is not a way round the ban', () => {
     const triage = pro.indexOf('await triageImageRequest(');
     expect(triage).toBeGreaterThan(0);
-    for (const later of ['requireAccountForCostlyAi(', 'readWalletBalanceInr(', 'fetchPollinationsPaidImage(', 'await fetch(imageProEndpoint()']) {
+    // ⚠️ `generateProImages(` REPLACED the two engine call sites here on 2026-09-22, when the rungs
+    // moved into `lib/imageProEngine.ts` for the API's own image door to share. It is the SAME
+    // guarantee — nothing may generate before the triage — expressed against the one call that now
+    // reaches both rungs, and it is STRICTLY stronger: a future third rung inside the engine is
+    // covered by construction, where the old list would have had to be remembered.
+    for (const later of ['requireAccountForCostlyAi(', 'readWalletBalanceInr(', 'generateProImages(']) {
       expect(pro.indexOf(later), `${later} runs before the triage`).toBeGreaterThan(triage);
     }
     expect(pro).toMatch(/if \(safety\.blocked\) \{\s*res\.status\(422\)\.json\(\{ error: safety\.message, code: 'blocked' \}\);\s*return;/);

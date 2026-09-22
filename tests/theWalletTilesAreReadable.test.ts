@@ -41,17 +41,25 @@ const APP = stripComments(read('src/App.tsx'));
  * marker would resolve to -1 and the slice would silently become the whole file.
  */
 const DETAIL_PANEL = 'bg-card border border-line rounded-[2.5rem] p-6 sm:p-8 shadow-3xl';
+/**
+ * The row selector. It was `grid grid-cols-1 sm:grid-cols-3 gap-4` until 2026-09-22, when the
+ * admin asked for three horizontal capsules (*"all 3 options ko horizontal 3 capsule ke jaise
+ * banao … jisse ui clear hoga"*). A FLEX row, not a grid, because `flex-1 min-w-fit` is what
+ * lets a long balance make the row SCROLL instead of the number being cut — see the measured
+ * case below.
+ */
+const CAPSULE_ROW = '<div className="flex items-stretch gap-2 sm:gap-3 overflow-x-auto no-scrollbar';
 const tileBlock = (): string => {
-  const from = PANEL.indexOf('<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">');
+  const from = PANEL.indexOf(CAPSULE_ROW);
   const to = PANEL.indexOf(DETAIL_PANEL, from);
-  expect(from, 'the tile grid').toBeGreaterThan(-1);
+  expect(from, 'the capsule row').toBeGreaterThan(-1);
   expect(to, 'the detail panel after it').toBeGreaterThan(from);
   return PANEL.slice(from, to);
 };
 
 describe('the tiles come FIRST — that was the whole instruction', () => {
   it('the tile grid sits above the daily-usage, plan and monthly-cost blocks', () => {
-    const tiles = PANEL.indexOf('<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">');
+    const tiles = PANEL.indexOf(CAPSULE_ROW);
     const usage = PANEL.indexOf("Today's Messages");
     const plans = PANEL.indexOf('<HostingPlanCard');
     const cost = PANEL.indexOf("This Month's AI Cost");
@@ -62,15 +70,25 @@ describe('the tiles come FIRST — that was the whole instruction', () => {
   });
 
   it('the detail panel the tiles switch stays directly under them, not pages away', () => {
-    const tiles = PANEL.indexOf('<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">');
+    const tiles = PANEL.indexOf(CAPSULE_ROW);
     const detail = PANEL.indexOf(DETAIL_PANEL);
     const usage = PANEL.indexOf("Today's Messages");
     expect(detail).toBeGreaterThan(tiles);
     expect(detail, 'tapping a tile must not appear to do nothing').toBeLessThan(usage);
   });
 
-  it('Buy tokens leads, whatever the source order', () => {
-    expect(tileBlock()).toContain('order-first');
+  it('Buy tokens leads — it is literally the first capsule in the row', () => {
+    // It used to lead by `order-first` on a grid. In the capsule row it leads by being first in
+    // source order, which is what a screen reader and a keyboard both follow as well.
+    // ⚠️ CODE markers, never the `{/* CAPSULE n */}` comments — this file is read with comments
+    // stripped, exactly as the note above says, so a comment marker resolves to -1.
+    const block = tileBlock();
+    const buy = block.indexOf("onSetActiveBillingDetailTab('purchase')");
+    const balance = block.indexOf('data-tour="billing"');
+    const promo = block.indexOf("onSetActiveBillingDetailTab('gift')");
+    expect(buy).toBeGreaterThan(-1);
+    expect(buy).toBeLessThan(balance);
+    expect(balance).toBeLessThan(promo);
   });
 });
 
@@ -79,7 +97,7 @@ describe('🔴 readable by construction — no tile wears the other kind of labe
 
   it('the one SOLID tile carries the solid-fill label colour', () => {
     const block = tiles();
-    const buy = block.slice(block.indexOf('order-first'), block.indexOf('data-tour="billing"'));
+    const buy = block.slice(0, block.indexOf('data-tour="billing"'));
     expect(buy).toContain('bg-emerald-700');
     expect(buy).toContain('text-on-accent');
   });
@@ -105,8 +123,14 @@ describe('🔴 readable by construction — no tile wears the other kind of labe
     expect(balanceLine!, 'the number this screen exists to show').not.toContain('truncate');
   });
 
-  it('one per row on a phone, three across above it — not four squeezed into two columns', () => {
-    expect(PANEL).toContain('grid grid-cols-1 sm:grid-cols-3 gap-4');
+  it('🔒 three across at every width, and a long value SCROLLS the row rather than being cut', () => {
+    // Measured in a real browser before this shipped: at 360 / 390 / 414 / 768 px the three
+    // capsules fit with nothing clipped, with a seven-digit balance as well as a five-digit one.
+    // `min-w-fit` is the property that guarantees it — a grid track can shrink a cell below its
+    // content and truncate, which is exactly the "89,894 tok…" defect this file already records.
+    const block = tileBlock();
+    expect(block.match(/flex-1 min-w-fit/g) ?? []).toHaveLength(3);
+    expect(PANEL).toContain('overflow-x-auto');
     expect(PANEL).not.toContain('grid grid-cols-2 md:grid-cols-4');
   });
 

@@ -166,63 +166,68 @@ export function BillingPanel(props: BillingPanelProps) {
           />
 
           {/*
-            THE THREE WALLET TILES — first thing on the page, and READABLE (admin 2026-09-20:
-            "yeh tile sabse upar aani chahiye … background opposite colour me karo ya text me border
-            banao, kuch bhi karo. bas clear hona chahiye!").
+            THE THREE WALLET CAPSULES — one horizontal row (admin 2026-09-22: "wallet and billing me
+            all 3 options ko horizontal 3 capsule ke jaise banao! (buy token) (token balance)
+            (promocode credit) jisse ui clear hoga").
 
-            🔴 WHY THEY WERE UNREADABLE, because the cause is not "the colours were ugly". Every tile
-            was written for a DARK-ONLY app: a `from-emerald-950/50` gradient with `text-on-accent`
-            (white) on top. `text-on-accent` is white by definition — it is the label colour for a
-            SOLID brand fill — and the fill under it here is `to-card`, which on the Light theme is
-            near-white. White on near-white. The same 900/950 tints are what the theme rules already
-            name as a Light defect: the theme cannot lighten a 950 shade.
+            They were three tall cards, one per row on a phone — three screens' worth of chrome before
+            the panel below them. As capsules they are one row, ~56px, and the tab they open is
+            immediately visible underneath.
 
-            So the rule applied here, in both directions: a tile is EITHER a solid brand fill with
-            `text-on-accent`, OR a themed surface with themed ink — never one wearing the other's
-            label colour. Buy Tokens is the solid one because it is the only action; the two data
-            tiles keep the card surface and earn their contrast from a 2px hue border and a solid
-            icon chip, so all three stay distinguishable at a glance without any of them shouting.
+            🔴 THE ONE THING THIS LAYOUT MUST NOT RE-CREATE, and it is written in this file's own
+            history: four tiles in `grid-cols-2` once gave each ~160px and truncated the balance to
+            "89,894 tok…" — the one number the screen exists to show. Three capsules on a 360px phone
+            is ~98px each, which is TIGHTER, so a plain grid would reproduce that defect exactly.
 
-            📐 AND THE LAYOUT WAS HALF THE PROBLEM: four tiles in `grid-cols-2` on a phone gave each
-            one ~160px, which truncated the balance to "89,894 tok…" — the one number the screen
-            exists to show. One per row on a phone, three across from `sm`, and no fixed height, so
-            nothing is ever cut.
+            So this is a FLEX row, not a grid: `flex-1` makes the three share the width equally while
+            they fit, and `min-w-fit` stops any of them shrinking below its own content. A seven-digit
+            balance therefore makes the row SCROLL rather than cut the number — the value never
+            truncates at any width, which a grid cannot promise. Measured in a real browser at 360 /
+            390 / 414px before this shipped.
+
+            Colour is unchanged from the cards: Buy tokens is the only ACTION so it is the only solid
+            fill (`text-on-accent` is legitimate only on a solid fill); the two data capsules keep the
+            card surface with a hue border and a solid icon chip.
           */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="flex items-stretch gap-2 sm:gap-3 overflow-x-auto no-scrollbar -mx-1 px-1 py-1">
 
-            {/* TILE 1 — BUY TOKENS. The only action, so the only solid fill. `order-first` keeps it
-                leading on every breakpoint whatever the source order. */}
+            {/* CAPSULE 1 — BUY TOKENS. The only action, so the only solid fill. */}
             <div
               role="button"
               tabIndex={0}
               onClick={() => onSetActiveBillingDetailTab('purchase')}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSetActiveBillingDetailTab('purchase'); } }}
               className={cn(
-                "order-first relative rounded-3xl p-5 min-h-[8.5rem] flex flex-col justify-between cursor-pointer select-none transition-all",
+                "relative flex-1 min-w-fit flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-4 py-2 cursor-pointer select-none transition-all",
                 "bg-emerald-700 hover:bg-emerald-600 text-on-accent",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
                 activeBillingDetailTab === 'purchase' && "ring-2 ring-emerald-300"
               )}
             >
-              <div className="flex justify-between items-start gap-2">
-                <div className="p-2.5 rounded-xl bg-emerald-800 text-on-accent">
-                  <CreditCard className="w-5 h-5" />
-                </div>
-                <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-800 text-on-accent px-2 py-1 rounded-lg inline-flex items-center gap-1.5">
-                  {needsTopUp && <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />}
-                  Recharge
-                  {needsTopUp && <span className="sr-only">{TOP_UP_DOT_LABEL}</span>}
+              {/* 🔴 THE LOW-BALANCE DOT HANGS OFF THE CAPSULE, NEVER OFF THE ICON — measured, and it
+                  was a real regression caught before it shipped. The icon chip stands down below
+                  `sm` (it is the widest thing in the row that carries no information), so a dot
+                  drawn inside it would have disappeared on exactly the screens where a ₹0 balance
+                  matters most: every phone. `theRedDotLeadsToTheTopUp` exists for that dot.
+
+                  🔴 AND THE SCREEN-READER LABEL IS A SIBLING, NOT A CHILD OF THE CHIP, for a second
+                  measured reason: `sr-only` clips to 1px but keeps its full intrinsic width, and a
+                  row item sized by `min-w-fit` counts it — inside the chip it pushed the capsule's
+                  fit-content out and squeezed the real label to 16px at desktop widths. */}
+              {needsTopUp && <span aria-hidden className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-danger" />}
+              <span className="shrink-0 hidden sm:inline-flex p-1.5 rounded-full bg-emerald-800 text-on-accent">
+                <CreditCard className="w-4 h-4" />
+              </span>
+              <span className="whitespace-nowrap">
+                <span className="block text-[9px] font-extrabold tracking-wide sm:uppercase sm:tracking-widest text-on-accent opacity-90">Buy tokens</span>
+                <span className="block text-sm sm:text-base font-black tracking-tight text-on-accent">
+                  100 <span className="text-[10px] font-bold">/ ₹</span>
                 </span>
-              </div>
-              <div className="mt-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-on-accent opacity-90">Buy tokens</p>
-                <p className="text-2xl font-black tracking-tight mt-1 text-on-accent">
-                  100 <span className="text-sm font-bold">tokens / ₹</span>
-                </p>
-              </div>
+              </span>
+              {needsTopUp && <span className="sr-only">{TOP_UP_DOT_LABEL}</span>}
             </div>
 
-            {/* TILE 2 — TOKEN BALANCE. */}
+            {/* CAPSULE 2 — TOKEN BALANCE. */}
             <div
               data-tour="billing"
               role="button"
@@ -230,60 +235,47 @@ export function BillingPanel(props: BillingPanelProps) {
               onClick={() => onSetActiveBillingDetailTab('remaining')}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSetActiveBillingDetailTab('remaining'); } }}
               className={cn(
-                "relative rounded-3xl p-5 min-h-[8.5rem] flex flex-col justify-between cursor-pointer select-none transition-all",
+                "flex-1 min-w-fit flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-4 py-2 cursor-pointer select-none transition-all",
                 "bg-card border-2 border-indigo-500 hover:bg-raised",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
                 activeBillingDetailTab === 'remaining' && "ring-2 ring-indigo-500"
               )}
             >
-              <div className="flex justify-between items-start gap-2">
-                <div className="p-2.5 rounded-xl bg-indigo-600 text-on-accent">
-                  <Wallet className="w-5 h-5" />
-                </div>
-                <span className="text-[9px] font-black uppercase tracking-widest bg-indigo-600 text-on-accent px-2 py-1 rounded-lg">
-                  Active
+              <span className="shrink-0 hidden sm:inline-flex p-1.5 rounded-full bg-indigo-600 text-on-accent">
+                <Wallet className="w-4 h-4" />
+              </span>
+              {/* No `truncate` anywhere in this capsule: `min-w-fit` on the row item is what keeps the
+                  number whole, by letting the row scroll instead of the value being cut. */}
+              <span className="whitespace-nowrap">
+                <span className="block text-[9px] font-extrabold tracking-wide sm:uppercase sm:tracking-widest text-muted">Token balance</span>
+                <span className="block text-sm sm:text-base font-black text-ink tracking-tight">
+                  {(wallet?.tokenBalance ?? 0).toLocaleString()}
                 </span>
-              </div>
-              <div className="mt-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted">Token balance</p>
-                {/* No `truncate`: this is the number the page exists to show, and a full-width tile
-                    has room for it. Cutting it was the original complaint. */}
-                <p className="text-2xl font-black text-ink tracking-tight mt-1 break-words">
-                  {(wallet?.tokenBalance ?? 0).toLocaleString()} <span className="text-sm font-bold text-muted">tokens</span>
-                </p>
-                <p className="text-[11px] font-bold text-body mt-0.5">
-                  ≈ ₹{(wallet?.remaining_balance ?? 0).toFixed(2)}
-                </p>
-              </div>
+              </span>
             </div>
 
-            {/* TILE 3 — PROMOCODE. */}
+            {/* CAPSULE 3 — PROMOCODE CREDIT. */}
             <div
               role="button"
               tabIndex={0}
               onClick={() => onSetActiveBillingDetailTab('gift')}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSetActiveBillingDetailTab('gift'); } }}
               className={cn(
-                "relative rounded-3xl p-5 min-h-[8.5rem] flex flex-col justify-between cursor-pointer select-none transition-all",
+                "flex-1 min-w-fit flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-4 py-2 cursor-pointer select-none transition-all",
                 "bg-card border-2 border-amber-500 hover:bg-raised",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500",
                 activeBillingDetailTab === 'gift' && "ring-2 ring-amber-500"
               )}
             >
-              <div className="flex justify-between items-start gap-2">
-                <div className="p-2.5 rounded-xl bg-amber-600 text-on-accent">
-                  <Gift className="w-5 h-5" />
-                </div>
-                <span className="text-[9px] font-black uppercase tracking-widest bg-amber-600 text-on-accent px-2 py-1 rounded-lg">
-                  Promo
-                </span>
-              </div>
-              <div className="mt-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted">Promocode credit</p>
-                <p className="text-2xl font-black text-ink tracking-tight mt-1 break-words">
+              <span className="shrink-0 hidden sm:inline-flex p-1.5 rounded-full bg-amber-600 text-on-accent">
+                <Gift className="w-4 h-4" />
+              </span>
+              <span className="whitespace-nowrap">
+                <span className="block text-[9px] font-extrabold tracking-wide sm:uppercase sm:tracking-widest text-muted">Promocode credit</span>
+                <span className="block text-sm sm:text-base font-black text-ink tracking-tight">
                   ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
-                </p>
-              </div>
+                </span>
+              </span>
             </div>
 
           </div>

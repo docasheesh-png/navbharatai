@@ -78838,6 +78838,54 @@ prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** 
 block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
 which this session cannot see — asked for that screen rather than pretending the two are the same problem.
 
+## 2026-09-22 — Wallet & Billing: the three tiles become three horizontal capsules (PR pending)
+
+**Admin, verbatim:** *"wallet and billing me all 3 options ko horizontal 3 capsule ke jaise banao!
+(buy token) (token balance) (promocode credit) jisse ui clear hoga!"*
+
+The three tall cards (`min-h-[8.5rem]`, one per row on a phone) are now one ~54px capsule row:
+`flex items-stretch gap-2 sm:gap-3 overflow-x-auto`, each capsule `flex-1 min-w-fit rounded-full`.
+Behaviour is unchanged — the same three tabs, the same keyboard handling, the same low-balance dot.
+
+**🔴 IT WAS MEASURED, NOT EYEBALLED, and the first draft did not fit.** Three capsules on a 360px
+phone get ~104px each, which is TIGHTER than the `grid-cols-2` layout that already produced this
+panel's worst defect (the balance truncated to `"89,894 tok…"`). Measured in real Chromium against
+the real built stylesheet at 360 / 390 / 414 / 768px, with five- and seven-digit balances:
+
+| | content vs row |
+|---|---|
+| first draft | **460px in 320px** — scrolled, third capsule off-screen (not "clear") |
+| shipped | **308px in 320px** — `scrollWidth === clientWidth` at every width, nothing clipped |
+
+The four width savings the measurement forced: the `≈ ₹` figure leaves the capsule (~60px; it is
+in the tab the capsule opens), the icon chips stand down below `sm` (~30px each), labels are
+sentence case on a phone and uppercase only from `sm` (~12px each), and padding/gap are tighter
+below `sm`. `flex-1 min-w-fit` is what keeps the promise a grid cannot: a longer value makes the
+ROW scroll rather than the number being cut.
+
+**Two regressions the measurement caught before they shipped:**
+1. **The low-balance red dot was inside the icon chip** — which stands down below `sm`, so the ₹0
+   warning would have vanished from every phone, i.e. from exactly the screens where it matters.
+   It now hangs off the capsule itself (`relative` + `absolute top-1.5 right-2`).
+2. **The `sr-only` words were inside that chip too.** `sr-only` clips to 1px but keeps its full
+   intrinsic width, and a row item sized by `min-w-fit` counts it — it pushed the capsule's
+   fit-content out and squeezed the visible label to **16px** at 768px.
+
+Test-locked and **reversion-proven four ways** in `tests/theThreeCapsulesFitAPhone.test.ts` (10
+cases); `theWalletTilesAreReadable` and `theRedDotLeadsToTheTopUp` updated to the new selectors
+with their intent intact (the latter now also asserts no dot may sit inside anything a phone hides).
+
+**Same day, admin's follow-up:** *"2% hi kaafi hai!!"* (the single fee line is confirmed for the
+gift slice) and *"promocode credit ka naam badal kar promocode karo — isse nhi baat na bane to only
+promo"*. Re-measured: **"Promocode" fits** at 360px with room, so the fallback "Promo" was not
+needed, and the row is better balanced for it (96 / 100 / 100px, against 80 / 99 / 117px before).
+
+**Still to come in this line of work (planned, not built):** *"promocode credit ke andar ek option
+aur add karo — **purchage promo code**"*, so a user can buy a code with real ₹ and gift it. Recorded
+as the next slice, with two open recommendations put to the admin: ONE disclosed fee line at the
+existing 2% (added on top for a gift, rather than deducted as on a recharge) instead of a separate
+"cashfree charges" line the platform cannot compute honestly; and a purchased code claimed ONCE on
+the CODE, not once per user as the marketing-coupon path does.
 ---
 
 ## 2026-09-22 — 🔌 The NavBharatAI API grew four doors: full access, the expert AIs, images, and two for the developer

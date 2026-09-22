@@ -21,7 +21,18 @@ import {
 } from 'lucide-react';
 
 import { packBreakdown, type PurchaseRail, type StoreConfig } from '../../lib/storePurchase';
-import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
+import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT, giftPriceAtPct } from '../../lib/platformFee';
+import { giftWhatsAppUrl, type GiftCodeRow } from '../../lib/giftCodeRow';
+
+/**
+ * Fallback bounds for the gift form, used only until the server's own numbers arrive.
+ *
+ * They MATCH `giftCodes.ts` deliberately: a form that offered an amount the server refuses would
+ * produce a refusal the user cannot act on. The server is still the authority — it re-checks every
+ * order — these are what the field shows in the first render.
+ */
+const MIN_GIFT_FALLBACK_INR = 100;
+const MAX_GIFT_FALLBACK_INR = 5_000;
 import { aiSpendSummary, formatInr } from '../../lib/aiSpendSummary';
 import { walletNeedsTopUp, TOP_UP_DOT_LABEL } from '../../lib/walletNeedsTopUp';
 
@@ -70,6 +81,19 @@ export interface BillingPanelProps {
   onRedeemPromoCoupon: (code: string) => void;
   onSetBuyAmountInput: (v: string) => void;
   onCreateBillingOrder: (amount: number) => void;
+  /**
+   * GIFT CODES (admin 2026-09-22). All optional, and the whole section is gated on
+   * `onCreateGiftOrder` being supplied — a panel rendered without the wiring shows nothing rather
+   * than a button that does nothing, which is what the second absolute rule requires.
+   */
+  giftFaceInput?: string;
+  onSetGiftFaceInput?: (v: string) => void;
+  isBuyingGift?: boolean;
+  giftError?: string | null;
+  giftCodes?: GiftCodeRow[];
+  giftBounds?: { minInr: number; maxInr: number };
+  lastGiftCode?: GiftCodeRow | null;
+  onCreateGiftOrder?: (faceInr: number) => void;
   onToast: (message: string, type?: ToastType) => void;
   /** Phase 4.2 — current month's AI cost accumulated from Pro builds. */
   monthlyAiCost?: { totalBuilds: number; totalCostUsd: number; month: string } | null;
@@ -88,7 +112,17 @@ export function BillingPanel(props: BillingPanelProps) {
     onShowAuth, onFetchWallet, onSetActiveBillingDetailTab, onSetCouponCodeInput,
     onRedeemPromoCoupon, onSetBuyAmountInput, referral, onRefreshReferral,
     onCreateBillingOrder, onToast,
+    giftFaceInput = '500', onSetGiftFaceInput, isBuyingGift = false, giftError = null,
+    giftCodes = [], giftBounds = { minInr: MIN_GIFT_FALLBACK_INR, maxInr: MAX_GIFT_FALLBACK_INR },
+    lastGiftCode = null, onCreateGiftOrder,
   } = props;
+
+  /**
+   * The price of the gift being composed, from the SAME pure function the server prices the order
+   * with — so the buyer cannot be shown one number and charged another. A blank or junk input is a
+   * zero price and the button below is disabled, rather than a NaN reaching the screen.
+   */
+  const giftPrice = giftPriceAtPct(Math.floor(Number(giftFaceInput) || 0), platformFeePct);
   const { monthlyAiCost } = props;
 
   // THE LAST TWO STEPS OF THE TOP-UP TRAIL (admin 2026-09-22: "☰ → wallet and billing → buy token →
@@ -273,7 +307,7 @@ export function BillingPanel(props: BillingPanelProps) {
               <span className="whitespace-nowrap">
                 <span className="block text-[9px] font-extrabold tracking-wide sm:uppercase sm:tracking-widest text-muted">Promocode</span>
                 <span className="block text-sm sm:text-base font-black text-ink tracking-tight">
-                  ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
+                  ₹{(billingTransactions.filter(tx => tx.paymentProvider === 'COUPON_REDEEM' || tx.paymentProvider === 'REFERRAL' || tx.paymentProvider === 'GIFT_REDEEM').reduce((sum, tx) => sum + (tx.balanceAdded || 0), 0)).toFixed(2)}
                 </span>
               </span>
             </div>
@@ -556,6 +590,149 @@ export function BillingPanel(props: BillingPanelProps) {
                     )}
                   </div>
                 </div>
+
+                {/* ───────────────────────── GIFT A PROMO CODE ─────────────────────────
+                    Admin 2026-09-22: *"promocode credit ke andar ek option aur add karo — purchage
+                    promo code. yaha user promocode purchage kar ke apne family/friend ko gift kar
+                    sakta hai! rate wahi jo ham charge karte hai, plus 2% pletform fee"*.
+
+                    🔒 IT IS BOUGHT AT THE GATEWAY, NEVER FROM THE WALLET — which is the admin's own
+                    condition (*"real ₹ se honge … welcome bonus se nahi"*) made true by construction:
+                    there is no code path from a balance to a code, so paying with the welcome gift is
+                    not a case that has to be refused.
+
+                    🔒 ONE FEE LINE. The first request said "2% platform fee + cashfree charges"; the
+                    gateway's real charge is unknowable in advance (UPI is ₹0 by regulation, cards
+                    ~2%+GST, and the method is chosen on a later screen), so a second line would be a
+                    number no statement will ever match. The admin confirmed: *"2% hi kaafi hai!!"*.
+
+                    ⚠️ The price shown here is `giftPriceAtPct` — the SAME pure function the server
+                    prices the order with, so the buyer cannot be shown one number and charged another. */}
+                {onCreateGiftOrder && (
+                  <div className="max-w-2xl">
+                    <div className="bg-well border border-line rounded-2xl p-6 space-y-4">
+                      <div>
+                        <h4 className="text-xs font-black text-ink uppercase tracking-wider">Gift a promo code</h4>
+                        <p className="text-[10px] text-muted font-bold font-mono">
+                          Buy a code and send it to family or a friend. They redeem it in the box above.
+                        </p>
+                      </div>
+
+                      {/* THE CODE THIS SESSION JUST BOUGHT — shown large, because the moment after
+                          paying is the only moment that matters for this product. */}
+                      {lastGiftCode && (
+                        <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-2xl p-4 space-y-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-success">Your gift code is ready</p>
+                          <p className="text-lg font-black text-ink font-mono break-all select-all">{lastGiftCode.code}</p>
+                          <p className="text-[10px] text-muted font-bold">
+                            Worth ₹{lastGiftCode.faceInr.toLocaleString('en-IN')} when they redeem it.
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => {
+                                // A clipboard write can be refused (an insecure context, a denied
+                                // permission), and a silent failure here loses somebody's money — so
+                                // the failure is SAID, and the code is selectable above either way.
+                                navigator.clipboard?.writeText(lastGiftCode.code)
+                                  .then(() => onToast('Gift code copied.', 'success'))
+                                  .catch(() => onToast('Could not copy — press and hold the code to select it.', 'warning'));
+                              }}
+                              className="px-4 py-2 rounded-xl bg-raised border border-line text-[10px] font-black uppercase tracking-widest text-ink"
+                            >
+                              Copy code
+                            </button>
+                            <a
+                              href={giftWhatsAppUrl(lastGiftCode.code, lastGiftCode.faceInr)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-4 py-2 rounded-xl bg-emerald-700 text-on-accent text-[10px] font-black uppercase tracking-widest"
+                            >
+                              Share on WhatsApp
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <label htmlFor="nbai-gift-amount" className="text-[10px] text-muted font-bold uppercase tracking-wider block">
+                          Gift amount (₹{giftBounds.minInr} to ₹{giftBounds.maxInr.toLocaleString('en-IN')})
+                        </label>
+                        <div className="flex items-center gap-3 bg-surface border border-line rounded-xl px-4 py-3 focus-within:border-amber-500 transition-colors">
+                          <span className="text-warn font-mono font-bold text-sm">₹</span>
+                          <input
+                            id="nbai-gift-amount"
+                            type="number"
+                            min={giftBounds.minInr}
+                            max={giftBounds.maxInr}
+                            step="1"
+                            value={giftFaceInput}
+                            onChange={(e) => onSetGiftFaceInput?.(e.target.value)}
+                            className="w-full bg-transparent text-ink font-mono font-bold text-sm focus:outline-none"
+                            placeholder="Amount in Rupees"
+                          />
+                        </div>
+                      </div>
+
+                      {/* WHAT THEY PAY AND WHAT THE FRIEND GETS — both, before they press anything. */}
+                      <div className="bg-surface border border-line rounded-xl p-4 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-body">
+                          <span>They receive</span>
+                          <span className="font-mono">₹{giftPrice.faceInr.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] font-bold text-muted">
+                          <span>Platform fee</span>
+                          <span className="font-mono">₹{giftPrice.feeInr.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm font-black text-ink border-t border-line pt-2 mt-2">
+                          <span>You pay</span>
+                          <span className="font-mono">₹{giftPrice.payInr.toFixed(2)}</span>
+                        </div>
+                      </div>
+
+                      {giftError && (
+                        <div className="bg-red-500/10 border border-red-500/20 text-danger p-3 rounded-xl text-xs font-semibold flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span>{giftError}</span>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => onCreateGiftOrder(giftPrice.faceInr)}
+                        disabled={isBuyingGift || giftPrice.faceInr < giftBounds.minInr || giftPrice.faceInr > giftBounds.maxInr}
+                        /* The purchase colour, not the section colour. Amber is this tab's identity, but `bg-amber-500`
+                            needs BLACK ink to be readable and a new colour literal is what the ratchet exists to
+                            refuse — so the one BUY action here wears the same emerald + `text-on-accent` pairing
+                            the Buy tokens capsule uses, which is a measured-good combination already in this file. */
+                        className="w-full px-5 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-on-accent text-[11px] font-black uppercase tracking-widest transition-all active:scale-[0.99]"
+                      >
+                        {isBuyingGift ? 'Opening checkout…' : `Buy this gift code — ₹${giftPrice.payInr.toFixed(2)}`}
+                      </button>
+
+                      <p className="text-[10px] text-muted leading-relaxed font-semibold">
+                        A code can be redeemed once, by one person, and it does not expire. It cannot be
+                        exchanged for cash and is spendable only inside NavBharatAI.
+                      </p>
+
+                      {/* THE CODES ALREADY BOUGHT — so a gift is never lost with a closed tab. */}
+                      {giftCodes.length > 0 && (
+                        <div className="border-t border-line pt-4 space-y-2">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted">Codes you have bought</p>
+                          {giftCodes.map((g) => (
+                            <div key={g.code} className="flex items-center justify-between gap-3 bg-surface border border-line rounded-xl px-3 py-2">
+                              <span className="font-mono text-[11px] font-bold text-ink break-all select-all">{g.code}</span>
+                              <span className="shrink-0 text-right">
+                                <span className="block text-[11px] font-black text-ink font-mono">₹{g.faceInr.toLocaleString('en-IN')}</span>
+                                <span className={`block text-[9px] font-black uppercase tracking-widest ${g.status === 'redeemed' ? 'text-muted' : 'text-success'}`}>
+                                  {g.status === 'redeemed' ? 'Used' : 'Unused'}
+                                </span>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

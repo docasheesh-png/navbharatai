@@ -73,6 +73,16 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_vault_pin', key: 'docId' },
   { collection: 'agentv3_mcp_library', key: 'docId' },
   /**
+   * The per-buyer daily gift-code tally (`giftCodeStore.ts`). Its doc id is `<uid>_<day>`, so it is
+   * reached by the `uid` FIELD rather than the id — the same shape `user_costs` uses.
+   *
+   * ⚠️ `gift_codes` itself is deliberately NOT here, and the reason matters: a code the buyer has
+   * already given away is value in somebody else's hands. Deleting the buyer's account must not
+   * cancel a gift the recipient has not redeemed yet, and a payment record is the first of §9's
+   * four stated exceptions to erasure anyway.
+   */
+  { collection: 'gift_code_daily', key: { field: 'uid' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the

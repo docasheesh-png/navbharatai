@@ -315,6 +315,10 @@ export default function App() {
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
     verifyBillingPayment,
     redeemPromoCoupon,
+    giftFaceInput, setGiftFaceInput,
+    isBuyingGift, giftError,
+    giftCodes, giftBounds, lastGiftCode,
+    fetchGiftCodes, createGiftOrder,
   } = usePaymentEngine({ user, addLog });
 
   // 💳 THE TOP-UP TRAIL (admin 2026-09-22: "agar balance khatam hai, to ☰ menu → wallet and billing →
@@ -3901,6 +3905,14 @@ export default function App() {
               onRefreshReferral={referralProgress.refresh}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
+              giftFaceInput={giftFaceInput}
+              onSetGiftFaceInput={setGiftFaceInput}
+              isBuyingGift={isBuyingGift}
+              giftError={giftError}
+              giftCodes={giftCodes}
+              giftBounds={giftBounds}
+              lastGiftCode={lastGiftCode}
+              onCreateGiftOrder={createGiftOrder}
               onToast={addToast}
               monthlyAiCost={monthlyAiCost}
             />

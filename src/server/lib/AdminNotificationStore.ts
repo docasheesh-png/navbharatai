@@ -30,10 +30,13 @@ export type NotificationTarget =
  * anywhere we did not build.
  *
  * `open-reports` opens the Report a problem sheet on the conversation list.
+ * `open-billing` opens Wallet & Billing — added 2026-09-22 for the low-balance warning, whose whole
+ * value is that the fix is one tap away. It routes through the app's existing `navbharat:navigate`
+ * channel, the same one the build panel's Add-credits button uses, so it can reach no new screen.
  */
-export type NotificationAction = 'open-reports';
+export type NotificationAction = 'open-reports' | 'open-billing';
 
-export const NOTIFICATION_ACTIONS: readonly NotificationAction[] = ['open-reports'];
+export const NOTIFICATION_ACTIONS: readonly NotificationAction[] = ['open-reports', 'open-billing'];
 
 /** Accept only an action this build knows. Anything else becomes "no action" — a plain message. */
 export function readNotificationAction(raw: unknown): NotificationAction | undefined {

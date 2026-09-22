@@ -31,6 +31,7 @@ import { ReferralCostCard } from './admin/ReferralCostCard';
 import { PushHealthCard } from './admin/PushHealthCard';
 import { WelcomeBackfillCard } from './admin/WelcomeBackfillCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
+import { MobileBuildOutcomeCard } from './admin/MobileBuildOutcomeCard';
 import { AdminCopyButton } from './admin/AdminCopyButton';
 import { reportStatus, reportStatusLabel, reportStatusHint, openReportCount, type ReportTriage } from '../server/AgentV3/reportTriage';
 import { completenessLine, readCompleteness } from '../server/AgentV3/reportTruncation';
@@ -4070,6 +4071,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* FAILURE CATEGORY (admin 2026-09-16): which app TYPE fails most, and WHY — grouped from
                   the same durable per-workspace records the All Builds list below reads. */}
               <FailureCategoryCard adminToken={adminToken} />
+              {/* Beside it deliberately: one card is the APP build (does the generated app compile?),
+                  this one is the PHONE build (does the .apk / .aab / .ipa come out?). Two pipelines,
+                  two questions — reading either as the other is exactly what an impression like
+                  "80% fail" is made of. */}
+              <MobileBuildOutcomeCard adminToken={adminToken} />
 
               {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
                   WITHOUT the user pressing Report. The engine already records every build durably;

@@ -41,3 +41,15 @@ export function walletEmptyMessage(body: unknown): string {
   if (typeof fromServer === 'string' && fromServer.trim()) return fromServer.trim();
   return 'Your balance is empty. NavBharatAI is pay-as-you-go — add credit to carry on, and you only pay for what you actually use.';
 }
+
+/**
+ * The one call a screen makes: the sentence to show when this response IS the empty-balance
+ * refusal, or `null` when it is an ordinary failure that a **Try again** can still fix.
+ *
+ * 🔒 It exists so a screen cannot recognise the refusal and then forget to take the server's
+ * wording — the two halves were separate calls at the first call site, and five more were about to
+ * copy that shape. One call, one decision, no way to do half of it.
+ */
+export function walletEmptyRefusalMessage(status: number, body: unknown): string | null {
+  return isWalletEmptyRefusal(status, body) ? walletEmptyMessage(body) : null;
+}

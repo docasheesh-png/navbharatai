@@ -14,6 +14,9 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import {
+  listDailyBuildOutcomes, summariseBuildOutcomes, cureFamily, cureSplit,
+} from '../lib/mobileBuildOutcomeStore';
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
 import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
@@ -140,6 +143,8 @@ import { collectionsNeedingRetention } from '../lib/DataRetentionManager';
 const GROWING_COLLECTIONS: readonly string[] = [
   'app_builds', 'build_sessions', 'user_build_history', 'user_costs', 'server_logs',
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
+  // One small document per finished phone build — the only per-run half of the build counters.
+  'mobile_build_counted',
   'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
   'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
 ];
@@ -2816,6 +2821,39 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    * that ceiling it says so, so every figure is presented as a LOWER BOUND rather than a total that
    * is quietly wrong. The alternative, an unbounded read, would be honest for a year and then not.
    */
+  /**
+   * HOW OFTEN DOES A USER'S APP BUILD FAIL, AND OF WHAT? (admin 2026-09-22: *"user jab apni app ka APK
+   * banata hai to 80% baar fail hoti hai"*.)
+   *
+   * 🔑 NOT the same question as `/api/admin/failure-categories` beside it, and the two must not be read
+   * as one. That card groups AgentV3 **app builds** (does the generated app compile?) by domain. This one
+   * is the **GitHub packaging pipeline** — the .apk / .aab / .ipa a user presses for — whose failure rate
+   * this platform wrote down on every run and could never read back.
+   *
+   * Read-only, and it changes nothing about how a build runs.
+   */
+  app.get('/api/admin/mobile-build-outcomes', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 90);
+      const rows = await listDailyBuildOutcomes(days);
+      const summary = summariseBuildOutcomes(rows);
+      return res.json({
+        ok: true,
+        requestedDays: days,
+        ...summary,
+        cures: cureSplit(summary),
+        // Every code carries the cure it needs, so the biggest number on the card is never read as
+        // "make the repair loop better" when it is actually "the user's own key is missing".
+        topCodes: summary.topCodes.slice(0, 15).map((c) => ({ ...c, cure: cureFamily(c.code) })),
+        // The days themselves, so a rate can be seen moving rather than taken as a constant.
+        daily: rows,
+      });
+    } catch (e) {
+      // A panel that 500s tells the admin nothing. Report the failure AS the answer.
+      return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get('/api/admin/referral/summary', verifyAdminToken, async (_req: Request, res: Response) => {
     const MAX = 2000;
     try {

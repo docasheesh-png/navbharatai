@@ -20,7 +20,7 @@
 
 import { toolchainForMajor } from './capacitorToolchain';
 import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
-import { capacitorMajorFromFiles, detectWebDir } from './mobileProjectAssembler';
+import { capacitorMajorFromFiles, detectWebDir, isAssembledStaticApp } from './mobileProjectAssembler';
 
 /** Every failure class NavBharatAI can name from a build log. */
 export type RepairCode =
@@ -276,7 +276,11 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       // the app, and a user who is told their working app does not compile has nowhere to go.
       summary: 'Your app compiled fine — the packager was looking for the finished page in the wrong folder.',
       autoFixable: true,
-      needs: ['capacitor.config.ts', 'package.json'],
+      // ⚠️ `vite.config.*` and `angular.json` are FETCHED because the repair reads them (2026-09-22).
+      // The applier's comment promised it honoured a custom outDir "from the app's own config" while
+      // this list handed it two files, so that promise was false and the repair silently fell back to
+      // the framework default — overwriting a correct webDir with a wrong one and committing it.
+      needs: ['capacitor.config.ts', 'package.json', 'vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'angular.json'],
       detail: webDirMatch ? { expected: webDirMatch[1].replace(/\/+$/, '') } : undefined,
     };
   }
@@ -409,11 +413,16 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
   if (stage && stage !== 'webbuild') {
     return {
       code: 'STALE_WORKFLOW',
+      // ⚠️ The phone platform is NAMED from the stage, never assumed to be Android: the iOS lane now
+      // reports its own stage, and telling an iOS user "the Android project" would be a sentence about
+      // a platform their build never touched.
       summary: stage === 'install'
         ? 'The build stopped while installing your app’s libraries.'
         : stage === 'capacitor'
-          ? 'The build stopped while creating the Android project.'
-          : 'The build stopped while building the Android app.',
+          ? 'The build stopped while creating the phone app project.'
+          : stage === 'ios'
+            ? 'The build stopped while building the iOS app.'
+            : 'The build stopped while building the Android app.',
       autoFixable: true,
       needs: [workflowPath, 'package.json'],
       detail: { stage },
@@ -439,9 +448,24 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
  * answer. Pattern-matching a megabyte of Gradle output for the same fact is guesswork by comparison.
  * Older repositories have no marker, so this returns null and the text patterns above still decide.
  */
-export function failedStage(log: string): 'install' | 'webbuild' | 'capacitor' | 'android' | null {
-  const m = normalizeLog(log).match(/NBAI_FAILED_STAGE=(install|webbuild|capacitor|android)\b/);
-  return (m?.[1] as 'install' | 'webbuild' | 'capacitor' | 'android') ?? null;
+export function failedStage(log: string): 'install' | 'webbuild' | 'capacitor' | 'android' | 'ios' | null {
+  // `ios` joined the set on 2026-09-22, when the iOS workflow finally got a diagnostic step of its own:
+  // without it here, an iOS build that named its stage honestly would still have read as "no marker".
+  //
+  // 🔴 A MARKER INSIDE AN `echo` IS THE SCRIPT, NOT THE ANSWER (same autopsy). GitHub PRINTS each step's
+  // whole `run:` block into the log before running it, so the ensure step's own two
+  // `echo "NBAI_FAILED_STAGE=capacitor"` lines appear in every log whether or not they ever execute —
+  // the admin's own report carries them, colour codes and all, beside the one real marker. Taking the
+  // FIRST match therefore read the SCRIPT: an Android build that died at Gradle would have been
+  // reported as having stopped at `capacitor`, and the repair chosen for a stage that never happened.
+  // Lines whose marker is part of an echo COMMAND are skipped; what a step really emitted is not.
+  const printed = /(^|[\s;&|])echo\s+["']?[^"']*NBAI_FAILED_STAGE=/;
+  for (const line of normalizeLog(log).split('\n')) {
+    if (printed.test(line)) continue;
+    const m = line.match(/NBAI_FAILED_STAGE=(install|webbuild|capacitor|android|ios)\b/);
+    if (m) return m[1] as 'install' | 'webbuild' | 'capacitor' | 'android' | 'ios';
+  }
+  return null;
 }
 
 /**
@@ -639,9 +663,16 @@ export function repairOutOfMemory(workflow: string): string | null {
  * agree on where a build lands. Takes just the package.json string for its existing call sites.
  */
 export function webDirForPackageJson(pkgJson: string): string {
-  // Always 'built' here: this repair only fires once a build has genuinely produced output, so the folder
-  // is a build folder — never the static 'www'. That also keeps a corrupt package.json defaulting to dist.
-  return detectWebDir({ 'package.json': pkgJson || '' }, 'built');
+  // 🔴 A STATIC APP IS RECOGNISED, NOT ASSUMED AWAY (autopsy 2026-09-22). This used to pin 'built' on the
+  // reasoning that "this repair only fires once a build has genuinely produced output, so the folder is a
+  // build folder — never the static 'www'". The premise is false: a STATIC app's `npm run build` is an
+  // honest no-op WE wrote, so it succeeds, and the repair then fires on an app whose page really is in
+  // `www`. Pinned 'built', `detectWebDir` found no framework and answered `dist` — a folder a static app
+  // never produces — so the repair rewrote a CORRECT config into a permanently broken one.
+  // ⚠️ `isAssembledStaticApp`, never `detectProjectKind`: the latter also calls "no build script at all"
+  // static, which is right in a workspace and wrong here, where such a repo is simply broken.
+  const files = { 'package.json': pkgJson || '' };
+  return detectWebDir(files, isAssembledStaticApp(files) ? 'static' : 'built');
 }
 
 /** Point Capacitor at the directory the app's own build genuinely produces. */
@@ -797,9 +828,13 @@ export function repairFiles(
     case 'NODE_OUT_OF_MEMORY':
       return one(workflowPath, repairOutOfMemory(wf), 'NavBharatAI: give the build enough memory for this app');
     case 'WEB_DIR_MISSING': {
-      // Read from the WHOLE repo, not just package.json, so a custom Vite outDir in the app's own config
-      // is honoured too (the build only fires here, so it is a 'built' app by construction).
-      const want = detectWebDir(current, 'built');
+      // Read every file `needs` fetched — package.json AND the app's own vite/angular config — so a
+      // custom outDir is honoured rather than silently replaced by the framework default. ⚠️ The kind is ASKED, not assumed: "the build only fires here, so it is a
+      // 'built' app by construction" was the old comment here and it was wrong — a static app's build
+      // is a no-op we wrote ourselves and it succeeds, so this case reaches static apps too, and
+      // pinning 'built' rewrote their correct `www` to a `dist` that never exists (see
+      // webDirForPackageJson, and tests/theStaticAppStaysStatic.test.ts).
+      const want = detectWebDir(current, isAssembledStaticApp(current) ? 'static' : 'built');
       // The log names the directory Capacitor LOOKED in; repairing to that same value would be a no-op,
       // so the truth comes from what the app's own toolchain actually writes.
       if (diag.detail?.expected && diag.detail.expected === want) return null;

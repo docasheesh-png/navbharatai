@@ -4,6 +4,8 @@ import { LoadMore } from '../../components/common/LoadMore';
 import { Bug, Wand2, Copy, Check, ChevronDown, ChevronRight, Clock, X, History, Shield, Lightbulb, Search, Code2, CheckCircle2, FileSearch } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { AppScanPanel } from './AppScanPanel';
+import { AddCreditNotice } from '../common/AddCreditNotice';
+import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 
 interface AIDebuggerProps {
   files?: Record<string, string>;
@@ -86,6 +88,9 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
   const [loadingStep, setLoadingStep] = useState(0);
   const [result, setResult] = useState<DebugResult | null>(null);
   const [analyzeError, setAnalyzeError] = useState('');
+  // The empty-balance refusal, kept apart from `analyzeError` so the two can never be shown
+  // together — one offers a retry, the other says the retry cannot work.
+  const [balanceBlock, setBalanceBlock] = useState('');
   const [copiedFix, setCopiedFix] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
@@ -115,6 +120,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
     }, 900);
 
     setAnalyzeError('');
+    setBalanceBlock('');
     try {
       const res = await fetch('/api/debug', {
         method: 'POST',
@@ -126,6 +132,10 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
         }),
       });
       const data = await res.json().catch(() => null);
+      // An empty wallet is a PRICE, not a fault. It must be read BEFORE the generic throw, or the
+      // catch turns a bill into a red error beside a **Try again** that the same gate will refuse.
+      const noCredit = walletEmptyRefusalMessage(res.status, data);
+      if (noCredit) { setBalanceBlock(noCredit); return; }
       if (!res.ok || !data) {
         throw new Error((data && typeof data.error === 'string' && data.error)
           || 'The analysis service could not be reached — please try again.');
@@ -418,8 +428,13 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
             </div>
           )}
 
+          {/* The wallet, not a fault. No retry offered — the next press meets the same gate. */}
+          {!isLoading && balanceBlock && (
+            <AddCreditNotice message={balanceBlock} />
+          )}
+
           {/* Honest failure banner — the real reason, never a canned fake analysis */}
-          {!isLoading && analyzeError && (
+          {!isLoading && analyzeError && !balanceBlock && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-danger flex items-start gap-2">
               <X className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{analyzeError}</span>

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
+import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2, Wallet } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DoseCalculator } from './DoseCalculator';
 import { loadVials } from '../../lib/vialMemory';
@@ -8,6 +8,7 @@ import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
 import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { isSafeHttpUrl, openInRealBrowser } from '../../lib/linkify';
+import { walletEmptyRefusalMessage, openAddCredit } from '../../lib/walletEmptyRefusal';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
@@ -48,6 +49,16 @@ interface SDAMessage {
   timestamp: Date;
   isRedFlag?: boolean;
   attachedFile?: { name: string; type: string; dataUrl?: string };
+  /**
+   * This reply is the empty-balance refusal, so the bubble carries an **Add credit** button
+   * instead of a dead-end sentence (admin 2026-09-22, "this is paid service!!").
+   *
+   * 🔒 DELIBERATELY NOT PERSISTED. The Firestore autosave below maps its fields one by one and
+   * this is not among them, so a refusal from last week can never come back as a live offer after
+   * the doctor has already topped up. If that save is ever "tidied" into a spread, this flag
+   * starts persisting — `theWallIsAButtonNotASentence.test.ts` fails if it does.
+   */
+  needsCredit?: boolean;
 }
 
 interface PatientSnapshot {
@@ -798,7 +809,12 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
       // prompt, a free-limit paywall, or a keys/busy error all look identically like "not responding").
       if (!res.ok) {
         const errData = await res.json().catch(() => ({} as { error?: string; code?: string }));
-        const honest = errData?.error
+        // An empty wallet is a PRICE, not a fault: it gets the server's own sentence plus the one
+        // control that can resolve it. Switching on the CODE, never on the prose — see
+        // `walletEmptyRefusal.ts` for why a `.includes('balance')` check is the bug.
+        const noCredit = walletEmptyRefusalMessage(res.status, errData);
+        const honest = noCredit
+          || errData?.error
           || (res.status === 401 ? 'Please sign in to use Doctor AI — new users get free messages every day.'
             // This is only the FALLBACK wording — the server almost always sends its own `error`, and
             // that one now names the real cause (an empty balance vs a used-up daily allowance). It no
@@ -809,9 +825,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
             : 'Doctor AI could not respond right now. Please try again in a moment.');
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          text: `⚠️ ${honest}`,
+          text: noCredit ? honest : `⚠️ ${honest}`,
           sender: 'sda',
           timestamp: new Date(),
+          needsCredit: !!noCredit,
         }]);
         return;
       }
@@ -1150,6 +1167,16 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                     }}
                   >{msg.text}</ReactMarkdown>
                 </div>
+                {/* The wallet, not a fault — the one control that actually resolves it. */}
+                {msg.needsCredit && (
+                  <button
+                    type="button"
+                    onClick={openAddCredit}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-on-accent"
+                  >
+                    <Wallet className="w-3.5 h-3.5" /> Add credit
+                  </button>
+                )}
                 <p className="text-[8px] text-faint mt-2 text-right">
                   {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                 </p>

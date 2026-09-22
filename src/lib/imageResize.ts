@@ -17,6 +17,7 @@
 // 🔒 PURE GEOMETRY. No canvas, no DOM. The component draws; this decides where.
 
 import { coverScale, type Box } from './imageCrop';
+import { MAX_CUSTOM_PX } from './imageSize';
 
 export type ResizeMode = 'crop' | 'stretch';
 
@@ -114,4 +115,33 @@ export function showsBackground(mode: ResizeMode, view: FreeView, img: Box, fram
 
 export function isFreeIdentity(view: FreeView): boolean {
   return view.zoom === 1 && view.offsetX === 0 && view.offsetY === 0;
+}
+
+/**
+ * The frame's size ON SCREEN, as a percentage of a SQUARE stage, on BOTH axes.
+ *
+ * 🔴 WHY THIS EXISTS (admin, 2026-09-22, with a screenshot: "W aur H button kaam nahi kar rahe hai.
+ * dono me se kuch bhi press karo, bas height change hoti hai, width nahi!"). The preview canvas was
+ * styled `w-full h-auto`, so its displayed WIDTH was pinned to the container and a change of shape
+ * could only ever show as a change of displayed HEIGHT — measured in Chromium: 1024×1024 → 360×360 on
+ * screen, 1280×1024 → 360×288, 1024×1280 → 360×450. Pressing W+ made the picture SHORTER. The output
+ * pixels were right the whole time; the preview could not say so.
+ *
+ * 🔑 THE RULE: one CONSTANT reference for every frame, so the axis the user pressed is the axis that
+ * moves. The reference is the longest side any frame may have (`MAX_CUSTOM_PX`), so no reachable
+ * frame can overflow the stage; a frame past it (none today) is scaled against its own longer side,
+ * so the SHAPE is never lost — the one thing a resize preview exists to show.
+ *
+ * The cost, stated: a 1024 square shows at 2/3 of the stage instead of filling it. That is the price
+ * of a preview that moves the way the buttons say, and it was measured before it was chosen.
+ *
+ * PURE. Percentages, not pixels — the stage is square, so both refer to one length.
+ */
+export const PREVIEW_REFERENCE_PX = MAX_CUSTOM_PX;
+
+export function previewPercent(frame: Box): { w: number; h: number } {
+  const w = Math.max(0, num(frame.w));
+  const h = Math.max(0, num(frame.h));
+  const ref = Math.max(PREVIEW_REFERENCE_PX, w, h);
+  return { w: round2((w / ref) * 100), h: round2((h / ref) * 100) };
 }

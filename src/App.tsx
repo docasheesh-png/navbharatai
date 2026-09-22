@@ -43,6 +43,7 @@ import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
 import { useNotificationInbox, NotificationPanel } from './components/NotificationBell';
+import { walletNeedsTopUp } from './lib/walletNeedsTopUp';
 import { FloatingExitFocusButton } from './components/FloatingExitFocusButton';
 import {
   endConversation, latestOpenConversationId, newConversationId, resumeArchived, deleteOpenConversation,
@@ -315,6 +316,13 @@ export default function App() {
     verifyBillingPayment,
     redeemPromoCoupon,
   } = usePaymentEngine({ user, addLog });
+
+  // 💳 THE TOP-UP TRAIL (admin 2026-09-22: "agar balance khatam hai, to ☰ menu → wallet and billing →
+  // buy token → purchage wallet token par ek red dot show hona chahiye"). Computed ONCE here, from the
+  // wallet this app already holds, and passed down — so the ☰ button, the sidebar row and the two
+  // controls inside Billing are four views of ONE fact and can never disagree about whether the app
+  // works. Silent while signed out, while loading, and on any wallet whose balance cannot be read.
+  const needsTopUp = walletNeedsTopUp({ wallet, loading: loadingWallet });
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return localStorage.getItem('navbharat_sidebar_collapsed') === 'true';
@@ -3377,6 +3385,7 @@ export default function App() {
       {!focusMode && (
         <TopNav
           unreadNotifications={inbox.unread}
+          walletNeedsTopUp={needsTopUp}
           effectiveDeviceMode={effectiveDeviceMode}
           isSidebarCollapsed={isSidebarCollapsed}
           setIsSidebarCollapsed={setIsSidebarCollapsed}
@@ -3415,6 +3424,7 @@ export default function App() {
         onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
         unreadReports={unreadReports}
         unreadNotifications={inbox.unread}
+        walletNeedsTopUp={needsTopUp}
         onOpenNotifications={() => setNotificationsOpen(true)}
         effectiveDeviceMode={effectiveDeviceMode}
         isSidebarCollapsed={isSidebarCollapsed}

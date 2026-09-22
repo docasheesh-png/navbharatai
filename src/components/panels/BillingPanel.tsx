@@ -23,6 +23,7 @@ import {
 import { packBreakdown, type PurchaseRail, type StoreConfig } from '../../lib/storePurchase';
 import { splitPaymentAtPct, DEFAULT_PLATFORM_FEE_PCT } from '../../lib/platformFee';
 import { aiSpendSummary, formatInr } from '../../lib/aiSpendSummary';
+import { walletNeedsTopUp, TOP_UP_DOT_LABEL } from '../../lib/walletNeedsTopUp';
 
 type BillingDetailTab = 'purchase' | 'gift' | 'use' | 'remaining';
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -89,6 +90,12 @@ export function BillingPanel(props: BillingPanelProps) {
     onCreateBillingOrder, onToast,
   } = props;
   const { monthlyAiCost } = props;
+
+  // THE LAST TWO STEPS OF THE TOP-UP TRAIL (admin 2026-09-22: "☰ → wallet and billing → buy token →
+  // purchage wallet token par ek red dot"). The same predicate the ☰ button and the sidebar row use,
+  // so the dot cannot lead somewhere it then disappears from — which is exactly how a trail loses a
+  // user. It reads the wallet this panel was already handed; nothing is fetched for it.
+  const needsTopUp = walletNeedsTopUp({ wallet, loading: loadingWallet });
 
   // TOTAL AI SPEND — the real ₹ this wallet has been charged, derived from its own ledger by the same
   // arithmetic the debit used (`tokens / TOKENS_PER_RUPEE`). Same principle as `rechargeSplit` below:
@@ -201,8 +208,10 @@ export function BillingPanel(props: BillingPanelProps) {
                 <div className="p-2.5 rounded-xl bg-emerald-800 text-on-accent">
                   <CreditCard className="w-5 h-5" />
                 </div>
-                <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-800 text-on-accent px-2 py-1 rounded-lg">
+                <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-800 text-on-accent px-2 py-1 rounded-lg inline-flex items-center gap-1.5">
+                  {needsTopUp && <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />}
                   Recharge
+                  {needsTopUp && <span className="sr-only">{TOP_UP_DOT_LABEL}</span>}
                 </span>
               </div>
               <div className="mt-3">
@@ -721,8 +730,12 @@ export function BillingPanel(props: BillingPanelProps) {
                           onCreateBillingOrder(enteredVal);
                         }}
                         disabled={isRecharging}
-                        className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-on-accent rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-emerald-600/20 active:scale-95 transition-all"
+                        title={needsTopUp ? TOP_UP_DOT_LABEL : undefined}
+                        className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-on-accent rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-emerald-600/20 active:scale-95 transition-all inline-flex items-center justify-center gap-2"
                       >
+                        {/* The end of the trail. The dot stops here because this button IS the fix —
+                            pressing it is what clears every dot behind it. */}
+                        {needsTopUp && <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />}
                         Purchase Wallet Tokens (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})
                       </button>
                     </div>

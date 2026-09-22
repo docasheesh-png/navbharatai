@@ -50,9 +50,21 @@ describe('the header: no bell, a dot on ☰, Focus last, the strip takes the roo
   });
 
   it('BOTH ☰ buttons draw the same dot from the same count, as a fact not a number', () => {
-    expect(nav).toContain('const menuDot = unreadNotifications > 0 ? (');
+    // 🔴 RE-AIMED 2026-09-22, and the re-aim is the point. A SECOND reason can now raise this dot —
+    // a finished wallet balance (the top-up trail) — so pinning the old literal
+    // `unreadNotifications > 0 ? (` would have forbidden that reason rather than protecting anything.
+    // What must stay true is unchanged and is what is asserted here: ONE definition, drawn by BOTH
+    // buttons, carrying a FACT and never a number. See `tests/theRedDotLeadsToTheTopUp.test.ts` for
+    // the second reason's own lock.
+    expect(nav).toContain('const menuNeedsAttention = unreadNotifications > 0 ||');
+    expect(nav).toContain('const menuDot = menuNeedsAttention ? (');
     expect(nav.match(/\{menuDot\}/g)?.length).toBe(2); // mobile hamburger + desktop collapse
     expect(nav.match(/aria-label=\{menuLabel\}/g)?.length).toBe(2);
+    // Still ONE dot however many reasons raise it: two marks on one button would be two problems
+    // where the user has one.
+    expect(nav.match(/rounded-full bg-danger/g)?.length).toBe(1);
+    // And it still carries no COUNT — the number lives on the sidebar's Notifications row.
+    expect(nav).not.toMatch(/\{unreadNotifications\}\s*<\/span>/);
   });
 
   it('Focus Mode is the LAST control in the bar', () => {

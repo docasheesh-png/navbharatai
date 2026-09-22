@@ -78176,6 +78176,103 @@ The number PR #3234 left open, built as the first proactive item after the admin
 
 Tests: `tests/thePlatformHasADayToo.test.ts` — the env parsing, the decision, the wording, and the
 ORDER at source level; proven by reversion.
+## 2026-09-22 — 🎓 EXAM MODE in Teacher AI: a real marked paper, not a quiz typed into a chat
+
+Admin's brief, verbatim in substance: the student tells the teacher the subject, topic, level (low /
+medium / hard / mix) and how many questions; the teacher asks objective questions with 4 clickable
+options; a correct click is a green tick and **+4**, a wrong one a red ❌ and **−1**; an explanation
+below; a **Next** button; the cycle repeats. And: *"isko aur jyada accha professional banao. mere
+batane se bhi jyada ux sundar ho!!"*
+
+### The four additions, and why each is not decoration
+
+1. **🔴 SKIP, worth 0.** With negative marking, deciding NOT to answer is the single skill the paper
+   trains — in NEET, JEE and every UPSC prelim a guessed wrong answer costs a mark a blank does not.
+   **A test with −1 and no skip button teaches the opposite of what it is for.** `skipped` is a
+   different fact from `wrong` in the marks, in the accuracy and in the per-topic breakdown.
+2. **🔴 The RIGHT option is revealed on a wrong answer.** A red cross alone tells a student they
+   failed and not what the answer was, so the next attempt is the same guess. This is the whole
+   difference between a score and a lesson.
+3. **🔑 A result that names the weak TOPICS and hands them back to the teacher in one press.** Each
+   question carries its sub-topic, so the end of a paper says *"revise Thermodynamics"* and offers one
+   button that asks Teacher AI to teach exactly the questions that were lost, with the student's own
+   wrong choice quoted. **Without this it is a quiz toy; with it, it is a teacher.**
+4. **Two honest numbers, never one.** `marks` answers *"what would this exam have scored?"*;
+   `accuracyPct` answers *"how good were my answers?"* — over ATTEMPTED only. Collapsing them is how
+   a student who skipped 29 of 30 sees "100%".
+
+Plus: **keyboard A–D or 1–4 to answer, S to skip, Enter for Next** (nobody doing thirty questions on
+a laptop should reach for a mouse); a progress bar with a live running mark total; **full review** of
+every question with the student's answer beside the right one; and the paper is pitched at the student
+Teacher AI already remembers, because the exam route runs through the same persona and memory the
+chat does.
+
+### 🔒 Honesty, where it would have been easy to fake
+
+- **A short paper is said out loud.** `parseExamPaper` REFUSES a malformed question rather than
+  repairing it, and returns `dropped` alongside what survived. Padding would invent questions;
+  silently renumbering a 10-question request to 7 would change the denominator of the student's own
+  score. The surface says *"7 questions, not the 10 you asked for … I would rather be short than make
+  them up."*
+- **A question with two identical options is refused** even when `correctIndex` points at one of
+  them — the answer is ambiguous whatever the index says.
+- **No paper, no score.** An unusable reply is a 502 with an honest sentence, never a fabricated set.
+- **Never colour alone.** Every option state carries an icon AND a word (`Correct`, `Correct answer`,
+  `Your answer`) — a red tint and a green tint are the same tint to roughly one boy in twelve, and
+  telling those two apart is this screen's entire job.
+- **The minus sign is a real `−`**, not a hyphen, because on a result screen a hyphen reads as a dash.
+
+### The two architecture decisions worth not re-deriving
+
+- **ONE model call for the WHOLE paper.** A call per question would cost the student N times as much,
+  make every Next press wait, and let question 7 repeat question 3 because nothing sees the others.
+  One paper is also what makes `mix` real — a generator can order thirty questions easy-first, which
+  it cannot do one at a time.
+- **The answers travel WITH the paper, deliberately and in writing.** Marking on the client is what
+  makes a tap turn green instantly and costs nothing. This is a study aid, not a proctored exam, and
+  the paper is already in the student's own browser. A graded invigilated exam would be a different
+  feature with a server-held key, not a flag on this one.
+
+### 🔒 It cannot become a second, ungoverned way to spend
+
+`POST /api/professional/:id/exam` reuses the chat route's whole spine — the rate limiter, the ban
+check, the Professional Pass gate, the persona, and `chargeForAiTurn` under THE ONE-WALLET LAW, after
+the answer and never awaited into the response. A source test asserts the charge is there and that
+exactly one model call is made.
+
+### Where it lives
+
+`professionals/examMode.ts` (pure: marks, the generator contract, the parser, the scoreboard, the
+hand-back message) · `professionals/examView.ts` (pure: every visual state, the keyboard map, the
+honest notes) · `professionals/ExamMode.tsx` (the screen) · one route · `skills: { exam: true }` on
+Teacher AI's client config.
+
+⚠️ **It is a DECLARED SKILL, not an id check.** `ProfessionalChat` is shared by ~50 professionals, so
+`config.skills?.exam` is what mounts it — the next professional that wants a paper (Maths & Science
+Solver, Spoken English) adds a flag, not a branch. A test asserts `config.id === 'teacher_ai'` appears
+nowhere in that component.
+
+### Verification
+
+`tests/examModeMarksWhatItSays.test.ts` — **53 cases**, reversion-proven three ways: not revealing the
+right answer on a wrong one fails 2; counting a skip as wrong fails 2; accepting duplicate options
+fails 1. White-label and colour-token guards included (no vendor name, no colour literal, no
+`text-white` anywhere in the feature).
+
+Full gate: typecheck · server typecheck · unused imports · native guard · **28,584 tests** · build ·
+bundle · boot · deps. `AppKnowledgeBase.ts` carries the new `teacher_exam_mode` entry per the sync
+rule, and Teacher AI's own prompt now knows the button exists, so a student who types *"mock test do"*
+is pointed at it instead of getting questions typed into the chat.
+
+### 🔴 Still open, deliberately not built
+
+- **No timer.** A real exam is timed, and a clock on a practice paper adds pressure to a student who
+  came to learn. It belongs behind an explicit "timed mode" choice, not as a default.
+- **No resume across a reload.** A paper in progress lives in component state; closing the pane loses
+  it. Worth a slice, and it needs a decision about whether a half-finished paper should be scored.
+- **No history of past papers** — a student cannot yet see whether their Thermodynamics score is
+  improving. That is the natural next slice and the one that would make the weak-topic list a trend
+  rather than a snapshot.
 
 ## 2026-09-22 — 🔔 Notifications moved to the sidebar; the header row belongs to the windows
 
@@ -78241,3 +78338,185 @@ two assumptions stated, approved with "haan".
 - Locked by `tests/theModeListIsTheWindowSwitcher.test.ts` (pure `headerTab` + source pins), new cases in
   `modePicker.test.ts` and `chatWindows.test.ts`; the 2026-09-21 chip pins in
   `fiveChatsAtOnceEachItsOwnWindow.test.ts` re-pointed in place with the reason. KB `professionals` updated.
+## 2026-09-22 — 🎁 ₹50 for a new account: the Play rejection was an empty wallet
+
+Google rejected the Android release under the **Broken Functionality** policy. Their label says
+*"Loading problems: Your app doesn't open or load"* — their own evidence screenshots show the app OPEN,
+on the AI Image Generator, carrying *"Image generation failed — please try again"* three times. The
+chain behind that, read out of the code rather than reasoned about:
+
+1. a brand-new account receives **₹0** — `flatWelcomeGiftAllowed()` has been a hardcoded `false` since
+   2026-09-17 and `weeklyTopUpAllowed()` likewise, while `REFERRAL_REWARDS` — the ladder meant to pay
+   instead — is deliberately unset until the app is live on Play;
+2. free images come from Pollinations, a keyless third party with no SLA;
+3. when it fails, the ladder falls to a **paid** rung;
+4. `gateToolAction` refuses a paid rung on an empty wallet (402), and the client shows one generic line.
+
+So image generation worked for a new user only while a free third party happened to be up. **A Play
+reviewer is exactly that user** — and it was a deadlock: the referral ladder was gated on being live on
+Play, and Play would not pass because a new account could not use the product.
+
+Admin's ruling, verbatim: *"new account me 50₹ credit do. jab tak, refral system activate na hota hai,
+tab tak. uske baad 100x4=400 denge.(after refral system activation)"*
+
+- **`src/server/lib/interimWelcomeGift.ts`** (new) — ₹50 = 5,000 tokens at signup. It is its own module
+  for a real reason: `referralRewards.ts` already imports `giftPolicy.ts`, so putting this in
+  `giftPolicy` would have closed a `giftPolicy → welcomeGiftExclusion → referralRewards → giftPolicy`
+  cycle.
+- 🔒 **The 2026-09-17 retirement is NOT reversed — only scoped.** `flatWelcomeGiftAllowed()` gates three
+  things: the signup grant, the retired **₹250 phone bonus** claim route, and the v2 gift summary.
+  Flipping it to reach the first would have silently re-opened a claim the admin retired — one problem
+  traded for another. It stays a hardcoded `false`; the interim grant is a separate, smaller, signup-only
+  predicate, and the phone route and the summary stand down exactly as they do today.
+- 🔒 **It stands down by itself.** The live test is `flatWelcomeGiftSuppressed` — the module that already
+  owns *"is the referral ladder paying instead?"* — so the moment `REFERRAL_REWARDS` is on this grant
+  returns 0, with no second copy of that rule and nothing for anyone to remember to switch off. That is
+  the admin's "jab tak … tab tak", in code.
+- 🔒 **It counts against the ₹400 lifetime ceiling** (`capSelfGift`, recorded in `freeGiftedTokens` in the
+  same write), so ₹50 today plus referral steps later tops out at ₹400, never ₹450.
+- ⚠️ **An unreadable `INTERIM_WELCOME_TOKENS` falls back to ₹50, never to zero.** `Number('')` is `0`, so
+  a key present-but-empty in a console would otherwise read as a deliberate "give nobody anything" and
+  silently restore the very bug this closes. An explicit `0` is honoured.
+- `alreadyGranted` still wins, so a re-created wallet document collects nothing; `retiredGiftSummary`
+  already reports the ₹50 as gifted with nothing claimable, so no screen promises a second instalment.
+- **AppKnowledgeBase:** the billing entry now states what a new account starts with and that the amount
+  is interim; the referral entry now leads with the fact that referral rewards are **not switched on
+  yet** — the Promo screen already says so, and the entry had been describing the ₹400 ladder as if it
+  were paying.
+- Test-locked and reversion-proven three ways in `tests/aNewAccountCanActuallyUseTheApp.test.ts`
+  (12 cases): removing the ladder stand-down, treating a blank env as zero, and reaching the grant
+  through `flatWelcomeGiftAllowed` (which would re-open the ₹250 phone bonus) each fail it.
+
+✅ **It is entirely server-side, so it reaches every installed app on the next merge to `main`** — no
+new `.aab` is needed for the credit itself (nothing user-facing in `dist/` changed).
+⚠️ **It does not by itself clear the rejection.** Play re-reviews on a resubmission, and what this
+changes is the reviewer's account having credit when Pollinations is down — the paid rung of the image
+ladder can now serve instead of refusing. The rejection is cleared by a resubmission that a reviewer
+gets through, not by this merge.
+
+## 2026-09-22 — 💳 "This is a paid service": an empty balance now says what it means
+
+Admin, the same hour as the ₹50 credit: *"agar user ke pas balance khatam hai, to proper likh kar ana
+chahiye. this is paid service!!"* Two defects were behind it, and neither was a missing message — both
+were about what the message actually said and what the screen then did with it.
+
+**🔴 1. The sentence was a drifted copy, three times.** `professionals/passGate.ts`, `tools/toolGate.ts`
+and the Pro image route each carried their own wording of the same refusal, already diverging
+("Add credit" / "Add credits", "balance is empty" / "credits are used up"). The drifted-copy class this
+repo has paid for four times over. One builder now: `src/server/lib/walletEmptyNotice.ts`, and a source
+guard fails if a fourth copy appears.
+
+**🔴 2. And for a wallet in DEBT the sentence was simply false.** The refusal fires at
+`balanceInr <= 0` (`walletTooEmptyForTurn`), and a build may legitimately leave a wallet down to −₹50
+(`WALLET_OVERDRAFT_FLOOR_INR`) — a real account was found at **−₹506**. Telling that person *"your
+balance is empty. Add credit"* is not a rounding of the truth: they top up ₹20, meet the identical
+refusal, and nothing anywhere tells them the real figure. The notice now names what was overspent and
+the amount that actually clears it, states the price of the refused thing where the caller knows it,
+and — when the balance could not be read at all — says so rather than inventing a zero.
+
+**🔴 3. The image studio treated a bill as a breakage.** The server's honest sentence landed in a red
+error line beside a **Try again** button, and retrying an empty wallet cannot work — the one control
+offered was the one guaranteed to fail. It now renders an *Add credit to carry on* card with a real
+button, through `navbharat:navigate`, the channel `AgentV3Panel` already uses. The generic error card
+stands down while a balance block is set, so a retry is never offered for a condition retrying cannot
+clear.
+
+- **`src/lib/walletEmptyRefusal.ts`** — the client half: `isWalletEmptyRefusal` switches on the server's
+  `wallet_empty` CODE, never on its prose (the sentence is written for a person and will be reworded).
+  ⚠️ A 402 alone is not enough — hosting plans and custom domains answer 402 with different offers.
+- 🔒 Test-locked and **reversion-proven twice** in `tests/anEmptyBalanceIsSaidProperly.test.ts`
+  (18 cases): moving the wallet check after the generic throw that swallows it, and treating a debt as
+  "empty" again, each fail it. Both guards are SOURCE-level — `tsc` and `vitest` cannot see either,
+  which is exactly how both shipped.
+- 🔒 White-label locked: no vendor, model or routing word can reach the text.
+
+⚠️ **What this does NOT do, said plainly.** The build panel and the Professional chat already had a
+proper card with an Add-credit button and are untouched. Doctor AI and the AI tool panels (Debugger,
+Design System, App Scan) still show the refusal as plain text with no button — honest, and better than
+before because the sentence itself improved, but not one tap from the fix. That is the next slice.
+
+## 2026-09-22 — 🔴 The red dot that leads to the top-up
+
+Admin, verbatim: *"agar balat kahatam hai, to navigator dot, ko 3lins menu-> wallet and billing ->
+buy token -> purchage wallet token par ek red dot show hona chahiye!"*
+
+A **trail**, not a badge: ☰ → **Wallet & Billing** → **Buy tokens** → **Purchase Wallet Tokens**, four
+marks that walk a blocked user to the one control that unblocks them. A refusal message tells someone
+they are stuck; this tells them where to go.
+
+- **`src/lib/walletNeedsTopUp.ts`** — one predicate, four readers. Four places asking "is the balance
+  finished?" in four slightly different ways is the drifted-copy class this repo has now paid for six
+  times (`safeRelPath` ×4, `tagsOnLine` ×2, the boot guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2, and the
+  empty-balance sentence earlier the same day). What makes it a trail rather than four coincidences is
+  that a dot cannot lead to a screen where it has quietly vanished.
+- 🔑 **The line is the SERVER's own refusal line** (`walletTooEmptyForTurn`: `balanceInr <= 0`). A dot
+  at ₹5 while builds still work is a nag; no dot at ₹0 while everything is refused is useless. Tying
+  it to the same number means the dot and the refusal can never disagree about whether the app works.
+- 🔴 **It reads the HIGHER of the wallet's two views, and that is a bug already paid for.** The wallet
+  holds one balance in `remaining_balance` and `tokenBalance`, and the gift path once moved only the
+  second (admin 2026-08-03: *"₹0 + 50,000 tokens → app building off"*). Reading ₹ alone would paint a
+  red "you have no money" dot across the whole app for **every brand-new account on the ₹50 welcome
+  credit**, whose token view is the one carrying it.
+- 🔒 **Silent on every doubt** — signed out, not fetched, still loading, or a balance that cannot be
+  read ⇒ no dot. A dot that is wrong once is a dot nobody reads again.
+- **One dot, two reasons, on the ☰ button.** An unread notification and a finished balance raise the
+  SAME mark; the accessible label names which (the balance first — it is the one that stops the app).
+  Two marks on one button would be two problems where the user has one.
+- 🔴 **Wired on the mobile DRAWER as well as the desktop rail.** `SidebarNav` has two `NavItem` render
+  sites and ☰ opens the drawer — wiring only the rail ships the feature working nowhere it was asked
+  for. Test-locked by counting both.
+- Test-locked and **reversion-proven three ways** in `tests/theRedDotLeadsToTheTopUp.test.ts`
+  (12 cases): dropping the drawer's dot, reading the ₹ view alone, and nagging while the wallet loads
+  each fail it. Half the suite is SOURCE-level — `tsc` and `vitest` cannot see a dot wired on one of
+  two render sites.
+- Colour comes from `bg-danger`; the ratchet's per-file baselines are unchanged.
+
+⚠️ **It does not warn BEFORE the wall.** "Your balance is running low" is a different, still-unbuilt
+thing (`notifyLowBalance`'s `blocked: false` branch has no caller anywhere) and a different decision,
+because a warning has to obey the alert-noise rule. This dot states a fact that is true right now and
+disappears the moment it stops being true.
+## 2026-09-22 — Resize sheet: "W aur H button kaam nahi kar rahe" — the buttons worked, the preview could not show width
+
+Admin, with a screenshot of the sheet at 1024 × 1024: *"ai image generate: me image banne ke bad, resize me
+W aur H button kaam nahi kar rahe hai. dono me se kuch bhi press karo, bas height change hoti hai, width
+nahi! fix karo!!"*
+
+**Investigated before touching code.** The field wiring is correct — W calls `onChange(n, height)`, H calls
+`onChange(width, n)` — and the output PNG was made at the frame's real pixels the whole time. The defect was
+the PREVIEW: the canvas was styled `w-full h-auto`, so its displayed WIDTH was pinned to the container and
+any change of shape could only show as a change of displayed HEIGHT. Reproduced in Chromium in a 360 px
+container before a line changed:
+
+| frame | shown on screen |
+|---|---|
+| 1024 × 1024 | 360 × 360 |
+| 1088 × 1024 (W+) | 360 × 339 — **shorter** |
+| 1280 × 1024 | 360 × 288 |
+| 1024 × 1088 (H+) | 360 × 383 — taller |
+
+So "whatever you press, only the height changes" was exactly true, and W+ read as the picture SHRINKING.
+
+**Fix — one rule, `previewPercent` in `src/lib/imageResize.ts`:** a SQUARE stage (`aspect-square`), and the
+canvas sized as a PERCENT of it on BOTH axes against ONE constant reference (`MAX_CUSTOM_PX`, the longest
+side any frame may have — so nothing reachable can overflow, and a frame past it keeps its shape). Measured
+after: 1024 × 1024 → 240 × 240, 1088 × 1024 → 255 × 240, 1280 × 1024 → 300 × 240, 1024 × 1280 → 240 × 300.
+The axis pressed is the axis that moves. **The cost, stated:** a 1024 square now shows at two-thirds of the
+stage instead of filling it; that is the price of a preview that moves the way the buttons say.
+
+⚠️ **Why the reference must be CONSTANT and not "the frame's own longer side":** with the latter, W+ on a
+square re-scales everything and the width stays pinned — the exact bug in different clothes. Proven by
+reversion (test fails when the reference follows the frame).
+
+**Second defect in the same sheet, fixed alongside (rule 3):** two `CustomSizeFields` can be on the page at
+once — the composer's (size = Custom) and the sheet's, portalled over it — with the SAME input ids, so the
+sheet's "W" label pointed at the composer's input BEHIND it (`getElementById` returns the first). The fields
+take an `idPrefix` now; the sheet passes `nbai-resize`, the composer keeps the default.
+
+**Siblings hunted:** `ImageCropEditor` (attach side) and `TextOverlayEditor` use the same `w-full h-auto`
+canvas, but their frame never changes while they are open, so the defect cannot occur there. Left as they
+are, on purpose — shrinking those previews would buy nothing.
+
+Tests: `tests/theFrameGrowsOnTheAxisYouPressed.test.ts` (10) — the pure rule (W+ moves only w, H+ only h,
+constant reference across every preset and custom frame, shape kept past the reference, junk → 0) and source
+guards (percent-sized canvas, square stage, distinct ids). **Proven by reversion three ways:** reference
+following the frame; the width-pinned canvas restored; shared ids restored.

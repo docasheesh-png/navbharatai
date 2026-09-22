@@ -88,8 +88,13 @@ describe('gift plan v2 — off by default, and genuinely inert while off', () =>
     // the FIRST thing this expression asks is whether a flat gift may be paid at all. What the test
     // still pins is the half that has to survive the retirement: if it is ever re-enabled, the v2-off
     // path must fall back to the EXACT legacy grant, not to some new number invented on the way.
-    expect(SRC).toMatch(/const welcomeTokens = !flatWelcomeGiftAllowed\(\) \? 0/);
-    expect(SRC).toMatch(/const welcomeTokens =[\s\S]{0,200}: welcomeGrantTokens\(alreadyGranted\);/);
+    // 🔴 AND AGAIN 2026-09-22: that first branch now pays the ₹50 INTERIM credit instead of a flat
+    // zero. The retirement predicate still asks the question first, which is what this line is for.
+    expect(SRC).toMatch(/const welcomeTokens = !flatWelcomeGiftAllowed\(\)/);
+    expect(SRC).toMatch(/\? \(alreadyGranted \|\| identityAlreadySpent \? 0 : interimWelcomeTokens\(\)\)/);
+    // The window is 400 rather than 200 because the interim branch lengthened the expression; it is
+    // still bounded, so a legacy fallback moved to some other statement entirely still fails here.
+    expect(SRC).toMatch(/const welcomeTokens =[\s\S]{0,400}: welcomeGrantTokens\(alreadyGranted\);/);
   });
 });
 

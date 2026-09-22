@@ -47,6 +47,12 @@ export interface TopNavProps {
    * tabs. The number lives on the sidebar's Notifications row; here only the fact.
    */
   unreadNotifications?: number;
+  /**
+   * The balance is finished, so the ☰ button carries the SAME dot (admin 2026-09-22) — the first step
+   * of the trail that ends on the Purchase button. It is a second REASON for one dot, never a second
+   * dot: two marks on one button would be two problems where the user has one.
+   */
+  walletNeedsTopUp?: boolean;
   setShowAuth: (v: boolean) => void;
   auth: any;
   /** Enter Focus Mode — hides the header (this bar) + the mobile bottom nav so only the
@@ -66,16 +72,24 @@ export function TopNav({
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
-  onOpenProfile, onOpenSettings, isAdmin, unreadNotifications = 0,
+  onOpenProfile, onOpenSettings, isAdmin, unreadNotifications = 0, walletNeedsTopUp = false,
   hiddenTabs = [], highlightedTab,
 }: TopNavProps) {
   const hidden = new Set(hiddenTabs);
   const lit = highlightedTab ?? activeView;
-  /** The one dot both ☰ buttons draw — a fact, never a number; the number is in the sidebar. */
-  const menuDot = unreadNotifications > 0 ? (
+  /** The one dot both ☰ buttons draw — a fact, never a number; the number is in the sidebar.
+   *  Two reasons can raise it (an unread notification, a finished balance) and it stays ONE dot. */
+  const menuNeedsAttention = unreadNotifications > 0 || walletNeedsTopUp;
+  const menuDot = menuNeedsAttention ? (
     <span aria-hidden className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-danger ring-2 ring-card" />
   ) : null;
-  const menuLabel = unreadNotifications > 0 ? `Menu, ${unreadNotifications} unread notifications` : 'Menu';
+  // The label must say WHICH, or a screen-reader user is told there is something and not what. When
+  // both are true the balance is named first: it is the one that stops the app working.
+  const menuLabel = walletNeedsTopUp
+    ? (unreadNotifications > 0
+      ? `Menu, balance finished, ${unreadNotifications} unread notifications`
+      : 'Menu, balance finished — add credit')
+    : unreadNotifications > 0 ? `Menu, ${unreadNotifications} unread notifications` : 'Menu';
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   // ONE ACCOUNT AT A TIME (admin 2026-09-19). The avatar menu used to carry a "Switch account" list

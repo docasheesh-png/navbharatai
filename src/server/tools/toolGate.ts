@@ -29,6 +29,7 @@ import { aiWalletSpendEnabled, chargeForAiTurns } from '../lib/aiTurnCharge';
 import { currentAiSpend } from '../lib/aiSpendZone';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { walletTooEmptyForTurn } from '../professionals/passGate';
+import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
 
@@ -113,20 +114,18 @@ export async function gateToolAction(
   if (walletSpend && uid && !freeListed && !hasActivePass) {
     const balanceInr = await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid).catch(() => null);
     if (walletTooEmptyForTurn(balanceInr)) {
+      // ADMIN 2026-08-10 ("pass system hata do"): the Pass offer that used to close this sentence
+      // was a LIVE LIE — this branch runs today (AI_WALLET_SPEND on since 2026-08-08) while the
+      // Pass has never been sellable, so an empty-balance user was sent to buy something that does
+      // not exist. Adding credit is the only instruction that actually resolves their block.
+      // ADMIN 2026-09-22: the wording is now shared (`walletEmptyNotice`) and states a real debt.
       return {
         allow: false,
-        status: 402,
-        body: {
-          // ADMIN 2026-08-10 ("pass system hata do"): the Pass offer that used to close this sentence
-          // was a LIVE LIE — this branch runs today (AI_WALLET_SPEND on since 2026-08-08) while the
-          // Pass has never been sellable, so an empty-balance user was sent to buy something that does
-          // not exist. Adding credit is the only instruction that actually resolves their block.
-          error: 'Your balance is empty. Add credit to keep using NavBharatAI — you only pay for what you actually use.',
-          code: 'wallet_empty',
-          reason: 'wallet-empty',
-          bucket,
-          balanceInr: balanceInr ?? 0,
-        },
+        status: WALLET_EMPTY_STATUS,
+        body: walletEmptyBody(
+          { balanceInr, what: bucket === 'image' ? 'this image' : 'this' },
+          { bucket },
+        ),
       };
     }
   }

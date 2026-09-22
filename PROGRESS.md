@@ -78198,3 +78198,18 @@ jyada jagah banao."*
   window strip is `flex-1 min-w-0` so it takes every pixel the fixed controls leave and scrolls inside it.
 - KB `notifications_bell` re-pointed to the sidebar row. Locked by `tests/notificationsLiveInTheSidebar.test.ts`;
   three old pins re-pointed (`adminUserMessaging`, `polishCollabSettings`).
+
+## 2026-09-22 — 🫳 The Focus Mode exit button goes where the finger puts it
+
+Admin: *"full screen off (collapse) button upper right corner me fix hai. isko moveable banao, user usko
+ungli se khich ke kahi bhi rakh sake! expand (full screen on) wala theek hai."*
+
+- **`useDraggableFloat`** (`src/hooks/`) — the drag, pointer capture, the clamp on every position (drag,
+  first paint, resize, rotation), the remembered spot per browser and the tap-vs-drag decision, ONCE.
+  The admin copy button had all of it inline since 2026-09-14; a second inline copy would have been the
+  drifted-copy class, so the admin button now calls the hook too (its wiring test re-pointed).
+- **`FloatingExitFocusButton`** — same blur, same size, same top-right default (`topRightPosition`, under
+  the notch), so a user who never drags it sees nothing change; a drag anywhere is remembered under
+  `nbai.focusExit.pos` and clamped to whatever screen it is next shown on. Keyboard still exits.
+- The header's ENTER button is untouched. Locked by `tests/theExitButtonGoesWhereTheFingerPutsIt.test.ts`
+  and two `topRightPosition` cases in `floatingButtonPosition.test.ts`.

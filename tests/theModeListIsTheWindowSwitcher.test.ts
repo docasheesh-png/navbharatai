@@ -76,43 +76,38 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
     expect(app).not.toContain('onSelectChatWindow');
   });
 
-  it('✕ on a recent row closes ONE conversation: a window, a single-chat view, or the FREE chat WITHOUT its tab', () => {
+  it('✕ on a recent row closes ONE conversation — a window through closeChatWindow, a single-chat view through closeTab — and the FREE row has no ✕ at all', () => {
     const at = app.indexOf('onCloseRecent={(recentId) =>');
     const body = app.slice(at, app.indexOf('onPick={(id) =>', at));
+    // 🔴 THE BUG (admin 2026-09-22, morning): the FREE row's ✕ called `closeTab('nbi_chat')`, the header
+    // tab's teardown, which closes every AI opened inside that tab. THE FIX (admin, the same evening:
+    // "navbharatai free, chat ke age se X hi hata den!!!"): the FREE row carries no ✕, and App refuses a
+    // close for it through the SAME rule the sheet renders by, so the two cannot disagree.
+    expect(body).toContain('if (!recentRowClosable(recentId)) return;');
     expect(body).toContain('const target = recentTargetFromId(recentId);');
     expect(body).toContain('if (target.conversationId) closeChatWindow(undefined, target.conversationId);');
-    // 🔴 THE BUG (admin 2026-09-22, the same evening): the FREE row used to call `closeTab('nbi_chat')`,
-    // the header tab's teardown, which closes every AI opened inside that tab. The FREE chat is ended
-    // with the tab left standing, and the flag takes it out of the list.
-    expect(body).toContain("else if (target.view === 'nbi_chat') { resetFreeChatSurface(); setFreeChatClosed(true); }");
     expect(body).toContain('else closeTab(undefined, target.view as ViewType);');
     expect(body).not.toContain("closeTab(undefined, 'nbi_chat'");
+    expect(app).not.toContain('freeChatClosed');
+    expect(sheet).toContain("{e.kind === 'recent' && onCloseRecent && recentRowClosable(e.id) && (");
   });
 
-  it('after a close the screen goes to the next chat, the list stays open; the LAST close lands on a fresh FREE page', () => {
+  it('after a close the screen goes to the next chat, the list stays open; the LAST close dismisses it and shows FREE', () => {
     const at = app.indexOf('onCloseRecent={(recentId) =>');
     const body = app.slice(at, app.indexOf('onPick={(id) =>', at));
     // The next chat is decided BEFORE anything closes, from the same Recent list the sheet shows.
     expect(body.indexOf('const next = nextRecentAfterClose(recent, recentId);')).toBeLessThan(body.indexOf('closeChatWindow(undefined, target.conversationId)'));
-    expect(body).toContain('recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats, freeChatClosed })');
-    expect(body).toContain('if (wasOnScreen) toggleTab(next.view as ViewType, true, next.conversationId);');
-    // The last chat: sheet dismissed, a fresh FREE chat, back on FREE ("starting jaisa").
-    const last = body.slice(body.indexOf('if (!next) {'), body.indexOf('if (wasOnScreen)'));
+    expect(body).toContain('recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats })');
+    expect(body).toContain('const last = lastChatClosed(recent, recentId);');
+    expect(body).toContain('if (wasOnScreen && next) toggleTab(next.view as ViewType, true, next.conversationId);');
+    // The last chat: sheet dismissed, FREE on screen — a FRESH one only when no FREE tab was open at all
+    // (FREE's own conversation is never wiped by closing somebody else).
+    const last = body.slice(body.indexOf('if (last) {'), body.indexOf('if (wasOnScreen'));
     expect(last).toContain('setShowModePicker(false);');
-    expect(last).toContain('startNewChat();');
-    expect(last).toContain('setFreeChatClosed(false);');
+    expect(last).toContain('if (!next) startNewChat();');
     expect(last).toContain("toggleTab('nbi_chat');");
     // Closing one of several does NOT dismiss the sheet — the only setShowModePicker(false) is in the last-close branch.
     expect(body.split('setShowModePicker(false)').length - 1).toBe(1);
-  });
-
-  it('the FREE chat is open again the moment the user is back on it, whichever door brought them', () => {
-    expect(app).toContain("useEffect(() => { if (activeView === 'nbi_chat') setFreeChatClosed(false); }, [activeView]);");
-    expect(app).toContain('freeChatClosed={freeChatClosed}');
-    // ONE reset for the FREE conversation, shared by the header ✕ (inside closeTab) and the Mode ✕.
-    expect(app).toContain('const resetFreeChatSurface = useCallback(() => {');
-    const closeTabBody = app.slice(app.indexOf('const closeTab = useCallback'), app.indexOf('const closeChatWindow'));
-    expect(closeTabBody).toContain("} else if (v === 'nbi_chat') {\n        resetFreeChatSurface();");
   });
 
   it('the image studio picked from Mode is capped, then parented to the chat tab it was picked from', () => {

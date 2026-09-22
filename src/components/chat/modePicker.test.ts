@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  modePickerEntries, recentModeEntries, nextRecentAfterClose, filterModeEntries, activeModeId, isModeSurface,
+  modePickerEntries, recentModeEntries, nextRecentAfterClose, lastChatClosed, recentRowClosable, filterModeEntries, activeModeId, isModeSurface,
   FREE_MODE_ID, IMAGE_MODE_ID, recentModeId, recentTargetFromId, startsFreshOnPick,
 } from './modePicker';
 import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
@@ -92,15 +92,16 @@ describe('modePickerEntries — what the Mode button offers', () => {
     expect(withImage.map((e) => e.view)).toEqual(['nbi_chat', IMAGE_MODE_ID]);
   });
 
-  it('🔴 a CLOSED free chat leaves the Recent group while its tab stays open (admin 2026-09-22)', () => {
-    // "recent chat me navbharatai free ko x karte hai, to navbharatai free pura window hi band ho jata
-    // hai, chahe 3-5 kitne bhi ai open ho!" — the tab is home to the others, so closing the FREE
-    // conversation must not close it; the flag is what takes FREE out of the list instead.
-    const openChats = [{ id: 't1', professionalId: 'teacher_ai' }];
-    const open = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat', 'teacher_ai'], openChats });
-    expect(open.map((e) => e.view)).toEqual(['nbi_chat', 'sda_chat', 'teacher_ai']);
-    const closed = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat', 'teacher_ai'], openChats, freeChatClosed: true });
-    expect(closed.map((e) => e.view)).toEqual(['sda_chat', 'teacher_ai']);
+  it('🔴 every recent row has a ✕ EXCEPT NavBharatAI FREE (admin 2026-09-22: "chat ke age se X hi hata den")', () => {
+    // FREE is the home the other chats live in; closing it from its own list either closed the tab and
+    // every AI inside it (the bug) or needed a tab-less "closed" flag (the first fix). Neither: no ✕.
+    expect(recentRowClosable(recentModeId('nbi_chat'))).toBe(false);
+    expect(recentRowClosable(recentModeId('sda_chat'))).toBe(true);
+    expect(recentRowClosable(recentModeId(IMAGE_MODE_ID))).toBe(true);
+    expect(recentRowClosable(recentModeId('teacher_ai', 't1'))).toBe(true);
+    // A New row (or any non-recent id) closes nothing — there is nothing open to close.
+    expect(recentRowClosable('teacher_ai')).toBe(false);
+    expect(recentRowClosable(FREE_MODE_ID)).toBe(false);
   });
 
   it('🔴 after a close the screen goes to the row BELOW, else above, and null means the last chat closed', () => {
@@ -109,17 +110,34 @@ describe('modePickerEntries — what the Mode button offers', () => {
     const openChats = [{ id: 't1', professionalId: 'teacher_ai' }, { id: 't2', professionalId: 'teacher_ai' }];
     const recent = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat', 'teacher_ai'], openChats });
     expect(recent.map((e) => e.id)).toEqual([recentModeId('nbi_chat'), recentModeId('sda_chat'), recentModeId('teacher_ai', 't1'), recentModeId('teacher_ai', 't2')]);
-    // FREE closed → Doctor AI (below).
+    // The first row closed → the row below it (pure: the function does not know FREE has no ✕).
     expect(nextRecentAfterClose(recent, recentModeId('nbi_chat'))?.id).toBe(recentModeId('sda_chat'));
     // The last row closed → the one above it.
     expect(nextRecentAfterClose(recent, recentModeId('teacher_ai', 't2'))?.id).toBe(recentModeId('teacher_ai', 't1'));
     // A middle row closed → the one below it, never the one above.
     expect(nextRecentAfterClose(recent, recentModeId('teacher_ai', 't1'))?.id).toBe(recentModeId('teacher_ai', 't2'));
-    // The only chat closed → null: the caller opens a fresh FREE page.
-    expect(nextRecentAfterClose([recent[0]], recentModeId('nbi_chat'))).toBeNull();
+    // The row under FREE closed → FREE (above), which is the last-chat case below.
+    expect(nextRecentAfterClose(recent.slice(0, 2), recentModeId('sda_chat'))?.id).toBe(recentModeId('nbi_chat'));
+    // The only chat closed, no FREE tab open → null: the caller opens a fresh FREE page.
+    expect(nextRecentAfterClose([recent[1]], recentModeId('sda_chat'))).toBeNull();
     // An id not in the list closes nothing that was listed: stay somewhere real.
     expect(nextRecentAfterClose(recent, 'recent:ghost')?.id).toBe(recentModeId('nbi_chat'));
     expect(nextRecentAfterClose([], 'recent:ghost')).toBeNull();
+  });
+
+  it('🔴 the LAST chat closed = nothing but FREE (or nothing) remains → the list dismisses, FREE shows', () => {
+    // "agar mode me kebal ek hi AI open hai, aur user usko bhi band kar de! to mode list band ho jaye
+    // aur navbharatai free ka page open ho jaye" — FREE itself has no ✕, so it is what remains.
+    const openChats = [{ id: 't1', professionalId: 'teacher_ai' }];
+    const two = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat'], openChats });
+    expect(lastChatClosed(two, recentModeId('sda_chat'))).toBe(false); // Teacher AI is still open
+    expect(lastChatClosed(two, recentModeId('teacher_ai', 't1'))).toBe(false); // Doctor AI is still open
+    const one = recentModeEntries({ hideMedical: false, openViews: ['nbi_chat', 'sda_chat'] });
+    expect(lastChatClosed(one, recentModeId('sda_chat'))).toBe(true);
+    // No FREE tab open at all (an expert opened from the hub): the last close leaves nothing.
+    const noFree = recentModeEntries({ hideMedical: false, openViews: ['sda_chat'] });
+    expect(lastChatClosed(noFree, recentModeId('sda_chat'))).toBe(true);
+    expect(lastChatClosed([], 'recent:ghost')).toBe(true);
   });
 
   it('a recent WINDOW row round-trips its view AND conversation through its id', () => {
@@ -317,12 +335,12 @@ describe('ModePickerSheet — the rows say which is which', () => {
     // The Recent group is hidden entirely when empty — a heading over nothing promises a way back to nothing.
     expect(sheet).toContain('{recent.length > 0 && (');
     // Every recent row carries the ✕; no New row does.
-    expect(sheet).toContain("{e.kind === 'recent' && onCloseRecent && (");
+    expect(sheet).toContain("{e.kind === 'recent' && onCloseRecent && recentRowClosable(e.id) && (");
   });
 
   it('it builds the list from the OPEN TABS and OPEN WINDOWS, or the Recent group could never know what is open', () => {
-    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats, freeChatClosed })');
-    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats, freeChatClosed]');
+    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats })');
+    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats]');
     expect(sheet).toContain('activeModeId(activeView, activeChatId)');
   });
 

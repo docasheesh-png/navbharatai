@@ -78790,3 +78790,25 @@ jaisa!!"*
 - Locked in `modePicker.test.ts` (two pure cases) and `theModeListIsTheWindowSwitcher.test.ts` (source pins:
   the FREE row never reaches `closeTab('nbi_chat')`; the only `setShowModePicker(false)` in the close path
   is the last-close branch). KB `professionals` howToUse updated.
+
+### 2026-09-22, later — 🥰 the admin's simpler answer: the FREE row has NO ✕ (supersedes the flag above)
+
+Admin, on reading the fix above: *"isse simple bhi ek rasta tha! navbharatai free, chat ke age se X hi hata
+den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebuilt on it before it merged.
+
+- **Why it is better, not merely smaller:** the FREE tab is the HOME of every chat opened through its Mode
+  button, so "close FREE from inside its own list" had no honest meaning — it either closed the tab and every
+  AI inside it (the morning's bug) or needed a second, tab-less notion of "closed" (`freeChatClosed` + an
+  effect + a shared reset, the first fix). A fresh FREE chat is already one tap away under "New chat", and
+  the header tab's ✕ still closes the whole thing. So the row simply carries no ✕.
+- **One rule, two readers:** `recentRowClosable(id)` (`modePicker.ts`, pure) decides both whether the sheet
+  renders the ✕ and whether App acts on a close for that id. `freeChatClosed`, its effect and
+  `resetFreeChatSurface` are gone; `closeTab`'s FREE branch is back to its original lines.
+- **The rest of the admin's spec stands:** ✕ on any other row closes that one chat, the screen moves to the
+  row below (else above — FREE, when it was the row under FREE; `nextRecentAfterClose`), the list stays open;
+  when the last chat closes (`lastChatClosed`: nothing but FREE remains) the list dismisses and FREE shows.
+  ⚠️ FREE's own conversation is NOT wiped by closing somebody else — it was never closed; `startNewChat()`
+  runs only when no FREE tab was open at all (an expert opened from the hub with FREE closed).
+- Locked in `modePicker.test.ts` (`recentRowClosable`, `lastChatClosed`, the FREE-above case) and
+  `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
+  the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.

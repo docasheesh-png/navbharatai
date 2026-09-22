@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from 'react';
 import { X, Search, Check } from 'lucide-react';
-import { modePickerEntries, filterModeEntries, activeModeId, type ModeEntry } from './modePicker';
+import { modePickerEntries, filterModeEntries, activeModeId, recentRowClosable, type ModeEntry } from './modePicker';
 import type { ChatWindow } from '../../lib/chatWindows';
 
 export function ModePickerSheet({
@@ -19,7 +19,6 @@ export function ModePickerSheet({
   activeChatId,
   openViews,
   openChats,
-  freeChatClosed = false,
   hideMedical,
   onPick,
   onCloseRecent,
@@ -33,8 +32,6 @@ export function ModePickerSheet({
   openViews: readonly string[];
   /** The open professional windows, in the order they were opened. */
   openChats: readonly ChatWindow[];
-  /** The FREE chat was closed from this list while its tab stays open (see modePicker.ts). */
-  freeChatClosed?: boolean;
   /** Native-shell Play compliance: hides the medical-class experts (same rule as the hub). */
   hideMedical: boolean;
   /**
@@ -57,8 +54,8 @@ export function ModePickerSheet({
 }) {
   const [query, setQuery] = useState('');
   const entries = useMemo(
-    () => modePickerEntries({ hideMedical, activeView, openViews, openChats, freeChatClosed }),
-    [hideMedical, activeView, openViews, openChats, freeChatClosed],
+    () => modePickerEntries({ hideMedical, activeView, openViews, openChats }),
+    [hideMedical, activeView, openViews, openChats],
   );
   const visible = useMemo(() => filterModeEntries(entries, query), [entries, query]);
   const current = activeModeId(activeView, activeChatId);
@@ -111,9 +108,11 @@ export function ModePickerSheet({
         {current === e.id && <Check className="w-4 h-4 text-accent-text shrink-0" aria-label="Current mode" />}
       </button>
       {/* CLOSE THAT CHAT, from the row that names it. Only a recent row gets it: every New row STARTS
-          something, and there is nothing yet to close. Absent when the caller supplies no handler, so
-          a surface that cannot close a chat shows no control that pretends it can. */}
-      {e.kind === 'recent' && onCloseRecent && (
+          something, and there is nothing yet to close. NavBharatAI FREE never gets it (admin 2026-09-22,
+          `recentRowClosable`): it is the home the other chats live in, and a fresh FREE chat is one tap
+          away under "New chat". Absent when the caller supplies no handler, so a surface that cannot
+          close a chat shows no control that pretends it can. */}
+      {e.kind === 'recent' && onCloseRecent && recentRowClosable(e.id) && (
         <button
           onClick={() => onCloseRecent(e.id)}
           aria-label={`Close ${e.name}`}

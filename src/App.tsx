@@ -59,7 +59,7 @@ import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
-import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, nextRecentAfterClose, activeModeId } from './components/chat/modePicker';
+import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
 import { headerTabFor, hiddenHeaderTabs } from './lib/headerTab';
 import { ReportSheet } from './components/ReportSheet';
 import { TestingNotice } from './components/TestingNotice';
@@ -593,15 +593,6 @@ export default function App() {
   const [sdaOpenCaseId, setSdaOpenCaseId] = useState<string | undefined>(undefined);
   // The Mode sheet (admin 2026-08-25): footer Mode button → pick FREE / a new FREE chat / any expert.
   const [showModePicker, setShowModePicker] = useState(false);
-  /**
-   * THE FREE CHAT CAN BE CLOSED WITHOUT CLOSING ITS TAB (admin 2026-09-22: *"recent chat me navbharatai
-   * free ko x karte hai, to navbharatai free pura window hi band ho jata hai, chahe 3-5 kitne bhi ai open
-   * ho! isko badlo"*). The FREE tab is the HOME of every chat opened through its Mode button, so the
-   * header tab's ✕ — `closeTab('nbi_chat')`, which takes every child with it by design — is the wrong
-   * verb for "close this one conversation". This flag is that verb's other half: the conversation is
-   * reset, the tab stays, and the Recent group stops listing FREE until the user is back on it.
-   */
-  const [freeChatClosed, setFreeChatClosed] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
@@ -833,9 +824,6 @@ export default function App() {
     const same = windowsOf(openChats, activeView);
     return same.find((w) => w.id === activeChatId) ?? same[same.length - 1] ?? null;
   }, [openChats, activeView, activeChatId]);
-  // Being ON the FREE chat is what re-opens it — whichever door brought the user back (the header tab,
-  // "New chat → FREE", the last chat closing). One rule, no second copy per door.
-  useEffect(() => { if (activeView === 'nbi_chat') setFreeChatClosed(false); }, [activeView]);
   // Fresh-open nonce: bumped by toggleTab ONLY when the user deliberately OPENS v5.0 from the menu/
   // sidebar (a plain open → start a NEW chat). A reload restores the v5.0 view WITHOUT toggleTab, so
   // the nonce stays 0 → AgentV3Panel takes the RESTORE path instead. A History reopen sets v3Resume
@@ -1820,18 +1808,6 @@ export default function App() {
   // click from also selecting the tab) and a panel's own "Close" button, which has no tab click to
   // stop. Giving the panel its own close would have meant a second copy of the tab/child/companion
   // teardown below — the kind of duplicate that drifts and then disagrees.
-  /**
-   * END the FREE conversation on screen: clear the transcript and the draft, and mint a fresh session id
-   * so the next conversation's memory cannot inherit this one's. The header tab's ✕ and the Mode list's
-   * ✕ on the FREE row both call THIS — the tab teardown below adds the tab removal, the Mode close does
-   * not (2026-09-22), and neither carries a private copy of the reset.
-   */
-  const resetFreeChatSurface = useCallback(() => {
-    setMessages([]);
-    setInput('');
-    setCurrentSessionId(Date.now().toString());
-  }, [setMessages, setInput, setCurrentSessionId]);
-
   const closeTab = useCallback((e: React.MouseEvent | undefined, view: ViewType) => {
     e?.stopPropagation();
 
@@ -1878,7 +1854,10 @@ export default function App() {
         // ✕-closing Settings clears the open sub-option so the next open starts at the root menu.
         setSettingsScreen('root');
       } else if (v === 'nbi_chat') {
-        resetFreeChatSurface();
+        setMessages([]);
+        setInput('');
+        // Reset session so memorySummary doesn't bleed into next conversation
+        setCurrentSessionId(Date.now().toString());
       } else if (v === 'nbi_pro_chat') {
         // ✕ CLOSE = one of the only ways the v5.0 chat ends (admin rule 2026-07-05): clear the sticky
         // session so the NEXT open starts a fresh chat. Everything short of this ✕ (tab switches,
@@ -1923,7 +1902,7 @@ export default function App() {
         if (store) for (const w of windowsOf(openChats, v)) endConversation(store, v, w.id);
       }
     }
-  }, [openTabs, activeView, tabOpeners, toggleTab, user, openChats, activeChatId, resetFreeChatSurface, setProMessages, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
+  }, [openTabs, activeView, tabOpeners, toggleTab, user, openChats, activeChatId, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
   /**
    * Close ONE conversation window (admin 2026-09-21) — the header chip's ✕ and the Mode sheet's recent-row
    * ✕. Its transcript is archived (it reappears under History); its sibling windows with the same expert
@@ -4045,37 +4024,39 @@ export default function App() {
               activeChatId={activeChat?.id ?? null}
               openViews={openTabs}
               openChats={openChats}
-              freeChatClosed={freeChatClosed}
               hideMedical={medicalFeaturesHidden(isNativeApp())}
               onClose={() => setShowModePicker(false)}
               // ✕ ON A RECENT ROW (admin 2026-09-21, one row; 2026-09-22, every open chat). It closes
-              // ONE conversation — never the tab that is home to the others (admin, the same evening:
-              // closing FREE used to take every AI inside it down, because it called the header tab's
-              // teardown). A WINDOW closes through `closeChatWindow` (its sibling windows stay); a
-              // single-chat view through the same `closeTab` the header's ✕ calls; the FREE chat
-              // through `resetFreeChatSurface` alone, with the tab left standing and `freeChatClosed`
-              // taking it out of the list. Then the screen goes to the row BELOW the closed one (else
-              // above), and the list stays open so more can be closed — except when the LAST chat
-              // closes, which lands on a fresh FREE page, "starting jaisa", with the list dismissed.
+              // ONE conversation — never the tab that is home to the others. NavBharatAI FREE has no ✕
+              // at all (admin 2026-09-22, `recentRowClosable`): closing it from inside its own list
+              // used to call the header tab's teardown and take every AI inside the tab down with it,
+              // and the tab-less "closed FREE" that replaced that for a few hours was a flag, an effect
+              // and a shared reset for a row that "New chat → FREE" already restarts in one tap. A WINDOW
+              // closes through `closeChatWindow` (its sibling windows stay); a single-chat view through
+              // the same `closeTab` the header's ✕ calls. Then the screen goes to the row BELOW the
+              // closed one (else above — FREE, when it was the row under FREE), and the list stays open
+              // so more can be closed; when the LAST chat closes the list is dismissed and FREE is on
+              // screen, its own conversation untouched because nobody closed it.
               onCloseRecent={(recentId) => {
+                if (!recentRowClosable(recentId)) return;
                 const target = recentTargetFromId(recentId);
                 if (!target) return;
                 const hideMedical = medicalFeaturesHidden(isNativeApp());
-                const recent = recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats, freeChatClosed });
+                const recent = recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats });
                 const next = nextRecentAfterClose(recent, recentId);
+                const last = lastChatClosed(recent, recentId);
                 const wasOnScreen = activeModeId(activeView, activeChat?.id ?? null) === recentId;
                 if (target.conversationId) closeChatWindow(undefined, target.conversationId);
-                else if (target.view === 'nbi_chat') { resetFreeChatSurface(); setFreeChatClosed(true); }
                 else closeTab(undefined, target.view as ViewType);
-                if (!next) {
-                  // The last chat just closed: a fresh FREE chat, the way the app starts.
+                if (last) {
+                  // Nothing but FREE is open now: the list goes, FREE shows. With no FREE tab open at all
+                  // (an expert opened from the hub with FREE closed), this is the app's starting page.
                   setShowModePicker(false);
-                  startNewChat();
-                  setFreeChatClosed(false);
+                  if (!next) startNewChat();
                   toggleTab('nbi_chat');
                   return;
                 }
-                if (wasOnScreen) toggleTab(next.view as ViewType, true, next.conversationId);
+                if (wasOnScreen && next) toggleTab(next.view as ViewType, true, next.conversationId);
               }}
               onPick={(id) => {
                 setShowModePicker(false);

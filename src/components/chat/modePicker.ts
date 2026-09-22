@@ -181,12 +181,21 @@ export interface ModePickerInput {
   openViews?: readonly string[];
   /** The open professional windows, in the order they were opened. */
   openChats?: readonly ChatWindow[];
-  /**
-   * The FREE chat has been closed from the Recent group while its tab stays open as the home of the
-   * other chats (admin 2026-09-22: closing FREE must not close the tab and everything inside it). It is
-   * open again the moment the user is back on it — App clears this when `activeView` is the FREE chat.
-   */
-  freeChatClosed?: boolean;
+}
+
+/**
+ * Does this recent row carry a ✕? Every row does EXCEPT NavBharatAI FREE (admin 2026-09-22: *"navbharatai
+ * free, chat ke age se X hi hata den!!!"*). The FREE tab is the HOME of every chat opened through its Mode
+ * button, so "close FREE" from inside its own list either closes the tab and every AI inside it (the bug
+ * of that morning) or needs a second, tab-less notion of "closed" (the first fix, a flag plus an effect
+ * plus a shared reset). Neither is needed: a fresh FREE chat is one tap away under "New chat", and the
+ * header tab's ✕ still closes the whole thing. ONE rule, read by the sheet (whether to render the ✕) and
+ * by App (whether to act on a close for that id), so the two cannot disagree. A non-recent id is never
+ * closable — there is nothing open to close.
+ */
+export function recentRowClosable(id: string): boolean {
+  const target = recentTargetFromId(id);
+  return target !== null && target.view !== 'nbi_chat';
 }
 
 /** The single-chat views the Recent group lists, in the order the New group lists them too. */
@@ -206,7 +215,6 @@ export function recentModeEntries(opts: ModePickerInput): ModeEntry[] {
   const entries: ModeEntry[] = [];
   for (const view of RECENT_SINGLE_VIEWS) {
     if (!openViews.includes(view)) continue;
-    if (view === 'nbi_chat' && opts.freeChatClosed) continue;
     if (opts.hideMedical && (view === 'sda_chat' || isMedicalProfessionalId(view))) continue;
     const name = modeNameFor(view);
     if (!name) continue;
@@ -230,11 +238,11 @@ export function recentModeEntries(opts: ModePickerInput): ModeEntry[] {
 
 /**
  * Which chat the screen goes to after `closedId` is closed from the Recent group (admin 2026-09-22:
- * *"mode navbharatai free ko agar band kiya jaye, to uske niche jo on ho woh open ho jaye"*). PURE.
+ * *"uske niche jo on ho woh open ho jaye"*). PURE.
  *
- * The row BELOW the closed one, else the row above it, else null — and null is the caller's signal that
- * the last chat just closed, which lands on a fresh FREE page (*"starting jaisa"*). A closed id that is
- * not in the list at all leaves the user where they are (null with nothing else open, else the first).
+ * The row BELOW the closed one, else the row above it, else null (nothing is open any more). FREE is
+ * always the first row when its tab is open, so closing the row under it lands on FREE. A closed id that
+ * is not in the list at all leaves the user somewhere real (null with nothing open, else the first row).
  */
 export function nextRecentAfterClose(recent: readonly ModeEntry[], closedId: string): ModeEntry | null {
   const idx = recent.findIndex((e) => e.id === closedId);
@@ -242,6 +250,17 @@ export function nextRecentAfterClose(recent: readonly ModeEntry[], closedId: str
   if (remaining.length === 0) return null;
   if (idx < 0) return remaining[0];
   return recent[idx + 1] ?? recent[idx - 1] ?? null;
+}
+
+/**
+ * Was that the LAST chat in the list? (admin 2026-09-22: *"agar mode me kebal ek hi AI open hai, aur user
+ * usko bhi band kar de! to mode list band ho jaye aur navbharatai free ka page open ho jaye"*). PURE.
+ *
+ * True when nothing but the FREE row (which has no ✕ — see `recentRowClosable`) remains after the close,
+ * or nothing at all. The caller dismisses the list and shows FREE.
+ */
+export function lastChatClosed(recent: readonly ModeEntry[], closedId: string): boolean {
+  return recent.every((e) => e.id === closedId || e.view === 'nbi_chat');
 }
 
 /**

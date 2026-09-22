@@ -22,6 +22,11 @@ import {
 } from '../professionals/professionalPaid';
 import { splitPayment, platformFeePct } from '../lib/platformFee';
 import { couponValueInr } from '../lib/promoCoupons';
+import {
+  decideGiftPurchase, decideGiftRedemption, isGiftCode as looksLikeGiftCode, normalizeGiftCode,
+  MIN_GIFT_INR, MAX_GIFT_INR, GIFT_CODE_COLLECTION,
+} from '../lib/giftCodes';
+import { readGiftDaily, giftDay, claimGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
 
 /**
@@ -62,7 +67,7 @@ export function isValidCashfreeSignature(opts: {
 export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitRequestHandler): void {
   app.post('/api/payment/create-order', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { amount, userEmail, userName, userPhone, productType, passPlan, passDays } = req.body;
+    const { amount, userEmail, userName, userPhone, productType, passPlan, passDays, giftFaceInr } = req.body;
 
     // SECURITY (money, 2026-07-27 — going to real production): the order's owner is the VERIFIED token
     // identity, never the body's `userId`. This route used to take the uid straight from the request, so
@@ -79,6 +84,15 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // tokens); anything else is the existing wallet recharge. Untrusted, but harmless — the fulfilment
     // path re-derives days/plan from the server config, and the amount is reconciled against Cashfree.
     const isProfessionalPass = String(productType || '') === 'professional_pass';
+    /**
+     * A GIFT CODE — bought with real money, redeemed by somebody else (`giftCodes.ts`).
+     *
+     * 🔴 THE PRICE IS THE SERVER'S, NEVER THE BODY'S. The buyer sends the FACE VALUE they want the
+     * friend to receive; `orderAmount` is recomputed here as face + fee. A client-supplied `amount`
+     * is ignored for this product entirely, because on this path the amount and the entitlement are
+     * two different numbers and trusting the caller for either would let them choose the other.
+     */
+    const isGiftCode = String(productType || '') === 'gift_code';
 
     // 🔒 APP LOCK (admin 2026-09-13), mapped PER PRODUCT rather than per route.
     //
@@ -88,11 +102,15 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // the mapping, and locking the whole Wallet & Billing screen covers both without this line knowing.
     //
     // Checked here, before the order exists: a refusal creates nothing and charges nothing.
+    // A gift purchase answers to the SAME lock as a recharge: it is money leaving this user from the
+    // Wallet & Billing screen, which is exactly what that tick is about.
     const lockBlocked = await appLockBlocks(req, userId, isProfessionalPass ? 'professional-pass' : 'wallet-recharge');
     if (lockBlocked) return res.status(lockBlocked.status).json(lockBlocked.body);
 
-    const orderAmount = parseFloat(amount);
-    if (isNaN(orderAmount) || orderAmount <= 0) {
+    // For a GIFT the buyer names the FACE value; the price is derived below and the body's `amount`
+    // is ignored entirely. For everything else the body's amount is the payment, exactly as before.
+    const clientAmount = parseFloat(amount);
+    if (!isGiftCode && (isNaN(clientAmount) || clientAmount <= 0)) {
       return res.status(400).json({ error: 'Invalid order amount' });
     }
 
@@ -121,7 +139,45 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // ⚠️ Deliberately NOT applied to the Play/Apple store route below — those packs are already priced
     // with their fee inside (₹119 buys ₹99 of credit) and the billing panel promises they credit the
     // full amount shown. Charging here as well would bill one thing twice.
-    const feeSplit = splitPayment(orderAmount);
+    /**
+     * THE GIFT BRANCH — priced here, capped here, and the buyer's WALLET IS NEVER TOUCHED.
+     *
+     * 🔒 THE FEE GOES ON TOP, not out of the payment (`giftPriceAtPct`). The FACE VALUE is the
+     * product: a ₹500 code has to be worth ₹500 when the friend redeems it. `splitPayment`'s
+     * deduction is right for a recharge — where the user names what they are willing to pay — and
+     * would be wrong here, because it would sell a "₹500 code" worth ₹490.
+     *
+     * 🔒 AND THE CAP IS CHECKED BEFORE THE GATEWAY, never after. A refusal here creates nothing and
+     * charges nothing; refusing once money has arrived would mean holding a payment for something we
+     * then decline to deliver.
+     *
+     * 🔴 The admin's condition — *"yaha jo purchage honge promocode woh real ₹ se honge navbharatai
+     * dwara gift kiye gaye welcome bonus se nahi"* — needs no check anywhere: this path reads no
+     * balance and writes no debit, so paying with the welcome gift is not a case that can arise.
+     */
+    let giftFace = 0;
+    let giftFee = 0;
+    if (isGiftCode) {
+      const tally = await readGiftDaily(db, userId, giftDay(Date.now()));
+      const decision = decideGiftPurchase({
+        faceInr: giftFaceInr,
+        feePct: platformFeePct(),
+        todayCount: tally.count,
+        todayInr: tally.inr,
+      });
+      if (!decision.ok || !decision.price) {
+        return res.status(400).json({ error: decision.message || 'That gift amount is not available.', code: decision.reason });
+      }
+      giftFace = decision.price.faceInr;
+      giftFee = decision.price.feeInr;
+    }
+
+    const orderAmount = isGiftCode ? Math.round((giftFace + giftFee) * 100) / 100 : clientAmount;
+    // A gift order credits the BUYER nothing — the code is the whole delivery — so the recharge
+    // split is computed only where it applies.
+    const feeSplit = isGiftCode
+      ? { paidInr: orderAmount, feeInr: giftFee, creditInr: 0 }
+      : splitPayment(orderAmount);
 
     // Cryptographically-random suffix avoids the collision/predictability of Math.random()*1000.
     const orderId = `ord_nb_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
@@ -140,8 +196,11 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         platformFeeInr: feeSplit.feeInr,
         platformFeePct: platformFeePct(),
         // Professional Pass product (fulfilment grants a pass instead of crediting wallet tokens).
-        productType: isProfessionalPass ? 'professional_pass' : 'wallet',
+        productType: isProfessionalPass ? 'professional_pass' : (isGiftCode ? 'gift_code' : 'wallet'),
         ...(isProfessionalPass ? { passPlan: String(passPlan || 'monthly'), passDays: Number(passDays) || 0 } : {}),
+        // The face value the RECIPIENT will receive. Server-derived, so fulfilment mints a code worth
+        // exactly what the buyer was shown and paid for — never a number the client sent.
+        ...(isGiftCode ? { giftFaceInr: giftFace } : {}),
         paymentProvider: 'CASHFREE',
         paymentStatus: 'PENDING',
         paymentReference: '',
@@ -470,6 +529,90 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     }
 
     const code = couponCode.trim().toUpperCase();
+
+    /**
+     * A PURCHASED GIFT CODE takes a different path from a marketing coupon, and every difference is
+     * deliberate (`giftCodes.ts`).
+     *
+     * 🔴 THE CLAIM IS ON THE **CODE**, NOT ON `(code, user)`. The marketing claim id below is
+     * `coupon_<CODE>_<uid>` — one redemption per USER, which is right for a code on a poster and
+     * catastrophic for a gift: ten friends could each redeem the same ₹500. A purchased code is a
+     * bearer instrument, so `claimGiftCode` flips the code's own document and the second redeemer
+     * finds it spent.
+     *
+     * 🔴 AND THE CREDIT IS 'paid', NOT 'gift'. `walletMirror` makes every credit declare whose money
+     * it is. A marketing coupon is money NavBharatAI handed over, so it is 'gift' and `giftSpend`
+     * keeps it away from plan purchases. A PURCHASED code is not: somebody paid us real rupees for
+     * it. Marking it 'gift' would tell the recipient their friend's money cannot buy a hosting plan
+     * — false, and it would mean keeping the cash while withholding the product.
+     *
+     * ⚠️ It still does NOT move `totalMoneySpent` or `lastRechargeAt` on the recipient, because THEY
+     * did not pay us. Those two fields answer "has this person ever paid?" and the answer is still no.
+     *
+     * Tried FIRST, so a gift code can never fall through to the coupon table's "invalid or expired"
+     * message — which would be a true sentence about the wrong question.
+     */
+    if (looksLikeGiftCode(code)) {
+      const giftCode = normalizeGiftCode(code);
+      try {
+        const { claimed, record } = await claimGiftCode(db, giftCode, userId, Date.now());
+        if (!claimed) {
+          const verdict = decideGiftRedemption(record, userId);
+          const message = verdict.ok
+            // Unreachable in practice: `claimed` is false only when the record is missing, already
+            // spent, or the buyer's own. Stated rather than assumed, so a future branch cannot make
+            // a refusal silently succeed.
+            ? 'That gift code could not be redeemed. Please try again.'
+            : verdict.message;
+          return res.status(400).json({ error: message });
+        }
+        const faceInr = Number(record?.faceInr) || 0;
+        // The visible history row, written with its own id so a retry cannot duplicate it. It uses
+        // the same shape the coupon path writes, so the Promocode capsule and the statement below
+        // need no second notion of what a redemption looks like.
+        try {
+          await setDoc(doc(db, 'payment_transactions', `gift_${giftCode}`), {
+            transactionId: `gift_${giftCode}`,
+            userId,
+            amountPaid: 0,
+            balanceAdded: faceInr,
+            paymentProvider: 'GIFT_REDEEM',
+            paymentStatus: 'SUCCESS',
+            paymentReference: `GIFT_${giftCode}`,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          // The code is already claimed and the credit follows — a missing history row must never
+          // cost somebody their money.
+          console.error('[GIFT] redemption history row failed to write:', e);
+        }
+        const walletRef = doc(db, 'user_token_wallets', userId);
+        const newBalance = await runTransaction(db, async (tx: any) => {
+          const fresh = await tx.get(walletRef);
+          const w = fresh.exists() ? fresh.data() : null;
+          const patch = mirroredCreditPatch(w, rupeesToTokens(faceInr), 'paid');
+          if (w) {
+            tx.update(walletRef, { ...patch, updatedAt: new Date().toISOString() });
+          } else {
+            tx.set(walletRef, {
+              userId,
+              userEmail: userEmail || '',
+              userName: userName || '',
+              ...patch,
+              total_output_tokens_used: 0,
+              total_money_spent: 0,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          return patch.remaining_balance;
+        });
+        return res.json({ success: true, balanceAdded: faceInr, currentBalance: newBalance, gift: true });
+      } catch (err: any) {
+        console.error('[GIFT] Redemption failed:', err?.message);
+        return sendSafeError(res, 500, 'That gift code could not be redeemed right now. Please try again.', err, 'gift redeem');
+      }
+    }
+
     // THE PRICE LIST MOVED OUT OF THE SOURCE (revenue audit 2026-09-10). Five codes used to be written
     // here — FREE100, WELCOME100, NAVBHARAT50, FESTIVE2026, SAKUNI25 — each minting ₹25 to ₹200 of real
     // credit, with no expiry and no total cap. The first two are the first two things anyone would type
@@ -567,6 +710,52 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       google: storePlatformConfigured('google'),
       packs: storePacks(),
     });
+  });
+
+  /**
+   * THE CODES THIS USER HAS BOUGHT — so a gift is not lost the moment the tab is closed.
+   *
+   * 🔒 IT LISTS ONLY THE CALLER'S OWN, from the VERIFIED token. A gift code is a bearer instrument:
+   * anybody holding the string can spend it, so a route that could list somebody else's codes would
+   * be a route that empties their friend's present. `buyerUid` is never taken from the query.
+   *
+   * ⚠️ IT DOES NOT PAGE, and the bound is stated rather than hidden: at 5 codes a day the newest 50
+   * covers ten days of the heaviest permitted use. A buyer past that sees their most recent ones;
+   * the ledger below is the complete record either way.
+   */
+  app.get('/api/payment/gift-codes', async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Gift codes are temporarily unavailable. Please try again shortly.' });
+    const userId = process.env.VITEST
+      ? (typeof req.query?.userId === 'string' ? req.query.userId : null)
+      : await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Please sign in to see your gift codes.' });
+    try {
+      const snap = await getDocs(query(
+        collection(db, GIFT_CODE_COLLECTION),
+        where('buyerUid', '==', userId),
+        limit(50),
+      ));
+      const rows = (snap.docs || [])
+        .map((d: any) => d.data())
+        // The order-pointer documents share this collection (`order_<id>`); they carry no face value,
+        // so this filter is a property of the row rather than a naming convention that could drift.
+        .filter((r: any) => r && typeof r.code === 'string' && Number.isFinite(Number(r.faceInr)))
+        .sort((a: any, b: any) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+        .slice(0, 20)
+        .map((r: any) => ({
+          code: String(r.code),
+          faceInr: Number(r.faceInr) || 0,
+          paidInr: Number(r.paidInr) || 0,
+          status: r.status === 'redeemed' ? 'redeemed' : 'unused',
+          createdAt: String(r.createdAt || ''),
+          redeemedAt: r.redeemedAt ? String(r.redeemedAt) : null,
+        }));
+      return res.json({ codes: rows, minInr: MIN_GIFT_INR, maxInr: MAX_GIFT_INR, feePct: platformFeePct() });
+    } catch (err: any) {
+      console.error('[GIFT] could not list codes:', err?.message);
+      return sendSafeError(res, 500, 'Your gift codes could not be loaded. Please try again.', err, 'gift list');
+    }
   });
 
   app.post('/api/payment/store/verify', paymentLimiter, async (req: Request, res: Response) => {

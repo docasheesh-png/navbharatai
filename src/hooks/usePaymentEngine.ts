@@ -6,6 +6,7 @@
 // keeps working unchanged by destructuring the SAME names this hook returns.
 
 import { useState, useEffect, useCallback } from 'react';
+import type { GiftCodeRow } from '../lib/giftCodeRow';
 import axios from 'axios';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { triggerCashfreeCheckout, warmCheckout } from '../services/paymentService';
@@ -96,6 +97,27 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [isRedeemingCoupon, setIsRedeemingCoupon] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [couponSuccess, setCouponSuccess] = useState<string | null>(null);
+
+  // ── GIFT CODES — buying one for somebody else (`giftCodes.ts` on the server) ────────────────────
+  //
+  // 🔒 NOTHING HERE READS OR SPENDS THE WALLET. A gift is paid for at the gateway like any other
+  // purchase, which is what makes the admin's condition — *"real ₹ se honge, welcome bonus se
+  // nahi"* — true by construction rather than by a check somebody has to remember.
+  const [giftFaceInput, setGiftFaceInput] = useState<string>('500');
+  const [isBuyingGift, setIsBuyingGift] = useState(false);
+  const [giftError, setGiftError] = useState<string | null>(null);
+  const [giftCodes, setGiftCodes] = useState<GiftCodeRow[]>([]);
+  /**
+   * The code this session just bought, shown large the moment it exists.
+   *
+   * 🔴 THE MOMENT AFTER PAYING IS THE ONLY MOMENT THAT MATTERS for this product. A gift the buyer
+   * cannot see is a gift they cannot give, so the code is surfaced here as well as being listed —
+   * the list is the record, this is the delivery.
+   */
+  const [lastGiftCode, setLastGiftCode] = useState<GiftCodeRow | null>(null);
+  const [loadingGiftCodes, setLoadingGiftCodes] = useState(false);
+  /** The server's own bounds, so the form cannot offer an amount the server will refuse. */
+  const [giftBounds, setGiftBounds] = useState<{ minInr: number; maxInr: number }>({ minInr: 100, maxInr: 5000 });
 
 
   /*
@@ -405,6 +427,19 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       if (res.data.success) {
         addLog(`Payment for ORDER #${paymentSession.orderId} verified successfully! credited ₹${paymentSession.orderAmount}.`, 'success');
         reportPurchaseOnce(paymentSession.orderId, Number(paymentSession.orderAmount));
+        // A GIFT credits nobody's wallet — the code IS the delivery, so it is shown rather than a
+        // balance. `fetchWallet` still runs below for every other product.
+        if (res.data.giftCode) {
+          setLastGiftCode({
+            code: String(res.data.giftCode),
+            faceInr: Number(res.data.giftFaceInr) || 0,
+            paidInr: Number(res.data.paidInr) || Number(paymentSession.orderAmount) || 0,
+            status: 'unused',
+            createdAt: new Date().toISOString(),
+            redeemedAt: null,
+          });
+          void fetchGiftCodes();
+        }
         fetchWallet();
         setShowCheckoutModal(false);
         setPaymentSession(null);
@@ -415,6 +450,73 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       alert(`Payment verification handshake errored: ${err.message}`);
     } finally {
       setRechargeStatus(null);
+    }
+  };
+
+  /**
+   * The codes this user has bought. Called when the Promocode tab opens and after a gift is paid for.
+   *
+   * Silent on failure by design: this is a LIST, and a list that could not load must not throw an
+   * alert over a screen the user opened to do something else. The purchase flow surfaces its own
+   * errors, and the code itself is shown the moment it is minted.
+   */
+  const fetchGiftCodes = useCallback(async () => {
+    if (!user) { setGiftCodes([]); return; }
+    setLoadingGiftCodes(true);
+    try {
+      const res = await axios.get('/api/payment/gift-codes', { headers: { ...(await authedHeaders()) } });
+      const rows = Array.isArray(res.data?.codes) ? (res.data.codes as GiftCodeRow[]) : [];
+      setGiftCodes(rows);
+      const min = Number(res.data?.minInr);
+      const max = Number(res.data?.maxInr);
+      if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > min) setGiftBounds({ minInr: min, maxInr: max });
+    } catch {
+      /* a list that did not load is not an error worth interrupting anybody for */
+    } finally {
+      setLoadingGiftCodes(false);
+    }
+  }, [user]);
+
+  /**
+   * Load them when the Promocode tab opens — HERE rather than in the panel, so the wiring cannot be
+   * forgotten by a second screen that renders the same panel. The panel stays a pure render.
+   */
+  useEffect(() => {
+    if (activeBillingDetailTab === 'gift' && user) void fetchGiftCodes();
+  }, [activeBillingDetailTab, user, fetchGiftCodes]);
+
+  /**
+   * Buy a gift code. The FACE value goes to the server; the PRICE comes back from it.
+   *
+   * 🔴 THE CLIENT NEVER SENDS AN AMOUNT HERE. `giftPriceAtPct` is shown to the buyer before they
+   * press, but the server recomputes it from its own rate — so a tampered price cannot buy a code
+   * worth more than was paid. That is the same rule the Pass entitlement learned the hard way.
+   */
+  const createGiftOrder = async (faceInr: number) => {
+    if (!user) return;
+    // The same Apple 3.1.1 chokepoint the recharge obeys: a device that may not buy cannot open an
+    // order, however it reached the button.
+    if (storeRail === 'none') return;
+    setGiftError(null);
+    setIsBuyingGift(true);
+    warmCheckout();
+    try {
+      const res = await axios.post('/api/payment/create-order', {
+        productType: 'gift_code',
+        giftFaceInr: faceInr,
+        userEmail: user.email || '',
+        userName: user.displayName || 'NavBharat Client',
+      }, { headers: { ...(await authedHeaders()), ...(await unlockHeaders()) } });
+      setPaymentSession(res.data);
+      if (res.data.isSimulator) {
+        setShowCheckoutModal(true);
+      } else {
+        triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
+      }
+    } catch (err: any) {
+      setGiftError(err?.response?.data?.error || 'That gift could not be started. Please try again.');
+    } finally {
+      setIsBuyingGift(false);
     }
   };
 
@@ -461,6 +563,18 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         // A pass resolves with a duration, not an amount — reported with no value, never a guess.
         reportPurchaseOnce(orderRef);
         alert(`🎉 Your Professional Pass is active${data.expiresAt ? ` until ${new Date(data.expiresAt).toLocaleDateString()}` : ''}. Every professional is now unlimited.`);
+      } else if (data.giftCode) {
+        addLog(`Gift code for Order #${orderRef} created.`, 'success');
+        reportPurchaseOnce(orderRef, Number(data.paidInr) || undefined);
+        setLastGiftCode({
+          code: String(data.giftCode),
+          faceInr: Number(data.giftFaceInr) || 0,
+          paidInr: Number(data.paidInr) || 0,
+          status: 'unused',
+          createdAt: new Date().toISOString(),
+          redeemedAt: null,
+        });
+        void fetchGiftCodes();
       } else if (data.balanceAdded) {
         addLog(`Payment for Order #${orderRef} verified successfully! Credited ₹${data.balanceAdded}.`, 'success');
         reportPurchaseOnce(orderRef, Number(data.balanceAdded));
@@ -483,7 +597,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     } finally {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [addLog, fetchWallet, reportPurchaseOnce]);
+  }, [addLog, fetchWallet, reportPurchaseOnce, fetchGiftCodes]);
 
   /**
    * On sign-in, ask the server to settle any payment of this user's that never reached their wallet.
@@ -578,5 +692,11 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     storePurchaseNotice, setStorePurchaseNotice,
     verifyBillingPayment,
     redeemPromoCoupon,
+    // gift codes
+    giftFaceInput, setGiftFaceInput,
+    isBuyingGift, giftError, setGiftError,
+    giftCodes, loadingGiftCodes, giftBounds,
+    lastGiftCode, setLastGiftCode,
+    fetchGiftCodes, createGiftOrder,
   };
 }

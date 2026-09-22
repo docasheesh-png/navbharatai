@@ -62,12 +62,24 @@ describe('the tsconfig probe — a read that threw is not a verdict', () => {
 
 describe('the report must not claim "no TypeScript was written" when TypeScript was written', () => {
   it('🔴 the bb688add sentence is gone — a project skip says so, and says why', () => {
-    const s = emptyWriteTypecheckStats();
-    s.skipped = 22; s.skippedNotTs = 16; s.skippedNoTsconfig = 6; s.probeFailures = 3;
-    const line = writeTypecheckSummary(s, true);
+    // ⚠️ THE FIXTURE SPLIT IN TWO BECAUSE THE STATES DID (autopsy 21b431e1, 2026-09-22). It used to
+    // set `skippedNoTsconfig` AND `probeFailures` together — the shape of a check that switched
+    // itself off on a read error, which the dispatcher can no longer produce. `skippedNoTsconfig`
+    // now means one thing only: we looked, and there is no tsconfig. The original assertion — that
+    // the bb688add sentence is gone and the TypeScript writes are counted — holds on both halves.
+    const looked = emptyWriteTypecheckStats();
+    looked.skipped = 22; looked.skippedNotTs = 16; looked.skippedNoTsconfig = 6; looked.projectVerdict = 'no';
+    const line = writeTypecheckSummary(looked, true);
     expect(line).not.toContain('no TypeScript source was written');
     expect(line).toContain('6 TypeScript write(s) happened');
-    expect(line).toContain('could not be read');
+    expect(line).toContain('no tsconfig.json was found');
+
+    const couldNotLook = emptyWriteTypecheckStats();
+    couldNotLook.skipped = 6; couldNotLook.probeFailures = 3; couldNotLook.projectVerdict = 'unknown';
+    const unread = writeTypecheckSummary(couldNotLook, true);
+    expect(unread).not.toContain('no TypeScript source was written');
+    expect(unread).toContain('could not be read');
+    expect(unread).not.toContain('non-TypeScript');
   });
 
   it('a genuinely absent tsconfig is reported as absent, not as a failed read', () => {

@@ -52,6 +52,16 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   agentv3_engine_use:  { kind: 'platform', why: 'one doc per day of engine use' },
   image_free_paid_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier images a PAID engine served; no person in it' },
   fleet_mistakes_v3:   { kind: 'platform', why: 'cross-fleet learning, keyed by the mistake, not a person' },
+  /**
+   * 🔴 `gift_codes` IS DELIBERATELY NOT USER-SCOPED, for the same shape of reason `takedown_records`
+   * is not: the thing it records does not belong solely to the person named in it. A purchased gift
+   * code is value sitting in SOMEBODY ELSE's hands — bought with real money and given away — so
+   * erasing it because the BUYER closed their account would destroy a stranger's property and take
+   * the payment with it. It is also a payment record, which is the first of Privacy Policy §9's four
+   * stated exceptions to erasure.
+   */
+  gift_codes:          { kind: 'platform', why: 'one doc per minted code; the doc id IS the code, and an unredeemed one is value in a third party\'s hands that must outlive the buyer\'s account' },
+  gift_code_daily:     { kind: 'user', why: "one doc per buyer per UTC day bounding chargeback exposure; it is that person's own purchase tally and nothing needs it once the account is gone" },
 
   site_analytics:      { kind: 'retained', why: 'visitor day-counts; the policy promises 30 days' },
   safety_flags:        { kind: 'retained', why: 'flagged messages; the policy promises 180 days' },

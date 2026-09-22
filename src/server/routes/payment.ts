@@ -62,7 +62,7 @@ export function isValidCashfreeSignature(opts: {
 export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitRequestHandler): void {
   app.post('/api/payment/create-order', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { amount, userEmail, userName, userPhone, productType, passPlan, passDays } = req.body;
+    const { amount, userEmail, userName, userPhone, productType, passPlan, passDays, giftFaceInr } = req.body;
 
     // SECURITY (money, 2026-07-27 — going to real production): the order's owner is the VERIFIED token
     // identity, never the body's `userId`. This route used to take the uid straight from the request, so
@@ -79,6 +79,15 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // tokens); anything else is the existing wallet recharge. Untrusted, but harmless — the fulfilment
     // path re-derives days/plan from the server config, and the amount is reconciled against Cashfree.
     const isProfessionalPass = String(productType || '') === 'professional_pass';
+    /**
+     * A GIFT CODE — bought with real money, redeemed by somebody else (`giftCodes.ts`).
+     *
+     * 🔴 THE PRICE IS THE SERVER'S, NEVER THE BODY'S. The buyer sends the FACE VALUE they want the
+     * friend to receive; `orderAmount` is recomputed here as face + fee. A client-supplied `amount`
+     * is ignored for this product entirely, because on this path the amount and the entitlement are
+     * two different numbers and trusting the caller for either would let them choose the other.
+     */
+    const isGiftCode = String(productType || '') === 'gift_code';
 
     // 🔒 APP LOCK (admin 2026-09-13), mapped PER PRODUCT rather than per route.
     //
@@ -88,6 +97,8 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // the mapping, and locking the whole Wallet & Billing screen covers both without this line knowing.
     //
     // Checked here, before the order exists: a refusal creates nothing and charges nothing.
+    // A gift purchase answers to the SAME lock as a recharge: it is money leaving this user from the
+    // Wallet & Billing screen, which is exactly what that tick is about.
     const lockBlocked = await appLockBlocks(req, userId, isProfessionalPass ? 'professional-pass' : 'wallet-recharge');
     if (lockBlocked) return res.status(lockBlocked.status).json(lockBlocked.body);
 

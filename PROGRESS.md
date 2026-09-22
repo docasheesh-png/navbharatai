@@ -78493,3 +78493,30 @@ Tests: `tests/theFrameGrowsOnTheAxisYouPressed.test.ts` (10) — the pure rule (
 constant reference across every preset and custom frame, shape kept past the reference, junk → 0) and source
 guards (percent-sized canvas, square stage, distinct ids). **Proven by reversion three ways:** reference
 following the frame; the width-pinned canvas restored; shared ids restored.
+
+## 2026-09-22 — Play "Deep links": 2 domains not verified, 8 links not working — one cause, one value, and a www defect the fingerprint alone would not have fixed
+
+Admin, with a Play Console screenshot (App version 126): *"yeh sabhi error fix karwao, app update publish
+nahi ho raha hai."* Every one of the 8 rows (4 paths × 2 domains) reads **Failed domain checks**.
+
+**Cause 1 — expected, and the admin's to close:** `ANDROID_CERT_SHA256` is NOT set in Cloud Run, so
+`/.well-known/assetlinks.json` answers 404 (verified in code; the live fetch is refused by this environment's
+egress policy). That is exactly the state the registry entry records. Setting the value — BOTH certificates
+from Play Console → Setup → App signing, comma-separated — turns the file on with no deploy.
+
+**Cause 2 — a real defect, found by reading the request path end to end (rule 1), fixed here:** the
+`CANONICAL_HOST` middleware is mounted FIRST and 308s every `www.navbharatai.com` path to the apex, the
+statement file included. Android verifies EACH claimed host by fetching ITS OWN `/.well-known/assetlinks.json`,
+and the Digital Asset Links verifier does not follow redirects. So with `CANONICAL_HOST` set (the admin was
+asked to set it on 2026-08-22), the `www` domain could never verify however correct the fingerprint — one of
+the "2 domains not verified" was structural. `isWellKnownPath` in `src/server/lib/canonicalHost.ts` now exempts
+the `/.well-known/` prefix at the root (Apple's `apple-app-site-association` is the same class); every other
+`www` path is still moved, so the one-canonical-origin rule that fixed the 2026-08-22 login split is untouched.
+
+Tests: three cases added to `src/server/lib/canonicalHost.test.ts` (the reported case, the Apple twin, and the
+prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** (guard removed → the two
+"served" cases fail). `tests/aLinkOpensTheApp.test.ts` and `tests/domainWwwApex.test.ts` still green.
+
+⚠️ **Said to the admin, per the third absolute rule:** the Deep-links page is ADVISORY. Red rows there never
+block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
+which this session cannot see — asked for that screen rather than pretending the two are the same problem.

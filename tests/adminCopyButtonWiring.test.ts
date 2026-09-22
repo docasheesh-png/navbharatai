@@ -19,6 +19,8 @@ import { resolve } from 'node:path';
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
 const dashboard = read('src/components/AdminDashboard.tsx');
 const button = read('src/components/admin/AdminCopyButton.tsx');
+// The drag mechanics moved into ONE shared hook on 2026-09-22 (the Focus Mode exit button uses it too).
+const hook = read('src/hooks/useDraggableFloat.ts');
 const pkg = JSON.parse(read('package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
 
 describe('the button is mounted on every admin page', () => {
@@ -43,26 +45,28 @@ describe('the button is mounted on every admin page', () => {
 
 describe('it can be moved and closed', () => {
   it('drags with pointer events, which covers a finger and a mouse with one path', () => {
+    expect(button).toContain('useDraggableFloat(');
+    expect(button).toContain('{...handlers}');
     for (const handler of ['onPointerDown', 'onPointerMove', 'onPointerUp', 'onPointerCancel']) {
-      expect(button).toContain(handler);
+      expect(hook).toContain(handler);
     }
     // Without this the browser scrolls the page instead of dragging the button on a touch screen.
     expect(button).toContain("touchAction: 'none'");
   });
 
   it('clamps every position it sets, so it can never be dragged off the screen', () => {
-    expect(button).toContain('clampPosition');
+    expect(hook).toContain('clampPosition');
     // The drag itself, the first paint and a resize all go through the clamp — not just one of them.
-    expect(button.match(/clampPosition\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
-    expect(button).toMatch(/addEventListener\('resize'/);
-    expect(button).toMatch(/addEventListener\('orientationchange'/);
+    expect(hook.match(/clampPosition\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(hook).toMatch(/addEventListener\('resize'/);
+    expect(hook).toMatch(/addEventListener\('orientationchange'/);
   });
 
   it('remembers where it was left, and re-clamps what it read back', () => {
-    expect(button).toContain('COPY_BUTTON_POSITION_KEY');
-    expect(button).toContain('parsePosition');
-    expect(button).toContain('serializePosition');
-    expect(button).toMatch(/stored \? clampPosition\(stored/);
+    expect(button).toContain('storageKey: COPY_BUTTON_POSITION_KEY');
+    expect(hook).toContain('parsePosition');
+    expect(hook).toContain('serializePosition');
+    expect(hook).toMatch(/stored \? clampPosition\(stored/);
   });
 
   it('has a close control that says how to get it back', () => {
@@ -78,7 +82,8 @@ describe('it can be moved and closed', () => {
   });
 
   it('separates a press from a drag instead of copying on every pointer-up', () => {
-    expect(button).toContain('isTap(');
+    expect(hook).toContain('isTap(');
+    expect(button).toContain('onTap: () => copyPageRef.current()');
   });
 });
 

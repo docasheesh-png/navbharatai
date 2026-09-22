@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, X, Download, Flag } from 'lucide-react';
+import { Info, Lock, Settings, Heart, X, Download, Flag, Bell } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
@@ -45,6 +45,15 @@ export interface SidebarNavProps {
    * Zero (or absent) draws nothing at all: a dot that is ever wrong is a dot people stop believing.
    */
   unreadReports?: number;
+  /**
+   * 🔔 NOTIFICATIONS LIVE HERE NOW (admin 2026-09-22: *"notifications ko header se hata kar, sidebar
+   * menu me karo, dot ke sath … notification option par number dikhe"*). The count is the inbox's
+   * real unread number — the same one the ☰ button's dot reads — so the row, the dot and the panel
+   * can never disagree. Zero draws nothing. Without a handler the row is not rendered at all, rather
+   * than rendered and inert.
+   */
+  unreadNotifications?: number;
+  onOpenNotifications?: () => void;
   /** Reopen a past chat (routes v5.0 → Pro v5.0, others → their own surface). Unused by this
    *  component (the "Recent Chats" menu block was removed 2026-07-01, admin request) — kept on the
    *  props interface only so App.tsx's existing call site doesn't need touching. */
@@ -114,7 +123,7 @@ export function SidebarNav({
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
   setErrorContext, onReportProblem,
-  unreadReports,
+  unreadReports, unreadNotifications, onOpenNotifications,
 }: SidebarNavProps) {
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
   // so it is excluded from the rail/drawer here. It stays in `menuItems` so its header tab + view still
@@ -158,6 +167,30 @@ export function SidebarNav({
   // there whatsoever. And neither is duplicated on the rail: it lists each exactly once already.
   const DRAWER_HIDDEN = new Set(['settings', 'donation']);
   const drawerItems = visibleItems.filter(item => !DRAWER_HIDDEN.has(item.id));
+
+  // ONE definition of the Notifications row for the rail and the drawer — a signed-in user's inbox,
+  // with the unread number spelled out beside the dot (a coloured dot alone says nothing to somebody
+  // who cannot see it). Opening it is the caller's: the panel is mounted by App, over whichever surface.
+  const notificationsRow = (closeMenu: boolean) => user && onOpenNotifications ? (
+    <button
+      onClick={() => { onOpenNotifications(); if (closeMenu) setIsMenuOpen(false); }}
+      aria-label={(unreadNotifications ?? 0) > 0 ? `Notifications, ${unreadNotifications} unread` : 'Notifications'}
+      className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group text-muted hover:bg-raised hover:text-ink"
+    >
+      <span className="relative shrink-0">
+        <Bell className="w-4.5 h-4.5 text-accent-text group-hover:scale-110 transition-transform" />
+        {(unreadNotifications ?? 0) > 0 && (
+          <span aria-hidden className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-danger ring-2 ring-card" />
+        )}
+      </span>
+      <span className="text-sm font-bold tracking-tight flex-1 text-left">Notifications</span>
+      {(unreadNotifications ?? 0) > 0 && (
+        <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-danger text-on-accent text-[10px] font-black flex items-center justify-center">
+          {unreadNotifications! > 99 ? '99+' : unreadNotifications}
+        </span>
+      )}
+    </button>
+  ) : null;
 
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }
@@ -215,6 +248,7 @@ export function SidebarNav({
                   onClick={makeClickHandler(item)}
                 />
               ))}
+              {notificationsRow(false)}
             </div>
 
             {/* Theme picker moved to Settings → General (admin 2026-07-16) — reachable & working in
@@ -284,6 +318,7 @@ export function SidebarNav({
                       onClick={makeClickHandler(item, true)}
                     />
                   ))}
+                  {notificationsRow(true)}
 
                   {/* Download app — mobile WEB on navbharatai.com only (never inside the installed app,
                       never on desktop). Opens the PUBLIC Google Play listing. It used to open the Play

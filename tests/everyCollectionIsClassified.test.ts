@@ -53,6 +53,8 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   image_free_paid_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier images a PAID engine served; no person in it' },
   fleet_mistakes_v3:   { kind: 'platform', why: 'cross-fleet learning, keyed by the mistake, not a person' },
 
+  mobile_build_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many .apk/.aab/.ipa builds finished and of what — counts only, no person in it, purged at 400 days' },
+  mobile_build_counted:  { kind: 'retained', why: 'one marker per finished run so a POLLED status endpoint cannot count it twice; the id is a digest and the body names no owner' },
   site_analytics:      { kind: 'retained', why: 'visitor day-counts; the policy promises 30 days' },
   safety_flags:        { kind: 'retained', why: 'flagged messages; the policy promises 180 days' },
   takedown_records:    { kind: 'retained', why: 'removal records; IT Rules 2021 require 180 days' },

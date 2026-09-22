@@ -17,6 +17,8 @@ import { getAllPublishGuides, getPublishGuide, renderPublishGuideText, type Stor
 // header, which carries the FIREBASE token, so every call here reached GitHub with the wrong credential
 // and came back 401. See lib/mobileShipAuth.ts for the full autopsy.
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
+// The two counters that finally make the pipeline's own failure rate readable (2026-09-22).
+import { recordBuildOutcome, recordBuildFailureCode } from '../lib/mobileBuildOutcomeStore';
 // ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
 // never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
 import {
@@ -263,6 +265,14 @@ export function registerMobileShipRoutes(app: Express): void {
         if (concl === 'success' || concl === 'failure' || concl === 'cancelled') {
           const identity = await verifyFirebaseIdentity(req);
           if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), concl);
+          // THE DENOMINATOR (2026-09-22). `setOutcome` above records how THIS app's LAST build ended and
+          // a success CLEARS the previous failure's code — so no scan of those rows can ever answer "how
+          // often does a build fail?", which is the number the admin's "80%" is a guess at. This counts
+          // every finished run once, keyed by its run id, into a per-day counter. Best-effort and
+          // deliberately NOT awaited: the status the user is watching must never wait on telemetry.
+          if (done?.id != null) {
+            void recordBuildOutcome(String(owner), String(repo), String(done.id), String(workflow), concl);
+          }
           // AUTOMATIC ADMIN FAILURE REPORT (admin 2026-09-14: "apk bane nahi, fail ho jaye, to puri
           // detailed build report admin panel me automatically send ho jaye"). No user action needed —
           // this is the FIRST point the server itself learns a run failed. `saveApkFailureReport` is
@@ -952,7 +962,17 @@ async function recordApkFailureReport(
     const preflight = isSigningSecretFailure(full.failure.detail)
       ? await describeSigningPreflight(headers, owner, repo)
       : null;
-    void saveApkFailureReport({
+    // THE NUMERATOR (2026-09-22) — WHICH class failed, counted once per run.
+    //
+    // 🔑 IT RIDES THE REPORT'S OWN CLAIM RATHER THAN INVENTING A SECOND ONE. `saveApkFailureReport`
+    // writes with `create()` on a doc id keyed to owner/repo/runId, so it returns true EXACTLY ONCE per
+    // run however many times this poll endpoint is hit. Counting inside that `true` is idempotent by
+    // construction; a second guard here would be a second thing to keep in step with the first.
+    //
+    // ⚠️ This is a SUBSET of the failures the denominator counts, and `summariseBuildOutcomes` reports
+    // the gap rather than hiding it: a diagnosis needs a client still polling when the run goes red, so
+    // a user who closes the tab is in the failure count and in no code.
+    const claimed = await saveApkFailureReport({
       userId: uid, email,
       owner, repo, workflow, building: full.app.building,
       runId: String(full.build.runId), runUrl: full.build.link,
@@ -960,6 +980,7 @@ async function recordApkFailureReport(
       durationSeconds: full.build.durationSeconds,
       steps: full.steps, failure: full.failure, preflight,
     });
+    if (claimed) void recordBuildFailureCode(workflow, full.failure.code);
   } catch { /* best-effort — the user's own build status must never wait on this */ }
 }
 

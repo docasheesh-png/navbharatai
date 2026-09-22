@@ -189,6 +189,24 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   // images the FREE tier got from a PAID engine. It enforces that day's cap and is read afterwards
   // only to judge whether the cap is right, which 90 days of history answers.
   { collection: 'image_free_paid_daily', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  /**
+   * Why a user's phone build failed — ONE document per UTC day (`day` is the doc id AND a field, and an
+   * ISO date sorts lexicographically, so it is its own timestamp, exactly like `build_failures` above).
+   * A long window is cheap at one document a day and is what lets "is the repair loop getting better?"
+   * be answered by comparison rather than by impression.
+   */
+  { collection: 'mobile_build_outcomes', ttlDays: 400, timestampField: 'day', timestampKind: 'iso' },
+  /**
+   * The per-run marker behind that counter — the ONE collection in this pair that really grows, at one
+   * small document per finished build.
+   *
+   * It exists solely so a POLLED status endpoint cannot count the same run twice, so it is needed only
+   * while a client could still be asking about that run — minutes, not weeks. 30 days is far past any
+   * real poll and is the window rather than the shorter honest one because the cost of being wrong is
+   * asymmetric: purge too early and a run still being watched is counted a second time, which would
+   * inflate the exact rate this whole feature was built to measure. `countedAt: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'mobile_build_counted', ttlDays: 30, timestampField: 'countedAt', timestampKind: 'epochMs' },
 
   /**
    * Visitor counts for published apps — the ONE window this registry promised in PUBLIC and did not keep.

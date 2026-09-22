@@ -149,7 +149,12 @@ const IOS_SECRETS: RequiredSecret[] = [
 // which is why this is the fix for the class rather than another round of backslashes. The regression
 // test parses every generated run: block with bash -n, so any future escaping mistake fails CI.
 
-const FAILURE_DIAGNOSTIC = (): string => `
+// ⚠️ THE PLATFORM IS A PARAMETER (2026-09-22). This was Android-only prose testing an Android-only
+// directory, and the iOS workflow carried NO diagnostic step at all — so every iOS failure reached the
+// user with no stage and no explanation, and the self-repair loop had no NBAI_FAILED_STAGE to read.
+// Bolting the Android version onto iOS would have been worse than nothing: it tests `-d android`, which
+// is never present on an iOS build, so every iOS failure would have been labelled `capacitor`.
+const FAILURE_DIAGNOSTIC = (platform: 'android' | 'ios' = 'android'): string => `
       # Runs only when something above failed. See mobileShipKit.ts for why this exists.
       - name: Explain what stopped the build
         if: failure()
@@ -160,12 +165,12 @@ const FAILURE_DIAGNOSTIC = (): string => `
           elif [ ! -d dist ] && [ ! -d build ] && [ ! -d out ] && [ ! -d www ]; then
             STAGE=webbuild
             WHY="The libraries installed fine, but your app itself did not compile, so there was nothing to package. The error further up names the exact file and line."
-          elif [ ! -d android ]; then
+          elif [ ! -d ${platform} ]; then
             STAGE=capacitor
-            WHY="Your app compiled correctly. It stopped while creating the Android project around it."
+            WHY="Your app compiled correctly. It stopped while creating the ${platform === 'ios' ? 'iOS' : 'Android'} project around it."
           else
-            STAGE=android
-            WHY="Your app compiled correctly. It stopped while building the Android app itself."
+            STAGE=${platform}
+            WHY="Your app compiled correctly. It stopped while building the ${platform === 'ios' ? 'iOS' : 'Android'} app itself."
           fi
           echo "NBAI_FAILED_STAGE=$STAGE"
           {
@@ -192,10 +197,21 @@ const FAILURE_DIAGNOSTIC = (): string => `
 // that also fails do we re-scaffold the whole project fresh (android/ is generated — nothing custom is
 // lost). The final guard now verifies BOTH the script and the jar, and fails honestly if either is
 // still absent.
-const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
-        run: |
-          set -e
-          # G17: Capacitor wraps the built web page. If the build produced no index.html in the folder
+/**
+ * IS THERE A PAGE TO WRAP? — ONE definition, used by EVERY lane that runs `cap sync` (autopsy 2026-09-22).
+ *
+ * Capacitor wraps exactly one file, `<webDir>/index.html`. This block finds the configured webDir, and
+ * when the build put the page somewhere else it points the config at the folder the build really made;
+ * only when there is no page anywhere does it stop, with the stage named honestly as `capacitor` rather
+ * than blaming the app's own compile.
+ *
+ * 🔴 IT USED TO LIVE ONLY IN THE ANDROID STEP. The iOS lane ran `cap sync ios` with no guard at all, so
+ * the same app died there inside Capacitor with a raw path error that `diagnose()` does not classify —
+ * the drifted-sibling class this repo has paid for repeatedly. It is a shared constant now, never a copy,
+ * so a lane added later cannot be born without it. `tests/theStaticAppStaysStatic.test.ts` asserts every
+ * `cap sync` lane carries it.
+ */
+const ENSURE_WEB_PAGE_GUARD = `          # G17: Capacitor wraps the built web page. If the build produced no index.html in the folder
           # named as webDir, there is nothing to wrap and cap sync dies with a confusing path error three
           # steps later. Detect the ACTUAL configured webDir (reads .ts/.js/.json as text — \\x27/\\x22 are
           # ' and " so nothing here needs shell-quoting) and fail early with a plain message. This only ever
@@ -212,11 +228,24 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             # BUILD OUTPUT folders only. "public" is deliberately NOT here: in Create React App it is
             # the SOURCE folder holding the un-built index.html template, so falling back to it would
             # package a broken shell and call it a success — worse than the honest failure below.
-            for d in dist build out www dist/spa .output/public; do
+            #
+            # ⚠️ THIS LIST MUST COVER EVERY FRAMEWORK DEFAULT detectWebDir RETURNS (autopsy 2026-09-22).
+            # The two live in different files and had already drifted: Remix's "build/client" and
+            # Angular's nested "<outputPath>/browser" are both real answers from that function and
+            # neither was searched here, so an app the assembler pointed at correctly could still fail
+            # this guard with "no index.html in any of the usual build folders".
+            # tests/theStaticAppStaysStatic.test.ts asserts the two agree PER FRAMEWORK, so a rung added
+            # to one fails CI until the other knows it.
+            # 🔒 It is deliberately NOT a claim about every possible answer: a custom Vite outDir or a
+            # custom angular.json outputPath can name any folder on earth, and no fixed list can cover
+            # that. Those are exactly the case the config itself already points at correctly — this
+            # fallback exists for when the config is WRONG, and an app whose config is right never
+            # reaches it. An unmatched glob stays literal and simply fails -f, so it costs nothing.
+            for d in dist build out www dist/spa build/client .output/public dist/*/browser build/*/browser; do
               if [ -f "$d/index.html" ]; then FOUND="$d"; break; fi
             done
             if [ -n "$FOUND" ]; then
-              echo "::warning::Your app builds to \"$FOUND\", not \"$WEBDIR\" — pointing the Android wrapper at the folder your build really produced."
+              echo "::warning::Your app builds to \"$FOUND\", not \"$WEBDIR\" — pointing the app wrapper at the folder your build really produced."
               # No \$ anywhere in this script: it sits inside double quotes, so a regex backreference
               # written as a dollar-group would be eaten by the shell before node ever saw it.
               node -e "const fs=require('fs');const d=process.argv[1];const f=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'].find(x=>fs.existsSync(x));if(f){const t=fs.readFileSync(f,'utf8');const n=t.replace(/(webDir\\s*[:=]\\s*)([\\x27\\x22])[^\\x27\\x22]+\\2/,function(m,a,q){return a+q+d+q;});if(n!==t)fs.writeFileSync(f,n);}" "$FOUND" || true
@@ -231,7 +260,12 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             echo "::error::Your app compiled, but it produced no web page to wrap: no index.html was found in \"$WEBDIR\" or in any of the usual build folders. Check that your build script really writes the finished site to a folder."
             exit 1
           fi
-          if [ ! -d android ]; then
+`;
+
+const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
+        run: |
+          set -e
+${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
             npx cap add android
           fi
           npx cap sync android
@@ -760,7 +794,7 @@ ${WEB_BUILD_STEP}
       - name: Generate and sync the iOS project
         run: |
           set -e
-          if [ ! -d ios ]; then
+${ENSURE_WEB_PAGE_GUARD}          if [ ! -d ios ]; then
             npx cap add ios
           fi
           npx cap sync ios
@@ -838,6 +872,7 @@ ${WEB_BUILD_STEP}
         run: |
           rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_\${IOS_ASC_KEY_ID}.p8" || true
           rm -f "$RUNNER_TEMP/AuthKey_\${IOS_ASC_KEY_ID}.p8" || true
+${FAILURE_DIAGNOSTIC('ios')}
 
       - name: Summary
         run: |

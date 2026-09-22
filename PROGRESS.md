@@ -79171,3 +79171,235 @@ den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebu
 - Locked in `modePicker.test.ts` (`recentRowClosable`, `lastChatClosed`, the FREE-above case) and
   `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
   the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.
+
+## 2026-09-22 — 🧩 THE STATIC APP THAT STOPPED BEING STATIC (autopsy: a real APK build, dead in 24 seconds)
+
+The admin forwarded a build report: user app `nagpurcity16-gif/bharat-alpha`, workflow `android-apk.yml`,
+**24 seconds**. Machine ready DONE, libraries DONE, *"Building your app"* DONE, *"Preparing the Android
+project"* FAILED with our own guard's words — *"Your app compiled, but it produced no web page to wrap:
+no index.html was found in \"$WEBDIR\" or in any of the usual build folders."* Three green steps, no app,
+and the report told the user the platform could fix it itself.
+
+**LEDGER (5 buckets):** ✅ self-heal 0 · 🔀 workaround 1 (the G17b fallback searched other folders and
+found nothing) · ⏭️ skipped 2 (compile, package) · ❌ still broken 3 (no APK; the warning that names the
+cause was suppressed; the self-repair makes it permanent) · 🥵 struggle 1 (the whole run, plus the advice
+to press Build again).
+
+🔴 **ROOT CAUSE, MEASURED ON THE REAL FUNCTIONS RATHER THAN REASONED ABOUT: our own assembler writes a
+`build` script into every STATIC app, and our own detector decided "is this app built?" by asking whether
+a build script exists.** `buildPackageJson` writes an honest no-op so that `npm run build` succeeds; from
+that moment the app's package.json looks buildable to everything that reads it back. A static app was
+therefore static exactly ONCE, at assembly. The probe output, on production code:
+
+    [nested index]   kind=static  webDir=www  www/index.html? false   notes=[]
+    [static pkg]     "build": "echo \"Static app — the web files in www/ are used as they are.\""
+    [detectProjectKind(our own assembled repo)] = built
+    [detectWebDir(that repo,'built')]           = dist
+    [repairWebDir]   webDir:'www'  →  webDir:'dist'
+
+**A classifier whose input is manufactured by the thing it classifies has to recognise its own hand.**
+
+**THE FOUR DEFECTS, all fixed at the class and each proven by REVERSION (`tests/theStaticAppStaysStatic.test.ts`,
+10 cases; every fix re-broken in turn and the suite confirmed to fail):**
+
+1. **`detectProjectKind` fooled by our own output.** The no-op script is now the exported constant
+   `STATIC_NO_OP_BUILD`, written by `buildPackageJson` and READ BACK by `detectProjectKind`. Every
+   repository already shipped carries that exact string, so this re-classifies them with no migration.
+2. **The self-repair rewrote a CORRECT `www` into a `dist` that never exists.** `WEB_DIR_MISSING` and
+   `webDirForPackageJson` both hardcoded `'built'`, on the reasoning *"this repair only fires once a build
+   has genuinely produced output"* — false for a static app, whose build is the no-op we wrote. Both now
+   ASK (`detectProjectKind(current)`). With (1) in place the repair returns null for a static app, so a
+   failed build can no longer be made permanently unbuildable. ⚠️ The `detail.expected` no-op guard beside
+   it is DEAD for this path (our own guard message never populates it) — the real guard is `repairWebDir`
+   returning null, which is what (1) makes effective.
+3. **A NESTED index.html counted as a page.** `sawIndex` matched `/(^|\/)index\.html?$/`, so
+   `public/index.html` satisfied it, landed at `www/public/index.html` — and Capacitor opens `www/index.html`
+   and nothing else. The app shipped with no page AND the warning was suppressed by the very file that
+   caused it. The question asked is now the one that matters: is there an index.html at the ROOT?
+4. **Two expressions of one fact had drifted across two files.** `detectWebDir` (TypeScript) names where a
+   framework builds; the generated workflow's G17b fallback (shell) searches for the page when the config
+   is wrong. Remix's `build/client` and Angular's nested `<outputPath>/browser` are real answers from the
+   first and were searched by neither. Added, plus a test that derives the invariant per framework, so a
+   rung added to one fails CI until the other knows it. **`public/` stays OUT** — in Create React App it is
+   the SOURCE template, and packaging it would ship a broken shell as a success.
+
+🔒 **THE MISSING SUBSYSTEM: a pre-flight that refuses a press that cannot succeed.** The precedent is in
+this repo already — `signingReadiness` (2026-09-15) exists because a user pressed a button only GitHub knew
+could not work. There was no equivalent for the page, although the assembler KNOWS at assembly time whether
+a static app has one: the fact sat in `notes` as advice and was pushed anyway. `missingWebPageRefusal`
+(pure) is that gate, wired into `/api/mobile-ship/setup` beside the existing `no-ui` and `missing-assets`
+refusals, and it names the file and the move. ⚠️ **It decides ONLY for a static app.** A built app's page is
+produced on the runner by a build we have not run, so refusing one would be a guess — the same asymmetry
+`signingReadiness` states in its own header.
+
+⚠️ **ONE CANDIDATE I RAISED AND THEN KILLED MYSELF, recorded so nobody re-derives it:** a re-ship does NOT
+flip anything. `assembleMobileProject` always reads the WORKSPACE (`loadWorkspaceFiles`), never the GitHub
+repo, so the round trip that would flip `static`→`built` on a second press does not exist on that path. It
+exists only on the REPAIR path, which does read the repo — which is defect 2.
+
+➕ **SIBLINGS FOUND BY THE SAME AUDIT AND FIXED IN THIS CHANGE (rule 3):**
+- **The iOS lane ran `cap sync ios` with NO page guard at all.** The same app Android self-healed, iOS
+  failed with Capacitor's raw path error — which `diagnose()` does not classify. The guard is ONE shared
+  constant (`ENSURE_WEB_PAGE_GUARD`) used by every `cap sync` lane now, never a copy, and its warning says
+  "app wrapper" rather than "Android wrapper" because it is no longer an Android-only sentence.
+- **The iOS lane had NO failure diagnostic either**, so every iOS failure reached the user with no stage
+  and left the repair loop with no `NBAI_FAILED_STAGE` to read. ⚠️ Bolting the Android step on would have
+  been worse than nothing: it tests for an `android` directory an iOS build never has, so every iOS
+  failure would have been labelled `capacitor`. `FAILURE_DIAGNOSTIC` takes the platform now, `failedStage`
+  knows `ios`, and the STALE_WORKFLOW summary stops saying "the Android project" to an iOS user.
+- **The WEB_DIR_MISSING repair was handed two files** while its own comment promised it honoured a custom
+  Vite `outDir` "from the app's own config". `needs` now fetches the vite/angular config it reads.
+- 🔴 **`failedStage` was reading the SCRIPT, not the answer.** GitHub PRINTS each step's whole `run:`
+  block into the log before running it, so the ensure step's own two `echo "NBAI_FAILED_STAGE=capacitor"`
+  lines appear in every log whether or not they execute — **the admin's own report carries them, colour
+  codes and all, beside the one real marker**. Taking the first match meant an Android build that died at
+  Gradle would have been reported as stopping at `capacitor` and repaired for a stage that never
+  happened. It was right in this report by luck, because both said the same word. Markers that are part
+  of an `echo` COMMAND are now skipped; what a step really emitted is not.
+
+⚠️ **AND ONE CORRECTION TO MY OWN FIRST CUT, recorded because it is the interesting half.** The repair
+first asked `detectProjectKind(current)` — and that function also answers `static` for "there is no build
+script at all", which is right in a WORKSPACE (nothing to build ⇒ the files are the site) and wrong in the
+REPAIR path, where such a repo is simply broken. Three existing tests caught it. The repair asks the
+narrow `isAssembledStaticApp` instead: does the package.json carry the exact no-op WE wrote? That is a
+claim about our own output and nothing else, which is all the repair path is entitled to make.
+
+🔴 **STILL OPEN (rule 6) — found by the same audit, NOT fixed here, and each one is real:**
+- The self-repair loop has **no server-side bound**; the only limit is React state that every Build press
+  resets. An unfixable failure can burn a user's Actions minutes without end.
+- **Every successful repair starts TWO GitHub runs** — `/autofix` dispatches the workflow and the client
+  dispatches it again at the top of the next attempt.
+- **`refresh()` reports `fixed: true` for a comment-only rewrite**, because the repair regenerates the
+  workflow under the REPO name while the original was written under the APP name — so the file always
+  differs and a no-op is reported as a fix.
+- **The build panel claims a repair happened on the final attempt even when every autofix returned
+  `fixed: false`.**
+- The **built** branch never asks whether the app can produce a page at all, and nothing ever looks at the
+  repo ROOT — a user-written `"build": "echo ok"` yields `dist` and the same dead run. Deciding that needs
+  a real "is this a FINISHED page or a source template?" test (`%PUBLIC_URL%`, `src="/src/…"`, does it
+  reference an asset that exists beside it), which is a change of its own and is NOT guessed at here.
+- The user's **icon and background colour reach the Android lanes only** — an iOS build silently ships
+  Capacitor's default icon.
+- `SKIP_PATH` drops any directory segment named `build`/`dist`/`coverage` anywhere in the tree, silently
+  and with no note, so an app folder genuinely called `build/` never reaches the repository.
+- All three export generators default `webDir` to `dist` without ever asking `detectWebDir`, which sits in
+  the same repo. Harmless on the ship path (the assembler's config wins) and a real default elsewhere.
+These are two classes — the loop's honesty and its bounds, and platform parity — and both are separate
+changes, deliberately not piled onto this one.
+
+## 2026-09-22 — 📊 THE NUMBER THIS PIPELINE WROTE DOWN EVERY DAY AND NEVER ONCE READ
+
+Admin: *"jab main Claude se NavBharatAI ka .aab banwata hoon woh har baar ban jaata hai… lekin
+NavBharatAI ka user jab apni app ka APK banata hai to 80% baar fail hoti hai aur theek nahi hoti."*
+Aim: **NavBharatAI apk building = Claude Code apk building.**
+
+### STEP 0 — measured before anything was built, because "80%" is an impression
+
+🔴 **THE IRONY, VERIFIED BY GREP RATHER THAN TAKEN FROM A DOC:** `routes/mobileShip.ts` classifies every
+real failure and writes the class down — `setOutcome(uid, owner, repo, 'failure', diag.code)` — and
+`failureCode` appears in this repository at **exactly four places, all four inside `AppBuildStore.ts`
+itself**: the field, its comment, the parameter, the write. **Nothing has ever read it.**
+
+🔑 **AND THAT RECORD COULD NOT HAVE ANSWERED THE QUESTION ANYWAY**, which is why this is a new counter
+rather than a query. `setOutcome` holds the LATEST outcome for one (user, owner, repo) and a SUCCESS
+explicitly CLEARS the previous failure's code — so an app that failed nine times and then worked
+contributes **zero** failures to any scan of those rows. A biased sample reads as an ABSENCE of the
+problem, which is worse than no measurement because nobody doubts it.
+
+**What shipped (`mobileBuildOutcomeStore.ts`, patterned on `agentv3_engine_use` → `agentv3_sandbox_starts`
+— one document per UTC day, `FieldValue.increment` per key, no new storage idea):**
+- **The denominator** — every finished run, counted ONCE, at the status-poll site. ⚠️ That endpoint is
+  POLLED: `setOutcome` beside it survives a repeat because it overwrites one document, an INCREMENT does
+  not, so the claim is keyed by the RUN ID (`create()`, the same shape `hosting-daily-bill` uses before
+  it moves money).
+- **The numerator** — which class failed, riding the automatic failure report's OWN `create()` claim,
+  which returns true exactly once per run. No second guard to keep in step with the first.
+- **The class now travels on the report at all**: `buildMobileBuildReport` computed `diag.code` on every
+  automatic failure report and dropped it, so the admin's inbox could describe a failure in prose and
+  never say which of the 21 named classes it was.
+- **The cure split** — `repairable` / `user-credentials` / `unclassified`, because the admin's "80%" can
+  be three different problems with three different answers and only one of them is the repair loop. A
+  missing signing key does not move however good the loop gets.
+- **Admin → Reports → "Phone build outcomes"**, deliberately beside `FailureCategoryCard` and NOT merged
+  into it: that card is the AgentV3 **app** build (does the generated app compile?), this is the GitHub
+  **phone** build (does the .apk/.aab/.ipa come out?). Reading either as the other is exactly what an
+  impression like "80%" is made of.
+
+🔒 **THE HONESTY HALF IS STRUCTURAL, not a caveat in a comment.** The class list is a SUBSET of the
+failures (a diagnosis needs a client still polling when the run goes red), so `diagnosisGap` is computed
+and the card prints it ABOVE the breakdown — a reader who has already read the list has already formed
+the impression the sentence exists to bound. A CANCELLED run is in neither side of the rate: a user who
+pressed Stop did not meet a broken build, and counting them would make the number move with impatience
+rather than with reliability. Nothing counted yet reads as *"no finished build has been counted"*, never
+as 0%.
+
+### THE SECOND CHANGE — run the build GitHub will run, here, first
+
+`mobileShipPreflight` already refuses to push an app that cannot parse, whose imports do not resolve, or
+whose packages are undeclared, and its own header says the worst place to find a compile error is a
+GitHub runner. **All three of those checks are STATIC.** The thing that really decides a phone build is
+the app's own `npm run build` — and its first execution anywhere was five minutes into a remote run that
+costs one of the user's three repair attempts. The app is already alive in a sandbox with its
+dependencies installed, because that is where it was built seconds earlier.
+
+`mobileShipRealBuild.ts` runs it there. **Three rules keep it from costing more than it saves, each
+proven by reversion:**
+1. **It NEVER starts a machine.** `hasLiveSandbox` is a new in-memory map lookup on the actuator — no
+   I/O, no provider call. Every other entry point goes through `getSandbox`, which CREATES or RESUMES a
+   billable VM, so an opportunistic check that "just ran a command" would have become the most expensive
+   step in the ship. An actuator that cannot answer counts as NO: a wrong yes starts a machine.
+2. **It is bounded** (180 s default, malformed value takes the default and never "no limit"), and a
+   build that outruns it is *"could not tell"*, never *"your app is broken"*.
+3. 🔴 **It is NOT stricter than the runner it predicts.** `WEB_BUILD_STEP` packages straight from the
+   bundler when only TYPE findings stopped the strict script, so `error TS…` is not a ship blocker there
+   and must not be one here. That judgement is `classifyBuildFailure`'s — the SAME classifier the remote
+   repair loop uses, never a copy — so our prediction and the runner's own diagnosis cannot disagree
+   about the same log. Being stricter than the thing you are predicting refuses apps that really build.
+
+A skip says NOTHING to the user: *"we could not check"* is not information anybody can act on, and it
+would turn a silent optimisation into a worry. The ship proceeds exactly as it did before.
+
+### ⚠️ ONE THEORY I RAISED AND KILLED MYSELF, recorded so nobody re-derives it
+
+I expected `autoFixable: false` to short-circuit the AI tier — which would have made
+`APP_CODE_BUILD_FAILED` (the user's own app not compiling) never reach a model at all, and would have
+been THE root cause. **It is false.** `routes/mobileShip.ts` reads *"the rules cannot fix this class —
+the AI pass is exactly for this case"* and calls `tryAiRepair()` first. The loop's real gaps are the
+ones the brief names, not this.
+
+### 🔒 MEASURING THE PIPELINE DOES NOT MEAN KEEPING A FILE ON THE PEOPLE USING IT
+
+Caught by `tests/everyCollectionIsClassified.test.ts` before either collection ever ran — *"a collection
+is guilty until listed"*, which is exactly what that guard is for. The per-run marker that stops a POLLED
+status endpoint counting one build twice was keyed `${owner}_${repo}_${runId}` and carried `{ owner, repo }`
+in its body. `owner` is a person's GitHub login; the collection grows with every finished build; and it is
+keyed by nothing a user owns, so `deleteUserData` could never have reached it — the `site_analytics` shape,
+before it shipped rather than three days after.
+
+- **The id is now a SHA-256 digest** (`countedDocId`) and the body holds `{ lane, outcome, countedAt }` —
+  what a count IS, and nothing about who ran it. Removing the data beats promising to erase it later.
+- **A plain digest, deliberately not an HMAC.** `siteAnalytics.visitorHash` keys its hash with a secret
+  because an IP address is a 32-bit space anybody can enumerate; this id must instead resolve to the same
+  string FOR EVER, and a rotated secret would make every existing claim unfindable at once — counting every
+  run still being polled a second time, the precise defect the marker exists to prevent.
+- **Both collections are on a retention clock**: the day rollup at 400 days (`day` is its own ISO
+  timestamp, like `build_failures`), the marker at 30 — far past any real poll, because purging it early
+  inflates the very rate this feature was built to measure. The marker is also in `GROWING_COLLECTIONS`,
+  so the Load board's storage warning can see it.
+
+### 🔴 STILL OPEN — and the numbers decide the order, which is the brief's own instruction
+
+- **C — the AI repair is a one-shot blind patch, not a loop.** It sees the failing step's log and a
+  capped set of files whose names appear in it, answers once in JSON, and that answer is COMMITTED
+  without being verified — while `mobileShipPreflight` re-verifies every one of its own AI rounds and
+  calls an unverified fix a MISS. The same discipline does not exist on the GitHub side.
+- **D — three blind attempts.** `ATTEMPT_BANDS` gives every app exactly 3, whatever the class. Ten
+  rounds on a missing signing key are ten wasted rounds; the cure there is the one-press key button that
+  already exists.
+- And from the earlier autopsy the same day: the loop has **no server-side bound**, starts **two** GitHub
+  runs per repair, reports `fixed: true` for a comment-only rewrite, and the panel claims a repair
+  happened when every autofix returned `fixed: false`.
+
+**C and D are deliberately NOT built yet.** If the aggregate says most failures are the credentials
+class, their benefit is ZERO and the whole plan should change — which is what Step 0 exists to find out,
+and what the admin's own brief instructs.

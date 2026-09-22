@@ -30,7 +30,7 @@ import { findMissingImportedAssets, missingAssetUserMessage } from '../AgentV3/m
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { generateShipKit } from '../lib/mobileShipKit';
-import { assembleMobileProject, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
+import { assembleMobileProject, capacitorMajorFromFiles, missingWebPageRefusal } from '../lib/mobileProjectAssembler';
 // One repository-write implementation, shared with the self-healing build loop so the two can never
 // drift apart on branch handling, blob encoding or ref updates (rule 4).
 import { commitFiles, ensureRepo, githubApiHeaders, type GhHeaders } from '../lib/githubRepoWrite';
@@ -41,6 +41,9 @@ import { SHIP_WORKFLOWS, workflowPath } from '../../lib/shipWorkflows';
 // receives an app already proven to compile, and every heal is written back into the user's v5
 // workspace so their app inside NavBharatAI is fixed too, not a shadow copy.
 import { preflightAndHeal, preflightUserMessage } from '../lib/mobileShipPreflight';
+// The app's OWN build, run in the warm sandbox before GitHub ever sees it (2026-09-22).
+import { runRealBuildCheck } from '../lib/mobileShipRealBuild';
+import { buildActuator } from './actuatorFactory';
 import { aiRepairEnabled, aiRepairModelChain, normalizeRepairTier } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
 import { apkRefusalForProject } from '../lib/frameworkCapability';
@@ -145,6 +148,32 @@ export function registerMobileSetupRoutes(app: Express): void {
     appFiles = preflight.files;
 
     /**
+     * 🔴 AND NOW THE BUILD GITHUB WILL ACTUALLY RUN (2026-09-22).
+     *
+     * The three checks above are STATIC — parse, resolve, declare. The thing that really decides a
+     * phone build is the app's OWN `npm run build`, and until now its first execution anywhere was
+     * five minutes into a GitHub run that costs one of the user's three repair attempts. The app is
+     * already alive in a sandbox with its dependencies installed, so the same question is asked in the
+     * cheap place instead of the expensive one.
+     *
+     * 🔒 It NEVER starts a machine, it is bounded, and it is not stricter than the runner — see
+     * `mobileShipRealBuild.ts`. A skip means the ship proceeds exactly as it did before this existed.
+     */
+    const realBuild = await runRealBuildCheck(buildActuator(), workspaceId, appFiles, preflight.changed)
+      .catch(() => ({ ran: false as const, reason: 'unavailable' as const }));
+    if (realBuild.ran && !realBuild.ok && realBuild.blocking) {
+      // The runner would have failed too, with this exact error. Saying so now costs seconds; letting
+      // it through costs five minutes, a remote log the user cannot act on, and an attempt they only
+      // have three of.
+      return res.status(422).json({
+        error: `Your app did not compile, so the phone build would have failed too. ${realBuild.summary}`,
+        code: 'real-build-failed',
+        failureCode: realBuild.code,
+        buildLog: realBuild.log.slice(-2000),
+      });
+    }
+
+    /**
      * 🔒 IS THERE ANYTHING FOR AN APP TO SHOW? (admin 2026-08-24, the 24-framework sweep.)
      *
      * Nine of the twenty-four frameworks in the picker — Express, Hono, NestJS, Fastify, FastAPI,
@@ -209,6 +238,21 @@ export function registerMobileSetupRoutes(app: Express): void {
         missingAssets: missingAssets.slice(0, 10),
       });
     }
+
+    /**
+     * 🔒 IS THERE A PAGE TO PUT IN THE APP? (autopsy 2026-09-22, user app `bharat-alpha`.)
+     *
+     * That run was green for three steps and then died in 24 seconds at the wrapper, because the app
+     * had no `index.html` where Capacitor opens one. Nothing was broken on the runner — the build could
+     * never have succeeded, and the assembler already knew it: the fact sat in `notes` as advice and
+     * was pushed anyway. This turns the fact into the refusal it always was, one sentence naming the
+     * file, before a repository is created and before the user waits on a run that cannot finish.
+     *
+     * Decided ONLY for a static app; a built app's page is made on the runner and is not ours to
+     * predict (see `missingWebPageRefusal`).
+     */
+    const noPage = missingWebPageRefusal(project);
+    if (noPage) return res.status(422).json({ error: noPage, code: 'no-web-page' });
 
     try {
       const { created, defaultBranch } = await ensureRepo(headers, owner, repoName, `${name} — mobile app, prepared by NavBharatAI`);

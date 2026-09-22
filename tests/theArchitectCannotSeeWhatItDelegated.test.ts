@@ -76,8 +76,15 @@ describe('the architect cannot see what it delegated', () => {
     const off = writeTypecheckSummary(emptyWriteTypecheckStats(), false);
     expect(off).toContain('OFF');
 
-    const nothingWritten = writeTypecheckSummary(emptyWriteTypecheckStats(), true);
+    // ⚠️ CORRECTED 2026-09-22 — this case used to pass NO count and assert that wording, which pinned
+    // the very thing that was wrong: an untouched stats object says only that no write reached the
+    // check, and "no TypeScript source was written" is a claim about the BUILD. The case's reason is
+    // unchanged and now holds more strictly — the sentence is reachable only when a real count of the
+    // build's own TypeScript writes agrees with it. See theCounterWatchedOneLaneOfTwo.test.ts.
+    const nothingWritten = writeTypecheckSummary(emptyWriteTypecheckStats(), true, 0);
     expect(nothingWritten).toContain('no TypeScript source was written');
+    expect(writeTypecheckSummary(emptyWriteTypecheckStats(), true, 4))
+      .not.toContain('no TypeScript source was written');
 
     const ran = writeTypecheckSummary(
       { ...emptyWriteTypecheckStats(), runs: 3, cleanRuns: 2, ownErrorsSurfaced: 1, elapsedMs: 4500 },

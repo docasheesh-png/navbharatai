@@ -42,6 +42,7 @@ import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance'
 import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
 import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
+import { useNotificationInbox, NotificationPanel } from './components/NotificationBell';
 import {
   endConversation, latestOpenConversationId, newConversationId, resumeArchived, deleteOpenConversation,
   browserStore as professionalStore,
@@ -273,6 +274,11 @@ export default function App() {
 
   const [tabHistories, setTabHistories] = useState<Record<string, ViewType[]>>({});
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  // 🔔 The notifications inbox lives at App level (admin 2026-09-22): its unread count is drawn on the
+  // ☰ button and the sidebar's Notifications row while the panel is CLOSED, so a component that only
+  // existed while open could not carry it. One hook, three readers, one number.
+  const inbox = useNotificationInbox(user);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(() => {
     return localStorage.getItem('navbharat_admin_v1') === 'true';
   });
@@ -3363,7 +3369,7 @@ export default function App() {
       {/* Focus Mode hides the header entirely — the floating corner button (below) or Esc bring it back. */}
       {!focusMode && (
         <TopNav
-          onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
+          unreadNotifications={inbox.unread}
           effectiveDeviceMode={effectiveDeviceMode}
           isSidebarCollapsed={isSidebarCollapsed}
           setIsSidebarCollapsed={setIsSidebarCollapsed}
@@ -3408,6 +3414,8 @@ export default function App() {
       <SidebarNav
         onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
         unreadReports={unreadReports}
+        unreadNotifications={inbox.unread}
+        onOpenNotifications={() => setNotificationsOpen(true)}
         effectiveDeviceMode={effectiveDeviceMode}
         isSidebarCollapsed={isSidebarCollapsed}
         isMenuOpen={isMenuOpen}
@@ -3991,6 +3999,15 @@ export default function App() {
           {/* The Mode sheet (admin 2026-08-25). Selecting navigates through the SAME toggleTab paths
               the Professionals hub uses, so every expert opens its real chat — engine, disclaimers and
               pass-gate untouched. "FREE +" mints a new free session; the old one stays in History. */}
+          {/* The notifications inbox, opened from the sidebar's row (admin 2026-09-22). A reply
+              notification's tap opens the Report a problem list, exactly as the old bell's did. */}
+          {notificationsOpen && (
+            <NotificationPanel
+              inbox={inbox}
+              onClose={() => setNotificationsOpen(false)}
+              onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
+            />
+          )}
           {showModePicker && (
             <ModePickerSheet
               activeView={activeView}

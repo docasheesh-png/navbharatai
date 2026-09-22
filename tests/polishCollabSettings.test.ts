@@ -79,7 +79,9 @@ describe('Settings — App Settings hub tiles are real', () => {
     expect(code).not.toContain('TerminalPanel');       // the component is no longer mounted here
     expect(code).not.toContain("settingsScreen === 'shell'");
   });
-  it('Notifications bell is mounted in the top bar', () => {
-    expect(topnav).toContain('NotificationBell');
+  it('Notifications are reachable — from the sidebar row now, not the top bar (2026-09-22)', () => {
+    expect(topnav).not.toContain('NotificationBell');
+    const sidebar = read('src/components/panels/SidebarNav.tsx');
+    expect(sidebar).toContain('>Notifications</span>');
   });
 });

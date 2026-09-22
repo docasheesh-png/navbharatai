@@ -10,6 +10,17 @@ import { join } from 'path';
  */
 const src = readFileSync(join(__dirname, '../src/App.tsx'), 'utf8');
 
+/**
+ * App.tsx's ONE history opener — where the scoping, the popup-vs-tab decision and the sign-in gate
+ * live since 2026-09-22, so the phone bar and the desktop rail can never show different lists.
+ */
+function opener(): string {
+  const at = src.indexOf('const openHistoryForCurrentSurface = useCallback(');
+  expect(at, 'openHistoryForCurrentSurface not found in App.tsx').toBeGreaterThan(-1);
+  const rest = src.slice(at);
+  return rest.slice(0, rest.indexOf('}, [activeView'));
+}
+
 describe('dynamic per-AI footer', () => {
   const branch = () => {
     const branchStart = src.indexOf(') : isModeSurface(activeView) ? (');
@@ -59,7 +70,16 @@ describe('dynamic per-AI footer', () => {
     // what "Free history" means. The invariant this test protects was never the ternary's spelling —
     // it is that the hub gets professional scope and every other surface gets the unified Free list,
     // and that rule is now pinned directly in historySurface.test.ts as well as here.
-    expect(b).toContain('setHistoryInitialFilter(historyFilterFor(activeView as string))');
+    //
+    // RE-ANCHORED AGAIN 2026-09-22, for the same reason and one level further out. The scoping line
+    // no longer lives in this footer branch: it moved into App.tsx's `openHistoryForCurrentSurface`,
+    // the ONE opener the desktop rail's History row now calls too. It had to move — the footer
+    // renders only on a phone, so while these rules lived inside it a desktop had no door to chat
+    // history at all (admin: "kuch options desktop me gayab ho gaye hai — jaise navbharatai free
+    // me, history"). The invariant is unchanged and is asserted where it now lives, plus the
+    // delegation, so the footer cannot quietly grow a second copy of the rule.
+    expect(b).toContain("if (id === 'history') { openHistoryForCurrentSurface(); return; }");
+    expect(opener()).toContain('setHistoryInitialFilter(historyFilterFor(activeView as string))');
     expect(src).toContain("import { historySurfaceFor, historyFilterFor } from './lib/historySurface'");
     // the scoped filter resets to 'all' when leaving History
     expect(src).toContain("if (activeView !== 'history') setHistoryInitialFilter('all')");
@@ -77,13 +97,18 @@ describe('dynamic per-AI footer', () => {
     // Admin 2026-08-28: Free's History should behave like Pro v5.0's — a panel over the conversation
     // you are in. The `return` is the load-bearing part: without it the popup would open AND the app
     // would switch to the History tab underneath it, which looks like the popup "did nothing".
-    const b = branch();
-    expect(b).toContain("historySurfaceFor(activeView as string) === 'popup'");
-    expect(b).toContain('setHistoryPopupOpen(true)');
-    const popupBranch = b.slice(b.indexOf("historySurfaceFor(activeView as string) === 'popup'"));
+    //
+    // Read from the shared opener since 2026-09-22 (see the note in the test above). The `return`
+    // is still the load-bearing part, and it still guards the same fall-through — the tab open is
+    // now the opener's own last line rather than the footer's.
+    const o = opener();
+    expect(o).toContain("historySurfaceFor(activeView as string) === 'popup'");
+    expect(o).toContain('setHistoryPopupOpen(true)');
+    const popupBranch = o.slice(o.indexOf("historySurfaceFor(activeView as string) === 'popup'"));
     const returnIdx = popupBranch.indexOf('return;');
-    const toggleIdx = popupBranch.indexOf('toggleTab(id)');
+    const toggleIdx = popupBranch.indexOf("toggleTab('history' as ViewType)");
     expect(returnIdx).toBeGreaterThan(-1);
+    expect(toggleIdx).toBeGreaterThan(-1);
     expect(returnIdx).toBeLessThan(toggleIdx);
   });
 });

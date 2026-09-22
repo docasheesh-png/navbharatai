@@ -1975,6 +1975,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   browser (JSON back ⇒ configured; 404 ⇒ unset or every entry malformed), then reinstall the app and
   tap a navbharatai.com link. Android re-checks the file on install and periodically, so an app already
   installed may take a while — a reinstall settles it immediately.
+  🔴 **THE `www` HALF COULD NEVER VERIFY UNTIL 2026-09-22, WHATEVER THE FINGERPRINT (Play Console:
+  "2 domains not verified · 8 links not working", every row "Failed domain checks").** The manifest
+  claims BOTH `navbharatai.com` and `www.navbharatai.com`, Android verifies each by fetching ITS OWN
+  `/.well-known/assetlinks.json`, and the Digital Asset Links verifier does NOT follow redirects — yet
+  the `CANONICAL_HOST` middleware (mounted first) 308'd every `www` path to the apex, the statement
+  file included. `isWellKnownPath` in `canonicalHost.ts` now exempts the whole `/.well-known/` prefix
+  (Apple's `apple-app-site-association` is the same class); the app itself keeps one canonical origin.
+  **Two things must both be true for the Play "Deep links" page to go green: `ANDROID_CERT_SHA256`
+  set (both certificates), AND the file answering 200 on BOTH hosts without a redirect.** ⚠️ And say
+  it plainly when asked: a red Deep-links page is ADVISORY — it never blocks a release. An update that
+  "will not publish" has its reason on Publishing overview or the release page, not here.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

@@ -56,7 +56,29 @@ export function canonicalHostRedirect(input: CanonicalInput): CanonicalDecision 
   if (!host) return none;
   if (host !== `www.${canonical}`) return none;      // only the www twin, nothing else
   const path = typeof input.originalUrl === 'string' && input.originalUrl.startsWith('/') ? input.originalUrl : '/';
+  if (isWellKnownPath(path)) return none;            // verifiers do not follow redirects — see below
   return { redirectTo: `https://${canonical}${path}`, status: 308 };
+}
+
+/**
+ * `/.well-known/…` is served on EVERY host, never redirected.
+ *
+ * 🔴 WHY (Play Console, 2026-09-22: "2 domains not verified · 8 links not working", every row
+ * "Failed domain checks"). The app's manifest claims BOTH `navbharatai.com` and `www.navbharatai.com`,
+ * and Android verifies each domain by fetching ITS OWN `/.well-known/assetlinks.json` — and the
+ * Digital Asset Links verifier does NOT follow redirects (Google's own rule for that file; Apple's
+ * `apple-app-site-association` verifier is the same). With this middleware mounted first, the `www`
+ * copy of that file was a 308 to the apex, i.e. a failed check for `www` however correct the
+ * fingerprint — a domain the manifest claims and the server could never let verify. Exempting the
+ * whole `.well-known` prefix keeps the one-canonical-origin rule for the app itself (pages, API, auth)
+ * while letting the two machine-read statement files answer where they are asked.
+ *
+ * The prefix is matched on the PATH only (the query string is ignored), and only at the root — a page
+ * that merely contains `.well-known` somewhere in its URL is still moved.
+ */
+export function isWellKnownPath(path: string): boolean {
+  const p = String(path ?? '').split('?')[0].split('#')[0];
+  return p === '/.well-known' || p.startsWith('/.well-known/');
 }
 
 /** Lowercase, strip any port, drop a trailing dot. PURE. */

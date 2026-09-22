@@ -89,7 +89,14 @@ export async function mintCodeForOrder(
   const orderRef = doc(db, GIFT_CODE_COLLECTION, `order_${input.orderId}`);
 
   return runTransaction(db, async (tx: any) => {
+    // 🔴 BOTH READS FIRST. Firestore requires every read in a transaction to precede every write —
+    // `payments.ts` carries the same note on its own transaction — and the first draft of this one
+    // read the daily tally AFTER writing the code. It would have thrown on the FIRST real gift
+    // purchase, at the worst possible moment: the money has already arrived and the buyer is waiting
+    // for the code. No unit test could see it, because the transaction body only runs against a real
+    // Firestore; `theReadsComeFirst` below drives it with a `tx` that enforces the rule instead.
     const existing = await tx.get(orderRef);
+    const tally = await tx.get(dailyRef);
     if (existing.exists()) {
       const already = String((existing.data() as { code?: unknown }).code ?? '');
       if (already) return already;
@@ -109,7 +116,6 @@ export async function mintCodeForOrder(
     };
     tx.set(doc(db, GIFT_CODE_COLLECTION, code), record);
     tx.set(orderRef, { code, orderId: input.orderId, buyerUid: input.buyerUid, createdAt: iso });
-    const tally = await tx.get(dailyRef);
     const prev = tally.exists() ? (tally.data() as { count?: number; inr?: number }) : null;
     tx.set(dailyRef, {
       uid: input.buyerUid,

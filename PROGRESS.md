@@ -79107,6 +79107,20 @@ entries are append-only. This branch then merged `main` and resolved one conflic
 `BillingPanel.tsx`: the capsule markup is `main`'s, with this branch's one real change to it kept —
 a redeemed GIFT is promocode credit too, so `GIFT_REDEEM` belongs in that capsule's sum.
 
+🔴 **A REAL BUG FOUND BY RE-READING THE DIFF WHILE CI RAN, in the worst possible place.**
+`mintCodeForOrder` read the order pointer, **WROTE** the code document, and only then read the
+buyer's daily tally. Firestore rejects a transaction that reads after it writes — `payments.ts`
+carries that exact note on its own transaction — so **the very first real gift purchase would have
+thrown after the money had already left the buyer's account**, while they waited for a code that was
+never going to appear. Both reads now precede every write.
+
+⚠️ **Nothing in this repo could have caught it.** The transaction body only executes against a real
+Firestore; the 31 pure and source-level cases never enter it, `tsc` has no opinion about call order,
+and "a get after a set" is not a question a grep can ask. `tests/theGiftMintReadsBeforeItWrites.test.ts`
+drives the real function with a `tx` that raises Firestore's own error on a late read —
+reversion-proven, and it also pins that TWO documents are read inside the transaction (a tally read
+outside it would drop the cap out of the conflict set).
+
 ⚠️ **Not verified against a live gateway from any session** — Cashfree cannot be reached from here.
 The first real purchase is the first real evidence, and the honest failure paths are in place: an
 order that somehow carries no face value refunds rather than minting a free code

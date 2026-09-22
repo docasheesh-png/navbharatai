@@ -8,10 +8,16 @@ import {
   imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, fetchPollinationsImage,
+  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl,
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
+import { triageImageRequest } from '../lib/imageSafety';
+import { imageFreePaidBudget, FREE_PAID_CAP_MESSAGE } from '../lib/imageFreePaidBudget';
+import { enhanceImagePrompt, ENHANCE_MAX_INPUT } from '../lib/imagePromptEnhancer';
+import { aiRouter } from '../lib/aiRouter';
+import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
+import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import {
@@ -20,6 +26,7 @@ import {
   pendingResultUrl, jobFailed, IMAGE_PRO_POLL_MS,
   imageProFailureMessage, initImageTooLarge, parseDataUrl, imageProMargin, imageProMarginWarning,
 } from '../lib/imageProGen';
+import { fetchPollinationsPaidImage, imageProAvailable } from '../lib/pollinationsPaid';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { imagePixelsFor } from '../lib/imageGen';
 import { getServerDb } from '../lib/serverDb';
@@ -99,11 +106,36 @@ const proLimiter = () => rateLimiter({
   name: 'imagegenpro', authed: 30, anon: 0, anonGlobalPerHour: 0, noun: 'Pro image generations',
 });
 
+// ── THE ⭐ PROMPT ENHANCER ──────────────────────────────────────────────────────────────────────
+// One short text call on the FREE chat ladder per press. Bounded like every other AI call here:
+// an account (the fallback rungs cost the platform), and its own bucket, generous because a user
+// may press it a few times while shaping a brief.
+const enhanceSchema = vobject({
+  prompt: vstring({ max: ENHANCE_MAX_INPUT }),
+  type: vstring({ optional: true, max: 60 }),
+  style: vstring({ optional: true, max: 40 }),
+  colorHint: vstring({ optional: true, max: 60 }),
+});
+const enhanceLimiter = () => rateLimiter({
+  name: 'imageenhance', authed: 60, anon: 0, anonGlobalPerHour: 0, noun: 'prompt improvements',
+});
+
 export function registerImageGenRoutes(app: Express): void {
   app.post('/api/image/generate', imageGenLimiter(), validateBody(schema), async (req: Request, res: Response) => {
     if (!isValidImageGenRequest(req.body)) {
       res.status(400).json({ error: 'Describe the image you want, or attach a picture to change.' });
       return;
+    }
+    // ── THE SAFETY TRIAGE — the same one build and chat run, and until 2026-09-21 the one thing
+    // this route did not do. Before a link is minted, before a provider is called, before an
+    // account is even looked up: a banned request costs nothing and produces nothing. The words
+    // are the user's own; an attached picture is not read.
+    {
+      const safety = await triageImageRequest(req, typeof req.body.prompt === 'string' ? req.body.prompt : '');
+      if (safety.blocked) {
+        res.status(422).json({ error: safety.message, code: 'blocked' });
+        return;
+      }
     }
     if (!imageGenConfigured()) {
       // Honest not-available state (rule 2): the capability needs the image key in the environment.
@@ -174,6 +206,18 @@ export function registerImageGenRoutes(app: Express): void {
           if (!res.headersSent) res.status(gate.status).json(gate.body);
           return false;
         }
+        // 🔒 THE PLATFORM'S OWN DAY, after the user's own allowance: a per-user cap bounds one account
+        // and nothing bounded the whole platform (PR #3234's open item). Read once per request, before
+        // the first paid rung, and never for a free-provider image. Free-listed users (the admin's own
+        // test accounts) are not counted against it — they are how the paid rungs get verified at all.
+        if (!gate.isFreeListed) {
+          const budget = await imageFreePaidBudget.decide();
+          if (!budget.allow) {
+            gateRefused = true;
+            if (!res.headersSent) res.status(503).json({ error: FREE_PAID_CAP_MESSAGE, code: 'free_paid_cap' });
+            return false;
+          }
+        }
       }
       return true;
     };
@@ -224,6 +268,8 @@ export function registerImageGenRoutes(app: Express): void {
         // Only a PAID rung spends an allowance. A free Pollinations image never counts against a quota,
         // and a failed rung never spends anything — the burn happens on delivery, not on attempt.
         if (paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+        // The platform's count moves on DELIVERY, like the user's — never on an attempt that failed.
+        if (paidRung && gate && gate.allow && !gate.isFreeListed) void imageFreePaidBudget.record();
         // `notes` carries the honest caveats (a style chip that was overruled, or the warning that
         // image engines cannot spell). Surfacing them is the point: a user who knows their shop name
         // may come out garbled can shorten it, where a silent bad spelling just wastes their time.
@@ -263,6 +309,27 @@ export function registerImageGenRoutes(app: Express): void {
       // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
       // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
       if (pollinationsEnabled() && !editing) {
+        // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip").
+        // The provider allows one request every 15 seconds PER ADDRESS, and this server is ONE
+        // address — so at any real scale every free user on the platform queues behind every other
+        // one. Handing the browser a link puts each user on their own connection. Nothing else
+        // moves: the prompt was triaged, crafted and bounded HERE, seconds ago, and the link
+        // carries that finished prompt. `IMAGE_GEN_CLIENT_FETCH=off` reverts it with no deploy.
+        if (clientImageFetchEnabled()) {
+          const url = pollinationsImageUrl(prompt, req.body.size, process.env, {
+            width: req.body.width,
+            height: req.body.height,
+          });
+          const exp = Date.now() + IMAGE_TICKET_TTL_MS;
+          res.json({
+            mode: 'client-fetch',
+            url,
+            ticket: signImageTicket(url, exp, imageTicketSecret()),
+            exp,
+            ...(crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
+          });
+          return;
+        }
         const pr = await fetchPollinationsImage(prompt, req.body.size, {
           timeoutMs: ROUTE_TIMEOUT_MS,
           custom: { width: req.body.width, height: req.body.height },
@@ -371,6 +438,131 @@ export function registerImageGenRoutes(app: Express): void {
    * Charging first would risk billing a request that then failed; charging for a batch that
    * half-delivered would bill for pictures nobody got.
    */
+  /**
+   * POST /api/image/relay — fetch back a picture the BROWSER could not read.
+   *
+   * 🔑 WHY IT EXISTS. A free picture is fetched by the user's own browser, from their own address,
+   * so the provider's one-request-per-15-seconds-per-address limit stops being shared by everybody
+   * on the platform. But a browser may not read the BYTES of another site's image unless that site
+   * allows it — and "Add text", "Crop", "Copy" and "Download" all need the real pixels. The admin's
+   * instruction was that those four keep working on the free tier ("yeh sab user ke ip par kaam kar
+   * jaye, kisi bhi tarah"), so when the browser cannot read them, this fetches them once.
+   *
+   * ⚠️ ONLY WHEN A BUTTON NEEDS THEM. The picture is DISPLAYED straight from the user's connection;
+   * this runs on a press, not on every generation. Most pictures are never edited, so the address
+   * our server spends stays a small fraction of the traffic.
+   *
+   * 🔴 THIS ENDPOINT TAKES A URL FROM THE CLIENT, so it is locked twice, and it is worth being
+   * explicit about why one lock is not enough:
+   *   • the HOST must be on an exact allowlist — otherwise a caller could ask our server to fetch
+   *     an internal address and read the answer back (SSRF), and a substring check would pass
+   *     `image.pollinations.ai.evil.com`;
+   *   • the URL must carry OUR signature — otherwise a caller could point us at any path on an
+   *     allowed host, including a prompt our safety triage never saw.
+   */
+  app.post(
+    '/api/image/relay',
+    rateLimiter({ name: 'imagerelay', authed: 80, anon: 0, anonGlobalPerHour: 0, noun: 'image fetches' }),
+    validateBody(vobject({
+      url: vstring({ max: 4_000 }),
+      ticket: vstring({ max: 120 }),
+      exp: vnumber({ int: true }),
+    })),
+    async (req: Request, res: Response) => {
+      // An account, for the same reason the generate route needs one: this spends our address and
+      // our bandwidth, and an anonymous caller is nobody we can rate-limit meaningfully.
+      const account = await requireAccountForCostlyAi(req, 'image download');
+      if (!account.ok) {
+        res.status(account.status).json(account.body);
+        return;
+      }
+      const url = String(req.body?.url || '');
+      if (!isAllowedImageHost(url)) {
+        res.status(400).json({ error: 'That picture link is not one NavBharatAI created.' });
+        return;
+      }
+      if (!verifyImageTicket(url, req.body?.exp, req.body?.ticket, imageTicketSecret(), Date.now())) {
+        // One message for a forged signature and for an expired one: telling them apart would say
+        // which lock they tripped. Re-generating the picture mints a fresh link either way.
+        res.status(403).json({ error: 'That picture link has expired. Please make the image again.' });
+        return;
+      }
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), ROUTE_TIMEOUT_MS);
+      try {
+        const r = await fetch(url, { signal: ctl.signal });
+        const ct = r.headers.get('content-type') || '';
+        if (!r.ok) {
+          // A rate limit here is the provider's, not ours — and it is transient, so the user is told
+          // to try again rather than that something is broken.
+          res.status(r.status === 429 ? 429 : 502).json({
+            error: r.status === 429
+              ? 'NavBharatAI’s engine is busy right now — please try again in a moment.'
+              : 'That picture could not be downloaded right now — please try again.',
+          });
+          return;
+        }
+        if (!ct.startsWith('image/')) {
+          res.status(502).json({ error: 'That picture could not be downloaded right now — please try again.' });
+          return;
+        }
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length === 0) {
+          res.status(502).json({ error: 'That picture could not be downloaded right now — please try again.' });
+          return;
+        }
+        res.json({ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[IMAGE_RELAY] fetch failed: ${msg.slice(0, 160)}`);
+        res.status(502).json({ error: 'That picture could not be downloaded right now — please try again.' });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  );
+
+  app.post('/api/image/enhance-prompt', enhanceLimiter(), validateBody(enhanceSchema), async (req: Request, res: Response) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) {
+      res.status(400).json({ error: 'Write a few words first, then press the star.' });
+      return;
+    }
+    // The same triage as a generation: a banned brief is not improved, it is refused.
+    const safety = await triageImageRequest(req, prompt);
+    if (safety.blocked) {
+      res.status(422).json({ error: safety.message, code: 'blocked' });
+      return;
+    }
+    const account = await requireAccountForCostlyAi(req, 'prompt improvement');
+    if (!account.ok) {
+      res.status(account.status).json(account.body);
+      return;
+    }
+    // 'navbharat' is the FREE universe — glm-4.7-flash led, ₹0 on the ordinary path — and the call
+    // carries no history and no tools. The router's own timeout applies as well as ours.
+    const out = await enhanceImagePrompt(
+      {
+        prompt,
+        type: typeof body.type === 'string' ? body.type : undefined,
+        style: typeof body.style === 'string' ? body.style : undefined,
+        colorHint: typeof body.colorHint === 'string' ? body.colorHint : undefined,
+      },
+      async (system, user) => {
+        const r = await aiRouter.routeDetailed(user, [], 'navbharat', undefined, system);
+        return { content: r.content, ok: r.ok };
+      },
+    );
+    if (!out.ok) {
+      // 200 with a note, not an error: the user's words are intact and the star simply had nothing
+      // better to offer. The words say so; a red error card would say something worse happened.
+      res.json({ ok: false, note: out.message, reason: out.reason });
+      return;
+    }
+    res.json({ ok: true, prompt: out.prompt });
+  });
+
   app.post('/api/image/pro/generate', proLimiter(), validateBody(proSchema), async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const proReq = {
@@ -388,6 +580,14 @@ export function registerImageGenRoutes(app: Express): void {
       res.status(400).json({ error: 'Add a prompt, or attach an image to work from.' });
       return;
     }
+    // The same triage the free route runs (see there) — a paid door is not a way round the ban.
+    {
+      const safety = await triageImageRequest(req, proReq.prompt ?? '');
+      if (safety.blocked) {
+        res.status(422).json({ error: safety.message, code: 'blocked' });
+        return;
+      }
+    }
     if (proReq.initImage && !parseDataUrl(proReq.initImage)) {
       res.status(400).json({ error: 'That attachment is not an image we can read. Please attach a PNG or JPEG.' });
       return;
@@ -396,10 +596,20 @@ export function registerImageGenRoutes(app: Express): void {
       res.status(413).json({ error: 'That image is too large — please attach one under 8 MB.' });
       return;
     }
-    if (!imageProConfigured()) {
+    // 🔑 TWO ENGINES SERVE PRO (admin 2026-09-21: "paid pahle pollination use ho, fallback me
+    // IMAGE_PRO_KEY"), and ONE function says whether either can — the same owner `/api/public-config`
+    // asks, so the chip and this 503 can never disagree about whether Pro is on.
+    if (!imageProAvailable()) {
       // Honest not-available (rule 2). Never a silent fall back to the FREE provider: that would
       // charge the Pro price for a picture the user could have had for nothing, on the tier they chose
       // precisely because they wanted something better.
+      res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
+      return;
+    }
+    // An EDIT needs the Pro host: the first engine takes words only, and the user's own photograph is
+    // never turned into a link (the free tier's rule, kept here). Without the host, editing on Pro is
+    // honestly "not switched on" — never a fresh picture that quietly ignores the attachment.
+    if (mode !== 'text-to-image' && !imageProConfigured()) {
       res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
       return;
     }
@@ -444,82 +654,110 @@ export function registerImageGenRoutes(app: Express): void {
     const finalPrompt = proReq.prompt ? withInlineNegative(crafted) : '';
 
     let delivered: Array<{ image: string; mimeType: string }> = [];
-    try {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), IMAGE_PRO_TIMEOUT_MS);
-      try {
-        const r = await fetch(imageProEndpoint(), {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...imageProAuthHeaders() },
-          body: JSON.stringify(buildImageProRequest({ ...proReq, prompt: finalPrompt }, px)),
-          signal: ctl.signal,
-        });
-        if (!r.ok) {
-          // The vendor's own status and body stay in the SERVER log and never reach the user.
-          console.error(`[IMAGE PRO] host returned HTTP ${r.status}`);
-          res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-          return;
-        }
-        // 🔴 A 200 IS NOT AN IMAGE. The host this tier was priced around is ASYNC by default: the POST
-        // answers with a prediction id, and even in sync mode a task slower than its wait window comes
-        // back HTTP **200** with `code: 5004, status: processing`. A caller that stops at `r.ok` would
-        // report a failure for a job that was about to succeed — and the user would be told their
-        // picture could not be made while it was being made.
-        let payload: unknown = await r.json();
-        let parsed = parseImageProResponse(payload);
-        let next = parsed ? null : pendingResultUrl(payload);
-        while (!parsed && next && !ctl.signal.aborted) {
-          await new Promise((resolve) => setTimeout(resolve, IMAGE_PRO_POLL_MS));
-          if (ctl.signal.aborted) break;
-          // The whole loop is bounded by the SAME AbortController as the first call, so the existing
-          // IMAGE_PRO_TIMEOUT_MS is still the one clock — there is no second, longer budget hiding here.
-          const poll = await fetch(next, { headers: imageProAuthHeaders(), signal: ctl.signal });
-          if (!poll.ok) {
-            console.error(`[IMAGE PRO] polling returned HTTP ${poll.status}`);
-            break;
-          }
-          payload = await poll.json();
-          if (jobFailed(payload)) {
-            console.error('[IMAGE PRO] the host reported the job failed');
-            break;
-          }
-          parsed = parseImageProResponse(payload);
-          next = parsed ? null : pendingResultUrl(payload);
-        }
-        if (!parsed) {
-          // Nothing was produced, so nothing is charged — the caller's own guard, unchanged.
-          console.error('[IMAGE PRO] host returned no image in a 200 response');
-          res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-          return;
-        }
-        if ('url' in parsed) {
-          // Server-proxied, exactly like the free provider: the bytes are fetched here and re-served
-          // as a data URL, so the user's browser never talks to the vendor and the result carries no
-          // third-party origin. White-label is a network fact here, not only a wording one.
-          const img = await fetch(parsed.url, { signal: ctl.signal });
-          const ct = img.headers.get('content-type') || 'image/png';
-          if (!img.ok || !ct.startsWith('image/')) {
-            console.error(`[IMAGE PRO] fetching the returned image failed (HTTP ${img.status}, ${ct})`);
-            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-            return;
-          }
-          const buf = Buffer.from(await img.arrayBuffer());
-          if (buf.length === 0) {
-            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
-            return;
-          }
-          delivered = [{ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct }];
-        } else {
-          delivered = [{ image: `data:${parsed.mimeType};base64,${parsed.base64}`, mimeType: parsed.mimeType }];
-        }
-      } finally {
-        clearTimeout(timer);
+
+    // RUNG 1 — Pollinations, keyed, from OUR server (admin: "paid me hamari [ip]"). Words only: the
+    // keyed door takes a prompt, and an attached photograph goes to the host below, which reads it.
+    // A failure here is an ADMIN line (it names the vendor and the status — White-Label §3) and then
+    // the host's turn; the user never sees it, and is never charged for it.
+    if (mode === 'text-to-image') {
+      const pr = await fetchPollinationsPaidImage(finalPrompt, proReq.size, {
+        custom: { width: proReq.width, height: proReq.height },
+      });
+      if (pr.image) {
+        delivered = [{ image: `data:${pr.image.mimeType};base64,${pr.image.base64}`, mimeType: pr.image.mimeType }];
+        // The provider's own statement of what this picture cost — the number IMAGE_PRO_COST_USD is
+        // waiting to be replaced by. Admin-only, one compact line per delivery.
+        console.log(`[IMAGE PRO] pollinations delivered — usage ${JSON.stringify(pr.usage ?? {})}`);
+      } else if (!pr.disabled) {
+        console.warn(`[IMAGE PRO] pollinations rung failed (${pr.error ?? 'unknown'}) — ${
+          imageProConfigured() ? 'trying the Pro host' : 'no Pro host configured'}.`);
       }
-    } catch (err: unknown) {
-      const aborted = err instanceof Error && /abort/i.test(err.message);
-      console.error(`[IMAGE PRO] ${aborted ? 'timed out' : 'threw'}: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
-      res.status(504).json({ error: imageProFailureMessage(aborted ? 'timeout' : 'failed'), code: 'pro_failed' });
-      return;
+    }
+
+    // RUNG 2 — the Pro host (`IMAGE_PRO_KEY`), for an edit or when rung 1 could not deliver.
+    if (delivered.length === 0) {
+      if (!imageProConfigured()) {
+        // Rung 1 failed and there is nothing behind it. Nothing was produced, so nothing is charged.
+        res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+        return;
+      }
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), IMAGE_PRO_TIMEOUT_MS);
+        try {
+          const r = await fetch(imageProEndpoint(), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...imageProAuthHeaders() },
+            body: JSON.stringify(buildImageProRequest({ ...proReq, prompt: finalPrompt }, px)),
+            signal: ctl.signal,
+          });
+          if (!r.ok) {
+            // The vendor's own status and body stay in the SERVER log and never reach the user.
+            console.error(`[IMAGE PRO] host returned HTTP ${r.status}`);
+            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+            return;
+          }
+          // 🔴 A 200 IS NOT AN IMAGE. The host this tier was priced around is ASYNC by default: the POST
+          // answers with a prediction id, and even in sync mode a task slower than its wait window comes
+          // back HTTP **200** with `code: 5004, status: processing`. A caller that stops at `r.ok` would
+          // report a failure for a job that was about to succeed — and the user would be told their
+          // picture could not be made while it was being made.
+          let payload: unknown = await r.json();
+          let parsed = parseImageProResponse(payload);
+          let next = parsed ? null : pendingResultUrl(payload);
+          while (!parsed && next && !ctl.signal.aborted) {
+            await new Promise((resolve) => setTimeout(resolve, IMAGE_PRO_POLL_MS));
+            if (ctl.signal.aborted) break;
+            // The whole loop is bounded by the SAME AbortController as the first call, so the existing
+            // IMAGE_PRO_TIMEOUT_MS is still the one clock — there is no second, longer budget hiding here.
+            const poll = await fetch(next, { headers: imageProAuthHeaders(), signal: ctl.signal });
+            if (!poll.ok) {
+              console.error(`[IMAGE PRO] polling returned HTTP ${poll.status}`);
+              break;
+            }
+            payload = await poll.json();
+            if (jobFailed(payload)) {
+              console.error('[IMAGE PRO] the host reported the job failed');
+              break;
+            }
+            parsed = parseImageProResponse(payload);
+            next = parsed ? null : pendingResultUrl(payload);
+          }
+          if (!parsed) {
+            // Nothing was produced, so nothing is charged — the caller's own guard, unchanged.
+            console.error('[IMAGE PRO] host returned no image in a 200 response');
+            res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+            return;
+          }
+          if ('url' in parsed) {
+            // Server-proxied, exactly like the free provider: the bytes are fetched here and re-served
+            // as a data URL, so the user's browser never talks to the vendor and the result carries no
+            // third-party origin. White-label is a network fact here, not only a wording one.
+            const img = await fetch(parsed.url, { signal: ctl.signal });
+            const ct = img.headers.get('content-type') || 'image/png';
+            if (!img.ok || !ct.startsWith('image/')) {
+              console.error(`[IMAGE PRO] fetching the returned image failed (HTTP ${img.status}, ${ct})`);
+              res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+              return;
+            }
+            const buf = Buffer.from(await img.arrayBuffer());
+            if (buf.length === 0) {
+              res.status(502).json({ error: imageProFailureMessage('failed'), code: 'pro_failed' });
+              return;
+            }
+            delivered = [{ image: `data:${ct};base64,${buf.toString('base64')}`, mimeType: ct }];
+          } else {
+            delivered = [{ image: `data:${parsed.mimeType};base64,${parsed.base64}`, mimeType: parsed.mimeType }];
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (err: unknown) {
+        const aborted = err instanceof Error && /abort/i.test(err.message);
+        console.error(`[IMAGE PRO] ${aborted ? 'timed out' : 'threw'}: ${err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200)}`);
+        res.status(504).json({ error: imageProFailureMessage(aborted ? 'timeout' : 'failed'), code: 'pro_failed' });
+        return;
+      }
     }
 
     if (delivered.length === 0) {

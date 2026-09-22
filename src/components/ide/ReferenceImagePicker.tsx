@@ -10,8 +10,8 @@
 // feature: what comes out is a PNG at the request's own pixel size, so a 12 MP phone photo can never
 // reach the 8 MB request cap and the user has always SEEN what will be sent.
 
-import { useRef, useState } from 'react';
-import { ImagePlus, Pencil, X } from 'lucide-react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { Pencil, X } from 'lucide-react';
 import { ImageCropEditor } from './ImageCropEditor';
 import { describeSize } from '../../lib/imageSize';
 
@@ -30,13 +30,26 @@ interface Props {
   /** The pixels the request will be made at right now. */
   frame: { w: number; h: number };
   disabled?: boolean;
+  /**
+   * Where the composer's OWN attach button reaches in (admin 2026-09-21: "change my own picture wala
+   * button, sirf attach button bana kar, input box ke andar karo"). This component fills the ref with
+   * "open the file chooser"; the button that calls it lives inside the input pill, beside the words —
+   * the shape every other composer in the app has, and the Pro studio has had since it shipped. The
+   * chooser, the size rule and the crop editor stay HERE, so both screens keep one rule for what a
+   * picture may be; only the button moved.
+   */
+  openRef: MutableRefObject<(() => void) | null>;
 }
 
 /** Bigger than any phone photo; a genuinely absurd file is refused here rather than at the server. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-export function ReferenceImagePicker({ value, onChange, frame, disabled }: Props) {
+export function ReferenceImagePicker({ value, onChange, frame, disabled, openRef }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    openRef.current = () => { if (!disabled) inputRef.current?.click(); };
+    return () => { openRef.current = null; };
+  }, [openRef, disabled]);
   const [cropping, setCropping] = useState<string | null>(null);
   const [error, setError] = useState('');
 
@@ -73,17 +86,10 @@ export function ReferenceImagePicker({ value, onChange, frame, disabled }: Props
         onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }}
       />
 
-      {!value ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => inputRef.current?.click()}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-line bg-raised text-xs text-body hover:border-accent-text transition-colors disabled:opacity-40"
-        >
-          <ImagePlus className="w-3.5 h-3.5 text-accent-text" />
-          Change my own picture
-        </button>
-      ) : (
+      {/* Nothing is shown until a picture is attached — the button that attaches one is the
+          composer's, inside the pill (see `openRef`). A dashed "Change my own picture" bar used to
+          sit here on every build, taking a row from a phone screen for a thing most sends never do. */}
+      {value && (
         <div className="flex items-center gap-2 px-2 py-2 rounded-xl border border-line bg-raised">
           <img
             src={value.dataUrl}

@@ -166,6 +166,14 @@ promised to build it.** Every model refused — the model's virtue, never our de
 
 - `ILLEGAL_RULES.ADULT_CONTENT` → `triagePrompt` returns **`block`**, before a sandbox or a token.
   One triage serves BOTH the build route and the chat route, so the ban covers both by construction.
+  🔴 **CORRECTED 2026-09-21 — IT SERVED NEITHER IMAGE ROUTE.** `/api/image/generate` and
+  `/api/image/pro/generate` never called `triagePrompt`; the only thing between a pornographic prompt
+  and a picture was whichever provider happened to refuse, and the free provider's anonymous door has
+  safety OFF. A PR description (#3234) had stated the ban was enforced there "as before" — written from
+  this paragraph, not from the route. Now all THREE surfaces run the same triage
+  (`src/server/lib/imageSafety.ts`; surface `image` in the safety flags), before a link is minted or a
+  provider is called. **"Both" in the line above means build and chat; a new surface that takes a
+  prompt is not covered until it calls the triage itself — grep for `triagePrompt(` before claiming it.**
 - **A refusal is a FINAL answer**: `shouldRetryEmptyBuild` never escalates one, and the free-tier
   upsell can never follow one (`looksLikeRefusal`). "Zero files" is not always a capability failure.
 - ⚠️ **The message is blunt on purpose, so detection must stay PRECISION-FIRST.** The rule carries an
@@ -1423,6 +1431,39 @@ the code (it is actually read somewhere) on 2026-07-11.
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
 
+- **🌐 `IMAGE_GEN_CLIENT_FETCH` — a FREE image is fetched by the USER'S BROWSER, not by this server
+  (admin-mandated 2026-09-21: *"free wale me user ki ip, paid me hamari"*). ⚠️ NOT set, and the code
+  default is ON**; `off` is the instant, no-deploy revert to the previous behaviour exactly. Read by
+  `src/server/lib/imageTicket.ts`; applied in the free Pollinations branch of `routes/imageGen.ts`.
+  🔑 **THE PROBLEM IS A RATE LIMIT, NOT A BILL.** The free provider allows **one request every 15
+  seconds PER IP ADDRESS**, and this server is ONE address — so every free user on the platform
+  shared a single bucket. Ceiling: ~5,760 images/day for the whole product, and only if perfectly
+  spread. Worse, a throttled request was read as a FAILURE and fell through to the **paid** Gemini
+  rung — so at scale the "free" tier quietly became a paid one, at a price this repo has never
+  measured (there is still no image rate in `providerRates.ts`). From the browser each user has
+  their own address.
+  ⚠️ **CGNAT MEANS THIS IS AN IMPROVEMENT, NOT A FIX.** Indian carriers put many phones behind one
+  public address, so a busy tower still shares a bucket. The admin asked for that to be fixed and it
+  cannot be — the only techniques are rotating proxies, i.e. deliberately evading a free provider's
+  rate limit, which would get NavBharatAI blocked outright. What absorbs the remainder is the
+  browser's retry, bounded by the admin's own budget (*"1 min baad bhi mile chalega"*).
+  🔴 **THE RELAY IS AN SSRF SURFACE AND HAS TWO LOCKS.** `POST /api/image/relay` exists so Add text,
+  Crop, Copy and Download keep working when a browser may not read another site's pixels — it takes
+  a URL **from the client**. Locks: (1) `isAllowedImageHost` — an EXACT host allowlist, because a
+  substring check passes `image.pollinations.ai.evil.com`; (2) our HMAC over that exact URL, because
+  an allowed host with a free path is a way to fetch a prompt our safety triage never saw. Neither
+  is relied on alone. A forged and an expired ticket return the SAME words, so a prober cannot tell
+  which lock they tripped.
+  🔒 **THE TRIAGE DID NOT MOVE.** The pornography ban, the craft layer and the India-map directive
+  all still run on this server before a link is minted; the link carries a FINISHED prompt.
+  ⚠️ **And the provider's own `safe` parameter is NOT a substitute** — their docs say safety is OFF
+  unless asked for, and it is documented on their NEW keyed endpoint, not the keyless one this uses.
+  ⚠️ **An EDIT of the user's own photo is never handed to the browser** (`!editing`): it carries
+  their photograph, and those bytes must not end up in a URL anybody could hold.
+  **What to watch on the first real days:** whether the countdown appears often (the shared-address
+  case), and whether pictures still open in "Add text" — if a browser cannot read them the relay
+  covers it, but a rise in relay calls means we are paying the address cost after all.
+
 - **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
   `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and
   writes an admin line, and charges **₹0** — NavBharatAI absorbs it, exactly as slice 2's admin route
@@ -1550,6 +1591,67 @@ the code (it is actually read somewhere) on 2026-07-11.
   `no image in a 200 response` (a response shape we do not yet read).
   🔒 **A failure costs the user ₹0** — nothing is charged unless an image is delivered, which is the
   same "working result or free" law a build obeys, and it is untouched by any of this.
+
+- **🌼 `POLLINATIONS_API_KEY` — the PAID image tier's FIRST engine (built 2026-09-21; admin: *"free wale
+  me user ki ip, paid me hamari … paid pahle pollination use ho, fallback me IMAGE_PRO_KEY"*).** Read by
+  `src/server/lib/pollinationsPaid.ts`; applied in `POST /api/image/pro/generate` (`routes/imageGen.ts`)
+  as RUNG 1, with the `IMAGE_PRO_KEY` host as RUNG 2. Optional beside it: `IMAGE_PRO_POLLINATIONS`
+  (`off` turns off ONLY this rung — Pro goes straight to the host) and `IMAGE_PRO_POLLINATIONS_MODEL`
+  (default `tongyi-mai/z-image-turbo`, the model the tier was priced around).
+  ⚠️ **WHETHER IT IS SET IS UNCONFIRMED.** The admin obtained an `sk_` key at `enter.pollinations.ai/keys`
+  on 2026-09-21 and was asked to save it under exactly this name in Cloud Run; they wrote *"maine api add
+  kar di hai"* without naming where. Per this registry's own rule it is not recorded as SET until they
+  say so. **How to tell without asking:** on the next Pro image the server log carries either
+  `[IMAGE PRO] pollinations delivered — usage {…}` or `[IMAGE PRO] pollinations rung failed (…)`; with
+  the key unset there is NO pollinations line at all and the host serves as before.
+  🔑 **WHAT THE KEY BUYS IS THE PICTURE, not only the bill.** On the anonymous door the free tier uses,
+  `nologo` is IGNORED (the watermark stays) and `private` must be asked for or the picture can appear
+  on the provider's public feed. A keyed request honours both — that is the "privacy + watermark" the
+  admin put first in the order list. The free link now asks `private=true` too; it still carries no
+  key BY DESIGN, because it is handed to the user's browser (`IMAGE_GEN_CLIENT_FETCH`) and a key in a
+  URL a user can copy is a key everybody has. **Do not "fix" the free watermark by adding `?key=`
+  there.** The watermark is the free door's price; the paid door is where it goes.
+  🔒 **THE KEY TRAVELS IN A HEADER (`Authorization: Bearer`), NEVER IN THE URL**, though the provider
+  accepts `?key=` — a URL ends up in logs and error messages, a header does not. The URL builder does
+  not take the key as an input, and a test asserts it is absent from the output.
+  💰 **THE COST IS MEASURED, NOT ASSUMED.** The provider bills in pollen (1 pollen = $1) at a per-model
+  rate no session can read (`gen.pollinations.ai` is refused by the execution environment's egress
+  policy), and reports each request's usage in `x-usage-*` response headers. Every delivery logs them
+  admin-only — the first real Pro image is the first real number. `IMAGE_PRO_COST_USD` ($0.005) still
+  prices the margin warning until then; **retune it from that log line, never from a guess.** The
+  admin's wallet on 2026-09-21 held **0.25 quest pollen and 0 paid**; some models need paid pollen, so
+  a `402` (no pollen) or `403` (key lacks the model) on the first try is a config fact, not a bug, and
+  the log names which — the image still arrives, from the host.
+  ⚠️ **AN EDIT STAYS ON THE HOST.** The keyed door takes words; the user's own photograph is never
+  turned into a link. So `initImage` requests go to `IMAGE_PRO_KEY` as before, and with the host
+  unconfigured an edit on Pro is honestly "not switched on" rather than a fresh picture that ignores
+  the attachment. `imageProAvailable()` (either engine) is now the ONE owner of "is Pro on?" for both
+  the chip (`/api/public-config`) and the route's 503; `imageProConfigured()` still means the host.
+  ✅ **A LATENT BUG FOUND ON THE WAY:** `__IMAGE_SEED`, the test pin for the free URL's seed, had never
+  once pinned anything — `Number.isFinite('5')` is false for the string an env value always is. Fixed
+  in the shared `pollinationsSeed`, with a test that reads the seed back.
+  Test-locked and reversion-proven four ways in `tests/thePaidTierAsksPollinationsFirst.test.ts`.
+
+- **🧮 `AI_IMAGE_FREE_PAID_DAILY_CAP` — the PLATFORM-WIDE daily ceiling on images the FREE tier gets
+  from a PAID engine (built 2026-09-21; the number PR #3234 left open). ⚠️ NOT set, and the code default
+  is **300 a day across the whole platform**.** Read by `src/server/lib/imageFreePaidBudget.ts`; its
+  single reader is `allowPaidRung()` in `routes/imageGen.ts` (the FREE route only — Pro's bound is the
+  wallet). `0` ⇒ the free tier never touches a paid engine (the free provider or nothing); an unreadable
+  value ⇒ the default, **never unlimited** (the `AGENTV3_FEATURE_HEAL_PCT` lesson); only the explicit
+  word `off` lifts it.
+  🔴 **WHY:** the free tier costs ₹0 while the free provider serves; its paid rungs (Gemini, Grok) and an
+  EDIT of the user's own picture are paid by NavBharatAI. The only bound was PER USER
+  (`AI_IMAGE_FREE_DAILY_LIMIT`, default 3) — at 10,000 users a bad hour at the free provider was 30,000
+  paid images with nothing to stop it, at a price `providerRates.ts` still does not carry. **A COUNT, not
+  a rupee figure**, because THE ONE-WALLET LAW forbids inventing a cost and no image model is on the rate
+  card; a count is a number that is true.
+  🔒 **FAILS CLOSED** (like `webRiskBudget.ts`, unlike the wallet gate): a counter that cannot be read
+  refuses the paid rungs — one user re-presses in a minute (the free provider is still tried first, every
+  time), whereas opening paid rungs on a counter nobody can read is the unbounded bill itself. The count
+  moves on DELIVERY only, never on a failed attempt; free-listed accounts (the admin's own) are neither
+  counted nor refused, because they are how the paid rungs get verified at all.
+  **What to watch:** `[IMAGE_GEN] free-tier PAID image cap reached` in the server log (once per process
+  per day) — the number that says whether 300 is right, and how often the free provider is really failing.
 
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the

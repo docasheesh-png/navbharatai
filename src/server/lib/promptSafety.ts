@@ -113,7 +113,7 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
 }
 
 /** Where the message came from, so a reviewer knows what they are looking at. */
-export type SafetySurface = 'build' | 'chat' | 'assistant';
+export type SafetySurface = 'build' | 'chat' | 'assistant' | 'image';
 
 /** How much of a flagged message is kept. Enough to judge, far too little to be a transcript. */
 export const EXCERPT_MAX = 300;

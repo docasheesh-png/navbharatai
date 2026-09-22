@@ -18,7 +18,7 @@ import { adminRequestOk } from '../lib/adminAuth';
 import { normalizeFeePct } from '../../lib/platformFee';
 import { grievanceOfficerFrom, type GrievanceOfficer } from '../../content/legal/grievance';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
-import { imageProConfigured } from '../lib/imageProGen';
+import { imageProAvailable } from '../lib/pollinationsPaid';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -100,8 +100,9 @@ export function buildPublicConfig(
     platformFeePct: normalizeFeePct(rawFeePct),
     grievance: grievanceOfficerFrom(rawGrievance ?? null),
     // Passed IN rather than read from `process.env` here, so this function stays pure and the
-    // availability rule has exactly one owner: `imageProConfigured()`. A second copy of "is Pro on?"
-    // is how the two halves come to disagree.
+    // availability rule has exactly one owner: `imageProAvailable()` (EITHER of Pro's two engines —
+    // it was `imageProConfigured()` alone until the Pollinations rung arrived on 2026-09-21). A second
+    // copy of "is Pro on?" is how the two halves come to disagree.
     imageProAvailable: imageProAvailable === true,
   };
 }
@@ -259,7 +260,7 @@ export function registerHealthRoutes(app: Express): void {
   app.get('/api/public-config', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=300');
     res.json(buildPublicConfig(
-      process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer(), imageProConfigured(),
+      process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer(), imageProAvailable(),
     ));
   });
 

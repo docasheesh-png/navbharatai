@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon } from 'lucide-react';
+import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
+import { ImageResizeEditor } from './ImageResizeEditor';
 import { ReferenceImagePicker, type ReferencePicture } from './ReferenceImagePicker';
 import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, describeSize, resolveCustomSize } from '../../lib/imageSize';
 import { Capacitor } from '@capacitor/core';
@@ -13,6 +14,8 @@ import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageEx
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
 import { ImageStudioPro } from './ImageStudioPro';
+import { fetchImageFromUser, relayImage, type ClientFetchTicket } from '../../lib/clientImageFetch';
+import { imageWaitMessage } from '../../lib/imageDelivery';
 import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
@@ -121,22 +124,15 @@ const IMAGE_TYPE_OPTIONS: ImageOption[] = IMAGE_TYPES.map((t) => ({ id: t, label
 const EXAMPLES = ['Tea shop banner', 'Clinic logo', 'Festival poster'];
 
 /** A group's chosen option, by id — for the one-line summary printed on each sent request. */
+/** The preset id whose pixels these are, or the custom id — so a resized picture's row reads right. */
+function sizeIdFor(px: { w: number; h: number }): string | undefined {
+  const hit = SIZES.find((o) => o.id !== CUSTOM_SIZE_ID && o.w === px.w && o.h === px.h);
+  return hit ? hit.id : CUSTOM_SIZE_ID;
+}
+
 function labelOf(options: ImageOption[], id: string): string {
   return (options.find((o) => o.id === id) || options[0])?.label ?? '';
 }
-
-const STYLE_ENHANCERS: Record<string, string> = {
-  minimal: 'minimalist, clean white background, simple shapes, ',
-  vibrant: 'vibrant colors, high contrast, bold, colorful, ',
-  dark: 'dark background, neon accents, moody, cinematic, ',
-  gradient: 'smooth gradient, colorful gradient background, ',
-  flat: 'flat design, 2D, vector style, no shadows, ',
-  '3d': '3D render, isometric, depth, shadows, realistic, ',
-  // Realistic and Cinematic deliberately add NOTHING here. The Enhance button pastes words into the
-  // user's own box, and these two styles are carried by camera language the server applies in full —
-  // pasting a shortened copy of it would put a weaker version of the same instruction in front of
-  // the real one, and `freshTerms` would then drop the real one as "already written".
-};
 
 /**
  * Which tier the user is on. Persisted, because the toggle is a PREFERENCE — the admin's words were
@@ -145,6 +141,20 @@ const STYLE_ENHANCERS: Record<string, string> = {
  * read that throws must never silently land somebody on the paid tier.
  */
 const TIER_KEY = 'nbai.imagegen.tier';
+/**
+ * Whether the four selectors are shown or folded (admin 2026-09-21: "in charo ko bhi hide/expand ka
+ * button do"). Remembered per device: somebody who folds them wants them folded next time too. The
+ * settings themselves are untouched by folding — a folded row still SAYS what is in force, so a
+ * user can never be surprised by a setting they cannot see.
+ */
+const OPTIONS_KEY = 'nbai.imagegen.options';
+function readOptionsOpen(): boolean {
+  try {
+    return localStorage.getItem(OPTIONS_KEY) !== 'closed';
+  } catch {
+    return true;
+  }
+}
 
 /**
  * What one Pro image costs, in ₹ — shown on the toggle so the switch names its own price.
@@ -169,6 +179,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   // overwriting a preference the user really expressed: the day Pro is switched on, their choice
   // returns by itself.
   const [chosenTier, setChosenTier] = useState<'free' | 'pro'>(readTier);
+  const [optionsOpen, setOptionsOpen] = useState<boolean>(readOptionsOpen);
+  useEffect(() => {
+    try { localStorage.setItem(OPTIONS_KEY, optionsOpen ? 'open' : 'closed'); } catch { /* a private window; the fold simply is not remembered */ }
+  }, [optionsOpen]);
+  /** Filled by the picker below the selectors; pressed by the attach button inside the input pill. */
+  const attachRef = useRef<(() => void) | null>(null);
+  const [enhancing, setEnhancing] = useState(false);
+  /** The words the star replaced, so one tap puts them back. Cleared on the next send or edit. */
+  const [enhanceUndo, setEnhanceUndo] = useState<string | null>(null);
   const [proAvailable, setProAvailable] = useState<ImageProAvailability>(null);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
@@ -191,6 +210,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   const pagedHistory = usePagedList(history);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [craftNotes, setCraftNotes] = useState<string[]>([]);
+  // The countdown shown while the browser waits out the provider's rate limit. Blank the rest of
+  // the time. A visible wait is the difference between "busy" and "broken" — the blank-screen
+  // failure this repo already root-caused once on the chat path.
+  const [waitNote, setWaitNote] = useState('');
   const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
   /**
    * The request currently in flight, shown as the user's own message the instant they press send.
@@ -258,11 +281,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       // Send the Firebase auth token — /api/image/generate requires a real account (per-image billing),
       // so WITHOUT this header the server saw an anonymous caller and asked the (already logged-in) user
       // to sign in. Root-caused 2026-07-31: the fetch previously sent no Authorization header.
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      try {
-        const tok = await auth.currentUser?.getIdToken();
-        if (tok) headers.Authorization = `Bearer ${tok}`;
-      } catch { /* token optional here — the server still returns an honest sign-in prompt if truly anon */ }
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeaders()) };
       const res = await fetch('/api/image/generate', {
         method: 'POST',
         headers,
@@ -286,8 +305,39 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
         }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data || typeof data.image !== 'string') {
+      if (!res.ok || !data) {
         throw new Error((data && typeof data.error === 'string' && data.error)
+          || 'Image generation failed — please try again.');
+      }
+
+      // ── THE BROWSER FETCHES IT, FROM THE USER'S OWN CONNECTION ────────────────────────────────
+      // A free picture now comes back as a signed link rather than as bytes (admin 2026-09-21:
+      // "free wale me user ki ip"). The provider's limit is one request every 15 seconds PER
+      // ADDRESS, and our server is one address — so this is the only way a free tier survives real
+      // numbers without a key. Everything before this point is unchanged: the prompt was triaged,
+      // crafted and bounded on our server seconds ago.
+      let imageUrl: string;
+      let ticket: ClientFetchTicket | null = null;
+      if (data.mode === 'client-fetch' && typeof data.url === 'string') {
+        ticket = { url: data.url, ticket: String(data.ticket || ''), exp: Number(data.exp) };
+        const got = await fetchImageFromUser(ticket, {
+          onWait: (msLeft) => setWaitNote(imageWaitMessage(msLeft)),
+        });
+        setWaitNote('');
+        if (got.error) throw new Error(got.error);
+        if (got.dataUrl) {
+          imageUrl = got.dataUrl;
+          ticket = null; // the bytes are here; nothing will ever need the relay for this one
+        } else {
+          // This browser is not allowed to read another site's pixels. The picture still arrives
+          // from the USER's connection — it is simply shown from the link — and the bytes are
+          // fetched through our relay the moment a button actually needs them.
+          imageUrl = ticket.url;
+        }
+      } else if (typeof data.image === 'string') {
+        imageUrl = data.image;
+      } else {
+        throw new Error((typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
       }
       // Honest caveats from the server — a style chip that was overruled, or the warning that image
@@ -296,7 +346,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       setCraftNotes(Array.isArray(data.notes) ? data.notes.filter((n: unknown) => typeof n === 'string') : []);
       const newItem: GeneratedImage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        url: data.image,
+        url: imageUrl,
+        ...(ticket ? { ticket: ticket.ticket, exp: ticket.exp } : {}),
         prompt: prompt.trim(),
         type: imageType,
         style,
@@ -310,7 +361,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
       // request keeps the words, because retyping a brief you already wrote is the worst possible
       // answer to "that did not work".
       setPrompt('');
-      if (onImageGenerated) onImageGenerated(data.image, effectivePrompt);
+      if (onImageGenerated) onImageGenerated(imageUrl, effectivePrompt);
     } catch (e) {
       // Honest failure — the real reason from the server, never a placeholder image.
       setImageError(true);
@@ -318,13 +369,49 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     } finally {
       setIsLoading(false);
       setPending(null);
+      setWaitNote('');
     }
   };
 
-  const handleEnhance = () => {
-    const enhancer = STYLE_ENHANCERS[style] || '';
-    if (!prompt.startsWith(enhancer)) {
-      setPrompt(enhancer + prompt);
+  /**
+   * ⭐ — rewrite the brief into a peak-level prompt, on request (admin 2026-09-21: "usko peak level
+   * promt banwana sikhao!"). It used to paste six style keywords in front of the words — a
+   * shortened copy of direction the server already applies in full. Now one short call on the
+   * free ladder rewrites the user's OWN words and puts the result in the box, where they can read
+   * it, change it, and undo it. The server refuses a rewrite that lost a name or a number, so what
+   * lands here never drops a fact the user typed.
+   */
+  const handleEnhance = async () => {
+    const original = prompt.trim();
+    if (!original || enhancing) return;
+    setEnhancing(true);
+    try {
+      const res = await fetch('/api/image/enhance-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        body: JSON.stringify({
+          prompt: original,
+          type: imageType,
+          style: labelOf(STYLES, style),
+          colorHint: labelOf(COLOR_HINTS, colorHint),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        flashNote(typeof data.error === 'string' ? data.error : 'NavBharatAI could not improve the prompt just now — your words are kept.');
+        return;
+      }
+      if (data.ok && typeof data.prompt === 'string') {
+        setEnhanceUndo(original);
+        setPrompt(data.prompt);
+        flashNote('Prompt improved — read it, change anything, then send. Undo puts your words back.');
+      } else {
+        flashNote(typeof data.note === 'string' ? data.note : 'NavBharatAI could not improve the prompt just now — your words are kept.');
+      }
+    } catch {
+      flashNote('NavBharatAI could not improve the prompt just now — your words are kept.');
+    } finally {
+      setEnhancing(false);
     }
   };
 
@@ -366,10 +453,57 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
   // the panel: it loads the picture into a full-resolution canvas, which is real work to do for a
   // user who never presses the button.
   const [textOn, setTextOn] = useState<string | null>(null);
+  /** The image whose Resize/Crop sheet is open — the same shape as `textOn`. */
+  const [resizeOn, setResizeOn] = useState<string | null>(null);
 
   const flashNote = (msg: string) => {
     setActionNote(msg);
     setTimeout(() => setActionNote(''), 3500);
+  };
+
+  /** The Firebase bearer, for the routes that need a real account. Optional by design. */
+  const authHeaders = async (): Promise<Record<string, string>> => {
+    try {
+      const tok = await auth.currentUser?.getIdToken();
+      return tok ? { Authorization: `Bearer ${tok}` } : {};
+    } catch {
+      return {};
+    }
+  };
+
+  /**
+   * Guarantee we hold the picture's real BYTES before anything that needs them.
+   *
+   * 🔑 THIS IS THE ONE PLACE THE FOUR FEATURES ARE KEPT ALIVE (admin 2026-09-21: "yeh sab user ke ip
+   * par kaam kar jaye, kisi bhi tarah"). "Add text", "Crop", "Copy" and "Download" all need real
+   * pixels, and a browser may not read another site's pixels unless that site allows it. When it
+   * does — the ordinary case — the bytes were already taken from the USER's connection at generation
+   * time and this returns immediately. When it does not, our relay fetches them ONCE, on the press,
+   * and the result is written back into history so the second press costs nothing.
+   *
+   * ⚠️ One function, every caller. Four call sites each doing their own version of this is exactly
+   * how three of them would end up subtly different and one of them broken.
+   */
+  const ensureLocalImage = async (id: string): Promise<string | null> => {
+    const item = history.find((h) => h.id === id);
+    if (!item) return null;
+    if (item.url.startsWith('data:')) return item.url;
+    if (!item.ticket || !item.exp) {
+      flashNote('This picture could not be opened for editing. Please make it again.');
+      return null;
+    }
+    setActionNote('Getting the picture ready…');
+    const got = await relayImage({ url: item.url, ticket: item.ticket, exp: item.exp }, await authHeaders());
+    setActionNote('');
+    if (!got.dataUrl) {
+      flashNote(got.error || 'That picture could not be downloaded right now — please try again.');
+      return null;
+    }
+    // Written back so the next press is instant, and so the saved history holds the real picture.
+    const updated: GeneratedImage = { ...item, url: got.dataUrl, ticket: undefined, exp: undefined };
+    setHistory((h) => h.map((x) => (x.id === id ? updated : x)));
+    void imageHistoryStore.save(updated).catch(() => { /* persistence is best-effort */ });
+    return got.dataUrl;
   };
 
   // COPY THE ACTUAL IMAGE (not the URL). Puts a real PNG on the clipboard so it pastes as a picture
@@ -548,7 +682,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
    * URL, and fifty of them in the DOM at once is the thing `usePagedList` exists to prevent.
    */
   const thread = [...pagedHistory.visible].reverse();
-  const styleEnhancer = STYLE_ENHANCERS[style] || '';
 
   return (
     <div className={`h-full flex flex-col text-ink overflow-hidden ${effectiveTier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
@@ -642,6 +775,41 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 <p className="text-sm font-semibold text-ink">No images yet</p>
                 <p className="text-xs text-muted mt-1">Your images appear here, newest at the bottom.</p>
               </div>
+              {/* ── WHAT THE FREE TIER IS FOR, said before the first send ────────────────────
+                  Admin, 2026-09-21: *"free image generator me, ek watermark jaise chat box me hi
+                  likh dekha, image only for your app … jisse log real cinematic image na ban pane
+                  se nirash nahi honge"* — and, the same day: *"is line ko, niche nahi. upar likhna
+                  hai. jahan 'no image yet' likh ke ata hai"*. So it lives HERE, in the empty state,
+                  and not under the input on every send.
+
+                  🔑 IT IS EXPECTATION, NOT AN APOLOGY. The free engine is genuinely good at flat,
+                  graphic work — a logo, an icon, a banner, an illustration — and genuinely weaker
+                  at photographic and cinematic scenes. A user who asks it for a film still and is
+                  disappointed was not failed by the picture; they were failed by nobody telling
+                  them which job this tool is for. Saying it once, where they start, turns a bad
+                  result into an informed choice.
+
+                  ⚠️ It never says "you cannot" and it never names a vendor. The Pro button is a REAL
+                  control (the same tier state the toggle above uses), and it is hidden entirely
+                  when Pro cannot serve — advice pointing at a door that does not open is worse
+                  than none. */}
+              <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
+                <Wand2 className="w-2.5 h-2.5 shrink-0" />
+                <span>Free images are made for your app’s artwork — logos, icons, banners, illustrations.</span>
+                {!proOff && (
+                  <>
+                    <span>For photo-real or cinematic pictures,</span>
+                    <button
+                      type="button"
+                      onClick={() => setChosenTier('pro')}
+                      className="underline text-accent-text hover:text-ink transition-colors"
+                    >
+                      use Pro
+                    </button>
+                    <span>— this tier stays free.</span>
+                  </>
+                )}
+              </p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {EXAMPLES.map((e) => (
                   <button
@@ -704,14 +872,21 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                     <div className="flex items-center gap-1.5 p-2">
                       <button
                         type="button"
-                        onClick={() => setTextOn(item.id)}
+                        onClick={() => void ensureLocalImage(item.id).then((ok) => { if (ok) setTextOn(item.id); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-on-accent bg-violet-600 hover:bg-violet-500 rounded-lg py-2 flex items-center justify-center gap-1.5 transition-colors"
                       >
                         <Type className="w-3 h-3" /> Add text
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleCopyImage(item.id, item.url)}
+                        onClick={() => void ensureLocalImage(item.id).then((ok) => { if (ok) setResizeOn(item.id); })}
+                        className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
+                      >
+                        <Move className="w-3 h-3" /> Resize
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void ensureLocalImage(item.id).then((url) => { if (url) void handleCopyImage(item.id, url); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
                       >
                         {copiedId === item.id
@@ -720,7 +895,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleDownload(item.url, item.prompt)}
+                        onClick={() => void ensureLocalImage(item.id).then((url) => { if (url) void handleDownload(url, item.prompt); })}
                         className="flex-1 min-w-0 text-[11px] font-semibold text-body bg-raised border border-line rounded-lg py-2 flex items-center justify-center gap-1.5"
                       >
                         <Download className="w-3 h-3" /> Save
@@ -752,9 +927,14 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 <div className="flex items-center gap-3 rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 w-fit">
                   <TirangaLoader className="w-5 h-5" />
                   <span className="text-xs text-muted">
-                    {reference
-                      ? 'Changing your picture — keeping everything you did not ask to change...'
-                      : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
+                    {waitNote
+                      // The provider allows one picture every 15 seconds per connection, and on a
+                      // shared mobile network several people can be behind one. Counting down is what
+                      // makes that read as "busy" rather than "broken".
+                      ? waitNote
+                      : reference
+                        ? 'Changing your picture — keeping everything you did not ask to change...'
+                        : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
                   </span>
                 </div>
               )}
@@ -801,7 +981,27 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
               <p className="text-[11px] text-warn leading-relaxed">{actionNote}</p>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* ── THE FOUR SELECTORS, foldable (admin 2026-09-21: "hide/expand ka button do") ──
+                Folded, ONE line still names every setting in force, so hiding the controls never
+                hides what they will do to the next image. */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] text-faint truncate min-w-0">
+                {optionsOpen
+                  ? 'Options'
+                  : [imageType, labelOf(STYLES, style), labelOf(SIZES, size), labelOf(COLOR_HINTS, colorHint)].filter(Boolean).join(' · ')}
+              </p>
+              <button
+                type="button"
+                onClick={() => setOptionsOpen((o) => !o)}
+                aria-expanded={optionsOpen}
+                aria-controls="nbai-image-options"
+                className="shrink-0 text-[10px] text-muted hover:text-ink flex items-center gap-1 transition-colors"
+              >
+                {optionsOpen ? <>Hide <ChevronDown className="w-3 h-3" /></> : <>Options <ChevronUp className="w-3 h-3" /></>}
+              </button>
+            </div>
+            {optionsOpen && (
+            <div id="nbai-image-options" className="grid grid-cols-2 gap-2">
               <ImageOptionSelect
                 label="Image type"
                 heading="What are you making?"
@@ -831,10 +1031,12 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 onChange={setColorHint}
               />
             </div>
+            )}
 
-            {/* Only when it is chosen: four selectors plus two number fields on every build would be
-                the crowded screen the dropdowns were introduced to clear. */}
-            {size === CUSTOM_SIZE_ID && (
+            {/* Only when it is chosen, and only while the options are open: four selectors plus two
+                number fields on every build would be the crowded screen the dropdowns were
+                introduced to clear. */}
+            {optionsOpen && size === CUSTOM_SIZE_ID && (
               <CustomSizeFields
                 width={customW}
                 height={customH}
@@ -852,13 +1054,29 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
               onChange={setReference}
               frame={willMakeAt}
               disabled={isLoading}
+              openRef={attachRef}
             />
 
             {/* Outside the pill, to its left — same placement and same shared button as every other
                 composer in the app (admin 2026-09-21). */}
             <div className="flex items-end gap-2">
             <ModeButton onOpen={onOpenModePicker} />
-            <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-3 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
+            <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-1.5 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
+              {/* ATTACH, inside the pill — the same button, in the same place, as the Pro studio and
+                  every other composer here (admin 2026-09-21: "sirf attach button bana kar, input
+                  box ke andar karo"). It opens the picker's chooser; the crop rule stays there. */}
+              <button
+                type="button"
+                onClick={() => attachRef.current?.()}
+                disabled={isLoading}
+                aria-label="Attach your own picture to change"
+                title={reference ? 'Your picture is attached — tap the pencil above to adjust it' : 'Change my own picture'}
+                className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 ${
+                  reference ? 'text-accent-text' : 'text-muted hover:text-ink hover:bg-raised'
+                }`}
+              >
+                <ImagePlus className="w-4 h-4" />
+              </button>
               <label htmlFor="nbai-image-prompt" className="sr-only">
                 {reference ? 'Describe the change you want' : 'Describe your image'}
               </label>
@@ -867,7 +1085,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 ref={taRef}
                 rows={1}
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => { setPrompt(e.target.value); if (enhanceUndo !== null) setEnhanceUndo(null); }}
                 onKeyDown={(e) => {
                   // Enter sends, Shift+Enter breaks the line — the convention every chat input in
                   // this app uses, and the reason the box grows rather than scrolls.
@@ -881,14 +1099,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   have. Realistic is exactly that case — it adds none. */}
               <button
                 type="button"
-                onClick={handleEnhance}
-                disabled={!styleEnhancer || !!reference}
+                onClick={() => void handleEnhance()}
+                disabled={enhancing || !!reference || prompt.trim().length < 3}
+                aria-label="Improve my prompt"
                 title={reference
-                  ? 'Style keywords are for a new picture — they would restyle the one you attached'
-                  : styleEnhancer ? 'Add this style’s keywords to your words' : 'This style adds no extra keywords'}
+                  ? 'The star writes a brief for a NEW picture — it would restyle the one you attached'
+                  : prompt.trim().length < 3 ? 'Write a few words first' : 'Rewrite my words as a professional prompt'}
                 className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <Sparkles className="w-4 h-4" />
+                {enhancing ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
               </button>
               <button
                 type="button"
@@ -902,42 +1121,28 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
             </div>
             </div>
 
-            {/* ── WHAT THE FREE TIER IS FOR, said where the user is typing ───────────────────
-                Admin, 2026-09-21: *"free image generator me, ek watermark jaise chat box me hi likh
-                dekha, image only for your app … jisse log real cinematic image na ban pane se
-                nirash nahi honge"*.
-
-                🔑 IT IS EXPECTATION, NOT AN APOLOGY. The free engine is genuinely good at flat,
-                graphic work — a logo, an icon, a banner, an illustration — and genuinely weaker at
-                photographic and cinematic scenes. A user who asks it for a film still and is
-                disappointed was not failed by the picture; they were failed by nobody telling them
-                which job this tool is for. Saying it BEFORE they press send costs one line and
-                turns a bad result into an informed choice.
-
-                ⚠️ It never says "you cannot" and it never names a vendor. The Pro button is a REAL
-                control (the same tier state the toggle above uses), and it is hidden entirely when
-                Pro cannot serve — advice pointing at a door that does not open is worse than none. */}
-            <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5 flex-wrap">
-              <Wand2 className="w-2.5 h-2.5 shrink-0" />
-              <span>
-                {reference
-                  ? 'Only what you ask for changes — the rest of your picture is kept.'
-                  : 'Free images are made for your app’s artwork — logos, icons, banners, illustrations.'}
-              </span>
-              {!proOff && !reference && (
-                <>
-                  <span>For photo-real or cinematic pictures,</span>
-                  <button
-                    type="button"
-                    onClick={() => setChosenTier('pro')}
-                    className="underline text-accent-text hover:text-ink transition-colors"
-                  >
-                    use Pro
-                  </button>
-                  <span>— this tier stays free.</span>
-                </>
-              )}
-            </p>
+            {/* With a picture attached the words mean something different — say so where they are
+                typed. The "what the free tier is for" line moved UP into the empty state (admin
+                2026-09-21: "upar likhna hai, jahan 'no image yet' likh ke ata hai"). */}
+            {enhanceUndo !== null && (
+              <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5">
+                <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                <span>Prompt improved.</span>
+                <button
+                  type="button"
+                  onClick={() => { setPrompt(enhanceUndo); setEnhanceUndo(null); }}
+                  className="underline text-accent-text hover:text-ink transition-colors"
+                >
+                  Undo
+                </button>
+              </p>
+            )}
+            {reference && (
+              <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5">
+                <Wand2 className="w-2.5 h-2.5 shrink-0" />
+                <span>Only what you ask for changes — the rest of your picture is kept.</span>
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -945,6 +1150,29 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
 
       {/* The typed text replaces that image in the thread, so Copy and Save then mean the version
           WITH the text on it — which is what someone who just pressed Done expects. */}
+      {resizeOn && (() => {
+        const target = history.find((h) => h.id === resizeOn);
+        if (!target) return null;
+        return (
+          <ImageResizeEditor
+            image={target.url}
+            initialSize={target.size || SIZES[0].id}
+            initialCustom={target.width && target.height ? { w: target.width, h: target.height } : undefined}
+            sizes={SIZES}
+            onClose={() => setResizeOn(null)}
+            onDone={(url, made) => {
+              // Replace IN PLACE and remember the new size, so Add text and a later Resize open on
+              // the picture as it now is, and Copy / Save mean this version.
+              const updated = { ...target, url, size: sizeIdFor(made) ?? target.size, width: made.w, height: made.h };
+              setHistory((h) => h.map((x) => (x.id === resizeOn ? updated : x)));
+              void imageHistoryStore.save(updated).catch(() => { /* best-effort, as every save here is */ });
+              setResizeOn(null);
+              flashNote(`Resized to ${describeSize(made.w, made.h)} \u2713  Now press Save to keep it.`);
+            }}
+          />
+        );
+      })()}
+
       {textOn && (() => {
         const target = history.find((h) => h.id === textOn);
         if (!target) return null;

@@ -77862,3 +77862,317 @@ Everything above is test-locked: `professionalChatStore.test.ts` (six new cases)
 `clientMemory.test.ts`, `teacherMemoryEngine.test.ts`, `aChatsWordsStayInThatChat.test.ts` (voice-lane
 source guards), `fiveChatsAtOnceEachItsOwnWindow.test.ts` (cap-before-resume, delete-closes-window,
 on-screen scroll), `sharedKeysMeanThePerson.test.ts`.
+
+---
+
+## 2026-09-21 (later still) — THE USER'S OWN CONNECTION FETCHES THEIR PICTURE
+
+**Admin:** *"free wale me user ki ip, paid me hamari"*, and — after being told the four editing
+features depend on reading the bytes — *"yeh sab user ke ip par kaam kar jaye, kisi bhi tarah to isko
+rahne do, image background me download karo, user ke free image generator me edit karwao."*
+
+### The problem was a RATE LIMIT, and nobody had noticed it
+
+The free provider allows **one request every 15 seconds PER IP ADDRESS**. This server is ONE address.
+So every free user on the platform shared a single bucket: a ceiling of roughly **5,760 images a day
+for the whole product**, and only if traffic were perfectly spread — which it is not.
+
+🔴 **And the overflow was not a queue, it was a silent bill.** A throttled request reads as a FAILURE
+in `routes/imageGen.ts`, and the next rung is **paid** (Gemini). So at 10,000 users the "free" tier
+would quietly become a paid one — at a price **this repo has never measured**: there is still no
+image rate in `providerRates.ts`, only a comment. That is the money audit's own class, a third time.
+
+### The change
+
+A free generation now returns a **signed link** instead of bytes; the browser fetches it, so the
+provider sees the user's address. Nothing else moved — the prompt was triaged, crafted and bounded
+on this server seconds earlier, and the link carries that finished prompt.
+
+⚠️ **CGNAT MEANS THIS IS AN IMPROVEMENT, NOT THE FIX THE ADMIN ASKED FOR.** Indian carriers put many
+phones behind one public address, so a busy tower still shares a bucket. I told them I could not fix
+it: the only techniques are rotating proxies — deliberately evading a free provider's rate limit,
+which is abuse of a service a commercial product depends on, and would get NavBharatAI blocked
+outright. What absorbs the remainder is the browser's retry, bounded by the admin's own budget
+(*"1 min baad bhi mile chalega"*): four waits summing to 58 s, the first of which clears the
+provider's 15-second window.
+
+### Keeping Add text, Crop, Copy and Download — the part that needed care
+
+All four need the picture's real **pixels**, and a browser may not read another site's pixels unless
+that site allows it (CORS). **Whether this provider allows it could not be checked from here** — both
+its hosts are refused by this execution environment's egress policy — so nothing assumes an answer:
+
+- The client **tries** a direct read. If it works, the bytes came from the user's connection and
+  every feature behaves exactly as before.
+- If it does not, the picture is still shown **from the user's connection** (an `<img>` load needs no
+  permission) and the bytes come through `POST /api/image/relay` **on the press**, not per picture.
+  Most pictures are never edited, so the address cost stays a small share.
+- `ensureLocalImage` is the ONE function all four call. Four call sites each doing their own version
+  is how three end up subtly different and one ends up broken.
+
+🔴 **A REAL BUG IN MY OWN CODE, CAUGHT BY MY OWN TEST BEFORE IT SHIPPED.** The first version treated
+any throw as "this browser may not read these bytes" — including a throw from *decoding* a picture
+that had already arrived. One undecodable picture would then have routed the **whole session**
+through our relay. A resolved response in default (`cors`) mode is proof on its own that the read is
+allowed; nothing after it can un-prove that. `directReadWorks` is now set the moment the response
+resolves, and a later throw is reported as a decode failure.
+
+### The relay is an SSRF surface, and it has two locks
+
+`/api/image/relay` takes a URL **from the client**. Both locks, and why one is not enough:
+
+1. **`isAllowedImageHost`** — an EXACT host allowlist. A substring or regex check passes
+   `image.pollinations.ai.evil.com`, and `https://image.pollinations.ai@evil.com/` has hostname
+   `evil.com`. Tested against both, plus the addresses an SSRF is actually aimed at (cloud metadata,
+   loopback, RFC1918, `file:`).
+2. **Our HMAC over that exact URL** — an allowed host with a free path is a way to make our server
+   fetch a prompt the safety triage never saw.
+
+A forged ticket and an expired one return the **same words**, so a prober cannot tell which lock they
+tripped.
+
+⚠️ **The provider's own `safe` parameter is NOT a substitute for our triage**, and the admin's
+assumption that *"pornography Pollinations ke server se ruk jayega"* was corrected before any code
+was written: their docs say safety is **off unless asked for**, and the parameter is documented on
+their NEW keyed endpoint, not the keyless one this path uses. The ban's enforcement is, as before,
+`triagePrompt` on our server.
+
+⚠️ **An EDIT of the user's own photo is never handed to the browser** (`!editing`): it carries their
+photograph, and those bytes must not end up in a URL anybody could hold.
+
+### Tests
+
+`tests/theUsersOwnConnectionFetchesTheirPicture.test.ts` (32), including the client fetcher exercised
+against a fake `fetch` rather than a snapshot of it. **Proven by reversion**: the host allowlist
+turned into a substring check → 2 fail; the signature check disabled → 1; the CORS/decode conflation
+restored → 1.
+
+⚠️ **And one of those guards was VACUOUS until the reversion proved it.**
+`expect(relay).toContain('verifyImageTicket(')` passes for `if (false && !verifyImageTicket(...))` —
+the reversion stayed green. It now asserts `if (!verifyImageTicket(` and that each refusal really
+returns. **A guard's presence is not a guard**; only running the reversion showed the difference.
+
+### Still open
+
+- **Not one real fetch has been made against the provider from any session** — both hosts are
+  egress-blocked here. Whether a browser may read those bytes is the single biggest unknown, and the
+  design works either way by construction rather than by assumption. The first real days answer it.
+- **What a fallback image costs us is still unmeasured.** `providerRates.ts` prices no image model.
+  Until it does, "the free tier fell through to a paid rung" has no rupee figure attached to it.
+- **There is still no platform-wide daily ceiling on free images** — only a per-user limit
+  (`AI_IMAGE_FREE_DAILY_LIMIT`, default 3). At 10,000 users that is 30,000 images a day with nothing
+  in the code to stop it. Recorded as the next thing to build.
+
+## 2026-09-21 — the PAID image tier asks Pollinations FIRST, with our key, from our server (Phase 2 item 2)
+
+**Admin's order list, item 2:** *"private=true + token padhne ka code — privacy + watermark — sabse
+zaroori."* And the plan behind it: *"free wale me user ki ip, paid me hamari … paid pahle pollination
+use ho, fallback me IMAGE_PRO_KEY. ham 1 rup lenge."*
+
+### What changed
+
+- **`src/server/lib/pollinationsPaid.ts` (new)** — the keyed door (`gen.pollinations.ai`), called from
+  THIS server with `POLLINATIONS_API_KEY` in an `Authorization: Bearer` header. Never `?key=`: the URL
+  builder does not take the key as an input, so it cannot be in the output. Asks `nologo=true` and
+  `private=true`, which a keyed request honours. Captures the provider's `x-usage-*` cost headers on
+  every delivery and the route logs them admin-only — the first real Pro image is the first real cost
+  number; `IMAGE_PRO_COST_USD` keeps pricing the margin warning until then.
+- **`POST /api/image/pro/generate`** — RUNG 1 is this door (words only); RUNG 2 is the existing
+  `IMAGE_PRO_KEY` host, for an edit or when rung 1 could not deliver. The gate asks
+  `imageProAvailable()` (EITHER engine), and `/api/public-config` asks the same function, so the chip
+  and the 503 still have one owner. An edit with no host is honestly "not switched on". The ₹1 charge
+  is unchanged and still reads `delivered`, never the engine.
+- **The FREE link now carries `private=true`.** The provider defaults a picture onto its PUBLIC feed;
+  a shopkeeper's banner with their phone number on it is theirs. It still carries no key by design —
+  it is handed to the browser (#3234). `nologo` stays sent and, on that door, stays ignored; the
+  watermark is the free door's price and the paid door is where it goes. **Do not add `?key=` there.**
+- ✅ **Latent bug:** `__IMAGE_SEED` had never pinned a seed — `Number.isFinite('5')` is false for the
+  string an env value always is. Fixed in the shared `pollinationsSeed`, read back by a test.
+
+### Tests
+
+`tests/thePaidTierAsksPollinationsFirst.test.ts` (26). **Proven by reversion**: `private=true` dropped
+from the free link → 2 fail; the key put into the paid URL → 2; the broken seed pin restored → 2;
+the gate switched back to the host alone → 1. `proTellsYouBeforeYouType.test.ts` repointed at the new
+owner (comments stripped, so the old name may be history but may not be called).
+
+### Still open
+
+- **Whether `POLLINATIONS_API_KEY` is set in Cloud Run is unconfirmed** (the admin wrote *"maine api
+  add kar di hai"* without naming where). The server log on the next Pro image settles it.
+- **The model's pollen price is unverified** (catalog egress-blocked). A `402`/`403` on the first try
+  is a config fact the log names; the image still arrives from the host.
+- **An edit on Pro still goes only to the host.** The keyed door's `/v1/images/edits` shape is
+  undocumented in what we have; not guessed at.
+- Carried from #3234: no platform-wide daily ceiling on free images; no image model in
+  `providerRates.ts`.
+
+## 2026-09-21 — D: "font change not working" in Add text — the loader trusted `fonts.check()`, which is true for a font that is not there (Phase 2 item 3)
+
+**Admin:** *"text add kiya, text ka font change kiya par ho nahi raha hai, fix karo, sabhi font working
+me lane hai!"* My own #3224 defect.
+
+### Root cause — REPRODUCED in a real Chromium before a line was changed
+
+A local stylesheet served with a 1.5 s delay, a real font file behind it, and the exact calls
+`imageFontLoader.ts` made, in the order it made them:
+
+| phase | `fonts.load()` matched | `fonts.check()` | canvas `measureText("Hello World")` |
+|---|---|---|---|
+| right after the `<link>` is appended (stylesheet not arrived) | `[0, 0]`, resolved in **0 ms** | **true** | **423.8 px** (fallback) |
+| after the stylesheet arrived | faces exist, `unloaded` | false | — |
+| after a second `fonts.load()` | `[1, 1]`, `loaded` | true | **355 px** (the real face) |
+
+`check()` is true when NO face of the family exists yet — it means "nothing is pending", not "the
+face is here" — and it is equally true for `"NoSuchFamilyZZ"`. So the loader answered `true` at
+phase 1, the editor set the font `ready`, painted in the fallback, and had no reason to paint again
+when the font really landed. The same answer meant the *"could not be loaded"* warning could never
+fire either: a family Google refuses with a 400 also read as ready. The wiring, the CSP and the
+repaint dependency were all correct — the VERDICT was wrong, so everything downstream of it was
+honestly acting on a lie.
+
+### The fix (`src/lib/imageFontLoader.ts`) — the order, and the proof
+
+1. The **stylesheet first**, awaited on its own `load`/`error` — the event that decides whether the
+   family's faces exist at all. `error` (a 400, a blocked host, offline) ⇒ `false`, and the `<link>`
+   is REMOVED so choosing the font again really refetches.
+2. Then `fonts.load()` for both weights, and the verdict is the **faces it returned**: at least one,
+   every one `loaded`. `check()` is no longer consulted anywhere, and the suite asserts it cannot
+   creep back.
+
+### Tests
+
+`tests/theFontArrivesBeforeItIsTrusted.test.ts` (11) drives the loader with a fake document that
+behaves exactly as Chromium measured (`load()` matches nothing before the sheet). **Proven by
+reversion**: not awaiting the stylesheet → fails; verdict from `check()` → fails.
+`theFontIsRealAndHindiStillWorks.test.ts` had pinned `fonts.check(` as the honest verdict — the
+assertion encoded the bug — repointed with the reason written in.
+
+### Still open
+
+- Not reproduced on the admin's phone itself; the repro is the same sequence in desktop Chromium.
+  If a font STILL does not change after this ships, the next fact to collect is the `fontNote` line
+  under the picker — with this fix it can now genuinely say *"could not be loaded"*.
+
+## 2026-09-21 — B + E + F + G: the free image composer is one box (Phase 2 item 4)
+
+**Admin, four small asks on one screenshot:** B *"change my own picture wala button, sirf attach button
+bana kar, input box ke andar karo"* · E *"jo 4 dropdown selector hai … in charo ko bhi hide/expand ka
+button do"* · F *"[free-tier line] is line ko, niche nahi. upar likhna hai. jahan 'no image yet' likh ke
+ata hai"* · G *"₹1 per image, charged only if it arrives (pro mode me already yah likha hai!) … hatao!!"*
+
+- **B** — the attach control is an `ImagePlus` button INSIDE the input pill, left of the words — the
+  same button in the same place as the Pro studio and every other composer. `ReferenceImagePicker`
+  keeps the chooser, the 25 MB rule, the attached-picture card and the crop editor (one rule for what a
+  picture may be, both tiers); it now takes an `openRef` the composer's button presses, and no longer
+  draws its own full-width dashed bar on every build.
+- **E** — a `Hide` / `Options` toggle folds the four selectors (and the custom-size fields with them).
+  **Folded, one line still names every setting in force** (`Photograph · Realistic · Square · No
+  preference`), read from the same state the selectors hold, so hiding the controls never hides what
+  they will do. Remembered per device (`nbai.imagegen.options`); an unreadable store means open.
+- **F** — the "free images are for your app's artwork … use Pro" line moved UP into the *No images yet*
+  state, shown once before the first send; the Pro pointer there is still a real control and still
+  hidden when Pro cannot serve. Under the input only the attached-picture hint remains, and only while
+  a picture is attached.
+- **G** — the studio's second "₹1 per image, charged only if it arrives" line under the box is gone. The
+  price stays on the toggle chip and in the Pro empty state (`theProPriceIsOneNumber.test.ts` still
+  holds all three copies to one number); "nothing was charged" is still said on the failure card.
+
+Tests: `tests/theFreeComposerIsOneBox.test.ts` (12) — placement guards, since where a control or a
+sentence sits is exactly what `tsc` cannot see. The colour-literal ratchet baseline was regenerated
+(the studio lost a literal) and committed.
+
+## 2026-09-21 — the image routes never ran the safety triage (found while wiring the ⭐ enhancer)
+
+**What was true:** `triagePrompt` — the deterministic ban (pornography → `block`, illegal classes →
+block/flag) — ran on the BUILD route and the CHAT route. It ran on **neither image route**. A pornographic
+prompt to `/api/image/generate` or `/api/image/pro/generate` reached the provider; on the free tier the
+only refusal possible was the provider's own, and the anonymous door has safety OFF unless asked for.
+Since #3234 the browser fetches that link itself.
+
+**And I had claimed the opposite, in writing.** PR #3234's description says *"the ban's enforcement is,
+as before, `triagePrompt` on our server — which this design preserves."* That was written from
+`CLAUDE.md`'s *"one triage serves BOTH the build route and the chat route"* — true, and not about images
+— not from reading the route. Corrected in the PR body and in `CLAUDE.md` the same hour.
+
+**Fix:** `src/server/lib/imageSafety.ts` — the SAME triage, the SAME flag record (surface `image`) and
+the SAME branded refusal (`blockMessage`, Hindi or English by the user's own words) as the other two
+surfaces. Both image routes call it first: before a link is minted, before a provider is called, before
+an account is looked up. A block is a 422 with `code: 'blocked'` and the refusal as the error text; a
+`flag` is recorded and the request proceeds, exactly as chat does. A triage that cannot run allows,
+loudly in the log — never a refusal it cannot justify.
+
+Tests: `tests/theImageRoutesRunTheTriage.test.ts`. Source-level for the ORDER (the triage before the
+account gate and before any provider or link), because the order is the point.
+
+## 2026-09-21 — A4: the ⭐ star writes a peak-level prompt, and never invents a fact (Phase 2 item 5)
+
+**Admin:** *"send button ke left me jo star hai, usko peak level promt banwana sikhao!"* — named as the
+biggest realism lever for the free tier.
+
+- **What it was:** the star pasted six style keywords in front of the user's words — a shortened copy
+  of direction the server's craft layer already applies in full on every send, and nothing for
+  Realistic or Cinematic at all.
+- **What it is:** `POST /api/image/enhance-prompt` → ONE short call on the FREE chat ladder
+  (`'navbharat'`, glm-4.7-flash led, ₹0 on the ordinary path, no history, no tools) with an
+  art-director system prompt (`src/server/lib/imagePromptEnhancer.ts`); the rewrite lands IN THE
+  USER'S BOX with an Undo, so they read it, learn from it, and can change it. The craft layer still
+  runs on top of whatever they send. It is a REQUEST, never automatic — a call nobody asked for is
+  spend nobody agreed to. The same safety triage as a generation runs before the call; an account
+  is required (the fallback rungs cost the platform).
+- 🔒 **Drift is the one thing a rewrite can do wrong, so it is CHECKED, not trusted.** `factsToKeep`
+  (digit runs of 3+, ALL-CAPS words, Devanagari words — deliberately narrow, so a sentence-initial
+  capital is not a "fact") must all survive into the rewrite; a rewrite that dropped the phone number
+  is refused and the user keeps their own words with an honest note. Empty, unchanged and busy each
+  have their own branded sentence; no vendor is ever named.
+
+Tests: `tests/theStarWritesAPeakPrompt.test.ts` (16) — pure decision logic plus source guards for the
+route's order (triage → account → free-universe call) and the client's replace-with-Undo. **Proven by
+reversion**: the facts check removed → fails; the Undo removed → fails.
+
+## 2026-09-21 — C: resize or crop a FINISHED picture into any frame, black where it does not reach (Phase 2 item 6, the last on the admin's list)
+
+**Admin:** *"image generate ho jane ke bad image ka size badalne / crop karne ka option do … agar user
+image ko frame se chota kar de, to bahat kala background a jaye."*
+
+- **`src/lib/imageResize.ts` (pure)** — a SECOND geometry, deliberately the opposite of the attach-side
+  `imageCrop.ts`: that one keeps an attached picture COVERING its frame (zoom floor 1 — a black band
+  there would look like our engine broke); this one exists to produce the black band the admin asked
+  for (floor 0.25). Two modes: **Crop** keeps the picture's proportions, zooms and moves it, slack
+  `|drawn − frame| / 2` in both directions so a small picture may sit anywhere inside the frame but
+  never half out of it; **Resize** stretches to the whole frame. `fitZoom` letterboxes exactly (not
+  rounded — a rounded zoom left a 3 px sliver of black beside a picture that was meant to fit).
+  `showsBackground` says on screen when black will be in the output.
+- **`ImageResizeEditor.tsx`** — the sheet (portalled to the body like every sheet on these screens):
+  Crop / Resize toggle, the composer's own size rows plus custom fields, − Fit ⟲ +, drag; the canvas
+  is filled with `RESIZE_BACKGROUND` before the picture is drawn and exported as PNG at the frame's
+  real pixels. **Done replaces the picture IN PLACE** and the history record learns its real pixels
+  (`width`/`height`, optional — older records have none), so Add text and a later Resize open on the
+  truth. The button goes through `ensureLocalImage` like the other three, so a link-only free picture
+  is fetched first.
+
+Tests: `tests/theGeneratedPictureFitsAnyFrame.test.ts` (11) — geometry plus source guards. **Proven by
+reversion**: the black fill dropped → fails; the floor set back to 1 → fails; the Resize button
+bypassing the local-bytes door → fails.
+
+⚠️ `lucide-react` in this install exports neither `Crop` nor `Scaling` (both appear in the d.ts under
+other names); `Move` and `Maximize2`, already imported elsewhere in the repo, are used instead.
+
+## 2026-09-21 — the platform has a day too: a ceiling on images the FREE tier gets from a PAID engine
+
+The number PR #3234 left open, built as the first proactive item after the admin's list was done.
+
+- **`src/server/lib/imageFreePaidBudget.ts`** — `AI_IMAGE_FREE_PAID_DAILY_CAP`, default **300/day
+  platform-wide**, a COUNT (no image model is on the rate card, and a rupee figure would be invented).
+  One Firestore document per UTC day (server clock), `increment(1)` on every PAID delivery to a free-tier
+  user; ~hundreds of writes a day at most, far below the hot-document line (§SCALE-PLAN item 1 is for a
+  cap two orders of magnitude higher). Unreadable env → the default, never unlimited; `0` → the free
+  provider or nothing; only `off` lifts it.
+- **Fails CLOSED**: a counter that cannot be read refuses the paid rungs (the free provider is still
+  tried first on every press). Free-listed accounts are neither counted nor refused.
+- **One reader**: `allowPaidRung()` in the FREE route, after the user's own allowance and before the
+  first paid rung; the count moves inside `deliver()` for a paid rung only. The Pro route does not
+  consult it — the wallet is that tier's bound. The refusal is branded and names no engine or number.
+
+Tests: `tests/thePlatformHasADayToo.test.ts` — the env parsing, the decision, the wording, and the
+ORDER at source level; proven by reversion.

@@ -13,6 +13,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Bug, Loader2, Box, RefreshCw, AlertTriangle, ShieldCheck, ChevronDown, ChevronRight, FileSearch, CheckCircle2, Sparkles, Wrench } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { authJsonHeaders } from '../../lib/authHeaders';
+import { AddCreditNotice } from '../common/AddCreditNotice';
+import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low';
 
@@ -95,6 +97,9 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
   const [summary, setSummary] = useState<ScanSummary | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [runError, setRunError] = useState('');
+  // The empty-balance refusal, kept apart from `runError` so a price is never drawn as a red
+  // failure beside a retry the same gate would refuse.
+  const [balanceBlock, setBalanceBlock] = useState('');
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   // For the deep-dive investigation: the scanned file map (github/open project) + the active source.
   const [scannedFiles, setScannedFiles] = useState<Record<string, string> | null>(null);
@@ -138,7 +143,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
   const hasCurrent = !!files && Object.keys(files).length > 0;
 
   const resetResults = () => {
-    setFindings([]); setSummary(null); setNotes([]); setRunError(''); setProgress(null); setExpanded({}); setDeepDive({});
+    setFindings([]); setSummary(null); setNotes([]); setRunError(''); setBalanceBlock(''); setProgress(null); setExpanded({}); setDeepDive({});
   };
 
   const handleEvent = useCallback((evt: any) => {
@@ -176,6 +181,10 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
     const res = await fetch('/api/app-debug/run', { method: 'POST', headers, body: JSON.stringify(payload) });
     if (!res.ok || !res.body) {
       const data = await res.json().catch(() => null);
+      // An empty wallet is a PRICE, not a fault, and it must be recognised HERE — a `throw` keeps
+      // only the sentence, and the catch below has no status left to judge it by.
+      const noCredit = walletEmptyRefusalMessage(res.status, data);
+      if (noCredit) { setBalanceBlock(noCredit); return; }
       throw new Error((data && typeof data.error === 'string' && data.error) || 'The scan could not be started — please try again.');
     }
     const reader = res.body.getReader();
@@ -251,6 +260,8 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
       }
       const res = await fetch('/api/app-debug/investigate', { method: 'POST', headers: await authJsonHeaders(), body: JSON.stringify(body) });
       const data = await res.json().catch(() => null);
+      const noCredit = walletEmptyRefusalMessage(res.status, data);
+      if (noCredit) { setBalanceBlock(noCredit); setDeepDive((d) => { const next = { ...d }; delete next[index]; return next; }); return; }
       if (!res.ok || !data) throw new Error((data && typeof data.error === 'string' && data.error) || 'The investigation could not be completed — please try again.');
       setDeepDive((d) => ({ ...d, [index]: { result: {
         rootCause: typeof data.rootCause === 'string' ? data.rootCause : '',
@@ -357,8 +368,15 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
           </div>
         )}
 
+        {/* The wallet, not a fault. No retry offered — the next press meets the same gate. */}
+        {balanceBlock && (
+          <div className="mb-4">
+            <AddCreditNotice message={balanceBlock} />
+          </div>
+        )}
+
         {/* Error */}
-        {runError && (
+        {runError && !balanceBlock && (
           <div className="rounded-lg border px-4 py-3 text-sm flex items-start gap-2 mb-4"
             style={{ borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', color: 'var(--brand-danger-text)' }}>
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> <span>{runError}</span>
@@ -429,7 +447,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
         ))}
 
         {/* Findings list */}
-        {summary && findings.length === 0 && !runError && (
+        {summary && findings.length === 0 && !runError && !balanceBlock && (
           <div className="flex flex-col items-center justify-center gap-2 py-10" style={{ color: 'var(--brand-success-text)' }}>
             <CheckCircle2 className="w-10 h-10" />
             <p className="text-sm">No problems found — {summary.filesStaticScanned} files scanned clean.</p>
@@ -510,7 +528,7 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
         })}
 
         {/* Empty initial state */}
-        {!running && !summary && !runError && (
+        {!running && !summary && !runError && !balanceBlock && (
           <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
             <FileSearch className="w-12 h-12" style={{ color: 'var(--text-muted)' }} />
             <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>

@@ -78830,3 +78830,65 @@ caught what reasoning did not; the case is now `tests/theWarningComesBeforeTheWa
 
 ⏭️ **Next:** item 2 — Doctor AI and the AI tool panels still show the empty-balance refusal as plain
 text with no Add-credit button.
+
+## 2026-09-22 — "banao!! dono! ek ek kar ke" (2 of 2): the wall is a BUTTON, not a sentence
+
+**Admin:** *"agar user ke pas balance khatam hai, to proper likh kar ana chahiye. this is paid
+service!!"* — and then, of the two gaps left after the ₹50 credit shipped, *"banao!! dono! ek ek kar
+ke"*. This is the second. (The first, the low-balance warning that arrives BEFORE the wall, is
+PR #3248.)
+
+**🔴 THE DEFECT: a PRICE was drawn as a FAULT, beside the one control guaranteed to fail.** The
+server has answered an empty wallet with an honest sentence and a machine-readable `wallet_empty`
+code since earlier the same day (`walletEmptyNotice.ts`, three gates: `passGate` → Doctor AI and the
+Professionals, `toolGate` → the AI tools, `imageGen`). The image studio was wired to it. **Four
+screens were not** — Doctor AI (`SDAChat`), the App Debugger (`AIDebugger`), the Design System
+palette and the App Scanner (`AppScanPanel`) all folded the 402 into their generic failure path, so
+the user saw a red error and a **Try again** button that the same gate refuses every single time.
+A user with an empty wallet could press it for ever and never once be shown the thing that resolves it.
+
+**The fix, in three pieces:**
+- **`src/components/common/AddCreditNotice.tsx` (new) — ONE card.** The image studio had hand-written
+  it; four more screens needed the same one. Five copies of a price explanation is the drifted-copy
+  class this repo has already paid for five times (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot
+  guard ×2, `PLAYWRIGHT_BROWSERS_PATH` ×2, and the empty-balance SENTENCE itself ×3 — which is what
+  `walletEmptyNotice.ts` exists to have ended). The image studio was refactored ONTO it, so there is
+  one definition and not six.
+- **`walletEmptyRefusalMessage(status, body)`** — one call replacing the two-call shape
+  (`isWalletEmptyRefusal` then `walletEmptyMessage`). A screen can no longer recognise the refusal
+  and forget to take the server's own wording.
+- **Four screens wired**, each reading the wallet BEFORE its generic throw — the whole defect is that
+  a `throw` keeps only the sentence and the catch has no status left to judge by.
+
+**⚠️ Deliberate decisions worth not re-deriving:**
+- **No "Try again" on the card.** The next press meets the same gate; offering a retry is what made a
+  bill look like a bug.
+- **Doctor AI draws the button inside its chat bubble**, not the card — a card would break the bubble
+  — and still calls the shared `openAddCredit`, never a hand-rolled navigation.
+- **`SDAMessage.needsCredit` is NEVER PERSISTED.** The Firestore autosave maps its fields by name and
+  this is not among them, so a refusal from last week can never return as a live offer after the
+  doctor has topped up. A test fails if that save is ever "tidied" into a spread.
+- **The Design System's refusal gets its OWN state** (`paletteNoCredit`): `paletteMsg` also carries
+  SUCCESS summaries, so sharing it would make a price and a result the same field.
+- **Switch on the CODE, never the prose.** A `.includes('balance')` check is how a copy edit silently
+  turns the card back into a red error — guarded, with comments stripped first so the files may
+  document the very check they forbid.
+
+**🔒 `tests/theWallIsAButtonNotASentence.test.ts` (24 cases), six reversion proofs:** the check moved
+after the throw; the retry banner and the price card drawn together; the flag persisted; the status
+read without the code; a sixth hand-written copy of the card; the card stripped from the studio.
+
+**⚠️ THE SECOND PROOF DID NOT BITE, AND THE TEST WAS WRONG, NOT THE CODE.** The guard asked whether
+`!balanceBlock` appeared ANYWHERE in the file — and every one of these files says it in two or three
+other places, so deleting it from the failure banner (the exact regression) left the suite green. It
+now pins each banner's OWN condition. Found by reversion, not by reasoning — the same shape as the
+hole found in PR #3248's suite the day before, which is twice now that a file-wide `toContain` has
+posed as a guard.
+
+**Also re-aimed (not weakened), with the reason recorded in place:** two assertions in
+`anEmptyBalanceIsSaidProperly.test.ts` that pinned the OLD call name and the studio's hand-written
+button. Both properties survive; both re-proven by reversion.
+
+**Gate, on the final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ · typecheck:server ✅
+· **vitest 28,933 passed | 1 skipped, 0 FAIL** ✅ · build ✅ · test:bundle (1499.2 KB / 1720) ✅ ·
+boot:check ✅ · deps:server-gate ✅.

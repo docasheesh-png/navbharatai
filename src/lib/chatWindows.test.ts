@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  MAX_OPEN_CHATS, openWindow, closeWindow, windowsOf, nextActiveAfterClose, windowLabel, capMessage,
+  MAX_OPEN_CHATS, SLOT_VIEWS, chatSlotsUsed, chatSlotFree, openWindow, closeWindow, windowsOf, nextActiveAfterClose, windowLabel, capMessage,
   isWindowedProfessional, OWN_SURFACE_PROFESSIONALS, type ChatWindow,
 } from './chatWindows';
 import { PROFESSIONAL_CHATS } from '../components/professionals/professionalConfigs';
@@ -68,5 +68,38 @@ describe('which professionals the window system serves', () => {
     for (const id of ['nbi_chat', 'sda_chat', 'imagegen', 'home', '']) expect(isWindowedProfessional(id), id).toBe(false);
     const served = Object.keys(PROFESSIONAL_CHATS).filter(isWindowedProfessional);
     expect(served.length).toBe(Object.keys(PROFESSIONAL_CHATS).length - OWN_SURFACE_PROFESSIONALS.size);
+  });
+});
+
+/**
+ * THE FIVE ARE COUNTED ACROSS EVERY CHAT THE MODE LIST CAN SWITCH TO (admin 2026-09-22, approving the
+ * redesign: Doctor AI and the Image Generator count — "doctor + 4 = 5"; the FREE chat is the tab's home
+ * and is never counted). One function holds the arithmetic; the cap asks it.
+ */
+describe('chatSlotsUsed — Doctor AI and the image studio take a slot each', () => {
+  const win = (id: string, professionalId = 'teacher_ai') => ({ id, professionalId });
+
+  it('counts every window plus every open slot view, and never the FREE chat or a non-chat tab', () => {
+    expect(chatSlotsUsed([], [])).toBe(0);
+    expect(chatSlotsUsed([win('a'), win('b')], ['nbi_chat', 'settings', 'home'])).toBe(2);
+    expect(chatSlotsUsed([win('a')], ['nbi_chat', 'sda_chat'])).toBe(2);
+    expect(chatSlotsUsed([win('a')], ['nbi_chat', 'sda_chat', 'imagegen'])).toBe(3);
+    expect(SLOT_VIEWS).toEqual(['sda_chat', 'imagegen']);
+  });
+
+  it('the admin\'s own example: Doctor AI plus four professional chats fills the five', () => {
+    const four = [win('a'), win('b', 'lawyer_ai'), win('c'), win('d', 'chef_ai')];
+    expect(chatSlotFree(four, ['nbi_chat', 'sda_chat'])).toBe(false);
+    expect(chatSlotFree(four, ['nbi_chat'])).toBe(true);
+    // …and openWindow refuses on the SAME count when it is handed the open tabs.
+    expect(openWindow(four, win('e'), ['nbi_chat', 'sda_chat'])).toMatchObject({ opened: false, reason: 'cap' });
+    expect(openWindow(four, win('e'), ['nbi_chat'])).toMatchObject({ opened: true });
+    // A window that is already open is a focus, not a sixth chat, even at the cap.
+    expect(openWindow(four, win('a'), ['nbi_chat', 'sda_chat'])).toMatchObject({ opened: true });
+  });
+
+  it('every slot view is a mode surface — a view the Mode list can actually switch to', async () => {
+    const { isModeSurface } = await import('../components/chat/modePicker');
+    for (const v of SLOT_VIEWS) expect(isModeSurface(v), v).toBe(true);
   });
 });

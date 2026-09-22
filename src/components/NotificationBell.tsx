@@ -4,6 +4,31 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { authJsonHeaders } from '../lib/authHeaders';
 
 /**
+ * The app header's own height, restated here because a `fixed` panel cannot inherit it.
+ *
+ * App.tsx pads the app ROOT by `--nb-safe-top` (the notch) and then lays the header out inside that
+ * padding at `h-14`; its content calc — `100vh - 3.5rem - var(--nb-safe-top)` — is the same two
+ * numbers. A `position: fixed` panel is anchored to the VIEWPORT instead, receives none of the
+ * root's padding, and so must add BOTH back itself. Exported so
+ * `tests/theNotificationsPanelClearsTheHeader.test.ts` can read App.tsx and fail if the header's
+ * height ever moves away from this value — the drift that would silently put the panel back under it.
+ */
+export const HEADER_H = '3.5rem';
+
+/** The gap between the header's bottom edge and the panel's top. Purely visual breathing room. */
+export const PANEL_GAP = '0.5rem';
+
+/**
+ * Where the panel's top edge sits: below the notch, below the header, plus the gap.
+ *
+ * Measured in real Chromium against the built stylesheet, with the old `top-12` (48px):
+ *   notch 0px  → header 0–56   → 8px of the panel hidden under the header
+ *   notch 47px → header 47–103 → 55px hidden
+ * and 0px hidden with this value at both.
+ */
+export const PANEL_TOP = `calc(var(--nb-safe-top, 0px) + ${HEADER_H} + ${PANEL_GAP})`;
+
+/**
  * Notifications inbox (admin 2026-07-30) — delivers admin → user messages in-app. Fetches the signed-in
  * user's notifications (broadcasts + those targeted at them), reports the unread count, and marks them
  * read when the panel is opened. Real end-to-end: no message = empty state, never a fake dot.
@@ -201,10 +226,35 @@ export function NotificationPanel({ inbox, onClose, onOpenReports }: {
         se bahar ja raha hai" — every line clipped on its left edge). An `absolute right-0` inside
         the old bell's wrapper anchored the panel's right edge well short of the screen's, and the
         320px-wide panel ran off the LEFT edge of narrow phones. `fixed` anchors to the viewport,
-        and `right-3` + a width capped at `100vw - 1.5rem` guarantees equal margins on both sides —
-        the panel can never overflow either edge, wherever it is opened from (now: the sidebar).
+        so the panel can never overflow an edge, wherever it is opened from (now: the sidebar).
+
+        🔴 AND THE TOP WAS UNDER THE HEADER FROM THE DAY IT SHIPPED (fixed 2026-09-22, admin report:
+        "notifications open kare to header me chupp raha hai, crop ho raha hai"). `top-12` is 48px.
+        The app header is `3.5rem` = 56px — ALWAYS taller — and it starts BELOW the device notch,
+        because the app root pads itself by `--nb-safe-top` (App.tsx). A `fixed` panel is anchored to
+        the VIEWPORT and gets none of that padding, so it slid underneath, and the header's higher
+        z-index painted over it. **Measured in real Chromium against the built stylesheet:**
+
+            notch 0px (web/desktop) → header 0–56,   panel top 48  → 8px hidden
+            notch 47px (the phone)  → header 47–103, panel top 48  → 55px hidden
+
+        So this was never a device quirk: the panel was clipped on EVERY screen, and the notch only
+        decided by how much. The offset is now DERIVED from the two facts that decide it — the
+        notch and the header's own height — instead of being a number that happened to look right.
+
+        ⚠️ `--nb-safe-top` and `HEADER_H` are the header's arithmetic, restated here because a
+        `fixed` element cannot inherit it. If the header's height ever changes, this must change
+        with it — which is what `tests/theNotificationsPanelClearsTheHeader.test.ts` enforces: it
+        reads BOTH files and fails when they disagree.
+
+        Centred rather than right-aligned (admin: "center me kar do") — the panel is opened from the
+        sidebar now, so there is no corner control for it to hang off, and equal margins are what
+        stops it clipping either edge.
       */}
-      <div className="fixed right-3 top-12 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[70vh] supports-[height:100dvh]:max-h-[70dvh] overflow-y-auto rounded-2xl border border-line bg-card shadow-2xl">
+      <div
+        style={{ top: PANEL_TOP }}
+        className="fixed left-1/2 -translate-x-1/2 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-var(--nb-safe-top,0px)-5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-var(--nb-safe-top,0px)-5rem)] overflow-y-auto rounded-2xl border border-line bg-card shadow-2xl"
+      >
         <div className="sticky top-0 bg-card border-b border-line">
           <div className="flex items-center justify-between gap-2 px-4 py-3">
             <span className="text-sm font-black text-ink truncate">

@@ -14,7 +14,7 @@ import { db } from '../lib/firebase';
 import { safeLS } from '../lib/localStorageSafe';
 import { generateUCI, getRandomElement, generateSmartHeuristicSummary, dedupAndSortMessages, asMessageArray } from '../lib/chatUtils';
 import { pickGreetingForAgent } from '../lib/agentGreetings';
-import { resolveSessionSurface } from '../lib/sessionRouting';
+import { resolveSessionSurface, sessionOwnerOf } from '../lib/sessionRouting';
 import { caseIdFromDocId } from '../lib/sdaCaseStore';
 
 export interface SessionManagerDeps {
@@ -167,9 +167,18 @@ export function useSessionManager(deps: SessionManagerDeps) {
       modelUsed: 'navBharatAI Cognitive Layer'
     };
     
+    // 🔴 A RESTORE MUST NOT REWRITE WHOSE SESSION THIS IS (admin 2026-09-22, the history leak).
+    // This used to stamp `currentAgent: 'navbharatai'` on EVERY restored non-v3 session — including a
+    // NavBharatAI Pro builder session, which this function's own `isV3Session` above does not match
+    // (it looks for the `agentv3` family, not `navbharatai-pro`). App.tsx then synced that value to
+    // Firestore as `current_agent`, and the next load reads `agent: current_agent || original_agent`,
+    // so the session came back calling itself `navbharatai` — a Pro conversation turned into a Free
+    // one by the act of opening it, permanently, and it then appeared in NavBharatAI Free's history.
+    // Opening a conversation is not a change of ownership, so a non-free session keeps what it had.
+    const restoredOwner = sessionOwnerOf(targetSession as unknown as Record<string, unknown>);
     const updatedSession: ChatSession = {
       ...targetSession,
-      currentAgent: 'navbharatai',
+      currentAgent: restoredOwner === 'free' ? 'navbharatai' : (targetSession.currentAgent || targetAgent),
       agent: targetAgent,
       messages: [continuationGreeting],
       restoredMessages: uniqueHistory,

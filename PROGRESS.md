@@ -78493,3 +78493,71 @@ Tests: `tests/theFrameGrowsOnTheAxisYouPressed.test.ts` (10) — the pure rule (
 constant reference across every preset and custom frame, shape kept past the reference, junk → 0) and source
 guards (percent-sized canvas, square stage, distinct ids). **Proven by reversion three ways:** reference
 following the frame; the width-pinned canvas restored; shared ids restored.
+
+## 2026-09-22 — Pro's history in Free's list: a restore was rewriting whose session it was
+
+**Admin:** *"navbharatai free me footer ka history button … usme navbharatai pro ki bhi history aati
+hai. navbharatai pro ki history sirf navbharatai pro me dikhe, navbharatai free ki sirf navbharatai
+free me. leakage to band karne ki bola tha maine."* And, in the same message: *"navbharatai free me
+history quickly load ho jati hai; navbharatai pro ki loading me bahut time lagta hai — pro ki history
+bhi quickly load ho jaye."*
+
+### The leak — root-caused from the code, in three ordinary steps and no error anywhere
+
+1. `useSessionManager.restoreSession` stamped `currentAgent: 'navbharatai'` on EVERY restored non-v3
+   session. Its own `isV3Session` matches the `agentv3` family — **not** `navbharatai-pro`, which is
+   what `App.tsx` saves the Pro App Builder chat as. So opening a Pro conversation rewrote it.
+2. `App.tsx`'s Firestore sync wrote that through as `current_agent` (and writes no `agent` field at
+   all).
+3. The next load reads `agent: docData.current_agent || docData.original_agent` → `'navbharatai'`.
+
+From that moment `HistoryView`'s `String(s.agent || s.current_agent || s.currentAgent || '')` read
+`'navbharatai'`, and the session lived in NavBharatAI Free's history permanently. **Opening a Pro
+conversation once was enough.**
+
+**The defect is the `||` chain, not the keyword list.** It reads the FIRST field that happens to be
+present and ignores the other four, so overwriting ONE field changes what a session appears to be.
+The same line existed in four drifted copies (`HistoryView`, `AgentV3Panel`, `useSessionManager`,
+`App.tsx`), each reading a different subset of the fields.
+
+### Fixed at the class
+
+- **`sessionRouting.ts` gains `sessionIsPro` / `sessionIsDoctor` / `sessionOwnerOf`** — pure, reading
+  EVERY agent field (`agent`, `current_agent`/`currentAgent`, `original_agent`/`originalAgent`) plus
+  the tab and the `v3_` id, never first-wins. This is what makes it resilient rather than merely
+  correct today: rows ALREADY laundered before this shipped still classify as Pro, because
+  `original_agent` survived.
+- **Both lists ask that one function.** The Free list (`HistoryView`) and the Pro panel's own
+  `chat_sessions` filter can no longer disagree about where a session belongs — the admin's rule
+  enforced by construction rather than by two lists that happen to match.
+- **The 50/50 half — the record stops losing its identity.** A restore no longer overwrites
+  `currentAgent` for a non-free session. Opening a conversation is not a change of ownership.
+- ⚠️ **Deliberately NOT widened:** the tab test still matches `engine_builder` alone. Adding
+  `nbi_pro_chat` was tempting and would have been the mirror-image regression — `App.tsx`'s generic
+  saver writes `tab: activeView`, so a FREE session that autosaved while the Pro tab was open would
+  have started classifying as Pro and **vanished from Free's history**. A fix must not trade one
+  problem for another.
+
+### The slow Pro history — the list was waiting for a megabyte it did not need
+
+`loadHistory` awaited BOTH sources before showing anything, and the second is a `getDocs` over every
+`chat_sessions` document the user owns — whole documents, carrying the full `messages` transcript, a
+second copy in `restoredMessages`, and a built app's entire `files` contents. That is exactly the cost
+`historyIndex.ts` records for the Free list, which is why Free was fast and Pro was not.
+
+Now the server list (already metadata-only: `FirestoreConversationStore.listByUser` omits transcripts)
+is published and the spinner cleared the moment it answers; the `chat_sessions` superset keeps loading
+behind the visible list. 🔒 **The merged result is unchanged** — it used to seed the map with the
+chat_sessions rows and let the richer server records overwrite them; now the server records land first
+and the top-up only fills in sessions the server did not list. Rows can only be ADDED by the second
+pass, never removed. A generation counter stops a superseded load landing on a newer list.
+
+**Test-locked and reversion-proven five ways** in `tests/historyBelongsToItsOwnSurface.test.ts` (16
+cases): restore the `||` chain in `HistoryView` → 1 fails; restore the Pro panel's own copy of the
+rule → 1; launder `currentAgent` again → 1; let the superset block the list again → 1; let the top-up
+overwrite the richer server record → 1. `AppKnowledgeBase` updated per the sync rule — it described
+the violet "Pro build" dot as part of the Free list, which is now unreachable there by construction.
+
+**Still open, stated rather than hidden:** the `chat_sessions` superset is still a full-document read;
+it no longer blocks the list, but it is bandwidth. The honest fix is the same local index the Free
+list uses (`historyIndex.ts`), extended to the Pro panel — a separate change, not guessed at here.

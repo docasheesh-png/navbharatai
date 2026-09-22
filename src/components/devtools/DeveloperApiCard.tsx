@@ -51,6 +51,9 @@ interface DeveloperApiCardProps {
   onShowLogin?: () => void;
 }
 
+/** The one scope that means every scope — matched by name, the same word the server uses. */
+const FULL_ACCESS = 'all';
+
 /** The API's public base — the origin the page is served from, so the snippet is right on every deploy. */
 function apiBase(): string {
   try { return `${window.location.origin}/api/v1`; } catch { return 'https://navbharatai.com/api/v1'; }
@@ -108,8 +111,22 @@ export function DeveloperApiCard({ signedIn, onShowLogin }: DeveloperApiCardProp
 
   useEffect(() => { void fetchKeys(); }, [fetchKeys]);
 
+  const fullAccess = scopes.includes(FULL_ACCESS);
+
+  /**
+   * 🔑 FULL ACCESS AND THE NARROW PERMISSIONS ARE MUTUALLY EXCLUSIVE ON THIS SCREEN.
+   *
+   * The server would accept `['all', 'ai:chat']` and behave identically (`hasScope` short-circuits on
+   * `all`), but a form that lets both be ticked is a form that shows a tick meaning nothing — and the
+   * tick a user would then untick to "remove" a permission they still have. So choosing full access
+   * clears the rest, and choosing any narrow one turns full access off.
+   */
   const toggleScope = (s: string) =>
-    setScopes((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
+    setScopes((prev) => {
+      if (s === FULL_ACCESS) return prev.includes(FULL_ACCESS) ? [] : [FULL_ACCESS];
+      const rest = prev.filter((x) => x !== FULL_ACCESS);
+      return rest.includes(s) ? rest.filter((x) => x !== s) : [...rest, s];
+    });
 
   const createKey = async () => {
     setError('');
@@ -193,14 +210,26 @@ export function DeveloperApiCard({ signedIn, onShowLogin }: DeveloperApiCardProp
   const base = apiBase();
   const snippets = useMemo(() => ({
     curl:
-`# Who am I (read:profile)
-curl ${base}/me -H "X-API-Key: nbai_YOUR_KEY"
+`# What can this key do, and what has it spent today? (any valid key)
+curl ${base}/key -H "X-API-Key: nbai_YOUR_KEY"
 
 # Ask NavBharatAI's AI (ai:chat) — standard chat-completions format
 curl ${base}/chat/completions \\
   -H "Authorization: Bearer nbai_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"messages":[{"role":"user","content":"Explain GST in one line"}]}'`,
+  -d '{"messages":[{"role":"user","content":"Explain GST in one line"}]}'
+
+# Ask one of the expert AIs (ai:professionals) — list them at ${base}/professionals
+curl ${base}/professionals/teacher_ai/chat \\
+  -H "Authorization: Bearer nbai_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"messages":[{"role":"user","content":"Explain photosynthesis to a class 8 student"}]}'
+
+# Make an image (ai:images) — Pro engine, ₹1 per image from your wallet
+curl ${base}/images/generations \\
+  -H "Authorization: Bearer nbai_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"a chai stall at sunrise, warm light","n":1,"response_format":"data_url"}'`,
     node:
 `import OpenAI from "openai";
 
@@ -211,16 +240,39 @@ const reply = await client.chat.completions.create({
   model: "navbharatai",
   messages: [{ role: "user", content: "Explain GST in one line" }],
 });
-console.log(reply.choices[0].message.content);`,
+console.log(reply.choices[0].message.content);
+
+// An expert AI is just another model name (needs the ai:professionals permission).
+const teacher = await client.chat.completions.create({
+  model: "navbharatai/teacher_ai",
+  messages: [{ role: "user", content: "Explain photosynthesis to a class 8 student" }],
+});
+console.log(teacher.choices[0].message.content);
+
+// Images (needs ai:images). Each one costs ₹1 from your wallet.
+const pic = await client.images.generate({ prompt: "a chai stall at sunrise, warm light" });
+console.log(pic.data[0].b64_json.slice(0, 40) + "...");`,
     python:
 `from openai import OpenAI
 
 client = OpenAI(api_key="nbai_YOUR_KEY", base_url="${base}")
+
 reply = client.chat.completions.create(
     model="navbharatai",
     messages=[{"role": "user", "content": "Explain GST in one line"}],
 )
-print(reply.choices[0].message.content)`,
+print(reply.choices[0].message.content)
+
+# An expert AI is just another model name (needs the ai:professionals permission).
+teacher = client.chat.completions.create(
+    model="navbharatai/teacher_ai",
+    messages=[{"role": "user", "content": "Explain photosynthesis to a class 8 student"}],
+)
+print(teacher.choices[0].message.content)
+
+# Images (needs ai:images). Each one costs \u20b91 from your wallet.
+pic = client.images.generate(prompt="a chai stall at sunrise, warm light")
+print(pic.data[0].b64_json[:40], "...")`,
   }), [base]);
 
   return (
@@ -233,9 +285,10 @@ print(reply.choices[0].message.content)`,
         <div className="min-w-0">
           <h2 className="text-sm font-black text-ink uppercase tracking-widest">NavBharatAI API</h2>
           <p className="text-[11px] text-muted mt-0.5 leading-relaxed">
-            Use NavBharatAI from your own program or app — read your account, list your apps, or let your
-            software ask NavBharatAI's AI. You choose exactly what each key may do, and how much it may
-            spend per day.
+            Use NavBharatAI from your own program or app — read your account, list your apps, ask
+            NavBharatAI's AI or any of its expert AIs, and generate images. It speaks the standard
+            chat-completions format, so an SDK you already have works by changing two lines. You choose
+            exactly what each key may do, and how much it may spend per day.
           </p>
         </div>
       </div>
@@ -291,21 +344,32 @@ print(reply.choices[0].message.content)`,
               <p className="text-[10px] font-bold text-muted mb-1.5">What may this key do? <span className="text-faint">(you can change this later)</span></p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {(payload?.availableScopes ?? []).map((s) => {
-                  const on = scopes.includes(s);
+                  const isFull = s === FULL_ACCESS;
+                  // A narrow permission is COVERED (not ticked) while full access is on: the key really
+                  // does have it, and showing an empty box beside a key that holds it would be a lie.
+                  const covered = fullAccess && !isFull;
+                  const on = isFull ? fullAccess : scopes.includes(s) || covered;
                   const d = payload?.scopeDescriptions?.[s];
                   const route = payload?.scopeRoutes?.[s];
                   return (
-                    <button key={s} type="button" onClick={() => toggleScope(s)} aria-pressed={on}
-                      className={`text-left rounded-xl border p-3 transition-colors ${on ? 'bg-indigo-500/15 border-indigo-500/50' : 'bg-well border-line hover:border-line'}`}>
+                    <button key={s} type="button" onClick={() => toggleScope(s)} aria-pressed={isFull ? fullAccess : scopes.includes(s)}
+                      className={`text-left rounded-xl border p-3 transition-colors ${
+                        isFull && fullAccess ? 'bg-indigo-500/15 border-indigo-500/50'
+                        : covered ? 'bg-well border-line opacity-60'
+                        : on ? 'bg-indigo-500/15 border-indigo-500/50'
+                        : 'bg-well border-line hover:border-line'} ${isFull ? 'sm:col-span-2' : ''}`}>
                       <div className="flex items-center gap-2">
                         <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${on ? 'bg-indigo-500 border-indigo-400 text-on-accent' : 'border-line'}`}>
                           {on && <Check className="w-2.5 h-2.5 text-ink" />}
                         </span>
                         <span className="text-[11px] font-bold text-ink">{d?.title ?? s}</span>
+                        {covered && <span className="text-[9px] text-muted">included in full access</span>}
                         <code className="ml-auto text-[9px] font-mono text-muted">{s}</code>
                       </div>
                       {d?.detail && <p className="text-[10px] text-muted mt-1 leading-snug">{d.detail}</p>}
-                      {route && <p className="text-[9px] font-mono text-faint mt-1">{route.method} {route.path}</p>}
+                      {route
+                        ? <p className="text-[9px] font-mono text-faint mt-1">{route.method} {route.path}</p>
+                        : isFull && <p className="text-[9px] font-mono text-faint mt-1">every endpoint</p>}
                     </button>
                   );
                 })}

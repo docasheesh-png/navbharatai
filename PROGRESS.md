@@ -78770,3 +78770,127 @@ prefix-at-root boundary with `isWellKnownPath` itself); **proven by reversion** 
 ⚠️ **Said to the admin, per the third absolute rule:** the Deep-links page is ADVISORY. Red rows there never
 block a release. "App update publish nahi ho raha" has its cause on Publishing overview or the release itself,
 which this session cannot see — asked for that screen rather than pretending the two are the same problem.
+
+---
+
+## 2026-09-22 — 🔌 The NavBharatAI API grew four doors: full access, the expert AIs, images, and two for the developer
+
+**Admin:** *"NAVBHARATAI API, jisko thoda aur modify karo! isme kuch cheeze aur add karo, jaise full
+access, professionals, images generator, aur aap jo bhi chaho..!"*
+
+Three asked for, two chosen. PR opened from `claude/vigilant-feynman-9aobjz`.
+
+| Permission | Door |
+|---|---|
+| `all` | **every** endpoint, and anything added later |
+| `ai:professionals` | `POST /api/v1/professionals/:id/chat` |
+| `ai:images` | `POST /api/v1/images/generations` |
+| *(any valid key)* | `GET /api/v1/key` · `GET /api/v1/models` |
+
+### 1 · Full access
+
+One scope that satisfies every check — and it satisfies FUTURE ones too, because the rule lives in
+`hasScope`, the single function every guard already calls, rather than in a list somebody has to
+remember to extend. A route that asked `scopes.includes(x)` directly would silently refuse a
+full-access key, so there must be no second way to ask that question.
+
+⚠️ **The honest cost is written down rather than discovered: it auto-grants doors that do not exist
+yet.** That is genuinely what full access means, so the answer was to SAY it — the warning is inside
+the scope's own description, at the only moment anybody reads it, and the narrow scopes stay the
+recommendation for a key that leaves your machine. **The daily ₹ cap is untouched by it**: `all`
+widens WHAT a key may do, never HOW MUCH it may spend.
+
+On the form, full access and the narrow permissions are **mutually exclusive** — the server would
+accept both and behave identically, but a form that lets both be ticked shows a tick that means
+nothing, and that a user would untick to "remove" a permission they still hold.
+
+### 2 · The ~80 expert AIs
+
+`POST /api/v1/professionals/:id/chat`, **and** `model: "navbharatai/teacher_ai"` on the standard chat
+endpoint — because a developer already holds an SDK that speaks chat-completions, and making them
+hand-roll a second HTTP call to reach a different persona is friction with nothing behind it. **Two
+entry points, ONE handler**, asserted by count so they cannot drift. The model prefix is our own
+brand; the engine beneath it stays admin-only.
+
+🔒 The model-name path needs `ai:professionals` **as well as** `ai:chat`: a key granted only
+"NavBharatAI's AI" chose the general assistant, and letting a model name quietly reach a different
+persona would make the scope a label again — the exact root cause this API was rebuilt for.
+
+It calls `runProfessionalChatWithUsage`, the same function the app's own screen calls, so an API
+caller gets the real Teacher AI with its persona, knowledge and memory rather than an imitation.
+
+🔴 **A `GET /api/v1/professionals` was written here and then DELETED, by its own guard.**
+`routeCollision.test.ts` caught it: `routes/professionals.ts` has claimed that exact path since long
+before this API existed, publicly and unauthenticated. A second registration is never reached — the
+first wins — so it would have been dead code serving nobody while looking like a feature, and a
+developer calling it would have been silently handed the other module's answer. **The duplicate-route
+class, caught by the guard written for it**, and the discovery need was already met twice: that
+public list answers `/api/v1/professionals`, and `GET /api/v1/models` returns the addressable
+`navbharatai/<id>` names, which is where a chat-completions client looks anyway.
+
+### 3 · The image generator — and why it is the PAID tier
+
+🔴 **THE ONE-WALLET LAW decided this, not convenience.** No image model is on the rate card, so a
+*free-tier* image genuinely cannot be priced, and its paid rungs are bounded by a platform-wide daily
+count that exists to stop NavBharatAI's own bill running away — serving an API caller from that pool
+would spend a budget the app's own users are inside, for a caller we could not bill. The **Pro** tier
+has a real published price (₹1), a real wallet debit and a real margin check, so it is the only
+honest engine for a door that bills. `IMAGE_PRO_PRICE_INR` stays the single source of that number.
+
+Two decisions worth keeping: an out-of-range `n` is **refused, not clamped** (silently turning `n: 50`
+into 4 bills ₹4 for a request the caller believes cost ₹50 and will retry — when money is the unit,
+say no rather than guess); and because an image's price is **known in advance**, the cap refuses a
+request that *would* cross it instead of reporting the overshoot afterwards. That is not an extra
+rule — it is the stated limit actually working.
+
+`response_format: "url"` is deliberately refused: we never hand out a third-party origin.
+
+### 4 · Two of my own
+
+`GET /api/v1/key` — what this key may do, its cap, and what it has spent today. The endpoint a
+developer reaches for when something returns 403 or 429, answered from the terminal they are already
+in. `GET /api/v1/models` so a standard SDK's `models.list()` works. **Neither takes a scope** — the
+403-debugging endpoint that can itself 403 is no use, and both disclose only what the caller holds.
+
+### 🧬 The root-cause half: one engine and one gate
+
+- **`lib/imageProEngine.ts`** — the two paid rungs lived INSIDE `/api/image/pro/generate`. The API's
+  image door needed exactly them, and a copy would be the drifted-copy class this repo has now paid
+  for five times (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2,
+  `PLAYWRIGHT_BROWSERS_PATH` ×2, the console listener ×3). It is a **relocation, not a redesign**:
+  every line is the route's own, with four `res` exits turned into a returned verdict. The engine
+  **never charges, never reads a wallet, and never runs a triage** — the triage belongs to the DOOR,
+  because a door is what a person walks through, and both doors run one.
+- **`spendGate`** — three doors now spend the same wallet. Three hand-written copies of "rate slot,
+  triage, cap, wallet" is the same class, so there is one gate, cheap-first, asserted in order. It is
+  what makes *"a banned prompt is refused before a token is spent, whoever is asking and however they
+  ask"* true of doors nobody has written yet.
+- An image flag is recorded against the **real uid**: `triageImageRequest` resolves identity from a
+  Firebase token, which an API-key request does not carry, so every flag it recorded on this door
+  would have read `anon`.
+
+### Locked
+
+`tests/theApiGrewFourDoors.test.ts` — 41 cases, **proven by reversion seven ways**: the full-access
+short-circuit removed from `hasScope`; the expert scope check dropped from the model path; `n` clamped
+instead of refused; the image door's cap check losing the quoted price; the form letting full access
+and narrow scopes both be ticked; the app route keeping its own copy of rung 1; and the two expert
+entry points not sharing a handler. Each breaks **nothing** `tsc` or the existing suite can see.
+
+Eight superseded assertions in four existing suites were **re-aimed, not deleted**, each with the
+reason: the scope-route guarantee now iterates the specific scopes (`all` has no single route — it is
+every route, and is proven against `hasScope` itself), and four source guards follow the rungs into
+the engine file. Two were tightened on the way: the triage-order check now names the single
+shared engine call instead of a list of two rung calls, so a future third rung is covered by
+construction, and the Pro host's polling guards now read the engine, so they cover BOTH doors instead
+of the one route they happened to be pointed at. `AppKnowledgeBase.ts` updated in the same commit, per the sync rule.
+
+### Not done, and said plainly
+
+- **No streaming.** `stream: true` is not supported on any of these doors; a developer gets the whole
+  answer or an honest error, exactly as before. Half-built streaming would be worse than none.
+- **Image EDITS are not on the API.** The app's Pro door accepts an attached photograph; this one
+  takes words only, because a user's own photograph reaching a key-authenticated door is a decision
+  about somebody's private pictures, not a feature gap to fill quietly.
+- **The API's AI runs the cheap routing tier**, the same as the existing `/chat/completions` door.
+  Consistent rather than silently better for one endpoint, and recorded here rather than assumed.

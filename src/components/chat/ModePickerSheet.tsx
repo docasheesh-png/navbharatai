@@ -10,6 +10,7 @@
 // per open chat, so a recent row is the way to get back to "Teacher AI (2)".
 
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Search, Check } from 'lucide-react';
 import { modePickerEntries, filterModeEntries, activeModeId, recentRowClosable, type ModeEntry } from './modePicker';
 import type { ChatWindow } from '../../lib/chatWindows';
@@ -125,7 +126,10 @@ export function ModePickerSheet({
     </div>
   );
 
-  return (
+  // Rendered into the body (tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts): a `fixed`
+  // sheet resolves against any ancestor with a transform, filter or backdrop blur, so the portal is
+  // what keeps it a full-screen sheet wherever it is mounted.
+  const sheet = (
     // UNDER THE FOOTER, like History (admin 2026-09-23: "Mode press karne ke baad History, AI, Settings
     // kisi par click karo, Mode hat ta hi nahi hai"). This sheet sat at z-200, ABOVE the tab bar's
     // z-150, and covered it: a tap on another footer item landed on this sheet's rows or backdrop, so
@@ -184,4 +188,5 @@ export function ModePickerSheet({
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 }

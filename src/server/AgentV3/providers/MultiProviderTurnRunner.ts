@@ -862,7 +862,10 @@ export function makeMultiProviderTurnRunner(
           }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
-            throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+            // ⚠️ "the time allowed for THIS STEP", never "this build's time budget" (autopsy 0d297b25): the
+            // deadline here is whichever the caller passed — the fast lane hands down its own 90 s plan
+            // allowance, and that report told the admin the BUILD's budget had ended with 56 minutes left.
+            throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
           if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
             // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"

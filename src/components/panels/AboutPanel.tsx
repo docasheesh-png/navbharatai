@@ -9,6 +9,14 @@
 import { motion } from 'motion/react';
 import { Shield, Bot, Camera, Edit2, User, Eye, Check, Sparkles, MapPin, Mail, Loader2 } from 'lucide-react';
 import type { AboutContent, AboutOverrides } from '../../content/about';
+import { openLegalLink } from '../../lib/legalLinks';
+
+/** The legal links About must carry (a requirement in India). Each resolves through `openLegalLink`. */
+export const ABOUT_LEGAL_LINKS = [
+  { href: '/privacy', label: 'Privacy Policy' },
+  { href: '/terms', label: 'Terms of Service' },
+  { href: '/grievance', label: 'Grievance Officer' },
+] as const;
 
 export interface AboutPanelProps {
   isAdmin: boolean;
@@ -204,12 +212,22 @@ export function AboutPanel({ isAdmin, about, saveState = 'idle', onOverrideChang
           <p className="text-muted font-medium leading-relaxed">
             Write to <a className="text-accent-text font-bold underline" href={`mailto:${about.contactEmail}`}>{about.contactEmail}</a>.
           </p>
+          {/* A plain relative /terms link reloaded the whole mobile app (admin 2026-09-23: "crash jaisa feel ho
+              raha"): in the bundled app a relative link means https://localhost/terms, not our site.
+              The href stays so the link can still be copied; a tap opens the app's own Legal page. */}
           <div className="flex flex-wrap gap-3 text-sm font-bold">
-            <a className="text-accent-text hover:underline" href="/privacy">Privacy Policy</a>
-            <span className="text-faint">·</span>
-            <a className="text-accent-text hover:underline" href="/terms">Terms of Service</a>
-            <span className="text-faint">·</span>
-            <a className="text-accent-text hover:underline" href="/grievance">Grievance Officer</a>
+            {ABOUT_LEGAL_LINKS.map((link, i) => (
+              <span key={link.href} className="contents">
+                {i > 0 && <span className="text-faint">·</span>}
+                <a
+                  className="text-accent-text hover:underline"
+                  href={link.href}
+                  onClick={(e) => { if (openLegalLink(link.href)) e.preventDefault(); }}
+                >
+                  {link.label}
+                </a>
+              </span>
+            ))}
           </div>
         </motion.section>
 

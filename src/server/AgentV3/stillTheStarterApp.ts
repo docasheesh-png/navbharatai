@@ -87,3 +87,70 @@ export function starterAppBlocker(entryContent: string | null | undefined): stri
     + 'Health checks pass because an empty scaffold has no defects, not because the app is finished.'
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 🔴 THE SIBLING THAT WAS NEVER HUNTED (autopsy 3ab93068, 2026-09-23).
+//
+// The readiness gate learned "a scaffold is not an app" on 2026-09-20. The RENDER PROOF did not. On a
+// free build of a street-vendor status app the fast lane ran out of its budget after four of seven
+// files, BROKE OUT of its tier loop because "4 files ≥ minFiles", and never generated `src/App.tsx`.
+// The preview then served our starter — `<h1>Hello World</h1>` — and every verdict downstream believed
+// it: "✅ Preview verified — it renders correctly", IN_BUILD_GREEN saved the Hello World as the last
+// known good, Green Stop made the reviewer's own CRITICAL finding ("App.tsx still renders a static
+// Hello World page … the app is non-functional") a polite OFFER, and the user was billed ₹85.29 with
+// markup under a message reading *"Your app is built and working — you can use it right now."*
+//
+// A render proof answers "did something paint?". It never asked "is what painted the USER'S app?".
+// The helpers below are that question, asked of the same exact-match fact the readiness gate uses.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The visible text of the starter page — the second factor of `starterIsWhatRendered`. */
+const STARTER_HEADING_RE = /<h1\b[^>]*>\s*Hello World\s*<\/h1>/i;
+
+/**
+ * The starter entry among `files`, or null. A file absent from the map is simply not examined — the
+ * caller decides what "absent" means; this function never invents a finding out of a missing file.
+ */
+export function starterEntryIn(files: Readonly<Record<string, string>> | ReadonlyMap<string, string>): string | null {
+  const get = (p: string): string | undefined => (files instanceof Map ? files.get(p) : (files as Record<string, string>)[p]);
+  for (const p of STARTER_ENTRY_PATHS) {
+    if (isUntouchedStarterEntry(get(p))) return p;
+  }
+  return null;
+}
+
+/**
+ * Is the page a browser just rendered OUR starter, rather than the user's app?
+ *
+ * 🔒 TWO FACTORS, BOTH REQUIRED. The entry file must still be byte-identical to the seeded starter
+ * (`entryPath` non-null) AND the rendered page must show the starter's heading. Either alone is not
+ * enough: an app may mount everything from `main.tsx` and leave the starter `App.tsx` unused (entry
+ * untouched, page is the real app), and a real app may print the words "Hello World". Both together
+ * leave exactly one reading — what the user is looking at is the template we seeded.
+ */
+export function starterIsWhatRendered(entryPath: string | null | undefined, renderedHtml: string | null | undefined): boolean {
+  if (!entryPath) return false;
+  return STARTER_HEADING_RE.test(String(renderedHtml ?? ''));
+}
+
+/** The problem line a repair pass is handed. Names the exact file and the exact fix — never a guess. */
+export function starterPreviewProblem(entryPath: string): string {
+  return `The page that renders is still NavBharatAI's starter template ("Hello World" from ${entryPath}) — `
+    + `the app's own components were built but ${entryPath} was never rewritten to mount them. `
+    + `Rewrite ${entryPath} so it renders the app the user asked for, using the components already in src/.`;
+}
+
+/**
+ * A preview verdict with the starter taken into account. Only a verdict that says RENDERED is changed —
+ * a dead server or an unreadable snapshot stays exactly what it was, because "the starter is showing"
+ * is a claim about a page we actually saw. The result is a conclusive NOT-rendered verdict, so every
+ * existing reader (the repair pass, `previewProvenBroken`, the render rescue, the bill) handles it
+ * through the paths it already has rather than a new special case.
+ */
+export function withStarterVerdict<V extends { rendered: boolean; inconclusive?: boolean; problems: string[] }>(
+  verdict: V,
+  starterShown: string | null,
+): V {
+  if (!starterShown || !verdict.rendered) return verdict;
+  return { ...verdict, rendered: false, inconclusive: false, problems: [starterPreviewProblem(starterShown), ...verdict.problems] };
+}

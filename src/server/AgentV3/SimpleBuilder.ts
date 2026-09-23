@@ -45,6 +45,43 @@ export interface SimpleFileSpec {
 const HEAVY_OR_UNSAFE = /^(node_modules|\.git|dist|build)\//;
 
 /**
+ * The app's ROOT COMPONENT — the file `main.tsx` mounts. Every other file is only reachable through it.
+ */
+const APP_ENTRY_RE = /^(src\/)?App\.[jt]sx?$/;
+/** The mount point itself (`src/main.tsx`, `index.jsx` …), which may render the app without an App file. */
+const MOUNT_ENTRY_RE = /^(src\/)?(main|index)\.[jt]sx?$/;
+
+/**
+ * 🔴 AN APP WHOSE ROOT WAS NEVER WRITTEN IS THE STARTER, HOWEVER MANY OTHER FILES EXIST
+ * (autopsy 3ab93068, 2026-09-23).
+ *
+ * If the plan names neither a root component nor a mount point while the workspace still holds the
+ * starter entry, every generated component would be written and then never shown — the page stays
+ * "Hello World". The plan is repaired here, deterministically, so the entry is generated like any other
+ * file: one more focused call, instead of a whole build that delivers nothing. Returns the manifest
+ * unchanged when the plan already has a root (or when there is no starter to replace). PURE.
+ */
+export function ensureEntryPlanned(manifest: SimpleFileSpec[], starterEntryPath: string | undefined): { manifest: SimpleFileSpec[]; injected: string | null } {
+  if (!starterEntryPath) return { manifest, injected: null };
+  const hasRoot = manifest.some((m) => APP_ENTRY_RE.test(m.path) || MOUNT_ENTRY_RE.test(m.path));
+  if (hasRoot) return { manifest, injected: null };
+  return {
+    manifest: [...manifest, { path: starterEntryPath, purpose: 'Root component that renders the whole app (replaces the starter page) by composing the components above' }],
+    injected: starterEntryPath,
+  };
+}
+
+/**
+ * The planned root-component files that were NOT generated. Non-empty means the files built so far are
+ * not connected to anything a user can see, so the lane must not call itself finished — it hands its
+ * finished files to the full builder instead (the existing "stopped early" salvage). PURE.
+ */
+export function unwrittenEntries(manifest: SimpleFileSpec[], writtenPaths: Iterable<string>): string[] {
+  const written = new Set(writtenPaths);
+  return manifest.map((m) => m.path).filter((p) => APP_ENTRY_RE.test(p) && !written.has(p));
+}
+
+/**
  * Parse the planner's file manifest. The planner is asked to emit one file per line as
  *   path/from/root.ext :: one-line purpose
  * Unsafe paths (absolute, traversal, node_modules) and obvious non-files are dropped. Pure + tested.
@@ -799,6 +836,13 @@ export interface SimpleBuildDeps {
   log?: (msg: string) => void;
   /** Minimum files a real build must produce (default 2 — a real app is more than one file). */
   minFiles?: number;
+  /**
+   * The workspace's app entry when it is still the untouched starter template (`src/App.tsx` saying
+   * "Hello World"), else undefined. Supplied by the caller, who can read the file; this lane only
+   * knows paths. When set, the lane will not report success without having rewritten that entry —
+   * see `ensureEntryPlanned` / `unwrittenEntries` (autopsy 3ab93068).
+   */
+  starterEntryPath?: string;
   /** Max concurrent per-file generation calls (default 5). */
   concurrency?: number;
   /** Hard cap (ms) on the manifest + all per-file generation + writes (default 240 s). */
@@ -1009,13 +1053,18 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // ignored: a boilerplate path is dropped from the plan whatever the model answered.
       const planned = parseFileManifest(manifestText);
       const droppedBoilerplate = planned.filter((m) => isScaffoldBoilerplate(m.path)).map((m) => m.path);
-      const manifest = droppedBoilerplate.length ? planned.filter((m) => !isScaffoldBoilerplate(m.path)) : planned;
+      const kept = droppedBoilerplate.length ? planned.filter((m) => !isScaffoldBoilerplate(m.path)) : planned;
+      // The plan must connect what it builds to the screen — see ensureEntryPlanned.
+      const { manifest, injected: injectedEntry } = ensureEntryPlanned(kept, deps.starterEntryPath);
       if (droppedBoilerplate.length) {
         deps.log?.(`Skipping ${droppedBoilerplate.length} file(s) NavBharatAI already provides — they are correct as shipped: ${droppedBoilerplate.join(', ')}.`);
       }
       // Recorded BEFORE the minFiles bail: a manifest too small to be worth this lane is exactly the
       // case the one-shot lane exists for, and it must still be able to see that number. Counted AFTER
       // the filter, because that is the number of files this build will actually write.
+      if (injectedEntry) {
+        deps.log?.(`The plan did not include the app's root component — adding ${injectedEntry} so the parts are actually shown.`);
+      }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
@@ -1192,12 +1241,25 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         const tiersRemaining = tiers.length - 1 - ti;
         const progress = { tiersRemaining, lastTierMs: Date.now() - tierStartedAt, elapsedMs: Date.now() - laneStartedAt, overallMs };
         if (!canFinishRemainingTiers(progress)) {
-          if (generatedCount() >= minFiles) break; // enough files to be a real app — finish this build honestly
+          // 🔴 "ENOUGH FILES" IS NOT "AN APP" (autopsy 3ab93068). The shell tier — the root component
+          // that mounts everything — is generated LAST, so breaking here before it ran meant four
+          // finished components and a page that still said "Hello World", reported as a success. A
+          // lane may stop early only when the root is already written; otherwise it hands off below.
+          if (generatedCount() >= minFiles && unwrittenEntries(manifest, written.map((f) => f.path)).length === 0) break;
           throw new Error(`simple-build ${earlyBailReason(progress)}`);
         }
       }
       clock.generateMs = Date.now() - generateStartedAt;
       if (generatedCount() < minFiles) throw new Error('too_few_files_generated');
+      // The same rule for the other way a root goes missing: its own generation call failed (genOne
+      // returns null). The wording contains "stopped early" ON PURPOSE — that is what routes it to the
+      // salvage path, so every finished file reaches the full builder instead of being thrown away.
+      {
+        const unwritten = unwrittenEntries(manifest, written.map((f) => f.path));
+        if (unwritten.length > 0) {
+          throw new Error(`simple-build fast lane stopped early — the app's root component (${unwritten.join(', ')}) was not written, so the files built so far are not connected to the page yet`);
+        }
+      }
       // DETERMINISTIC IMPORT SELF-HEAL before the files are written/previewed (jungle-game report
       // 104f5b09 + fae70e42): (1) fix unambiguous named<->default import mismatches; (2) ADD a
       // forgotten shared-symbol import — a value used but never imported (e.g. Background.ts using

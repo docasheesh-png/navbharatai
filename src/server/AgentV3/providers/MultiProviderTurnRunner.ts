@@ -834,13 +834,15 @@ export function makeMultiProviderTurnRunner(
            * call is our accounting and is deliberately left out; `isTimeoutProviderError` is the
            * same test the bench uses, so the two can never disagree about what a timeout is.
            */
+          //
+          // 🔴 AND THE SENTENCE ABOVE WAS FALSE FOR A DAY (autopsy 3a0a8f7f, 2026-09-23). The comment
+          // promised the exclusion and the code never made it: a fast-lane contract call cut off by
+          // the lane's own cap reached the final `: 'error'` arm and was reported as "1 error (55.9s)"
+          // against KIMI — a vendor fault, in the one line written to stop exactly that. The kind is
+          // now decided by `wasteKindFor`, which says `null` for our own clock, and a test holds it.
           try {
-            const wastedMs = Math.max(0, now() - attemptStartedAt);
-            const kind = isSlowStreamAbandon(err) ? 'crawl'
-              : isTimeoutProviderError(err) ? 'timeout'
-                : isRateLimitProviderError(err) ? 'rate-limit'
-                  : 'error';
-            opts.onAttemptWasted?.(reportName, kind, wastedMs);
+            const kind = wasteKindFor(err);
+            if (kind) opts.onAttemptWasted?.(reportName, kind, Math.max(0, now() - attemptStartedAt));
           } catch { /* telemetry only — it must never replace the error below */ }
           if (isSlowStreamAbandon(err)) {
             abandonedSlowRung = true;
@@ -933,4 +935,18 @@ export function makeMultiProviderTurnRunner(
       throw new Error(`${prefix}. Last error: ${reason}${fatalProviderHint(reason)}`);
     },
   };
+}
+
+
+/**
+ * What kind of provider waste one failed attempt was — or `null` when it was not the provider's
+ * waste at all because OUR OWN clock ended it (a lane cap, a build budget). Budget-ended is checked
+ * FIRST: such an error can also read as a timeout, and the order is the whole rule. Pure.
+ */
+export function wasteKindFor(err: unknown): 'timeout' | 'crawl' | 'rate-limit' | 'error' | null {
+  if (isBudgetEndedError(err)) return null;
+  if (isSlowStreamAbandon(err)) return 'crawl';
+  if (isTimeoutProviderError(err)) return 'timeout';
+  if (isRateLimitProviderError(err)) return 'rate-limit';
+  return 'error';
 }

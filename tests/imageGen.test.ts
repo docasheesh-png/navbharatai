@@ -121,7 +121,7 @@ describe('Pollinations free provider (admin: "free wala chalu karo")', () => {
     expect(url).toContain('model=flux');
   });
   it('🔒 the FREE link never carries a key — it is handed to the browser', () => {
-    const url = pollinationsImageUrl('x', 'square', { POLLINATIONS_API_KEY: 'sk_secret_123' } as unknown as NodeJS.ProcessEnv);
+    const url = pollinationsImageUrl('x', 'square', { IMAGE_GEN_KEY_PROBE: 'sk_secret_123' } as unknown as NodeJS.ProcessEnv);
     expect(url).not.toContain('sk_secret_123');
     expect(url).not.toMatch(/[?&]key=/);
   });

@@ -425,7 +425,6 @@ describe('the feature is actually wired to both tiers', () => {
       .join('\n');
 
   const FREE = 'src/components/ide/AIImageGenerator.tsx';
-  const PRO = 'src/components/ide/ImageStudioPro.tsx';
   const EDITOR = 'src/components/ide/TextOverlayEditor.tsx';
 
   // ⚠️ A BOUNDARY, NOT `toContain` — and this is not theoretical fussiness. The first draft of these
@@ -440,18 +439,13 @@ describe('the feature is actually wired to both tiers', () => {
     expect(rendersEditor(code(FREE))).toBe(true);
   });
 
-  it('the Pro studio renders the editor too — a paying user never loses a capability', () => {
-    expect(rendersEditor(code(PRO))).toBe(true);
-  });
-
   it('the boundary check rejects a renamed element, which a substring check does not', () => {
     expect(rendersEditor('<TextOverlayEditor imageUrl={u} />')).toBe(true);
     expect(rendersEditor('<TextOverlayEditorXX imageUrl={u} />')).toBe(false);
   });
 
-  it('both tiers apply the result, so Done is not a button that does nothing', () => {
+  it('the generator applies the result, so Done is not a button that does nothing', () => {
     expect(code(FREE)).toContain('onApply=');
-    expect(code(PRO)).toContain('onApply=');
   });
 
   it('the editor has exactly ONE drawing path — preview and export cannot diverge', () => {

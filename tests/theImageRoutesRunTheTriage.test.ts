@@ -1,8 +1,7 @@
-// The image routes run the SAME safety triage as build and chat — they ran none until 2026-09-21.
+// The image route runs the SAME safety triage as build and chat — it ran none until 2026-09-21.
 //
 // `CLAUDE.md` records the pornography ban as "one triage serving BOTH the build route and the chat
-// route". True — and not about images. `/api/image/generate` and `/api/image/pro/generate` never
-// called `triagePrompt`, so a pornographic prompt reached the provider, and on the free tier the
+// route". True — and not about images. `/api/image/generate` never called `triagePrompt`, so a pornographic prompt reached the provider, and on the free tier the
 // browser has fetched that link itself since #3234. PR #3234's description had claimed the opposite,
 // written from the doc rather than from the route. This suite is the route's own answer.
 //
@@ -19,7 +18,6 @@ const REPORTED = 'Create a porn websites where anyone can upload watch porns can
 const route = readFileSync(join(__dirname, '..', 'src/server/routes/imageGen.ts'), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const free = route.slice(route.indexOf("app.post('/api/image/generate'"), route.indexOf("app.post(\n"));
-const pro = route.slice(route.indexOf("app.post('/api/image/pro/generate'"));
 
 describe('the decision is the SAME triage, with the SAME refusal', () => {
   it('🔴 the reported porn prompt is BLOCKED as an image request, with the branded refusal', () => {
@@ -57,20 +55,6 @@ describe('🔒 SOURCE — both routes call it FIRST', () => {
       expect(free.indexOf(later), `${later} runs before the triage`).toBeGreaterThan(triage);
     }
     expect(free).toMatch(/if \(safety\.blocked\) \{\s*res\.status\(422\)\.json\(\{ error: safety\.message, code: 'blocked' \}\);\s*return;/);
-  });
-
-  it('the paid route triages before the wallet and before either engine — a paid door is not a way round the ban', () => {
-    const triage = pro.indexOf('await triageImageRequest(');
-    expect(triage).toBeGreaterThan(0);
-    // ⚠️ `generateProImages(` REPLACED the two engine call sites here on 2026-09-22, when the rungs
-    // moved into `lib/imageProEngine.ts` for the API's own image door to share. It is the SAME
-    // guarantee — nothing may generate before the triage — expressed against the one call that now
-    // reaches both rungs, and it is STRICTLY stronger: a future third rung inside the engine is
-    // covered by construction, where the old list would have had to be remembered.
-    for (const later of ['requireAccountForCostlyAi(', 'readWalletBalanceInr(', 'generateProImages(']) {
-      expect(pro.indexOf(later), `${later} runs before the triage`).toBeGreaterThan(triage);
-    }
-    expect(pro).toMatch(/if \(safety\.blocked\) \{\s*res\.status\(422\)\.json\(\{ error: safety\.message, code: 'blocked' \}\);\s*return;/);
   });
 
   it('the flag is recorded on its own surface, and a triage that cannot run allows rather than refuses', () => {

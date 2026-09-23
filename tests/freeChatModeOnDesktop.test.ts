@@ -77,7 +77,8 @@ describe('the button, in the composer — AIChat', () => {
   it('renders only when asked for, and never beside the Pro dropdown that owns the same slot', () => {
     expect(CHAT).toContain("const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');");
     // The rendering is the shared component now, wired to this surface's own opener.
-    expect(CHAT).toContain('{showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}');
+    // Since 2026-09-23 the shared two-row shell renders it, in the rail left of the box.
+    expect(CHAT).toContain('onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}');
   });
 
   it('is a real, accessible control that opens the picker', () => {
@@ -94,23 +95,21 @@ describe('the button, in the composer — AIChat', () => {
     expect(BUTTON).toContain('h-12');
   });
 
-  it('sits OUTSIDE the message box, immediately to its LEFT — and the box itself is untouched', () => {
-    const buttonAt = CHAT.indexOf('{showFreeModeButton && <ModeButton');
-    const box = CHAT.indexOf('<div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">');
-    const textarea = CHAT.indexOf('placeholder="Ask NavBharatAI..."');
-    expect(box).toBeGreaterThan(-1);
-    // Order in the source is order on screen: [ Mode ] then [ the box ].
-    expect(buttonAt).toBeGreaterThan(-1);
-    expect(buttonAt).toBeLessThan(box);
-    expect(box).toBeLessThan(textarea);
-    // The row exists ONLY while the button shows; hidden ⇒ `contents`, i.e. no box of its own, so the
-    // mobile layout is byte-for-byte what it was ("mobile wala kuch touch nahi karna").
-    // Since 2026-09-23 the same row also holds the History button (to Mode's left), so the row opens
-    // when EITHER control shows — and still collapses to `contents` when neither does.
-    expect(CHAT).toContain("const showFreeLeftControls = showFreeModeButton || showFreeHistoryButton;");
-    expect(CHAT).toContain("className={showFreeLeftControls ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}");
-    // The textarea's own inset is EXACTLY what it was — the input box is not touched ("na inputbox").
-    expect(CHAT).toContain("onModeChange && activeAgent === 'navbharatai-pro' ? \"pl-32\" : \"pl-5\"");
+  it('sits OUTSIDE the message box, to its LEFT — History above it, the box beside them', () => {
+    // 2026-09-23 (admin sketch): the left column is [ History over Mode ], and it is the shell's, so
+    // every surface gets the same order. Order in the source is order on screen.
+    const SHELL = stripComments(read('src/components/chat/ComposerShell.tsx'));
+    const history = SHELL.indexOf('<HistoryButton onOpen={onOpenHistory} size="rail" />');
+    const mode = SHELL.indexOf('<ModeButton onOpen={onOpenMode} size="rail" />');
+    const box = SHELL.indexOf('<div className={`${COMPOSER_BOX_CLASS}');
+    expect(history).toBeGreaterThan(-1);
+    expect(mode).toBeGreaterThan(history);
+    expect(box).toBeGreaterThan(mode);
+    // No left column at all when neither door is passed — a phone, where the bottom bar has both.
+    expect(SHELL).toContain('const rail = onOpenHistory || onOpenMode ? (');
+    // The free chat hands the shell its textarea; Pro's own dropdown still owns the left inset.
+    expect(CHAT.indexOf('<ComposerShell')).toBeLessThan(CHAT.indexOf('placeholder="Ask NavBharatAI..."'));
+    expect(CHAT).toContain(`onModeChange && activeAgent === 'navbharatai-pro' && "pl-32"`);
     expect(CHAT).not.toContain('pl-24');
   });
 

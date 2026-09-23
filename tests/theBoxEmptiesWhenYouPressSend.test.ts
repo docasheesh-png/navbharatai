@@ -5,8 +5,8 @@
  *
  * Both image composers cleared their box only on SUCCESS. Every other box in this app clears at
  * send. The reason for the old behaviour was real and is kept — a failed send must hand the words
- * back — so the fix is clear-at-send plus restore-on-failure, through ONE pure rule both composers
- * share (`draftAfterFailedSend`), never two copies.
+ * back — so the fix is clear-at-send plus restore-on-failure, through ONE pure rule
+ * (`draftAfterFailedSend`), never two copies.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -29,11 +29,10 @@ describe('draftAfterFailedSend', () => {
   });
 });
 
-describe('both composers follow the rule — at the source, since a hook cannot be rendered here', () => {
+describe('the composer follows the rule — at the source, since a hook cannot be rendered here', () => {
   const free = readFileSync(join(process.cwd(), 'src/components/ide/AIImageGenerator.tsx'), 'utf8');
-  const pro = readFileSync(join(process.cwd(), 'src/components/ide/ImageStudioPro.tsx'), 'utf8');
 
-  for (const [name, src, handler] of [['free composer', free, 'const handleGenerate = async () => {'], ['pro studio', pro, 'const generate = async () => {']] as const) {
+  for (const [name, src, handler] of [['free composer', free, 'const handleGenerate = async () => {']] as const) {
     it(`${name}: the box is emptied BEFORE the request goes out, and restored on failure`, () => {
       const start = src.indexOf(handler);
       expect(start).toBeGreaterThan(0);

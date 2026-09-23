@@ -149,7 +149,7 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { STARTER_ENTRY_PATHS, starterAppBlocker } from './stillTheStarterApp';
+import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
@@ -1283,15 +1283,15 @@ export class ToolDispatcher {
    * fail real builds on our own trouble — the same rule the timeout above already follows.
    */
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
+    // The SAME question every render proof asks (`entryIsStillTheStarter`) — one answer, so the gate
+    // and the proofs can never disagree about the same file again (autopsy 0d297b25).
     try {
-      for (const path of STARTER_ENTRY_PATHS) {
-        let content: string;
-        try { content = await withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'starter-entry-read'); }
-        catch { continue; }                       // not this framework's entry, or unreadable — try the next
-        const blocker = starterAppBlocker(content);
-        if (!blocker) return report;              // the entry EXISTS and has been edited → genuinely built
-        return { ...report, ready: false, blockers: [...report.blockers, blocker] };
-      }
+      const starter = await entryIsStillTheStarter(
+        (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'starter-entry-read'),
+      );
+      if (!starter) return report;
+      const blocker = starterAppBlocker(STARTER_ENTRY_CONTENT);
+      if (blocker) return { ...report, ready: false, blockers: [...report.blockers, blocker] };
     } catch { /* best-effort — never fail a build on this check's own trouble */ }
     return report;
   }

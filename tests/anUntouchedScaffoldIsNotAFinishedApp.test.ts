@@ -101,8 +101,15 @@ describe('the wiring — asserted from source, comments stripped', () => {
   it('it fails OPEN — an unreadable entry leaves the report untouched', () => {
     const at = dispatcher.indexOf('_blockIfStillTheStarterApp(report: ReadinessReport)');
     const body = dispatcher.slice(at, at + 900);
-    expect(body).toContain('catch { continue; }');
-    expect(body.trimEnd().endsWith('return report;\n  }') || body.includes('return report;')).toBe(true);
+    // Re-aimed (autopsy 0d297b25): the per-entry walk moved into the SHARED `entryIsStillTheStarter`,
+    // which every render proof now asks too — so "unreadable ⇒ skip" is asserted where it now lives,
+    // and the dispatcher must still return the report untouched when the answer is not "starter".
+    const shared = readFileSync(join(process.cwd(), 'src/server/AgentV3/stillTheStarterApp.ts'), 'utf8');
+    const walk = shared.slice(shared.indexOf('export async function entryIsStillTheStarter'));
+    expect(walk).toContain('catch { continue; }');
+    expect(walk).toContain('return false;');
+    expect(body).toContain('if (!starter) return report;');
+    expect(body.includes('return report;')).toBe(true);
   });
 
   it('every candidate entry path is a real scaffold entry name', () => {

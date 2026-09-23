@@ -21,9 +21,7 @@ import { Check, ChevronDown, X } from 'lucide-react';
  * fourth. There is one sheet; every group gets the same one.
  *
  * 🔴 THE SHEET IS RENDERED INTO `document.body`, AND THAT IS A BUG FIX, NOT A STYLE CHOICE.
- * Admin, 2026-09-21: *"pro (paid) image size/formate (1:1 default) change nahi ho raha"* — while the
- * free tier's four selectors worked. The difference was one class: `ImageStudioPro`'s footer carries
- * `backdrop-blur`, and an element with a `backdrop-filter` (like `transform` and `filter`) becomes
+ * A size selector that opened inside a footer carrying `backdrop-blur` could not be changed: an element with a `backdrop-filter` (like `transform` and `filter`) becomes
  * the CONTAINING BLOCK for every `position: fixed` descendant. So `fixed inset-0` resolved to that
  * ~100px footer strip instead of the viewport, the panel's `overflow-hidden` clipped what was left,
  * and the sheet opened where nobody could see it. The value never changed because the list was never

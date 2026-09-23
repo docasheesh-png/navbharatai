@@ -16,7 +16,7 @@
 //      Absent entirely when no AI is open (the Professionals hub), because there is nothing to return to.
 //   2. "NavBharatAI FREE"   — always a BRAND-NEW free chat. (This is the old "FREE +", renamed; the
 //      old resume-row's job moved to row 1, so the `+` had nothing left to distinguish.)
-//   3. "Image Generator AI" — the SAME module Other Tools opens, free AND paid together, untouched.
+//   3. "Image Generator AI FREE" — the SAME module Other Tools opens, untouched.
 //   4. Doctor AI, then every professional — the SAME real experts as the Professionals hub, opened
 //      through the SAME navigation, so every engine, disclaimer, pass-gate and billing rule they have
 //      today applies untouched. A new door, never a side-door. Each now starts a NEW chat.
@@ -114,14 +114,14 @@ export const FREE_MODE_ID = 'free';
 /**
  * The image studio's OWN view id, not a new one.
  *
- * Other Tools already opens `imagegen`, which renders `AIImageGenerator` — the component that carries
- * the Free/Pro toggle. Reusing the id is what makes the admin's "same to same" literal: this row is the
- * same surface reached by a second door, with the same tiers, the same price and the same billing. A
+ * Other Tools already opens `imagegen`, which renders `AIImageGenerator`. Reusing the id is what
+ * makes the admin's "same to same" literal: this row is the same surface reached by a second door. A
  * separate id would have been a second copy to keep in sync.
  */
 export const IMAGE_MODE_ID = 'imagegen';
 
-export const IMAGE_MODE_NAME = 'Image Generator AI';
+/** Named like "NavBharatAI FREE", because it is free (admin 2026-09-23: "image generator ai 'free'"). */
+export const IMAGE_MODE_NAME = 'Image Generator AI FREE';
 
 /** What a recent row's id is built from. See ModeEntry.id for why it cannot be the bare view id. */
 export const RECENT_MODE_PREFIX = 'recent:';

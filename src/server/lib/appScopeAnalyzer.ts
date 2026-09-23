@@ -66,6 +66,40 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
   { name: 'an AI like Claude/ChatGPT', re: /\b(like|jaisa|jaise|clone of)\s+(claude|chatgpt|gpt-?\d?|gemini|openai|an?\s+ai)\b|\bapna\s+chatgpt\b|\bchatgpt\s+(jaisa|banao)\b/i },
 ];
 
+/**
+ * 🔴 A PRODUCT NAMED AS A TOOL IS NOT A CLONE REQUEST (autopsy 0d297b25, 2026-09-23).
+ *
+ * "Download APK → Send APK to Phone 2 using WhatsApp/Drive/USB" classed a request to package an existing
+ * app as *"LARGE — clone of WhatsApp"*, and the mega-app roadmap planner spent a model call building a
+ * roadmap for a WhatsApp clone nobody asked for. The Zoom entry above had already learned this for ONE
+ * product ("a product reference names the product AS a product, or asks for a likeness of it"); every
+ * other entry matched the bare name. This is that rule, applied to the whole list: a mention is a TOOL
+ * mention when a channel preposition sits right before it (using / via / through / on / with / to /
+ * share on / login with …) or an integration noun right after it (API, login, share, notifications,
+ * link …). The product counts only if at least ONE mention is not a tool mention — so "a WhatsApp clone
+ * with WhatsApp login" still escalates, and "WhatsApp jaisa app" still does.
+ *
+ * ⚠️ PRECISION-FIRST in the NON-escalating direction on purpose: a missed clone falls back to today's
+ * ordinary build (which the feature count may still escalate), while a false clone costs a planner call
+ * and hands the build a roadmap for the wrong app.
+ */
+const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+)?$/i;
+const TOOL_AFTER = /^[\s/]*(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|channel|bot|webhook|ads)\b/i;
+
+export function namesAsProduct(text: string, re: RegExp): boolean {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+  for (const m of text.matchAll(g)) {
+    const at = m.index ?? 0;
+    const before = text.slice(Math.max(0, at - 24), at);
+    const after = text.slice(at + m[0].length, at + m[0].length + 24);
+    // A list of channels ("WhatsApp/Drive/USB") inherits the preposition before its first item.
+    const listHead = before.replace(/(?:[\w.-]+\s*\/\s*)+$/, '');
+    if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
+    return true;
+  }
+  return false;
+}
+
 /** Heavy infrastructure a one-shot build genuinely cannot deliver — each is a strong escalate signal. */
 const HEAVY_INFRA: Array<{ label: string; re: RegExp }> = [
   { label: 'real-time messaging between users', re: /\b(chat|message|messaging|messenger)\b[^.]{0,40}\b(between|with other|other user|each other|real.?time|do users|2 users|do log|ek dusre)\b|real.?time chat|live chat between/i },
@@ -111,7 +145,7 @@ export function analyzeAppScope(prompt: string): AppScope {
   const text = String(prompt || '');
   const signals: string[] = [];
 
-  const famous = FAMOUS_APPS.find((f) => f.re.test(text));
+  const famous = FAMOUS_APPS.find((f) => namesAsProduct(text, f.re));
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(text));
   const feats = featureCount(text);
   const smallHint = CLEARLY_SMALL.test(text);

@@ -79939,3 +79939,46 @@ All 109 existing enhancer/craft/composer tests unchanged.
   tells a 404 from a failure to check, and an unknown answer falls to the prebuilt side. **The KB sentence
   overclaimed** ("GitHub never compiles it again") — it now says when the source path still applies.
 
+
+---
+
+## 2026-09-23 — 🌊 A streaming client got an EMPTY answer it had already paid for (a defect in #3246)
+
+Found by checking my own shipped API the day after it merged, not from a report. **Nothing in the
+developer API read `stream`.** A chat UI built on a standard SDK almost always sends `stream: true`; it
+received a plain JSON body, parsed it as an event stream, found no events, and handed the developer an
+**empty answer — already charged to their wallet.** A paid answer nobody could read, reachable by the
+single most common way the API would be called. #3246's own description listed "no streaming" as *not
+done*; that was true and incomplete — "not supported" and "silently returns nothing while billing" are
+different states, and only the first is honest.
+
+### The fix, and the design choice a later session must not "improve"
+
+`stream: true` is now honoured with a real event stream (`chatCompletionStream`, pure): one content
+chunk, one finish chunk, the usage chunk when `stream_options.include_usage` asks for it **and** it was
+measured, then `[DONE]`. Both chat doors write through ONE function (`sendCompletion`), so the plain
+assistant and the experts cannot drift.
+
+🔒 **The answer arrives in ONE piece, deliberately.** This repo's streaming provider path reports **no
+token counts** (`routeStream` logs `usageMeasured: false`), and THE ONE-WALLET LAW charges ₹0 for an
+unmeasured turn rather than inventing a number. Real token-by-token streaming on this door would
+therefore have given **every API caller every answer free, silently, on NavBharatAI's bill.** So the
+stream carries the answer from the SAME measured call the non-streaming door makes, and a test asserts
+the two are charged identically. **Do not swap it for a live stream until the streaming path reports
+usage** — the day it does, `chatCompletionStream` is the only thing to change. The Developer Tools page
+and the knowledge base both say "one piece" plainly, so a developer who chose streaming for speed is
+told rather than left to discover it.
+
+Refusals (400/402/403/422/429/503) stay ordinary JSON with their status — an SDK reads the status
+before deciding whether a body is a stream, so nothing about error handling changes for the caller.
+
+### Locked
+
+`tests/theApiStreamsWhatItCharges.test.ts` — 15 cases, parsing the response **the way an SDK does**
+(split on blank lines, strip `data: `, stop at `[DONE]`), because a test of our own builder alone
+would have passed while the original bug shipped. **Proven by reversion four ways:** the original bug
+itself (stream ignored → 3 fail), content written raw instead of JSON-encoded (an answer containing a
+blank line would end the event early), a usage chunk sent for an unmeasured turn, and the expert door
+dropping the caller's choice. One ordering guard in `theApiGrewFourDoors.test.ts` was re-aimed onto
+`sendCompletion` and made stronger: it used to prove two markers existed, it now proves per door that
+the answer is written BEFORE the money moves.

@@ -34,6 +34,7 @@ import {
   refusalMessage, refusalStatus, chatCompletionResponse, apiError, takeRateSlot, keyDayKey,
   normalizeDailyCapInr, professionalIdFromModel, professionalModelName, readImageRequest,
   imageGenerationResponse, MAX_IMAGES_PER_REQUEST, MAX_IMAGE_PROMPT_CHARS, PUBLIC_MODEL_NAME,
+  wantsStream, wantsStreamUsage, chatCompletionStream,
   type RateWindow, type ChatMessage,
 } from '../lib/developerApi';
 import { hasScope, effectiveScopes, FULL_ACCESS_SCOPE } from '../lib/ApiKeyManager';
@@ -224,6 +225,50 @@ function settleKeyTurn(
   );
 }
 
+/** How the caller asked to receive the answer. Read once per request, from the raw body. */
+interface StreamChoice { on: boolean; includeUsage: boolean }
+
+function streamChoiceOf(body: unknown): StreamChoice {
+  return { on: wantsStream(body), includeUsage: wantsStreamUsage(body) };
+}
+
+/**
+ * Write one finished answer, in whichever format the caller asked for. Shared by BOTH chat doors, so
+ * the plain assistant and the experts cannot drift in how they answer a streaming client.
+ *
+ * ⚠️ Every refusal (400/402/403/422/429/503) is sent BEFORE this, as ordinary JSON with its status —
+ * which is what a standard SDK expects: it reads the status first and only then decides whether a
+ * body is an event stream. This function is reached only with an answer in hand.
+ */
+function sendCompletion(
+  res: Response,
+  content: string,
+  opts: {
+    id: string;
+    createdMs: number;
+    model: string;
+    usage: { inputTokens?: number; outputTokens?: number } | null;
+    stream: StreamChoice;
+  },
+): void {
+  if (opts.stream.on) {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    for (const event of chatCompletionStream(content, {
+      id: opts.id, createdMs: opts.createdMs, model: opts.model,
+      includeUsage: opts.stream.includeUsage, usage: opts.usage,
+    })) res.write(event);
+    res.end();
+    return;
+  }
+  res.status(200).json({
+    ...chatCompletionResponse(content, { id: opts.id, createdMs: opts.createdMs, usage: opts.usage }),
+    model: opts.model,
+  });
+}
+
 export function registerDeveloperApiRoutes(app: Express): void {
   // Per-IP, in memory — a key carries no Firebase token, so the shared limiter keys by address. It
   // bounds the shape of abuse a ₹ cap cannot see (a flood of free-model calls). `durable: false` for
@@ -307,7 +352,7 @@ export function registerDeveloperApiRoutes(app: Express): void {
           { scope: 'ai:professionals' }));
         return;
       }
-      await answerAsExpert(res, auth, now, expertId, request.system, request.messages);
+      await answerAsExpert(res, auth, now, expertId, request.system, request.messages, streamChoiceOf(req.body));
       return;
     }
 
@@ -325,11 +370,13 @@ export function registerDeveloperApiRoutes(app: Express): void {
     }
 
     const last = run.spend[run.spend.length - 1];
-    res.status(200).json(chatCompletionResponse(run.result.content, {
+    sendCompletion(res, run.result.content, {
       id: `${auth.keyId}-${now.toString(36)}`,
       createdMs: now,
+      model: PUBLIC_MODEL_NAME,
       usage: last ? { inputTokens: last.inputTokens, outputTokens: last.outputTokens } : null,
-    }));
+      stream: streamChoiceOf(req.body),
+    });
 
     // ── Money, AFTER the answer is out ──────────────────────────────────────────────────────
     settleKeyTurn(auth, now, gate.freeListed, run.spend);
@@ -355,7 +402,7 @@ export function registerDeveloperApiRoutes(app: Express): void {
       res.status(400).json(apiError('invalid_request', chatRequestHelp(request.reason)));
       return;
     }
-    await answerAsExpert(res, auth, now, routeParam(req.params.id), request.system, request.messages);
+    await answerAsExpert(res, auth, now, routeParam(req.params.id), request.system, request.messages, streamChoiceOf(req.body));
   });
 
   // ── ai:images ───────────────────────────────────────────────────────────────────────────────
@@ -503,6 +550,7 @@ async function answerAsExpert(
   id: string,
   developerSystem: string,
   messages: readonly ChatMessage[],
+  stream: StreamChoice,
 ): Promise<void> {
   const config = getProfessional(id);
   if (!config) {
@@ -533,14 +581,13 @@ async function answerAsExpert(
   }
 
   const usage = run.spend[run.spend.length - 1];
-  res.status(200).json({
-    ...chatCompletionResponse(run.result.reply, {
-      id: `${auth.keyId}-${now.toString(36)}`,
-      createdMs: now,
-      usage: usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : null,
-    }),
+  sendCompletion(res, run.result.reply, {
+    id: `${auth.keyId}-${now.toString(36)}`,
+    createdMs: now,
     // Which expert answered, under our own brand. Never the vendor beneath it.
     model: professionalModelName(config.id),
+    usage: usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : null,
+    stream,
   });
 
   settleKeyTurn(auth, now, gate.freeListed, run.spend);

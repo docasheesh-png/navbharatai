@@ -21,7 +21,8 @@
 // 🔑 OPENAI-COMPATIBLE ON PURPOSE. `POST /chat/completions` with `messages: [{role, content}]` in and
 // `choices[0].message.content` out is the shape every AI SDK on earth already speaks. A developer
 // points their existing client at our base URL and it works; a bespoke shape would cost them a
-// rewrite for no gain. Non-streaming only for now — said plainly rather than half-built.
+// rewrite for no gain. `stream: true` is honoured in the protocol and delivers the answer in ONE piece
+// — see `chatCompletionStream` for why that is the honest design, not a shortcut.
 //
 // PURE — no I/O, no clock, no env. The route owns every byte of I/O.
 
@@ -202,6 +203,86 @@ export function chatCompletionResponse(
       ? { usage: { prompt_tokens: Math.round(inTok), completion_tokens: Math.round(outTok), total_tokens: Math.round(inTok + outTok) } as ChatCompletionUsage }
       : {}),
   };
+}
+
+// ── Streaming ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Did the caller ask for a streamed answer? PURE.
+ *
+ * Only the literal `true` counts — `"true"`, `1` and `"yes"` are not what any SDK sends, and reading a
+ * truthy-looking string as consent would switch a caller's response FORMAT on a value they never meant.
+ */
+export function wantsStream(body: unknown): boolean {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  return b.stream === true;
+}
+
+/** Did the caller ask for the usage chunk? The standard spelling is `stream_options.include_usage`. */
+export function wantsStreamUsage(body: unknown): boolean {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const o = (b.stream_options && typeof b.stream_options === 'object' ? b.stream_options : {}) as Record<string, unknown>;
+  return o.include_usage === true;
+}
+
+/**
+ * 🌊 A streamed chat completion, as the exact server-sent events a standard SDK reads. PURE.
+ *
+ * 🔴 WHY THIS EXISTS (found 2026-09-23, in the API that shipped the day before). Nothing read `stream`.
+ * A chat UI built on a standard SDK almost always sends `stream: true`, received a plain JSON body,
+ * parsed it as an event stream, found no events, and handed the developer an EMPTY answer — which had
+ * already been charged to their wallet. A paid answer nobody could read.
+ *
+ * 🔒 WHY ONE PIECE AND NOT TOKEN-BY-TOKEN — the part a later session will want to "improve", so it is
+ * written down. The streaming provider path in this repo reports NO token counts (`routeStream` logs
+ * `usageMeasured: false`), and THE ONE-WALLET LAW charges ₹0 for an unmeasured turn rather than
+ * inventing a number. Real token streaming on this door would therefore let every API caller get every
+ * answer FREE, silently, on NavBharatAI's bill. So the answer comes from the SAME measured call the
+ * non-streaming door makes, and is written out as a valid event stream: one content chunk, one finish
+ * chunk, the usage chunk if it was asked for and was measured, then `[DONE]`. The developer's code works
+ * unchanged, the bill is the real one, and the only thing absent is the incremental arrival — which is
+ * said plainly on the Developer Tools page rather than implied. **Do not swap this for a live stream
+ * until the streaming path reports usage**; the day it does, this function is the only thing to change.
+ *
+ * ⚠️ The usage chunk carries `choices: []`, exactly as the standard has it: a client that reads
+ * `choices[0]` on every chunk must be able to tell the usage event apart, and an empty array is how.
+ */
+export function chatCompletionStream(
+  content: string,
+  opts: {
+    id: string;
+    createdMs: number;
+    model?: string;
+    includeUsage?: boolean;
+    usage?: { inputTokens?: number; outputTokens?: number } | null;
+  },
+): string[] {
+  const base = {
+    id: `chatcmpl-${opts.id}`,
+    object: 'chat.completion.chunk',
+    created: Math.floor(opts.createdMs / 1000),
+    model: opts.model || PUBLIC_MODEL_NAME,
+  };
+  const event = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+  const out = [
+    event({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] }),
+    event({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+  ];
+  if (opts.includeUsage) {
+    const inTok = Number(opts.usage?.inputTokens);
+    const outTok = Number(opts.usage?.outputTokens);
+    // Same rule as the non-streaming response: a count is sent only when it was MEASURED. An absent
+    // usage chunk means "not measured" — a zero would be a claim, and a developer may bill on it.
+    if (Number.isFinite(inTok) && Number.isFinite(outTok) && (inTok > 0 || outTok > 0)) {
+      out.push(event({
+        ...base,
+        choices: [],
+        usage: { prompt_tokens: Math.round(inTok), completion_tokens: Math.round(outTok), total_tokens: Math.round(inTok + outTok) },
+      }));
+    }
+  }
+  out.push('data: [DONE]\n\n');
+  return out;
 }
 
 export type ApiErrorCode =

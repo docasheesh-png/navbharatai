@@ -293,9 +293,19 @@ describe('🔒 EVERY MONEY DOOR PASSES THROUGH ONE GATE', () => {
   it('🔒 the money lands AFTER the answer, through one settlement both AI doors share', () => {
     expect((src.match(/function settleKeyTurn\(/g) || []).length).toBe(1);
     expect((src.match(/settleKeyTurn\(auth, now, gate\.freeListed, run\.spend\)/g) || []).length).toBe(2);
-    // The response is sent first in both — a money-path failure must never cost the caller the answer.
-    for (const marker of ['res.status(200).json(chatCompletionResponse(', 'res.status(200).json({']) {
-      expect(src.indexOf(marker)).toBeGreaterThan(-1);
+    // The answer is written first in both — a money-path failure must never cost the caller the answer.
+    // ⚠️ RE-AIMED 2026-09-23: this read `res.status(200).json(...)` markers until both doors moved onto
+    // `sendCompletion` (so a streaming client can read its answer too). The old check only proved the
+    // markers EXISTED; this one proves the ORDER, per door, which is what the rule actually says.
+    const doors = [
+      src.slice(src.indexOf("app.post('/api/chat/completions'"), src.indexOf("app.post('/api/professionals/:id/chat'")),
+      src.slice(src.indexOf('async function answerAsExpert(')),
+    ];
+    for (const door of doors) {
+      const answer = door.indexOf('sendCompletion(res,');
+      const money = door.indexOf('settleKeyTurn(auth, now, gate.freeListed, run.spend)');
+      expect(answer, 'the door writes no answer').toBeGreaterThan(-1);
+      expect(money, 'the answer must be written BEFORE the money moves').toBeGreaterThan(answer);
     }
   });
 

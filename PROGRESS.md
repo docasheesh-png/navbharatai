@@ -80189,3 +80189,17 @@ dev server died between first render at 512 s and the runtime check; ETA 2.9 min
   functional kind should get one verified repair on a green app is the admin's call, raised with them.
 - `PREVIEW_SNAPSHOT_STALE`: a post-green write by the runtime-error pass, while the model wrote no file.
   The report does not name the file.
+
+**Same PR, follow-up (2026-09-23):**
+- **The kit now ships the placeholder the image rule asks for.** `.nb-img` is a tinted gradient panel,
+  16:9. `.nb-img-square` makes it a tile. Both use tokens only.
+- The prompt rule names these classes. The rule also moved below the "WHICH SCAFFOLDS SHIP THE KIT" note:
+  it had been wedged between the kit rules and that note's "the classes above". A test guards the order,
+  and the test is reversion-proven.
+- **Measured, and NOT built: a Devanagari keyword list for the complexity scorer.** The English prompt
+  *"can you make me a professional news blog website"* goes the same way as the Hindi original: `chat`,
+  score 5, "matched nothing", and a second opinion is asked. Both scripts took the same path. The
+  `complex` verdict came from the second opinion, not from a failure to read Hindi, so a Hindi lexicon
+  would not have changed this build. It would also be the fixed-vocabulary list `signalsMatchedNothing`
+  warns against. What this build actually lost to that verdict was the 90 s fast lane, and fix 3 above
+  removes that loss.

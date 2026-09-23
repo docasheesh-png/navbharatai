@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { classifyRuntimeError, apiTesterHintFor, groupRuntimeErrors } from '../src/server/AgentV3/RuntimeErrorClassify';
+import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
 
 /**
  * Autopsy ac41a924 (2026-09-23): the one runtime error left in a finished news site was
@@ -54,5 +55,26 @@ describe('the build prompt stops the guess upstream', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/systemPrompt.ts'), 'utf8');
     expect(src).toContain('NEVER INVENT AN IMAGE URL');
     expect(src).toMatch(/CSS gradient panel/);
+  });
+
+  it('the design kit ships the placeholder the rule names, built from tokens only', () => {
+    expect(DESIGN_KIT_CSS).toMatch(/\.nb-img \{[^}]*aspect-ratio: 16 \/ 9/);
+    expect(DESIGN_KIT_CSS).toContain('.nb-img-square');
+    const rule = /\.nb-img \{[^}]*\}/.exec(DESIGN_KIT_CSS)![0];
+    expect(rule).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/systemPrompt.ts'), 'utf8');
+    expect(src).toContain('`.nb-img`');
+  });
+
+  it('the image rule does not split the kit rules from their "which scaffolds ship the kit" note', () => {
+    // The note says "the classes above"; a rule wedged between them made it read as the image rule's.
+    const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/systemPrompt.ts'), 'utf8');
+    const consistency = src.indexOf('Consistency IS the design.');
+    const note = src.indexOf('WHICH SCAFFOLDS SHIP THE KIT');
+    const image = src.indexOf('NEVER INVENT AN IMAGE URL');
+    expect(consistency).toBeGreaterThan(0);
+    expect(note).toBeGreaterThan(consistency);
+    expect(src.slice(consistency, note)).not.toContain('NEVER INVENT AN IMAGE URL');
+    expect(image).toBeGreaterThan(note);
   });
 });

@@ -338,6 +338,7 @@ import {
   reconcileWithSink,
   perTierBilledUsd,
   providerBaselineCostUsd,
+  modelUsageFromEntries,
   type ProviderModelEntry,
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
@@ -21355,6 +21356,17 @@ async function noteBuildOutcome(
           providerUsage: reconciledProviderUsage,
           wasLoss: effectiveBilledUsd === 0 && buildUsage.total().outputTokens > 0,
           lossRealCostUsd: effectiveBilledUsd === 0 ? sonnetEquivalentUsd(buildUsage.total()) : 0,
+          // 🔴 WHAT IT REALLY COST — the figure `decideBuildBilledUsd` already priced with the
+          // per-model rate card, recorded instead of thrown away. Until 2026-09-23 every cost in the
+          // admin usage report was `sonnetEquivalentUsd` above: an honest upper bound, displayed
+          // under a field called `marginUsd` and painted red, so a window that charged 18% of
+          // Sonnet's price read as a $1,257 loss. These two lines are the whole fix for that, and
+          // they cost nothing — both numbers were already in scope, one variable away.
+          realCostUsd: decidedRealCostUsd,
+          sandboxUsd: decidedSandboxUsd,
+          // Per-RUNG tokens. `reconciledProviderUsage` above names only the vendor, and one vendor
+          // holds rungs 20x apart in price, so no downstream reader could price it.
+          modelUsage: modelUsageFromEntries(providerLedger.entries()),
         })
         .catch(() => {});
 

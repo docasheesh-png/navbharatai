@@ -159,7 +159,15 @@ describe('🔴 A FIELD NAME THE SERVER DOES NOT SEND IS A CARD THAT SHOWS NOTHIN
   const ROUTER = read('src/server/AI/Router/AIRouter.ts');
 
   it('the usage report reads the fields UsageReport really declares', () => {
-    for (const field of ['perProvider', 'totalBilledUsd', 'totalBaselineCostUsd', 'marginUsd', 'lossBuilds']) {
+    // 2026-09-23: the MEASURED half joins the list. The card used to lead with `marginUsd`, which is
+    // `billed − Sonnet-equivalent baseline` — every engine priced at one flat rate — so a window that
+    // charged 18% of that price rendered as a $1,257 loss in red. The baseline fields stay required
+    // (they are still shown, as a reference) and the real ones are required beside them, so a card
+    // that quietly stops showing what a build actually cost fails here.
+    for (const field of [
+      'perProvider', 'totalBilledUsd', 'totalBaselineCostUsd', 'marginUsd', 'lossBuilds',
+      'totalRealSpendUsd', 'realMarginUsd', 'realCostCoverage', 'perModel', 'lossSpendUsd',
+    ]) {
       expect(TELEMETRY, `UsageReport no longer declares ${field}`).toContain(`${field}`);
       expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
     }
@@ -173,7 +181,13 @@ describe('🔴 A FIELD NAME THE SERVER DOES NOT SEND IS A CARD THAT SHOWS NOTHIN
   });
 
   it('it does NOT read the names the first version guessed', () => {
-    expect(PANEL_CODE).not.toContain('realCostUsd');
+    // ⚠️ NARROWED 2026-09-23, and the reason it had to be is worth keeping. This read
+    // `not.toContain('realCostUsd')` — a SUBSTRING ban written when no such field existed anywhere.
+    // `UsageReport` now really declares `totalRealCostUsd`, so the old line forbade the panel from
+    // ever reading a field the server genuinely sends: a guard still firing after its reason expired,
+    // which this repo has paid for before. What it MEANT is asserted instead — the panel must not
+    // read a TOP-LEVEL `realCostUsd` off the payload, because the route does not send one.
+    expect(PANEL_CODE).not.toMatch(/d\?\.realCostUsd\b/);
     // `d?.rows` is NOT asserted against: the takedowns card legitimately reads `rows`, which is what
     // that route really returns. Forbidding a field name globally because one card once misused it
     // would ban a correct reading elsewhere.

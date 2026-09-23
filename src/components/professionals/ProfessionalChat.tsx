@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { ModeButton } from '../chat/ModeButton';
-import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
@@ -94,7 +94,7 @@ async function fileToAttachment(file: File): Promise<{ name: string; type: strin
   return { name: file.name, type: file.type || 'application/octet-stream', base64: await readRaw() };
 }
 
-export function ProfessionalChat({ config, userId, conversationId, onScreen = true, onOpenModePicker }: {
+export function ProfessionalChat({ config, userId, conversationId, onScreen = true, onOpenModePicker, onOpenHistory }: {
   config: ProfessionalChatConfig;
   userId?: string;
   /**
@@ -118,6 +118,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
    * carries Mode — App.tsx decides that once for every surface rather than each one guessing.
    */
   onOpenModePicker?: (() => void) | undefined;
+  /** Opens chat history from the composer's left column. Absent ⇒ no History button (the phone's bottom bar has it). */
+  onOpenHistory?: (() => void) | undefined;
 }) {
   // ONE definition of where a professional's conversation lives (professionalChatStore) — the key used
   // to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close has to agree with both.
@@ -409,7 +411,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       <div className={COMPOSER_PANEL_CLASS}>
         <div className="max-w-4xl mx-auto">
           <ComposerShell
-            left={<ModeButton onOpen={onOpenModePicker} />}
+            onOpenHistory={onOpenHistory}
+            onOpenMode={onOpenModePicker}
             controls={(
               <>
                 <AttachMenu
@@ -433,6 +436,10 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                     .slice(-12)
                     .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
                 />
+              </>
+            )}
+            send={(
+              <>
                 {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
                 {loading ? (
                   <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
@@ -474,7 +481,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
               placeholder={`Ask ${config.name}…`}
               rows={1}
               className={COMPOSER_TEXTAREA_CLASS}
-              style={{ paddingRight: composerTextPadding(3), maxHeight: '240px', overflowY: 'auto' }}
+              style={{ maxHeight: '240px', overflowY: 'auto' }}
             />
           </ComposerShell>
         </div>

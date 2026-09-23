@@ -1,7 +1,7 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModeButton } from '../chat/ModeButton';
-import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { Send, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
@@ -95,10 +95,11 @@ const MODE_LABEL: Record<Mode, string> = {
   'image-text-to-image': 'Image + Text → Image',
 };
 
-export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
+export function ImageStudioPro({ onImageGenerated, onOpenModePicker, onOpenHistory }: {
   onImageGenerated?: (url: string, prompt: string) => void;
   /** Open the ONE mode picker; undefined on a phone, where the bottom bar carries Mode. */
   onOpenModePicker?: (() => void) | undefined;
+  onOpenHistory?: (() => void) | undefined;
 }) {
   const [prompt, setPrompt] = useState('');
   const [ref, setRef] = useState<string | null>(null);
@@ -404,7 +405,8 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
               chat's own send button. The ₹1 price is still stated where it always was — on the Pro chip
               and in this button's tooltip — so the colour is not the only thing telling the user. */}
           <ComposerShell
-            left={<ModeButton onOpen={onOpenModePicker} />}
+            onOpenHistory={onOpenHistory}
+            onOpenMode={onOpenModePicker}
             controls={(
               <>
                 <button
@@ -416,6 +418,10 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
                 >
                   <ImagePlus className="w-4 h-4" />
                 </button>
+              </>
+            )}
+            send={(
+              <>
                 <button
                   type="button"
                   onClick={() => void generate()}
@@ -448,7 +454,6 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
               }}
               placeholder={ref ? 'Describe the change, or press send to re-imagine…' : 'Describe the image you want…'}
               className={COMPOSER_TEXTAREA_CLASS}
-              style={{ paddingRight: composerTextPadding(2) }}
             />
           </ComposerShell>
           {promptLimit.near && (

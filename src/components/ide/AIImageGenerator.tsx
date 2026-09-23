@@ -1,7 +1,7 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
-import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
@@ -31,6 +31,8 @@ interface Props {
   onImageGenerated?: (imageUrl: string, prompt: string) => void;
   /** Open the ONE mode picker (admin 2026-09-21); undefined on a phone, where the bottom bar has it. */
   onOpenModePicker?: (() => void) | undefined;
+  /** Opens chat history from the composer's left column. Absent ⇒ no History button (the phone's bottom bar has it). */
+  onOpenHistory?: (() => void) | undefined;
 }
 
 const STYLES = [
@@ -186,7 +188,7 @@ function readOptionsOpen(): boolean {
  * places out of three.
  */
 const PRO_PRICE_INR = 1;
-export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) {
+export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHistory }: Props) {
   // What the user PRESSED this visit, and what is actually shown, are two different things — see
   // `effectiveTier` below. Keeping them separate is what lets a dead paid tier be hidden WITHOUT
   // discarding a press the user really made: the moment Pro is switched on, their choice takes
@@ -785,7 +787,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
 
       {effectiveTier === 'pro' ? (
         <div className="flex-1 min-h-0">
-          <ImageStudioPro onImageGenerated={onImageGenerated} onOpenModePicker={onOpenModePicker} />
+          <ImageStudioPro onImageGenerated={onImageGenerated} onOpenModePicker={onOpenModePicker} onOpenHistory={onOpenHistory} />
         </div>
       ) : (
       <div className="flex-1 min-h-0 flex flex-col">
@@ -988,6 +990,43 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   <p className="text-xs text-danger leading-relaxed">
                     {errorMsg || 'Image could not be generated. Retry or change the prompt.'}
                   </p>
+</> : <>Options <ChevronUp className="w-3 h-3" /></>}
+              </button>
+            </div>
+            {optionsOpen && (
+            <div id="nbai-image-options" className="grid grid-cols-2 gap-2">
+              <ImageOptionSelect
+                label="Image type"
+                heading="What are you making?"
+                options={IMAGE_TYPE_OPTIONS}
+                value={imageType}
+                onChange={setImageType}
+              />
+              <ImageOptionSelect
+                label="Style"
+                heading="How should it look?"
+                options={STYLES}
+                value={style}
+                onChange={setStyle}
+              />
+              <ImageOptionSelect
+                label="Size / format"
+                heading="What shape do you need?"
+                options={SIZES}
+                value={size}
+                onChange={setSize}
+              />
+              <ImageOptionSelect
+                label="Colour hint"
+                heading="Lean toward a colour?"
+                options={COLOR_HINTS}
+                value={colorHint}
+                onChange={setColorHint}
+              />
+            </div>
+            )}
+              send={(
+                <>
                   <button
                     type="button"
                     onClick={() => void handleGenerate()}
@@ -1041,41 +1080,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 aria-controls="nbai-image-options"
                 className="shrink-0 text-[10px] text-muted hover:text-ink flex items-center gap-1 transition-colors"
               >
-                {optionsOpen ? <>Hide <ChevronDown className="w-3 h-3" /></> : <>Options <ChevronUp className="w-3 h-3" /></>}
-              </button>
-            </div>
-            {optionsOpen && (
-            <div id="nbai-image-options" className="grid grid-cols-2 gap-2">
-              <ImageOptionSelect
-                label="Image type"
-                heading="What are you making?"
-                options={IMAGE_TYPE_OPTIONS}
-                value={imageType}
-                onChange={setImageType}
-              />
-              <ImageOptionSelect
-                label="Style"
-                heading="How should it look?"
-                options={STYLES}
-                value={style}
-                onChange={setStyle}
-              />
-              <ImageOptionSelect
-                label="Size / format"
-                heading="What shape do you need?"
-                options={SIZES}
-                value={size}
-                onChange={setSize}
-              />
-              <ImageOptionSelect
-                label="Colour hint"
-                heading="Lean toward a colour?"
-                options={COLOR_HINTS}
-                value={colorHint}
-                onChange={setColorHint}
-              />
-            </div>
-            )}
+                {optionsOpen ? <>Hide <ChevronDown className="w-3 h-3" />
+                </>
+              )}
 
             {/* Only when it is chosen, and only while the options are open: four selectors plus two
                 number fields on every build would be the crowded screen the dropdowns were
@@ -1107,7 +1114,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 Mode outside on the left; attach, the star and Generate inside on the right, where the
                 free chat keeps its controls. The look is the one shared shell — see ComposerShell. */}
             <ComposerShell
-              left={<ModeButton onOpen={onOpenModePicker} />}
+              onOpenHistory={onOpenHistory}
+              onOpenMode={onOpenModePicker}
               controls={(
                 <>
                   {/* ATTACH (admin 2026-09-21: inside the box). Opens the picker's chooser; the crop
@@ -1166,7 +1174,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 }}
                 placeholder={reference ? 'What should change? e.g. make the background blue' : 'Describe your image...'}
                 className={COMPOSER_TEXTAREA_CLASS}
-                style={{ paddingRight: composerTextPadding(3) }}
               />
             </ComposerShell>
             {promptLimit.near && (

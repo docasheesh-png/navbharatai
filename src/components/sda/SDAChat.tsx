@@ -35,7 +35,7 @@ import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { ModeButton } from '../chat/ModeButton';
-import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { MessageEditActions } from '../chat/MessageEditActions';
@@ -93,6 +93,8 @@ interface SDAChatProps {
    * view, but on a desktop there was no control here that led anywhere else.
    */
   onOpenModePicker?: (() => void) | undefined;
+  /** Opens chat history from the composer's left column. Absent ⇒ no History button (the phone's bottom bar has it). */
+  onOpenHistory?: (() => void) | undefined;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -297,7 +299,7 @@ const buildCasePDF = (
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenModePicker }) => {
+export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenModePicker, onOpenHistory }) => {
   const [messages, setMessages] = useState<SDAMessage[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1357,7 +1359,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
               professionals do not have) and the voice button keeps its speaker glyph, so the two are
               never one icon for two features. */}
           <ComposerShell
-            left={<ModeButton onOpen={onOpenModePicker} />}
+            onOpenHistory={onOpenHistory}
+            onOpenMode={onOpenModePicker}
             controls={(
               <>
                 <AttachMenu
@@ -1404,6 +1407,10 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                       .filter((t) => t.content)
                   }
                 />
+              </>
+            )}
+            send={(
+              <>
                 {/* Send → one-tap STOP while a reply loads (admin 2026-08-13). */}
                 {loading ? (
                   <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
@@ -1446,7 +1453,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                 placeholder={attachedFile ? 'Add a note about this document…' : 'Type your answer…'}
                 rows={1}
                 className={COMPOSER_TEXTAREA_CLASS}
-                style={{ paddingRight: composerTextPadding(4), maxHeight: `${MAX_HEIGHT}px`, overflowY: 'auto' }}
+                style={{ maxHeight: `${MAX_HEIGHT}px`, overflowY: 'auto' }}
                 disabled={loading}
               />
           </ComposerShell>

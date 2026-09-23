@@ -990,43 +990,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                   <p className="text-xs text-danger leading-relaxed">
                     {errorMsg || 'Image could not be generated. Retry or change the prompt.'}
                   </p>
-</> : <>Options <ChevronUp className="w-3 h-3" /></>}
-              </button>
-            </div>
-            {optionsOpen && (
-            <div id="nbai-image-options" className="grid grid-cols-2 gap-2">
-              <ImageOptionSelect
-                label="Image type"
-                heading="What are you making?"
-                options={IMAGE_TYPE_OPTIONS}
-                value={imageType}
-                onChange={setImageType}
-              />
-              <ImageOptionSelect
-                label="Style"
-                heading="How should it look?"
-                options={STYLES}
-                value={style}
-                onChange={setStyle}
-              />
-              <ImageOptionSelect
-                label="Size / format"
-                heading="What shape do you need?"
-                options={SIZES}
-                value={size}
-                onChange={setSize}
-              />
-              <ImageOptionSelect
-                label="Colour hint"
-                heading="Lean toward a colour?"
-                options={COLOR_HINTS}
-                value={colorHint}
-                onChange={setColorHint}
-              />
-            </div>
-            )}
-              send={(
-                <>
                   <button
                     type="button"
                     onClick={() => void handleGenerate()}
@@ -1080,9 +1043,41 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                 aria-controls="nbai-image-options"
                 className="shrink-0 text-[10px] text-muted hover:text-ink flex items-center gap-1 transition-colors"
               >
-                {optionsOpen ? <>Hide <ChevronDown className="w-3 h-3" />
-                </>
-              )}
+                {optionsOpen ? <>Hide <ChevronDown className="w-3 h-3" /></> : <>Options <ChevronUp className="w-3 h-3" /></>}
+              </button>
+            </div>
+            {optionsOpen && (
+            <div id="nbai-image-options" className="grid grid-cols-2 gap-2">
+              <ImageOptionSelect
+                label="Image type"
+                heading="What are you making?"
+                options={IMAGE_TYPE_OPTIONS}
+                value={imageType}
+                onChange={setImageType}
+              />
+              <ImageOptionSelect
+                label="Style"
+                heading="How should it look?"
+                options={STYLES}
+                value={style}
+                onChange={setStyle}
+              />
+              <ImageOptionSelect
+                label="Size / format"
+                heading="What shape do you need?"
+                options={SIZES}
+                value={size}
+                onChange={setSize}
+              />
+              <ImageOptionSelect
+                label="Colour hint"
+                heading="Lean toward a colour?"
+                options={COLOR_HINTS}
+                value={colorHint}
+                onChange={setColorHint}
+              />
+            </div>
+            )}
 
             {/* Only when it is chosen, and only while the options are open: four selectors plus two
                 number fields on every build would be the crowded screen the dropdowns were
@@ -1145,6 +1140,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                   >
                     {enhancing ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
                   </button>
+                </>
+              )}
+              send={(
+                <>
                   <button
                     type="button"
                     onClick={() => void handleGenerate()}

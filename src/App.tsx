@@ -1076,11 +1076,17 @@ export default function App() {
   }, [githubRepoContext]);
 
   const [isSearching, setIsSearching] = useState(false);
-  const [files, setFiles] = useState<FileSystem>({
-    'index.html': `<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Welcome to Navbharat AI Sandbox</h2><p>Edit index.html to see changes or ask AI to build something!</p></div></body></html>`,
-    'script.js': 'console.log("Welcome to your AI workspace");',
-    'style.css': 'body { margin: 0; font-family: system-ui; }'
-  });
+  // A user with no app has NO files — the state starts EMPTY, the same `{}` a New Chat resets it to
+  // (admin 2026-09-23: "studio open ho jaye, bas andar koi file na dikhe, kyu ki file hai hi nahi").
+  // It used to start with three placeholder files (a "Welcome to Navbharat AI Sandbox" index.html, a
+  // script.js and a style.css), which did two kinds of harm nobody could see:
+  //   1. Code Studio opened on files that do not exist, instead of its own "Empty workspace" screen.
+  //   2. The workspace hydration below is guarded on `files` being EMPTY ("never clobber what is already
+  //      open"), and the placeholders made it never empty — so an app built in an earlier session
+  //      never loaded into Code Studio, the exact bug that effect was written for (2026-08-05).
+  // That placeholder page has also reached a real publish once (see server/AgentV3/publishablePayload.ts).
+  // Do not seed this state with example files again.
+  const [files, setFiles] = useState<FileSystem>({});
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
@@ -4570,7 +4576,13 @@ export default function App() {
             const isActive = activeView === id;
             // Preview is v5.0-first (admin 2026-07-07: one preview, three gates): enable it whenever a v3
             // workspace exists, not only for the retired v2 generatedCode path.
-            const isDisabled = id === 'preview' ? !(v3Preview.workspaceId || hasGeneratedCode) : (id === 'studio' && !hasGeneratedCode);
+            // Studio is NEVER disabled (admin 2026-09-23: "agar koi open app nahi hai, to bhi studio open
+            // ho jaye, bas andar koi file na dikhe"). It used to be gated on `hasGeneratedCode`, so with no
+            // app the button was dead — while the desktop sidebar opened the same screen without a gate.
+            // CodeStudio already renders an honest "Empty workspace" state with a New File button, so an
+            // IDE with nothing in it is a real screen, not a broken one. Preview keeps its gate: with no
+            // app there is nothing to render.
+            const isDisabled = id === 'preview' && !(v3Preview.workspaceId || hasGeneratedCode);
             return (
               <button
                 key={id}

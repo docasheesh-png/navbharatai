@@ -14,6 +14,7 @@
 // description and contains nothing. Send is always enabled; the placeholder does the persuading.
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertTriangle, Loader2 } from 'lucide-react';
 
 /**
@@ -53,8 +54,20 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
 
   const left = REPORT_NOTE_MAX - note.length;
 
-  return (
-    <div className="fixed inset-0 z-[150] flex items-end sm:items-center sm:justify-center">
+  // 🔒 PORTALLED TO THE BODY (2026-09-22), and that is what decides the z-index question.
+  //
+  // Rendered in place, this dialog lived inside AgentV3Panel — a subtree that can carry a transform
+  // or a backdrop-filter, either of which becomes the CONTAINING BLOCK for a `position: fixed`
+  // descendant (tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts records the Pro image
+  // selector breaking exactly that way). Measured in place, the card rested 90px UNDER the tab bar.
+  //
+  // Portalled, it is appended after the app root, so at z-150 — EQUAL to the bar's — it paints
+  // OVER the bar by DOM order, deterministically. That is why it takes `nb-sheet-over-nav`, which is
+  // the rule `sheetOverlayGeometry.test.ts` already enforces for z ≥ 150: a sheet that covers the
+  // bar must not also hold a strip for it. (An earlier draft of this change reasoned the opposite
+  // from the un-portalled position; that test caught it.)
+  const sheet = (
+    <div className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 z-[150] flex items-end sm:items-center sm:justify-center">
       <div
         className="absolute inset-0 bg-scrim cursor-pointer touch-manipulation"
         onClick={() => { if (!sending) onCancel(); }}
@@ -64,7 +77,11 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
         role="dialog"
         aria-modal="true"
         aria-label="Describe the problem"
-        className="relative w-full sm:max-w-lg bg-card border border-line shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh]"
+        // `nb-sheet-partial` keeps the design's "laid over the page" 85%, but CLAMPED to the room
+        // the overlay really has — a bare 85vh is measured against the LARGE viewport and against a
+        // screen that still owes space to the notch and the tab bar.
+        className="nb-sheet-partial relative w-full sm:max-w-lg bg-card border border-line shadow-2xl rounded-t-2xl sm:rounded-2xl flex flex-col"
+        style={{ ['--nb-sheet-cap' as string]: '85%' }}
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-line shrink-0">
           <AlertTriangle className="w-4 h-4 text-warn shrink-0" />
@@ -126,4 +143,8 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
       </div>
     </div>
   );
+  // With no document (a server render, or `renderToStaticMarkup` in this file's own test) there is no
+  // body to portal into, so the sheet renders in place — the only meaningful thing to do there, and
+  // what keeps its content assertions honest rather than rendering nothing to satisfy them.
+  return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 };

@@ -231,6 +231,17 @@ describe('every stand-down is a skip to the source ship — and says whether a b
     expect(m.builds).toBe(0);
   });
 
+  it('a Next.js app with no static export builds a server — skipped BEFORE any machine is woken', async () => {
+    const next = { 'package.json': JSON.stringify({ scripts: { build: 'next build' }, dependencies: { next: '^14' } }), 'app/page.tsx': 'export default () => null' };
+    const m = machine({ files: next });
+    expect(await prebuildForShip(m, 'ws', next)).toEqual({ kind: 'skip', reason: 'server-app', buildRan: false });
+    expect(m.builds).toBe(0);
+    expect(m.writes).toEqual([]);
+    // …while a Next app that DOES export a static site still builds here.
+    const exported = { ...next, 'next.config.js': "module.exports = { output: 'export' }" };
+    expect((await prebuildForShip(machine({ files: exported }), 'ws', exported)).kind).not.toBe('skip');
+  });
+
   it('🔒 an actuator with no `hasLiveSandbox` is not sandbox-backed: nothing is woken, seeded or built on disk', async () => {
     // The local actuator (tests, dev) lists an empty directory as an empty workspace and would seed
     // and build INSIDE THE TEST PROCESS. Presence of the method is the signal; its answer is not.

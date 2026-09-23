@@ -61,6 +61,7 @@ interface OutcomeData {
 const SKIP_LABEL: Record<string, string> = {
   'flag-off': 'switched off',
   'static-app': 'already a static app',
+  'server-app': 'a Next.js app with no static export',
   'no-sandbox': 'no machine held the app',
   'build-in-flight': 'another build of the app was running',
   unavailable: 'the machine could not answer',

@@ -215,7 +215,7 @@ describe('the dialogs deliberately LEFT alone — measured clean with their real
   // no problem for a new risk is not a fix (CLAUDE.md, "a fix must never trade one problem for
   // another"). Each reason below was measured or read, not assumed:
   const leftAlone: Array<[string, string]> = [
-    ['src/components/chat/ModePickerSheet.tsx', "maxHeight: 'min(72dvh, 40rem)'"],     // own dvh cap + env padding
+    ['src/components/chat/ModePickerSheet.tsx', "maxHeight: 'min(72dvh, 40rem)'"],     // own dvh cap; the shared flush overlay since 2026-09-23
     ['src/components/agentv3/UserActionTray.tsx', "maxHeight: 'min(72dvh, 40rem)'"],  // same design
     ['src/components/ide/FileExplorer.tsx', 'max-h-32 overflow-y-auto'],              // the path list is capped
     ['src/components/ide/PerformanceAnalyzer.tsx', 'w-full h-56'],                    // fixed-height textarea

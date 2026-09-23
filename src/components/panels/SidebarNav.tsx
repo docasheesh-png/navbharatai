@@ -38,6 +38,12 @@ export interface SidebarNavProps {
   /** Open the app-wide "Report a problem" sheet (the same one a phone shake opens). */
   onReportProblem?: () => void;
   /**
+   * Open chat history for whatever surface is on screen — App.tsx's ONE opener, which carries the
+   * list's scope, the popup-vs-tab decision and the sign-in gate. Undefined falls back to a plain
+   * tab open, so this row is never dead.
+   */
+  onOpenHistory?: () => void;
+  /**
    * How many of this person's reports carry a NavBharatAI reply they have not read yet.
    *
    * 🟢 THE FIRST OF THREE DOTS, and the only one visible without opening anything. It is a COUNT
@@ -145,7 +151,7 @@ export function SidebarNav({
   isMenuOpen, setIsMenuOpen, menuItems, enabledModules,
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
-  setErrorContext, onReportProblem,
+  setErrorContext, onReportProblem, onOpenHistory,
   unreadReports, unreadNotifications, onOpenNotifications, walletNeedsTopUp = false,
 }: SidebarNavProps) {
   // Git lives in App Settings now (admin 2026-08-01: "Git option sidebar se App Settings me move karo"),
@@ -173,7 +179,21 @@ export function SidebarNav({
   // Settings' tool directory; Diff and AI Image Gen are reached from inside the panels that use
   // them), and this sidebar has been deliberately trimmed more than once. Same hide-not-delete
   // reasoning as the ids above it.
-  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'history', 'professionals', 'about', 'apk', 'diff', 'imagegen']);
+  //
+  // 🔴 `history` CAME BACK OUT OF THIS SET ON 2026-09-22, AND THE REASON IT WAS IN IT IS THE BUG.
+  // The 2026-08-11 note above says each hidden id "already has a doorway INSIDE the relevant AI's
+  // footer … History: the per-AI footer". That bar renders ONLY when `effectiveDeviceMode ===
+  // 'mobile'` — so the justification is true on a phone and FALSE on a desktop, where the footer
+  // does not exist and this was the only other door. Chat history was unreachable on desktop
+  // entirely (admin: *"kuch options desktop me gayab ho gaye hai — jaise navbharatai free me,
+  // history"*). It is hidden from the DRAWER instead, which is the phone's menu, so there is still
+  // exactly ONE door per screen: the footer on a phone, this rail everywhere else.
+  //
+  // ⚠️ `preview` and `files` STAY HIDDEN, and that is a measured distinction rather than caution:
+  // their stated door is *"Pro v5.0"*, and `AgentV3Panel`'s tab strip really does render on desktop
+  // (`mobileFooter ? 'hidden lg:flex' : 'flex'`) carrying Preview, Files, Diff, Terminal and its own
+  // build History. Only the ids whose door was the MOBILE BAR were stranded.
+  const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'professionals', 'about', 'apk', 'diff', 'imagegen']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
   // Settings and Donate each appeared TWICE in the mobile drawer — once in this list, once as a System
@@ -188,7 +208,11 @@ export function SidebarNav({
   // all. Settings' only other door on that surface is TopNav's user dropdown, which renders solely when
   // someone is signed in, so a signed-out desktop user would have been stranded; Donate has no other door
   // there whatsoever. And neither is duplicated on the rail: it lists each exactly once already.
-  const DRAWER_HIDDEN = new Set(['settings', 'donation']);
+  //
+  // `history` joins them for the OPPOSITE reason to Settings and Donate: those are dropped here
+  // because the drawer shows them twice, this one because the phone already carries History in the
+  // bottom bar. Same outcome either way — one door per screen, never two and never none.
+  const DRAWER_HIDDEN = new Set(['settings', 'donation', 'history']);
   const drawerItems = visibleItems.filter(item => !DRAWER_HIDDEN.has(item.id));
 
   // ONE definition of the Notifications row for the rail and the drawer — a signed-in user's inbox,
@@ -215,12 +239,71 @@ export function SidebarNav({
     </button>
   ) : null;
 
+  /**
+   * ── TWO ROWS THAT EXISTED ONLY IN THE PHONE'S DRAWER (admin 2026-09-22) ───────────────────────
+   *
+   * The drawer is opened by the hamburger, and `TopNav` renders that button under
+   * `effectiveDeviceMode === 'mobile'` — so everything that lived ONLY in the drawer was
+   * unreachable on a desktop. **About Us** was one (its own note above calls the drawer its door),
+   * and **Report a problem** was the other: `CLAUDE.md` describes it as *"reachable from every
+   * screen: shake, or the sidebar's Report a problem"*, and a shake is a phone gesture — so a
+   * desktop user could neither file a report nor see the replies the badge counts.
+   *
+   * 🔒 ONE DEFINITION, TWO CALL SITES, exactly as `notificationsRow` above already does it. A copy
+   * per surface is the drifted-copy class this repo has paid for four times; here it would show up
+   * as a badge that counts on one surface and not the other.
+   */
+  const aboutRow = (closeMenu: boolean) => (
+    <button
+      onClick={() => { toggleTab('about' as ViewType); if (closeMenu) setIsMenuOpen(false); }}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'about' ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:bg-raised hover:text-ink'}`}
+    >
+      <Info className="w-4.5 h-4.5 text-accent-text" />
+      <span className="text-sm font-bold tracking-tight">About Us</span>
+    </button>
+  );
+
+  /* REPORT A PROBLEM (admin 2026-08-21). The same sheet a phone SHAKE opens — and the reason it
+     exists: nobody discovers an invisible gesture, and iOS will not give a page motion access
+     unasked, so shake alone would leave the feature unreachable for the people most likely to need
+     it. On a desktop there is no shake at all, which is why this row has to be on the rail too. */
+  const reportRow = (closeMenu: boolean) => onReportProblem ? (
+    <button
+      onClick={() => { onReportProblem(); if (closeMenu) setIsMenuOpen(false); }}
+      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-line bg-raised text-muted hover:text-ink hover:bg-raised-hover"
+    >
+      <span className="relative shrink-0">
+        <Flag className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
+        {(unreadReports ?? 0) > 0 && (
+          <span aria-hidden className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-card" />
+        )}
+      </span>
+      <span className="text-sm font-bold tracking-tight flex-1 text-left">Report a problem</span>
+      {/* The count is spelled out beside the dot, and read out for a screen reader — a coloured dot
+          alone says nothing to somebody who cannot see it. */}
+      {(unreadReports ?? 0) > 0 && (
+        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-success">
+          {unreadReports} new
+        </span>
+      )}
+      {(unreadReports ?? 0) > 0 && (
+        <span className="sr-only">
+          {unreadReports} unread {unreadReports === 1 ? 'reply' : 'replies'} from NavBharatAI
+        </span>
+      )}
+    </button>
+  ) : null;
+
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }
-    if (item.id === 'history' && !user) {
-      setShowAuth(true);
+    // ONE OPENER, NEVER A SECOND COPY OF THE RULES. App.tsx's `openHistoryForCurrentSurface` owns
+    // the list's scope, the popup-vs-tab decision AND the sign-in gate; this row used to carry its
+    // own `!user` check, which was a second copy of the third rule and knew nothing of the first
+    // two. Falls back to a plain tab open only if no opener was supplied, so the row can never
+    // become a dead button.
+    if (item.id === 'history' && onOpenHistory) {
+      onOpenHistory();
       if (closeMenu) setIsMenuOpen(false);
-      addLog('Chat history requires an active session. Please login.', 'warn');
       return;
     }
     toggleTab(item.id as ViewType);
@@ -274,6 +357,13 @@ export function SidebarNav({
                 />
               ))}
               {notificationsRow(false)}
+            </div>
+
+            {/* The two rows that used to exist only in the phone's drawer. See `aboutRow` /
+                `reportRow` above for why a desktop had neither. */}
+            <div className="space-y-1.5 pt-4 border-t border-line">
+              {aboutRow(false)}
+              {reportRow(false)}
             </div>
 
             {/* Theme picker moved to Settings → General (admin 2026-07-16) — reachable & working in
@@ -362,39 +452,7 @@ export function SidebarNav({
                     </a>
                   )}
 
-                  {/* REPORT A PROBLEM (admin 2026-08-21). The same sheet a phone SHAKE opens — and the
-                      reason it exists: nobody discovers an invisible gesture, and iOS will not give a
-                      page motion access unasked, so shake alone would leave the feature unreachable
-                      for the people most likely to need it. */}
-                  {onReportProblem && (
-                    <button
-                      onClick={() => { onReportProblem(); setIsMenuOpen(false); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-line bg-raised text-muted hover:text-ink hover:bg-raised-hover"
-                    >
-                      <span className="relative shrink-0">
-                        <Flag className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
-                        {(unreadReports ?? 0) > 0 && (
-                          <span
-                            aria-hidden
-                            className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0d1117]"
-                          />
-                        )}
-                      </span>
-                      <span className="text-sm font-bold tracking-tight flex-1 text-left">Report a problem</span>
-                      {/* The count is spelled out beside the dot, and read out for a screen reader —
-                          a coloured dot alone says nothing to somebody who cannot see it. */}
-                      {(unreadReports ?? 0) > 0 && (
-                        <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-success">
-                          {unreadReports} new
-                        </span>
-                      )}
-                      {(unreadReports ?? 0) > 0 && (
-                        <span className="sr-only">
-                          {unreadReports} unread {unreadReports === 1 ? 'reply' : 'replies'} from NavBharatAI
-                        </span>
-                      )}
-                    </button>
-                  )}
+                  {reportRow(true)}
 
                   {/* Theme picker moved to Settings → General (admin 2026-07-16). */}
                 </div>
@@ -432,13 +490,7 @@ export function SidebarNav({
                 </div>
 
                 <div className="space-y-1.5 pt-4 border-t border-line">
-                  <button
-                    onClick={() => { toggleTab('about'); setIsMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'about' ? 'bg-indigo-600 text-on-accent' : 'text-muted hover:bg-raised hover:text-ink'}`}
-                  >
-                    <Info className="w-4.5 h-4.5 text-accent-text" />
-                    <span className="text-sm font-bold tracking-tight">About Us</span>
-                  </button>
+                  {aboutRow(true)}
                   {/* The "Connect my website" row that stood here is DELETED (admin 2026-09-19: *"already
                       kayi jagah ho chuka hai. setting me, deploy me hai. to alag se button banane ki need
                       nahi hai"*). It was a THIRD door to one room: the same `ConnectMyWebsitePanel` is

@@ -27,8 +27,32 @@ describe('the sidebar’s hidden list', () => {
     expect(hiddenIds()).toContain('professionals');
   });
 
-  it('still hides the four that moved earlier', () => {
-    for (const id of ['git', 'preview', 'files', 'history']) expect(hiddenIds()).toContain(id);
+  it('still hides the three whose other door really is on every screen', () => {
+    // Git → Settings → Git & Deployment. Preview and Files → AgentV3Panel's tab strip, which on a
+    // phone moves into the footer and on a desktop renders as `hidden lg:flex` — so both screens
+    // have it. Each of these was verified against the code, not taken from the comment.
+    for (const id of ['git', 'preview', 'files']) expect(hiddenIds()).toContain(id);
+  });
+
+  it('🔴 does NOT hide History — its only other door was the phone bar (admin 2026-09-22)', () => {
+    // This assertion is the REVERSE of what stood here, and the reversal is the point. `history`
+    // was hidden on 2026-08-11 with the reason "yeh sab AI ke andar already hai … History: the
+    // per-AI footer". That bar renders only under `effectiveDeviceMode === 'mobile'`, so the
+    // reason held on a phone and failed on a desktop: chat history had NO door there at all
+    // (admin: "kuch options desktop me gayab ho gaye hai — jaise navbharatai free me, history").
+    //
+    // ⚠️ The old test was not wrong about the code — it pinned the decision faithfully. It pinned
+    // a decision that was only ever true on one of the two screens, which is why a test can lock
+    // a bug in place while passing.
+    expect(hiddenIds()).not.toContain('history');
+  });
+
+  it('…and History is hidden from the DRAWER instead, so a phone still has exactly one door', () => {
+    // The phone's bottom bar already carries History. Without this the drawer would show a second
+    // one — the duplication the 2026-08-11 change was right to remove.
+    const m = sidebar.match(/DRAWER_HIDDEN = new Set\(\[([^\]]*)\]\)/);
+    expect(m, 'DRAWER_HIDDEN not found').toBeTruthy();
+    expect(m![1]).toContain('history');
   });
 
   it('🔒 every hidden id is STILL in menuItems — hiding is not deleting', () => {

@@ -3318,6 +3318,51 @@ export default function App() {
   const modePickerOpener = showsGlobalMobileNav ? undefined : () => setShowModePicker(true);
 
   /**
+   * OPEN CHAT HISTORY FOR WHATEVER SURFACE IS ON SCREEN — one definition, every door.
+   *
+   * 🔴 WHY THIS EXISTS (admin 2026-09-22: *"mobile to footer me jo jo options hai, kuch options
+   * desktop me gayab ho gaye hai — jaise navbharatai free me, history"*). Chat history had exactly
+   * ONE door in the whole client: the mode-surface footer's History item. That bar renders only
+   * when `effectiveDeviceMode === 'mobile'`, and `history` sits in SidebarNav's `SIDEBAR_HIDDEN`
+   * — removed on 2026-08-11 with the reason *"inko need nahi hai, yeh sab AI ke andar already
+   * hai … History: the per-AI footer"*. That reason is TRUE ON A PHONE AND FALSE ON A DESKTOP, so
+   * a desktop user could not reach their own conversations at all.
+   *
+   * ⚠️ THE CLASS WAS ALREADY FOUND ONCE, FOR THE BUTTON SITTING BESIDE THIS ONE IN THE SAME ROW.
+   * `ModeButton`'s docblock says it in as many words — *"on a PHONE they all do, because the bottom
+   * bar's Mode item is rendered for exactly that list. On desktop there is no bottom bar"*. Mode was
+   * fixed; History, one item along the same four-item footer, was never hunted. That is this repo's
+   * headline class (autopsy `a38c6fef`): the instance fixed, the sibling left.
+   *
+   * 🔒 IT IS ONE FUNCTION BECAUSE THE DECISION IS NOT TRIVIAL. Three rules ride on it — the list's
+   * scope (`historyFilterFor`), whether it opens as a popup over the chat or as its own tab
+   * (`historySurfaceFor`), and the sign-in gate. A second copy at the desktop door would drift from
+   * this one the first time any of the three changed, and nothing would fail: the two doors would
+   * simply start showing different lists.
+   */
+  const openHistoryForCurrentSurface = useCallback(() => {
+    // History scoping (admin 2026-08-11, amended 2026-08-25): the FREE surface shows Free + Doctor +
+    // every professional conversation, each with its mode tag — one unified list.
+    setHistoryInitialFilter(historyFilterFor(activeView as string));
+    if (historySurfaceFor(activeView as string) === 'popup') {
+      // The SAME auth gate the tab uses, CALLED rather than re-implemented: history is sign-in-only,
+      // and a second copy of that rule would drift. `authGateDecision` opens optimistically while
+      // Firebase is still restoring, so a returning user is never shown the login screen by mistake.
+      if (authGateDecision('history', !!user, loadingUser) === 'login') {
+        pendingViewAfterLoginRef.current = 'history';
+        setShowAuth(true);
+        addLog('Chat history requires an active session. Please login.', 'warn');
+        return;
+      }
+      // POPUP OVER THE CHAT: you glance at the list and you are back in the same conversation,
+      // exactly as Pro v5.0 behaves.
+      setHistoryPopupOpen(true);
+      return;
+    }
+    toggleTab('history' as ViewType);
+  }, [activeView, user, loadingUser, addLog, toggleTab]);
+
+  /**
    * …and publish that same answer to CSS, for the THIRD consumer of it.
    *
    * The bar is `fixed bottom-0` at z-150, so it paints over every dialog below that z-index. Two
@@ -3426,6 +3471,10 @@ export default function App() {
 
       <SidebarNav
         onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
+        // THE DESKTOP'S DOOR TO CHAT HISTORY (admin 2026-09-22). The phone's bottom bar carries
+        // History; this rail carries it everywhere else, and both call the SAME opener, so the
+        // scope, the popup-vs-tab decision and the sign-in gate can never disagree between them.
+        onOpenHistory={openHistoryForCurrentSurface}
         unreadReports={unreadReports}
         unreadNotifications={inbox.unread}
         walletNeedsTopUp={needsTopUp}
@@ -4472,30 +4521,10 @@ export default function App() {
                   key={key}
                   onClick={() => {
                     if (key === 'mode') { setShowModePicker(true); return; }
-                    // History scoping (admin 2026-08-11, amended 2026-08-25): the FREE surface now shows
-                    // Free + Doctor + every professional conversation, each with its mode tag — one
-                    // unified list ("free ki history me sabhi ayegi tag ke sath"). The Professionals
-                    // hub keeps its professional-only view.
-                    if (id === 'history') {
-                      setHistoryInitialFilter(historyFilterFor(activeView as string));
-                      // POPUP OVER THE CHAT on the Free surface — you glance at the list and you are
-                      // back in the same conversation, exactly as Pro v5.0 behaves. Every other
-                      // surface keeps the History tab byte-for-byte.
-                      if (historySurfaceFor(activeView as string) === 'popup') {
-                        // The SAME auth gate the tab uses, called rather than re-implemented: history
-                        // is sign-in-only, and a second copy of that rule would drift. authGateDecision
-                        // opens optimistically while Firebase is still restoring, so a returning user
-                        // is never shown the login screen by mistake.
-                        if (authGateDecision('history', !!user, loadingUser) === 'login') {
-                          pendingViewAfterLoginRef.current = 'history';
-                          setShowAuth(true);
-                          addLog('Chat history requires an active session. Please login.', 'warn');
-                          return;
-                        }
-                        setHistoryPopupOpen(true);
-                        return;
-                      }
-                    }
+                    // The scoping, the popup-vs-tab decision and the sign-in gate all live in
+                    // `openHistoryForCurrentSurface` — the ONE definition the desktop door calls too,
+                    // so the two can never show different lists. See its docblock for why.
+                    if (id === 'history') { openHistoryForCurrentSurface(); return; }
                     if (id) toggleTab(id);
                   }}
                   aria-label={label}

@@ -1,3 +1,4 @@
+import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModeButton } from '../chat/ModeButton';
 import { ArrowUp, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
@@ -163,6 +164,10 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
 
   const generate = async () => {
     if (!mode || busy) return;
+    // The box empties at send, like every other box in this app, and the words come back only if
+    // the send fails — the same rule the free composer follows (`draftAfterFailedSend`).
+    const typed = prompt.trim();
+    setPrompt('');
     setBusy(true);
     setError('');
     try {
@@ -175,7 +180,7 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          prompt: prompt.trim(),
+          prompt: typed,
           size,
           // Already through the server's own clamp, so the picker's number and the generated
           // picture are the same number. Absent for a preset — nothing downstream changes.
@@ -190,18 +195,19 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
       const item: Result = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: data.image,
-        prompt: prompt.trim(),
+        prompt: typed,
         mode: (data.mode as Mode) || mode,
         size,
         chargedInr: typeof data.chargedInr === 'number' ? data.chargedInr : PRICE_INR,
         at: Date.now(),
       };
       setResults((r) => [...r, item]);
-      setPrompt('');
       if (onImageGenerated) onImageGenerated(data.image, item.prompt);
     } catch (e) {
       // The server's real reason, never a placeholder image and never a cheerful lie. The route
-      // guarantees a failure was not charged and says so in its own words.
+      // guarantees a failure was not charged and says so in its own words. The words come back,
+      // unless a new brief is already being typed.
+      setPrompt((cur) => draftAfterFailedSend(cur, typed));
       setError(e instanceof Error ? e.message : 'That image could not be generated.');
     } finally {
       setBusy(false);

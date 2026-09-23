@@ -5,13 +5,46 @@
 // Readable typography over decoration: these pages exist to be actually read, including by lawyers
 // and enterprise reviewers on desktop and by users on phones.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { FileText, Loader2 } from 'lucide-react';
 import type { LegalDoc } from '../../content/legal';
+import { openLegalLink } from '../../lib/legalLinks';
+import { openExternalUrl } from '../../lib/mobileNative';
+
+/**
+ * How a link INSIDE a legal document behaves (admin 2026-09-23: "crash jaisa feel ho raha").
+ *
+ * The documents link to each other with relative paths — `[Refund policy](/refund)` — and a plain
+ * anchor for one of those reloaded the whole mobile app, because in the bundled app `/refund` means
+ * `https://localhost/refund`. `openLegalLink` resolves it to the app's own Legal page, or to the
+ * real site for a page only the server has. Any other web link goes to the browser through
+ * `openExternalUrl` (the system browser in the app, a new tab on the web) instead of replacing the app.
+ * `mailto:` and anything else keep the browser's own behaviour.
+ */
+export const legalMarkdownComponents: ComponentProps<typeof ReactMarkdown>['components'] = {
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      onClick={(e) => {
+        if (openLegalLink(href)) { e.preventDefault(); return; }
+        if (href && /^https?:/i.test(href)) { e.preventDefault(); openExternalUrl(href); }
+      }}
+    >
+      {children}
+    </a>
+  ),
+};
 
 export function LegalDocPage({ docId }: { docId: string }) {
   const [doc, setDoc] = useState<LegalDoc | null | 'loading'>('loading');
+  const topRef = useRef<HTMLDivElement>(null);
+
+  // A link from one document to another swaps the document in place, so the reader must land at the
+  // TOP of the new one, not at the scroll position they had reached in the old one.
+  useEffect(() => {
+    if (doc && doc !== 'loading') topRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [doc]);
 
   useEffect(() => {
     let alive = true;
@@ -66,7 +99,7 @@ export function LegalDocPage({ docId }: { docId: string }) {
     );
   }
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-3xl" ref={topRef}>
       <div className="flex items-start gap-3 mb-1">
         <div className="p-2 bg-indigo-600/10 rounded-lg shrink-0 mt-0.5">
           <FileText className="w-4 h-4 text-accent-text" />
@@ -91,7 +124,7 @@ export function LegalDocPage({ docId }: { docId: string }) {
           [&_hr]:border-line [&_hr]:my-5
           [&_code]:text-[0.75rem] [&_code]:bg-raised [&_code]:px-1 [&_code]:rounded"
       >
-        <ReactMarkdown>{doc.body}</ReactMarkdown>
+        <ReactMarkdown components={legalMarkdownComponents}>{doc.body}</ReactMarkdown>
       </div>
 
       <p className="mt-8 text-[10px] text-faint leading-relaxed border-t border-line pt-3">

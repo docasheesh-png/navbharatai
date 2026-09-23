@@ -79994,6 +79994,27 @@ touched, and skips with reason `server-app`, shown on the admin card as "a Next.
 export". A Next app that DOES export still builds here. Test-locked in
 `tests/theAppIsBuiltHereGithubOnlyPackagesIt.test.ts`.
 
+## 2026-09-23 — 📱 Legal links reloaded the whole mobile app ("crash jaisa feel ho raha")
+
+Admin: *"mobile app me navbharatai ke about us me jab terms and conditions etc par click karte hai to open
+nahi ho raha. crash jaisa feel ho raha."*
+
+**Root cause:** About Us carried plain relative links (`/privacy`, `/terms`, `/grievance`). The app is
+BUNDLED, so its WebView origin is `https://localhost`: a relative link there is `https://localhost/terms`,
+the local asset server answers with index.html, and the whole app boots again from its splash screen.
+**Sibling, same class:** the legal documents themselves carry ~25 relative links to each other
+(`/refund`, `/grievance`, `/dpa`, `/security`, `/contact`, `/delete-account`), rendered by ReactMarkdown on
+the in-app Legal page, and every one did the same reload.
+
+**Fix:** `src/lib/legalLinks.ts`, one resolver reading the server's own `legalPaths.ts` table (aliases
+included): an in-app document opens Settings → that Legal page (`navbharat:navigate`, which opens or focuses,
+never closes); `/contact` and `/delete-account` open at navbharatai.com in the browser; anything else is left
+alone. About's links and every `<a>` inside `LegalDocPage` go through it; other web links in a document go
+through `openExternalUrl`, and a swapped document scrolls to its top.
+Verified in Chromium at 390×844: About → Terms → the Refund link inside it, zero page navigations.
+Test: `tests/legalLinksStayInTheApp.test.ts` (14; 7 fail with the components reverted), including a source
+guard that fails on any bare relative `href="/…"` literal in client TSX.
+⚠️ Reaching installed phones needs a fresh `.aab`/`.ipa` (bundled mode) — only when the admin asks.
 ---
 
 ## 2026-09-23 — Every AI in NavBharatAI FREE uses the free chat's composer

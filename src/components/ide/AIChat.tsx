@@ -1806,24 +1806,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                     placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
-                      // Admin 2026-07-12: composer was py-3.5 + min-h-48px (~2 lines) and felt oversized on
-                      // phones — trim to a single comfortable line; it still auto-grows up to 240px as you type.
-                      //
-                      // ⚠️ min-h is 48px and that does NOT undo that trim (admin 2026-08-31). The box was
-                      // ALREADY rendering at 46px — py-2.5 (20px) plus one 16px line at leading-relaxed
-                      // (26px) — because the content exceeded the old min-h-40, which never bound. So this
-                      // is +2px of real height, and the padding stays py-2.5, not the py-3.5 that was
-                      // trimmed away. What the 48px buys is room for the control row: 36px of buttons plus
-                      // a symmetric 6px above and below. At 46px that row had ZERO gap at the top and sat
-                      // flush against the container's border, which is what made the send button look like
-                      // it was breaking out of the box.
-                      //
-                      // pr-44 reserves the right edge for that row so typed text never runs underneath it.
-                      // The row is 4 buttons wide in the common signed-in case (4x36 + 3x4 gaps + 8px inset
-                      // = 164px); pr-24 (96px) did not even cover the three-button case, so text slid under
-                      // the paperclip. With all five present the expand button can still overlap long text,
-                      // and that is the accepted edge: expand only appears once the text is long enough to
-                      // have wrapped anyway.
+                      // HISTORY OF THIS BOX, kept short: 2026-07-12 trimmed it to one line; 2026-08-31 sized
+                      // it to fit a control row laid OVER the text and reserved a fixed ~176px right edge
+                      // for that row. Both are superseded below — see chatComposerAlignment.test.ts.
                       // The shared two-row box (ComposerShell): the text owns the WHOLE top row, so there is
                       // no right-hand reserve for the controls any more — they have their own row below.
                       // That reserve (a fixed ~176px) is what squeezed the box to a sliver on a phone

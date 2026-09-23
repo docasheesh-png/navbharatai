@@ -92,9 +92,10 @@ describe('every surface that renders a chat composer receives it', () => {
     expect(panels).toMatch(/<AIImageGenerator[^>]*onOpenModePicker=\{onOpenModePicker\}/);
     const gen = codeOnly(read('src/components/ide/AIImageGenerator.tsx'));
     expect(gen).toMatch(/<ImageStudioPro[^>]*onOpenModePicker=\{onOpenModePicker\}/);
-    // And each tier actually renders the button, rather than merely accepting the prop.
-    expect(gen).toContain('<ModeButton onOpen={onOpenModePicker} />');
-    expect(codeOnly(read('src/components/ide/ImageStudioPro.tsx'))).toContain('<ModeButton onOpen={onOpenModePicker} />');
+    // And each tier actually hands it to the shared shell (which renders the button), rather than merely
+    // accepting the prop.
+    expect(gen).toContain('onOpenMode={onOpenModePicker}');
+    expect(codeOnly(read('src/components/ide/ImageStudioPro.tsx'))).toContain('onOpenMode={onOpenModePicker}');
   });
 
   it('each composer renders the SHARED button, never its own copy', () => {
@@ -106,11 +107,13 @@ describe('every surface that renders a chat composer receives it', () => {
       'src/components/ide/AIChat.tsx',
     ]) {
       const src = codeOnly(read(file));
-      expect(src, file).toContain('<ModeButton');
-      expect(src, file).toContain("from '");
+      // Since 2026-09-23 every composer is the shared ComposerShell, which renders the shared button.
+      expect(src, file).toContain('<ComposerShell');
+      expect(src, file).toMatch(/onOpenMode=\{/);
       // The retired inline markup: a second copy would reintroduce the drift this replaced.
       expect(src, file).not.toContain('aria-label="Choose AI mode"');
     }
+    expect(codeOnly(read('src/components/chat/ComposerShell.tsx'))).toContain('<ModeButton onOpen={onOpenMode} size="rail" />');
   });
 });
 

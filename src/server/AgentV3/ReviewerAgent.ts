@@ -170,6 +170,16 @@ const COSMETIC_WARNING_RE = /\b(aria-?\w*|landmark|<main>|semantic|role=|naming|
 const FUNCTIONAL_WARNING_RE = /\b(broke\w*|does ?n'?t|do ?n'?t|not work\w*|fail\w*|bug|incorrect|wrong|invalid|missing|never (fires|works|holds|updates|renders)|steal\w* focus|conflict\w*|ignor\w*|unnecessar\w*|block\w*|mismatch\w*|off-by|race\b|crash\w*|throw\w*|undefined\b|null\b|requirement|logic error)\b/i;
 
 /**
+ * Functional signals written as an OUTCOME the user would see, not as a verdict word (autopsy
+ * ac41a924, 2026-09-23). The reviewer found two real bugs in a finished news site and neither was
+ * picked: "the literal backslash-n sequence is not present and the content will render as one long
+ * paragraph", and "no routes or pages exist for them; clicking them will show the NotFound page …
+ * dead-end navigation". Neither says "bug", "broken" or "missing" — they describe what the user sees.
+ * Kept to outcomes that are unambiguous on their own; still subject to the cosmetic veto below.
+ */
+const FUNCTIONAL_OUTCOME_RE = /\b(not present|(?:do|does) not exist|no (?:\w+ ){0,3}exists?|dead[- ]end|notfound|renders? as (?:one|a single|plain|raw|blank|empty)\b|one long paragraph|blank (?:page|screen)|nothing happens|has no effect|goes nowhere)/i;
+
+/**
  * From a reviewer's issues, pick the WARNINGs worth an automatic repair pass: functional/correctness
  * warnings (a behaviour the user asked for is broken or missing), excluding purely cosmetic/advisory
  * ones. Pure & deterministic — a fuzzy classifier over the reviewer's own text, kept conservative
@@ -177,11 +187,25 @@ const FUNCTIONAL_WARNING_RE = /\b(broke\w*|does ?n'?t|do ?n'?t|not work\w*|fail\
  */
 export function selectAutoFixableWarnings(issues: ReviewIssue[]): ReviewIssue[] {
   if (!Array.isArray(issues)) return [];
-  return issues.filter((i) =>
-    i && i.severity === 'warning' && typeof i.message === 'string' && i.message.trim().length > 0
-    && FUNCTIONAL_WARNING_RE.test(i.message)
-    && !COSMETIC_WARNING_RE.test(i.message),
-  );
+  return issues.filter((i) => i && i.severity === 'warning' && isFunctionalFinding(i.message));
+}
+
+/** One definition of "names broken behaviour, not polish" — shared by both selectors below. PURE. */
+export function isFunctionalFinding(message: unknown): boolean {
+  if (typeof message !== 'string' || message.trim().length === 0) return false;
+  return (FUNCTIONAL_WARNING_RE.test(message) || FUNCTIONAL_OUTCOME_RE.test(message))
+    && !COSMETIC_WARNING_RE.test(message);
+}
+
+/**
+ * What a WORKING app's one verified repair may touch (greenReviewPolicy.ts, `greenFunctionalRepairEnabled`).
+ * Criticals as well as warnings — but only the ones that name broken behaviour. A critical is the
+ * reviewer's confidence, not its subject: "secrets should live in a vault" can be tagged critical, and
+ * that kind of opinion, repaired silently on a green app, is what erased a user's .env on 2026-08-12.
+ */
+export function selectGreenRepairable(issues: ReviewIssue[]): ReviewIssue[] {
+  if (!Array.isArray(issues)) return [];
+  return issues.filter((i) => i && (i.severity === 'critical' || i.severity === 'warning') && isFunctionalFinding(i.message));
 }
 
 /** Source-file extensions that mean "there is real reviewable code in the workspace". */

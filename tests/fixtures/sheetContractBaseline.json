@@ -1,0 +1,14 @@
+{
+  "src/components/ExitConfirmDialog.tsx": 1,
+  "src/components/panels/AppModals.tsx": 6,
+  "src/components/panels/FilesPanel.tsx": 1,
+  "src/components/chat/ModePickerSheet.tsx": 1,
+  "src/components/AdminDashboard.tsx": 1,
+  "src/components/sonic/ProfessionalVoiceButton.tsx": 1,
+  "src/components/agentv3/UserActionTray.tsx": 1,
+  "src/components/ide/PerformanceAnalyzer.tsx": 1,
+  "src/components/ide/VirtualKeyboard.tsx": 1,
+  "src/components/ide/GitPanel.tsx": 1,
+  "src/components/ide/FileExplorer.tsx": 1,
+  "src/components/ide/ZipSizeModal.tsx": 1
+}

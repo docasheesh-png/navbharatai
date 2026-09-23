@@ -79982,3 +79982,14 @@ blank line would end the event early), a usage chunk sent for an unmeasured turn
 dropping the caller's choice. One ordering guard in `theApiGrewFourDoors.test.ts` was re-aimed onto
 `sendCompletion` and made stronger: it used to prove two markers existed, it now proves per door that
 the answer is written BEFORE the money moves.
+### 🧹 THE LAST REVIEW ITEM (2026-09-23, follow-up to #3258)
+
+The seven-finder review that ran over #3258 finished after the merge. Its 35 findings (with heavy
+duplication across finders) were checked one by one against merged `main`: every one had been fixed in
+#3258 except half of one — a **Next.js app with no static export** still woke the sandbox and ran a full
+`next build` (up to the 240 s budget, with the user watching "Preparing…") only to fall through to the
+source ship, because the reader finds no site in a server build. `prebuildForShip` now asks
+`isNextWithoutStaticExport` (the builtSiteCheck helper publish already uses) before any machine is
+touched, and skips with reason `server-app`, shown on the admin card as "a Next.js app with no static
+export". A Next app that DOES export still builds here. Test-locked in
+`tests/theAppIsBuiltHereGithubOnlyPackagesIt.test.ts`.

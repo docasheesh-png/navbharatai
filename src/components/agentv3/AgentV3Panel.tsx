@@ -6745,7 +6745,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
     return (
       <div className="group flex flex-col items-end">
         <div className="max-w-[85%] bg-indigo-600 text-on-accent rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
-          <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />
+          <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
         <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
@@ -6772,7 +6772,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
           {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}
           {msg.streaming
             ? <><TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}</>
-            : <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />}
+            : <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />}
         </div>
       </div>
       {!isThinking && !msg.streaming && (

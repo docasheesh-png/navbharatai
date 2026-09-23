@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap } from 'lucide-react';
+import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { ModeButton } from '../chat/ModeButton';
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
@@ -401,65 +402,82 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         />
       </div>
 
-      <div className="px-3 py-2 border-t border-line flex items-end gap-2 shrink-0">
-        {/* BEFORE the input box, so an expert is never a one-way door (admin 2026-09-21). Same shared
-            button and same sheet the free chat opens — this surface holds no list of its own. */}
-        <ModeButton onOpen={onOpenModePicker} />
-        <AttachMenu
-          onFiles={(fl) => addFiles(fl)}
-          fileAccept={ACCEPTED_TYPES}
-          disabled={loading || files.length >= MAX_FILES}
-          badge={files.length}
-          title="Attach (photo, gallery, or file)"
-          buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover disabled:opacity-40 border border-line text-body flex items-center justify-center"
-        />
-        <textarea
-          ref={composerRef}
-          value={input}
-          onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 128); }}
-          onKeyDown={(e) => {
-            // Was unconditional: Enter ALWAYS sent, the toggle did not exist here, and it fired mid-IME
-            // composition — so a Hindi or CJK typist sent a half-finished word. One shared rule now.
-            if (enterShouldSend({
-              key: e.key,
-              shiftKey: e.shiftKey,
-              sendOnEnter,
-              hasContent: !!input.trim() || files.length > 0,
-              isBusy: loading,
-              isComposing: (e.nativeEvent as any)?.isComposing,
-            })) {
-              e.preventDefault();
-              void send();
-              dismissKeyboardOnMobile(composerRef.current);
-            }
-          }}
-          onPaste={(e) => {
-            const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
-            const pasted = items.map((it) => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean) as File[];
-            if (pasted.length > 0) { e.preventDefault(); addFiles(pasted); }
-          }}
-          placeholder={`Ask ${config.name}…`}
-          rows={1}
-          className="flex-1 resize-none bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/40 max-h-32"
-        />
-        <ProfessionalVoiceButton
-          professionalId={config.id}
-          conversationId={serverConversationId(conversationId)}
-          getHistory={() => messages
-            .filter((m) => m.content !== config.welcome)
-            .slice(-12)
-            .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
-        />
-        {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
-        {loading ? (
-          <button onClick={stop} title="Stop" className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent flex items-center justify-center shrink-0">
-            <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
-          </button>
-        ) : (
-          <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-on-accent flex items-center justify-center shrink-0">
-            <Send className="w-4 h-4" />
-          </button>
-        )}
+      {/* THE FREE CHAT'S COMPOSER (admin 2026-09-23: "sabhi professionals navbharatai free jaise hi lagne
+          chahiye"). Mode stays OUTSIDE the box on its left (admin 2026-09-21: an expert is never a
+          one-way door); the paperclip, the voice button and Send move INSIDE it, on the right, exactly
+          where the free chat keeps them. The look comes from the one shared shell — see ComposerShell. */}
+      <div className={COMPOSER_PANEL_CLASS}>
+        <div className="max-w-4xl mx-auto">
+          <ComposerShell
+            left={<ModeButton onOpen={onOpenModePicker} />}
+            controls={(
+              <>
+                <AttachMenu
+                  onFiles={(fl) => addFiles(fl)}
+                  fileAccept={ACCEPTED_TYPES}
+                  disabled={loading || files.length >= MAX_FILES}
+                  badge={files.length}
+                  title="Attach (photo, gallery, or file)"
+                  buttonClassName={COMPOSER_ICON_CLASS}
+                />
+                <ProfessionalVoiceButton
+                  professionalId={config.id}
+                  conversationId={serverConversationId(conversationId)}
+                  title={`Talk to ${config.name} by voice`}
+                  // The speaker glyph, as in the free chat's row: there a mic means dictation and the
+                  // speaker means a spoken conversation, and this button is the conversation.
+                  icon={<Volume2 className="w-4 h-4" />}
+                  className={COMPOSER_ICON_CLASS}
+                  getHistory={() => messages
+                    .filter((m) => m.content !== config.welcome)
+                    .slice(-12)
+                    .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
+                />
+                {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
+                {loading ? (
+                  <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
+                    <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                  </button>
+                ) : (
+                  <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} aria-label="Send" className={COMPOSER_SEND_CLASS}>
+                    <Send className="w-4 h-4" />
+                  </button>
+                )}
+              </>
+            )}
+          >
+            <textarea
+              ref={composerRef}
+              value={input}
+              onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 240); }}
+              onKeyDown={(e) => {
+                // Was unconditional: Enter ALWAYS sent, the toggle did not exist here, and it fired mid-IME
+                // composition — so a Hindi or CJK typist sent a half-finished word. One shared rule now.
+                if (enterShouldSend({
+                  key: e.key,
+                  shiftKey: e.shiftKey,
+                  sendOnEnter,
+                  hasContent: !!input.trim() || files.length > 0,
+                  isBusy: loading,
+                  isComposing: (e.nativeEvent as any)?.isComposing,
+                })) {
+                  e.preventDefault();
+                  void send();
+                  dismissKeyboardOnMobile(composerRef.current);
+                }
+              }}
+              onPaste={(e) => {
+                const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
+                const pasted = items.map((it) => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean) as File[];
+                if (pasted.length > 0) { e.preventDefault(); addFiles(pasted); }
+              }}
+              placeholder={`Ask ${config.name}…`}
+              rows={1}
+              className={COMPOSER_TEXTAREA_CLASS}
+              style={{ paddingRight: composerTextPadding(3), maxHeight: '240px', overflowY: 'auto' }}
+            />
+          </ComposerShell>
+        </div>
       </div>
 
       {/* Paywall / login card — shown when the gate blocks a turn (or the user taps the quota chip). */}

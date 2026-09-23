@@ -80015,6 +80015,20 @@ Verified in Chromium at 390×844: About → Terms → the Refund link inside it,
 Test: `tests/legalLinksStayInTheApp.test.ts` (14; 7 fail with the components reverted), including a source
 guard that fails on any bare relative `href="/…"` literal in client TSX.
 ⚠️ Reaching installed phones needs a fresh `.aab`/`.ipa` (bundled mode) — only when the admin asks.
+---
+
+## 2026-09-23 — Every AI in NavBharatAI FREE uses the free chat's composer
+
+Admin: *"navbharatai free ke andar, sabhi ai aur professionals ke inputbox ko navbharatai free ke jaisa
+kro."* Four surfaces (professionals, Doctor AI, the image generator, Image Studio Pro) each hand-built
+their own composer. They now render one shell, `components/chat/ComposerShell.tsx`, whose classes are
+read back against `AIChat.tsx` by `tests/oneComposerEverywhere.test.ts`, so none of them can drift
+from the free chat again. Mode stays outside on the left; attach / mic / voice / send sit inside on the
+right. Supersedes the 2026-09-20 "Doctor AI like the professionals" layout (recorded in that test).
+Image Studio Pro's amber send became the shared indigo; the ₹1 is still on its chip and tooltip.
+
+**Pending on #3268 (another session, green):** the History button left of Mode. Once it merges, the same
+button goes into the shell's `left` slot on all four surfaces, and the sidebar row is removed as asked.
 ## 2026-09-23 — 🎓 PROFESSIONALS: 10 free messages a day, then paid; Exam mode 5 free questions
 
 Admin: *"professional ai me din ke 10 message free honge, fir paid hoga. aapne sabke liye sab free kar

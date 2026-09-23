@@ -1,7 +1,8 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModeButton } from '../chat/ModeButton';
-import { ArrowUp, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
+import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { Send, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
 import { TextOverlayEditor } from './TextOverlayEditor';
@@ -394,16 +395,36 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
           {/* OUTSIDE the pill, to its left (admin 2026-09-21: "input box se pahle mode button").
               Inside it the button would read as part of the message box; the free chat's composer
               already places it this way, and this is that same shared control. */}
-          <div className="flex items-end gap-2">
-          <ModeButton onOpen={onOpenModePicker} />
-          <div className="flex-1 min-w-0 flex items-end gap-2 bg-raised border border-line focus-within:border-amber-400/40 rounded-[26px] pl-2 pr-2 py-2 transition-colors">
-            <button
-              onClick={() => fileRef.current?.click()}
-              title="Attach an image to work from"
-              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink hover:bg-raised transition-colors"
-            >
-              <ImagePlus className="w-4.5 h-4.5" />
-            </button>
+          {/* THE FREE CHAT'S COMPOSER (admin 2026-09-23: "sabhi ai … navbharatai free ke jaisa karo").
+              Mode outside on the left; attach and Generate inside on the right, and Generate is the free
+              chat's own send button. The ₹1 price is still stated where it always was — on the Pro chip
+              and in this button's tooltip — so the colour is not the only thing telling the user. */}
+          <ComposerShell
+            left={<ModeButton onOpen={onOpenModePicker} />}
+            controls={(
+              <>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  title="Attach an image to work from"
+                  aria-label="Attach an image to work from"
+                  className={COMPOSER_ICON_CLASS}
+                >
+                  <ImagePlus className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void generate()}
+                  disabled={!mode || busy}
+                  title={mode ? `Generate — ₹${PRICE_INR}` : 'Describe an image, or attach one'}
+                  aria-label={`Generate — ₹${PRICE_INR}`}
+                  className={COMPOSER_SEND_CLASS}
+                >
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </button>
+              </>
+            )}
+          >
             <input
               ref={fileRef}
               type="file"
@@ -422,18 +443,10 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void generate(); }
               }}
               placeholder={ref ? 'Describe the change, or press send to re-imagine…' : 'Describe the image you want…'}
-              className="flex-1 min-w-0 bg-transparent resize-none text-sm text-ink placeholder-faint focus:outline-none py-2 leading-6"
+              className={COMPOSER_TEXTAREA_CLASS}
+              style={{ paddingRight: composerTextPadding(2) }}
             />
-            <button
-              onClick={() => void generate()}
-              disabled={!mode || busy}
-              title={mode ? `Generate — ₹${PRICE_INR}` : 'Describe an image, or attach one'}
-              className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-amber-400 text-black disabled:bg-raised disabled:text-faint hover:bg-amber-300 transition-colors"
-            >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
-            </button>
-          </div>
-          </div>
+          </ComposerShell>
           {/* The price is on the toggle chip ("Pro ₹1") and in the empty state; a third copy under the
               box only cost a line of a phone screen (admin 2026-09-21: "pro mode me already yah likha
               hai … space khatam ho raha hai, hatao"). "Charged only if it arrives" is still true, and

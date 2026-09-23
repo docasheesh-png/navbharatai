@@ -8,16 +8,19 @@
 // Several copies of one idea is the drifted-copy class this repo keeps
 // paying for, so the fix is not four restyles but ONE shell they all render:
 //
-//     [ left controls, e.g. Mode ▾ ]  [ message box ……………… 📎 🎤 🔊 ➤ ]
+//     [ 🕘 / ☰ ]  [ message box, full width           | ➤ ]
+//                 [                     📎  🎤  🔊    |   ]
 //
-// The box, its text and its control row are the free chat's own (`AIChat.tsx`, the composer the admin
-// pointed at). `tests/everyComposerLooksLikeTheFreeChat.test.ts` reads AIChat's classes back and fails
-// if these constants ever stop matching them, so the two cannot drift either.
+// The free chat (`AIChat.tsx`) renders this same shell, so "like the free chat" is true by
+// construction rather than by copying its classes. `tests/oneComposerEverywhere.test.ts` fails if any
+// of the five surfaces builds its own box again.
 //
 // It holds no state and sends nothing: each surface keeps its own textarea (handlers, placeholder,
 // auto-grow) and its own buttons, and only takes the LOOK from here.
 
 import React from 'react';
+import { HistoryButton } from './HistoryButton';
+import { ModeButton } from './ModeButton';
 
 /** The strip the composer sits on — the free chat's, verbatim. */
 export const COMPOSER_PANEL_CLASS =
@@ -28,58 +31,73 @@ export const COMPOSER_BOX_CLASS =
   'bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all';
 
 /**
- * The textarea inside the box. Same 48px resting height, left inset and 16px text as the free chat (16px
- * also stops iOS zooming the page on focus). The RIGHT inset is not here: it depends on how many controls
- * sit in the row, so each surface sets it with `composerTextPadding`.
+ * The textarea: the box's WHOLE top row (admin 2026-09-23, with a phone screenshot of the box squeezed
+ * to a sliver). It used to share one line with the controls and reserve a fixed ~176px on its right
+ * for them — so the moment the box got narrow (a phone, with History and Mode beside it) the writing
+ * area fell to a few pixels. The controls now have their own row underneath, so the text takes the
+ * full width at ANY width, and there is no right-hand reserve to get wrong. 16px text also stops iOS
+ * zooming the page on focus.
  */
 export const COMPOSER_TEXTAREA_CLASS =
-  'w-full bg-transparent text-[var(--theme-text)] placeholder:text-faint pl-5 py-2.5 outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]';
+  'w-full bg-transparent text-[var(--theme-text)] placeholder:text-faint pl-4 pr-2 pt-2.5 pb-1 outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]';
 
-/** A quiet icon control in the row (attach, mic, star). 36px, like every control in the free chat's row. */
+/** A quiet icon control in the bottom row (attach, mic, voice, star). 36px. */
 export const COMPOSER_ICON_CLASS =
   'p-2.5 text-faint hover:text-accent-text transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
 
-/** The send button — the free chat's. */
-export const COMPOSER_SEND_CLASS =
-  'p-2.5 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95';
-
-/** The one-tap Stop that replaces Send while a reply loads — the free chat's. */
-export const COMPOSER_STOP_CLASS =
-  'p-2.5 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95';
-
 /**
- * How far typed text must stay from the right edge so it never runs under the control row. Each control
- * is 36px with a 4px gap and the row is inset 8px — the arithmetic the free chat's own comment derives.
- * Pure.
+ * Send — as TALL AS THE BOX, spanning both rows on its right (admin 2026-09-23: "send button ko bhi 2
+ * line me banao"). The biggest target in the composer, at the edge the thumb reaches, and set apart
+ * from the voice button by the box's own gap so a reach for Send cannot land on a paid control.
  */
-export function composerTextPadding(controls: number): string {
-  const n = Number.isFinite(controls) && controls > 0 ? Math.floor(controls) : 0;
-  return `${n === 0 ? 20 : 8 + n * 36 + (n - 1) * 4 + 8}px`;
-}
+export const COMPOSER_SEND_CLASS =
+  'h-full min-h-[72px] w-11 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95';
+
+/** The one-tap Stop that replaces Send while a reply loads — the same tall shape. */
+export const COMPOSER_STOP_CLASS =
+  'h-full min-h-[72px] w-11 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95';
 
 export interface ComposerShellProps {
-  /** Controls OUTSIDE the box, on its left (Mode, and later History). Absent ⇒ the box takes the row. */
-  left?: React.ReactNode;
-  /** The surface's own `<textarea>`, styled with `COMPOSER_TEXTAREA_CLASS`. */
+  /** Opens chat history. Absent ⇒ no History half in the left column. */
+  onOpenHistory?: (() => void) | undefined;
+  /** Opens the mode picker. Absent ⇒ no Mode half. Both absent ⇒ no left column at all. */
+  onOpenMode?: (() => void) | undefined;
+  /** The surface's own `<textarea>` (styled with `COMPOSER_TEXTAREA_CLASS`), plus any overlay it needs. */
   children: React.ReactNode;
-  /** The controls INSIDE the box, on its right, in the free chat's order: attach, mic, voice, send. */
+  /** The quiet controls for the bottom row, right-aligned: attach, mic, voice, star. */
   controls: React.ReactNode;
+  /** The Send / Stop button, which spans both rows on the right. */
+  send: React.ReactNode;
 }
 
-export function ComposerShell({ left, children, controls }: ComposerShellProps) {
-  const box = (
-    <div className={COMPOSER_BOX_CLASS}>
-      <div className="relative flex items-center">
-        {children}
-        <div className="absolute right-2 bottom-1.5 flex gap-1 items-center">{controls}</div>
-      </div>
+/**
+ *     ┌──┐ ┌──────────────────────────┬──┐
+ *     │🕘│ │ Ask NavBharatAI…         │  │
+ *     ├──┤ │                          │➤ │
+ *     │☰ │ │           📎   🎤   🔊   │  │
+ *     └──┘ └──────────────────────────┴──┘
+ *
+ * The admin's own sketch (2026-09-23). The left column is icon-only on a phone and labelled from `md`
+ * up; it stretches to the box's height and its two buttons split it. Everything is `items-stretch`, so
+ * as the text grows the column and the Send button grow with it.
+ */
+export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, send }: ComposerShellProps) {
+  const rail = onOpenHistory || onOpenMode ? (
+    <div className="flex flex-col gap-1.5 shrink-0">
+      <HistoryButton onOpen={onOpenHistory} size="rail" />
+      <ModeButton onOpen={onOpenMode} size="rail" />
     </div>
-  );
-  if (!left) return box;
+  ) : null;
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2">
-      <div className="flex items-end gap-2">{left}</div>
-      {box}
+    <div className="flex items-stretch gap-2">
+      {rail}
+      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch`}>
+        <div className="relative flex-1 min-w-0 flex flex-col">
+          {children}
+          <div className="flex items-center justify-end gap-1 px-1.5 pb-1">{controls}</div>
+        </div>
+        <div className="flex p-1.5 pl-0.5">{send}</div>
+      </div>
     </div>
   );
 }

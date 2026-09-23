@@ -64,6 +64,6 @@ describe('a step deadline is not called the build\'s budget', () => {
   it('the runner no longer tells the report that the BUILD\'s time budget ended', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/providers/MultiProviderTurnRunner.ts'), 'utf8');
     expect(src).not.toContain("This build's time budget ended before the step could finish");
-    expect(src).toContain('The time budget ended before this step could finish');
+    expect(src).toContain('The time allowed for this step ran out before it could finish');
   });
 });

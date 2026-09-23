@@ -862,11 +862,12 @@ export function makeMultiProviderTurnRunner(
           }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
-            // "THE time budget", never "this BUILD'S": the deadline handed down may be a single step's
-            // (the fast lane's 90 s plan cap, autopsy ac41a924) with most of the build still ahead, and
-            // this runner cannot tell which clock it was. The report used to say the build's budget had
-            // ended 90 s into a 29-minute build — the sibling of the fix aFailedProbeIsNotAnAnswer holds.
-            throw new Error(`The time budget ended before this step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+            // ⚠️ "the time allowed for THIS STEP", never "this build's time budget". The deadline handed
+            // down may be a single step's — the fast lane's 90 s plan cap — with most of the build still
+            // ahead, and this runner cannot tell which clock it was. Two autopsies found the same lie:
+            // 0d297b25 (56 minutes left) and ac41a924 (90 s into a 29-minute build). Sibling of the fix
+            // in aFailedProbeIsNotAnAnswer.
+            throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
           if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
             // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"

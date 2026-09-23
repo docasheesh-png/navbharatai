@@ -18,15 +18,32 @@
 // so a phone never shows two History controls.
 
 import { History } from 'lucide-react';
+import { RAIL_BUTTON_CLASS } from './ModeButton';
 
 export interface HistoryButtonProps {
   /** Open history. `undefined` ⇒ render nothing (the bottom bar is carrying History). */
   onOpen?: (() => void) | undefined;
+  /** `rail` = the upper half of the composer's left column; icon only on a phone. See ModeButton. */
+  size?: 'inline' | 'rail';
   className?: string;
 }
 
-export function HistoryButton({ onOpen, className = '' }: HistoryButtonProps) {
+export function HistoryButton({ onOpen, size = 'inline', className = '' }: HistoryButtonProps) {
   if (!onOpen) return null;
+  if (size === 'rail') {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label="Open chat history"
+        title="Chat history — your earlier conversations"
+        className={`${RAIL_BUTTON_CLASS} ${className}`}
+      >
+        <History className="w-4 h-4 shrink-0" />
+        <span className="hidden md:inline">History</span>
+      </button>
+    );
+  }
   return (
     <button
       type="button"

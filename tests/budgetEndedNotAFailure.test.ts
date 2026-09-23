@@ -135,7 +135,9 @@ describe('the chain stops walking rungs it cannot use', () => {
       chain.map((c) => ({ name: c.name, runner: c.runner as never })) as never,
       {} as never,
     );
-    await expect(runner.runTurn({} as never)).rejects.toThrow(/time budget ended/);
+    // Anchored on the FACT (autopsy 0d297b25): the old words "this build's time budget ended" named a
+    // clock the runner cannot identify — a fast-lane step cap said it with 56 minutes of build left.
+    await expect(runner.runTurn({} as never)).rejects.toThrow(/stopped by our own deadline/);
     // Exactly ONE provider was asked. The report's 153 were all after the budget was already gone.
     expect(attempts).toEqual(['KIMI']);
   });

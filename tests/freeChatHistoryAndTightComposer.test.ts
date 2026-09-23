@@ -46,13 +46,11 @@ describe('1 · a History button, on desktop only, to the LEFT of Mode', () => {
     expect(PANEL).not.toMatch(/HistoryPopup|HistoryView/);
   });
 
-  it('AIChat renders [ History ] [ Mode ] [ message box ], in that order', () => {
-    const history = CHAT.indexOf('<HistoryButton onOpen={onOpenHistory} />');
-    const mode = CHAT.indexOf('<ModeButton onOpen={onOpenModePicker} />');
-    const box = CHAT.indexOf('<div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl');
-    expect(history).toBeGreaterThan(-1);
-    expect(mode).toBeGreaterThan(history);
-    expect(box).toBeGreaterThan(mode);
+  it('AIChat hands History and Mode to the shared shell, which stacks them left of the box', () => {
+    // 2026-09-23: one column, History above Mode (admin sketch) — the order is the shell's, asserted in
+    // freeChatModeOnDesktop.test.ts; here, that the free chat passes both doors, each behind its gate.
+    expect(CHAT).toContain('onOpenHistory={showFreeHistoryButton ? onOpenHistory : undefined}');
+    expect(CHAT).toContain('onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}');
   });
 
   it('shares Mode\'s carve-out, so it never appears beside Pro\'s own dropdown', () => {

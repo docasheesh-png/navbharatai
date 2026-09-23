@@ -165,6 +165,7 @@ import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, revi
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
+import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
@@ -14090,9 +14091,13 @@ async function noteBuildOutcome(
           // for a proven render with an empty file set — a third way for this check to disappear from
           // its own report, on top of the swallowed throw below. Naming it removes the asymmetry: the
           // record call is now unconditional and every attempt leaves exactly one line.
-          const outcome: AttemptOutcome = judged.kind === 'proven' && Object.keys(files).length === 0
-            ? { kind: 'nothing-to-save' }
-            : judged;
+          // 🔴 A STARTER IS NOT A LAST KNOWN GOOD (autopsy 3ab93068): that build saved "Hello World" here as
+          // the version to restore. `files` holds the tree that rendered, so both factors are read from it.
+          const outcome: AttemptOutcome = judged.kind === 'proven' && starterIsWhatRendered(starterEntryIn(files), shot.html)
+            ? { kind: 'starter' }
+            : judged.kind === 'proven' && Object.keys(files).length === 0
+              ? { kind: 'nothing-to-save' }
+              : judged;
           const elapsedMs = Date.now() - buildStartedAt;
           if (outcome.kind === 'proven') {
             // The same key the end-of-build GreenGuard reads — no second store, no second rule.
@@ -16081,7 +16086,15 @@ async function noteBuildOutcome(
           merge: mergeWorkspaceFiles,
           emit: (e) => events.emit(e),
         });
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        // The workspace entry, when it is still our starter — the lane must not finish without replacing
+        // it (autopsy 3ab93068). Read, never guessed: an unreadable file leaves it undefined.
+        let starterEntryPath: string | undefined;
+        for (const p of STARTER_ENTRY_PATHS) {
+          if (!scaffold.includes(p)) continue;
+          const c = await actuator.readFile(workspaceId, p).catch(() => null);
+          if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
+        }
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
@@ -18236,6 +18249,34 @@ async function noteBuildOutcome(
         } catch { /* the ledger write is best-effort — it must never affect a build */ }
       };
       /**
+       * 🔴 IS THE PAGE WE JUST RENDERED THE USER'S APP, OR OUR STARTER? (autopsy 3ab93068, 2026-09-23)
+       *
+       * The entry path when both factors hold (entry untouched AND the page shows the starter heading —
+       * see `starterIsWhatRendered`), else null. Every verdict below that can call a build "rendered"
+       * passes through `withStarterVerdict` with this answer, so a Hello World page becomes a conclusive
+       * NOT-rendered verdict and flows down the paths that already exist for one: the repair pass is
+       * handed the exact fix, the reviewer may write, and the markup is not earned. Cheap when it does
+       * not apply: the heading test runs first and only a page carrying it costs a file read.
+       */
+      let starterNoted = false;
+      const starterShownOn = async (html: string): Promise<string | null> => {
+        if (!pageShowsStarter(html)) return null;
+        try {
+          for (const p of STARTER_ENTRY_PATHS) {
+            const c = writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
+            if (!isUntouchedStarterEntry(c)) continue;
+            if (!starterNoted) {
+              starterNoted = true;
+              buildDiag.record({ phase: 'preview', severity: 'warning', code: 'STARTER_STILL_SHOWING', autoResolved: false,
+                message: `The preview rendered, but what it showed was the starter template (${p} still says "Hello World") — not the app that was built. Not counted as a render.`,
+                detail: 'Entry file byte-identical to the seeded starter AND the page carries its heading. Treated as a conclusive not-rendered verdict so the existing repair, reviewer and billing rules apply.' });
+            }
+            return p;
+          }
+        } catch { /* an unreadable entry is "could not tell", never a finding */ }
+        return null;
+      };
+      /**
        * 🔴 DID A REAL BROWSER SEE THIS APP RENDER? — THE ONE ANSWER, FOR EVERY VERDICT BELOW
        * (autopsy 697b38ee, EIGHTH appearance, 2026-09-21).
        *
@@ -18353,11 +18394,11 @@ async function noteBuildOutcome(
           // has spent the week removing, and it would produce the WRONG sentence — telling someone
           // with a real web app that their API returned an error. Unknown falls back to today's
           // wording, which is correct for an API and merely unhelpful for a site.
-          const verdict = analyzePreviewHtml(shot.html, {
+          const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, {
             painted: shot.painted,
             source: shot.source,
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
-          });
+          }), await starterShownOn(shot.html));
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
@@ -18422,7 +18463,7 @@ async function noteBuildOutcome(
             shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
           const html = shot.html;
-          const verdict = analyzePreviewHtml(html, { painted: shot.painted, source: shot.source });
+          const verdict = withStarterVerdict(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), await starterShownOn(html));
           let consoleErrs: string[] = [];
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
@@ -19398,7 +19439,7 @@ async function noteBuildOutcome(
           try {
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 Nothing proved your app runs yet — opening it once more to check…', ts: Date.now() });
             const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'last-chance-proof');
-            const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+            const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), await starterShownOn(shot.html));
             let consoleErrs: string[] = [];
             try {
               if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
@@ -19703,6 +19744,17 @@ async function noteBuildOutcome(
             }
             captured = split.app;
           }
+          // WHAT THE REPAIR WAS HANDED, IN THE REPORT (autopsy f15a9bcc, 2026-09-23). That build spent a
+          // repair pass on "2 runtime error(s)" that its own model then called a transient 502, and the
+          // report carried only the COUNT — so whether `partitionServerDown` should have caught them could
+          // not be answered from the evidence. The texts ride on the line now, bounded; admin-only.
+          try {
+            buildDiag.record({
+              phase: 'autofix', severity: 'info', code: 'RUNTIME_AUTOFIX_TRIGGERED', autoResolved: true,
+              message: `${captured.length} runtime error(s) sent to a repair pass (attempt ${attempt}/${maxAttempts}).`,
+              detail: `preview=${internalPreviewUrl(lastPreviewUrl) ?? 'none'} · ${captured.slice(0, 4).map((e) => `[${e.kind}] ${e.text.slice(0, 240)}`).join(' · ')}`,
+            });
+          } catch { /* the report line is best-effort — never affects the repair */ }
           events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({

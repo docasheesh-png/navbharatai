@@ -110,6 +110,12 @@ export function shouldAttemptInBuildProof(s: AttemptState, now: number): boolean
  */
 export type AttemptOutcome =
   | { kind: 'proven' }
+  /**
+   * A real browser saw a page — but it was our starter template ("Hello World"), because the app's root
+   * component had not been rewritten yet (autopsy 3ab93068). Never a last known good: protecting it
+   * would make a later restore hand the user back a blank template as "your working app".
+   */
+  | { kind: 'starter' }
   /** The app rendered, but a file was written while the browser was open — the bytes are not the proof. */
   | { kind: 'raced' }
   /** A real browser looked and the page carried a defect signal (an error overlay, an empty root). */
@@ -199,6 +205,12 @@ export function inBuildGreenNote(outcome: AttemptOutcome, facts: { elapsedMs: nu
       return {
         code: IN_BUILD_GREEN_CODE, severity: 'info', autoResolved: true,
         message: `The app rendered in a real browser ${secs}s into this build — ${facts.fileCount ?? 0} file(s) recorded as the last known good. If a later step breaks the app, this version is what comes back.`,
+      };
+    case 'starter':
+      return {
+        code: 'IN_BUILD_GREEN_NOT_YET', severity: 'info', autoResolved: false,
+        message: `Opened the app ${secs}s into this build; the page was still the starter template, not the app being built. Nothing recorded.`,
+        detail: 'The entry file was byte-identical to the seeded starter and the page showed its heading. A starter is never saved as the last known good.',
       };
     case 'raced':
       return {

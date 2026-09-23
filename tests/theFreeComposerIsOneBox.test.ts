@@ -23,10 +23,14 @@ const PRO = code(read('src/components/ide/ImageStudioPro.tsx'));
 
 const freeScreen = FREE.slice(FREE.indexOf('No images yet'));
 const dock = FREE.slice(FREE.indexOf('id="nbai-image-options"') > 0 ? FREE.indexOf('aria-controls="nbai-image-options"') : 0);
-const pill = dock.slice(dock.indexOf('<textarea') - 1600, dock.indexOf('<textarea'));
+// Since 2026-09-23 the box is the shared ComposerShell (admin: "sabhi ai … navbharatai free ke jaisa"):
+// the attach button is still INSIDE it, now on the right with the other controls, as the free chat has
+// it. So "the pill" is the ComposerShell element, from its opening tag to the textarea it wraps.
+const pill = dock.slice(dock.indexOf('<ComposerShell'), dock.indexOf('<textarea'));
 
 describe('B — the attach button is inside the input pill', () => {
-  it('the pill carries an attach button BEFORE the words, wired to the picker through openRef', () => {
+  it('the box carries an attach button, wired to the picker through openRef', () => {
+    expect(dock.indexOf('<ComposerShell')).toBeGreaterThan(-1);
     expect(pill).toContain('aria-label="Attach your own picture to change"');
     expect(pill).toContain('onClick={() => attachRef.current?.()}');
     expect(pill).toContain('<ImagePlus');

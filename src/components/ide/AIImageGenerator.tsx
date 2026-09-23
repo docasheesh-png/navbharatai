@@ -1,9 +1,10 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef } from 'react';
 import { ModeButton } from '../chat/ModeButton';
+import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { ArrowUp, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
 import { ImageResizeEditor } from './ImageResizeEditor';
@@ -1102,24 +1103,53 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
 
             {/* Outside the pill, to its left — same placement and same shared button as every other
                 composer in the app (admin 2026-09-21). */}
-            <div className="flex items-end gap-2">
-            <ModeButton onOpen={onOpenModePicker} />
-            <div className="flex-1 min-w-0 flex items-end gap-2 rounded-2xl border border-line bg-card pl-1.5 pr-2 py-1.5 focus-within:border-accent-text/50 transition-colors">
-              {/* ATTACH, inside the pill — the same button, in the same place, as the Pro studio and
-                  every other composer here (admin 2026-09-21: "sirf attach button bana kar, input
-                  box ke andar karo"). It opens the picker's chooser; the crop rule stays there. */}
-              <button
-                type="button"
-                onClick={() => attachRef.current?.()}
-                disabled={isLoading}
-                aria-label="Attach your own picture to change"
-                title={reference ? 'Your picture is attached — tap the pencil above to adjust it' : 'Change my own picture'}
-                className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 ${
-                  reference ? 'text-accent-text' : 'text-muted hover:text-ink hover:bg-raised'
-                }`}
-              >
-                <ImagePlus className="w-4 h-4" />
-              </button>
+            {/* THE FREE CHAT'S COMPOSER (admin 2026-09-23: "sabhi ai … navbharatai free ke jaisa karo").
+                Mode outside on the left; attach, the star and Generate inside on the right, where the
+                free chat keeps its controls. The look is the one shared shell — see ComposerShell. */}
+            <ComposerShell
+              left={<ModeButton onOpen={onOpenModePicker} />}
+              controls={(
+                <>
+                  {/* ATTACH (admin 2026-09-21: inside the box). Opens the picker's chooser; the crop
+                      rule stays there. */}
+                  <button
+                    type="button"
+                    onClick={() => attachRef.current?.()}
+                    disabled={isLoading}
+                    aria-label="Attach your own picture to change"
+                    title={reference ? 'Your picture is attached — tap the pencil above to adjust it' : 'Change my own picture'}
+                    className={`${COMPOSER_ICON_CLASS} ${reference ? 'text-accent-text' : ''}`}
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                  </button>
+                  {/* Enhance is DISABLED when the chosen style has no keywords to add, rather than
+                      present and inert: "built but not really working" is the state this app does not
+                      have. Realistic is exactly that case — it adds none. */}
+                  <button
+                    type="button"
+                    onClick={() => void handleEnhance()}
+                    disabled={enhancing || !!reference || prompt.trim().length < 3 || prompt.trim().length > IMAGE_PROMPT_MAX}
+                    aria-label="Improve my prompt"
+                    title={reference
+                      ? 'The star writes a brief for a NEW picture — it would restyle the one you attached'
+                      : prompt.trim().length < 3 ? 'Write a few words first' : 'Rewrite my words as a professional prompt'}
+                    className={COMPOSER_ICON_CLASS}
+                  >
+                    {enhancing ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerate()}
+                    disabled={isLoading || promptLimit.over}
+                    aria-label="Generate image"
+                    title={promptLimit.over ? 'Too long to send — please shorten it' : undefined}
+                    className={COMPOSER_SEND_CLASS}
+                  >
+                    {isLoading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </>
+              )}
+            >
               <label htmlFor="nbai-image-prompt" className="sr-only">
                 {reference ? 'Describe the change you want' : 'Describe your image'}
               </label>
@@ -1135,35 +1165,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleGenerate(); }
                 }}
                 placeholder={reference ? 'What should change? e.g. make the background blue' : 'Describe your image...'}
-                className="flex-1 min-w-0 bg-transparent resize-none text-sm text-ink placeholder-faint focus:outline-none py-2 leading-6"
+                className={COMPOSER_TEXTAREA_CLASS}
+                style={{ paddingRight: composerTextPadding(3) }}
               />
-              {/* Enhance is DISABLED when the chosen style has no keywords to add, rather than
-                  present and inert: "built but not really working" is the state this app does not
-                  have. Realistic is exactly that case — it adds none. */}
-              <button
-                type="button"
-                onClick={() => void handleEnhance()}
-                disabled={enhancing || !!reference || prompt.trim().length < 3 || prompt.trim().length > IMAGE_PROMPT_MAX}
-                aria-label="Improve my prompt"
-                title={reference
-                  ? 'The star writes a brief for a NEW picture — it would restyle the one you attached'
-                  : prompt.trim().length < 3 ? 'Write a few words first' : 'Rewrite my words as a professional prompt'}
-                className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                {enhancing ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleGenerate()}
-                disabled={isLoading || promptLimit.over}
-                aria-label="Generate image"
-                title={promptLimit.over ? 'Too long to send — please shorten it' : undefined}
-                className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-violet-600 hover:bg-violet-500 text-on-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {isLoading ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
-              </button>
-            </div>
-            </div>
+            </ComposerShell>
             {promptLimit.near && (
               <p className={`text-[11px] text-right px-3 ${promptLimit.over ? 'text-danger' : 'text-faint'}`} aria-live="polite">
                 {imagePromptLimitNote(promptLimit)}

@@ -300,6 +300,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
+import { readDevServerLastWords } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -18548,6 +18549,8 @@ async function noteBuildOutcome(
               break;
             }
             serverRevivals += 1;
+            // Its last words BEFORE the restart overwrites them — the only evidence of WHY it stopped.
+            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
@@ -18560,6 +18563,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
+              detail: lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)',
               autoResolved: true,
             });
             attempt -= 1; // a process restart is not a repair attempt
@@ -19621,6 +19625,7 @@ async function noteBuildOutcome(
               break;
             }
             runtimeServerRestarted = true;
+            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             const restartedAt = Date.now();
             try {
@@ -19629,7 +19634,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
-              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''}`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)'}`,
               autoResolved: true,
             });
             if (split.app.length === 0) {

@@ -158,6 +158,7 @@ export function withStarterVerdict<V extends { rendered: boolean; inconclusive?:
 ): V {
   if (!starterShown || !verdict.rendered) return verdict;
   return { ...verdict, rendered: false, inconclusive: false, problems: [starterPreviewProblem(starterShown), ...verdict.problems] };
+}
 
 /**
  * 🔴 A BROWSER THAT RENDERED THE STARTER DID NOT RENDER THE APP (autopsy 0d297b25, 2026-09-23).

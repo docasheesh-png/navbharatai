@@ -59,7 +59,7 @@
   "src/components/panels/SettingsPanel.tsx": 5,
   "src/components/panels/SidebarNav.tsx": 1,
   "src/components/panels/ViewPanels.tsx": 3,
-  "src/components/professionals/ProfessionalChat.tsx": 2,
+  "src/components/professionals/ProfessionalChat.tsx": 1,
   "src/components/professionals/ProfessionalsView.tsx": 1,
   "src/components/profile/ProfilePage.tsx": 2,
   "src/components/sda/DoseCalculator.tsx": 1,

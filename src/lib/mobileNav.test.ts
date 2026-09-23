@@ -55,7 +55,11 @@ describe('every professional gets the compact header (locked)', () => {
   });
 
   it('keeps the composer compact', () => {
-    expect(chat).toContain('px-3 py-2 border-t border-line'); // same: only the border class moved to the token
+    // Since 2026-09-23 the strip is the shared one every FREE-mode AI uses (ComposerShell) — the same
+    // 8px above and below it had, so it is exactly as compact as before.
+    expect(chat).toContain('className={COMPOSER_PANEL_CLASS}');
+    const shell = readFileSync(resolve(process.cwd(), 'src/components/chat/ComposerShell.tsx'), 'utf8');
+    expect(shell).toContain("'px-3 pt-2 pb-2 border-t border-line");
   });
 });
 

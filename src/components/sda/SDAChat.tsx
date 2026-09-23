@@ -35,6 +35,7 @@ import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { ModeButton } from '../chat/ModeButton';
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { MessageEditActions } from '../chat/MessageEditActions';
@@ -1284,7 +1285,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
         </div>
 
         {/* Input Area */}
-        <div className="shrink-0 bg-surface border-t border-emerald-900/30 px-4 pb-3 pt-2">
+        <div className={COMPOSER_PANEL_CLASS}>
 
           {/* THE SHARED COMPOSER TOOLBAR (admin 2026-08-10: "wahi sabhi jagah laga do"). Doctor AI had
               none of this — no Enter-to-send preference, no way to find something said earlier in a long
@@ -1347,109 +1348,108 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
             two different features wearing one icon — the distinction predates this change and the
             layout is what the admin asked to align, not the meaning.
           */}
-          <div className="flex items-end gap-2">
-            {/* Before the input box, same shared button and same sheet as every other surface. */}
-            <ModeButton onOpen={onOpenModePicker} />
-            <AttachMenu
-              onFiles={handleFiles}
-              fileAccept={ACCEPTED_TYPES}
-              multiple={false}
-              disabled={loading}
-              badge={attachedFile ? 1 : undefined}
-              title="Attach a lab report, X-ray, ECG or any medical document"
-              buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover disabled:opacity-40 border border-line text-body flex items-center justify-center"
-            />
-
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={e => { setInput(e.target.value); autoResize(e.target); }}
-              onKeyDown={(e) => {
-                // Doctor AI previously had NO keyboard send at all — every message needed a tap on
-                // the button, which on a desktop consult is the slowest possible way to work. Same
-                // shared rule as every other AI now, IME-safe and honouring the toggle.
-                if (enterShouldSend({
-                  key: e.key,
-                  shiftKey: e.shiftKey,
-                  sendOnEnter,
-                  hasContent: !!input.trim() || !!attachedFile,
-                  isBusy: loading,
-                  isComposing: (e.nativeEvent as any)?.isComposing,
-                })) {
-                  e.preventDefault();
-                  void handleSend();
-                  dismissKeyboardOnMobile(inputRef.current);
-                }
-              }}
-              placeholder={attachedFile ? 'Add a note about this document…' : 'Type your answer…'}
-              rows={1}
-              className="flex-1 resize-none bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-emerald-600/60 max-h-32"
-              disabled={loading}
-            />
-
-            {/* Dictation mic — speech → TEXT into the box (you still read + Send). Renders only where
-                the Web Speech API exists; absent on iOS/iPadOS WKWebView (no dead button). */}
-            {voiceSupported && (
-              <button
-                onClick={() => toggleVoice(input)}
-                disabled={loading}
-                title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
-                className={cn(
-                  'w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 disabled:opacity-40 transition-colors',
-                  isListening
-                    ? 'bg-red-500/15 border-red-500/40 text-danger animate-pulse'
-                    : 'bg-raised hover:bg-raised-hover border-line text-body',
+          {/* THE FREE CHAT'S COMPOSER (admin 2026-09-23: "sabhi ai aur professionals ke inputbox ko
+              navbharatai free ke jaisa karo"). Supersedes the 2026-09-20 layout, which put every control
+              in its own box BESIDE the input: the complaint then was a paperclip and mic INSIDE on the
+              LEFT, pushing the text a third of the way across. Inside on the RIGHT, as the free chat
+              does it, the writing area starts at the left edge — the thing that was actually wrong.
+              Mode stays outside on the left. The DICTATION mic stays (speech → text, which the
+              professionals do not have) and the voice button keeps its speaker glyph, so the two are
+              never one icon for two features. */}
+          <ComposerShell
+            left={<ModeButton onOpen={onOpenModePicker} />}
+            controls={(
+              <>
+                <AttachMenu
+                  onFiles={handleFiles}
+                  fileAccept={ACCEPTED_TYPES}
+                  multiple={false}
+                  disabled={loading}
+                  badge={attachedFile ? 1 : undefined}
+                  title="Attach a lab report, X-ray, ECG or any medical document"
+                  buttonClassName={COMPOSER_ICON_CLASS}
+                />
+                {/* Dictation mic — speech → TEXT into the box. Renders only where the Web Speech API
+                    exists; absent on iOS/iPadOS WKWebView (no dead button). */}
+                {voiceSupported && (
+                  <button
+                    onClick={() => toggleVoice(input)}
+                    disabled={loading}
+                    title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
+                    aria-label={isListening ? 'Stop voice input' : 'Dictate'}
+                    className={cn(COMPOSER_ICON_CLASS, isListening && 'text-danger animate-pulse')}
+                  >
+                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </button>
                 )}
-              >
-                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
+                {/* Talk to SDA by VOICE — a full spoken consult (distinct from dictation). Renders
+                    nothing unless voice is enabled + the user is signed in. */}
+                <ProfessionalVoiceButton
+                  professionalId="sda"
+                  title="Talk to SDA by voice — start a live spoken consult"
+                  icon={<Volume2 className="w-4 h-4" />}
+                  className={COMPOSER_ICON_CLASS}
+                  getHistory={() =>
+                    messages
+                      .filter((m) => m.text && m.text.trim())
+                      .slice(-20)
+                      .map((m) => ({
+                        role: (m.sender === 'doctor' ? 'user' : 'assistant') as 'user' | 'assistant',
+                        // Strip the text-only clinical machine signals so they are never spoken back.
+                        content: m.text
+                          .replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]/g, '')
+                          .replace(/\[CASE_COMPLETE\]/g, '')
+                          .trim(),
+                      }))
+                      .filter((t) => t.content)
+                  }
+                />
+                {/* Send → one-tap STOP while a reply loads (admin 2026-08-13). */}
+                {loading ? (
+                  <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
+                    <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { handleSend(); dismissKeyboardOnMobile(inputRef.current); }}
+                    disabled={!input.trim() && !attachedFile}
+                    aria-label="Send"
+                    className={COMPOSER_SEND_CLASS}
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                )}
+              </>
             )}
-
-            {/* Talk to SDA by VOICE — a full spoken back-and-forth with the doctor persona (distinct
-                from the dictation mic, which only turns speech → text). Renders nothing unless voice
-                is enabled + the user is signed in. getHistory continues THIS case in voice (clinical
-                markers stripped so nothing is read aloud). */}
-            <ProfessionalVoiceButton
-              professionalId="sda"
-              title="Talk to SDA by voice — start a live spoken consult"
-              icon={<Volume2 className="w-4 h-4" />}
-              className="w-9 h-9 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-success flex items-center justify-center shrink-0"
-              getHistory={() =>
-                messages
-                  .filter((m) => m.text && m.text.trim())
-                  .slice(-20)
-                  .map((m) => ({
-                    role: (m.sender === 'doctor' ? 'user' : 'assistant') as 'user' | 'assistant',
-                    // Strip the text-only clinical machine signals so they are never spoken back.
-                    content: m.text
-                      .replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]/g, '')
-                      .replace(/\[CASE_COMPLETE\]/g, '')
-                      .trim(),
-                  }))
-                  .filter((t) => t.content)
-              }
-            />
-
-            {/* Send button — becomes a one-tap STOP while a reply is loading (admin 2026-08-13), so a wrong
-                query can be cancelled instead of waited out. */}
-            {loading ? (
-              <button
-                onClick={stop}
-                title="Stop"
-                className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent flex items-center justify-center shrink-0"
-              >
-                <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => { handleSend(); dismissKeyboardOnMobile(inputRef.current); }}
-                disabled={!input.trim() && !attachedFile}
-                className="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent flex items-center justify-center shrink-0"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+          >
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={e => { setInput(e.target.value); autoResize(e.target); }}
+                onKeyDown={(e) => {
+                  // Doctor AI previously had NO keyboard send at all — every message needed a tap on
+                  // the button, which on a desktop consult is the slowest possible way to work. Same
+                  // shared rule as every other AI now, IME-safe and honouring the toggle.
+                  if (enterShouldSend({
+                    key: e.key,
+                    shiftKey: e.shiftKey,
+                    sendOnEnter,
+                    hasContent: !!input.trim() || !!attachedFile,
+                    isBusy: loading,
+                    isComposing: (e.nativeEvent as any)?.isComposing,
+                  })) {
+                    e.preventDefault();
+                    void handleSend();
+                    dismissKeyboardOnMobile(inputRef.current);
+                  }
+                }}
+                placeholder={attachedFile ? 'Add a note about this document…' : 'Type your answer…'}
+                rows={1}
+                className={COMPOSER_TEXTAREA_CLASS}
+                style={{ paddingRight: composerTextPadding(4), maxHeight: `${MAX_HEIGHT}px`, overflowY: 'auto' }}
+                disabled={loading}
+              />
+          </ComposerShell>
 
           {/* The emoji legend row that sat here (Docs / Dictate / Talk-to-SDA / Clinical-Tools) was
               DELETED (admin 2026-08-08). Every entry labelled a control visible in this very row —

@@ -80136,6 +80136,31 @@ starter cards (`agentv3/starterTemplates.ts`), untouched.
 Locked in `tests/theFreeChatOffersOnlyWhatFreeCanDo.test.ts` (5 cases, 4 fail on the old code),
 including a repo-wide guard against any button that "clicks" another element found by its title, and a
 check that `AIChat` still has only the free chat as caller. Installed phones need a fresh `.aab`/`.ipa`.
+## 2026-09-23 — One footer sheet at a time: Mode no longer sits over the footer
+
+Admin: *"navbharatai free ke andar footer ke Mode press karne ke baad History, AI, Settings kisi par click
+karo, Mode hat ta hi nahi hai … footer me koi option open hai, aur 2nd footer option par click kiya jaye
+to, old wala hide ho jaye, new click wala show ho!!"*
+
+**Root cause (measured in Chromium at 390×844, not guessed):** `ModePickerSheet` was `fixed inset-0
+z-[200]`, ABOVE the tab bar's `z-[150]`, and ran to the bottom of the screen — so the footer was covered
+and a tap on History / AI / Settings landed on the sheet's own rows (Playwright reported the sheet
+"intercepts pointer events" on the Settings button). `HistoryPopup` had always been `z-[130]` with
+`nb-sheet-overlay-flush`, i.e. UNDER the bar with room reserved for it; the Mode sheet never got the
+same footing. And even with the bar reachable, no footer item closed the other item's sheet.
+
+**Fix:**
+- `ModePickerSheet` → `nb-sheet-overlay-flush fixed inset-0 z-[130]` (HistoryPopup's footing). The card
+  no longer adds the device inset itself, since the overlay reserves it. It leaves the sheet-contract
+  ratchet (`sheetContractBaseline.json` 17 → 16).
+- `src/lib/footerSheets.ts` (pure): a footer tap first closes the sheet another item opened; a re-tap on
+  the open item closes it. Wired into the Free / Professionals footer.
+- Sibling: Pro v5.0's footer already kept History/More in one `mobileSheet` state, but its **Code
+  Studio** item left that sheet open behind it. `V3FooterApi.closeSheet` now closes it first.
+
+**Verified in the real built app:** Mode → Settings opens Settings; Mode → AI closes the sheet; Mode →
+Mode closes it; the sheet's card ends above the footer. `tests/oneFooterSheetAtATime.test.ts` (8 cases;
+the wiring cases fail against the old code). Installed phones get it only with a fresh `.aab`/`.ipa`.
 ---
 
 ## 2026-09-23 — The two-row composer (admin sketch), on every AI in NavBharatAI FREE

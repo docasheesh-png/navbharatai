@@ -1130,61 +1130,17 @@ export const AIChat: React.FC<AIChatProps> = ({
               <div className="w-10 h-10 bg-indigo-600/10 rounded-2xl flex items-center justify-center mb-2">
                 <Sparkles className="w-5 h-5 text-accent-text" />
               </div>
-              <p className={cn("text-[10px] font-black uppercase tracking-widest text-muted")}>Ready to architect and build.</p>
+              <p className={cn("text-[10px] font-black uppercase tracking-widest text-muted")}>Ask me anything.</p>
             </div>
 
-            {/* B6/G9 — Quick-Start Gallery: example prompts, adapts per agent */}
-            {(() => {
-              const isPro = activeAgent === 'navbharatai-pro';
-              const isIde = activeAgent === 'navbharatai' || !activeAgent?.includes('pro');
-              const proStarters = [
-                { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
-                { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
-                { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
-                { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
-                { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
-                { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
-                { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
-                { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
-              ];
-              const ideStarters = [
-                { icon: '🔍', title: 'Explain this file', prompt: 'Explain what this file does and how it works.' },
-                { icon: '🐛', title: 'Find bugs', prompt: 'Review this code for bugs, edge cases, and potential issues. List each problem with a fix.' },
-                { icon: '⚡', title: 'Improve performance', prompt: 'Identify and fix performance bottlenecks in this code.' },
-                { icon: '🛡️', title: 'Security review', prompt: 'Do a security audit of this code. Identify vulnerabilities and suggest fixes.' },
-                { icon: '🧪', title: 'Write tests', prompt: 'Write comprehensive unit tests for the functions in this file.' },
-                { icon: '📚', title: 'Generate README', prompt: 'Generate a comprehensive README.md for this project based on the code.' },
-              ];
-              const starters = isPro ? proStarters : (isIde ? ideStarters : proStarters);
-              return (
-                <div className="px-3 pb-3 space-y-2">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-faint text-center">Try one of these</p>
-                  <div className={`grid gap-2 ${isPro ? 'grid-cols-2' : 'grid-cols-2'}`}>
-                    {starters.map(({ icon, title, prompt }) => (
-                      <button
-                        key={title}
-                        onClick={() => onInputChange(prompt)}
-                        className="text-left p-2.5 bg-card hover:bg-raised border border-line hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
-                      >
-                        <span className="text-base leading-none">{icon}</span>
-                        <p className="text-[10px] font-black text-ink mt-1.5 group-hover:text-accent-text transition-colors">{title}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-
-            <div className="flex items-center justify-center py-4 border-t border-line mt-4">
-               <button
-                 onClick={() => document.querySelector<HTMLButtonElement>('[title="Security Scan"]')?.click()}
-                 className="p-2 px-4 bg-red-500/10 hover:bg-red-500/20 text-danger border border-red-500/20 rounded-xl flex items-center gap-2 transition-all shadow-lg"
-                 title="Open Security Scan Hub"
-               >
-                 <ShieldAlert className="w-4 h-4" />
-                 <span className="text-[10px] font-black uppercase tracking-widest">Start Security Scan</span>
-               </button>
-            </div>
+            {/* NO CODE-TOOL TILES HERE (admin 2026-09-23: "navbharatai free me jab koi chat nahi hoti hai
+                to yeh tiles dikhti hai … yeh function free me hai hi nahi"). This component has ONE caller,
+                the NavBharatAI FREE chat, which has no open file and no code tools — yet its empty state
+                offered "Explain this file", "Find bugs", "Write tests", "Generate README" (prompts about a
+                file that does not exist) and a "Start Security Scan" button that clicked
+                `[title="Security Scan"]`, an element that exists nowhere in the app, so it did nothing.
+                Starter cards for building apps live in Pro v5.0 (agentv3/starterTemplates.ts), where
+                the builder is. */}
           </>
         )}
 

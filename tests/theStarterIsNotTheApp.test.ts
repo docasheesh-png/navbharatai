@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  STARTER_ENTRY_CONTENT, starterEntryIn, starterIsWhatRendered, starterPreviewProblem, withStarterVerdict,
+  STARTER_ENTRY_CONTENT, starterEntryIn, starterIsWhatRendered, pageShowsStarter, starterPreviewProblem, withStarterVerdict,
 } from '../src/server/AgentV3/stillTheStarterApp';
 import { ensureEntryPlanned, unwrittenEntries, runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 import { inBuildGreenNote } from '../src/server/AgentV3/inBuildGreen';
@@ -35,6 +35,8 @@ describe('layer B — the starter is never a rendered app', () => {
     expect(starterIsWhatRendered('src/App.tsx', REAL_PAGE)).toBe(false);
     // the page says Hello World but the entry was rewritten — a real app may say it
     expect(starterIsWhatRendered(null, HELLO_PAGE)).toBe(false);
+    expect(pageShowsStarter(HELLO_PAGE)).toBe(true);
+    expect(pageShowsStarter(REAL_PAGE)).toBe(false);
   });
 
   it('turns a RENDERED verdict into a conclusive not-rendered one naming the exact fix', () => {

@@ -165,7 +165,7 @@ import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, revi
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
-import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
+import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
@@ -18180,6 +18180,34 @@ async function noteBuildOutcome(
         } catch { /* the ledger write is best-effort — it must never affect a build */ }
       };
       /**
+       * 🔴 IS THE PAGE WE JUST RENDERED THE USER'S APP, OR OUR STARTER? (autopsy 3ab93068, 2026-09-23)
+       *
+       * The entry path when both factors hold (entry untouched AND the page shows the starter heading —
+       * see `starterIsWhatRendered`), else null. Every verdict below that can call a build "rendered"
+       * passes through `withStarterVerdict` with this answer, so a Hello World page becomes a conclusive
+       * NOT-rendered verdict and flows down the paths that already exist for one: the repair pass is
+       * handed the exact fix, the reviewer may write, and the markup is not earned. Cheap when it does
+       * not apply: the heading test runs first and only a page carrying it costs a file read.
+       */
+      let starterNoted = false;
+      const starterShownOn = async (html: string): Promise<string | null> => {
+        if (!pageShowsStarter(html)) return null;
+        try {
+          for (const p of STARTER_ENTRY_PATHS) {
+            const c = writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
+            if (!isUntouchedStarterEntry(c)) continue;
+            if (!starterNoted) {
+              starterNoted = true;
+              buildDiag.record({ phase: 'preview', severity: 'warning', code: 'STARTER_STILL_SHOWING', autoResolved: false,
+                message: `The preview rendered, but what it showed was the starter template (${p} still says "Hello World") — not the app that was built. Not counted as a render.`,
+                detail: 'Entry file byte-identical to the seeded starter AND the page carries its heading. Treated as a conclusive not-rendered verdict so the existing repair, reviewer and billing rules apply.' });
+            }
+            return p;
+          }
+        } catch { /* an unreadable entry is "could not tell", never a finding */ }
+        return null;
+      };
+      /**
        * 🔴 DID A REAL BROWSER SEE THIS APP RENDER? — THE ONE ANSWER, FOR EVERY VERDICT BELOW
        * (autopsy 697b38ee, EIGHTH appearance, 2026-09-21).
        *
@@ -18199,34 +18227,6 @@ async function noteBuildOutcome(
        * ever turn an unproven render into a proven one, and nothing here can demote a proof or move a
        * bill. Best-effort — a ledger read that throws falls back to exactly what this pass saw.
        */
-      /**
-       * 🔴 IS THE PAGE WE JUST RENDERED THE USER'S APP, OR OUR STARTER? (autopsy 3ab93068, 2026-09-23)
-       *
-       * The entry path when both factors hold (entry untouched AND the page shows the starter heading —
-       * see `starterIsWhatRendered`), else null. Every verdict below that can call a build "rendered"
-       * passes through `withStarterVerdict` with this answer, so a Hello World page becomes a conclusive
-       * NOT-rendered verdict and flows down the paths that already exist for one: the repair pass is
-       * handed the exact fix, the reviewer may write, and the markup is not earned. Cheap when it does
-       * not apply: the heading test runs first and only a page carrying it costs a file read.
-       */
-      let starterNoted = false;
-      const starterShownOn = async (html: string): Promise<string | null> => {
-        if (!starterIsWhatRendered('probe', html)) return null;
-        try {
-          for (const p of STARTER_ENTRY_PATHS) {
-            const c = writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
-            if (!isUntouchedStarterEntry(c)) continue;
-            if (!starterNoted) {
-              starterNoted = true;
-              buildDiag.record({ phase: 'preview', severity: 'warning', code: 'STARTER_STILL_SHOWING', autoResolved: false,
-                message: `The preview rendered, but what it showed was the starter template (${p} still says "Hello World") — not the app that was built. Not counted as a render.`,
-                detail: 'Entry file byte-identical to the seeded starter AND the page carries its heading. Treated as a conclusive not-rendered verdict so the existing repair, reviewer and billing rules apply.' });
-            }
-            return p;
-          }
-        } catch { /* an unreadable entry is "could not tell", never a finding */ }
-        return null;
-      };
       const renderProvenNow = (): boolean => {
         if (previewVerifiedRendered) return true;
         try { return provenFromTimeline(buildDiag.report().issues).preview === 'passed'; }

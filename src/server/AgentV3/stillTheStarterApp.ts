@@ -130,6 +130,11 @@ export function starterEntryIn(files: Readonly<Record<string, string>> | Readonl
  */
 export function starterIsWhatRendered(entryPath: string | null | undefined, renderedHtml: string | null | undefined): boolean {
   if (!entryPath) return false;
+  return pageShowsStarter(renderedHtml);
+}
+
+/** The page half of the check alone — cheap, so a caller can skip the file read when it is false. */
+export function pageShowsStarter(renderedHtml: string | null | undefined): boolean {
   return STARTER_HEADING_RE.test(String(renderedHtml ?? ''));
 }
 

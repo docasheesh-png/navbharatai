@@ -10,12 +10,11 @@ import { MAX_PROMPT_CHARS } from '../src/server/lib/imageGen';
 const read = (p: string) => readFileSync(p, 'utf8');
 
 describe('the image send button knows the limit', () => {
-  it('🔒 the client limit IS the server limit — the route schemas and the generator agree', () => {
+  it('🔒 the client limit IS the server limit — the route schema and the generator agree', () => {
     expect(IMAGE_PROMPT_MAX).toBe(MAX_PROMPT_CHARS);
     const route = read('src/server/routes/imageGen.ts');
-    // Both image routes: the free `schema` and the Pro `proSchema`.
     const maxes = [...route.matchAll(/^\s+prompt: vstring\(\{[^}]*max: ([\d_]+)/gm)].map((m) => Number(m[1].replace(/_/g, '')));
-    expect(maxes.length).toBeGreaterThanOrEqual(2);
+    expect(maxes.length).toBeGreaterThanOrEqual(1);
     for (const m of maxes) expect(m).toBe(IMAGE_PROMPT_MAX);
   });
 
@@ -40,10 +39,7 @@ describe('the image send button knows the limit', () => {
     expect(l.count).toBe(1_990);
   });
 
-  it('🔒 both composers wire it: the button is off, and the send function refuses too (Enter key)', () => {
-    const pro = read('src/components/ide/ImageStudioPro.tsx');
-    expect(pro).toMatch(/disabled=\{!mode \|\| busy \|\| promptLimit\.over\}/);
-    expect(pro).toMatch(/if \(!mode \|\| busy \|\| promptLimit\.over\) return;/);
+  it('🔒 the composer wires it: the button is off, and the send function refuses too (Enter key)', () => {
     const free = read('src/components/ide/AIImageGenerator.tsx');
     expect(free).toMatch(/disabled=\{isLoading \|\| promptLimit\.over\}/);
     expect(free).toMatch(/\|\| isLoading \|\| promptLimit\.over\) return;/);

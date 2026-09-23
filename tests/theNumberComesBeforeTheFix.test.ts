@@ -73,9 +73,13 @@ describe('where the fast lane’s minutes went', () => {
 });
 
 describe('what the calls that returned nothing cost', () => {
-  it('a clean build says every call returned something', () => {
+  // Re-aimed (autopsy 0d297b25): the old sentence "every model call this build returned something" was
+  // false beside a call our own clock stopped — those are excluded from this ledger by design.
+  it('a clean build says no engine wasted time, and names what it does not count', () => {
     const line = wasteSummary(emptyWasteLedger(), 600_000);
-    expect(line).toContain('every model call this build returned something');
+    expect(line).toContain('no engine wasted any time this build');
+    expect(line).toContain('stopped by our own clock is not counted');
+    expect(line).not.toContain('every model call this build returned something');
   });
 
   it('sums by kind and by engine, and shows the share of the build’s clock', () => {

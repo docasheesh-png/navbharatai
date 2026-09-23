@@ -177,7 +177,7 @@ const REASON_PATTERNS: ReadonlyArray<{ key: string; label: string; test: RegExp 
     label: 'AI provider timed out / ran out of budget',
     // turnDeadline.ts: BUDGET_EXHAUSTED_MESSAGE / BUDGET_REACHED_MESSAGE; plus the platform's own
     // "no provider answered" wording (autopsy 4efab9d7) and a plain provider timeout.
-    test: /build budget (exhausted|reached)|no provider answered|timed out|time budget ended/i,
+    test: /build budget (exhausted|reached)|no provider answered|timed out|time budget ended|time allowed for this step ran out/i,
   },
   {
     key: 'provider-unavailable',

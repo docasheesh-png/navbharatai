@@ -201,7 +201,7 @@ describe('🔒 what the server does, and what it deliberately still does', () =>
   });
 
   it('the relay is locked by BOTH the host allowlist and the signature', () => {
-    const relay = route.slice(route.indexOf("'/api/image/relay'"), route.indexOf("'/api/image/pro/generate'"));
+    const relay = route.slice(route.indexOf("'/api/image/relay'"), route.indexOf("'/api/image/enhance-prompt'"));
     expect(relay.length).toBeGreaterThan(400);
     // ⚠️ ASSERT THE NEGATION, NOT THE NAME. `toContain('verifyImageTicket(')` passes for
     // `if (false && !verifyImageTicket(...))` — proven by reverting it and watching this test stay
@@ -217,7 +217,7 @@ describe('🔒 what the server does, and what it deliberately still does', () =>
   });
 
   it('🔒 the relay refuses a forged and an expired ticket with the SAME words', () => {
-    const relay = route.slice(route.indexOf("'/api/image/relay'"), route.indexOf("'/api/image/pro/generate'"));
+    const relay = route.slice(route.indexOf("'/api/image/relay'"), route.indexOf("'/api/image/enhance-prompt'"));
     expect(relay).toContain('That picture link has expired');
     // Two different messages would tell a prober which lock they tripped.
     expect(relay.match(/res\.status\(403\)/g) || []).toHaveLength(1);

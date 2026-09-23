@@ -1,13 +1,13 @@
 /**
  * The image prompt limit, met BEFORE the send rather than after it.
  *
- * Admin, 2026-09-23 (a 400 "Invalid request body" on a long pasted Pro brief): *"agar problem text
+ * Admin, 2026-09-23 (a 400 "Invalid request body" on a long pasted image brief): *"agar problem text
  * length ki hai, to 2000+ wala text se send button inactive kar do!!"*. The server refuses a
- * `prompt` over 2,000 characters on both image routes (`routes/imageGen.ts`), and since #3272 it
+ * `prompt` over 2,000 characters on the image route (`routes/imageGen.ts`), and since #3272 it
  * says so in words — but a send that can only fail should not be pressable at all.
  *
  * 🔒 The number is the SERVER's, not a second opinion: `tests/theSendButtonKnowsTheLimit.test.ts`
- * asserts it equals the route schemas' `max`, so the two can never drift apart.
+ * asserts it equals the route schema's `max`, so the two can never drift apart.
  *
  * ⚠️ The free generator SENDS more than the user typed (the image type and colour tint are added
  * around the words), so the limit a person sees is what is left for THEIR words once that wrapping

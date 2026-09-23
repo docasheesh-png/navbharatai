@@ -2,14 +2,14 @@
 //
 // 🔴 THE GAP, stated plainly because a PR description had already claimed the opposite. `CLAUDE.md`
 // records the pornography ban as enforced by `triagePrompt`, "one triage serving BOTH the build route
-// and the chat route". It did serve both. It served NEITHER image route: `/api/image/generate` and
-// `/api/image/pro/generate` never called it, so the only thing standing between a pornographic
+// and the chat route". It did serve both. It did NOT serve the image route: `/api/image/generate`
+// never called it, so the only thing standing between a pornographic
 // prompt and a picture was whichever provider happened to refuse — and the free provider's anonymous
 // door has safety OFF unless asked for, and since #3234 the browser fetches that link itself. PR #3234
 // said "the ban's enforcement is, as before, `triagePrompt` on our server — which this design
 // preserves". That sentence was written from the doc, not from the route, and it was false.
 //
-// So this is the third surface, and it reuses the SAME triage, the SAME record and the SAME refusal
+// So the image route is the third surface, and it reuses the SAME triage, the SAME record and the SAME refusal
 // wording as the other two — a second copy of "what is banned" is how the two would drift.
 //
 // 🔒 A TRIAGE THAT CANNOT RUN NEVER REFUSES. The chat route's rule, kept: an unavailable checker

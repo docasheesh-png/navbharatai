@@ -80136,3 +80136,146 @@ starter cards (`agentv3/starterTemplates.ts`), untouched.
 Locked in `tests/theFreeChatOffersOnlyWhatFreeCanDo.test.ts` (5 cases, 4 fail on the old code),
 including a repo-wide guard against any button that "clicks" another element found by its title, and a
 check that `AIChat` still has only the free chat as caller. Installed phones need a fresh `.aab`/`.ipa`.
+---
+
+## 2026-09-23 — The two-row composer (admin sketch), on every AI in NavBharatAI FREE
+
+Admin screenshot: the free chat in full-screen on a phone, box squeezed to a sliver. Root cause: the
+textarea reserved a FIXED ~176px on its right for the controls laid over it, and once History and Mode
+(labelled) sat beside the box it was ~200px wide. Now `ComposerShell` is two rows — text on top at full
+width, attach · mic · voice below, Send as tall as the box on the right (admin: "send button ko bhi 2 line
+me banao") — with History over Mode in a slim left column, icon-only on a phone and labelled from `md` up.
+The free chat (`AIChat.tsx`) now renders the same shell as the professionals, Doctor AI and both image
+screens; every surface also gets the History button (historyOpener threaded through App → ViewPanels).
+Rendered at 390px and 1280px, light and dark, against the real built stylesheet before shipping.
+
+**Not done, raised with the admin:** removing History from the desktop sidebar. The composer's History
+button exists only inside the FREE surfaces, so on Pro / Studio / Wallet the sidebar row is the only
+desktop door — the 2026-08-11 removal is what left desktop without one for six weeks
+(`everyPhoneBarOptionHasADesktopDoor.test.ts`).
+## 2026-09-23 — The paid image tier is REMOVED, permanently (admin-mandated)
+
+Admin, verbatim: *"paid image kam nahi kar raha hai. isko hatao … (image to image) is photo me ek snake
+add karo. reply me wahi same photo aa gaya … aap free image ho rakho. paid wale ko permanently remove kar
+do!!! koi bhi traces na mile, na code me na kahi comment me."*
+
+- **Removed from the code, with its comments and tests:** the paid image screen and its FREE/PRO switch,
+  the paid generate route, both paid engines and their modules, the availability flag in
+  `/api/public-config`, the image permission and image endpoint of the developer API, the wallet's
+  image-purchase line, the edit-strength setting only the paid engine read, two CSS rules and two
+  font-size remaps only the paid screen used, and every comment, knowledge-base line and CLAUDE.md
+  registry entry that described it. `tests/theImageGeneratorHasOneTier.test.ts` locks the result.
+- **Kept, because the free tier uses it:** the photo-reading helpers moved to `lib/imageDataUrl.ts`
+  (tested in `tests/imageDataUrl.test.ts`); the free route, its image-to-image edit, relay, ⭐ star,
+  daily caps and triage are unchanged.
+- **What this does NOT remove:** git history, and the dated entries above in this file — PROGRESS.md is
+  append-only by the standing rule, so the earlier record stays as history.
+- ⚠️ **ADMIN ACTION:** the Cloud Run keys that fed the removed tier are now read by nothing and can be
+  deleted: `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, `IMAGE_PRO_AUTH_SCHEME`, `POLLINATIONS_API_KEY` (and
+  any optional `IMAGE_PRO_*` values, if set). Existing API keys that held the image permission keep
+  working — an unknown permission is simply ignored when a key is read.
+- ✅ **Same day, the name says it (admin: *"jo image generator ai bach jaye uske aage free likh dena
+  (jaise navbharatai free)"*):** the tool is now **"Image Generator AI FREE"** — the Mode list row, the
+  header chip (both read `IMAGE_MODE_NAME`), the screen's own title, the Mode button's tooltip and every
+  knowledge-base mention. The Other AI tile keeps its short label "AI Image Gen".
+
+## 2026-09-23 — Autopsy ac41a924 (Hindi news blog, Weak, 11.8 min, ₹127, app works)
+
+**Ledger.** ✅ self-healed 2 (design page brought to standard; the stopped dev server restarted — by a
+model pass, since #3267 had not merged when this ran) · 🔀 workarounds 1 (fast lane handed to the full
+builder after 90 s) · ⏭️ skipped 3 (page-render check, user-journey check, and the auto-test
+`playwright.config.ts` write refused by Green Freeze) · ❌ shipped imperfect 3 (a broken hero image from a
+guessed Unsplash id; `ArticleDetail` splits content on the literal `"\\n"` so every article renders as one
+paragraph; footer links to `/about`, `/contact`, `/privacy` that do not exist — the last two found by the
+reviewer, which is suggest-only on a green app) · 🥵 struggle 3 (90 s fast-lane plan call for nothing; the
+dev server died between first render at 512 s and the runtime check; ETA 2.9 min vs 11.8 min actual).
+
+**Fixed at the root, this PR:**
+1. **The page and journey checks had never been able to load Playwright** in this sandbox.
+   Both scripts ran `import { chromium } from '…/playwright/index.js'`. That file is CommonJS, re-exporting
+   an object built at run time, so Node refused to link the module. Both scripts died before their
+   first line on every build — the report's own diagnostic tail was Node's advice
+   (`const { chromium } = pkg;`). Now one shared `playwrightImport()` default import, reproduced and
+   locked by running it in a real Node against a package with Playwright's shape. The old tests pinned
+   the broken line as a STRING — the same trap the NODE_PATH bug fell into.
+2. **A broken image was reported as a failing API.** An `ERR_BLOCKED_BY_ORB` on a guessed Unsplash photo
+   hit the generic `net::ERR` rule. That sent the user, at severity error, to the API Tester.
+   - New `broken-image` category, with no API Tester line.
+   - Its repair hint says: draw the picture, don't guess again.
+   - Upstream, the build prompt now forbids inventing image URLs.
+3. **A lane that cannot finish is not started.** The complex-routed build opened on `kimi-k2.7-code`,
+   which always reasons, and the fast lane's single 90 s plan call spent its cap thinking.
+   - `fastLaneRungDecision` now skips the lane on an always-reasoning opener.
+   - Recorded as `FAST_LANE_SKIPPED_REASONING_RUNG`.
+   - Kill switch: `AGENTV3_FASTLANE_REASONING_GATE=off`.
+   - Sibling honesty fix: the runner said "This build's time budget ended" about a step's own cap.
+4. **A stopped dev server is asked why before it is restarted.** Both restart sites now read the tail of
+   `/tmp/nbai-devserver.log` into the admin report (`PREVIEW_SERVER_RESTARTED` detail). This finding has
+   been OPEN twice ("no process log"); the next report carries the evidence.
+
+**OPEN (rule 6):**
+- **Why the dev server died** — the next report will say. Leading lead, unproven: `node_modules` was
+  modified at 14:47, between the render and the 502s. An install or audit-fix swapping modules under a
+  running Vite is the candidate.
+- **The reviewer found two real functional bugs on a green app and could only suggest them.** That is
+  the admin-approved Green Stop / lean-review design. Whether a reviewer `[WARNING]` of the
+  functional kind should get one verified repair on a green app is the admin's call, raised with them.
+- `PREVIEW_SNAPSHOT_STALE`: a post-green write by the runtime-error pass, while the model wrote no file.
+  The report does not name the file.
+
+**Same PR, follow-up (2026-09-23):**
+- **The kit now ships the placeholder the image rule asks for.** `.nb-img` is a tinted gradient panel,
+  16:9. `.nb-img-square` makes it a tile. Both use tokens only.
+- The prompt rule names these classes. The rule also moved below the "WHICH SCAFFOLDS SHIP THE KIT" note:
+  it had been wedged between the kit rules and that note's "the classes above". A test guards the order,
+  and the test is reversion-proven.
+- **Measured, and NOT built: a Devanagari keyword list for the complexity scorer.** The English prompt
+  *"can you make me a professional news blog website"* goes the same way as the Hindi original: `chat`,
+  score 5, "matched nothing", and a second opinion is asked. Both scripts took the same path. The
+  `complex` verdict came from the second opinion, not from a failure to read Hindi, so a Hindi lexicon
+  would not have changed this build. It would also be the fixed-vocabulary list `signalsMatchedNothing`
+  warns against. What this build actually lost to that verdict was the 90 s fast lane, and fix 3 above
+  removes that loss.
+## 2026-09-23 — Autopsy 0d297b25 (WORKNEX): a Hello World sold as "built and working"
+
+The prompt asked for a signed Android APK of an **existing Expo/React Native project on Replit** ("do NOT
+rebuild it"). That project was never in the workspace — only our seeded Vite starter. The model inspected
+honestly and wrote one file, `INSPECTION_REPORT.md`, saying so. The readiness gate also said so
+(`READINESS_BLOCKER`: the entry is still the starter) and the build ended `ok: false`. Then the platform
+overruled both: `RENDER_RESCUE` saw the preview render (a Hello World renders perfectly) and upgraded it
+to success, `VERDICT_HELD_BY_RUN` held that against a RED gate, `IN_BUILD_GREEN` told the user "this
+working version is now protected", the recap said "✅ Here's what I built: 11 files", and the free user
+was charged **₹47.36** of the welcome balance with the full markup.
+
+**Tally:** ✅ 0 genuine self-heals · 🔀 1 workaround (fast lane → full builder after its 90 s plan cap) ·
+⏭️ 1 skip (typecheck/journeys — nothing to check) · ❌ 3 shipped false (verdict, recap, bill) ·
+🥵 1 struggle (90 s of a 244 s build in a planner call that could never finish).
+
+**Fixed (PR on `claude/vigilant-feynman-9aobjz`, `tests/theStarterRenderedNotTheApp.test.ts`, reversion-proven):**
+- `entryIsStillTheStarter` (`stillTheStarterApp.ts`) — ONE check, asked by the readiness gate and by all
+  four producers of the render proof (in-build green, render rescue, verify loop, last-chance proof). A
+  starter render is recorded as `RENDERED_ONLY_THE_STARTER` and earns nothing: no upgrade, no markup, no
+  "protected" claim, no reviewer run. The build stays honestly not-ok, which bills ₹0.
+- A readiness failure whose blocker is the starter now tells the user *nothing has been built yet* and keeps
+  the model's own finding, instead of "a couple of things still need fixing".
+- `summarizeProject` — a turn that wrote only notes says "No app code was written this time — I only wrote
+  a note (…)"; the project's size is labelled as the project's.
+- `appScopeAnalyzer.namesAsProduct` — "send the APK using WhatsApp/Drive/USB" is a TOOL mention, not a
+  clone request (the Zoom entry's rule, generalised to every famous product).
+- `RequirementGapAnalyzer` — "Expo/React Native" is a toolchain, not an exhibition (was domain=events,
+  handed "QR check-in"); conditional on React Native / EAS evidence, so a real expo keeps its domain.
+- Honesty: the step-deadline error no longer says "this build's time budget ended" (56 min were left);
+  `PROVIDER_TIME_WASTED` no longer says "every model call returned something"; a failed fast-lane plan
+  call is timed as `plan`, not "everything else 90s (100%)".
+
+**🔴 OPEN ROOT CAUSES (rule 6), not fixed here:**
+1. **A request about a project that is NOT in the workspace should be answered, not built.** The prompt
+   said "already developed in this Replit project … DO NOT rebuild"; the workspace was an empty starter.
+   The right reply is one message: "Your WORKNEX project isn't here — import it (GitHub/zip), then use
+   Phone build". Missing subsystem: a **precondition check** — the prompt references existing code, and
+   the workspace provably has none. Belongs with the intent reader (`IntentClassifier.ts`).
+2. **The fast lane ran on a complexity-83, mega-roadmap build** and spent 90 s on a "plan the COMPLETE
+   file list" call that could not finish inside its cap. Routing change, not made here: it needs the
+   fast-lane gate owner's agreement and real numbers on how often a complex build's plan call completes.
+3. **Expo/React Native is not a stack NavBharatAI builds** (it builds web apps and packages them with
+   Capacitor). The honest answer to "build an Expo APK" names that, and offers the Phone build path.

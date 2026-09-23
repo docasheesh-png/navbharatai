@@ -3803,7 +3803,7 @@ export default function App() {
           {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
           {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} onOpenModePicker={modePickerOpener} />
+              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} onOpenModePicker={modePickerOpener} onOpenHistory={historyOpener} />
             </div>
           )}
 
@@ -3902,7 +3902,7 @@ export default function App() {
             const onScreen = activeChat?.id === win.id;
             return (
               <div key={win.id} className={onScreen ? 'flex-1 overflow-hidden h-full min-h-0 max-h-full' : 'hidden'}>
-                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onScreen={onScreen} onOpenModePicker={modePickerOpener} />
+                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onScreen={onScreen} onOpenModePicker={modePickerOpener} onOpenHistory={historyOpener} />
               </div>
             );
           })}
@@ -4155,7 +4155,7 @@ export default function App() {
                 if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }
                 // Everything else opens a NEW chat, which is the whole point of the change.
                 if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
-                // The image studio is Other Tools' own view — free and paid together, nothing forked.
+                // The image studio is Other Tools' own view — nothing forked.
                 // Opened from HERE it lives inside the chat tab the user is in (no header chip of its
                 // own, that tab stays lit) and takes one of the five slots; already open, it is simply
                 // shown, through whichever door it came in by (from Other Tools it keeps its own tab).
@@ -4231,6 +4231,7 @@ export default function App() {
 
           <ViewPanels
             onOpenModePicker={modePickerOpener}
+            onOpenHistory={historyOpener}
             effectiveDeviceMode={effectiveDeviceMode}
             storeInitialTab={storeTarget?.tab}
             storePublishWorkspaceId={storeTarget?.workspaceId ?? null}

@@ -73,6 +73,18 @@ const RULES: Rule[] = [
     match: /blocked by CORS|Access-Control-Allow-Origin|CORS policy|Cross-Origin Request Blocked/i,
   },
   {
+    // A BROKEN IMAGE IS NOT A FAILING API (autopsy ac41a924, 2026-09-23). A guessed Unsplash photo id
+    // returned an error page, the browser blocked it (net::ERR_BLOCKED_BY_ORB — ORB only ever blocks a
+    // subresource such as an <img>), and the generic `net::ERR` rule below filed it as a network call,
+    // which sent the user to the API Tester to debug an API that does not exist. Placed BEFORE
+    // http-status and network-fetch because it is the more specific reading of the same capture.
+    category: {
+      id: 'broken-image', label: 'Image does not load', priority: 4,
+      hint: 'An image URL in the app does not load — the address is wrong or points to a page, not an image (a guessed stock-photo id is the usual cause). Replace it with an image the user supplied, or draw the picture in the app itself: a CSS gradient panel, an emoji or icon in a coloured tile, or a small inline SVG. Do not guess another photo URL.',
+    },
+    match: /ERR_BLOCKED_BY_ORB|(?:\[requestfailed\]|\bHTTP \d{3} from)\s*\S+\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp)(?:[?#]\S*)?(?=\s|$)|(?:\[requestfailed\]|\bHTTP \d{3} from)\s*https?:\/\/(?:images\.unsplash\.com|source\.unsplash\.com|picsum\.photos|placehold\.co|via\.placeholder\.com)\//i,
+  },
+  {
     category: {
       id: 'http-status', label: 'API returned an error status', priority: 3,
       hint: 'The server responded with a 4xx/5xx. Check the endpoint path, method, and request body; a 401/403 usually means auth is missing, a 404 a wrong URL, a 5xx a backend bug. For a captured "HTTP 5xx from <url>" the request itself succeeded but the backend threw — fix the failing route/handler (and its error handling), not the client call.',

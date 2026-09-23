@@ -862,9 +862,11 @@ export function makeMultiProviderTurnRunner(
           }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
-            // ⚠️ "the time allowed for THIS STEP", never "this build's time budget" (autopsy 0d297b25): the
-            // deadline here is whichever the caller passed — the fast lane hands down its own 90 s plan
-            // allowance, and that report told the admin the BUILD's budget had ended with 56 minutes left.
+            // ⚠️ "the time allowed for THIS STEP", never "this build's time budget". The deadline handed
+            // down may be a single step's — the fast lane's 90 s plan cap — with most of the build still
+            // ahead, and this runner cannot tell which clock it was. Two autopsies found the same lie:
+            // 0d297b25 (56 minutes left) and ac41a924 (90 s into a 29-minute build). Sibling of the fix
+            // in aFailedProbeIsNotAnAnswer.
             throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
           if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {

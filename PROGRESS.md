@@ -80145,3 +80145,47 @@ do!!! koi bhi traces na mile, na code me na kahi comment me."*
   (jaise navbharatai free)"*):** the tool is now **"Image Generator AI FREE"** — the Mode list row, the
   header chip (both read `IMAGE_MODE_NAME`), the screen's own title, the Mode button's tooltip and every
   knowledge-base mention. The Other AI tile keeps its short label "AI Image Gen".
+
+## 2026-09-23 — Autopsy ac41a924 (Hindi news blog, Weak, 11.8 min, ₹127, app works)
+
+**Ledger.** ✅ self-healed 2 (design page brought to standard; the stopped dev server restarted — by a
+model pass, since #3267 had not merged when this ran) · 🔀 workarounds 1 (fast lane handed to the full
+builder after 90 s) · ⏭️ skipped 3 (page-render check, user-journey check, and the auto-test
+`playwright.config.ts` write refused by Green Freeze) · ❌ shipped imperfect 3 (a broken hero image from a
+guessed Unsplash id; `ArticleDetail` splits content on the literal `"\\n"` so every article renders as one
+paragraph; footer links to `/about`, `/contact`, `/privacy` that do not exist — the last two found by the
+reviewer, which is suggest-only on a green app) · 🥵 struggle 3 (90 s fast-lane plan call for nothing; the
+dev server died between first render at 512 s and the runtime check; ETA 2.9 min vs 11.8 min actual).
+
+**Fixed at the root, this PR:**
+1. **The page and journey checks had never been able to load Playwright** in this sandbox.
+   Both scripts ran `import { chromium } from '…/playwright/index.js'`. That file is CommonJS, re-exporting
+   an object built at run time, so Node refused to link the module. Both scripts died before their
+   first line on every build — the report's own diagnostic tail was Node's advice
+   (`const { chromium } = pkg;`). Now one shared `playwrightImport()` default import, reproduced and
+   locked by running it in a real Node against a package with Playwright's shape. The old tests pinned
+   the broken line as a STRING — the same trap the NODE_PATH bug fell into.
+2. **A broken image was reported as a failing API.** An `ERR_BLOCKED_BY_ORB` on a guessed Unsplash photo
+   hit the generic `net::ERR` rule. That sent the user, at severity error, to the API Tester.
+   - New `broken-image` category, with no API Tester line.
+   - Its repair hint says: draw the picture, don't guess again.
+   - Upstream, the build prompt now forbids inventing image URLs.
+3. **A lane that cannot finish is not started.** The complex-routed build opened on `kimi-k2.7-code`,
+   which always reasons, and the fast lane's single 90 s plan call spent its cap thinking.
+   - `fastLaneRungDecision` now skips the lane on an always-reasoning opener.
+   - Recorded as `FAST_LANE_SKIPPED_REASONING_RUNG`.
+   - Kill switch: `AGENTV3_FASTLANE_REASONING_GATE=off`.
+   - Sibling honesty fix: the runner said "This build's time budget ended" about a step's own cap.
+4. **A stopped dev server is asked why before it is restarted.** Both restart sites now read the tail of
+   `/tmp/nbai-devserver.log` into the admin report (`PREVIEW_SERVER_RESTARTED` detail). This finding has
+   been OPEN twice ("no process log"); the next report carries the evidence.
+
+**OPEN (rule 6):**
+- **Why the dev server died** — the next report will say. Leading lead, unproven: `node_modules` was
+  modified at 14:47, between the render and the 502s. An install or audit-fix swapping modules under a
+  running Vite is the candidate.
+- **The reviewer found two real functional bugs on a green app and could only suggest them.** That is
+  the admin-approved Green Stop / lean-review design. Whether a reviewer `[WARNING]` of the
+  functional kind should get one verified repair on a green app is the admin's call, raised with them.
+- `PREVIEW_SNAPSHOT_STALE`: a post-green write by the runtime-error pass, while the model wrote no file.
+  The report does not name the file.

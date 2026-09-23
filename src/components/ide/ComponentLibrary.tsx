@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Copy, Check, Star, X, Layout, Type, Square, LayoutGrid, Bell, Table, MousePointer, Navigation, Image, CreditCard, AlignLeft, Anchor, ChevronRight, Eye, Loader2, History, AlertTriangle, Save } from 'lucide-react';
 import { insertSnippet, pageLoadsTailwind, snippetNeedsTailwind } from '../../lib/htmlInsert';
 import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
@@ -809,19 +810,32 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
       </div>
       </div>}
 
-      {/* ── Modal Preview ── */}
-      {modalComp && (
+      {/* ── Modal Preview ──
+          🔴 IT DID NOT FIT A SMALL PHONE (measured 2026-09-22, with its REAL content — a header and
+          the fixed 420px preview, not a filled harness). At 320×568 the card ran 44px under the
+          tab bar and 13px under a 59px notch; at 360×640, 8px under the bar. A fixed-height preview
+          simply does not fit a phone that still owes room to its notch and our own bar.
+          Now: the sheet contract on the backdrop (`nb-sheet-overlay`, z-50 is BELOW the bar so it
+          reserves it — no `-over-nav`), `nb-sheet` on the card so it clamps to the room that is
+          really left, and a preview that is STILL 420px wherever that fits but may shrink where it
+          does not. ⚠️ `flex-1` would have been the obvious edit and a regression: the card has no
+          fixed height, so a flex-1 child has nothing to fill and the iframe collapses to its
+          ~150px intrinsic height on every desktop. `height` + `min-h-0` keeps 420 and permits less.
+          Portalled because a sheet that carries the contract must be out of reach of an ancestor's
+          transform or blur (tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts). */}
+      {modalComp && (() => {
+        const sheet = (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
+          className="nb-sheet-overlay fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: 'var(--scrim)' }}
           onClick={() => setModalComp(null)}
         >
           <div
-            className="relative rounded-2xl overflow-hidden shadow-2xl"
+            className="nb-sheet relative rounded-2xl overflow-hidden shadow-2xl flex flex-col"
             style={{ width: '700px', maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid var(--border-soft)' }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border-soft)' }}>
+            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--border-soft)' }}>
               <div>
                 <p className="text-ink font-semibold text-sm">{modalComp.name}</p>
                 <div className="flex gap-1.5 mt-1">
@@ -844,7 +858,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
                 </button>
               </div>
             </div>
-            <div style={{ height: '420px', background: 'var(--surface-base)' }}>
+            <div className="min-h-0" style={{ height: '420px', background: 'var(--surface-base)' }}>
               <iframe
                 srcDoc={buildSrcdoc(modalComp.html)}
                 className="w-full h-full"
@@ -855,7 +869,10 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
             </div>
           </div>
         </div>
-      )}
+        );
+        // No document ⇒ nothing to portal into (a server render), so render in place.
+        return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
+      })()}
 
       {/* ── Copied Toast ── */}
       {copied && (

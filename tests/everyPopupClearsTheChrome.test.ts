@@ -137,6 +137,48 @@ describe('the ratchet — a dialog without the contract can only ever leave the 
   });
 });
 
+describe('slice 2 — the two that still cropped once measured with their REAL content', () => {
+  // Slice 2 re-measured the remaining dialogs with their ACTUAL content rather than a filled
+  // harness, and most of the "latent" list turned out not to crop at all (see the next block).
+  // These two did: ComponentLibrary's fixed 420px preview ran 44px under the tab bar and 13px under
+  // a 59px notch at 320×568; VerifyPhoneSheet's Verify button sat in the home-indicator's gesture
+  // zone. After: all combinations clean, and the desktop preview is still exactly 420px.
+  it('ComponentLibrary carries the contract and still lets its preview be 420px where it fits', () => {
+    const src = readFileSync(resolve(root, 'src/components/ide/ComponentLibrary.tsx'), 'utf8');
+    expect(src).toContain('nb-sheet-overlay fixed inset-0 z-50');
+    expect(src).toContain('nb-sheet relative rounded-2xl');
+    // `height` + `min-h-0`, NOT `flex-1`: the card has no fixed height, so a flex-1 preview would
+    // have nothing to fill and collapse to ~150px on every desktop.
+    expect(src).toContain(`<div className="min-h-0" style={{ height: '420px'`);
+  });
+
+  it('VerifyPhoneSheet reserves the home indicator and does not cancel its own reserve', () => {
+    const src = readFileSync(resolve(root, 'src/components/VerifyPhoneSheet.tsx'), 'utf8');
+    expect(src).toContain('nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 z-[400]');
+  });
+});
+
+describe('the dialogs deliberately LEFT alone — measured clean with their real content', () => {
+  // ⚠️ They stay in the baseline, and this block exists so nobody reads that as a to-do list.
+  // A harness that fills every card with 40 paragraphs calls all of these "cropped"; their real
+  // content does not. Migrating one anyway means portalling it, which is a real blast radius on
+  // screens that work — ModePickerSheet opens on every chat surface in the app. A fix that trades
+  // no problem for a new risk is not a fix (CLAUDE.md, "a fix must never trade one problem for
+  // another"). Each reason below was measured or read, not assumed:
+  const leftAlone: Array<[string, string]> = [
+    ['src/components/chat/ModePickerSheet.tsx', "maxHeight: 'min(72dvh, 40rem)'"],     // own dvh cap + env padding
+    ['src/components/agentv3/UserActionTray.tsx', "maxHeight: 'min(72dvh, 40rem)'"],  // same design
+    ['src/components/ide/FileExplorer.tsx', 'max-h-32 overflow-y-auto'],              // the path list is capped
+    ['src/components/ide/PerformanceAnalyzer.tsx', 'w-full h-56'],                    // fixed-height textarea
+  ];
+  for (const [file, why] of leftAlone) {
+    it(`${file.split('/').pop()} still bounds its own content (${why})`, () => {
+      // If this ever stops being true, the dialog is no longer self-bounded and belongs in a slice.
+      expect(readFileSync(resolve(root, file), 'utf8')).toContain(why);
+    });
+  }
+});
+
 describe('the five that cropped with a SHORT dialog are fixed', () => {
   // These cropped for every user, whatever their content — measured before the fix and again
   // after. Named explicitly because a ratchet alone would let one of them regress back to its

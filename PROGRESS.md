@@ -80119,3 +80119,21 @@ its contract hit the 56 s cap; the bail was correct, the lane was doomed from th
   asserted equal to the route schemas' `max` (`tests/theSendButtonKnowsTheLimit.test.ts`). ⚠️ This
   touches the two files PR #3270 is rewriting — a few one-line conflicts are expected for whichever
   of the two merges second (the `disabled=` lines and the note under the box).
+
+---
+
+## 2026-09-23 — The two-row composer (admin sketch), on every AI in NavBharatAI FREE
+
+Admin screenshot: the free chat in full-screen on a phone, box squeezed to a sliver. Root cause: the
+textarea reserved a FIXED ~176px on its right for the controls laid over it, and once History and Mode
+(labelled) sat beside the box it was ~200px wide. Now `ComposerShell` is two rows — text on top at full
+width, attach · mic · voice below, Send as tall as the box on the right (admin: "send button ko bhi 2 line
+me banao") — with History over Mode in a slim left column, icon-only on a phone and labelled from `md` up.
+The free chat (`AIChat.tsx`) now renders the same shell as the professionals, Doctor AI and both image
+screens; every surface also gets the History button (historyOpener threaded through App → ViewPanels).
+Rendered at 390px and 1280px, light and dark, against the real built stylesheet before shipping.
+
+**Not done, raised with the admin:** removing History from the desktop sidebar. The composer's History
+button exists only inside the FREE surfaces, so on Pro / Studio / Wallet the sidebar row is the only
+desktop door — the 2026-08-11 removal is what left desktop without one for six weeks
+(`everyPhoneBarOptionHasADesktopDoor.test.ts`).

@@ -18,94 +18,97 @@
  * These are geometry facts, so they are asserted as geometry rather than by rendering: a jsdom render
  * has no layout engine and would report every one of these boxes as 0x0, i.e. it would pass while the
  * phone stayed broken.
+
+ *
+ * 🔁 2026-09-23 — THE GEOMETRY CHANGED, THE RULES DID NOT. The box is now the shared two-row
+ * `ComposerShell` (admin sketch): text on top at full width, the controls in their own row under it,
+ * Send as tall as the box on the right. The control row is no longer absolutely positioned over the
+ * text, so "typed text runs under the buttons" is now impossible by structure rather than by a
+ * right-hand padding that had to be re-derived for every new button — and a fixed ~176px of that
+ * padding is exactly what squeezed the box to a sliver on a phone. Every rule below is kept and
+ * re-asserted against the new shape.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../src/components/chat/ComposerShell';
+import { RAIL_BUTTON_CLASS } from '../src/components/chat/ModeButton';
 
 const SRC = readFileSync(join(__dirname, '..', 'src/components/ide/AIChat.tsx'), 'utf8');
+const SHELL = readFileSync(join(__dirname, '..', 'src/components/chat/ComposerShell.tsx'), 'utf8');
 
-/** The composer's textarea class string. */
-const TEXTAREA = (() => {
-  const at = SRC.indexOf('placeholder="Ask NavBharatAI..."');
-  return SRC.slice(at, SRC.indexOf('/>', at));
-})();
-
-/** The absolutely-positioned control row, from its opening div to the end of the send button. */
+/** The free chat's bottom-row controls: the `controls` prop it hands the shell. */
 const ROW = (() => {
-  const at = SRC.indexOf('<div className="absolute right-2 bottom-1.5 flex gap-1 items-center">');
-  return at === -1 ? '' : SRC.slice(at, SRC.indexOf('end inner flex row', at));
+  const at = SRC.indexOf('controls={(');
+  return at === -1 ? '' : SRC.slice(at, SRC.indexOf('send={(', at));
+})();
+/** Its Send / Stop: the `send` prop. */
+const SEND = (() => {
+  const at = SRC.indexOf('send={(');
+  return at === -1 ? '' : SRC.slice(at, SRC.indexOf('<textarea', at));
 })();
 
-const px = (cls: string, m: RegExpMatchArray | null) => (m ? Number(m[1]) : NaN);
+const px = (m: RegExpMatchArray | null) => (m ? Number(m[1]) : NaN);
 
-describe('the control row fits inside the composer', () => {
-  it('the row exists and is bottom-anchored (buttons stay put as the textarea grows)', () => {
+describe('the control row has its own line, under the text', () => {
+  it('the free chat hands its controls and Send to the shared shell', () => {
+    expect(SRC).toContain('<ComposerShell');
     expect(ROW).not.toBe('');
-    expect(ROW).toContain('items-center');
+    expect(SEND).not.toBe('');
   });
 
-  it('the reserved height genuinely covers the row plus a symmetric gap', () => {
-    // min-h must be >= button height + bottom inset + an equal top gap, or the row touches the border.
-    const minH = px('min-h', TEXTAREA.match(/min-h-\[(\d+)px\]/));
-    expect(Number.isFinite(minH)).toBe(true);
-
-    const BUTTON = 36;   // p-2.5 (10px each side) + a w-4 h-4 (16px) icon
-    const BOTTOM = 6;    // bottom-1.5
-    expect(minH).toBeGreaterThanOrEqual(BUTTON + BOTTOM * 2);
-    // The old value made this fail: 40 (and the real 46) are both under 48.
-    expect(minH).toBe(48);
+  it('the row is a normal flex row in the shell, never laid over the text', () => {
+    expect(SHELL).toContain('<div className="flex items-center justify-end gap-1 px-1.5 pb-1">{controls}</div>');
+    expect(SHELL).not.toMatch(/absolute right-\d/);
   });
 
-  it('EVERY control in the row is the same 36px box — this is the "unaligned" complaint', () => {
-    // A control with different padding makes the row taller than the space reserved for it and brings
-    // the overflow straight back, so the uniformity is load-bearing, not cosmetic.
+  it('so the text needs no right-hand reserve, however many controls there are', () => {
+    expect(COMPOSER_TEXTAREA_CLASS).not.toMatch(/\bpr-(?:[3-9]\d|\d{3})\b/);
+    expect(SRC).not.toContain('pr-44');
+  });
+});
+
+describe('every control in the row is the same 36px box — the "unaligned" complaint', () => {
+  it('p-2.5 everywhere, never p-3', () => {
     const paddings = ROW.match(/className="[^"]*\bp-(\d(?:\.\d)?)\b[^"]*"/g) ?? [];
-    expect(paddings.length).toBeGreaterThanOrEqual(3); // expand + attach + mic + send at minimum
-    for (const cls of paddings) {
-      expect(cls, `every control must be p-2.5: ${cls}`).toMatch(/\bp-2\.5\b/);
-    }
-    // The send and stop buttons were the odd ones out at p-3 with a 3.5 icon.
+    expect(paddings.length).toBeGreaterThanOrEqual(2); // expand + mic at minimum (attach passes its own)
+    for (const cls of paddings) expect(cls, `every control must be p-2.5: ${cls}`).toMatch(/\bp-2\.5\b/);
     expect(ROW).not.toMatch(/\bp-3\b/);
     expect(ROW).not.toMatch(/w-3\.5 h-3\.5/);
   });
 
   it('the icons are all w-4 h-4, so the boxes really are equal', () => {
-    const icons = ROW.match(/w-4 h-4/g) ?? [];
-    expect(icons.length).toBeGreaterThanOrEqual(3);
+    expect((ROW.match(/w-4 h-4/g) ?? []).length).toBeGreaterThanOrEqual(3);
   });
 });
 
-describe('nothing in the corner is placed by a hand-tuned offset any more', () => {
+describe('nothing is placed by a hand-tuned offset', () => {
   it('the expand button lives in the row, not at its own right-N', () => {
-    // `right-20` (80px) landed inside a row spanning 8px..126px, so it sat on top of the mic.
     expect(SRC).not.toMatch(/absolute right-20/);
     expect(ROW).toMatch(/Maximize2/);
     expect(ROW).toMatch(/setIsExpanded\(true\)/);
   });
 
   it('the expand button is still conditional on a long message', () => {
-    // Moving it must not make it always-on — it is a long-text affordance.
     expect(ROW).toMatch(/length > 300/);
   });
 });
 
-describe('typed text does not run underneath the controls', () => {
-  it('the right padding covers the common four-button row', () => {
-    const pr = px('pr', TEXTAREA.match(/\bpr-(\d+)\b/));
-    expect(Number.isFinite(pr)).toBe(true);
-    // Tailwind spacing: pr-N = N * 4px. Four buttons = 4*36 + 3*4 gaps + 8px inset = 164px.
-    expect(pr * 4).toBeGreaterThanOrEqual(164);
-    // pr-24 (96px) did not even cover three buttons (124px) — text slid under the paperclip.
-    expect(pr).toBeGreaterThan(24);
-  });
-});
-
 describe('the tap targets did not shrink', () => {
-  it('the send button is still at least 36px, not trimmed to fit', () => {
-    // The fix must not have been "make the buttons smaller until they fit" — that trades one real
-    // problem for a worse one on a touch screen.
-    expect(ROW).toMatch(/p-2\.5 bg-indigo-600/);
-    expect(ROW).toMatch(/p-2\.5 bg-red-600/);
+  it('Send and Stop are as tall as the box and wider than a 36px control', () => {
+    expect(SEND).toContain('className={COMPOSER_SEND_CLASS}');
+    expect(SEND).toContain('className={COMPOSER_STOP_CLASS}');
+    for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) {
+      expect(cls).toContain('h-full');
+      expect(px(cls.match(/min-h-\[(\d+)px\]/))).toBeGreaterThanOrEqual(72);
+      expect(cls).toContain('w-11'); // 44px
+    }
+  });
+
+  it('the box at rest is tall enough for the two rail buttons beside it', () => {
+    // text row (min 40) + control row (36 + pb-1) ≥ two rail buttons (min 36 each) + the 6px gap.
+    const text = px(COMPOSER_TEXTAREA_CLASS.match(/min-h-\[(\d+)px\]/));
+    const rail = px(RAIL_BUTTON_CLASS.match(/min-h-\[(\d+)px\]/));
+    expect(text + 36 + 4).toBeGreaterThanOrEqual(rail * 2 + 6);
   });
 });

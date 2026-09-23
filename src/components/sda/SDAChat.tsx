@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { ImageLightbox } from '../chat/ImageLightbox';
 import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2, Wallet } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DoseCalculator } from './DoseCalculator';
@@ -926,20 +927,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
   return (
     <div className="flex h-full bg-surface overflow-hidden">
       {/* In-chat image lightbox */}
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-[200] bg-scrim flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
-        >
-          <div className="relative max-w-[95vw] max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
-            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] rounded-2xl shadow-2xl object-contain" />
-            <p className="text-[10px] text-muted font-mono truncate max-w-full">{lightbox.name}</p>
-            <button onClick={() => setLightbox(null)} className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised-hover rounded-full flex items-center justify-center text-ink transition-colors border border-line">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      {/* The one shared lightbox — this file used to carry its own copy (see ImageLightbox.tsx). */}
+      <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
 
       {/* ── Left Panel ──────────────────────────────────────────────────── */}
       {showPatientPanel && (

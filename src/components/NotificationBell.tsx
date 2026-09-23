@@ -6,14 +6,18 @@ import { authJsonHeaders } from '../lib/authHeaders';
 /**
  * The app header's own height, restated here because a `fixed` panel cannot inherit it.
  *
- * App.tsx pads the app ROOT by `--nb-safe-top` (the notch) and then lays the header out inside that
- * padding at `h-14`; its content calc — `100vh - 3.5rem - var(--nb-safe-top)` — is the same two
- * numbers. A `position: fixed` panel is anchored to the VIEWPORT instead, receives none of the
- * root's padding, and so must add BOTH back itself. Exported so
- * `tests/theNotificationsPanelClearsTheHeader.test.ts` can read App.tsx and fail if the header's
- * height ever moves away from this value — the drift that would silently put the panel back under it.
+ * The header is TopNav's `<nav className="h-10 …">` — 2.5rem, 40px — laid out inside the app root's
+ * `--nb-safe-top` padding. A `position: fixed` panel is anchored to the VIEWPORT instead, receives none
+ * of the root's padding, and so must add BOTH back itself. Exported so
+ * `tests/theNotificationsPanelClearsTheHeader.test.ts` can read TopNav.tsx and fail if the header's
+ * height ever moves away from this value.
+ *
+ * 🔴 CORRECTED 2026-09-23 — this said `3.5rem`, copied from App.tsx's content calc
+ * `100vh - 3.5rem - var(--nb-safe-top)`, on the premise that the calc restated the header. It did not:
+ * the header has been `h-10` since before that calc was written, and the calc was itself the bug (every
+ * full-height screen ended 16px short of the viewport). The calc is gone; this now names the header.
  */
-export const HEADER_H = '3.5rem';
+export const HEADER_H = '2.5rem';
 
 /** The gap between the header's bottom edge and the panel's top. Purely visual breathing room. */
 export const PANEL_GAP = '0.5rem';
@@ -228,24 +232,23 @@ export function NotificationPanel({ inbox, onClose, onOpenReports }: {
         320px-wide panel ran off the LEFT edge of narrow phones. `fixed` anchors to the viewport,
         so the panel can never overflow an edge, wherever it is opened from (now: the sidebar).
 
-        🔴 AND THE TOP WAS UNDER THE HEADER FROM THE DAY IT SHIPPED (fixed 2026-09-22, admin report:
+        🔴 AND THE TOP WAS UNDER THE HEADER ON A NOTCHED PHONE (fixed 2026-09-22, admin report:
         "notifications open kare to header me chupp raha hai, crop ho raha hai"). `top-12` is 48px.
-        The app header is `3.5rem` = 56px — ALWAYS taller — and it starts BELOW the device notch,
-        because the app root pads itself by `--nb-safe-top` (App.tsx). A `fixed` panel is anchored to
-        the VIEWPORT and gets none of that padding, so it slid underneath, and the header's higher
-        z-index painted over it. **Measured in real Chromium against the built stylesheet:**
+        The app header is `h-10` = 40px and it starts BELOW the device notch, because the app root
+        pads itself by `--nb-safe-top` (App.tsx). A `fixed` panel is anchored to the VIEWPORT and gets
+        none of that padding, so on the admin's phone (notch 47px → header 47–87) it started 39px
+        inside the header, and the header's higher z-index painted over it.
 
-            notch 0px (web/desktop) → header 0–56,   panel top 48  → 8px hidden
-            notch 47px (the phone)  → header 47–103, panel top 48  → 55px hidden
-
-        So this was never a device quirk: the panel was clipped on EVERY screen, and the notch only
-        decided by how much. The offset is now DERIVED from the two facts that decide it — the
-        notch and the header's own height — instead of being a number that happened to look right.
+        ⚠️ CORRECTED 2026-09-23: this block first said the header was 56px and that the panel was
+        therefore "clipped on EVERY screen". Both were wrong — the measurement harness drew a 56px
+        header because it trusted the same `3.5rem` this file did. With no notch the old 48px cleared
+        the real 40px header; the notch was the whole bug. The offset is DERIVED from the two facts
+        that decide it — the notch and the header's own height — so it is right either way.
 
         ⚠️ `--nb-safe-top` and `HEADER_H` are the header's arithmetic, restated here because a
         `fixed` element cannot inherit it. If the header's height ever changes, this must change
         with it — which is what `tests/theNotificationsPanelClearsTheHeader.test.ts` enforces: it
-        reads BOTH files and fails when they disagree.
+        reads TopNav.tsx and fails when the two disagree.
 
         Centred rather than right-aligned (admin: "center me kar do") — the panel is opened from the
         sidebar now, so there is no corner control for it to hang off, and equal margins are what
@@ -253,7 +256,7 @@ export function NotificationPanel({ inbox, onClose, onOpenReports }: {
       */}
       <div
         style={{ top: PANEL_TOP }}
-        className="fixed left-1/2 -translate-x-1/2 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-var(--nb-safe-top,0px)-5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-var(--nb-safe-top,0px)-5rem)] overflow-y-auto rounded-2xl border border-line bg-card shadow-2xl"
+        className="fixed left-1/2 -translate-x-1/2 z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-var(--nb-safe-top,0px)-4rem)] supports-[height:100dvh]:max-h-[calc(100dvh-var(--nb-safe-top,0px)-4rem)] overflow-y-auto rounded-2xl border border-line bg-card shadow-2xl"
       >
         <div className="sticky top-0 bg-card border-b border-line">
           <div className="flex items-center justify-between gap-2 px-4 py-3">

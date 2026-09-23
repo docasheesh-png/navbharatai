@@ -319,22 +319,19 @@ export function useSessionManager(deps: SessionManagerDeps) {
     setErrorContext(null);
     setHasGeneratedCode(false);
     setIsAppBuilt(false);
-    setFiles({
-      'index.html': `<!DOCTYPE html><html><body><h1>New Sandbox</h1></body></html>`,
-      'script.js': 'console.log("Ready");',
-      'style.css': 'body { background: #0d1117; color: white; }'
-    });
+    // A new chat has NO files — `{}`, never placeholder ones (admin 2026-09-23). Three "New Sandbox"
+    // files used to be seeded here AND saved into the session below, so Code Studio showed files that
+    // do not exist, and restoring this blank chat from History found that index.html and set
+    // hasGeneratedCode(true) — a conversation with no app came back looking like one. Same fix as the
+    // initial state in App.tsx; see the note there.
+    setFiles({});
     
     // Initial save of the new clean session
     const initSession: ChatSession = {
       id: newId,
       title: 'New Conversation',
       messages: opening,
-      files: {
-        'index.html': `<!DOCTYPE html><html><body><h1>New Sandbox</h1></body></html>`,
-        'script.js': 'console.log("Ready");',
-        'style.css': 'body { background: #0d1117; color: white; }'
-      },
+      files: {},
       lastUpdated: new Date().toISOString(),
       isPinned: false,
       mode: mode,

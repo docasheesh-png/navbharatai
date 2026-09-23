@@ -105,7 +105,10 @@ describe('the button, in the composer — AIChat', () => {
     expect(box).toBeLessThan(textarea);
     // The row exists ONLY while the button shows; hidden ⇒ `contents`, i.e. no box of its own, so the
     // mobile layout is byte-for-byte what it was ("mobile wala kuch touch nahi karna").
-    expect(CHAT).toContain("className={showFreeModeButton ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}");
+    // Since 2026-09-23 the same row also holds the History button (to Mode's left), so the row opens
+    // when EITHER control shows — and still collapses to `contents` when neither does.
+    expect(CHAT).toContain("const showFreeLeftControls = showFreeModeButton || showFreeHistoryButton;");
+    expect(CHAT).toContain("className={showFreeLeftControls ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}");
     // The textarea's own inset is EXACTLY what it was — the input box is not touched ("na inputbox").
     expect(CHAT).toContain("onModeChange && activeAgent === 'navbharatai-pro' ? \"pl-32\" : \"pl-5\"");
     expect(CHAT).not.toContain('pl-24');

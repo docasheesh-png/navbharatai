@@ -24,6 +24,13 @@ export interface ProfessionalAccessInput {
   usedToday: number;
   /** Daily free-message allowance for non-subscribers (default 10). */
   freeDailyLimit: number;
+  /**
+   * What an over-allowance turn becomes. `'block'` (the default, and what the AI tools still use) is
+   * the old paywall. `'paid'` is the professionals' rule since 2026-09-23 — "10 free, then paid": the
+   * turn is ALLOWED and charged from the wallet. The caller passes `'paid'` only when there is a
+   * wallet to charge; without one, "paid" would silently mean free.
+   */
+  overQuota?: 'block' | 'paid';
 }
 
 export type ProfessionalAccessReason =
@@ -32,7 +39,8 @@ export type ProfessionalAccessReason =
   | 'pass'              // active Professional Pass — unlimited
   | 'within-free-quota' // no pass, but still inside today's free allowance
   | 'login-required'    // gating on, but the caller is anonymous
-  | 'free-quota-exhausted'; // no pass and today's free allowance is used up
+  | 'free-quota-exhausted' // no pass and today's free allowance is used up
+  | 'paid-after-free';    // allowance used up, and the turn is charged from the wallet instead
 
 export interface ProfessionalAccessDecision {
   action: 'allow' | 'block';
@@ -49,7 +57,7 @@ export interface ProfessionalAccessDecision {
  * requirement; then the daily free quota. A blocked decision never counts against the quota.
  */
 export function decideProfessionalAccess(input: ProfessionalAccessInput): ProfessionalAccessDecision {
-  const { enabled, signedIn, isFreeListed, hasActivePass, usedToday, freeDailyLimit } = input;
+  const { enabled, signedIn, isFreeListed, hasActivePass, usedToday, freeDailyLimit, overQuota = 'block' } = input;
 
   // Flag off → gating is completely inert: allow everything, count nothing (byte-for-byte today).
   if (!enabled) return { action: 'allow', reason: 'disabled', countsAgainstFree: false, remainingFree: 0 };
@@ -69,5 +77,31 @@ export function decideProfessionalAccess(input: ProfessionalAccessInput): Profes
   if (used < limit) {
     return { action: 'allow', reason: 'within-free-quota', countsAgainstFree: true, remainingFree: limit - used - 1 };
   }
+  if (overQuota === 'paid') {
+    return { action: 'allow', reason: 'paid-after-free', countsAgainstFree: false, remainingFree: 0 };
+  }
   return { action: 'block', reason: 'free-quota-exhausted', countsAgainstFree: false, remainingFree: 0 };
+}
+
+export interface ExamQuestionSplit {
+  /** Questions of this paper the day's free allowance covers. */
+  free: number;
+  /** Questions of this paper that are charged. */
+  paid: number;
+}
+
+/**
+ * How many questions of a requested paper are free today, and how many are paid. PURE.
+ *
+ * The allowance is counted in QUESTIONS (admin 2026-09-23: "only 5 questions per day free"), so a
+ * paper is split rather than judged whole: with 2 free questions left, a 10-question paper is 2 free
+ * and 8 paid — neither all-free (which would make the allowance a paper a day of any size) nor
+ * all-paid (which would take back 2 questions the student still had).
+ */
+export function splitExamQuestions(requested: number, usedToday: number, freeLimit: number): ExamQuestionSplit {
+  const n = Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 0;
+  const limit = Number.isFinite(freeLimit) && freeLimit > 0 ? Math.floor(freeLimit) : 0;
+  const used = Number.isFinite(usedToday) && usedToday > 0 ? Math.floor(usedToday) : 0;
+  const free = Math.min(n, Math.max(0, limit - used));
+  return { free, paid: n - free };
 }

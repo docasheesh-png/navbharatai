@@ -4,19 +4,21 @@
  * 🔴 Admin, 2026-09-22, with a screenshot: *"notifications, open kare to notifications header me
  * chupp raha hai, crop ho raha hai. isko thoda niche sarkao!! jisse crop na do! center me kar do!!"*
  *
- * The panel sat at `top-12` — **48px**. The app header is `3.5rem` — **56px** — and it begins BELOW
- * the device notch, because App.tsx pads the app ROOT by `--nb-safe-top`. A `position: fixed` panel
- * is anchored to the VIEWPORT and receives none of that padding, so it started inside the header's
- * band and the header's higher z-index painted over its first rows.
+ * The panel sat at `top-12` — **48px**. The app header is TopNav's `h-10` — **40px** — and it begins
+ * BELOW the device notch, because App.tsx pads the app ROOT by `--nb-safe-top`. A `position: fixed`
+ * panel is anchored to the VIEWPORT and receives none of that padding, so on a notched phone it started
+ * inside the header's band and the header's higher z-index painted over its first rows:
  *
- * Measured in real Chromium against the built stylesheet, before the fix:
+ *     notch 0px  (web, desktop)      → header 0–40   → panel top 48 → clear by 8px
+ *     notch 47px (the admin's phone) → header 47–87  → panel top 48 → **39px hidden**
  *
- *     notch 0px  (web, desktop)      → header 0–56    → panel top 48 →  **8px hidden**
- *     notch 47px (the admin's phone) → header 47–103  → panel top 48 → **55px hidden**
- *
- * So this was never a device quirk to reproduce on a phone: **it was clipped on every screen ever**,
- * and the notch only decided by how much. 48 < 56 with no notch at all. A number chosen to look
- * right, against a header whose height it never consulted.
+ * 🔴 CORRECTED 2026-09-23. The first version of this docblock said the header was `3.5rem` (56px) and
+ * that the panel was "clipped on every screen ever". It was not. That number was read out of App.tsx's
+ * content calc `100vh - 3.5rem - var(--nb-safe-top)`, which was assumed to restate the header and did
+ * not — the calc was itself wrong by 16px (removed in the same change as this note). The measurement
+ * harness drew a 56px header too, so it confirmed the assumption instead of testing it. The FIX was
+ * right regardless, because it adds the notch and the header's height rather than guessing a number;
+ * only the diagnosis overstated the no-notch case.
  *
  * ## What this file guards, and why a unit test can guard it at all
  *
@@ -25,10 +27,10 @@
  * header's own height. What a test can check is exactly that derivation, and the one thing that
  * would silently undo it:
  *
- * 🔑 **`HEADER_H` is a restatement of a fact App.tsx owns.** A fixed element cannot inherit the
+ * 🔑 **`HEADER_H` is a restatement of a fact TopNav.tsx owns.** A fixed element cannot inherit the
  * header's height, so the number has to be written twice — and two copies of one fact is the
  * drifted-copy class this repo has paid for repeatedly (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML
- * boot guard ×2). So the last block below READS App.tsx and fails when the two disagree. Change the
+ * boot guard ×2). So the last block below READS TopNav.tsx and fails when the two disagree. Change the
  * header's height and this test tells you the panel needs moving, instead of a user finding out.
  *
  * ⚠️ What a unit test deliberately does NOT claim: that the panel *renders* clear of the header.
@@ -44,7 +46,7 @@ import { HEADER_H, PANEL_GAP, PANEL_TOP } from '../src/components/NotificationBe
 
 const root = resolve(__dirname, '..');
 const source = readFileSync(resolve(root, 'src/components/NotificationBell.tsx'), 'utf8');
-const app = readFileSync(resolve(root, 'src/App.tsx'), 'utf8');
+const topNav = readFileSync(resolve(root, 'src/components/panels/TopNav.tsx'), 'utf8');
 
 /** The panel's own element — the one `fixed` block that carries the offset. */
 const panel = /<div\s+style=\{\{ top: PANEL_TOP \}\}\s+className="([^"]+)"/.exec(source);
@@ -67,10 +69,13 @@ describe('the panel starts below the header, not inside it', () => {
 
   it('the offset is genuinely larger than the header it has to clear', () => {
     // Guards the arithmetic itself rather than its spelling: whatever the three parts are, the
-    // notch-free case must still land past 56px.
+    // notch-free case must still land past the header.
     const rem = (v: string) => (v.endsWith('rem') ? parseFloat(v) * 16 : parseFloat(v));
     expect(rem(HEADER_H) + rem(PANEL_GAP)).toBeGreaterThan(rem(HEADER_H));
-    expect(rem(HEADER_H) + rem(PANEL_GAP)).toBeGreaterThan(48); // the old top-12
+    // There used to be a second line here: "must land past 48px, the old top-12". It was written on the
+    // belief that the header was 56px. It is 40px, so without a notch the old 48px was never the bug —
+    // the notch was — and the derived offset lands on exactly 48px there. The notch case is what the
+    // PANEL_TOP assertion above protects.
   });
 });
 
@@ -87,10 +92,10 @@ describe('it is centred, and it fits', () => {
   it('its height is measured from where it actually starts, not from the top of the screen', () => {
     // `max-h-[70vh]` was measured from the viewport top while the panel starts ~111px down it, so a
     // full inbox ran off the bottom on a short screen. The reserve is the notch + the header + the
-    // gap + a bottom margin, which is 3.5 + 0.5 + 1 = 5rem beyond the notch.
-    expect(panel![1]).toContain('max-h-[calc(100vh-var(--nb-safe-top,0px)-5rem)]');
+    // gap + a bottom margin, which is 2.5 + 0.5 + 1 = 4rem beyond the notch.
+    expect(panel![1]).toContain('max-h-[calc(100vh-var(--nb-safe-top,0px)-4rem)]');
     // dvh where the browser has it: on a phone the URL bar makes vh and dvh differ by real pixels.
-    expect(panel![1]).toContain('supports-[height:100dvh]:max-h-[calc(100dvh-var(--nb-safe-top,0px)-5rem)]');
+    expect(panel![1]).toContain('supports-[height:100dvh]:max-h-[calc(100dvh-var(--nb-safe-top,0px)-4rem)]');
     expect(panel![1]).not.toContain('70vh');
   });
 
@@ -99,29 +104,27 @@ describe('it is centred, and it fits', () => {
   });
 });
 
-describe('the header height written here is the header height App.tsx uses', () => {
+describe('the header height written here is the header height TopNav renders', () => {
   /**
-   * App.tsx is `h-screen`, pads its root by `--nb-safe-top`, and sizes the content area as
-   * `100vh - <header> - var(--nb-safe-top)`. That subtraction IS the header's height, stated by the
-   * file that owns it. Read it back rather than trusting the copy in NotificationBell.
+   * The header is TopNav's root `<nav>`, sized by a Tailwind `h-N` class (N × 0.25rem). Read that class
+   * back rather than trusting the copy in NotificationBell. This used to read App.tsx's content calc,
+   * which was assumed to restate the header and was 16px wrong — see the note at the top of this file.
    */
-  const declared = [
-    ...app.matchAll(/calc\(100d?vh-([\d.]+rem)-var\(--nb-safe-top\)\)/g),
-  ].map((m) => m[1]);
+  const navClass = /<nav className=\{cn\(\s*(?:\/\/[^\n]*\n\s*)*"([^"]+)"/.exec(topNav)?.[1] ?? '';
+  const h = /(?:^|\s)h-(\d+(?:\.\d+)?)(?:\s|$)/.exec(navClass)?.[1];
 
-  it('App.tsx really does state a header height (or this guard is asleep)', () => {
-    // Without this, a refactor that changed how App.tsx spells the calc would leave the block below
-    // vacuously passing over an empty list — a guard that cannot fail, which is not a guard.
-    expect(declared.length).toBeGreaterThan(0);
+  it('TopNav really does state a header height (or this guard is asleep)', () => {
+    // Without this, a refactor that changed how TopNav spells its height would leave the check below
+    // vacuously passing — a guard that cannot fail, which is not a guard.
+    expect(navClass).toContain('border-b');
+    expect(h, 'TopNav\'s root <nav> must carry an h-N height class').toBeTruthy();
   });
 
-  it('every one of them matches HEADER_H', () => {
-    for (const h of declared) {
-      expect(
-        h,
-        `App.tsx reserves ${h} for the header but NotificationBell offsets the panel by ${HEADER_H} — ` +
-          'the panel will start inside the header again. Update HEADER_H.',
-      ).toBe(HEADER_H);
-    }
+  it('it matches HEADER_H', () => {
+    expect(
+      `${Number(h) * 0.25}rem`,
+      `TopNav renders an h-${h} header but NotificationBell offsets the panel by ${HEADER_H} — ` +
+        'the panel will start in the wrong place. Update HEADER_H.',
+    ).toBe(HEADER_H);
   });
 });

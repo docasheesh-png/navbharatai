@@ -80145,3 +80145,51 @@ do!!! koi bhi traces na mile, na code me na kahi comment me."*
   (jaise navbharatai free)"*):** the tool is now **"Image Generator AI FREE"** — the Mode list row, the
   header chip (both read `IMAGE_MODE_NAME`), the screen's own title, the Mode button's tooltip and every
   knowledge-base mention. The Other AI tile keeps its short label "AI Image Gen".
+
+## 2026-09-23 — Autopsy 3ab93068 + f15a9bcc: a "Hello World" page was delivered, verified and billed as the app
+
+**Build 3ab93068 (Weak, free, fast lane, complexity 68).** The prompt asked for a street-vendor
+open/closed status app. The lane planned 7 files, lost its shared-contract call to its own preamble cap
+(56 s), and wrote 4 files in one wave. With too little budget left for the remaining tiers, it **broke
+out of the tier loop because "4 files ≥ minFiles"**. The shell tier, which holds `src/App.tsx`, never
+ran. Three repair rounds (419 s, 63% of the build) fixed the compile errors that the missing contract
+caused. Then:
+- the preview served our seeded starter (`<h1>Hello World</h1>`);
+- "✅ Preview verified — it renders correctly";
+- IN_BUILD_GREEN saved the starter as the **last known good**;
+- Green Stop turned the reviewer's own CRITICAL finding (*"App.tsx still renders a static Hello World
+  page… the app is non-functional"*) into a polite offer;
+- the user was billed **₹85.29 with markup** under *"✅ Your app is built and working"*.
+
+The next turn (f15a9bcc, ₹385.17) mounted the app. So the user paid a second build partly to repair
+the first.
+
+- 🔑 **The class is the sibling this repo already named once.** `stillTheStarterApp.ts` (31dc61fd,
+  2026-09-20) taught the READINESS gate that an untouched scaffold is not an app. The render proof,
+  the in-build snapshot and the fast lane never learned it. That is the a38c6fef shape again: the
+  instance was fixed and the class was not.
+- **Layer A: prevent (`SimpleBuilder.ts`).** The lane may stop early only once the app's root
+  component is written (`unwrittenEntries`). Otherwise it throws a "stopped early" reason, which routes
+  to the existing salvage, so the finished files reach the full builder. A root whose own generation
+  call failed takes the same path. A plan that names no root, on a workspace whose entry is still the
+  starter, gets the root added (`ensureEntryPlanned`). The route reads the entry to supply
+  `starterEntryPath`.
+- **Layer B: never believe it (`stillTheStarterApp.ts`, `routes/agentv3.ts`, `inBuildGreen.ts`).**
+  All three real-browser render verdicts (render rescue, preview verify loop, last-chance proof) pass
+  through `withStarterVerdict`. It needs two factors: the entry is byte-identical to the starter AND
+  the page shows its heading. A starter page then becomes a conclusive not-rendered verdict, so the
+  existing repair pass is handed the exact fix, the reviewer may write, and the markup is not earned.
+  In-build green gains a `starter` outcome and never protects a starter. The report code is
+  `STARTER_STILL_SHOWING` (warning).
+- **Diagnostics gap closed (f15a9bcc).** The runtime auto-fix spent a repair pass on "2 runtime
+  error(s)" that its own model called a transient 502. The report carried only the count, so nobody
+  could say whether `partitionServerDown` should have caught them. `RUNTIME_AUTOFIX_TRIGGERED` now
+  records the texts it handed over.
+- Test-locked and proven by reversion in `tests/theStarterIsNotTheApp.test.ts`.
+- 🔴 **Still open (rule 6).**
+  1. **A complexity-68 app still takes the 240 s fast lane on a reasoning rung.** Its contract call
+     cannot fit the preamble cap, and the missing contract is what bought the 419 s of repair.
+  2. **Build f15a9bcc's "nearby discovery" generates SIMULATED vendors** and presents them as real.
+     The fake-code check reported "No fake/placeholder code". A web app cannot advertise over
+     Bluetooth, and cross-user discovery needs a backend. The honest build says so. No detector exists.
+  3. **The contract timeout is labelled "build budget reached"**, though it was the contract's own cap.

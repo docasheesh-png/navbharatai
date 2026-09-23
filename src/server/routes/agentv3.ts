@@ -19665,6 +19665,17 @@ async function noteBuildOutcome(
             }
             captured = split.app;
           }
+          // WHAT THE REPAIR WAS HANDED, IN THE REPORT (autopsy f15a9bcc, 2026-09-23). That build spent a
+          // repair pass on "2 runtime error(s)" that its own model then called a transient 502, and the
+          // report carried only the COUNT — so whether `partitionServerDown` should have caught them could
+          // not be answered from the evidence. The texts ride on the line now, bounded; admin-only.
+          try {
+            buildDiag.record({
+              phase: 'autofix', severity: 'info', code: 'RUNTIME_AUTOFIX_TRIGGERED', autoResolved: true,
+              message: `${captured.length} runtime error(s) sent to a repair pass (attempt ${attempt}/${maxAttempts}).`,
+              detail: `preview=${internalPreviewUrl(lastPreviewUrl) ?? 'none'} · ${captured.slice(0, 4).map((e) => `[${e.kind}] ${e.text.slice(0, 240)}`).join(' · ')}`,
+            });
+          } catch { /* the report line is best-effort — never affects the repair */ }
           events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({

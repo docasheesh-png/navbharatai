@@ -22,7 +22,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, composerTextPadding,
+  COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS,
 } from '../src/components/chat/ComposerShell';
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
@@ -37,29 +37,28 @@ const SURFACES = {
   imageGenerator: code(read('src/components/ide/AIImageGenerator.tsx')),
 };
 
-describe('the shell IS the free chat\'s composer', () => {
-  it('the box is the free chat\'s box, class for class', () => {
-    expect(FREE_CHAT).toContain(`<div className="${COMPOSER_BOX_CLASS}">`);
+describe('the free chat IS the shell (2026-09-23: the two-row box)', () => {
+  it('the free chat renders ComposerShell with the shared text, send and stop', () => {
+    expect(FREE_CHAT).toContain('<ComposerShell');
+    expect(FREE_CHAT).toContain('COMPOSER_TEXTAREA_CLASS');
+    expect(FREE_CHAT).toContain('className={COMPOSER_SEND_CLASS}');
+    expect(FREE_CHAT).toContain('className={COMPOSER_STOP_CLASS}');
   });
 
-  it('the send and stop buttons are the free chat\'s', () => {
-    expect(FREE_CHAT).toContain(`className="${COMPOSER_SEND_CLASS}"`);
-    expect(FREE_CHAT).toContain(`className="${COMPOSER_STOP_CLASS}"`);
+  it('the box keeps the free chat\'s look: rounded, themed, indigo on focus', () => {
+    expect(COMPOSER_BOX_CLASS).toContain('rounded-2xl');
+    expect(COMPOSER_BOX_CLASS).toContain('focus-within:border-indigo-500');
   });
 
-  it('the text keeps the free chat\'s size, inset and resting height', () => {
-    for (const cls of ['bg-transparent', 'pl-5', 'py-2.5', 'min-h-[48px]', 'leading-relaxed', 'text-[16px]', 'resize-none']) {
-      expect(FREE_CHAT, `AIChat's textarea no longer has "${cls}" — update ComposerShell with it`).toContain(cls);
+  it('the text keeps its 16px size (no iOS zoom) and needs no right-hand reserve', () => {
+    for (const cls of ['bg-transparent', 'text-[16px]', 'resize-none', 'leading-relaxed']) {
       expect(COMPOSER_TEXTAREA_CLASS.split(/\s+/)).toContain(cls);
     }
+    expect(COMPOSER_TEXTAREA_CLASS).not.toMatch(/\bpr-(?:[3-9]\d|\d{3})\b/);
   });
 
-  it('text never runs under the control row, however many controls there are', () => {
-    // 36px per control, 4px between them, the row inset 8px — plus 8px of air.
-    expect(composerTextPadding(1)).toBe('52px');
-    expect(composerTextPadding(4)).toBe('172px');
-    expect(composerTextPadding(0)).toBe('20px');
-    expect(composerTextPadding(Number.NaN)).toBe('20px');
+  it('Send and Stop span the box\'s height (admin: "send button ko bhi 2 line me banao")', () => {
+    for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) expect(cls).toContain('h-full');
   });
 });
 
@@ -70,8 +69,11 @@ describe('every AI in NavBharatAI FREE renders that one shell', () => {
       expect(src).toContain('<ComposerShell');
       expect(src).toContain('className={COMPOSER_TEXTAREA_CLASS}');
       expect(src).toContain('COMPOSER_SEND_CLASS');
-      // Mode stays OUTSIDE the box, on its left (admin 2026-09-21).
-      expect(src).toContain('left={<ModeButton onOpen={onOpenModePicker} />}');
+      // History and Mode stay OUTSIDE the box, in the shell's left column (admin 2026-09-21 / 09-23).
+      expect(src).toContain('onOpenMode={onOpenModePicker}');
+      expect(src).toContain('onOpenHistory={onOpenHistory}');
+      // Send has its own slot, spanning both rows — never squeezed into the control row.
+      expect(src).toMatch(/send=\{\(/);
     });
 
     it(`${name}: no private square input left behind`, () => {

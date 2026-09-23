@@ -379,7 +379,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
@@ -19576,6 +19576,8 @@ async function noteBuildOutcome(
         // Honesty tracking (rule 5): did we EVER actually capture the browser console? An empty capture
         // only means "runtime clean" if a real session was read; otherwise it's "runtime UNCHECKED".
         let captureAvailable = false;
+        // At most ONE deterministic restart per build from this loop — a second stop is reported, never retried.
+        let runtimeServerRestarted = false;
         for (let attempt = 1; attempt <= maxAttempts && !abort.signal.aborted; attempt++) {
           let captured: RuntimeError[] = [];
           try {
@@ -19584,6 +19586,44 @@ async function noteBuildOutcome(
             captured = filterActionableErrors(cap.errors);
           } catch { break; /* console capture needs a real sandbox — availability stays unproven */ }
           if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
+          // A STOPPED SERVER IS RESTARTED, NOT REPAIRED — the verify loop's rule (2026-08-12), applied to
+          // its sibling at last (autopsy 3a0a8f7f). See partitionServerDown for what counts and why.
+          const split = partitionServerDown(captured, internalPreviewUrl(lastPreviewUrl)); // the host the browser actually opened
+          if (split.serverDown.length > 0) {
+            const signals = split.serverDown.map((e) => e.text).slice(0, 4).join(' · ');
+            if (runtimeServerRestarted) {
+              // It stopped again after our own restart. That is an infrastructure finding, never a
+              // licence to rewrite the app — no model call, and the loop ends here.
+              buildDiag.record({
+                phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
+                message: `The dev server stopped again after it was restarted. The app's code was never the problem here — the preview port stopped answering. ${split.serverDown[0].text}`,
+                autoResolved: false,
+              });
+              break;
+            }
+            runtimeServerRestarted = true;
+            events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
+            const restartedAt = Date.now();
+            try {
+              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'runtime-server-revive');
+            } catch { /* the next capture is the real verdict */ }
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
+              message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''}`,
+              autoResolved: true,
+            });
+            if (split.app.length === 0) {
+              // Open the app again so the next capture is a real post-restart console, not an old one.
+              if (lastPreviewUrl && actuator.browseUrl) {
+                try { await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'runtime-server-recheck'); } catch { /* unproven, not failed */ }
+              }
+              sinceMs = restartedAt;
+              attempt -= 1; // a process restart is not a repair attempt
+              continue;
+            }
+            captured = split.app;
+          }
           events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
@@ -19667,8 +19707,15 @@ async function noteBuildOutcome(
         let remaining: RuntimeError[] = [];
         try {
           const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
-          if (fin.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
-          remaining = filterActionableErrors(fin.errors);
+          // A stopped SERVER is not an error IN THE APP. It must neither accuse the app ("errors remain")
+          // nor vouch for it ("runtime verified") — the app did not run, so the honest verdict is unchecked.
+          const finSplit = partitionServerDown(filterActionableErrors(fin.errors), internalPreviewUrl(lastPreviewUrl));
+          if (fin.captured !== false && !(finSplit.serverDown.length > 0 && finSplit.app.length === 0)) {
+            captureAvailable = true; runtimeCaptureAvailable = true;
+          } else if (finSplit.serverDown.length > 0 && finSplit.app.length === 0) {
+            captureAvailable = false;
+          }
+          remaining = finSplit.app;
           runtimeErrorsRemaining = remaining.length;
         } catch { /* best-effort — availability stays whatever the loop proved */ }
         try {
@@ -19958,9 +20005,22 @@ async function noteBuildOutcome(
           // the review can only suggest, it is also lean (a hard step cap, a 45 s budget, and an
           // instruction that says so). Not-green / proven-broken / failed build: byte-identical.
           const reviewPlan = greenReviewPlan({ previewGreen, previewProvenBroken, buildOk: result.ok });
-          const reviewSpawn = reviewPlan.maxSteps !== undefined
-            ? makeSubAgentSpawn({ ...subAgentDeps, maxSteps: reviewPlan.maxSteps })
-            : spawnSubAgent;
+          // 🔴 A REVIEWER WE WALKED AWAY FROM MUST STOP, NOT MERELY STOP BEING WAITED FOR (autopsy
+          // 3a0a8f7f). `raceTimeout` below only ends OUR wait: that build conceded REVIEW_INCOMPLETE and
+          // the reviewer went on making model calls for five more seconds, on the user's bill, for an
+          // answer nothing would read. The review gets its OWN signal — tied to the build's, so a user's
+          // Stop still reaches it — and it is aborted the moment its verdict is conceded, after the grace
+          // and the salvage have had their chance. `makeSubAgentSpawn` holds no state of its own, so a
+          // per-review spawn over the same deps is the shared one with a different signal.
+          const reviewAbort = new AbortController();
+          const stopReviewWithBuild = (): void => reviewAbort.abort();
+          if (abort.signal.aborted) reviewAbort.abort();
+          else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
+          const reviewSpawn = makeSubAgentSpawn({
+            ...subAgentDeps,
+            signal: reviewAbort.signal,
+            ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
+          });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
             try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: at most ${reviewPlan.maxSteps} steps, ${Math.round(reviewBudget / 1000)}s budget. Its findings are an offer, never a repair.`, autoResolved: true }); } catch { /* best-effort */ }
@@ -20049,7 +20109,7 @@ async function noteBuildOutcome(
               review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
-                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
+                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish in the time it had — send "review it" and I\'ll run it on its own.'
                 : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
               // HONESTY (rule 5): this used to be recorded `autoResolved: true` — a literal claim that
               // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
@@ -20072,6 +20132,10 @@ async function noteBuildOutcome(
             // Always detach: the stream outlives this block, and a listener left attached would keep
             // appending a later turn's reviewer output to this turn's buffer.
             stopListening();
+            // Whatever the outcome, nothing reads this reviewer after here — end it (a no-op if it
+            // already finished) and drop the build-abort link so it cannot outlive the build.
+            reviewAbort.abort();
+            abort.signal.removeEventListener('abort', stopReviewWithBuild);
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {

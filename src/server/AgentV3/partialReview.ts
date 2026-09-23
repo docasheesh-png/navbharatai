@@ -102,7 +102,7 @@ export function salvageReview(text: unknown): SalvagedReview | null {
  * Names no provider and no model (white-label law) and claims nothing about completeness. PURE.
  */
 export function formatPartialReview(review: SalvagedReview, maxIssues = 5): string {
-  const head = '📋 Partial review — the deeper completeness check ran out of time on this large app, '
+  const head = '📋 Partial review — the deeper completeness check ran out of time, '
     + 'but here is what it had already found. Send "review it" for a full pass.';
   const lines = review.issues.slice(0, Math.max(1, maxIssues)).map((i) =>
     `  ${i.severity === 'critical' ? '🚨' : i.severity === 'warning' ? '⚠️' : '💡'} ${i.message}`);

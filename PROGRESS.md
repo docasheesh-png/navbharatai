@@ -80012,3 +80012,45 @@ sat in `issues`, which no screen reads, while every surface shows `error` verbat
 - ⚠️ **OPEN, deferred on purpose:** a live character counter in the two image composers, so the
   limit is met BEFORE sending. Both files are being rewritten by PR #3270 right now; touching them
   would only produce a conflict. Do it after #3270 merges.
+---
+
+## 2026-09-23 — Autopsy `3a0a8f7f` (IP Pharmacy handover form, Weak, ₹152.57, 12.8 min, rendered)
+
+**Tally.** ✅ self-healed 2 (write-time typecheck caught `contue` in `storage.ts`; the platform started
+the preview itself when none was published) · 🔀 worked around 2 (fast lane bailed at 96 s and handed
+its plan to the full builder; ₹4.43 of barren work absorbed) · ⏭️ skipped 3 (no journey derived → gate
+YELLOW; no tests; `GREEN_FREEZE_DEFERRED` ×11) · ❌ shipped imperfect 2 (`REVIEW_INCOMPLETE`;
+`PREVIEW_SNAPSHOT_STALE`) · 🥵 struggles 4 (fast lane 96 s; 529 s to first render on the Kimi rung;
+a **paid AI repair pass whose only act was `npm run dev`**; the reviewer kept calling after its timeout).
+
+**Fixed (root cause):**
+1. **A stopped preview server was repaired by a model.** Since `browseUrl` records its console
+   (2026-09-21), a page opened against a dead server writes `HTTP 502 from <preview>` plus Chromium's
+   echo — "2 runtime error(s)" — and the runtime-error loop spent a full KIMI pass to restart the server.
+   The preview verify loop had this exact rule since 2026-08-12; the sibling loop never got it.
+   `partitionServerDown` (`AutoFix.ts`, pure): 502/503/504 or a refused connection **on the preview's own
+   origin** is server-down (a 500, another origin, or a URL-less echo alone stays an app error). The loop
+   restarts deterministically (`PREVIEW_SERVER_RESTARTED`, once; a second stop is `PREVIEW_SERVER_DOWN`),
+   re-opens the app, and never calls a model for it. The final verdict ignores a stopped server too —
+   it neither accuses the app nor vouches for it.
+2. **`PROVIDER_TIME_WASTED` counted our own clock as a KIMI "error"** — my own #3254, whose comment
+   promised the exclusion the code never made. `wasteKindFor` checks budget-ended first and returns null.
+3. **The reviewer kept spending after we stopped waiting.** `raceTimeout` ended the wait, not the work.
+   The review now carries its own `AbortController` (linked to the build's), aborted in `finally`.
+   The user-facing line no longer calls a 16-file app "large".
+
+Locked in `tests/theStoppedServerIsRestartedNotRepaired.test.ts` (14 cases, budget-ended case
+reversion-proven).
+
+**🔴 OPEN — for the admin, not decided here: the platform's finishing passes run AFTER the freeze.**
+The production-defaults pass (manifest, icon, robots.txt, service worker, meta tags) and the auto-test
+pass run after the app is green-latched, so Green Freeze refuses every write — third autopsy in a row
+(`8a92e5ed`, `21b431e1`, this one). The "by default" defaults effectively never land on a build that
+went green, and the release gate then reports "no test suite". Recommendation: run the deterministic
+defaults BEFORE the preview proof so they are part of what gets verified; tests likewise, or behind
+`verifyAfterFix`. Changing freeze ordering is architecture, so it is raised, not shipped.
+
+**OPEN (rule 6):** why the dev server died between the first render (529 s) and the runtime check
+(~600 s) is not in the report — no process log. **OPEN:** the fast lane on an always-reasoning rung
+(complex → `kimi-k2.7-code`) spent 40 s planning a 10-line list (3,027 output tokens for 799 chars) and
+its contract hit the 56 s cap; the bail was correct, the lane was doomed from the rung choice.

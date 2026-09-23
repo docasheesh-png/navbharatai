@@ -158,7 +158,56 @@ describe('slice 2 — the two that still cropped once measured with their REAL c
   });
 });
 
+describe('slice 3 — the image lightbox was TWO copies, and its close button sat in the notch', () => {
+  // The free chat (AIChat) and Doctor AI (SDAChat) each carried an identical lightbox — already
+  // drifted (one faded in, one did not). Both hung the ✕ at `-top-3 -right-3`, 12px ABOVE the card,
+  // and capped the card at a bare 92dvh: on a tall photo the card's top landed ~34px down an 852px
+  // screen, so the only control that closes it landed ~22px down — inside a 47–59px notch.
+  // ⚠️ COMMENTS STRIPPED. The component's own docblock describes the old bug in its own words
+  // (`-top-3 -right-3`), and the first version of this block matched that prose and failed on a
+  // correct file — the third time this exact trap has fired in this change. Assert on code.
+  const lightbox = readFileSync(resolve(root, 'src/components/chat/ImageLightbox.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/^\s*\/\/.*$/gm, ' ');
+
+  it('there is ONE lightbox, and both chats use it', () => {
+    for (const f of ['src/components/ide/AIChat.tsx', 'src/components/sda/SDAChat.tsx']) {
+      const src = readFileSync(resolve(root, f), 'utf8');
+      expect(src, `${f} should render the shared lightbox`).toContain('<ImageLightbox image={lightbox}');
+      // and no longer carries its own copy
+      expect(src, `${f} still has an inline lightbox`).not.toMatch(/\{lightbox && \(/);
+    }
+  });
+
+  it('it carries the contract, above the bar, portalled', () => {
+    expect(lightbox).toContain('nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[200]');
+    expect(lightbox).toContain('createPortal(sheet, document.body)');
+  });
+
+  it('🔴 the close button sits INSIDE the card, where the reserve can protect it', () => {
+    // Anything hanging outside the card's box is outside the overlay's reserve too.
+    expect(lightbox).toContain('absolute top-2 right-2');
+    expect(lightbox).not.toContain('-top-3');
+  });
+
+  it('the card is NOT full-height — tapping beside a small image must still close it', () => {
+    // `h-full` was the obvious way to give the image room to shrink, and it would have made the card
+    // swallow every tap on the empty space around a small image (it stops propagation).
+    const card = /<div className="(nb-sheet [^"]*)"/.exec(lightbox);
+    expect(card, 'lightbox card not found').toBeTruthy();
+    expect(card![1]).not.toMatch(/\bh-full\b/);
+    expect(lightbox).toContain('min-h-0 max-w-full');   // the image shrinks as a flex item instead
+  });
+});
+
 describe('the dialogs deliberately LEFT alone — measured clean with their real content', () => {
+  // SLICE 3 ADDITION: the twelve short confirm dialogs (AppModals ×6, ExitConfirmDialog,
+  // AdminDashboard's confirm, FilesPanel's conflict prompt, ZipSizeModal, GitPanel, VirtualKeyboard)
+  // were rendered with a realistic body — a heading, a two-line message and two buttons (five rows
+  // of keys for the keyboard) — at portrait 320×568 with a 59px notch and at landscape 667×375 and
+  // 844×390. Every one fits all three. They carry no cap because they never need one, and
+  // portalling twelve working dialogs to satisfy a census would be all risk and no fix.
+
   // ⚠️ They stay in the baseline, and this block exists so nobody reads that as a to-do list.
   // A harness that fills every card with 40 paragraphs calls all of these "cropped"; their real
   // content does not. Migrating one anyway means portalling it, which is a real blast radius on

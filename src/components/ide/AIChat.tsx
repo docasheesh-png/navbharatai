@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { ImageLightbox } from '../chat/ImageLightbox';
 import { ModeButton } from '../chat/ModeButton';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
@@ -943,27 +944,8 @@ export const AIChat: React.FC<AIChatProps> = ({
         </div>
       )}
       {/* In-chat image lightbox */}
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-[200] bg-scrim flex items-center justify-center p-4 animate-in fade-in duration-150"
-          onClick={() => setLightbox(null)}
-        >
-          <div className="relative max-w-[95vw] max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
-            <img
-              src={lightbox.src}
-              alt={lightbox.name}
-              className="max-w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] rounded-2xl shadow-2xl object-contain"
-            />
-            <p className="text-[10px] text-muted font-mono truncate max-w-full">{lightbox.name}</p>
-            <button
-              onClick={() => setLightbox(null)}
-              className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised-hover rounded-full flex items-center justify-center text-ink transition-colors border border-line"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      {/* The one shared lightbox — this file used to carry its own copy (see ImageLightbox.tsx). */}
+      <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
       {isExpanded && (
         <div className="fixed inset-0 z-[100] bg-[var(--theme-bg)] flex flex-col p-4 md:p-6 animate-in fade-in zoom-in-95 duration-200">
           <div className="flex justify-between items-center mb-4">

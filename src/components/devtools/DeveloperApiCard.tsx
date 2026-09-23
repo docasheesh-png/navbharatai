@@ -468,6 +468,9 @@ print(pic.data[0].b64_json[:40], "...")`,
         <ul className="text-[10px] text-muted space-y-1 leading-relaxed">
           <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> Base URL <code className="font-mono text-ink">{base}</code>. Send the key as <code className="font-mono">X-API-Key</code> or <code className="font-mono">Authorization: Bearer</code>.</li>
           <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> AI answers cost the same as in the app and come from your wallet — never more than the key's daily limit.</li>
+          {/* Said plainly because the protocol alone cannot say it: a developer who chose streaming for
+              speed deserves to know the answer arrives in one piece, and why that keeps their bill real. */}
+          <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> <span><code className="font-mono">stream: true</code> works with any standard SDK. Today the answer arrives in one piece rather than word by word, so every answer is measured and billed at exactly the same price as a normal one.</span></li>
           <li className="flex gap-2"><AlertTriangle className="w-3 h-3 text-warn shrink-0 mt-0.5" /> Keep the key on your server. Never put it inside a website's front-end code — anyone could read it there. An app you publish with NavBharatAI gets its AI assistant built in automatically, with no key at all.</li>
         </ul>
       </div>

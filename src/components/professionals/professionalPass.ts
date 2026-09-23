@@ -15,7 +15,10 @@
 
 import { authedHeaders } from '../../lib/authHeaders';
 export interface PassStatus {
+  /** The daily allowance is being counted (since 2026-09-23 it no longer waits on the Pass switch). */
   enabled: boolean;
+  /** Past the allowance an answer is charged from the balance (true), not refused until tomorrow. */
+  paidAfterFree?: boolean;
   signedIn: boolean;
   freeListed?: boolean;
   unlimited: boolean;
@@ -25,6 +28,10 @@ export interface PassStatus {
   freeDailyLimit: number;
   usedToday: number;
   remainingFree: number;
+  /** Exam mode's own allowance, counted in questions (admin 2026-09-23: 5 a day). */
+  examFreeDailyQuestions?: number;
+  examUsedToday?: number;
+  examRemainingFree?: number;
   priceInr: number;
   passDays: number;
 }

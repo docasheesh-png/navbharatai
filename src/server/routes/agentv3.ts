@@ -300,6 +300,8 @@ import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
+import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
+import { readDevServerLastWords } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -532,6 +534,7 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
+import { entryIsStillTheStarter, starterRenderNote } from '../AgentV3/stillTheStarterApp';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
@@ -14004,6 +14007,20 @@ async function noteBuildOutcome(
       // 🔒 Runs BESIDE the loop, never in it: fire-and-forget on a preview/tool event, one browser open
       // per attempt, zero model calls, every failure swallowed. It does not freeze writes and does not
       // stop the build — the model keeps finishing the app; only the worst case changes.
+      /**
+       * 🔴 IS WHAT RENDERS STILL THE STARTER PAGE WE SEEDED? (autopsy 0d297b25) — asked by EVERY producer
+       * of the render proof below: the in-build green, the render rescue, the verify loop and the last-
+       * chance proof. A Hello World renders perfectly, so without this each of them turned "the preview
+       * renders" into "the app works" for an app nobody wrote — upgraded a build the readiness gate had
+       * failed, earned the markup on it, and told the user it was protected. Read fresh at each call (a
+       * later write may genuinely build the app), and it is the SAME exact-match rule the readiness
+       * blocker uses, so the gate and the proofs cannot disagree about one file. An unreadable entry
+       * answers `false` — our own trouble must never veto a real app's proof.
+       */
+      const renderIsOnlyTheStarter = (): Promise<boolean> => entryIsStillTheStarter(
+        (path) => withTimeout(actuator.readFile(workspaceId, path), 5_000, 'starter-entry-read'),
+      ).catch(() => false);
+      let inBuildStarterNoted = false;
       let inBuildGreenAt = 0;
       let inBuildGreenInFlight = false;
       let inBuildGreenLastAttempt = 0;
@@ -14019,6 +14036,17 @@ async function noteBuildOutcome(
         }, Date.now())) return;
         inBuildGreenInFlight = true;
         inBuildGreenLastAttempt = Date.now();
+        // The starter page is not a working version to protect, and saying "Your app rendered — this
+        // working version is now protected" about it is the false claim 0d297b25 showed the user. A file
+        // read, not a browser open, so a still-empty build pays almost nothing per trigger.
+        if (await renderIsOnlyTheStarter()) {
+          if (!inBuildStarterNoted) {
+            inBuildStarterNoted = true;
+            try { buildDiag.record({ phase: 'preview', ...starterRenderNote('in-build green') }); } catch { /* best-effort */ }
+          }
+          inBuildGreenInFlight = false;
+          return;
+        }
         const inBuildGreenStartedAt = Date.now();
         try {
           const writesBefore = inBuildWriteTick;
@@ -15621,7 +15649,25 @@ async function noteBuildOutcome(
       // explicit.)
       // `!goldenPreseeded`: a pre-seeded golden app skips the fast lane — regenerating from scratch would
       // discard the verified template; the agentic loop verifies & customizes the seeded files instead.
-      if (!goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // A LANE THAT CANNOT FINISH IS NOT STARTED (autopsy ac41a924). When the rung this build opens on
+      // always reasons, the lane's single 90 s plan call spends its cap thinking and hands over with
+      // nothing — 90 s the user watched for no file. See fastLaneRung.ts.
+      const fastLaneWouldRun = !goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      const fastLaneRung = fastLaneWouldRun
+        ? (() => {
+          try {
+            return fastLaneRungDecision(tierLadder(powerLevelReqEffective).rungs, {
+              complex: buildIsComplex,
+              isKeyed: (r) => { const v = process.env[keyEnvFor(r.provider)]; return !!(v && String(v).trim()); },
+              enabled: fastLaneReasoningGateEnabled(),
+            });
+          } catch { return { rung: null, skip: false, reason: '' }; }
+        })()
+        : { rung: null, skip: false, reason: '' };
+      if (fastLaneRung.skip) {
+        buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_REASONING_RUNG', message: 'Skipped the fast lane: the engine this build opens on always reasons first, so the lane could not finish its plan step in time. Building directly with the full builder.', autoResolved: true, detail: fastLaneRung.reason });
+      }
+      if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -18341,7 +18387,12 @@ async function noteBuildOutcome(
           // We looked, the answer was conclusive, and the app did not render. That — and only that — is
           // evidence a repair has something real to aim at.
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
-          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker })) {
+          // The rescue's premise is that the build WROTE the app. A rendering starter page is not that.
+          const stillTheStarter = verdict.rendered ? await renderIsOnlyTheStarter() : false;
+          if (stillTheStarter) {
+            try { buildDiag.record({ phase: 'preview', ...starterRenderNote('render rescue') }); } catch { /* best-effort */ }
+          }
+          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker, stillTheStarter })) {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
@@ -18395,6 +18446,12 @@ async function noteBuildOutcome(
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
+          if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
+            // Rendered — but the starter page, not an app. Not a proof, and not a defect a repair pass
+            // could fix either (there is nothing to repair), so the loop ends here without spending one.
+            try { buildDiag.record({ phase: 'preview', ...starterRenderNote('preview verify loop') }); } catch { /* best-effort */ }
+            break;
+          }
           if (verdict.rendered && consoleErrs.length === 0) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
             // Honesty upgrade (autopsy 2026-07-11): the real-browser check just CONFIRMED the app renders,
@@ -18570,6 +18627,8 @@ async function noteBuildOutcome(
               break;
             }
             serverRevivals += 1;
+            // Its last words BEFORE the restart overwrites them — the only evidence of WHY it stopped.
+            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
@@ -18582,6 +18641,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
+              detail: lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)',
               autoResolved: true,
             });
             attempt -= 1; // a process restart is not a repair attempt
@@ -19371,7 +19431,11 @@ async function noteBuildOutcome(
               if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
-            const proven = verdict.rendered && consoleErrs.length === 0;
+            const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();
+            if (starterOnly) {
+              try { buildDiag.record({ phase: 'preview', ...starterRenderNote('last-chance proof') }); } catch { /* best-effort */ }
+            }
+            const proven = verdict.rendered && consoleErrs.length === 0 && !starterOnly;
             const broken = !verdict.rendered && !verdict.inconclusive && !verdict.serverDown;
             if (proven) gateEvidence.preview = 'passed';
             else if (broken) gateEvidence.preview = 'failed';
@@ -19643,6 +19707,7 @@ async function noteBuildOutcome(
               break;
             }
             runtimeServerRestarted = true;
+            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             const restartedAt = Date.now();
             try {
@@ -19651,7 +19716,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
-              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''}`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)'}`,
               autoResolved: true,
             });
             if (split.app.length === 0) {

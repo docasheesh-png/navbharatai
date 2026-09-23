@@ -1034,17 +1034,24 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // provider events 148 s after it had ended, on a sandbox still being billed. Handing the same cap
       // DOWN as an absolute deadline means the call it starts cannot outlive the wait. The race stays:
       // it is what makes the lane bail promptly; the deadline is what stops the abandoned call.
-      const manifestText = await withTimeout(
-        deps.generate(
-          manifestSystemPrompt(deps.framework),
-          manifestUserPrompt(deps.prompt, deps.scaffoldPaths),
-          { deadlineAt: deadlineFromBudget(planCap, laneStartedAt) },
-        ),
-        planCap, 'simple-plan');
+      let manifestText: string;
+      try {
+        manifestText = await withTimeout(
+          deps.generate(
+            manifestSystemPrompt(deps.framework),
+            manifestUserPrompt(deps.prompt, deps.scaffoldPaths),
+            { deadlineAt: deadlineFromBudget(planCap, laneStartedAt) },
+          ),
+          planCap, 'simple-plan');
+      } finally {
+        // 🔴 A PLAN CALL THAT FAILS STILL TOOK ITS TIME (autopsy 0d297b25). The phase clock was set
+        // only on success, so a plan call cut off at its 90 s cap reported "plan 0s … everything else
+        // 90s (100%)" — the one phase that consumed the whole lane read as zero.
+        clock.planMs = Date.now() - laneStartedAt;
+      }
       // The plan call is a REAL model call on this build's REAL provider chain, and it is the only
       // latency measurement that exists before a single file is generated. See canFinishAfterPreamble.
-      const planCallMs = Date.now() - laneStartedAt;
-      clock.planMs = planCallMs;
+      const planCallMs = clock.planMs;
       // THE OTHER HALF OF THE SEVEN MINUTES (50/50 law). Restoring src/ErrorBoundary.tsx after the fact
       // is recovery; this is why it needed recovering. The manifest prompt hands the model the scaffold
       // list and says "edit/extend", so the plan can — and did — include a file we ship correct, and the

@@ -338,6 +338,14 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\b(?:click|change|input|submit|key(?:board|down|up|press)?|mouse|touch|scroll|focus|blur|drag|drop|custom|dom|browser|window|resize|load)\s+events?\b/gi,
   /\bevents?\s+(?:handler|listener|bubbling|loop|delegation|emitter|target|object)\b/gi,
   /\b(?:add|remove)\s*event\s*listener\b/gi,
+  // events — Expo is a React Native TOOLCHAIN, not an exhibition (autopsy 0d297b25: "Act as a senior
+  // Expo/React Native Android developer … configure EAS" was read as an EVENTS app and handed "QR
+  // check-in"). Only the toolchain's own constructions: "an expo on handicrafts" keeps its domain.
+  /\bexpo\s*(?:\/|and|&|\+)\s*react[\s-]?native\b/gi,
+  /\breact[\s-]?native\s*(?:\/|and|&|\+|with|using)\s*expo\b/gi,
+  /\bexpo[\s-](?:go|sdk|cli|router|eas|dev(?:elopment)?\s+build|prebuild|config|project|app\.json|managed|bare|modules?)\b/gi,
+  /\bexpo\s+(?:version|v?\d)/gi,
+  /\bexpo-[a-z][\w-]*/gi,
   // real-estate — a CSS/JS property is not a house; "flat" is a layout, not an apartment;
   // "listing" is a rendered list of anything.
   /\b(?:css|style|styling|js|javascript|object|custom|computed)\s+propert(?:y|ies)\b/gi,
@@ -377,8 +385,15 @@ const NON_DOMAIN_USES: RegExp[] = [
 export function stripNonDomainUses(text: string): string {
   let out = String(text || '');
   for (const re of NON_DOMAIN_USES) out = out.replace(re, ' ');
+  // A prompt that names the React Native toolchain anywhere is using "Expo" as its name every time —
+  // "if the project uses Expo, configure EAS" has no construction of its own to match. Conditional on
+  // THAT evidence, never a bare-word strip: without it, "expo" keeps its meaning.
+  if (REACT_NATIVE_CONTEXT.test(String(text || ''))) out = out.replace(/\bexpo\b/gi, ' ');
   return out;
 }
+
+/** Evidence that "Expo" in this prompt is the React Native toolchain (autopsy 0d297b25). */
+const REACT_NATIVE_CONTEXT = /\breact[\s-]?native\b|\beas\.json\b|\beas\s+(?:build|submit|update|cli)\b|\bconfigure\s+eas\b/i;
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [
   { label: 'user authentication', re: /auth|login|sign.?in|sign.?up|account|user/i },

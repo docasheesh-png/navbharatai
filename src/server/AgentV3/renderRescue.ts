@@ -31,6 +31,14 @@ export function renderRescueConfirmsSuccess(input: {
   rendered: boolean;
   consoleErrorCount: number;
   runtimeCrashBlocker?: boolean;
+  /**
+   * Is the rendered page still the starter entry we seeded? (autopsy 0d297b25, `entryIsStillTheStarter`)
+   * A Hello World renders perfectly, so "the preview renders" proves nothing about an app nobody wrote.
+   * The rescue's own premise is that the build "actually WROTE the app" — a Markdown file does not
+   * qualify, and the readiness gate had already said so.
+   */
+  stillTheStarter?: boolean;
 }): boolean {
-  return input.rendered === true && input.consoleErrorCount === 0 && input.runtimeCrashBlocker !== true;
+  return input.rendered === true && input.consoleErrorCount === 0 && input.runtimeCrashBlocker !== true
+    && input.stillTheStarter !== true;
 }

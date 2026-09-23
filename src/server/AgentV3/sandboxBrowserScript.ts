@@ -24,6 +24,26 @@
 // produces no result lines (or exits non-zero) it prints a BOUNDED tail of whatever the script really
 // said, under its own marker. The cost on a healthy run is zero — the diagnostic branch is not taken.
 
+/**
+ * How an in-sandbox browser script loads Playwright — ONE line, for every script that needs it.
+ *
+ * 🔴 THE NAMED IMPORT NEVER WORKED HERE (autopsy ac41a924, 2026-09-23). Both `pageCheckScript` and
+ * `journeyScript` began `import { chromium } from '…/playwright/index.js'`. That file is CommonJS —
+ * `module.exports = require('playwright-core')`, which in turn re-exports an object built at run
+ * time — so Node's ESM loader cannot see a `chromium` export and refuses to LINK the module:
+ * *"SyntaxError: Named export 'chromium' not found … CommonJS modules can always be imported via the
+ * default export"*. The script died before its first line ran, on every build, and the report said
+ * PAGE_RENDER_NOT_RUN and JOURNEY_NOT_RUN — the exact wording the diagnostic tail carried. The tests
+ * pinned the broken line as a STRING, so they stayed green; the lock is now a test that runs this
+ * line in a real Node against a package shaped like Playwright.
+ *
+ * The default import is what Node itself recommends, and it works on every Playwright version: a
+ * CommonJS module's default export IS its `module.exports`, whatever it re-exports underneath.
+ */
+export function playwrightImport(toolsDir: string): string {
+  return `import playwright from '${toolsDir}/node_modules/playwright/index.js';\nconst { chromium } = playwright;`;
+}
+
 /** The marker the run line prefixes its diagnostic lines with. Never a result marker. */
 export const SCRIPT_DIAG_MARKER = 'NBAI_DIAG:';
 

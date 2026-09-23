@@ -197,6 +197,12 @@ small, .muted { color: var(--muted); }
 .nb-empty-title { font-size: 1.05rem; font-weight: 700; color: var(--fg); }
 .nb-empty-text { max-width: 40ch; font-size: 0.9rem; }
 
+/* Picture placeholder — a DRAWN image for a spot that wants a photo nobody supplied. A guessed photo
+   URL often fails to load (the browser blocks the error page it returns), leaving an empty frame on
+   the first screen; this always renders. Put an emoji or icon inside; add .nb-img-square for a tile. */
+.nb-img { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--radius); background: linear-gradient(135deg, var(--accent-soft), color-mix(in srgb, var(--accent) 28%, var(--card))); color: var(--accent); font-size: 2.5rem; line-height: 1; }
+.nb-img-square { aspect-ratio: 1 / 1; }
+
 /* Dashboard shell — sidebar + topbar + content. Collapses to a single column on a phone, because a
    fixed sidebar on a 390px screen leaves no room for the app itself. */
 .nb-shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }

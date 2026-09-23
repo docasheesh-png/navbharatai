@@ -30,6 +30,12 @@ export interface V3FooterApi {
   openFiles: () => void;
   /** Open the More sheet (framework, diff, terminal, checkpoints, Report, GitHub, deploy, live site…). */
   openMore: () => void;
+  /**
+   * Close whichever of this panel's footer sheets (History / More) is open, touching nothing else.
+   * For a footer item that leaves the panel — Code Studio — so the sheet is not still hanging over
+   * the chat on the way back (admin 2026-09-23: "old wala hide ho jaye, new click wala show ho").
+   */
+  closeSheet: () => void;
   /** Admin 2026-07-07: green dot on the Preview item the moment the app is genuinely viewable. */
   previewReady: boolean;
   /** Admin 2026-07-07: the REAL number of built files, shown on the Files item (0 = hidden). */

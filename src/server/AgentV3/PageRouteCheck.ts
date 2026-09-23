@@ -33,7 +33,7 @@
 // including the cases that LOOK like violations: alt="" with aria-hidden, an aria-label on a button, a
 // label[for], a wrapping label, and a hidden input).
 
-import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote } from './sandboxBrowserScript';
+import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 
 /** How many page routes to actually open. A 40-page app must not add minutes to every build. */
 export const MAX_PAGE_ROUTES = 6;
@@ -135,7 +135,7 @@ export function pageCheckScript(previewUrl: string, routes: string[]): string {
 // and the grep swallow the error, so the run simply produces no result lines. Verified both ways.
 // (No backticks anywhere in this script: it lives inside a TypeScript template literal, where one would
 // close the literal. That mistake has been made twice here; tsc catches it, which is why it is caught.)
-import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js';
+${playwrightImport(TOOLS_DIR)}
 const base = ${JSON.stringify(base)};
 const routes = ${list};
 const browser = await chromium.launch({ args: ['--no-sandbox'] });

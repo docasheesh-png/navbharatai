@@ -862,7 +862,11 @@ export function makeMultiProviderTurnRunner(
           }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
-            throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+            // "THE time budget", never "this BUILD'S": the deadline handed down may be a single step's
+            // (the fast lane's 90 s plan cap, autopsy ac41a924) with most of the build still ahead, and
+            // this runner cannot tell which clock it was. The report used to say the build's budget had
+            // ended 90 s into a 29-minute build — the sibling of the fix aFailedProbeIsNotAnAnswer holds.
+            throw new Error(`The time budget ended before this step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
           if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
             // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"

@@ -299,6 +299,7 @@ import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
+import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -15616,7 +15617,25 @@ async function noteBuildOutcome(
       // explicit.)
       // `!goldenPreseeded`: a pre-seeded golden app skips the fast lane — regenerating from scratch would
       // discard the verified template; the agentic loop verifies & customizes the seeded files instead.
-      if (!goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // A LANE THAT CANNOT FINISH IS NOT STARTED (autopsy ac41a924). When the rung this build opens on
+      // always reasons, the lane's single 90 s plan call spends its cap thinking and hands over with
+      // nothing — 90 s the user watched for no file. See fastLaneRung.ts.
+      const fastLaneWouldRun = !goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      const fastLaneRung = fastLaneWouldRun
+        ? (() => {
+          try {
+            return fastLaneRungDecision(tierLadder(powerLevelReqEffective).rungs, {
+              complex: buildIsComplex,
+              isKeyed: (r) => { const v = process.env[keyEnvFor(r.provider)]; return !!(v && String(v).trim()); },
+              enabled: fastLaneReasoningGateEnabled(),
+            });
+          } catch { return { rung: null, skip: false, reason: '' }; }
+        })()
+        : { rung: null, skip: false, reason: '' };
+      if (fastLaneRung.skip) {
+        buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_REASONING_RUNG', message: 'Skipped the fast lane: the engine this build opens on always reasons first, so the lane could not finish its plan step in time. Building directly with the full builder.', autoResolved: true, detail: fastLaneRung.reason });
+      }
+      if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))

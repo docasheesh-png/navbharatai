@@ -48,7 +48,7 @@
 import { workspaceContentHash } from '../AgentV3/snapshotIdentity';
 import { ensureWorkspaceFilesInSandbox } from '../AgentV3/sandboxSeed';
 import { isGreenLatched } from '../AgentV3/greenFreeze';
-import { buildOutputCandidates } from '../AgentV3/builtSiteCheck';
+import { buildOutputCandidates, isNextWithoutStaticExport } from '../AgentV3/builtSiteCheck';
 import { detectProjectKind, detectWebDir, isBinaryPath, type PrebuiltWeb } from './mobileProjectAssembler';
 import { readRealBuildFailure, sandboxHoldsApp } from './mobileShipRealBuild';
 import { envFlag } from './envFlag';
@@ -116,6 +116,8 @@ export interface PrebuiltActuator {
 export type PrebuiltSkip =
   | 'flag-off'
   | 'static-app'
+  /** A Next.js app with no static export builds a SERVER, not a site a phone app can wrap. */
+  | 'server-app'
   | 'no-sandbox'
   | 'build-in-flight'
   | 'unavailable'
@@ -271,6 +273,11 @@ export async function prebuildForShip(
   if (!actuator || !workspaceId) return skip('unavailable', false);
   if (typeof actuator.hasLiveSandbox !== 'function') return skip('no-sandbox', false);
   if (detectProjectKind(files) === 'static') return skip('static-app', false);
+  // A Next.js app without `output: 'export'` produces a server, and the reader has no site to find in
+  // it — so building it here would wake a machine and hold the user through minutes of `next build`
+  // only to fall through to the source ship anyway (the review's catch, 2026-09-22). Asked of the
+  // files, before any machine is touched; the source ship's own note tells the user what to change.
+  if (isNextWithoutStaticExport(files)) return skip('server-app', false);
   // Another build of this very app is in flight — its files are changing and its flag is its own.
   if (actuator.isBuildActive?.(workspaceId) || isGreenLatched(workspaceId)) return skip('build-in-flight', false);
   const started = Date.now();

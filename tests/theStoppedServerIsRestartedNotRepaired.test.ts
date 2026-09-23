@@ -83,7 +83,7 @@ describe('the wiring in routes/agentv3.ts', () => {
   const src = readFileSync(new URL('../src/server/routes/agentv3.ts', import.meta.url), 'utf8');
 
   it('the runtime loop splits server-down BEFORE it announces a repair', () => {
-    const split = src.indexOf('const split = partitionServerDown(captured, lastPreviewUrl);');
+    const split = src.indexOf('const split = partitionServerDown(captured, internalPreviewUrl(lastPreviewUrl));');
     const announce = src.indexOf('runtime error(s) — auto-fixing (attempt');
     expect(split).toBeGreaterThan(0);
     expect(announce).toBeGreaterThan(split);
@@ -92,7 +92,7 @@ describe('the wiring in routes/agentv3.ts', () => {
   });
 
   it('the final runtime verdict ignores a stopped server too', () => {
-    expect(src).toContain('const finSplit = partitionServerDown(filterActionableErrors(fin.errors), lastPreviewUrl);');
+    expect(src).toContain('const finSplit = partitionServerDown(filterActionableErrors(fin.errors), internalPreviewUrl(lastPreviewUrl));');
   });
 
   it('the reviewer gets its own signal and it is aborted when the review is over', () => {

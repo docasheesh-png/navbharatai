@@ -19588,7 +19588,7 @@ async function noteBuildOutcome(
           if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
           // A STOPPED SERVER IS RESTARTED, NOT REPAIRED — the verify loop's rule (2026-08-12), applied to
           // its sibling at last (autopsy 3a0a8f7f). See partitionServerDown for what counts and why.
-          const split = partitionServerDown(captured, lastPreviewUrl);
+          const split = partitionServerDown(captured, internalPreviewUrl(lastPreviewUrl)); // the host the browser actually opened
           if (split.serverDown.length > 0) {
             const signals = split.serverDown.map((e) => e.text).slice(0, 4).join(' · ');
             if (runtimeServerRestarted) {
@@ -19616,7 +19616,7 @@ async function noteBuildOutcome(
             if (split.app.length === 0) {
               // Open the app again so the next capture is a real post-restart console, not an old one.
               if (lastPreviewUrl && actuator.browseUrl) {
-                try { await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'runtime-server-recheck'); } catch { /* unproven, not failed */ }
+                try { await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'runtime-server-recheck'); } catch { /* unproven, not failed */ }
               }
               sinceMs = restartedAt;
               attempt -= 1; // a process restart is not a repair attempt
@@ -19709,7 +19709,7 @@ async function noteBuildOutcome(
           const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
           // A stopped SERVER is not an error IN THE APP. It must neither accuse the app ("errors remain")
           // nor vouch for it ("runtime verified") — the app did not run, so the honest verdict is unchecked.
-          const finSplit = partitionServerDown(filterActionableErrors(fin.errors), lastPreviewUrl);
+          const finSplit = partitionServerDown(filterActionableErrors(fin.errors), internalPreviewUrl(lastPreviewUrl));
           if (fin.captured !== false && !(finSplit.serverDown.length > 0 && finSplit.app.length === 0)) {
             captureAvailable = true; runtimeCaptureAvailable = true;
           } else if (finSplit.serverDown.length > 0 && finSplit.app.length === 0) {

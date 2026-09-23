@@ -128,7 +128,7 @@ describe('what the calls that returned nothing cost', () => {
 
   it('REVERSION GUARD: the runner emits once, before the classification, and the route listens', () => {
     const runner = readFileSync(join(process.cwd(), 'src/server/AgentV3/providers/MultiProviderTurnRunner.ts'), 'utf8');
-    const emitAt = runner.indexOf('opts.onAttemptWasted?.(reportName, kind, wastedMs)');
+    const emitAt = runner.indexOf('opts.onAttemptWasted?.(reportName, kind, Math.max(0, now() - attemptStartedAt))');
     const classifyAt = runner.indexOf('if (isSlowStreamAbandon(err)) {\n            abandonedSlowRung = true;');
     expect(emitAt).toBeGreaterThan(0);
     // Placed before the branches so no branch can forget it.

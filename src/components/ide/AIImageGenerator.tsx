@@ -670,7 +670,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
           <Wand2 className="w-5 h-5 text-accent-text" />
         </div>
         <div className="min-w-0">
-          <h2 className="font-semibold text-ink text-base truncate">AI Image Generator</h2>
+          <h2 className="font-semibold text-ink text-base truncate">Image Generator AI FREE</h2>
           <p className="text-xs text-faint truncate">Write a prompt to generate images — logos, banners, icons</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">

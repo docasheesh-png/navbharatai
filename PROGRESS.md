@@ -80141,3 +80141,7 @@ do!!! koi bhi traces na mile, na code me na kahi comment me."*
   deleted: `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, `IMAGE_PRO_AUTH_SCHEME`, `POLLINATIONS_API_KEY` (and
   any optional `IMAGE_PRO_*` values, if set). Existing API keys that held the image permission keep
   working — an unknown permission is simply ignored when a key is read.
+- ✅ **Same day, the name says it (admin: *"jo image generator ai bach jaye uske aage free likh dena
+  (jaise navbharatai free)"*):** the tool is now **"Image Generator AI FREE"** — the Mode list row, the
+  header chip (both read `IMAGE_MODE_NAME`), the screen's own title, the Mode button's tooltip and every
+  knowledge-base mention. The Other AI tile keeps its short label "AI Image Gen".

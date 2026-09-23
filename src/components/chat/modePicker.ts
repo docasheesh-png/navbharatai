@@ -16,7 +16,7 @@
 //      Absent entirely when no AI is open (the Professionals hub), because there is nothing to return to.
 //   2. "NavBharatAI FREE"   — always a BRAND-NEW free chat. (This is the old "FREE +", renamed; the
 //      old resume-row's job moved to row 1, so the `+` had nothing left to distinguish.)
-//   3. "Image Generator AI" — the SAME module Other Tools opens, free AND paid together, untouched.
+//   3. "Image Generator AI FREE" — the SAME module Other Tools opens, untouched.
 //   4. Doctor AI, then every professional — the SAME real experts as the Professionals hub, opened
 //      through the SAME navigation, so every engine, disclaimer, pass-gate and billing rule they have
 //      today applies untouched. A new door, never a side-door. Each now starts a NEW chat.
@@ -120,7 +120,8 @@ export const FREE_MODE_ID = 'free';
  */
 export const IMAGE_MODE_ID = 'imagegen';
 
-export const IMAGE_MODE_NAME = 'Image Generator AI';
+/** Named like "NavBharatAI FREE", because it is free (admin 2026-09-23: "image generator ai 'free'"). */
+export const IMAGE_MODE_NAME = 'Image Generator AI FREE';
 
 /** What a recent row's id is built from. See ModeEntry.id for why it cannot be the bare view id. */
 export const RECENT_MODE_PREFIX = 'recent:';

@@ -30,7 +30,7 @@ describe('modePickerEntries — what the Mode button offers', () => {
     const entries = modePickerEntries({ hideMedical: false, activeView: 'teacher_ai', openViews: ['teacher_ai'], openChats: [win] });
     expect(entries[0]).toMatchObject({ id: recentModeId('teacher_ai', 'c1'), name: 'Teacher AI', kind: 'recent', view: 'teacher_ai', conversationId: 'c1' });
     expect(entries[1]).toMatchObject({ id: FREE_MODE_ID, kind: 'free' });
-    expect(entries[2]).toMatchObject({ id: IMAGE_MODE_ID, name: 'Image Generator AI', kind: 'image' });
+    expect(entries[2]).toMatchObject({ id: IMAGE_MODE_ID, name: 'Image Generator AI FREE', kind: 'image' });
     expect(entries[3]).toMatchObject({ id: 'sda_chat', name: 'Doctor AI' });
     // Every configured professional is in the list — none silently dropped.
     for (const id of Object.keys(PROFESSIONAL_CHATS)) {

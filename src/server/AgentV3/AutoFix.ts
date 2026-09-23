@@ -476,3 +476,50 @@ export function releaseGateFailureSummary(blockerCount: number, rootCause?: stri
     `You have NOT been charged for this build. Reply "fix it" (or "continue") and I'll finish it.`
   );
 }
+
+/**
+ * WHICH CAPTURED ERRORS SAY "THE PREVIEW SERVER IS DOWN", NOT "THE APP IS BROKEN".
+ *
+ * 🔴 THE SIBLING THE PREVIEW CHECK'S FIX NEVER REACHED (autopsy 3a0a8f7f, 2026-09-23). The preview
+ * verify loop learned on 2026-08-12 that a dead dev server must be RESTARTED, not repaired: three LLM
+ * passes had each read the files, found nothing, restarted the server and billed for it. The
+ * runtime-error loop never got that guard, and since 2026-09-21 `browseUrl` records its console — so a
+ * page opened against a stopped server now writes `HTTP 502 from <preview>` and Chromium's echo of it,
+ * those two lines reached this loop as "2 runtime error(s)", and a full paid repair pass ran to do the
+ * one thing a free `npm run dev` does. Its summary ("the Vite dev server was not running … port 5173")
+ * then became the build's summary, about an app nobody had asked to fix.
+ *
+ * What counts, precisely, because a false positive here would hide a real crash:
+ *   • a 502 / 503 / 504 response, or a refused / reset / empty connection, on the PREVIEW'S OWN ORIGIN
+ *     — the sandbox proxy's answer when nothing listens on the port. A 500 is the app's own server
+ *     saying something went wrong and is deliberately NOT here; nor is any other origin (an app's
+ *     third-party API being down is the app's problem to handle).
+ *   • Chromium's URL-less echo ("Failed to load resource: … status of 502") — but ONLY when a real
+ *     origin-matched signal is in the same capture. On its own it could be the app's own proxy.
+ * With no preview URL there is no origin to match, and nothing is classified server-down. Pure.
+ */
+export function partitionServerDown(errors: RuntimeError[], previewUrl: string | null | undefined): { serverDown: RuntimeError[]; app: RuntimeError[] } {
+  const list = Array.isArray(errors) ? errors : [];
+  let origin = '';
+  try { origin = previewUrl ? new URL(previewUrl).origin : ''; } catch { origin = ''; }
+  if (!origin) return { serverDown: [], app: [...list] };
+  const onPreview = (text: string): boolean => {
+    const m = /(https?:\/\/[^\s'"<>]+)/i.exec(text);
+    if (!m) return false;
+    try { return new URL(m[1]).origin === origin; } catch { return false; }
+  };
+  const direct = (e: RuntimeError): boolean => {
+    const t = String(e?.text ?? '');
+    if (/^HTTP 50[234] from /i.test(t) && onPreview(t)) return true;
+    if (e?.kind === 'requestfailed' && onPreview(t)
+      && /ERR_CONNECTION_(?:REFUSED|RESET|CLOSED)|ERR_EMPTY_RESPONSE|ERR_CONNECTION_FAILED/i.test(t)) return true;
+    return false;
+  };
+  const anyDirect = list.some(direct);
+  const echo = (e: RuntimeError): boolean => anyDirect
+    && /Failed to load resource: the server responded with a status of 50[234]\b/i.test(String(e?.text ?? ''));
+  const serverDown: RuntimeError[] = [];
+  const app: RuntimeError[] = [];
+  for (const e of list) (direct(e) || echo(e) ? serverDown : app).push(e);
+  return { serverDown, app };
+}

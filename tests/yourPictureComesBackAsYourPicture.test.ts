@@ -3,9 +3,8 @@
  * whole change: somebody uploads their photograph, asks for one thing to change, and must get THEIR
  * photograph back with that one thing changed.
  *
- * Five asks landed together and they are one feature: image→image on BOTH tiers (3), free chat's
- * image+text→image done properly (4), and a crop/resize control with +/0/− on both tiers (5), on
- * top of the Pro size fix and the free-tier notice (1, 2).
+ * Several asks landed together and they are one feature: image→image (3), free chat's
+ * image+text→image done properly (4), and a crop/resize control with +/0/− (5).
  *
  * ⚠️ SEVERAL OF THESE ARE SOURCE-LEVEL, and deliberately: `tsc` and `vitest` cannot see that an
  * art-direction layer is being applied to an edit, that a text-to-image rung is allowed to answer an
@@ -16,8 +15,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  EDIT_STRENGTH, MAX_EDIT_STRENGTH, PRESERVE_DIRECTIVE, REIMAGINE_DIRECTIVE,
-  buildEditInstruction, editIntentFor, editStrengthFor, looksLikeImageEdit,
+  PRESERVE_DIRECTIVE, REIMAGINE_DIRECTIVE,
+  buildEditInstruction, editIntentFor, looksLikeImageEdit,
 } from '../src/lib/imageEdit';
 import {
   IDENTITY_VIEW, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, clampView, coverScale, dragToFrame, drawRect,
@@ -35,7 +34,6 @@ const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*
 const ROUTE = 'src/server/routes/imageGen.ts';
 const CHAT = 'src/server/routes/chat.ts';
 const FREE = 'src/components/ide/AIImageGenerator.tsx';
-const PRO = 'src/components/ide/ImageStudioPro.tsx';
 
 /**
  * Free chat's edit branch, sliced out of the file.
@@ -56,33 +54,6 @@ function editBranch(body: string): string {
 // A 1×1 PNG — a real data URL, so `parseDataUrl` is exercised rather than mocked.
 const PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-
-describe('🔴 an edit keeps the picture — the strength rule', () => {
-  it('a DIRECTED edit moves less than a wordless re-imagining', () => {
-    // The inversion this fixes: the paid adapter shipped directed=0.85 / wordless=0.65, reasoning
-    // that words "need room to follow them". Words say WHAT to change, never HOW MUCH.
-    expect(EDIT_STRENGTH.directed).toBeLessThan(EDIT_STRENGTH.reimagine);
-    expect(editStrengthFor('directed')).toBe(EDIT_STRENGTH.directed);
-    expect(editStrengthFor('reimagine')).toBe(EDIT_STRENGTH.reimagine);
-  });
-
-  it('an explicit value is honoured inside the range and capped above it', () => {
-    expect(editStrengthFor('directed', 0.5)).toBe(0.5);
-    expect(editStrengthFor('directed', '0.5')).toBe(0.5);
-    expect(editStrengthFor('directed', 1)).toBe(MAX_EDIT_STRENGTH);
-  });
-
-  it('junk is junk, not "the most destructive edit you can make"', () => {
-    for (const bad of [9, -1, 0, Number.NaN, 'x', '', null, undefined, {}]) {
-      expect(editStrengthFor('directed', bad as unknown)).toBe(EDIT_STRENGTH.directed);
-    }
-  });
-
-  it('the cap can never reach 1 — the reference must always still matter', () => {
-    expect(MAX_EDIT_STRENGTH).toBeLessThan(1);
-    expect(EDIT_STRENGTH.reimagine).toBeLessThanOrEqual(MAX_EDIT_STRENGTH);
-  });
-});
 
 describe('🔒 what the model is told', () => {
   it('a directed edit carries the user’s words AND the promise about everything else', () => {
@@ -162,7 +133,7 @@ describe('🔒 the free route treats an edit as an edit', () => {
   it('the request schema DECLARES the picture, or vobject would silently drop it', () => {
     // The same trap the custom size hit: a key the schema does not declare vanishes between the
     // client and the generator, and the attach button becomes a no-op with nothing failing.
-    expect(body.split('initImage: vstring(').length - 1).toBeGreaterThanOrEqual(2);
+    expect(body.split('initImage: vstring(').length - 1).toBeGreaterThanOrEqual(1);
   });
 
   it('🔴 the art-direction layer never reaches an edit', () => {
@@ -257,7 +228,7 @@ describe('🔒 one edit implementation, not two', () => {
   });
 
   it('the preservation brief has exactly one home', () => {
-    for (const f of [ROUTE, CHAT, 'src/server/lib/imageProGen.ts', 'src/server/lib/imageEditRun.ts']) {
+    for (const f of [ROUTE, CHAT, 'src/server/lib/imageEditRun.ts']) {
       expect(code(read(f)), f).not.toContain('This is an edit of the supplied photograph');
     }
   });
@@ -335,20 +306,13 @@ describe('🔒 the crop control exists on BOTH tiers, and so does the reference 
     expect(body).toContain('if (reference) return prompt.trim();');
   });
 
-  it('the paid studio can adjust its reference too', () => {
-    const body = code(read(PRO));
-    expect(body).toContain('<ImageCropEditor');
-    expect(body).toContain('setCropping(');
-  });
-
-  it('both tiers use ONE crop component', () => {
+  it('the attach control uses the shared crop component', () => {
     expect(code(read('src/components/ide/ReferenceImagePicker.tsx'))).toContain('<ImageCropEditor');
-    expect(code(read(PRO))).toContain("from './ImageCropEditor'");
   });
 
   it('the crop sheet portals to the body, like every other sheet on these screens', () => {
     // A `backdrop-filter` anywhere above a `position: fixed` overlay makes that ancestor its
-    // containing block — which is what trapped the Pro size selector inside a 100px footer.
+    // containing block — which is what once trapped a size selector inside a 100px footer.
     expect(code(read('src/components/ide/ImageCropEditor.tsx'))).toContain('createPortal(');
   });
 
@@ -360,7 +324,7 @@ describe('🔒 the crop control exists on BOTH tiers, and so does the reference 
   });
 });
 
-describe('🔒 one size table, read by the server and by both pickers', () => {
+describe('🔒 one size table, read by the server and by the picker', () => {
   it('the server’s export IS the shared table', () => {
     expect(IMAGE_SIZE_PIXELS).toBe(PRESET_PIXELS);
   });
@@ -371,9 +335,5 @@ describe('🔒 one size table, read by the server and by both pickers', () => {
     }
     expect(pixelsForSize('nonsense')).toEqual(PRESET_PIXELS.square);
     expect(pixelsForSize(CUSTOM_SIZE_ID, 768, 1280)).toEqual({ w: 768, h: 1280 });
-  });
-
-  it('the paid studio sizes its crop frame from that resolver, not from a third copy', () => {
-    expect(code(read(PRO))).toContain('pixelsForSize(size, customW, customH)');
   });
 });

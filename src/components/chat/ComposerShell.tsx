@@ -2,10 +2,10 @@
 // inputbox ko navbharatai free ke jaisa karo — sabhi professionals navbharatai free jaise hi lagne
 // chahiye").
 //
-// Four surfaces open from the FREE mode picker besides the free chat itself — the professionals
-// (`ProfessionalChat`), Doctor AI (`SDAChat`), the image generator and Image Studio Pro — and each had
-// hand-built its own composer: a square `rounded-xl` input with the paperclip OUTSIDE it on the left,
-// a violet pill, an amber pill. Four copies of one idea is the drifted-copy class this repo keeps
+// Three surfaces open from the FREE mode picker besides the free chat itself — the professionals
+// (`ProfessionalChat`), Doctor AI (`SDAChat`) and the image generator — and each had hand-built its
+// own composer: a square `rounded-xl` input with the paperclip OUTSIDE it on the left, a violet pill.
+// Several copies of one idea is the drifted-copy class this repo keeps
 // paying for, so the fix is not four restyles but ONE shell they all render:
 //
 //     [ left controls, e.g. Mode ▾ ]  [ message box ……………… 📎 🎤 🔊 ➤ ]

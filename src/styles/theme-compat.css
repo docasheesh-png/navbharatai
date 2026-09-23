@@ -282,14 +282,6 @@ html[data-theme] .ring-white\/40 { --tw-ring-color: color-mix(in srgb, var(--tex
 html[data-theme] .via-white { --tw-gradient-via: var(--text-primary); }
 html[data-theme] .to-white\/60 { --tw-gradient-to: color-mix(in srgb, var(--text-primary) 60%, transparent); }
 
-/* ── DISABLED states of the mapped neutrals (added 2026-09-18, Pro image studio) ────────────────
-   Same class of gap the hover block above documents, one variant over: `disabled:bg-white/10` is a
-   DIFFERENT class from `bg-white/10`, so a disabled control escaped the remap entirely and rendered
-   white-on-white on a light theme — which on a SEND button means the user cannot see that the
-   button is disabled, only that it has vanished. */
-html[data-theme] .disabled\:bg-white\/10:disabled { background-color: color-mix(in srgb, var(--text-primary) 10%, transparent); }
-html[data-theme] .disabled\:text-white\/25:disabled { color: color-mix(in srgb, var(--text-primary) 25%, transparent); }
-
 /* ── BRAND TEXT ON A SURFACE (admin 2026-09-13: "yeh button dikh hi nahi rahe hai") ─────────────
    THE BUG, and why this file caused it. The header above says brand colours are "deliberately NOT
    remapped", and for a white label on a solid indigo button that is exactly right. But Tailwind's

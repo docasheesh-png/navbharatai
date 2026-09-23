@@ -238,15 +238,12 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
     expect(pick).not.toContain('endProfessionalChat(');
   });
 
-  it('the image row opens Other Tools\' OWN view — free and paid together, not a fork', () => {
+  it('the image row opens Other Tools\' OWN view — not a fork', () => {
     expect(app).toContain('if (id === IMAGE_MODE_ID) {');
     expect(app).toContain('toggleTab(IMAGE_MODE_ID as ViewType);');
     const panels = readFileSync(join(__dirname, '..', 'panels', 'ViewPanels.tsx'), 'utf8');
     expect(panels).toContain("activeView === 'imagegen'");
     expect(panels).toContain('<AIImageGenerator');
-    // The tier toggle lives inside that component, so both tiers ride along by construction.
-    const gen = readFileSync(join(__dirname, '..', 'ide', 'AIImageGenerator.tsx'), 'utf8');
-    expect(gen).toContain('ImageStudioPro');
   });
 
   it('🔴 Doctor AI RESUMES — it has no archive, so a new chat would destroy the case', () => {

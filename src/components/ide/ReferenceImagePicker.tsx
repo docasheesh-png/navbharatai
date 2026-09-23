@@ -1,10 +1,6 @@
-// "Use my own picture" — the attach + crop control both image generators share
-// (admin 2026-09-21: "free/paid dono image generator me image to image ka option bhi add karo, user
-// apni photo dal kar usme kuch badalwana chahe to woh badala ja sake").
-//
-// 🔑 ONE CONTROL, BOTH TIERS. The free generator and the paid studio are two screens with the same
-// job here, and a second copy of "attach, crop, show, remove" is how they would end up disagreeing
-// about what a picture may be — exactly what `ImageOptionSelect` was extracted to prevent.
+// "Use my own picture" — the image generator's attach + crop control (admin 2026-09-21: "image to
+// image ka option bhi add karo, user apni photo dal kar usme kuch badalwana chahe to woh badala ja
+// sake").
 //
 // 🔒 EVERY ATTACHED PICTURE GOES THROUGH THE CROP EDITOR, and that is a safety property as much as a
 // feature: what comes out is a PNG at the request's own pixel size, so a 12 MP phone photo can never
@@ -34,9 +30,8 @@ interface Props {
    * Where the composer's OWN attach button reaches in (admin 2026-09-21: "change my own picture wala
    * button, sirf attach button bana kar, input box ke andar karo"). This component fills the ref with
    * "open the file chooser"; the button that calls it lives inside the input pill, beside the words —
-   * the shape every other composer in the app has, and the Pro studio has had since it shipped. The
-   * chooser, the size rule and the crop editor stay HERE, so both screens keep one rule for what a
-   * picture may be; only the button moved.
+   * the shape every other composer in the app has. The chooser, the size rule and the crop editor
+   * stay HERE, so there is one rule for what a picture may be; only the button moved.
    */
   openRef: MutableRefObject<(() => void) | null>;
 }

@@ -114,9 +114,8 @@ export const FREE_MODE_ID = 'free';
 /**
  * The image studio's OWN view id, not a new one.
  *
- * Other Tools already opens `imagegen`, which renders `AIImageGenerator` — the component that carries
- * the Free/Pro toggle. Reusing the id is what makes the admin's "same to same" literal: this row is the
- * same surface reached by a second door, with the same tiers, the same price and the same billing. A
+ * Other Tools already opens `imagegen`, which renders `AIImageGenerator`. Reusing the id is what
+ * makes the admin's "same to same" literal: this row is the same surface reached by a second door. A
  * separate id would have been a second copy to keep in sync.
  */
 export const IMAGE_MODE_ID = 'imagegen';

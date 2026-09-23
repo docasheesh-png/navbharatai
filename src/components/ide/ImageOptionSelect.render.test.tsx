@@ -14,14 +14,13 @@ import { ImageOptionSelect, currentOption, type ImageOption } from './ImageOptio
  * WHAT WAS WRONG. The free image generator drew all four option groups in full — eight image types,
  * seven styles, four sizes, six colour dots — above the prompt box, in a two-column desktop layout
  * that stacked on a phone into one long form with the Generate button below about twenty-five
- * controls. The one component that serves BOTH the Mode surface and Other Tools' image generator, so
- * both screens had it.
+ * controls. The one component serves BOTH the Mode surface and Other Tools' image generator, so
+ * both entry points had it.
  *
  * ⚠️ WHY SO MUCH OF THIS IS ASSERTED FROM SOURCE. The requirements here are LAYOUT ones — what sits
  * above what — and `renderToStaticMarkup` produces no layout at all. Worse, `AIImageGenerator.tsx`
  * pulls in Firebase and Capacitor, so it cannot even be imported in a node test. Source order IS
- * visual order in a column flexbox, and that is the thing that must not drift back. The same
- * reasoning `ImageStudioPro.render.test.tsx` already records for the paid studio.
+ * visual order in a column flexbox, and that is the thing that must not drift back.
  *
  * ⚠️ AND WHY THE REGEXES CARRY BOUNDARIES. A bare `toContain('<ImageOptionSelect')` still passes when
  * the element is renamed `<ImageOptionSelectOld` — this repo has now paid for that weak-assertion
@@ -30,7 +29,6 @@ import { ImageOptionSelect, currentOption, type ImageOption } from './ImageOptio
 
 const DIR = __dirname;
 const GEN = readFileSync(join(DIR, 'AIImageGenerator.tsx'), 'utf8');
-const PRO = readFileSync(join(DIR, 'ImageStudioPro.tsx'), 'utf8');
 const SEL = readFileSync(join(DIR, 'ImageOptionSelect.tsx'), 'utf8');
 /** Comments are prose. A note that QUOTES an old class name must not make an assertion pass or fail. */
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
@@ -131,18 +129,16 @@ describe('🔒 the sheet uses the SHARED geometry, never a hand-written viewport
   });
 });
 
-describe('🔒 ONE selector, used by both screens — no second copy of the sheet', () => {
-  it('neither image screen declares an overlay of its own', () => {
-    // Four hand-rolled sheets is four chances for Escape, the scrim, the tick or the tab-bar
-    // reservation to be right in three places and wrong in the fourth. This repo has paid for the
-    // drifted-copy class four separate times already.
+describe('🔒 ONE selector — no second copy of the sheet', () => {
+  it('the image screen declares no overlay of its own', () => {
+    // Hand-rolled sheets are chances for Escape, the scrim, the tick or the tab-bar reservation to be
+    // right in one place and wrong in another. This repo has paid for the drifted-copy class four
+    // separate times already.
     expect(code(GEN)).not.toContain('nb-sheet-overlay');
-    expect(code(PRO)).not.toContain('nb-sheet-overlay');
   });
 
-  it('both screens mount the shared component', () => {
+  it('the screen mounts the shared component', () => {
     expect(code(GEN)).toMatch(/<ImageOptionSelect[\s/>]/);
-    expect(code(PRO)).toMatch(/<ImageOptionSelect[\s/>]/);
   });
 });
 
@@ -274,13 +270,12 @@ describe('🔒 each image in the thread carries its OWN actions', () => {
 });
 
 describe('🔒 the promises this screen already made are unchanged', () => {
-  it('the free tier still advertises no price', () => {
-    const free = code(GEN).split("effectiveTier === 'pro'")[0];
-    expect(free).not.toMatch(/₹/);
+  it('the generator advertises no price', () => {
+    expect(code(GEN)).not.toMatch(/₹/);
   });
 
-  it('neither screen names a vendor or a model', () => {
-    for (const [name, src] of [['AIImageGenerator', GEN], ['ImageStudioPro', PRO], ['ImageOptionSelect', SEL]] as const) {
+  it('no screen names a vendor or a model', () => {
+    for (const [name, src] of [['AIImageGenerator', GEN], ['ImageOptionSelect', SEL]] as const) {
       const lower = code(src).toLowerCase();
       for (const bad of ['flux', 'bfl', 'black forest', 'fal.ai', 'replicate', 'pollinations', 'openai', 'dall', 'midjourney', 'stability', 'wavespeed']) {
         expect(lower, `${name} leaked "${bad}"`).not.toContain(bad);
@@ -288,8 +283,8 @@ describe('🔒 the promises this screen already made are unchanged', () => {
     }
   });
 
-  it('no Devanagari reaches any of the three', () => {
-    for (const [name, src] of [['AIImageGenerator', GEN], ['ImageStudioPro', PRO], ['ImageOptionSelect', SEL]] as const) {
+  it('no Devanagari reaches either of them', () => {
+    for (const [name, src] of [['AIImageGenerator', GEN], ['ImageOptionSelect', SEL]] as const) {
       expect(code(src), `${name} contains Devanagari`).not.toMatch(/[ऀ-ॿ]/);
     }
   });
@@ -301,7 +296,7 @@ describe('🔒 the promises this screen already made are unchanged', () => {
 
   it('…and the sources this file reads are really there', () => {
     // Without this, a bad path would make every assertion above vacuously pass on an empty string.
-    for (const [name, src] of [['AIImageGenerator', GEN], ['ImageStudioPro', PRO], ['ImageOptionSelect', SEL]] as const) {
+    for (const [name, src] of [['AIImageGenerator', GEN], ['ImageOptionSelect', SEL]] as const) {
       expect(src.length, `${name} read empty`).toBeGreaterThan(2000);
     }
   });

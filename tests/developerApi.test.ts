@@ -52,12 +52,12 @@ const VENDOR = /\b(GLM|Z\.ai|Kimi|Moonshot|Claude|Anthropic|Gemini|Vertex|Grok|x
 
 describe('🔴 every scope a user can tick opens a real endpoint', () => {
   it('every scope exists, is described in plain words, and each specific one names its route', () => {
-    // ⚠️ GREW 2026-09-22 (admin: add full access, professionals, an image generator). `all` is FIRST
+    // ⚠️ GREW 2026-09-22 (admin: add full access and professionals). `all` is FIRST
     // and is the only scope with no single route of its own — it is every route — so `SCOPE_ROUTES`
     // is keyed by the SPECIFIC scopes and `all` is proven a different way, two cases below. The
     // original guarantee is unchanged: no scope on this screen may be a label.
     expect([...API_SCOPES]).toEqual([
-      'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals', 'ai:images',
+      'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals',
     ]);
     expect(API_SCOPES[0]).toBe(FULL_ACCESS_SCOPE);
     expect([...SPECIFIC_API_SCOPES]).toEqual(API_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE));
@@ -76,7 +76,7 @@ describe('🔴 every scope a user can tick opens a real endpoint', () => {
     }
     // …and it is the ONLY scope that does. A narrow scope opens its own door and nothing else.
     expect(hasScope(['read:profile'], 'ai:chat')).toBe(false);
-    expect(hasScope(['ai:chat'], 'ai:images')).toBe(false);
+    expect(hasScope(['ai:chat'], 'ai:professionals')).toBe(false);
     expect(hasScope([], 'read:profile')).toBe(false);
     expect(hasScope(undefined, 'read:profile')).toBe(false);
   });

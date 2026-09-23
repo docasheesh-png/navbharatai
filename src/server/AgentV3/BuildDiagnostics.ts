@@ -56,6 +56,9 @@ const PROCESS_ONLY_CODES = new Set([
   // How long OUR OWN fast lane spent in each of its phases is a fact about this engine's routing,
   // never a defect in the user's app (autopsy 21b431e1).
   'FAST_LANE_PHASES',
+  // …and the decision NOT to start that lane on a rung that always reasons (fastLaneRung.ts,
+  // autopsy ac41a924): a fact about OUR routing, never about the user's app.
+  'FAST_LANE_SKIPPED_REASONING_RUNG',
   // …and its sibling: what OUR calls that returned nothing cost in wall clock (providerWaste.ts).
   'PROVIDER_TIME_WASTED',
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',

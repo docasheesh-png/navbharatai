@@ -85,7 +85,10 @@ describe('WIRING — measured from the real call, counted from the real manifest
   it('the projection uses the PLAN call\'s own measured duration', () => {
     // A configured cap would be a guess about the provider; the elapsed time of a call that really ran
     // is a fact about it.
-    expect(src).toContain('const planCallMs = Date.now() - laneStartedAt;');
+    // Re-aimed (autopsy 0d297b25): the measurement is now taken in a `finally`, so a plan call that
+    // FAILS still records its minutes as plan — the value is still the real call's elapsed time.
+    expect(src).toContain('clock.planMs = Date.now() - laneStartedAt;');
+    expect(src).toContain('const planCallMs = clock.planMs;');
     expect(src).toContain('preambleCallMs: planCallMs');
   });
 

@@ -25,7 +25,7 @@
 // PURE. The runner script is a STRING built here and executed by the caller in the sandbox's pre-baked
 // browser — no I/O, no clock, no model call in this module.
 
-import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote } from './sandboxBrowserScript';
+import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -550,7 +550,7 @@ ${fills}
   }).join('\n');
 
   return `cat > /tmp/nbai-journey.mjs <<'NBAI_EOF'
-import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js';
+${playwrightImport(TOOLS_DIR)}
 const base = ${JSON.stringify(base)};
 const marker = ${JSON.stringify(marker)};
 const journeys = [

@@ -1,4 +1,5 @@
 import type { AgentEventStream } from './AgentEventStream';
+import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from './ClaudeClient';
 import type { ToolDispatcher } from './ToolDispatcher';
@@ -890,6 +891,11 @@ export class AgentRunner {
                     ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
                     : '';
                   summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
+                } else if (readiness.blockers.some(isStarterBlocker)) {
+                  // Nothing was built — "a couple of things still need fixing" would invent a small fix
+                  // list for an app that does not exist, and discard the model's own finding of WHY
+                  // (autopsy 0d297b25: it had correctly found the project was never in the workspace).
+                  summary = starterSummary(turn.text);
                 } else {
                   summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
                 }

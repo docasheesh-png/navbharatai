@@ -1,7 +1,6 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef } from 'react';
-import { ModeButton } from '../chat/ModeButton';
-import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
@@ -29,6 +28,8 @@ interface Props {
   onImageGenerated?: (imageUrl: string, prompt: string) => void;
   /** Open the ONE mode picker (admin 2026-09-21); undefined on a phone, where the bottom bar has it. */
   onOpenModePicker?: (() => void) | undefined;
+  /** Opens chat history from the composer's left column. Absent ⇒ no History button (the phone's bottom bar has it). */
+  onOpenHistory?: (() => void) | undefined;
 }
 
 const STYLES = [
@@ -152,7 +153,7 @@ function readOptionsOpen(): boolean {
   }
 }
 
-export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) {
+export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHistory }: Props) {
   const [optionsOpen, setOptionsOpen] = useState<boolean>(readOptionsOpen);
   useEffect(() => {
     try { localStorage.setItem(OPTIONS_KEY, optionsOpen ? 'open' : 'closed'); } catch { /* a private window; the fold simply is not remembered */ }
@@ -980,7 +981,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 Mode outside on the left; attach, the star and Generate inside on the right, where the
                 free chat keeps its controls. The look is the one shared shell — see ComposerShell. */}
             <ComposerShell
-              left={<ModeButton onOpen={onOpenModePicker} />}
+              onOpenHistory={onOpenHistory}
+              onOpenMode={onOpenModePicker}
               controls={(
                 <>
                   {/* ATTACH (admin 2026-09-21: inside the box). Opens the picker's chooser; the crop
@@ -1010,6 +1012,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   >
                     {enhancing ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
                   </button>
+                </>
+              )}
+              send={(
+                <>
                   <button
                     type="button"
                     onClick={() => void handleGenerate()}
@@ -1039,7 +1045,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 }}
                 placeholder={reference ? 'What should change? e.g. make the background blue' : 'Describe your image...'}
                 className={COMPOSER_TEXTAREA_CLASS}
-                style={{ paddingRight: composerTextPadding(3) }}
               />
             </ComposerShell>
             {promptLimit.near && (

@@ -46,6 +46,11 @@ export interface NBIChatPanelProps {
    * the mobile bottom bar, which already carries Mode, is on screen. See AIChat's prop of the same name.
    */
   onOpenModePicker?: () => void;
+  /**
+   * Open chat history from the composer (desktop). Absent ⇒ no button — App.tsx omits it while the
+   * mobile bottom bar, which already carries History, is on screen. See HistoryButton.tsx.
+   */
+  onOpenHistory?: () => void;
 }
 
 export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
@@ -79,6 +84,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   setMessages,
   onNewChat,
   onOpenModePicker,
+  onOpenHistory,
 }) => {
   const currentSession = sessions.find(s => s.id === currentSessionId);
 
@@ -148,6 +154,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           mode={mode}
           onModeChange={setMode}
           onOpenModePicker={onOpenModePicker}
+          onOpenHistory={onOpenHistory}
           activeAgent={activeAgent}
           pendingGHEdit={pendingGHEdit}
           onConfirmPush={onConfirmPush}

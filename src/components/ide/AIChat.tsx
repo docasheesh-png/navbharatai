@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { ImageLightbox } from '../chat/ImageLightbox';
 import { ModeButton } from '../chat/ModeButton';
+import { HistoryButton } from '../chat/HistoryButton';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
@@ -290,6 +291,12 @@ interface AIChatProps {
    * only asks for it to open, so desktop and mobile can never hold two different "current modes".
    */
   onOpenModePicker?: () => void;
+  /**
+   * Present ⇒ a "History" button renders at the LEFT of the Mode button (admin 2026-09-23: "mode
+   * selecter se pahle (left me) … only in desktop"). Absent ⇒ nothing renders; App.tsx passes it only
+   * when the bottom bar, which already carries History, is not on screen. See chat/HistoryButton.tsx.
+   */
+  onOpenHistory?: () => void;
   pendingGHEdit?: any;
   onConfirmPush?: () => void;
   isPushing?: boolean;
@@ -345,6 +352,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   mode = 'planning',
   onModeChange,
   onOpenModePicker,
+  onOpenHistory,
   pendingGHEdit,
   onConfirmPush,
   isPushing,
@@ -383,6 +391,9 @@ export const AIChat: React.FC<AIChatProps> = ({
    * both render.
    */
   const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');
+  /** Same carve-out as Mode: the composer's left slot belongs to the free chat's controls only. */
+  const showFreeHistoryButton = Boolean(onOpenHistory) && !(onModeChange && activeAgent === 'navbharatai-pro');
+  const showFreeLeftControls = showFreeModeButton || showFreeHistoryButton;
   const { buildSteps } = useBuild();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
@@ -1617,7 +1628,14 @@ export const AIChat: React.FC<AIChatProps> = ({
 
       <div
         className="px-3 pt-2 border-t border-line bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
-        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
+        // `--nb-safe-below`, not the raw inset (admin 2026-09-23: "footer ka border input box ke saath
+        // chipka do"). When the bottom bar is on screen it has ALREADY reserved the home indicator, so
+        // adding `env(safe-area-inset-bottom)` again left one whole inset (~34px on an iPhone) of empty
+        // strip between the message box and the bar. The variable is 0 while the bar is shown and the
+        // device inset while it is not (lib/mobileNav.ts) — the same fix NavBharatAI Pro's composer got
+        // on 2026-09-14; this was the sibling it did not reach. The 8px floor is the panel's own
+        // breathing room, matching its `pt-2` above.
+        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, var(--nb-safe-below, env(safe-area-inset-bottom, 0px)))' }}
       >
         <div className="max-w-4xl mx-auto space-y-1.5">
             {uploadError && (
@@ -1671,12 +1689,20 @@ export const AIChat: React.FC<AIChatProps> = ({
                 hidden (mobile, where the bottom bar carries Mode) this wrapper is `contents`, i.e. it has
                 no box of its own and the layout is byte-for-byte what it was. It holds no mode; it asks
                 App.tsx to open the ONE picker sheet the bottom bar opens. */}
-            <div className={showFreeModeButton ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}>
+            <div className={showFreeLeftControls ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}>
             {/* THE SHARED BUTTON (2026-09-21). This markup used to live here inline, and when the
                 admin asked for the same control on every other surface it would have become five
                 copies — the drifted-copy class this repo has paid for repeatedly. `showFreeModeButton`
                 still decides WHETHER, because only this surface has the Pro-mode carve-out below. */}
-            {showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}
+            {/* [ History ] [ Mode ▾ ] share the grid's first cell, History on the LEFT (admin 2026-09-23).
+                One wrapper so the message box stays the grid's second cell — its width and position are
+                exactly what they were with Mode alone. */}
+            {showFreeLeftControls && (
+              <div className="flex items-end gap-2">
+                {showFreeHistoryButton && <HistoryButton onOpen={onOpenHistory} />}
+                {showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}
+              </div>
+            )}
             <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
                   {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}

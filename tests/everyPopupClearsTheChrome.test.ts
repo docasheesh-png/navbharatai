@@ -60,8 +60,8 @@
  * it would be worse than this one.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { scanDialogs, BASELINE } from '../scripts/sheetContractBaseline.mjs';
 
 const root = resolve(__dirname, '..');
@@ -264,5 +264,109 @@ describe('the five that cropped with a SHORT dialog are fixed', () => {
     // and the replacements are really there
     expect(classesIn('src/components/agentv3/ReportNoteDialog.tsx')).toContain('nb-sheet-partial');
     expect(classesIn('src/components/admin/BuiltAppsPanel.tsx')).toContain('nb-sheet');
+  });
+});
+
+describe('slice 4 — toasts and floating panels: the same chrome, one element smaller', () => {
+  // Every dialog above is a `fixed inset-0` overlay, so the scan could only ever see those. A toast
+  // anchored to one edge has the identical problem and was invisible to it: measured before this
+  // slice, three "Copied" toasts sat 32px (plain phone) to 66px (notched) BEHIND the tab bar, the
+  // admin's save toast sat 35px in the notch, the history-open error banner 10px under the bar, the
+  // global toast covered 10px of the bar on a notched phone, and the bot builder's help button and
+  // panel (z-200) sat ON the bar, covering its right-hand button on every phone.
+  //
+  // One rule fixes all of them: `.nb-float-bottom` / `.nb-float-top` ADD the chrome that is really on
+  // screen to each element's own gap (`--nb-float-gap`), so a desktop — where every chrome variable
+  // is 0 — is pixel-identical to before (measured), and only a phone moves.
+  const css = readFileSync(resolve(root, 'src/index.css'), 'utf8');
+  const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/[^\n]*$/gm, '');
+
+  /** Every className on a `fixed` element, from every client component (server code has no DOM). */
+  const fixedClassLists: { file: string; cls: string }[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== 'server') walk(p); continue; }
+      if (!p.endsWith('.tsx') || p.includes('.test.')) continue;
+      const src = stripComments(readFileSync(p, 'utf8'));
+      for (const m of src.matchAll(/className=(?:\{`|"|\{"|\{cn\(\s*")([^"`]*)/g)) {
+        if (/(^|\s)fixed(\s|$)/.test(m[1])) fixedClassLists.push({ file: relative(root, p), cls: m[1] });
+      }
+    }
+  };
+  walk(resolve(root, 'src'));
+
+  /** The side a list anchors to with a non-zero gap. `inset-0` / `bottom-0` / `top-0` are flush chrome
+   *  (the tab bar itself, headers, overlays) and belong to the dialog contract, not to this one. */
+  const anchors = (cls: string, side: 'top' | 'bottom') =>
+    new RegExp(`(^|\\s)(${side}-(?!0(\\s|$))[\\d\\[]|inset-y-)`).test(cls);
+
+  it('the rule exists, and it ADDS the chrome rather than replacing the gap', () => {
+    expect(css).toContain('bottom: calc(var(--nb-float-gap, 1.5rem) + max(var(--nb-safe-bottom), var(--nb-bottom-nav)));');
+    expect(css).toContain('top: calc(var(--nb-float-gap, 1.5rem) + var(--nb-safe-top));');
+  });
+
+  it('the scan sees fixed elements at all (a scan that found none would pass everything)', () => {
+    expect(fixedClassLists.length).toBeGreaterThan(40);
+    expect(fixedClassLists.filter((f) => f.cls.includes('nb-float-')).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('🔴 no element carries the rule AND a utility that silently cancels it', () => {
+    // Tailwind emits utilities after @layer components, so `bottom-6` — or a responsive `lg:bottom-6`
+    // — beside `nb-float-bottom` wins and the rule does nothing, with no error anywhere. The same shape
+    // as `p-0` cancelling the sheet contract on two sheets in slice 1.
+    const cancels = (cls: string, side: 'top' | 'bottom') =>
+      new RegExp(`(^|\\s)([a-z0-9-]+:)?(${side}-|inset-y-|inset-(\\d|\\[))`).test(cls);
+    const bad = fixedClassLists.filter(
+      (f) => (f.cls.includes('nb-float-bottom') && cancels(f.cls, 'bottom')) ||
+             (f.cls.includes('nb-float-top') && cancels(f.cls, 'top')),
+    );
+    expect(bad.map((b) => `${b.file}: ${b.cls.slice(0, 80)}`)).toEqual([]);
+  });
+
+  it('every fixed element floated off an edge uses the rule, or is on the measured list', () => {
+    // A new toast written as `fixed bottom-6` fails here instead of reaching a phone behind the bar.
+    const MEASURED_CLEAN: Record<string, string> = {
+      // Ctrl+K, z-1001 over everything; its list is capped at 40dvh, so at 390px tall it ends ~110px
+      // above the bar. Measured, not assumed — and a keyboard shortcut is not a phone surface anyway.
+      'src/components/ide/CommandPalette.tsx': 'top-20',
+    };
+    const bare = fixedClassLists.filter(
+      (f) => (anchors(f.cls, 'bottom') && !f.cls.includes('nb-float-bottom')) ||
+             (anchors(f.cls, 'top') && !f.cls.includes('nb-float-top')),
+    ).filter((f) => !(MEASURED_CLEAN[f.file] && f.cls.includes(MEASURED_CLEAN[f.file])));
+    expect(bare.map((b) => `${b.file}: ${b.cls.slice(0, 90)}`)).toEqual([]);
+  });
+
+  const sites = [
+    ['src/components/AdminDashboard.tsx', 'nb-float-top fixed right-6 z-[110]'],
+    ['src/components/admin/AdminCopyButton.tsx', 'nb-float-bottom fixed left-1/2'],
+    ['src/components/ide/ComponentLibrary.tsx', 'nb-float-bottom fixed left-1/2'],
+    ['src/components/ide/TeamCollaboration.tsx', 'nb-float-bottom fixed right-6'],
+    ['src/components/agentv3/AgentV3Panel.tsx', 'nb-float-bottom fixed inset-x-3 z-[70]'],
+    ['src/components/Toast.tsx', 'nb-float-bottom fixed right-4 z-[500]'],
+  ] as const;
+  for (const [file, needs] of sites) {
+    it(`${file.split('/').pop()} floats clear of the chrome`, () => {
+      expect(readFileSync(resolve(root, file), 'utf8')).toContain(needs);
+    });
+  }
+
+  it('the admin save toast paints OVER the header, not under it', () => {
+    // It is a toast at the top edge; the header (z-100) covered it at z-50 even on a phone with no
+    // notch. Above the header, below the tab bar (150) and every dialog.
+    const src = readFileSync(resolve(root, 'src/components/AdminDashboard.tsx'), 'utf8');
+    expect(src).not.toContain('fixed top-6 right-6 z-50');
+  });
+
+  it('the bot builder help keeps its 1rem gap and is lifted off the tab bar, button AND panel', () => {
+    const src = readFileSync(resolve(root, 'src/components/ide/BotBuildHelp.tsx'), 'utf8');
+    expect(src.match(/nb-float-bottom fixed right-4 z-\[200\]/g)?.length).toBe(2);
+    expect(src.match(/\['--nb-float-gap' as string\]: '1rem'/g)?.length).toBe(2);
+  });
+
+  it('the history error banner keeps its 5rem gap, so a desktop sees it exactly where it was', () => {
+    const src = readFileSync(resolve(root, 'src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
+    expect(src).toContain("style={{ ['--nb-float-gap' as string]: '5rem' }}");
   });
 });

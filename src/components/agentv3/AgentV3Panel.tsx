@@ -6287,7 +6287,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
 
       {/* LOUD open-failure toast — a history chat that fails to open must say WHY, never no-op. */}
       {openChatError && (
-        <div className="fixed inset-x-3 bottom-20 z-[70] sm:left-auto sm:right-4 sm:max-w-md rounded-xl border border-red-500/40 bg-red-950/95 text-danger text-xs leading-relaxed shadow-2xl p-3 pr-8">
+        <div
+          // nb-float-bottom keeps the old 5rem gap and ADDS the tab bar + home indicator, so a
+          // desktop is unchanged and a notched phone no longer tucks the banner under the bar.
+          className="nb-float-bottom fixed inset-x-3 z-[70] sm:left-auto sm:right-4 sm:max-w-md rounded-xl border border-red-500/40 bg-red-950/95 text-danger text-xs leading-relaxed shadow-2xl p-3 pr-8"
+          style={{ ['--nb-float-gap' as string]: '5rem' }}
+        >
           {openChatError}
           <button
             type="button"

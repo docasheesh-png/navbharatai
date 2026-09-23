@@ -876,7 +876,7 @@ export const ComponentLibrary: React.FC<ComponentLibraryProps> = ({ onInsert, se
 
       {/* ── Copied Toast ── */}
       {copied && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full shadow-xl text-sm font-medium bg-emerald-600 text-on-accent">
+        <div className="nb-float-bottom fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full shadow-xl text-sm font-medium bg-emerald-600 text-on-accent">
           <Check size={14} /> Copied to clipboard!
         </div>
       )}

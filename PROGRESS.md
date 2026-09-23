@@ -80120,6 +80120,22 @@ its contract hit the 56 s cap; the bail was correct, the lane was doomed from th
   touches the two files PR #3270 is rewriting — a few one-line conflicts are expected for whichever
   of the two merges second (the `disabled=` lines and the note under the box).
 
+## 2026-09-23 — The free chat's empty screen no longer offers tools free does not have
+
+Admin (with a screenshot): *"navbharatai free me jab koi chat nahi hoti hai to yeh tiles dikhti hai!
+isko theek karo kyu ki yeh function free me hai hi nahi."*
+
+`AIChat` has exactly ONE caller — `NBIChatPanel`, the NavBharatAI FREE chat. Its empty state showed a
+"Ready to architect and build." heading, six IDE tiles (Explain this file, Find bugs, Improve
+performance, Security review, Write tests, Generate README — prompts about an open file the free chat
+never has; `isIde` was true for every non-Pro agent) and a **"Start Security Scan" button that did
+nothing**: it clicked `[title="Security Scan"]`, an element no screen renders (grep finds only the
+selector itself). Removed all three; the heading now reads "Ask me anything." Pro v5.0 keeps its own
+starter cards (`agentv3/starterTemplates.ts`), untouched.
+
+Locked in `tests/theFreeChatOffersOnlyWhatFreeCanDo.test.ts` (5 cases, 4 fail on the old code),
+including a repo-wide guard against any button that "clicks" another element found by its title, and a
+check that `AIChat` still has only the free chat as caller. Installed phones need a fresh `.aab`/`.ipa`.
 ## 2026-09-23 — One footer sheet at a time: Mode no longer sits over the footer
 
 Admin: *"navbharatai free ke andar footer ke Mode press karne ke baad History, AI, Settings kisi par click

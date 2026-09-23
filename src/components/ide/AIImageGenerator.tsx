@@ -23,6 +23,7 @@ import { AddCreditNotice } from '../common/AddCreditNotice';
 import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
+import { IMAGE_PROMPT_MAX, imagePromptLimit, imagePromptLimitNote } from '../../lib/imagePromptLimit';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -284,10 +285,14 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
     return `${imageType}${prompt.trim() ? ` \u2014 ${prompt.trim()}` : ''}${tint}`;
   };
 
+  // The server refuses a prompt over its limit, so a send that can only fail is not offered. The
+  // limit is counted on what is SENT — the type and tint wrapped around the words included.
+  const promptLimit = imagePromptLimit(prompt.trim(), buildEffectivePrompt());
+
   const handleGenerate = async () => {
     const effectivePrompt = buildEffectivePrompt();
     // A picture on its own IS a request ("re-render this"), so words are required only without one.
-    if ((!effectivePrompt.trim() && !reference) || isLoading) return;
+    if ((!effectivePrompt.trim() && !reference) || isLoading || promptLimit.over) return;
     // Captured ONCE, because the box is emptied on the next line and everything below that still
     // needs the words — the history row, the bubble, and the restore on failure.
     const typed = prompt.trim();
@@ -1123,7 +1128,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   <button
                     type="button"
                     onClick={() => void handleEnhance()}
-                    disabled={enhancing || !!reference || prompt.trim().length < 3}
+                    disabled={enhancing || !!reference || prompt.trim().length < 3 || prompt.trim().length > IMAGE_PROMPT_MAX}
                     aria-label="Improve my prompt"
                     title={reference
                       ? 'The star writes a brief for a NEW picture — it would restyle the one you attached'
@@ -1135,8 +1140,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                   <button
                     type="button"
                     onClick={() => void handleGenerate()}
-                    disabled={isLoading}
+                    disabled={isLoading || promptLimit.over}
                     aria-label="Generate image"
+                    title={promptLimit.over ? 'Too long to send — please shorten it' : undefined}
                     className={COMPOSER_SEND_CLASS}
                   >
                     {isLoading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
@@ -1163,6 +1169,11 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker }: Props) 
                 style={{ paddingRight: composerTextPadding(3) }}
               />
             </ComposerShell>
+            {promptLimit.near && (
+              <p className={`text-[11px] text-right px-3 ${promptLimit.over ? 'text-danger' : 'text-faint'}`} aria-live="polite">
+                {imagePromptLimitNote(promptLimit)}
+              </p>
+            )}
 
             {/* With a picture attached the words mean something different — say so where they are
                 typed. The "what the free tier is for" line moved UP into the empty state (admin

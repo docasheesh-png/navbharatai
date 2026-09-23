@@ -79994,6 +79994,24 @@ touched, and skips with reason `server-app`, shown on the admin card as "a Next.
 export". A Next app that DOES export still builds here. Test-locked in
 `tests/theAppIsBuiltHereGithubOnlyPackagesIt.test.ts`.
 
+## 2026-09-23 — "paid image generate nahi ho rahi": the validator said "Invalid request body"
+
+Admin screenshot: a long pasted Pro image brief was refused with **"Invalid request body"**. Root
+cause: `/api/image/pro/generate` (and the free route) cap `prompt` at 2,000 characters, and
+`validateBody` answered every refusal with that one fixed string — the limit and the real length
+sat in `issues`, which no screen reads, while every surface shows `error` verbatim.
+- **Fixed at the class, not the route:** `validate.ts` now derives `error` from the first
+  actionable issue (`humanizeIssue` / `bodyErrorMessage`) for all 37 `validateBody` routes and
+  `validateQuery`; a too-long string carries its real length (`… (got N)`), so the user reads
+  *"Your prompt is too long: 2,431 characters, and the limit is 2,000. Please shorten it and try
+  again — nothing was charged."* `issues` is unchanged for tooling. Test-locked and
+  reversion-proven in `tests/aTooLongPromptSaysHowLong.test.ts`.
+- **Limit deliberately NOT raised:** both image doors put the prompt into a URL, and the image
+  models' text encoders truncate long briefs anyway — a bigger cap would buy a longer URL, not a
+  better picture.
+- ⚠️ **OPEN, deferred on purpose:** a live character counter in the two image composers, so the
+  limit is met BEFORE sending. Both files are being rewritten by PR #3270 right now; touching them
+  would only produce a conflict. Do it after #3270 merges.
 ## 2026-09-23 — 📱 Legal links reloaded the whole mobile app ("crash jaisa feel ho raha")
 
 Admin: *"mobile app me navbharatai ke about us me jab terms and conditions etc par click karte hai to open
@@ -80093,3 +80111,11 @@ defaults BEFORE the preview proof so they are part of what gets verified; tests 
 (~600 s) is not in the report — no process log. **OPEN:** the fast lane on an always-reasoning rung
 (complex → `kimi-k2.7-code`) spent 40 s planning a 10-line list (3,027 output tokens for 799 chars) and
 its contract hit the 56 s cap; the bail was correct, the lane was doomed from the rung choice.
+- ✅ **Same day, the "OPEN" line above is CLOSED by the admin's own instruction** (*"2000+ wala text
+  se send button inactive kar do!!"*): `src/lib/imagePromptLimit.ts` puts the server's limit on both
+  image composers — the send button is off, Enter refuses too, and a counter appears from 90%
+  (`2,431 / 2,000 characters — too long to send. Please shorten it.`). The free generator counts
+  what it SENDS (type + tint wrapped around the words), not only what was typed. The number is
+  asserted equal to the route schemas' `max` (`tests/theSendButtonKnowsTheLimit.test.ts`). ⚠️ This
+  touches the two files PR #3270 is rewriting — a few one-line conflicts are expected for whichever
+  of the two merges second (the `disabled=` lines and the note under the box).

@@ -11,9 +11,9 @@
 //     [ 🕘 / ☰ ]  [ message box, full width           | ➤ ]
 //                 [                     📎  🎤  🔊    |   ]
 //
-// The box, its text and its control row are the free chat's own (`AIChat.tsx`, the composer the admin
-// pointed at). `tests/everyComposerLooksLikeTheFreeChat.test.ts` reads AIChat's classes back and fails
-// if these constants ever stop matching them, so the two cannot drift either.
+// The free chat (`AIChat.tsx`) renders this same shell, so "like the free chat" is true by
+// construction rather than by copying its classes. `tests/oneComposerEverywhere.test.ts` fails if any
+// of the five surfaces builds its own box again.
 //
 // It holds no state and sends nothing: each surface keeps its own textarea (handlers, placeholder,
 // auto-grow) and its own buttons, and only takes the LOOK from here.

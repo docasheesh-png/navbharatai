@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { ImageLightbox } from '../chat/ImageLightbox';
-import { ModeButton } from '../chat/ModeButton';
-import { HistoryButton } from '../chat/HistoryButton';
+import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
@@ -393,7 +392,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');
   /** Same carve-out as Mode: the composer's left slot belongs to the free chat's controls only. */
   const showFreeHistoryButton = Boolean(onOpenHistory) && !(onModeChange && activeAgent === 'navbharatai-pro');
-  const showFreeLeftControls = showFreeModeButton || showFreeHistoryButton;
   const { buildSteps } = useBuild();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
@@ -1683,29 +1681,99 @@ export const AIChat: React.FC<AIChatProps> = ({
               ) : null}
             />
 
-            {/* THE FREE CHAT'S MODE BUTTON, ON DESKTOP (admin 2026-09-20: "sirf desktop 'Mode' button add
-                karna hai … na inputbox, na search button, kuch nahi"). It sits OUTSIDE the message box, to
-                its left — [ Mode ▾ ] [ message box ] — and the box itself is untouched: when the button is
-                hidden (mobile, where the bottom bar carries Mode) this wrapper is `contents`, i.e. it has
-                no box of its own and the layout is byte-for-byte what it was. It holds no mode; it asks
-                App.tsx to open the ONE picker sheet the bottom bar opens. */}
-            <div className={showFreeLeftControls ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}>
-            {/* THE SHARED BUTTON (2026-09-21). This markup used to live here inline, and when the
-                admin asked for the same control on every other surface it would have become five
-                copies — the drifted-copy class this repo has paid for repeatedly. `showFreeModeButton`
-                still decides WHETHER, because only this surface has the Pro-mode carve-out below. */}
-            {/* [ History ] [ Mode ▾ ] share the grid's first cell, History on the LEFT (admin 2026-09-23).
-                One wrapper so the message box stays the grid's second cell — its width and position are
-                exactly what they were with Mode alone. */}
-            {showFreeLeftControls && (
-              <div className="flex items-end gap-2">
-                {showFreeHistoryButton && <HistoryButton onOpen={onOpenHistory} />}
-                {showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}
-              </div>
-            )}
-            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
-                  <div className="relative flex items-center">
-                  {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}
+            {/* THE ONE COMPOSER (admin 2026-09-23, with a sketch): [ 🕘 / ☰ ] beside a TWO-ROW box —
+                the text on top at full width, attach · mic · voice underneath, and Send as tall as the
+                box on its right. The same shell every AI in NavBharatAI FREE renders (ComposerShell), so
+                none of them can look different from this one again. History and Mode still show only
+                where the phone's bottom bar is absent, and never beside Pro's own mode dropdown. */}
+            <ComposerShell
+              onOpenHistory={showFreeHistoryButton ? onOpenHistory : undefined}
+              onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}
+              controls={(
+                <>
+                    {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
+                      <button
+                        type="button"
+                        onClick={() => setIsExpanded(true)}
+                        title="Expand"
+                        aria-label="Expand the message box"
+                        className="p-2.5 text-faint hover:text-ink transition-colors flex items-center justify-center"
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                    )}
+                    <AttachMenu
+                      onFiles={addPickedFiles}
+                      fileAccept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.js,.ts,.tsx,.jsx,.py,.css,.xml,.yaml,.yml,.go,.java,.php,.sql,.rs,.kt,.swift,.rb,.sh,.env,.toml,.ini"
+                      badge={attachments.length}
+                      title="Attach (photo, gallery, or file)"
+                      buttonClassName="p-2.5 text-faint hover:text-accent-text transition-colors"
+                    />
+                    {voiceSupported && (
+                      <button
+                        type="button"
+                        onClick={() => toggleVoice(input)}
+                        title={isListening ? 'Stop voice input' : 'Voice input'}
+                        aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                        className={`p-2.5 transition-colors ${isListening ? 'text-danger animate-pulse' : 'text-faint hover:text-info'}`}
+                      >
+                        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
+                    )}
+                    {/* TALK TO NAVBHARATAI BY VOICE (admin 2026-08-10: "sabhi me laga do"). Distinct
+                        from the dictation mic beside it, which only turns speech into text in this box:
+                        this opens a live spoken conversation. It is a PAID feature, so the button opens
+                        a consent card stating the per-second price in the user's own language before
+                        anything is charged, and it renders nothing at all unless voice is enabled on
+                        the server and the user is signed in. */}
+                    <ProfessionalVoiceButton
+                      title="Talk to NavBharatAI by voice"
+                      className="p-2.5 text-faint hover:text-success transition-colors flex items-center justify-center"
+                      icon={<Volume2 className="w-4 h-4" />}
+                      getHistory={() => messages
+                        .filter((m: any) => (m?.text || '').trim())
+                        .slice(-12)
+                        .map((m: any) => ({
+                          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+                          content: String(m.text || ''),
+                        }))}
+                    />
+                </>
+              )}
+              send={(
+                <>
+                    {/* UNSEND moved out of the composer (admin 2026-08-14): it now lives ON the last sent
+                        message bubble and appears only while the reply is still coming — see the message
+                        footer above. The composer keeps just Stop (while loading) and Send. */}
+                    {isLoading && onStop ? (
+                      // ONE-CLICK STOP (admin 2026-08-13: "galat search rukti nahi") — a running reply must
+                      // end the instant this is tapped, not after a confirm dialog the user has to dismiss.
+                      <button
+                        onClick={() => onStop?.()}
+                        title="Stop"
+                        className={COMPOSER_STOP_CLASS}
+                      >
+                        <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          // Tone, not vibration (admin 2026-08-09) — same feedback as every other tap.
+                          playTapTone();
+                          onSend(attachments);
+                          setAttachments([]);
+                          setEditingMsgId(null);
+                          dismissKeyboardOnMobile(textareaRef.current);
+                        }}
+                        disabled={(!input.trim() && attachments.length === 0) || isLoading}
+                        className={COMPOSER_SEND_CLASS}
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    )}
+                </>
+              )}
+            >
                   <textarea
                     ref={textareaRef}
                     value={input}
@@ -1756,8 +1824,12 @@ export const AIChat: React.FC<AIChatProps> = ({
                       // the paperclip. With all five present the expand button can still overlap long text,
                       // and that is the accepted edge: expand only appears once the text is long enough to
                       // have wrapped anyway.
-                      "w-full bg-transparent text-[var(--theme-text)] pr-44 py-2.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
-                      onModeChange && activeAgent === 'navbharatai-pro' ? "pl-32" : "pl-5"
+                      // The shared two-row box (ComposerShell): the text owns the WHOLE top row, so there is
+                      // no right-hand reserve for the controls any more — they have their own row below.
+                      // That reserve (a fixed ~176px) is what squeezed the box to a sliver on a phone
+                      // once History and Mode sat beside it (admin screenshot 2026-09-23).
+                      COMPOSER_TEXTAREA_CLASS,
+                      onModeChange && activeAgent === 'navbharatai-pro' && "pl-32"
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}
                   />
@@ -1771,110 +1843,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
                     </div>
                   )}
-                  {/* THE ONE CONTROL ROW (admin 2026-08-31: "send, mic aur attachment ke buttons
-                      unaligned hai").
- 
-                      Two real defects, both visible on a phone:
-
-                      1. THE ROW DID NOT FIT THE BOX. It is absolutely positioned at `bottom-2` inside a
-                         container that renders 46px tall, and its tallest child — the send button at
-                         p-3 + a 3.5 icon = 38px — left the row's top edge at 46-8-38 = ZERO. The filled
-                         red/indigo button therefore sat flush against the container's rounded border and
-                         read as broken out of it. Fixed at both ends: every control is now the SAME 36px
-                         box, and the textarea's min-height carries the row with a symmetric 6px gap.
-
-                      2. THE EXPAND BUTTON SAT ON TOP OF THE MIC. It was positioned separately at
-                         `right-20` (80px), a number that was correct when the row was narrower — the row
-                         now spans 8px to ~126px (three buttons) or ~166px (four), so 80px lands INSIDE
-                         it. That is the root cause worth naming: controls in this corner were placed by
-                         hand-tuned absolute offsets, so adding the voice button in 2026-08-10 silently
-                         invalidated a magic number nobody re-derived. It lives in this flex row now, and
-                         a sixth control cannot reintroduce the overlap.
-
-                      ⚠️ Keep every child of this row at 36px (p-2.5 with a w-4 h-4 icon). A control with
-                      different padding makes the row taller than the space reserved for it and brings
-                      defect 1 straight back. */}
-                  <div className="absolute right-2 bottom-1.5 flex gap-1 items-center">
-                    {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
-                      <button
-                        type="button"
-                        onClick={() => setIsExpanded(true)}
-                        title="Expand"
-                        aria-label="Expand the message box"
-                        className="p-2.5 text-faint hover:text-ink transition-colors flex items-center justify-center"
-                      >
-                        <Maximize2 className="w-4 h-4" />
-                      </button>
-                    )}
-                    <AttachMenu
-                      onFiles={addPickedFiles}
-                      fileAccept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.js,.ts,.tsx,.jsx,.py,.css,.xml,.yaml,.yml,.go,.java,.php,.sql,.rs,.kt,.swift,.rb,.sh,.env,.toml,.ini"
-                      badge={attachments.length}
-                      title="Attach (photo, gallery, or file)"
-                      buttonClassName="p-2.5 text-faint hover:text-accent-text transition-colors"
-                    />
-                    {voiceSupported && (
-                      <button
-                        type="button"
-                        onClick={() => toggleVoice(input)}
-                        title={isListening ? 'Stop voice input' : 'Voice input'}
-                        aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
-                        className={`p-2.5 transition-colors ${isListening ? 'text-danger animate-pulse' : 'text-faint hover:text-info'}`}
-                      >
-                        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                      </button>
-                    )}
-                    {/* TALK TO NAVBHARATAI BY VOICE (admin 2026-08-10: "sabhi me laga do"). Distinct
-                        from the dictation mic beside it, which only turns speech into text in this box:
-                        this opens a live spoken conversation. It is a PAID feature, so the button opens
-                        a consent card stating the per-second price in the user's own language before
-                        anything is charged, and it renders nothing at all unless voice is enabled on
-                        the server and the user is signed in. */}
-                    <ProfessionalVoiceButton
-                      title="Talk to NavBharatAI by voice"
-                      className="p-2.5 text-faint hover:text-success transition-colors flex items-center justify-center"
-                      icon={<Volume2 className="w-4 h-4" />}
-                      getHistory={() => messages
-                        .filter((m: any) => (m?.text || '').trim())
-                        .slice(-12)
-                        .map((m: any) => ({
-                          role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-                          content: String(m.text || ''),
-                        }))}
-                    />
-                    {/* UNSEND moved out of the composer (admin 2026-08-14): it now lives ON the last sent
-                        message bubble and appears only while the reply is still coming — see the message
-                        footer above. The composer keeps just Stop (while loading) and Send. */}
-                    {isLoading && onStop ? (
-                      // ONE-CLICK STOP (admin 2026-08-13: "galat search rukti nahi") — a running reply must
-                      // end the instant this is tapped, not after a confirm dialog the user has to dismiss.
-                      <button
-                        onClick={() => onStop?.()}
-                        title="Stop"
-                        className="p-2.5 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
-                      >
-                        <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          // Tone, not vibration (admin 2026-08-09) — same feedback as every other tap.
-                          playTapTone();
-                          onSend(attachments);
-                          setAttachments([]);
-                          setEditingMsgId(null);
-                          dismissKeyboardOnMobile(textareaRef.current);
-                        }}
-                        disabled={(!input.trim() && attachments.length === 0) || isLoading}
-                        className="p-2.5 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
-                      >
-                        <Send className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                  </div>{/* end inner flex row */}
-            </div>{/* end rounded input container */}
-            </div>{/* end mode-button + input row (contents when the button is hidden) */}
+            </ComposerShell>
         </div>
       </div>
     </div>

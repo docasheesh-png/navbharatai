@@ -1,7 +1,7 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModeButton } from '../chat/ModeButton';
-import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
+import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS, composerTextPadding } from '../chat/ComposerShell';
 import { Send, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { dataUrlToBlob, imageFilename } from '../../lib/imageExport';
@@ -396,9 +396,9 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
               Inside it the button would read as part of the message box; the free chat's composer
               already places it this way, and this is that same shared control. */}
           {/* THE FREE CHAT'S COMPOSER (admin 2026-09-23: "sabhi ai … navbharatai free ke jaisa karo").
-              Mode outside on the left; attach and Generate inside on the right. ⚠️ Generate keeps its
-              AMBER fill, on the free chat's shape: amber is how this screen says a press costs ₹1, and
-              an indigo button would make the paid action look exactly like a free one. */}
+              Mode outside on the left; attach and Generate inside on the right, and Generate is the free
+              chat's own send button. The ₹1 price is still stated where it always was — on the Pro chip
+              and in this button's tooltip — so the colour is not the only thing telling the user. */}
           <ComposerShell
             left={<ModeButton onOpen={onOpenModePicker} />}
             controls={(
@@ -418,7 +418,7 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
                   disabled={!mode || busy}
                   title={mode ? `Generate — ₹${PRICE_INR}` : 'Describe an image, or attach one'}
                   aria-label={`Generate — ₹${PRICE_INR}`}
-                  className="p-2.5 bg-amber-400 text-black rounded-xl disabled:bg-raised disabled:text-faint hover:bg-amber-300 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                  className={COMPOSER_SEND_CLASS}
                 >
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>

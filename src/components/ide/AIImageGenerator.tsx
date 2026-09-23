@@ -14,12 +14,10 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
-import { ImageStudioPro } from './ImageStudioPro';
 import { fetchImageFromUser, relayImage, type ClientFetchTicket } from '../../lib/clientImageFetch';
 import { imageWaitMessage } from '../../lib/imageDelivery';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 import { AddCreditNotice } from '../common/AddCreditNotice';
-import { fetchImageProAvailable, IMAGE_PRO_UNAVAILABLE_NOTE, type ImageProAvailability } from '../../lib/imageProAvailability';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 import { IMAGE_PROMPT_MAX, imagePromptLimit, imagePromptLimitNote } from '../../lib/imagePromptLimit';
@@ -141,29 +139,6 @@ function labelOf(options: ImageOption[], id: string): string {
 }
 
 /**
- * 🔴 EVERY OPEN STARTS ON FREE — the tier is NOT remembered (admin-mandated 2026-09-22).
- *
- * Admin, verbatim: *"jab koi user navbharatai free me mode badal kar image genrator ai me swich
- * kare, to default free mode open hona chahiye. abhi paid mode open ho raha hai."*
- *
- * ⚠️ THIS REVERSES A DOCUMENTED DECISION, so the old reasoning is kept here rather than deleted.
- * It read: *"Persisted, because the toggle is a PREFERENCE — the admin's words were 'user uske
- * kabhi bhi free aur paid me convert kar sake', and a preference that resets on every panel open is
- * not one."* That was a fair reading, and it produced exactly the outcome reported: a user who
- * tried Pro once landed on the paid tier on every visit afterwards, having chosen it only on the
- * first. The half of the older instruction that still binds is "kabhi bhi convert kar sake" — and
- * it is untouched, because the toggle still switches instantly, for as long as the panel is open.
- *
- * 🔑 AND MONEY POINTS THE SAME WAY, which is what makes this the safe direction rather than merely
- * the requested one: a Pro image costs real rupees per press, so a REMEMBERED Pro is a charge the
- * user did not decide on this visit. Free is the only default that cannot spend somebody's balance
- * by being forgotten about. A remembered FREE would be harmless — but a rule of "remember only the
- * cheap one" is a rule nobody can predict, so the tier is simply not stored at all.
- *
- * ⚠️ NOTHING IS LEFT WRITING TO STORAGE. The `nbai.imagegen.tier` key and its read/write are gone
- * rather than kept "in case": a value nothing reads is a value the next reader will trust.
- */
-/**
  * Whether the four selectors are shown or folded (admin 2026-09-21: "in charo ko bhi hide/expand ka
  * button do"). Remembered per device: somebody who folds them wants them folded next time too. The
  * settings themselves are untouched by folding — a folded row still SAYS what is in force, so a
@@ -178,22 +153,7 @@ function readOptionsOpen(): boolean {
   }
 }
 
-/**
- * What one Pro image costs, in ₹ — shown on the toggle so the switch names its own price.
- *
- * ⚠️ A COPY of the server's `IMAGE_PRO_PRICE_INR`, which is the authority; this file runs in the
- * browser and must not import server code. `tests/theProPriceIsOneNumber.test.ts` fails CI if they
- * ever disagree. It used to be the bare string 'Pro ₹2', which is how a price gets changed in two
- * places out of three.
- */
-const PRO_PRICE_INR = 1;
 export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHistory }: Props) {
-  // What the user PRESSED this visit, and what is actually shown, are two different things — see
-  // `effectiveTier` below. Keeping them separate is what lets a dead paid tier be hidden WITHOUT
-  // discarding a press the user really made: the moment Pro is switched on, their choice takes
-  // effect by itself. (It used to survive the panel closing; see the block above for why it no
-  // longer does — the two states are still separate, over a shorter life.)
-  const [chosenTier, setChosenTier] = useState<'free' | 'pro'>('free');
   const [optionsOpen, setOptionsOpen] = useState<boolean>(readOptionsOpen);
   useEffect(() => {
     try { localStorage.setItem(OPTIONS_KEY, optionsOpen ? 'open' : 'closed'); } catch { /* a private window; the fold simply is not remembered */ }
@@ -203,7 +163,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   const [enhancing, setEnhancing] = useState(false);
   /** The words the star replaced, so one tap puts them back. Cleared on the next send or edit. */
   const [enhanceUndo, setEnhanceUndo] = useState<string | null>(null);
-  const [proAvailable, setProAvailable] = useState<ImageProAvailability>(null);
   const [prompt, setPrompt] = useState('');
   const [imageType, setImageType] = useState(IMAGE_TYPES[0]); // compulsory — always one selected
   // Realistic by default, for the same reason "Photograph" leads the type list: an untouched screen
@@ -213,8 +172,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   const [size, setSize] = useState('square');
   const [colorHint, setColorHint] = useState('none');
   // The user's own picture, when they are CHANGING one instead of inventing one. Its presence is
-  // what makes this request an edit — the same derivation the paid tier makes, so nobody has to
-  // set a mode control to match what they attached.
+  // what makes this request an edit, so nobody has to set a mode control to match what they
+  // attached.
   const [reference, setReference] = useState<ReferencePicture | null>(null);
   const [customW, setCustomW] = useState(DEFAULT_CUSTOM_SIZE.w);
   const [customH, setCustomH] = useState(DEFAULT_CUSTOM_SIZE.h);
@@ -490,8 +449,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   };
 
   // Which image the text editor is open on — an id, not a boolean, because this surface now shows a
-  // whole thread and "Add text" has to mean the one whose button was pressed. The same shape the paid
-  // studio already uses, so the two screens behave identically. Opened on demand, never mounted with
+  // whole thread and "Add text" has to mean the one whose button was pressed. Opened on demand, never mounted with
   // the panel: it loads the picture into a full-resolution canvas, which is real work to do for a
   // user who never presses the button.
   const [textOn, setTextOn] = useState<string | null>(null);
@@ -677,16 +635,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
     return `${Math.floor(diff / 86400000)}d ago`;
   };
 
-  // Ask the server whether the paid tier can serve, BEFORE the user writes anything. While the
-  // answer is unknown (`null`) the panel behaves exactly as it did before this existed.
-  useEffect(() => {
-    let live = true;
-    void fetchImageProAvailable().then((ok) => { if (live) setProAvailable(ok); });
-    return () => { live = false; };
-  }, []);
-
   // The newest image sits at the BOTTOM, closest to the input, so it appears where the eye already
-  // is rather than at the far end of a scroll. Same rule as the paid studio.
+  // is rather than at the far end of a scroll.
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [history.length, isLoading]);
@@ -699,11 +649,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
     ta.style.height = 'auto';
     ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
   }, [prompt]);
-
-  // 🔒 A tier that CANNOT serve is never the one on screen. Only an explicit `false` forces Free, so
-  // an unknown or unreachable answer leaves the user exactly where they chose to be.
-  const effectiveTier: 'free' | 'pro' = proAvailable === false ? 'free' : chosenTier;
-  const proOff = proAvailable === false;
 
   const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
   /** The pixels this request will really be made at — the custom pair, or the preset's own numbers. */
@@ -720,75 +665,20 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   const thread = [...pagedHistory.visible].reverse();
 
   return (
-    <div className={`h-full flex flex-col text-ink overflow-hidden ${effectiveTier === 'pro' ? 'bg-surface' : 'bg-surface'}`}>
-      {/* Header. In Pro it collapses to a single slim bar carrying only the toggle — the studio below
-          introduces itself, and a dense title block would undo the restraint the whole surface is for.
-          The toggle itself is never hidden: a user must always be one press from the free tier, which
-          is exactly what Pro's own error messages tell them to do. */}
-      <div className={`flex items-center gap-3 border-b border-line ${
-        effectiveTier === 'pro' ? 'px-4 sm:px-6 py-2.5 bg-transparent' : 'px-6 py-4 bg-card'
-      }`}>
-        {effectiveTier === 'free' && (
-          <>
-            <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
-              <Wand2 className="w-5 h-5 text-accent-text" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="font-semibold text-ink text-base truncate">AI Image Generator</h2>
-              <p className="text-xs text-faint truncate">Write a prompt to generate images — logos, banners, icons</p>
-            </div>
-          </>
-        )}
-        {/* The static "Free" badge was a LABEL; this is a CONTROL (admin 2026-09-18: "free ke jagah
-            free-paid ke toggle bana do … user uske kabhi bhi free aur paid me convert kar sake").
-            Both states are always reachable — switching back to Free is one press, and it is the
-            press the paid tier's own error messages point at when Pro cannot serve. */}
+    <div className="h-full flex flex-col text-ink overflow-hidden bg-surface">
+      <div className="flex items-center gap-3 border-b border-line px-6 py-4 bg-card">
+        <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
+          <Wand2 className="w-5 h-5 text-accent-text" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="font-semibold text-ink text-base truncate">Image Generator AI FREE</h2>
+          <p className="text-xs text-faint truncate">Write a prompt to generate images — logos, banners, icons</p>
+        </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
-          <div role="tablist" aria-label="Image quality tier" className="flex items-center bg-well border border-line rounded-full p-0.5">
-            {(['free', 'pro'] as const).map((t) => {
-              // The paid chip stops being a control when the paid tier cannot serve. It is still
-              // SHOWN — hiding it would leave a user who had chosen Pro unable to see what happened
-              // to their choice — but it says so, and pressing it can no longer cost them a prompt.
-              const dead = t === 'pro' && proOff;
-              return (
-                <button
-                  key={t}
-                  role="tab"
-                  aria-selected={effectiveTier === t}
-                  aria-disabled={dead}
-                  disabled={dead}
-                  title={dead ? IMAGE_PRO_UNAVAILABLE_NOTE : undefined}
-                  onClick={() => { if (!dead) setChosenTier(t); }}
-                  className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
-                    dead
-                      ? 'text-faint cursor-not-allowed'
-                      : effectiveTier === t
-                        ? (t === 'pro' ? 'bg-amber-400 text-black' : 'bg-emerald-400 text-black')
-                        : 'text-muted hover:text-body'
-                  }`}
-                >
-                  {t === 'pro' ? `Pro ₹${PRO_PRICE_INR}` : 'Free'}
-                </button>
-              );
-            })}
-          </div>
         </div>
       </div>
 
-      {/* ⚠️ A `title` on the chip above is DESKTOP-ONLY — a finger never hovers, and a phone is where
-          this was reported. So the fact is also stated in the layout, once, where the toggle is. */}
-      {proOff && (
-        <div className="px-4 sm:px-6 py-2 bg-amber-500/10 border-b border-line">
-          <p className="text-xs text-body">{IMAGE_PRO_UNAVAILABLE_NOTE}</p>
-        </div>
-      )}
-
-      {effectiveTier === 'pro' ? (
-        <div className="flex-1 min-h-0">
-          <ImageStudioPro onImageGenerated={onImageGenerated} onOpenModePicker={onOpenModePicker} onOpenHistory={onOpenHistory} />
-        </div>
-      ) : (
       <div className="flex-1 min-h-0 flex flex-col">
         {/* ── THE THREAD ──────────────────────────────────────────────────────────────────────
             Admin, 2026-09-21: "pure chat box ka ui bhi sabhi ai ke jaise banao. sabse niche input
@@ -796,9 +686,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
 
             The old layout was two side-by-side columns — every option on the left, the result on the
             right — which on a phone stacked into one long form whose Generate button sat below about
-            twenty-five controls. This is the shape every other AI surface here already has, and the
-            one the paid studio has had since it shipped: what you made grows upward out of the box
-            you typed in. `flex-1 min-h-0` on the thread and `shrink-0` on the dock are what pin the
+            twenty-five controls. This is the shape every other AI surface here already has: what you
+            made grows upward out of the box you typed in. `flex-1 min-h-0` on the thread and `shrink-0` on the dock are what pin the
             input; without the `min-h-0` a long thread pushes the dock off the bottom of the panel
             instead of scrolling inside itself. */}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 py-3">
@@ -825,26 +714,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                   them which job this tool is for. Saying it once, where they start, turns a bad
                   result into an informed choice.
 
-                  ⚠️ It never says "you cannot" and it never names a vendor. The Pro button is a REAL
-                  control (the same tier state the toggle above uses), and it is hidden entirely
-                  when Pro cannot serve — advice pointing at a door that does not open is worse
-                  than none. */}
+                  ⚠️ It never says "you cannot" and it never names a vendor. */}
               <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
                 <Wand2 className="w-2.5 h-2.5 shrink-0" />
                 <span>Free images are made for your app’s artwork — logos, icons, banners, illustrations.</span>
-                {!proOff && (
-                  <>
-                    <span>For photo-real or cinematic pictures,</span>
-                    <button
-                      type="button"
-                      onClick={() => setChosenTier('pro')}
-                      className="underline text-accent-text hover:text-ink transition-colors"
-                    >
-                      use Pro
-                    </button>
-                    <span>— this tier stays free.</span>
-                  </>
-                )}
               </p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {EXAMPLES.map((e) => (
@@ -1205,7 +1078,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
           </div>
         </div>
       </div>
-      )}
 
       {/* The typed text replaces that image in the thread, so Copy and Save then mean the version
           WITH the text on it — which is what someone who just pressed Done expects. */}

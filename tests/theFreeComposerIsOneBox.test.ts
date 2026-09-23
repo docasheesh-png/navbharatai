@@ -1,11 +1,10 @@
-// The free image screen: the attach button is IN the box, the four selectors fold, the "what this
-// tier is for" line sits where a first-time user looks, and the Pro price is said once.
+// The free image screen: the attach button is IN the box, the four selectors fold, and the "what this
+// tool is for" line sits where a first-time user looks.
 //
 // Admin, 2026-09-21, four small asks on one screenshot:
 //   B. "change my own picture wala button, sirf attach button bana kar, input box ke andar karo"
 //   E. "jo 4 dropdown selector hai … in charo ko bhi hide/expand ka button do"
 //   F. "[free-tier line] is line ko, niche nahi. upar likhna hai. jahan 'no image yet' likh ke ata hai"
-//   G. "₹1 per image, charged only if it arrives (pro mode me already yah likha hai!) … hatao!!"
 //
 // Source-level, because each of these is a PLACEMENT — where a control or a sentence sits — and
 // placement is exactly what `tsc` and a render test cannot see.
@@ -19,7 +18,6 @@ const code = (src: string) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/
 
 const FREE = code(read('src/components/ide/AIImageGenerator.tsx'));
 const PICKER = code(read('src/components/ide/ReferenceImagePicker.tsx'));
-const PRO = code(read('src/components/ide/ImageStudioPro.tsx'));
 
 const freeScreen = FREE.slice(FREE.indexOf('No images yet'));
 const dock = FREE.slice(FREE.indexOf('id="nbai-image-options"') > 0 ? FREE.indexOf('aria-controls="nbai-image-options"') : 0);
@@ -83,26 +81,9 @@ describe('F — "what the free tier is for" is said in the empty state, not unde
     expect(FREE.split('Free images are made for your app').length).toBe(2);
   });
 
-  it('the Pro pointer is still a REAL control there, and still hidden when Pro cannot serve', () => {
-    const block = freeScreen.slice(freeScreen.indexOf('Free images are made for your app'), freeScreen.indexOf('EXAMPLES.map'));
-    expect(block).toContain("onClick={() => setChosenTier('pro')}");
-    expect(block).toContain('{!proOff && (');
-  });
-
   it('under the input only the attached-picture hint remains, and only while a picture is attached', () => {
     const under = FREE.slice(FREE.indexOf('aria-label="Generate image"'));
     expect(under).not.toContain('Free images are made for your app');
     expect(under).toMatch(/\{reference && \(\s*<p[^>]*>\s*<Wand2[^>]*\/>\s*<span>Only what you ask for changes/);
-  });
-});
-
-describe('G — the Pro price is said once, not under the input as well', () => {
-  it('the studio no longer repeats "charged only if it arrives" under the box', () => {
-    expect(PRO).not.toContain('charged only if it arrives');
-  });
-
-  it('…but the price is still on the toggle chip and in the Pro empty state', () => {
-    expect(FREE).toContain('`Pro ₹${PRO_PRICE_INR}`');
-    expect(PRO).toMatch(/₹\{PRICE_INR\} per image/);
   });
 });

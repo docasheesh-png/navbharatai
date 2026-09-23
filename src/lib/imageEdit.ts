@@ -8,9 +8,9 @@
 // awning, and gets back a DIFFERENT shop. Everything in this module exists to make the returned
 // picture recognisably the one that went in.
 //
-// 🔒 PURE. No DOM, no env, no I/O — so `src/lib` (the pickers), `src/server/lib` (the paid adapter)
-// and `src/server/routes` (the free route and free chat) all read the same rule, the way
-// `imageSize.ts` is shared. Two copies of "how far may an edit move?" is two different answers.
+// 🔒 PURE. No DOM, no env, no I/O — so `src/lib` (the pickers), `src/server/lib` (the edit runner)
+// and `src/server/routes` (the image route and free chat) all read the same rule, the way
+// `imageSize.ts` is shared. Two copies of "what is an edit told?" is two different answers.
 
 /**
  * What kind of edit this is, derived from what the user sent — never a control they must get right.
@@ -23,53 +23,11 @@
 export type ImageEditIntent = 'directed' | 'reimagine';
 
 /**
- * How far the result may move from the original, 0..1 (the diffusion `strength` knob: 0 returns the
- * input, 1 ignores it).
- *
- * 🔴 THESE TWO NUMBERS WERE THE WRONG WAY ROUND, and that inversion IS the admin's reported fear.
- * The paid adapter shipped `image-to-image: 0.65` and `image-text-to-image: 0.85`, justified as "a
- * reference WITH words is a directed edit and needs ROOM to follow them". It is the opposite: words
- * say WHAT to change, they never ask for MORE to change. At 0.85 the model is re-rolling most of the
- * picture, which is precisely how a user's own photo comes back as somebody else's.
- *
- * So the directed edit gets the LEAST freedom of the two, and the wordless re-imagining — where the
- * user asked for no specific thing and a re-render is the whole request — gets more.
- */
-export const EDIT_STRENGTH: Record<ImageEditIntent, number> = {
-  directed: 0.35,
-  reimagine: 0.6,
-};
-
-/** The most an explicit strength may be, however it arrives. Above this the input stops mattering. */
-export const MAX_EDIT_STRENGTH = 0.85;
-
-/**
- * The strength to send. An explicit, in-range value from the caller always wins — but it is CLAMPED,
- * because "keep my photo" is the promise this whole module makes and a stray 1.0 would break it
- * silently, with a successful-looking response.
- *
- * PURE.
- */
-export function editStrengthFor(intent: ImageEditIntent, explicit?: unknown): number {
-  const n =
-    typeof explicit === 'number'
-      ? explicit
-      : typeof explicit === 'string' && explicit.trim() !== ''
-        ? Number(explicit)
-        : Number.NaN;
-  // Out of range is JUNK, not "a lot" — a 9 that clamped to the ceiling would be this function
-  // deciding that a malformed field meant the most destructive edit it can make.
-  if (Number.isFinite(n) && n > 0 && n <= 1) return Math.min(MAX_EDIT_STRENGTH, n);
-  return EDIT_STRENGTH[intent];
-}
-
-/**
  * What the model is told about the picture it was handed.
  *
- * The strength knob only exists on diffusion hosts. The FREE tier's editing rung is a multimodal
- * model that takes an image and an instruction and has no such dial at all — for it, this sentence
- * IS the fidelity control, which is why the wording is a shared constant and not a string typed at
- * two call sites.
+ * The editing rung is a multimodal model that takes an image and an instruction and has no
+ * "how far may it move" dial at all — for it, this sentence IS the fidelity control, which is why the
+ * wording is a shared constant and not a string typed at two call sites.
  */
 export const PRESERVE_DIRECTIVE =
   'This is an edit of the supplied photograph, not a new picture. Return the SAME image with only ' +

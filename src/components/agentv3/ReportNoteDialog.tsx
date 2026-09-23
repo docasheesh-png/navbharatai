@@ -58,7 +58,7 @@ export const ReportNoteDialog: React.FC<ReportNoteDialogProps> = ({ buildLabel, 
   //
   // Rendered in place, this dialog lived inside AgentV3Panel — a subtree that can carry a transform
   // or a backdrop-filter, either of which becomes the CONTAINING BLOCK for a `position: fixed`
-  // descendant (tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts records the Pro image
+  // descendant (tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts records an image size
   // selector breaking exactly that way). Measured in place, the card rested 90px UNDER the tab bar.
   //
   // Portalled, it is appended after the app root, so at z-150 — EQUAL to the bar's — it paints

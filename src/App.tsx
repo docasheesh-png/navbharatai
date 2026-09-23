@@ -4155,7 +4155,7 @@ export default function App() {
                 if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }
                 // Everything else opens a NEW chat, which is the whole point of the change.
                 if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
-                // The image studio is Other Tools' own view — free and paid together, nothing forked.
+                // The image studio is Other Tools' own view — nothing forked.
                 // Opened from HERE it lives inside the chat tab the user is in (no header chip of its
                 // own, that tab stays lit) and takes one of the five slots; already open, it is simply
                 // shown, through whichever door it came in by (from Other Tools it keeps its own tab).

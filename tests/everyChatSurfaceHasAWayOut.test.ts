@@ -87,15 +87,13 @@ describe('every surface that renders a chat composer receives it', () => {
     expect(app).toMatch(/onOpenModePicker=\{modePickerOpener\}/);
   });
 
-  it('the image studio passes it down both tiers, free and paid', () => {
+  it('the image generator receives it and renders the button', () => {
     const panels = codeOnly(read('src/components/panels/ViewPanels.tsx'));
     expect(panels).toMatch(/<AIImageGenerator[^>]*onOpenModePicker=\{onOpenModePicker\}/);
     const gen = codeOnly(read('src/components/ide/AIImageGenerator.tsx'));
-    expect(gen).toMatch(/<ImageStudioPro[^>]*onOpenModePicker=\{onOpenModePicker\}/);
-    // And each tier actually hands it to the shared shell (which renders the button), rather than merely
+    // It actually hands it to the shared shell (which renders the button), rather than merely
     // accepting the prop.
     expect(gen).toContain('onOpenMode={onOpenModePicker}');
-    expect(codeOnly(read('src/components/ide/ImageStudioPro.tsx'))).toContain('onOpenMode={onOpenModePicker}');
   });
 
   it('each composer renders the SHARED button, never its own copy', () => {
@@ -103,7 +101,6 @@ describe('every surface that renders a chat composer receives it', () => {
       'src/components/professionals/ProfessionalChat.tsx',
       'src/components/sda/SDAChat.tsx',
       'src/components/ide/AIImageGenerator.tsx',
-      'src/components/ide/ImageStudioPro.tsx',
       'src/components/ide/AIChat.tsx',
     ]) {
       const src = codeOnly(read(file));

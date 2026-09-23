@@ -80137,3 +80137,28 @@ Rendered at 390px and 1280px, light and dark, against the real built stylesheet 
 button exists only inside the FREE surfaces, so on Pro / Studio / Wallet the sidebar row is the only
 desktop door — the 2026-08-11 removal is what left desktop without one for six weeks
 (`everyPhoneBarOptionHasADesktopDoor.test.ts`).
+## 2026-09-23 — The paid image tier is REMOVED, permanently (admin-mandated)
+
+Admin, verbatim: *"paid image kam nahi kar raha hai. isko hatao … (image to image) is photo me ek snake
+add karo. reply me wahi same photo aa gaya … aap free image ho rakho. paid wale ko permanently remove kar
+do!!! koi bhi traces na mile, na code me na kahi comment me."*
+
+- **Removed from the code, with its comments and tests:** the paid image screen and its FREE/PRO switch,
+  the paid generate route, both paid engines and their modules, the availability flag in
+  `/api/public-config`, the image permission and image endpoint of the developer API, the wallet's
+  image-purchase line, the edit-strength setting only the paid engine read, two CSS rules and two
+  font-size remaps only the paid screen used, and every comment, knowledge-base line and CLAUDE.md
+  registry entry that described it. `tests/theImageGeneratorHasOneTier.test.ts` locks the result.
+- **Kept, because the free tier uses it:** the photo-reading helpers moved to `lib/imageDataUrl.ts`
+  (tested in `tests/imageDataUrl.test.ts`); the free route, its image-to-image edit, relay, ⭐ star,
+  daily caps and triage are unchanged.
+- **What this does NOT remove:** git history, and the dated entries above in this file — PROGRESS.md is
+  append-only by the standing rule, so the earlier record stays as history.
+- ⚠️ **ADMIN ACTION:** the Cloud Run keys that fed the removed tier are now read by nothing and can be
+  deleted: `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, `IMAGE_PRO_AUTH_SCHEME`, `POLLINATIONS_API_KEY` (and
+  any optional `IMAGE_PRO_*` values, if set). Existing API keys that held the image permission keep
+  working — an unknown permission is simply ignored when a key is read.
+- ✅ **Same day, the name says it (admin: *"jo image generator ai bach jaye uske aage free likh dena
+  (jaise navbharatai free)"*):** the tool is now **"Image Generator AI FREE"** — the Mode list row, the
+  header chip (both read `IMAGE_MODE_NAME`), the screen's own title, the Mode button's tooltip and every
+  knowledge-base mention. The Other AI tile keeps its short label "AI Image Gen".

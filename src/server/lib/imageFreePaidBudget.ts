@@ -23,8 +23,7 @@
 // two orders of magnitude higher, not before. Collection `image_free_paid_daily`, one document per
 // UTC day, dated on the SERVER clock (a device clock cannot move it).
 //
-// ⚠️ THE PAID (Pro) TIER IS UNTOUCHED: the user pays ₹1 there and the wallet is the bound. This is the
-// FREE route's paid rungs only — `allowPaidRung()` in `routes/imageGen.ts` is its single reader.
+// `allowPaidRung()` in `routes/imageGen.ts` is its single reader.
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';

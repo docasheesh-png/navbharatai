@@ -14,7 +14,7 @@
  *     and gives every AI the one look the admin pointed at.
  *
  * 🔑 THE CLASS, not the instance: every chat screen used to hand-roll its composer, so a restyle of
- * one never reached the others. The four FREE-mode surfaces now render ONE shell
+ * one never reached the others. The FREE-mode surfaces now render ONE shell
  * (`components/chat/ComposerShell.tsx`), and the shell's classes are read back against the free
  * chat's own source (`AIChat.tsx`) — so neither side can drift from the other.
  */
@@ -35,7 +35,6 @@ const SURFACES = {
   professionals: code(read('src/components/professionals/ProfessionalChat.tsx')),
   doctorAi: code(read('src/components/sda/SDAChat.tsx')),
   imageGenerator: code(read('src/components/ide/AIImageGenerator.tsx')),
-  imageStudioPro: code(read('src/components/ide/ImageStudioPro.tsx')),
 };
 
 describe('the free chat IS the shell (2026-09-23: the two-row box)', () => {

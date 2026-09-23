@@ -81,7 +81,7 @@ export function LegalDocPage({ docId }: { docId: string }) {
           generous line-height and spacing because these are long documents meant to be READ.
           Sizes in rem so the accessibility Text Size zoom applies here too. */}
       <div
-        className="mt-5 text-[0.8125rem] leading-relaxed text-body space-y-3
+        className="nb-selectable mt-5 text-[0.8125rem] leading-relaxed text-body space-y-3
           [&_h1]:text-lg [&_h1]:font-black [&_h1]:text-ink [&_h1]:mt-2
           [&_h2]:text-[0.9375rem] [&_h2]:font-black [&_h2]:text-ink [&_h2]:mt-6 [&_h2]:mb-1
           [&_h3]:text-[0.8125rem] [&_h3]:font-black [&_h3]:text-accent-text [&_h3]:mt-4

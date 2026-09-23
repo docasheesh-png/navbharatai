@@ -219,6 +219,73 @@ button, [role='button'], nav, header, footer {
   user-select: none;
 }
 
+/* ── LONG-PRESS IN THE APP IS NOT LONG-PRESS ON A WEB PAGE (admin 2026-09-23, with a phone screenshot
+   of the home screen: the tagline highlighted in blue with selection handles, and iOS's
+   "Copy · Look Up · Translate" bubble sitting over the cards) —
+   "navbharatai app (mobile app) me kisi text par long press karo to woh copy hone lagta hai —
+    'website behaviour'. isko hatao, aur app jaisa banao. website me abhi jaisa rahne dena."
+
+   🔴 THE RULE DIRECTLY ABOVE WAS ALREADY TRYING TO DO THIS AND STRUCTURALLY COULD NOT — which is why
+   this is a different fix and not a second patch on the same symptom. It names four things (button,
+   [role='button'], nav, header, footer) and the text in the screenshot is a plain <p> (HomeView's
+   "Made with ❤️ for Bharat …", which sits in no <footer> and no <nav>). So is every heading, every
+   card title and every line of body copy in the app. An ALLOWLIST OF CHROME CAN NEVER BE COMPLETE
+   against an open-ended set of tags: chrome is most of a screen, and the exceptions are the few
+   places that hold real content. So inside the shell the question is INVERTED — nothing is
+   selectable unless it is named in the allow list below.
+
+   That inversion is what a native app actually is, not an approximation of one: React Native's <Text>
+   is not selectable unless it is explicitly asked to be, and neither an Android nor an iOS label
+   raises selection handles under a resting finger.
+
+   🔒 GATED IN CSS, SO THERE IS NOTHING TO KEEP IN SYNC, AND THE WEBSITE IS UNTOUCHED BY CONSTRUCTION.
+   `html.nb-native-shell` is added to <html> by index.html's pre-paint script and ONLY when the
+   Capacitor bridge is present, so on the plain website every declaration here is inert and behaviour
+   is byte-identical to today — which is exactly what was asked. Because the class is set before first
+   paint there is also no frame of web behaviour to catch on a cold start.
+
+   📐 WHY THE DENY IS ON <html> AND NOT ON `html.nb-native-shell *`. Both `user-select` and
+   `-webkit-touch-callout` INHERIT, so one declaration at (0,1,1) reaches the whole document, and each
+   allow rule below is (0,1,2) and wins on its own subtree with no specificity contest at all. A
+   universal selector would be (0,1,1) on EVERY descendant and would beat the allow rules everywhere
+   they matter — the chat reply, the generated code, the terminal, the legal page would all become
+   uncopyable and nothing would fail to reveal it. Do not "tidy" it into one. */
+html.nb-native-shell {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The exceptions — every place where selecting text is a FEATURE rather than an accident.
+
+   ⚠️ THE FIRST FOUR ARE NOT OPTIONAL. A field whose text cannot be selected is a field a user cannot
+   correct, and in a WKWebView an inherited `-webkit-user-select: none` takes the caret handles with
+   it — so an input inside a shell without this line is worse than a web page, not more native.
+
+   The rest are the app's CONTENT, addressed through hooks the app already renders rather than through
+   new markup: `.prose` and `.markdown-body` are the wrappers every chat surface already puts an answer
+   into (free chat, Pro, the mini chat, the security report), `pre`/`code` cover generated code, diffs
+   and logs, `.xterm` and `.monaco-editor` are the terminal and the editor, and `.nb-selectable` is the
+   opt-in for a content block that uses none of those — today the legal documents and the Professional
+   chat bubble. A new content surface adds that one class; it must never be answered by weakening the
+   deny above. */
+html.nb-native-shell input,
+html.nb-native-shell textarea,
+html.nb-native-shell select,
+html.nb-native-shell [contenteditable]:not([contenteditable='false']),
+html.nb-native-shell pre,
+html.nb-native-shell code,
+html.nb-native-shell .prose,
+html.nb-native-shell .markdown-body,
+html.nb-native-shell .xterm,
+html.nb-native-shell .monaco-editor,
+html.nb-native-shell .nb-selectable {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+
 @layer base {
   /* ── DNA-level theme palette (admin 2026-07-14) ──────────────────────────────────────────────
      ONE semantic palette per theme, keyed on `html[data-theme]`. The compat layer (theme-compat.css)

@@ -128,8 +128,16 @@ describe('it is wired around the allowed post-green passes', () => {
   it('a reverted fix is restored through the allowlisted green-guard-restore pass', () => {
     // The revert writes through actuator.writeFile, which is frozen — so it must run inside the
     // allowlisted restore pass or the restore would itself be refused.
-    const at = routes.search(/verifyAfterFix[<(]/);
-    expect(at).toBeGreaterThan(-1);
-    expect(routes.slice(at, at + 1500)).toContain("runInPass('green-guard-restore'");
+    // Since 2026-09-23 every site shares ONE revert (`revertToGreenSnapshot`), so the invariant is
+    // checked on that function AND on every call site — a site with its own inline revert would
+    // bypass the captured-writes reconciliation that function carries.
+    const sites = [...routes.matchAll(/verifyAfterFix<Record<string, string>>\(\{/g)].map((m) => m.index!);
+    expect(sites.length).toBeGreaterThanOrEqual(2);
+    for (const at of sites) {
+      expect(routes.slice(at, at + 4000)).toContain('revert: revertToGreenSnapshot,');
+    }
+    const def = routes.indexOf('const revertToGreenSnapshot');
+    expect(def).toBeGreaterThan(-1);
+    expect(routes.slice(def, def + 1200)).toContain("runInPass('green-guard-restore'");
   });
 });

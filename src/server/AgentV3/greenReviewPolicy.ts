@@ -244,3 +244,107 @@ export function reviewSuggestionCard(suggestions: ReadonlyArray<ReviewSuggestion
   if (!suggestions || suggestions.length === 0) return null;
   return { kind: 'review_suggestions', count: suggestions.length, items: [...suggestions] };
 }
+
+/**
+ * A REAL BUG IN A WORKING APP GETS ONE VERIFIED REPAIR (admin 2026-09-23, autopsy ac41a924: "han to
+ * fix karo"). Green Stop made every reviewer finding on a green app a suggestion. That was right for
+ * the engine's OPINIONS and wrong for the reviewer's FUNCTIONAL findings: a news site shipped with
+ * every article rendered as one paragraph and footer links into "page not found", because the
+ * reviewer that found both could only suggest. The user asked for a working site; a broken one is
+ * the job left undone, the same reason the feature heal and the runtime fix may write to a green app.
+ *
+ * What keeps it from being the 2026-08-12 disaster it replaces the ban on:
+ *   • only FUNCTIONAL findings — criticals and `selectAutoFixableWarnings`, never style or a11y polish;
+ *   • one pass, with its own abort, bounded by the build's wall clock (see `greenRepairPlan`);
+ *   • `verifyAfterFix`: a repair that stops the app rendering is reverted to the green snapshot, and a
+ *     repair that runs out of time is stopped AND reverted — an unfinished edit is never kept;
+ *   • the pass may never write a `.env` file (greenFreeze.ts `SECRET_FILE_DENIED_PASSES`).
+ * `AGENTV3_GREEN_FUNCTIONAL_REPAIR=off` restores suggest-only exactly.
+ */
+export function greenFunctionalRepairEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_GREEN_FUNCTIONAL_REPAIR ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** Time the re-render check needs after the repair (one browse, bounded at 35 s) plus the revert. */
+export const GREEN_REPAIR_VERIFY_RESERVE_MS = 40_000;
+/** Room after verification for the build's own settle (billing, persist, the terminal result). */
+export const GREEN_REPAIR_SETTLE_SLACK_MS = 20_000;
+/** Below this there is no honest repair to attempt; the findings stay an offer. */
+export const GREEN_REPAIR_MIN_MS = 30_000;
+/** Never more than this, however much time is left — it is one focused pass, not a rebuild. */
+export const GREEN_REPAIR_MAX_MS = 150_000;
+
+export interface GreenRepairPlan {
+  /** How long the repair itself may run. 0 ⇒ do not start — the findings stay an offer. */
+  repairMs: number;
+  /**
+   * The advisory cap to re-arm for this repair, or 0 when it is not attempted. Re-armed ONCE, to a
+   * bound computed here — so the cap's promise (no advisory step can hold a finished build open
+   * indefinitely) still holds, with a known, finite number instead of the 120 s default.
+   */
+  capMs: number;
+}
+
+/**
+ * 🔴 WHY THE BUDGET IS THE BUILD'S TIME AND NOT WHAT THE ADVISORY CAP HAS LEFT. The advisory cap
+ * (120 s) is armed BEFORE the reviewer runs, and a green app's reviewer alone may take 45 s — so what
+ * the cap has left is routinely ~30 s, less than one turn of a reasoning model. A repair sized to that
+ * would almost never start, and one that started would be cut off mid-edit. So the repair is bounded
+ * by the BUILD's remaining wall clock (the real ceiling), and the cap is re-armed once to exactly
+ * repair + verification + settle. PURE.
+ *
+ * `buildHeadroomMs` is Infinity when the build has no wall clock.
+ */
+export function greenRepairPlan(buildHeadroomMs: number): GreenRepairPlan {
+  const headroom = Number.isFinite(buildHeadroomMs) ? buildHeadroomMs : Number.POSITIVE_INFINITY;
+  if (Number.isNaN(buildHeadroomMs)) return { repairMs: 0, capMs: 0 };
+  const usable = headroom - GREEN_REPAIR_VERIFY_RESERVE_MS - GREEN_REPAIR_SETTLE_SLACK_MS;
+  if (!(usable >= GREEN_REPAIR_MIN_MS)) return { repairMs: 0, capMs: 0 };
+  const repairMs = Math.min(usable, GREEN_REPAIR_MAX_MS);
+  return { repairMs, capMs: repairMs + GREEN_REPAIR_VERIFY_RESERVE_MS + GREEN_REPAIR_SETTLE_SLACK_MS };
+}
+
+export interface GreenRepairFacts {
+  kept: boolean;
+  reverted: boolean;
+  timedOut: boolean;
+  finished: boolean;
+  count: number;
+  budgetMs: number;
+}
+
+/**
+ * The honest admin line for the green repair. PURE. Four outcomes, and "undone" is the SUCCESS of the
+ * safety net rather than a failure of the app: the user still has the version that rendered.
+ */
+export function greenRepairOutcome(f: GreenRepairFacts): { severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean } {
+  const n = Math.max(0, f.count | 0);
+  if (f.kept) {
+    return {
+      severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIRED', autoResolved: true,
+      message: `${n} functional reviewer finding(s) on the working app were repaired, and the app was re-opened in a real browser and still renders.`,
+    };
+  }
+  if (f.reverted) {
+    const why = f.timedOut
+      ? `the repair did not finish inside its ${Math.round(f.budgetMs / 1000)} s budget`
+      : !f.finished
+        ? 'the repair pass did not complete'
+        : 'the app could not be shown to still render afterwards';
+    return {
+      severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIR_UNDONE', autoResolved: true,
+      message: `A repair of ${n} functional reviewer finding(s) was undone because ${why} — the working version was restored, and the findings were offered instead.`,
+    };
+  }
+  return {
+    severity: 'warning', code: 'REVIEW_FUNCTIONAL_REPAIR_UNDONE', autoResolved: false,
+    message: `A repair of ${n} functional reviewer finding(s) was not kept, and restoring the working version did not complete — check that the app still renders.`,
+  };
+}
+
+/** The line the USER reads when a green repair was kept. Branded, no engine or vendor named. PURE. */
+export function greenRepairUserLine(count: number): string {
+  const n = Math.max(0, count | 0);
+  if (n === 0) return '';
+  return `\n\n🔧 After the app was working, a final review found ${n} real problem${n === 1 ? '' : 's'}. ${n === 1 ? 'It was' : 'They were'} fixed, and the app was checked again: it still works.`;
+}

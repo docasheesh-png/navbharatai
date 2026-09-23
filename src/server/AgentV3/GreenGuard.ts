@@ -214,6 +214,29 @@ export function restorePlan(
   return { write, remove, unchanged };
 }
 
+/**
+ * Make the build's CAPTURED-WRITES map agree with a restore that was just applied. MUTATES `captured`.
+ *
+ * 🔴 WHY (found 2026-09-23 while wiring the green functional repair). A heal pass writes through the
+ * dispatcher, so every file it touches lands in the route's `writtenFiles`. When `verifyAfterFix`
+ * decides the heal broke the app, the revert writes the snapshot back through the ACTUATOR, which that
+ * map never sees. The end-of-build durable save then takes the sandbox scan and lets `writtenFiles`
+ * WIN ("captured writes win") — so the broken heal the sandbox had just undone was saved again, and
+ * the next restore from the durable store brought the broken app back. The revert was real in the
+ * sandbox and false in storage.
+ *
+ * Exactly what the restore changed, nothing more: a restored path takes the snapshot content if the
+ * map holds it, and a path the restore REMOVED leaves the map (it was created by the reverted pass).
+ * Paths the restore did not touch are left alone. PURE apart from the one map it is given.
+ */
+export function reconcileCapturedWrites(captured: Map<string, string>, plan: RestorePlan): void {
+  if (!captured || !plan) return;
+  for (const [path, content] of Object.entries(plan.write || {})) {
+    if (captured.has(path)) captured.set(path, content);
+  }
+  for (const path of plan.remove || []) captured.delete(path);
+}
+
 /** Where the rolled-back attempt is kept, so "undo the undo" is possible at all. */
 export function attemptWorkspaceKey(workspaceId: string): string {
   return `${workspaceId}::attempt`;

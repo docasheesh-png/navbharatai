@@ -161,7 +161,7 @@ import {
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
-import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan } from '../AgentV3/greenReviewPolicy';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
@@ -195,7 +195,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -480,7 +480,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemoryFor,
@@ -11948,10 +11948,13 @@ async function noteBuildOutcome(
      * half-finished look cut off mid-flight.
      */
     const LAST_CHANCE_PROOF_MS = 45_000;
-    const armAdvisoryCap = () => {
+    // `ms` is for the ONE caller that needs a longer bound (the green functional repair, which computes
+    // it from the build's own wall clock in `greenRepairPlan`); it is always a finite number, so the
+    // cap's promise — a finished build is never held open indefinitely — holds for every caller.
+    const armAdvisoryCap = (ms: number = ADVISORY_CAP_MS) => {
       if (deadlineMs <= 0) return;
       if (deadlineTimer) clearTimeout(deadlineTimer);
-      deadlineTimer = setTimeout(finalizeOnDeadline, ADVISORY_CAP_MS);
+      deadlineTimer = setTimeout(finalizeOnDeadline, Number.isFinite(ms) && ms > 0 ? ms : ADVISORY_CAP_MS);
     };
     // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
@@ -11989,6 +11992,26 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    /**
+     * Put the workspace back to a green snapshot — sandbox, durable store AND the captured-writes map.
+     * The ONE revert every `verifyAfterFix` site uses. Before 2026-09-23 each site carried its own copy,
+     * and none of them touched `writtenFiles`, so the end-of-build save re-persisted the very change the
+     * sandbox had just undone (see `reconcileCapturedWrites`).
+     */
+    const revertToGreenSnapshot = async (snap: Record<string, string>): Promise<void> => {
+      // An EMPTY snapshot is a failed read, never a green app — and `restorePlan({}, cur)` would remove
+      // every file in the workspace. Refuse; verifyAfterFix reports a revert that did not complete.
+      if (!snap || Object.keys(snap).length === 0) throw new Error('refusing to restore from an empty snapshot');
+      const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+      const plan = restorePlan(snap, cur);
+      await runInPass('green-guard-restore', async () => {
+        for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
+        const rm = buildRemoveCommand(plan.remove);
+        if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
+      });
+      reconcileCapturedWrites(writtenFiles, plan);
+      await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
+    };
     /**
      * The copy this build took, if any, and the hash of the source it was built from — compared with
      * what the FINAL durable save persists, so the copy is declared current only when it provably is
@@ -18551,16 +18574,7 @@ async function noteBuildOutcome(
                         afterHtml = shot.html;
                         return v.rendered;
                       },
-                      revert: async (snap) => {
-                        const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
-                        const plan = restorePlan(snap, cur);
-                        await runInPass('green-guard-restore', async () => {
-                          for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
-                          const rm = buildRemoveCommand(plan.remove);
-                          if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
-                        });
-                        await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
-                      },
+                      revert: revertToGreenSnapshot,
                     });
                     try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('feature-presence heal', vr) }); } catch { /* best-effort */ }
                     // Only a KEPT heal updates result + coverage; a reverted heal leaves the app exactly as
@@ -19792,16 +19806,7 @@ async function noteBuildOutcome(
                 snapshot: async () => (await collectWorkspaceFiles(actuator, workspaceId)).files,
                 apply: async () => { fixResult = await applyFix(); },
                 reverify: reRenderOk,
-                revert: async (snap) => {
-                  const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
-                  const plan = restorePlan(snap, cur);
-                  await runInPass('green-guard-restore', async () => {
-                    for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
-                    const rm = buildRemoveCommand(plan.remove);
-                    if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
-                  });
-                  await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
-                },
+                revert: revertToGreenSnapshot,
               });
               try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('runtime-error fix', vr) }); } catch { /* best-effort */ }
               // Promote the repaired result ONLY when it was kept — a reverted fix leaves the app exactly
@@ -20288,7 +20293,14 @@ async function noteBuildOutcome(
           // and the working app ships untouched. The user's actual requests (a missing requested feature,
           // a real runtime error) are handled by their own passes and keep fixing automatically — this
           // governs only the reviewer's opinions. Kill switch: AGENTV3_GREEN_STOP=off. See greenReviewPolicy.
-          const greenStopReview = !reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok }) && autoFixItems.length > 0 && !isImportTurn;
+          const reviewerMaySilentlyWrite = reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok });
+          // What a WORKING app's one verified repair may take on — the findings that name broken
+          // behaviour, whatever their severity tag (see `selectGreenRepairable`). Its own list, not
+          // `autoFixItems`: that one carries warnings only when the C9 warning canary is on.
+          const greenRepairable = !reviewerMaySilentlyWrite && !isImportTurn && greenFunctionalRepairEnabled()
+            ? selectGreenRepairable(review?.issues ?? []).map((i) => i.message.trim()).filter(Boolean)
+            : [];
+          const greenStopReview = !reviewerMaySilentlyWrite && (autoFixItems.length > 0 || greenRepairable.length > 0) && !isImportTurn;
           // FALSE-SUCCESS GUARD: a real build turn (never an import/survey turn, where findings stay
           // advisory by design) whose reviewer found [CRITICAL]s is NOT-ok until they are verifiably
           // fixed. Set the holder NOW (before the bounded fix pass) so the verdict is honest even if
@@ -20299,19 +20311,118 @@ async function noteBuildOutcome(
           // opinions — those are now suggestions the user can accept, not blockers.
           if (criticals.length > 0 && !isImportTurn && !greenStopReview) reviewCriticalsUnresolved = criticals.slice();
           if (greenStopReview) {
-            // The app is verified working. Surface the findings as an offer instead of silently editing.
+            // A REAL BUG IN A WORKING APP GETS ONE VERIFIED REPAIR (admin 2026-09-23, autopsy ac41a924).
+            // Only the functional findings, one pass, its own abort, and verifyAfterFix around it: a
+            // repair that does not finish, or after which the app no longer PROVABLY renders, is undone —
+            // on a working app an unproven edit is not kept (the reverse of the runtime fix's rule, and
+            // deliberately so: this pass exists to act on the reviewer's reading, not on a crash the user
+            // can see). The pass may never write a .env file (greenFreeze.ts). Everything it did not fix
+            // is still OFFERED below, exactly as before.
+            let greenRepaired: string[] = [];
+            if (greenRepairable.length > 0) {
+              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+              const plan = greenRepairPlan(headroomMs);
+              const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!lastPreviewUrl && !!actuator.browseUrl;
+              if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
+                armAdvisoryCap(plan.capMs);
+                events.emit({ type: 'narration', agent: 'architect', text: `🔧 Your app works — fixing ${greenRepairable.length} real problem(s) the review found, then checking it still works…`, ts: Date.now() });
+                const repairAbort = new AbortController();
+                const stopRepairWithBuild = () => repairAbort.abort();
+                abort.signal.addEventListener('abort', stopRepairWithBuild);
+                let repairOk = false;
+                let repairTimedOut = false;
+                try {
+                  // The snapshot is taken HERE, not inside verifyAfterFix: when its own snapshot fails it
+                  // runs the change without a net and keeps it — right for a crash fix, never for an edit
+                  // to a working app. No usable snapshot ⇒ no repair.
+                  const greenSnap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                  if (Object.keys(greenSnap).length === 0) throw new Error('no snapshot of the working app — repair not attempted');
+                  const repairRunner = new AgentRunner({
+                    ...baseRunnerOpts,
+                    signal: repairAbort.signal,
+                    client: buildTurnRunner(healRunnerOpts()),
+                    model: resolveModel(powerLevelReqEffective),
+                    persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                  });
+                  const vr = await verifyAfterFix<Record<string, string>>({
+                    snapshot: async () => greenSnap,
+                    apply: async () => {
+                      const run = runInPass('reviewer-functional-repair', () => repairRunner.run(judgeRepairPrompt(prompt, greenRepairable)));
+                      let timer: ReturnType<typeof setTimeout> | undefined;
+                      const outcome = await Promise.race([
+                        run.then((r) => ({ ok: !!r?.ok }), () => ({ ok: false })),
+                        new Promise<'timeout'>((res) => { timer = setTimeout(() => res('timeout'), plan.repairMs); }),
+                      ]);
+                      if (timer) clearTimeout(timer);
+                      if (outcome === 'timeout') {
+                        // Stop it, and let it settle before anything is reverted — a runner still writing
+                        // while the snapshot goes back would leave a hybrid.
+                        repairTimedOut = true;
+                        repairAbort.abort();
+                        await Promise.race([run.catch(() => undefined), new Promise((res) => setTimeout(res, 15_000))]);
+                        return;
+                      }
+                      repairOk = outcome.ok;
+                    },
+                    reverify: async () => {
+                      if (!repairOk) return false; // unfinished or failed ⇒ undo
+                      const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'green-repair-verify');
+                      const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                      return v.rendered && !v.inconclusive && !v.serverDown; // unproven ⇒ undo
+                    },
+                    revert: revertToGreenSnapshot,
+                  });
+                  if (vr.kept && repairOk) {
+                    greenRepaired = greenRepairable.slice();
+                    result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length)}` };
+                    if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                  }
+                  try {
+                    buildDiag.record({
+                      phase: 'build',
+                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: greenRepairable.length, budgetMs: plan.repairMs }),
+                    });
+                  } catch { /* best-effort */ }
+                } catch (e) {
+                  const why = e instanceof Error ? e.message : String(e);
+                  console.log(`[AGENTV3] green functional repair failed: ${why}`);
+                  try {
+                    buildDiag.record({
+                      phase: 'build', severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIR_SKIPPED',
+                      message: `${greenRepairable.length} functional reviewer finding(s) on the working app were offered, not repaired: ${why}.`,
+                      autoResolved: true,
+                    });
+                  } catch { /* best-effort */ }
+                } finally {
+                  abort.signal.removeEventListener('abort', stopRepairWithBuild);
+                  repairAbort.abort();
+                }
+              } else {
+                try {
+                  buildDiag.record({
+                    phase: 'build', severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIR_SKIPPED',
+                    message: `${greenRepairable.length} functional reviewer finding(s) on the working app were offered, not repaired: ${plan.repairMs <= 0 ? 'not enough build time left for a repair and its check' : !canVerify ? 'the result of a repair could not have been checked in a real browser' : 'the build was stopped'}.`,
+                    autoResolved: true,
+                  });
+                } catch { /* best-effort */ }
+              }
+            }
+            // The app is verified working. Surface what was NOT repaired as an offer, never a silent edit.
+            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t));
             const suggestions = toReviewSuggestions(
-              autoFixItems.map((t) => ({ text: t, functional: criticals.includes(t) })),
+              offered.map((t) => ({ text: t, functional: criticals.includes(t) || greenRepairable.includes(t) })),
             );
             const suggestSummary = reviewSuggestionSummary(suggestions);
             if (suggestSummary) result = { ...result, summary: `${result.summary || ''}${suggestSummary}` };
-            try {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'REVIEW_SUGGESTED_NOT_APPLIED',
-                message: `The app was verified rendering, so ${suggestions.length} reviewer finding(s) were OFFERED to the user rather than applied silently (the working app was left untouched): ${suggestions.map((s) => s.title).join('; ')}`,
-                autoResolved: true,
-              });
-            } catch { /* best-effort */ }
+            if (suggestions.length > 0) {
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'REVIEW_SUGGESTED_NOT_APPLIED',
+                  message: `The app was verified rendering, so ${suggestions.length} reviewer finding(s) were OFFERED to the user rather than applied silently (the working app was left untouched): ${suggestions.map((s) => s.title).join('; ')}`,
+                  autoResolved: true,
+                });
+              } catch { /* best-effort */ }
+            }
             const card = reviewSuggestionCard(suggestions);
             // A richer client can render per-item "fix" buttons; the summary above already carries the
             // whole feature end-to-end for a plain client, so this emit is purely additive.

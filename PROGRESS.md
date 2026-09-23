@@ -80308,6 +80308,27 @@ dev server died between first render at 512 s and the runtime check; ETA 2.9 min
   would not have changed this build. It would also be the fixed-vocabulary list `signalsMatchedNothing`
   warns against. What this build actually lost to that verdict was the 90 s fast lane, and fix 3 above
   removes that loss.
+
+## 2026-09-23 — A real bug in a working app gets one verified repair (follow-up to autopsy ac41a924)
+
+Admin: *"koi bacha hai? han to fix karo! aur, pura complete karo"*.
+
+- **The reviewer's functional findings on a green app are now repaired, once.** This covers the two
+  bugs that shipped in ac41a924: articles rendered as one paragraph, and footer links into NotFound.
+  - The classifier missed both, because they describe what the user SEES ("renders as one long
+    paragraph", "no routes or pages exist … dead-end") rather than using a verdict word. Fixed with
+    `FUNCTIONAL_OUTCOME_RE` behind one shared `isFunctionalFinding`.
+  - The repair runs in pass `reviewer-functional-repair`, inside `verifyAfterFix`.
+  - An unproven result or a timed-out repair is undone.
+  - `.env*` writes are refused for this pass.
+  - Its budget comes from the build clock. The advisory cap is re-armed once, to a finite bound.
+- **Sibling bug fixed: a reverted heal was saved again.** Reverts bypassed `writtenFiles`, and the
+  end-of-build save lets `writtenFiles` win. So the feature-heal and runtime-fix reverts re-persisted
+  the broken change to the durable store. Now there is one `revertToGreenSnapshot` with
+  `reconcileCapturedWrites`, and it refuses an empty snapshot, which would have deleted the whole
+  workspace.
+- **Not done, on evidence:** the Hindi complexity keywords. The English prompt takes the identical path;
+  see the ac41a924 follow-up note.
 ## 2026-09-23 — Autopsy 0d297b25 (WORKNEX): a Hello World sold as "built and working"
 
 The prompt asked for a signed Android APK of an **existing Expo/React Native project on Replit** ("do NOT

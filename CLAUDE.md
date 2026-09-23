@@ -2776,6 +2776,38 @@ the flag entries above promise.
   `fromThisBuild`). Test-locked and reversion-proven four ways in
   `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts`. **What to watch:** `IN_BUILD_GREEN` appearing
   a minute or two into builds, and `GREEN_GUARD_RESTORED` on FIRST builds — which was impossible before.
+- **`AGENTV3_GREEN_FUNCTIONAL_REPAIR`** (default ON, `off` restores suggest-only exactly — added
+  2026-09-23, autopsy ac41a924, admin: *"han to fix karo"*) — **a real bug in a working app gets ONE
+  verified repair.** Green Stop made every reviewer finding on a green app a suggestion. That is right
+  for the engine's opinions, but it shipped a news site whose articles all rendered as ONE paragraph and
+  whose footer linked into "page not found". The reviewer found both, and was allowed only to suggest.
+  Now `selectGreenRepairable` (`ReviewerAgent.ts`) picks the findings that name BROKEN behaviour.
+  Criticals as well as warnings qualify, but only when the text is functional, so *"move keys to a
+  vault"* stays an offer. One pass fixes them in pass `reviewer-functional-repair`, wrapped in
+  `verifyAfterFix`.
+  🔒 **FOUR RESTRAINTS NO OTHER ALLOWED PASS CARRIES, because it is the one with a history of harm (the
+  2026-08-12 `.env` erasure).**
+  • An unproven result is UNDONE, not kept.
+  • A repair that does not finish inside its budget is stopped and undone.
+  • The pass may never write a `.env*` file (`SECRET_FILE_DENIED_PASSES` in `greenFreeze.ts`).
+  • It never runs without a snapshot it took itself.
+  ⚠️ **The budget is the BUILD's clock, not the advisory cap's.** That cap (120 s) is armed before the
+  reviewer runs, so it routinely has ~30 s left. `greenRepairPlan` sizes the repair from the wall clock
+  (max 150 s) and re-arms the cap ONCE, to repair + 40 s check + 20 s settle — still a finite bound.
+  Report codes: `REVIEW_FUNCTIONAL_REPAIRED` / `_UNDONE` / `_SKIPPED`. Whatever it does not fix is still
+  offered, exactly as before.
+  🔴 **SIBLING FIXED IN THE SAME CHANGE: a reverted heal used to be SAVED AGAIN.** Every `verifyAfterFix`
+  revert wrote the snapshot back through the actuator, which the captured-writes map never saw. The
+  end-of-build save lets that map win, so the broken change the sandbox had just undone went back into
+  the durable store. The next restore brought it back. All three revert sites now share
+  `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
+  EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
+  reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+- **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
+  PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
+  (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
+  directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
+  `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the

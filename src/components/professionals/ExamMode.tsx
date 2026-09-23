@@ -10,7 +10,7 @@ import {
 } from '../../server/professionals/examMode';
 import {
   LEVEL_HINTS, LEVEL_LABELS, deltaLabel, deltaWhy, keyToOptionIndex, optionLetter, optionView,
-  outcomeOf, progressLabel, progressPct, readingNote, setupReady, shortPaperNote,
+  outcomeOf, progressLabel, progressPct, readingNote, setupReady, shortPaperNote, examCostLine,
 } from './examView';
 
 /**
@@ -45,11 +45,21 @@ interface Props {
   /** Hands a message to the chat composer — how "teach me my mistakes" returns to the teacher. */
   onAskTeacher: (message: string) => void;
   onClose: () => void;
+  /**
+   * Free exam questions left today, or `null`/omitted when the allowance does not apply (unlimited
+   * account, signed out, or not counted). Exam mode has its OWN allowance, in questions (admin
+   * 2026-09-23: 5 a day), so the student can see before pressing Start what this paper will cost.
+   */
+  freeQuestionsLeft?: number | null;
+  /** Past the free questions a paper is charged from the balance (true), not refused until tomorrow. */
+  paidAfterFree?: boolean;
+  /** Called after a paper is set, so the surface can refresh the free-questions count. */
+  onPaperSet?: () => void;
 }
 
 type Phase = 'setup' | 'loading' | 'running' | 'result' | 'review';
 
-export function ExamMode({ professionalId, onAskTeacher, onClose }: Props) {
+export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsLeft = null, paidAfterFree = false, onPaperSet }: Props) {
   const [phase, setPhase] = useState<Phase>('setup');
   const [subject, setSubject] = useState('');
   const [topic, setTopic] = useState('');
@@ -105,11 +115,12 @@ export function ExamMode({ professionalId, onAskTeacher, onClose }: Props) {
       setAsked(Number(data.asked) || (data.questions as unknown[]).length);
       setAt(0); setChosen(null); setRevealed(false); setAnswers([]);
       setPhase('running');
+      onPaperSet?.();
     } catch {
       setError('Could not reach the teacher. Check your connection and try again.');
       setPhase('setup');
     }
-  }, [professionalId, subject, topic, level, count, targetExam, targetExamOther, ready]);
+  }, [professionalId, subject, topic, level, count, targetExam, targetExamOther, ready, onPaperSet]);
 
   const answer = useCallback((index: number | null) => {
     if (!q || revealed) return;
@@ -295,6 +306,10 @@ export function ExamMode({ professionalId, onAskTeacher, onClose }: Props) {
                 />
                 <span className="text-[11px] text-muted">max {EXAM_MAX_QUESTIONS}</span>
               </div>
+              {(() => {
+                const line = examCostLine(count, freeQuestionsLeft, paidAfterFree);
+                return line ? <p className="mt-1.5 text-[12px] text-muted">{line}</p> : null;
+              })()}
             </div>
             {error && <p className="text-sm text-danger">{error}</p>}
             <button

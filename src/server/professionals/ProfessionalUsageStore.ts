@@ -7,7 +7,8 @@
  * never block a legitimate user) and the increment is best-effort. Worst case is a little free overuse,
  * never a wrongly-blocked user.
  *
- * Collection: `professional_daily_usage` (doc id = userId)
+ * Collections: `professional_daily_usage` (messages) and `professional_exam_usage` (exam questions),
+ * doc id = userId in both.
  */
 import * as admin from 'firebase-admin';
 import { doc, runTransaction } from '../lib/serverDb';
@@ -31,6 +32,10 @@ export function istDayKey(now: number = Date.now()): string {
 class ProfessionalUsageStore {
   private db: admin.firestore.Firestore | null = null;
 
+  /** One store per allowance: the chat messages and the exam questions are counted SEPARATELY (admin
+   *  2026-09-23), so neither can spend the other, and neither write can clobber the other's document. */
+  constructor(private readonly collection: string) {}
+
   private getDb(): admin.firestore.Firestore | null {
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
@@ -49,7 +54,7 @@ class ProfessionalUsageStore {
     const db = this.getDb();
     if (!db || !userId) return 0;
     try {
-      const snap = await db.collection('professional_daily_usage').doc(userId).get();
+      const snap = await db.collection(this.collection).doc(userId).get();
       if (!snap.exists) return 0;
       const data = snap.data() as UsageDoc | undefined;
       if (!data || data.date !== istDayKey(now)) return 0; // stale day → effectively 0
@@ -60,21 +65,22 @@ class ProfessionalUsageStore {
   }
 
   /**
-   * Atomically record ONE free message used today and return the new count. Resets to 1 when the stored
-   * day is stale. Best-effort: a failure returns the pre-increment estimate + 1 without throwing.
+   * Atomically record `by` (default ONE) free uses today and return the new count. Resets when the
+   * stored day is stale. Best-effort: a failure returns 0 without throwing.
    */
-  async increment(userId: string, now: number = Date.now()): Promise<number> {
+  async increment(userId: string, now: number = Date.now(), by: number = 1): Promise<number> {
     const db = this.getDb();
-    if (!db || !userId) return 0;
+    const step = Number.isFinite(by) && by > 0 ? Math.floor(by) : 0;
+    if (!db || !userId || step === 0) return 0;
     const today = istDayKey(now);
     const nowIso = new Date(now).toISOString();
     try {
-      const ref = doc(db, 'professional_daily_usage', userId);
+      const ref = doc(db, this.collection, userId);
       return await runTransaction(db, async (t: any) => {
         const snap = await t.get(ref);
         const data = snap.exists() ? (snap.data() as UsageDoc | undefined) : undefined;
         const base = data && data.date === today && Number.isFinite(data.count) && data.count > 0 ? Math.floor(data.count) : 0;
-        const count = base + 1;
+        const count = base + step;
         t.set(ref, { userId, date: today, count, updatedAt: nowIso } as UsageDoc);
         return count;
       });
@@ -84,4 +90,7 @@ class ProfessionalUsageStore {
   }
 }
 
-export const professionalUsageStore = new ProfessionalUsageStore();
+export const professionalUsageStore = new ProfessionalUsageStore('professional_daily_usage');
+
+/** Free Exam-mode QUESTIONS used today (IST) — a separate allowance from the chat messages. */
+export const professionalExamUsageStore = new ProfessionalUsageStore('professional_exam_usage');

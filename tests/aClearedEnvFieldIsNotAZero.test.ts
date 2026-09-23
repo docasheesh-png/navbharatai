@@ -43,7 +43,7 @@ const READERS: Array<{ key: string; read: () => number; dflt: number; zeroMeans:
   { key: 'AI_TOOL_FREE_DAILY_LIMIT', read: aiToolFreeDailyLimit, dflt: 5, zeroMeans: 'no free tool actions' },
   { key: 'AI_IMAGE_FREE_DAILY_LIMIT', read: imageFreeDailyLimit, dflt: 3, zeroMeans: 'no free images' },
   { key: 'AI_IMAGE_PASS_DAILY_LIMIT', read: imagePassDailyLimit, dflt: 25, zeroMeans: 'no images on an unlimited tier' },
-  { key: 'PROFESSIONAL_FREE_DAILY_LIMIT', read: professionalFreeDailyLimit, dflt: 50, zeroMeans: 'no free professional messages' },
+  { key: 'PROFESSIONAL_FREE_DAILY_LIMIT', read: professionalFreeDailyLimit, dflt: 10, zeroMeans: 'no free professional messages' },
   { key: 'AGENTV3_DEPLOY_MAX_MB', read: maxDeployMb, dflt: 50, zeroMeans: 'the per-deploy size ceiling is disabled' },
   { key: 'STORE_FEE_PCT', read: storeFeePct, dflt: 15, zeroMeans: 'the store takes no commission' },
   { key: 'MONITOR_SANDBOX_SPIKE_MIN_USD', read: sandboxSpikeMinUsd, dflt: 1, zeroMeans: 'every trivial spend is alert-worthy' },

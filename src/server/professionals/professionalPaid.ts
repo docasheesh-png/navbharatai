@@ -14,11 +14,41 @@ export function professionalPaidEnabled(): boolean {
   return String(process.env.PROFESSIONAL_PAID_ENABLED || '').trim().toLowerCase() === 'true';
 }
 
-/** Daily free-message allowance for non-subscribers (across all professionals). Default 50 (admin
- *  2026-07-15). Env-tunable without a deploy. */
+/**
+ * Is the daily free allowance COUNTED at all? (admin 2026-09-23.)
+ *
+ * Admin, verbatim: *"professional ai me din ke 10 message free honge, fir paid hoga. aapne sabke
+ * liye sab free kar diya."* The allowance used to ride on `PROFESSIONAL_PAID_ENABLED`, which is the
+ * switch for SELLING a Pass — and that key was never set in Cloud Run, because the Pass was retired.
+ * So nothing was counted and the promised "10 free, then paid" never existed: every answer went to
+ * the paid model chain and was charged its real cost from the first message, which on the free
+ * leader is ₹0. Counting is a different question from selling, so it has its own switch.
+ *
+ * ON unless explicitly `off` — the admin asked for it, and a limit that needs a console key before
+ * it does anything is how it stayed switched off for two months. `off` is the no-deploy revert to
+ * the previous behaviour exactly. `PROFESSIONAL_PAID_ENABLED=true` still implies counting.
+ */
+export function professionalFreeQuotaEnabled(): boolean {
+  if (professionalPaidEnabled()) return true;
+  return String(process.env.PROFESSIONAL_FREE_QUOTA || '').trim().toLowerCase() !== 'off';
+}
+
+/** Daily free-message allowance, shared by every professional AND Doctor AI. Default 10 (admin
+ *  2026-09-23 — it had drifted to 50 in code). Env-tunable without a deploy. */
 export function professionalFreeDailyLimit(): number {
   const n = parseEnvNumber(process.env.PROFESSIONAL_FREE_DAILY_LIMIT);
-  return n !== null && n >= 0 ? Math.floor(n) : 50;
+  return n !== null && n >= 0 ? Math.floor(n) : 10;
+}
+
+/**
+ * Free EXAM-MODE questions per day (admin 2026-09-23: *"exam mode me only 5 questions per day free"*).
+ * A SEPARATE allowance from the messages — a paper does not spend the student's chat messages, and
+ * the messages do not spend the paper. Counted in QUESTIONS, not papers: a 30-question paper is not
+ * one free thing. Default 5, env-tunable.
+ */
+export function professionalExamFreeDailyQuestions(): number {
+  const n = parseEnvNumber(process.env.PROFESSIONAL_EXAM_FREE_QUESTIONS);
+  return n !== null && n >= 0 ? Math.floor(n) : 5;
 }
 
 /** Professional Pass price in ₹. Default 99. */

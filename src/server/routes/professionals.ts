@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChatWithUsage, type ProfessionalTurn } from '../professionals/engine';
-import { chargeForAiTurn } from '../lib/aiTurnCharge';
+import { chargeForAiTurn, aiWalletSpendEnabled } from '../lib/aiTurnCharge';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { getServerDb } from '../lib/serverDb';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
@@ -10,12 +10,12 @@ import { detectImageIntent, imageGenGuidance } from '../lib/imageIntent';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { sendSafeError } from '../lib/httpError';
 import {
-  professionalPaidEnabled, professionalFreeDailyLimit, professionalPassPriceInr,
-  professionalPassDays, isProfessionalFreeUser,
+  professionalFreeQuotaEnabled, professionalFreeDailyLimit, professionalExamFreeDailyQuestions,
+  professionalPassPriceInr, professionalPassDays, isProfessionalFreeUser,
 } from '../professionals/professionalPaid';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
-import { professionalUsageStore } from '../professionals/ProfessionalUsageStore';
-import { gateProfessionalTurn } from '../professionals/passGate';
+import { professionalUsageStore, professionalExamUsageStore } from '../professionals/ProfessionalUsageStore';
+import { gateProfessionalTurn, gateProfessionalExam, examPaperCharge } from '../professionals/passGate';
 import { routeParam, routeParams } from '../lib/expressCompat';
 // ATTACHMENT RECALL (admin 2026-08-19) — the sibling of Doctor AI's report memory: a file's
 // vision-derived text is remembered for this conversation so the NEXT turn can still answer from it.
@@ -51,29 +51,42 @@ export function registerProfessionalsRoutes(app: Express): void {
     res.json({ professionals: listProfessionals() });
   });
 
-  // Professional Pass status for the CURRENT user — the UI uses this to show "X/limit free today",
-  // an active-pass badge, or the paywall + price. Reflects the same gate the chat route enforces.
+  // The daily-allowance status for the CURRENT user — the UI uses this to show "X/limit free today"
+  // (messages) and the free exam questions left. Reflects the same gate the chat and exam routes enforce.
   app.get('/api/professional/pass/status', async (req: Request, res: Response) => {
     const identity = await verifyFirebaseIdentity(req);
     const uid = identity?.uid || null;
-    const enabled = professionalPaidEnabled();
+    // `enabled` means "the allowance is being COUNTED" — which, since 2026-09-23, no longer waits on the
+    // Pass-selling switch. `paidAfterFree` says what happens past it: charged from the balance (true)
+    // or refused until tomorrow (false, only when wallet spending is off).
+    const enabled = professionalFreeQuotaEnabled();
+    const paidAfterFree = enabled && aiWalletSpendEnabled();
     const freeDailyLimit = professionalFreeDailyLimit();
+    const examFreeDailyQuestions = professionalExamFreeDailyQuestions();
     const priceInr = professionalPassPriceInr();
     const passDays = professionalPassDays();
     if (!uid) {
-      // Anonymous: with the gate on, login is required (no free quota without an account to key it).
-      res.json({ enabled, signedIn: false, unlimited: false, hasPass: false, freeDailyLimit, usedToday: 0, remainingFree: 0, priceInr, passDays });
+      // Anonymous: with the allowance on, login is required (no free quota without an account to key it).
+      res.json({
+        enabled, paidAfterFree, signedIn: false, unlimited: false, hasPass: false,
+        freeDailyLimit, usedToday: 0, remainingFree: 0,
+        examFreeDailyQuestions, examUsedToday: 0, examRemainingFree: 0,
+        priceInr, passDays,
+      });
       return;
     }
     const freeListed = isProfessionalFreeUser(uid, identity?.email || null);
     const pass = enabled ? await professionalPassStore.getStatus(uid) : { active: false, expiresAt: null, plan: null };
     const unlimited = !enabled || freeListed || pass.active;
-    const usedToday = unlimited ? 0 : await professionalUsageStore.getTodayCount(uid);
+    const [usedToday, examUsedToday] = unlimited
+      ? [0, 0]
+      : await Promise.all([professionalUsageStore.getTodayCount(uid), professionalExamUsageStore.getTodayCount(uid)]);
     res.json({
-      enabled, signedIn: true, freeListed,
+      enabled, paidAfterFree, signedIn: true, freeListed,
       hasPass: pass.active, passExpiresAt: pass.expiresAt, plan: pass.plan,
       unlimited,
       freeDailyLimit, usedToday, remainingFree: Math.max(0, freeDailyLimit - usedToday),
+      examFreeDailyQuestions, examUsedToday, examRemainingFree: Math.max(0, examFreeDailyQuestions - examUsedToday),
       priceInr, passDays,
     });
   });
@@ -188,7 +201,11 @@ export function registerProfessionalsRoutes(app: Express): void {
       // Entirely inert while AI_WALLET_SPEND is off (the default), and never charges an unmeasured turn.
       void chargeForAiTurn(
         getServerDb() as any,
-        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'professionals' },
+        {
+          userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'professionals',
+          // 0 for one of the day's free messages — a free message is free (admin 2026-09-23).
+          billableFraction: gate.billableFraction,
+        },
         spend,
         usdInrRate(),
         Date.now(),
@@ -232,7 +249,9 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
     const identity = await verifyFirebaseIdentity(req);
     const verifiedUserId = identity?.uid || null;
-    const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
+    // The EXAM allowance, not the message one (admin 2026-09-23): 5 free questions a day, counted
+    // separately, the rest charged at the same rate as a message.
+    const gate = await gateProfessionalExam(verifiedUserId, identity?.email || null, Math.min(spec.count, EXAM_MAX_QUESTIONS));
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;
@@ -247,18 +266,24 @@ export function registerProfessionalsRoutes(app: Express): void {
         { conversationId: conversationIdFromBody(req.body?.conversationId) },
       );
       const paper = parseExamPaper(reply, Math.min(spec.count, EXAM_MAX_QUESTIONS));
-      if (gate.countsAgainstFree && verifiedUserId) {
-        void professionalUsageStore.increment(verifiedUserId);
+      // Priced on what was DELIVERED: the free questions this paper used, and the paid share of its
+      // real cost. A paper that came back empty spends nothing and is charged nothing — before
+      // 2026-09-23 the charge ran BEFORE this check, so an unusable paper was billed.
+      const { freeUsed, billableFraction } = examPaperCharge(paper.questions.length, gate.freeQuestions);
+      if (freeUsed > 0 && verifiedUserId) {
+        void professionalExamUsageStore.increment(verifiedUserId, Date.now(), freeUsed);
       }
-      // ONE WALLET, same discipline as the chat turn above: after the answer, never awaited into the
-      // response, and never for an unmeasured turn.
-      void chargeForAiTurn(
-        getServerDb() as any,
-        { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'professionals' },
-        spend,
-        usdInrRate(),
-        Date.now(),
-      );
+      if (paper.questions.length > 0) {
+        // ONE WALLET, same discipline as the chat turn above: after the answer, never awaited into the
+        // response, and never for an unmeasured turn.
+        void chargeForAiTurn(
+          getServerDb() as any,
+          { userId: verifiedUserId, isFreeListed: gate.isFreeListed, hasActivePass: gate.hasActivePass, feature: 'professionals', billableFraction },
+          spend,
+          usdInrRate(),
+          Date.now(),
+        );
+      }
       if (paper.questions.length === 0) {
         // Honest failure: no paper, and no charge pretended into a score. The student is told plainly.
         res.status(502).json({ error: 'The paper did not come back in a usable form. Please try once more.' });

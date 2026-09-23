@@ -34,7 +34,6 @@ import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { initialToolsOpen, saveToolsOpen } from './sdaChrome';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { ChatToolbar } from '../chat/ChatToolbar';
-import { ModeButton } from '../chat/ModeButton';
 import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';

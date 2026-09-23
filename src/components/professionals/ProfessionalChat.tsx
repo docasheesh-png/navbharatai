@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import { ModeButton } from '../chat/ModeButton';
 import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';

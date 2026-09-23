@@ -1,6 +1,5 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ModeButton } from '../chat/ModeButton';
 import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { Send, Download, ImagePlus, Loader2, Pencil, RefreshCw, Sparkles, Type, X } from 'lucide-react';
 import { auth } from '../../lib/firebase';

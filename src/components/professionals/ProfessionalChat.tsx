@@ -137,6 +137,10 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
   // same wallet as a build). Telling an empty-balance user they "used their free messages" would be
   // simply untrue, and would offer them the wrong action.
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login' | 'wallet'>(null);
+  // Whether the empty-wallet refusal came AFTER today's free messages (admin 2026-09-23: "10 free,
+  // then paid"). Then the card says both true things — the free ones are used, and the paid ones need
+  // a balance — instead of implying the user never had any free messages at all.
+  const [walletFreeUsedUp, setWalletFreeUsedUp] = useState(false);
   // Shared composer toolbar state (admin 2026-08-10) — the Enter preference comes from the ONE key
   // every AI reads, so the setting follows the user between screens instead of resetting per chat.
   const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
@@ -235,7 +239,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       });
       const data = await res.json().catch(() => ({}));
       // Professional Pass gate: show the paywall / login prompt instead of a raw error bubble.
-      if (data?.code === 'wallet_empty') { setPaywall('wallet'); return; }
+      if (data?.code === 'wallet_empty') { setWalletFreeUsedUp(data?.freeUsedUp === true); setPaywall('wallet'); refreshPass(); return; }
       if (res.status === 402 || data?.code === 'professional_paywall') { setPaywall('paywall'); refreshPass(); return; }
       if (res.status === 401 || data?.code === 'login_required') { setPaywall('login'); return; }
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
@@ -274,6 +278,9 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         professionalId={config.id}
         onAskTeacher={(m) => { setExamOpen(false); void send(m); }}
         onClose={() => setExamOpen(false)}
+        freeQuestionsLeft={pass?.enabled && pass.signedIn && !pass.unlimited ? (pass.examRemainingFree ?? null) : null}
+        paidAfterFree={pass?.paidAfterFree === true}
+        onPaperSet={refreshPass}
       />
     );
   }
@@ -300,7 +307,9 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         )}
         {pass?.enabled && pass?.signedIn && !pass.unlimited && (
           <span className={`${config.skills?.exam ? '' : 'ml-auto'} text-[11px] font-semibold px-2.5 py-1 rounded-full bg-raised border border-line text-body`}>
-            <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+            {pass.remainingFree > 0 || !pass.paidAfterFree
+              ? <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+              : <span className="text-warn">Free used · paid from balance</span>}
           </span>
         )}
       </div>
@@ -461,10 +470,11 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
             {paywall === 'wallet' ? (
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-warn flex items-center justify-center"><Wallet className="w-6 h-6" /></div>
-                <h3 className="font-bold text-ink mb-1">Your balance is empty</h3>
+                <h3 className="font-bold text-ink mb-1">{walletFreeUsedUp ? "That's today's free messages" : 'Your balance is empty'}</h3>
                 <p className="text-sm text-muted mb-4">
-                  The assistants use the same balance as your builds — you only pay for what you actually use.
-                  Add credit to carry on.
+                  {walletFreeUsedUp
+                    ? `You've used all ${pass?.freeDailyLimit ?? 10} free messages for today, and answers after that are paid from your balance — which is empty. The free ones come back tomorrow, or add credit and carry on now, paying only for what you use.`
+                    : 'The assistants use the same balance as your builds — you only pay for what you actually use. Add credit to carry on.'}
                 </p>
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
@@ -477,7 +487,17 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-accent-text flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
                 <h3 className="font-bold text-ink mb-1">Sign in to continue</h3>
-                <p className="text-sm text-muted">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 50} free messages every day.</p>
+                <p className="text-sm text-muted mb-4">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 10} free messages every day.</p>
+                {/* A card that says "sign in" must be able to open sign-in (admin 2026-09-23 — until the
+                    daily allowance was counted, a guest never reached this card at all). It rides the
+                    existing `signIn` navigate event, the one App listens to for opening the sign-in
+                    screen from deep inside a surface; the sign-in screen offers every method. */}
+                <button
+                  onClick={() => { setPaywall(null); window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } })); }}
+                  className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-on-accent font-bold flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" /> Sign in
+                </button>
               </>
             ) : (
               <>
@@ -486,15 +506,12 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                     when it returns, and offers the one action that genuinely helps today. */}
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-warn flex items-center justify-center"><Clock className="w-6 h-6" /></div>
                 <h3 className="font-bold text-ink mb-1">That's today's free messages</h3>
-                <p className="text-sm text-muted mb-4">
-                  You've used all {pass?.freeDailyLimit ?? 50} of them. They come back tomorrow — or add credit and carry on now, paying only for what you use.
+                {/* Reachable only when the server cannot charge past the allowance (wallet spending off);
+                    with it on, an answer after the free ones is paid instead of refused. So credit would
+                    not unblock this — the card says the one true thing, and offers nothing to buy. */}
+                <p className="text-sm text-muted">
+                  You've used all {pass?.freeDailyLimit ?? 10} of them. They come back tomorrow.
                 </p>
-                <button
-                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
-                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center justify-center gap-2"
-                >
-                  <Wallet className="w-4 h-4" /> Add credit
-                </button>
               </>
             )}
           </div>

@@ -80015,6 +80015,28 @@ Verified in Chromium at 390×844: About → Terms → the Refund link inside it,
 Test: `tests/legalLinksStayInTheApp.test.ts` (14; 7 fail with the components reverted), including a source
 guard that fails on any bare relative `href="/…"` literal in client TSX.
 ⚠️ Reaching installed phones needs a fresh `.aab`/`.ipa` (bundled mode) — only when the admin asks.
+## 2026-09-23 — 🎓 PROFESSIONALS: 10 free messages a day, then paid; Exam mode 5 free questions
+
+Admin: *"professional ai me din ke 10 message free honge, fir paid hoga. aapne sabke liye sab free kar
+diya. teacher ai ka exam mode me only 5 questions per day free ho, baaki sab paid"*. Choices (asked):
+paid = real cost + markup; exam allowance SEPARATE from messages; extra questions at the message rate;
+Doctor AI shares the same 10.
+
+**Root cause, verified in code:** the allowance was gated on `PROFESSIONAL_PAID_ENABLED` (the Pass-selling
+switch, never set), so nothing was counted; the default was 50; the charge had no way to know a
+counted message was free; the empty-wallet refusal ran before the allowance; over-allowance was a
+block, not a charge; exam spent one chat message per paper and was billed even for an unusable paper.
+
+**Fixed:** `PROFESSIONAL_FREE_QUOTA` (default on) owns counting; default 10; `billableFraction` on
+`AiChargeContext` (0 ⇒ `free-allowance`); `decideProfessionalAccess` gains opt-in `overQuota: 'paid'`
+(the AI tools keep their block); `gateProfessionalExam` + `professional_exam_usage` count questions,
+split a paper, charge the paid share of what was delivered. UI: "Free used · paid from balance" chip,
+the empty-wallet card names the used free messages, the sign-in card has a real button, the exam
+screen says what the paper costs before Start. Tests: `tests/tenFreeMessagesThenPaid.test.ts` (24,
+reversion-proven), route wiring in `tests/professionalsRoute.test.ts`.
+
+⚠️ **Behaviour change to watch:** guests can no longer use the professionals unsigned. ⚠️ Many paid
+answers still bill ₹0 because the professionals' leader model is free — the admin's chosen model.
 ---
 
 ## 2026-09-23 — Autopsy `3a0a8f7f` (IP Pharmacy handover form, Weak, ₹152.57, 12.8 min, rendered)

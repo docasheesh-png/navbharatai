@@ -112,9 +112,9 @@ export function registerSdaRoutes(app: Express): void {
       message = message || 'Please analyze this medical document and extract all relevant clinical findings.';
 
       // Professional Pass gate — Doctor AI is a professional too (admin 2026-07-15: "Doctor AI = same as
-      // all professionals"). Same shared gate as every config-driven professional: 50 free msgs/day
-      // (across ALL professionals), Pass ⇒ unlimited, anonymous ⇒ sign in. Flag-off ⇒ no-op (today's
-      // behaviour). The verified identity keys the gate — never the client-claimed body userId.
+      // all professionals"). Same shared gate as every config-driven professional: 10 free msgs/day
+      // (across ALL professionals), then paid from the wallet (admin 2026-09-23); Pass ⇒ unlimited,
+      // anonymous ⇒ sign in. The verified identity keys the gate — never the client-claimed body userId.
       const sdaIdentity = await verifyFirebaseIdentity(req);
       const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, sdaIdentity?.email || null);
       if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
@@ -722,7 +722,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // After the answer, never awaited into the response, inert while AI_WALLET_SPEND is off.
       void chargeForAiTurn(
         getServerDb() as any,
-        { userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass, feature: 'doctor' },
+        {
+          userId: sdaGate.uid, isFreeListed: sdaGate.isFreeListed, hasActivePass: sdaGate.hasActivePass, feature: 'doctor',
+          // Doctor AI shares the professionals' 10 free messages (admin 2026-09-23) — a free one is free.
+          billableFraction: sdaGate.billableFraction,
+        },
         sdaSpend,
         usdInrRate(),
         Date.now(),

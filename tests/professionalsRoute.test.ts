@@ -70,14 +70,32 @@ describe('professional chat route — verified identity only', () => {
   });
 
   it('anonymous request (no/invalid token): engine gets NO user id even if body claims one', async () => {
+    // With the daily allowance counted (the default since 2026-09-23) an anonymous caller is asked to
+    // sign in; the identity rule is exercised with the allowance switched off, the one state in which
+    // an anonymous turn still reaches the engine.
+    const prev = process.env.PROFESSIONAL_FREE_QUOTA;
+    process.env.PROFESSIONAL_FREE_QUOTA = 'off';
+    try {
+      verifyIdentityMock.mockResolvedValue(null);
+      const res = mockRes();
+      await chatHandler()(
+        mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', userId: 'uid-victim' } }),
+        res,
+      );
+      expect(res.statusCode).toBe(200);
+      expect(runChatMock.mock.calls[0][3]).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.PROFESSIONAL_FREE_QUOTA; else process.env.PROFESSIONAL_FREE_QUOTA = prev;
+    }
+  });
+
+  it('allowance ON by default + anonymous → 401 login_required, and the body-claimed id is never used', async () => {
     verifyIdentityMock.mockResolvedValue(null);
     const res = mockRes();
-    await chatHandler()(
-      mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', userId: 'uid-victim' } }),
-      res,
-    );
-    expect(res.statusCode).toBe(200);
-    expect(runChatMock.mock.calls[0][3]).toBeUndefined();
+    await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hi', userId: 'uid-victim' } }), res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.code).toBe('login_required');
+    expect(runChatMock).not.toHaveBeenCalled();
   });
 
   it('Professional Pass gate ON + anonymous → 401 login_required, engine never called', async () => {
@@ -163,5 +181,34 @@ describe('professional chat route — verified identity only', () => {
       expect(res.statusCode).toBe(200);
       expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: undefined });
     }
+  });
+});
+
+describe('the daily allowance reaches the charge (admin 2026-09-23: "10 free, then paid")', () => {
+  beforeEach(() => {
+    runChatMock.mockReset();
+    chargeMock.mockClear();
+    verifyIdentityMock.mockReset().mockResolvedValue({ uid: 'uid-student', email: null });
+  });
+
+  it('a free chat message is handed to the charge with billableFraction 0', async () => {
+    runChatMock.mockResolvedValue({ reply: 'teacher reply', spend: {} });
+    const res = mockRes();
+    await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hi' } }), res);
+    expect(res.statusCode).toBe(200);
+    // The free chain was asked for, and the charge was told the answer is free.
+    expect(runChatMock.mock.calls[0][4]).toBe('free');
+    expect(chargeMock).toHaveBeenCalledTimes(1);
+    expect(chargeMock.mock.calls[0][1]).toMatchObject({ userId: 'uid-student', billableFraction: 0 });
+  });
+
+  it('an exam paper that came back unusable is NOT charged', async () => {
+    runChatMock.mockResolvedValue({ reply: 'not a paper at all', spend: { provider: 'GLM', model: 'glm-4.7', inputTokens: 9000, outputTokens: 9000 } });
+    const routes = captureRoutes(registerProfessionalsRoutes as any);
+    const exam = routes.get('POST /api/professional/:id/exam')!;
+    const res = mockRes();
+    await exam(mockReq({ params: { id: 'teacher_ai' }, body: { subject: 'Physics', count: 5 } }), res);
+    expect(res.statusCode).toBe(502);
+    expect(chargeMock).not.toHaveBeenCalled();
   });
 });

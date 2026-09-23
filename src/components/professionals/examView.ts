@@ -179,3 +179,22 @@ export const LEVEL_HINTS: Record<string, string> = {
   hard: 'Multi-step and traps — competitive-exam standard.',
   mix: 'Easy first, then harder — closest to a real paper.',
 };
+
+/**
+ * The one line under the question count that says what THIS paper costs. PURE, so the three cases —
+ * all free, partly free, all paid — are testable without a browser. `null` when nothing is counted.
+ */
+export function examCostLine(count: number, freeLeft: number | null | undefined, paidAfterFree: boolean): string | null {
+  if (typeof freeLeft !== 'number' || !Number.isFinite(freeLeft)) return null;
+  const left = Math.max(0, Math.floor(freeLeft));
+  const n = Math.max(0, Math.floor(count));
+  if (n <= left) return `This paper is free — ${left} free question${left === 1 ? '' : 's'} left today.`;
+  if (!paidAfterFree) {
+    return left > 0
+      ? `Only ${left} free question${left === 1 ? '' : 's'} left today — set ${left} or fewer.`
+      : "Today's free questions are used. They come back tomorrow.";
+  }
+  return left > 0
+    ? `${left} of these ${n} are free today; the other ${n - left} are paid from your balance.`
+    : "Today's free questions are used — this paper is paid from your balance.";
+}

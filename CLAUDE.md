@@ -1788,6 +1788,32 @@ the code (it is actually read somewhere) on 2026-07-11.
   **What to watch:** how often `MARKUP_WAIVED_NO_PREVIEW` appears. A high rate is not a billing problem —
   it is the engine failing to prove its own work, and the number that says so.
 
+- **🎓 PROFESSIONALS: 10 FREE MESSAGES A DAY, THEN PAID — and Exam mode's 5 free QUESTIONS (built
+  2026-09-23; admin, verbatim: *"professional ai me din ke 10 message free honge, fir paid hoga. aapne
+  sabke liye sab free kar diya. teacher ai ka exam mode me only 5 questions per day free ho"*). Three
+  keys, NONE set, all with working code defaults: `PROFESSIONAL_FREE_QUOTA` (**default ON**; `off` is the
+  no-deploy revert to the previous behaviour exactly), `PROFESSIONAL_FREE_DAILY_LIMIT` (**default now 10**
+  — it had drifted to 50 in code), `PROFESSIONAL_EXAM_FREE_QUESTIONS` (**default 5**). Read by
+  `src/server/professionals/professionalPaid.ts`; decided in `passGate.ts` (`gateProfessionalTurn`,
+  `gateProfessionalExam`).
+  🔴 **WHY "SAB FREE" WAS TRUE:** the allowance rode on `PROFESSIONAL_PAID_ENABLED` — the switch for
+  SELLING a Pass, which was retired and never set — so nothing was ever counted; and even switched on,
+  nothing told the charge that a counted free message was free. Counting now has its own switch, and
+  `billableFraction` on the charge context (`aiTurnCharge.ts`) carries "this one is free" to the wallet:
+  `0` ⇒ reason `free-allowance`, never a debit.
+  🔒 **THE ORDER:** free messages first (free chain, never charged, **never refused for an empty
+  wallet**); the 11th and every later answer is ALLOWED on the paid chain and charged its real cost +
+  markup from the one wallet, refused only when that wallet is empty (with the free-used reason named).
+  Doctor AI shares the same 10. Free-list and a Pass holder stay unlimited. **A guest must now sign in**
+  — an anonymous allowance cannot be counted, so guests who used Teacher AI etc. without limit now see
+  the sign-in card (which gained a real Sign in button). Without `AI_WALLET_SPEND=on`, "then paid"
+  cannot be charged, so past the allowance is the honest block, never a silent free answer.
+  🎓 **EXAM:** its own counter (`professional_exam_usage`), in QUESTIONS — a paper is SPLIT (2 free left
+  + 10 asked = 2 free, 8 paid, charged `8/10` of the paper's real cost), priced on what was DELIVERED.
+  An unusable paper is now charged NOTHING (the charge used to run before that check).
+  ⚠️ **SAID PLAINLY, because the admin chose it knowing:** "paid" = real cost + markup, and the
+  professionals' leader model is the free GLM-flash rung for BOTH tiers, so many paid answers still
+  cost ₹0. That is the admin's "Asli kharcha + markup" decision, not a bug.
 - **The MID-BUILD cost stop (shipped 2026-09-13):** `AGENTV3_BUILD_COST_CEILING_USD` — ⚠️ **NOT set,
   and the code default is what governs today.** The ceiling on ONE build's REAL provider cost, in USD.
   **Default $5**, capped at $50, read by `src/server/AgentV3/buildCostCeiling.ts` and evaluated inside

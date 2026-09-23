@@ -10,6 +10,7 @@ import { CustomSizeFields } from './CustomSizeFields';
 import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, pixelsForSize, resolveCustomSize } from '../../lib/imageSize';
 import { ImageCropEditor } from './ImageCropEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
+import { imagePromptLimit, imagePromptLimitNote } from '../../lib/imagePromptLimit';
 
 /**
  * NavBharatAI Pro — the PAID image studio (admin 2026-09-18).
@@ -162,8 +163,11 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
     return () => window.removeEventListener('paste', onPaste);
   }, [attach]);
 
+  // The server refuses a prompt over its limit, so a send that can only fail is not offered.
+  const promptLimit = imagePromptLimit(prompt.trim());
+
   const generate = async () => {
-    if (!mode || busy) return;
+    if (!mode || busy || promptLimit.over) return;
     // The box empties at send, like every other box in this app, and the words come back only if
     // the send fails — the same rule the free composer follows (`draftAfterFailedSend`).
     const typed = prompt.trim();
@@ -426,14 +430,19 @@ export function ImageStudioPro({ onImageGenerated, onOpenModePicker }: {
             />
             <button
               onClick={() => void generate()}
-              disabled={!mode || busy}
-              title={mode ? `Generate — ₹${PRICE_INR}` : 'Describe an image, or attach one'}
+              disabled={!mode || busy || promptLimit.over}
+              title={promptLimit.over ? 'Too long to send — please shorten it' : mode ? `Generate — ₹${PRICE_INR}` : 'Describe an image, or attach one'}
               className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-amber-400 text-black disabled:bg-raised disabled:text-faint hover:bg-amber-300 transition-colors"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
             </button>
           </div>
           </div>
+          {promptLimit.near && (
+            <p className={`text-[11px] text-right px-3 ${promptLimit.over ? 'text-danger' : 'text-faint'}`} aria-live="polite">
+              {imagePromptLimitNote(promptLimit)}
+            </p>
+          )}
           {/* The price is on the toggle chip ("Pro ₹1") and in the empty state; a third copy under the
               box only cost a line of a phone screen (admin 2026-09-21: "pro mode me already yah likha
               hai … space khatam ho raha hai, hatao"). "Charged only if it arrives" is still true, and

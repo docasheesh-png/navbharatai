@@ -80054,3 +80054,11 @@ defaults BEFORE the preview proof so they are part of what gets verified; tests 
 (~600 s) is not in the report — no process log. **OPEN:** the fast lane on an always-reasoning rung
 (complex → `kimi-k2.7-code`) spent 40 s planning a 10-line list (3,027 output tokens for 799 chars) and
 its contract hit the 56 s cap; the bail was correct, the lane was doomed from the rung choice.
+- ✅ **Same day, the "OPEN" line above is CLOSED by the admin's own instruction** (*"2000+ wala text
+  se send button inactive kar do!!"*): `src/lib/imagePromptLimit.ts` puts the server's limit on both
+  image composers — the send button is off, Enter refuses too, and a counter appears from 90%
+  (`2,431 / 2,000 characters — too long to send. Please shorten it.`). The free generator counts
+  what it SENDS (type + tint wrapped around the words), not only what was typed. The number is
+  asserted equal to the route schemas' `max` (`tests/theSendButtonKnowsTheLimit.test.ts`). ⚠️ This
+  touches the two files PR #3270 is rewriting — a few one-line conflicts are expected for whichever
+  of the two merges second (the `disabled=` lines and the note under the box).

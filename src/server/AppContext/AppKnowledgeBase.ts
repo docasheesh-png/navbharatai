@@ -1893,8 +1893,9 @@ NOTE: Does NOT build apps (use NavBharatAI Pro for that).`,
   {
     id: 'ide',
     name: 'IDE / Code Studio',
-    path: 'Sidebar → IDE  OR  Header → IDE tab',
+    path: 'Sidebar → IDE  OR  Header → IDE tab  OR  (phone) bottom bar → Studio',
     description: `Full in-browser development environment. Panels:
+• OPENS EVEN WITH NO APP (2026-09-23) — the phone's bottom-bar Studio button is never greyed out. If you have not built or opened an app yet, Code Studio opens on an "Empty workspace" screen with a New File button — there are no files because there are none yet, and nothing is filled in with example files. Build an app in NavBharatAI Pro (or create a file) and it appears here.
 • FILES — file explorer: browse, create, rename and delete files. Tapping a file gives you See · Open · Copy file · Copy path · Delete. "See" opens the file READ-ONLY — you can read and copy it, but nothing there can change it (useful on a phone, where a stray tap in the editor is easy); "Open" opens it in the Code Studio editor to edit. On desktop the same read-only view is the eye icon that appears when you hover a file. Delete one file (trash icon) or use the Select button to multi-select / Select All and delete many at once — always with a confirmation dialog before anything is removed.
 • EDITOR — syntax-highlighted code editor for all file types (TypeScript, React, Python, HTML, CSS, etc.).
 • PHONE FOOTER (Code Studio's own bottom bar) — five tabs: CODE (the editor), FILES (the file tree), TERMINAL (opens/closes the real shell), DEBUG (the debugger panel — breakpoints) and MORE (the secondary tools: Search, Problems, Source Control, Security, Shortcuts). It never disappears on its own, so there is always a way back from any panel. AI and PREVIEW are deliberately NOT in the footer — both are buttons in the top-right header, and the terminal opens from the footer's Terminal tab ONLY (there is no second floating button on a phone), so every action has exactly one place.

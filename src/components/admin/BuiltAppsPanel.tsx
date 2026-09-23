@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon } from 'lucide-react';
 import {
   canBan, canUnpublish, matchesBuiltApp, previewPlan, publishStateView, replaceRow, type BuiltAppRow,
@@ -340,10 +341,22 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
 
       {preview && (() => {
         const plan = previewPlan(preview.row);
-        return (
-          <div className="fixed inset-0 z-[9998] flex items-center justify-center p-3 sm:p-6 bg-scrim backdrop-blur-sm" role="presentation">
+        // THE SHEET CONTRACT (index.css), added 2026-09-22 from a measured audit. `-over-nav`
+        // because z-9998 paints above the tab bar. `p-3` is gone: a `p-*` utility beats the
+        // overlay class on source order and would zero the notch reserve (12px against a 47px
+        // notch); `sm:p-6` stays, since at ≥sm the insets and the bar are all 0 anyway.
+        // 🔒 Portalled to the body: rendered in place it sat inside the admin console, and any
+        // ancestor with a transform, a filter or a backdrop-blur becomes the containing block for a
+        // `position: fixed` child — the trap tests/theSheetOpensOverTheScreenNotInsideAFooter.test.ts
+        // exists for. A sheet that carries the contract must also be out of reach of that trap.
+        const sheet = (
+          <div className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[9998] flex items-center justify-center sm:p-6 bg-scrim backdrop-blur-sm" role="presentation">
+            {/* `h-full` + `nb-sheet`, not `h-[88vh]`: a `vh` fraction is measured against the LARGE
+                viewport and against a screen that still owes space to the notch. The overlay's box
+                IS the visible area now, so "as tall as it can be" is the honest height — and the
+                iframe below is already `flex-1 min-h-0`, so it fills whatever it is given. */}
             <div role="dialog" aria-modal="true" aria-label={`Preview of ${preview.row.workspaceId}`}
-                 className="w-full max-w-[1100px] h-[88vh] rounded-2xl bg-card border border-line shadow-2xl flex flex-col overflow-hidden">
+                 className="nb-sheet w-full max-w-[1100px] h-full rounded-2xl bg-card border border-line shadow-2xl flex flex-col overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line">
                 <div className="min-w-0">
                   <p className="text-[11px] font-mono text-body truncate">{preview.row.workspaceId}</p>
@@ -378,6 +391,8 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
             </div>
           </div>
         );
+        // No document ⇒ nothing to portal into (a server render), so render in place.
+        return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
       })()}
     </div>
   );

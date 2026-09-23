@@ -1224,9 +1224,17 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         )}
       </div>
 
+      {/* 🔴 `p-0` USED TO CANCEL THE SHEET CONTRACT ON BOTH OF THESE (measured 2026-09-22).
+          `.nb-sheet-overlay-flush` sets the four paddings that reserve the notch, the home
+          indicator and the app's own tab bar. Tailwind emits utilities AFTER components, and both
+          are single-class specificity — so `p-0` won on source order and the computed
+          `padding-bottom` was **0px**. The protection was written, reviewed, present in the class
+          list, and did nothing; the sheet rested 90px under the tab bar with nothing failing
+          anywhere. `sm:p-4` stays: at ≥sm the bar is not rendered and the insets are 0, so it
+          overrides only zeroes and gives the desktop dialog its gutter. */}
       {/* ── App detail ── */}
       {detailApp && (
-        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailApp(null)}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center sm:p-4" onClick={() => setDetailApp(null)}>
           <div className="nb-sheet w-full sm:max-w-lg bg-surface border border-line rounded-t-2xl sm:rounded-2xl p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 mb-3">
               <div className="w-12 h-12 rounded-xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -1264,7 +1272,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       )}
 
       {openApp && (
-        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setOpenApp(null)}>
+        <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center sm:p-4" onClick={() => setOpenApp(null)}>
           <div
             className="nb-sheet w-full sm:max-w-lg overflow-y-auto bg-card border border-line rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"
             onClick={(e) => e.stopPropagation()}

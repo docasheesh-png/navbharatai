@@ -3369,6 +3369,16 @@ export default function App() {
   }, [activeView, user, loadingUser, addLog, toggleTab]);
 
   /**
+   * The free chat's composer History button (admin 2026-09-23: "input box wali line me, mode selecter se
+   * pahle … only in desktop"). `undefined` exactly when `modePickerOpener` is — i.e. while the bottom
+   * bar, which already carries History AND Mode, is on screen — so a phone never shows two History
+   * controls. It reads that answer rather than asking `showsGlobalMobileNav` a second time: the "is the
+   * bar there?" gate is derived ONCE (tests/freeChatModeOnDesktop.test.ts holds it to one). Otherwise it
+   * is the ONE opener above, so the composer door and the bottom-bar door always open the same list.
+   */
+  const historyOpener = modePickerOpener ? openHistoryForCurrentSurface : undefined;
+
+  /**
    * …and publish that same answer to CSS, for the THIRD consumer of it.
    *
    * The bar is `fixed bottom-0` at z-150, so it paints over every dialog below that z-index. Two
@@ -3519,8 +3529,17 @@ export default function App() {
             </div>
           </div>
         }>
+        {/* THE FULL-HEIGHT VIEWS TAKE THE HEIGHT THEY ARE GIVEN, NOT A HAND-TYPED GUESS OF IT
+            (admin 2026-09-23: "input box aur footer me bahut jyada space khali hai"). They used to be
+            sized `100dvh − 3.5rem − notch`, i.e. on the premise that the header is 3.5rem. TopNav is
+            `h-10` — 2.5rem — so every chat, Studio, Preview and Shell screen ended 16px short of the
+            viewport, leaving a dead strip under the composer on every device (and 3.5rem short in
+            focus mode, where there is no header at all). This box is a stretched item of `main`, whose
+            height is already exactly what is left under whatever header is on screen, so with the
+            calc gone it fills that space by construction and cannot drift from the header again.
+            `min-h-0` + `overflow-hidden` still bound it, so the chat scrolls inside, not the page. */}
         <div ref={screenRef} className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:h-[calc(100dvh-3.5rem-var(--nb-safe-top))] max-h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem-var(--nb-safe-top))]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          ['chat', 'nbi_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
@@ -3646,6 +3665,7 @@ export default function App() {
               // button instead — gated on the SAME condition that renders the bar, so exactly one of
               // the two exists on any screen, and both open the one `showModePicker` sheet below.
               onOpenModePicker={modePickerOpener}
+              onOpenHistory={historyOpener}
             />
           )}
 

@@ -625,6 +625,28 @@ html.nb-native-shell .nb-selectable {
     min-height: 0;
   }
 
+  /* ── FLOATING TOASTS AND BANNERS: the sheet contract's sibling (added 2026-09-22) ───────────────
+     A `fixed` toast anchored to an edge has the same problem a sheet has, one element smaller: it
+     knows nothing about the notch, the home indicator or our own tab bar. Measured before this
+     existed — "Copied" confirmations in the admin console and in the component library sat 32px
+     (plain phone) to 66px (notched) BEHIND the tab bar, invisible; the admin's save toast sat 32px
+     under the header even with no notch at all.
+
+     Each element keeps its own gap as `--nb-float-gap`, and the chrome is ADDED to it — so on a
+     desktop, where every chrome variable is 0, the element sits exactly where it always did, and
+     only a phone moves. `max()` because `--nb-bottom-nav` already includes the home-indicator inset
+     whenever the bar is on screen, and must never be counted twice.
+
+     ⚠️ Do not put a `bottom-*` / `top-*` utility on the same element: Tailwind emits utilities after
+     this layer, so the utility would win and silently cancel the whole rule — the exact failure a
+     `p-0` caused on two sheets. tests/everyPopupClearsTheChrome.test.ts refuses the pair. */
+  .nb-float-bottom {
+    bottom: calc(var(--nb-float-gap, 1.5rem) + max(var(--nb-safe-bottom), var(--nb-bottom-nav)));
+  }
+  .nb-float-top {
+    top: calc(var(--nb-float-gap, 1.5rem) + var(--nb-safe-top));
+  }
+
 
 }
 

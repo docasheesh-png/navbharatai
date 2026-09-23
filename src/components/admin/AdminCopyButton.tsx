@@ -147,7 +147,7 @@ export function AdminCopyButton({ pageLabel, jsonPayload }: AdminCopyButtonProps
       ? createPortal(
           <div
             data-nb-no-copy=""
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] bg-card border border-line text-body px-4 py-2 rounded-xl text-xs font-bold shadow-2xl"
+            className="nb-float-bottom fixed left-1/2 -translate-x-1/2 z-[70] bg-card border border-line text-body px-4 py-2 rounded-xl text-xs font-bold shadow-2xl"
           >
             Copy button hidden — reload the admin panel to bring it back.
           </div>,

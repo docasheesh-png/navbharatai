@@ -1632,7 +1632,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
       {/* Toast */}
       {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 bg-indigo-600 text-on-accent px-5 py-3 rounded-2xl font-bold text-sm shadow-2xl animate-in slide-in-from-top-2">
+        <div className="nb-float-top fixed right-6 z-[110] bg-indigo-600 text-on-accent px-5 py-3 rounded-2xl font-bold text-sm shadow-2xl animate-in slide-in-from-top-2">
           {toastMsg}
         </div>
       )}

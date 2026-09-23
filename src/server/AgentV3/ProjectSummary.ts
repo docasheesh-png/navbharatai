@@ -93,7 +93,8 @@ export function isProjectSummaryNarration(text: string | null | undefined): bool
   return first === ANALYSIS_ONLY_HEADLINE
     || first === BUILT_HEADLINE
     || /^🔍 I analyzed your project\. Your source files are untouched — I only wrote /.test(first)
-    || /^✅ Done — I changed \d+ files? in your project/.test(first);
+    || /^✅ Done — I changed \d+ files? in your project/.test(first)
+    || /^📝 No app code was written this time — I only wrote /.test(first);
 }
 
 /**
@@ -121,6 +122,13 @@ export function isProjectSummaryNarration(text: string | null | undefined): bool
  * mirror image of this bug, and the worse one.
  */
 const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.gitignore|\.npmrc|\.nvmrc)$/;
+
+/**
+ * A document, not app code — a report, a README, a plan. Matched on the extension alone: a note is a
+ * note wherever it lives. Deliberately narrow (Markdown and plain text): a `.json` or `.yml` can be real
+ * configuration the app runs on, and calling that "only a note" would hide a real change.
+ */
+const NOTE_PATH = /\.(md|mdx|markdown|txt)$/i;
 
 export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[] }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
@@ -150,8 +158,16 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   const paths = (opts?.changedPaths ?? []).filter((p) => typeof p === 'string' && p);
   const named = paths.length > 0 && paths.length <= 3 ? ` (${paths.join(', ')})` : '';
   const onlyEngineConfig = paths.length > 0 && paths.every((p) => ENGINE_CONFIG_PATH.test(p));
+  // 🔴 A TURN THAT WROTE ONLY NOTES DID NOT BUILD AN APP (autopsy 0d297b25). A fresh-build turn whose
+  // only write was `INSPECTION_REPORT.md` was recapped "✅ Here's what I built: … 11 files" — the eleven
+  // being the starter scaffold the engine seeded. `changedPaths` names what this run wrote, so a run
+  // that wrote documents and nothing else says exactly that, and the project's size is labelled as the
+  // project's, never as this run's output.
+  const onlyNotes = paths.some((p) => NOTE_PATH.test(p)) && paths.every((p) => NOTE_PATH.test(p) || ENGINE_CONFIG_PATH.test(p));
   if (analysisOnly) {
     lines.push(ANALYSIS_ONLY_HEADLINE);
+  } else if (onlyNotes) {
+    lines.push(`📝 No app code was written this time — I only wrote ${paths.length === 1 ? 'a note' : `${paths.length} notes`}${named}. Overview:`);
   } else if (editRun && onlyEngineConfig) {
     lines.push(`🔍 I analyzed your project. Your source files are untouched — I only wrote ${paths.length === 1 ? 'a setup file' : `${paths.length} setup files`}${named} so the app can run here. Overview:`);
   } else if (editRun) {
@@ -169,7 +185,7 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
     counts.push(`${graph.routes.length} route${graph.routes.length === 1 ? '' : 's'}`);
   }
   // For analysis/edit runs the counts describe the EXISTING project, not this run's output.
-  lines.push((analysisOnly || editRun ? 'Project: ' : '') + counts.join(', ') + '.');
+  lines.push((analysisOnly || editRun || onlyNotes ? 'Project: ' : '') + counts.join(', ') + '.');
 
   if (graph.components.length) {
     const names = graph.components.slice(0, MAX_COMPONENTS).join(', ');

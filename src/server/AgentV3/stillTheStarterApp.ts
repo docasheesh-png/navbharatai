@@ -87,3 +87,78 @@ export function starterAppBlocker(entryContent: string | null | undefined): stri
     + 'Health checks pass because an empty scaffold has no defects, not because the app is finished.'
   );
 }
+
+/**
+ * 🔴 A BROWSER THAT RENDERED THE STARTER DID NOT RENDER THE APP (autopsy 0d297b25, 2026-09-23).
+ *
+ * The readiness gate above is the one place that knew, and it said so: `READINESS_BLOCKER` — *"the
+ * app's entry point is still the starter template we seeded — nothing has been built yet"* — and the
+ * build finished `ok: false`. Then three later passes asked a different question, *"does the preview
+ * render?"*, and the answer was yes, because a Hello World page renders perfectly:
+ *
+ *   - `RENDER_RESCUE` upgraded the build to success *"so health, billing and the verdict are honest"*;
+ *   - `VERDICT_HELD_BY_RUN` then held that success against a RED release gate, because *"a real browser
+ *     rendered it"*;
+ *   - `IN_BUILD_GREEN` told the user *"Your app rendered — this working version is now protected"*.
+ *
+ * The user asked for an APK of a project that was never in the workspace, received one Markdown file,
+ * was told *"✅ Your app is built and working — you can use it right now"*, and was charged ₹47.36 of
+ * their welcome balance with the full markup. **Every one of those passes was right about the page and
+ * wrong about the app**, because "the preview renders" and "the app renders" are the same fact only
+ * once somebody has written the app.
+ *
+ * So every producer of the render proof asks THIS, not a copy of it. It is the same exact-match rule
+ * the readiness blocker uses — one question, one answer — so the gate and the proofs can no longer
+ * disagree about the same file.
+ *
+ * `read` rejects for a path that does not exist; the first entry that CAN be read decides, exactly as
+ * `_blockIfStillTheStarterApp` walks them. Nothing readable ⇒ `false`: "we could not look" must never
+ * veto a real app's proof (the asymmetry `isUntouchedStarterEntry` is built on).
+ */
+export async function entryIsStillTheStarter(read: (path: string) => Promise<string>): Promise<boolean> {
+  for (const path of STARTER_ENTRY_PATHS) {
+    let content: string;
+    try { content = await read(path); } catch { continue; }
+    return isUntouchedStarterEntry(content);
+  }
+  return false;
+}
+
+/** The admin-only timeline code for a render that proved only the starter page. */
+export const STARTER_RENDER_CODE = 'RENDERED_ONLY_THE_STARTER' as const;
+
+/** The admin-only line recorded where a render proof was refused because the app is still the starter. */
+export function starterRenderNote(where: string): {
+  code: typeof STARTER_RENDER_CODE; severity: 'info'; message: string; autoResolved: false;
+} {
+  return {
+    code: STARTER_RENDER_CODE,
+    severity: 'info',
+    autoResolved: false,
+    message: `The preview rendered, but what rendered is the untouched starter page we seeded — not an app anybody built. `
+      + `Not counted as the app working (${where}), so it cannot upgrade the verdict, earn the markup, or be protected as a working version.`,
+  };
+}
+
+/**
+ * The user's summary when the only thing standing between this build and "done" is that nothing was
+ * built. `This app isn't fully working yet — a couple of things still need fixing` is the wrong sentence
+ * for it: there is no app to be "not fully working", and "a couple of things" invents a small fix list.
+ *
+ * The model's own closing words are kept beneath the headline, because on a turn like 0d297b25 they are
+ * the valuable part — the model had found, correctly, that the project it was asked to change was not
+ * in the workspace, and the platform replaced that finding with a generic headline.
+ */
+export function starterSummary(modelText: string | null | undefined): string {
+  const head = '⚠️ Nothing has been built yet — this project still holds only the empty starter page, so there is no app to use or preview.';
+  const said = String(modelText ?? '').trim();
+  if (!said) return head;
+  const cap = 1_500;
+  const body = said.length > cap ? `${said.slice(0, cap).replace(/\s+\S*$/, '')}…` : said;
+  return `${head}\n\n${body}`;
+}
+
+/** Is this readiness blocker the "nothing has been built" one? Compared against the ONE producer. */
+export function isStarterBlocker(blocker: string): boolean {
+  return blocker === starterAppBlocker(STARTER_ENTRY_CONTENT);
+}

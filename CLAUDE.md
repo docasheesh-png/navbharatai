@@ -166,8 +166,8 @@ promised to build it.** Every model refused — the model's virtue, never our de
 
 - `ILLEGAL_RULES.ADULT_CONTENT` → `triagePrompt` returns **`block`**, before a sandbox or a token.
   One triage serves BOTH the build route and the chat route, so the ban covers both by construction.
-  🔴 **CORRECTED 2026-09-21 — IT SERVED NEITHER IMAGE ROUTE.** `/api/image/generate` and
-  `/api/image/pro/generate` never called `triagePrompt`; the only thing between a pornographic prompt
+  🔴 **CORRECTED 2026-09-21 — IT DID NOT SERVE THE IMAGE ROUTE.** `/api/image/generate` never called
+  `triagePrompt`; the only thing between a pornographic prompt
   and a picture was whichever provider happened to refuse, and the free provider's anonymous door has
   safety OFF. A PR description (#3234) had stated the ban was enforced there "as before" — written from
   this paragraph, not from the route. Now all THREE surfaces run the same triage
@@ -1558,85 +1558,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
-- **🖼️ AI IMAGE STUDIO PRO — the ₹1/image paid tier. ✅ THE ADMIN SET ALL THREE IN CLOUD RUN
-  2026-09-21:** `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, and `IMAGE_PRO_AUTH_SCHEME` = **`bearer`**.
-  Read by `src/server/lib/imageProGen.ts`; the route is `POST /api/image/pro` (`routes/imageGen.ts`).
-  Recorded hand-to-hand, the same session it was said, per this registry's own rule.
-  🔴 **THE THIRD KEY IS THE ONE THAT LOOKS OPTIONAL AND IS NOT.** `imageProAuthHeaders` defaults to
-  `Authorization: Key <token>`; the host this tier was priced around wants `Bearer <token>`, so
-  without it every call is a 401 and the toggle looks broken rather than misconfigured. The other two
-  accepted values are `key` and `x-key` — one word, three hosts, which is why it is an env and not
-  three code paths.
-  ⚠️ **SETTING THE KEYS IS NOT ENOUGH ON ITS OWN, and this was found by reading the vendor's API docs
-  BEFORE telling the admin to buy anything.** The host is **ASYNCHRONOUS by default**: the POST answers
-  with a prediction id and the picture appears later at a separate result URL, and even in sync mode a
-  task slower than its wait window comes back **HTTP 200** carrying `status: processing`. Every one of
-  its documented response shapes returned `null` from `parseImageProResponse` — verified by running
-  our own parser over them, not reasoned about — so a correctly-configured Pro tier would have
-  produced an honest *"could not finish"* on every single press. Fixed in PR #3215 (`enable_sync_mode`,
-  `data.outputs`, `pendingResultUrl`, `jobFailed`, and a poll loop bounded by the SAME
-  `IMAGE_PRO_TIMEOUT_MS` clock). **Until that PR is merged the keys change nothing** — which is the
-  order to follow: merge, then test.
-  📌 Optional, all with working code defaults: `IMAGE_PRO_ENABLED` (`off` is the kill switch),
-  `IMAGE_PRO_COST_USD` (what one image really costs us — **$0.005**, invoice-anchored, and the basis
-  of `imageProMarginWarning`), `IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` (a family, not one
-  model: a fresh-generation model handed an image and an instruction quietly ignores one of them),
-  and `IMAGE_PRO_MODEL` (overrides BOTH — the escape hatch for a host serving one endpoint, not the
-  normal path).
-  ⚠️ **NOT ONE REAL CALL has been made against the host from any session** — its site is refused by
-  the execution environment's egress policy, so every shape above comes from its published
-  documentation. The first real request is the first real evidence. When it fails, the server log
-  names the cause rather than degrading in silence: `[IMAGE PRO] host returned HTTP 401` (the key or
-  the auth scheme), `HTTP 404` (the endpoint or the model id), `polling returned HTTP …`, or
-  `no image in a 200 response` (a response shape we do not yet read).
-  🔒 **A failure costs the user ₹0** — nothing is charged unless an image is delivered, which is the
-  same "working result or free" law a build obeys, and it is untouched by any of this.
-
-- **🌼 `POLLINATIONS_API_KEY` — the PAID image tier's FIRST engine (built 2026-09-21; admin: *"free wale
-  me user ki ip, paid me hamari … paid pahle pollination use ho, fallback me IMAGE_PRO_KEY"*).** Read by
-  `src/server/lib/pollinationsPaid.ts`; applied in `POST /api/image/pro/generate` (`routes/imageGen.ts`)
-  as RUNG 1, with the `IMAGE_PRO_KEY` host as RUNG 2. Optional beside it: `IMAGE_PRO_POLLINATIONS`
-  (`off` turns off ONLY this rung — Pro goes straight to the host) and `IMAGE_PRO_POLLINATIONS_MODEL`
-  (default `tongyi-mai/z-image-turbo`, the model the tier was priced around).
-  ⚠️ **WHETHER IT IS SET IS UNCONFIRMED.** The admin obtained an `sk_` key at `enter.pollinations.ai/keys`
-  on 2026-09-21 and was asked to save it under exactly this name in Cloud Run; they wrote *"maine api add
-  kar di hai"* without naming where. Per this registry's own rule it is not recorded as SET until they
-  say so. **How to tell without asking:** on the next Pro image the server log carries either
-  `[IMAGE PRO] pollinations delivered — usage {…}` or `[IMAGE PRO] pollinations rung failed (…)`; with
-  the key unset there is NO pollinations line at all and the host serves as before.
-  🔑 **WHAT THE KEY BUYS IS THE PICTURE, not only the bill.** On the anonymous door the free tier uses,
-  `nologo` is IGNORED (the watermark stays) and `private` must be asked for or the picture can appear
-  on the provider's public feed. A keyed request honours both — that is the "privacy + watermark" the
-  admin put first in the order list. The free link now asks `private=true` too; it still carries no
-  key BY DESIGN, because it is handed to the user's browser (`IMAGE_GEN_CLIENT_FETCH`) and a key in a
-  URL a user can copy is a key everybody has. **Do not "fix" the free watermark by adding `?key=`
-  there.** The watermark is the free door's price; the paid door is where it goes.
-  🔒 **THE KEY TRAVELS IN A HEADER (`Authorization: Bearer`), NEVER IN THE URL**, though the provider
-  accepts `?key=` — a URL ends up in logs and error messages, a header does not. The URL builder does
-  not take the key as an input, and a test asserts it is absent from the output.
-  💰 **THE COST IS MEASURED, NOT ASSUMED.** The provider bills in pollen (1 pollen = $1) at a per-model
-  rate no session can read (`gen.pollinations.ai` is refused by the execution environment's egress
-  policy), and reports each request's usage in `x-usage-*` response headers. Every delivery logs them
-  admin-only — the first real Pro image is the first real number. `IMAGE_PRO_COST_USD` ($0.005) still
-  prices the margin warning until then; **retune it from that log line, never from a guess.** The
-  admin's wallet on 2026-09-21 held **0.25 quest pollen and 0 paid**; some models need paid pollen, so
-  a `402` (no pollen) or `403` (key lacks the model) on the first try is a config fact, not a bug, and
-  the log names which — the image still arrives, from the host.
-  ⚠️ **AN EDIT STAYS ON THE HOST.** The keyed door takes words; the user's own photograph is never
-  turned into a link. So `initImage` requests go to `IMAGE_PRO_KEY` as before, and with the host
-  unconfigured an edit on Pro is honestly "not switched on" rather than a fresh picture that ignores
-  the attachment. `imageProAvailable()` (either engine) is now the ONE owner of "is Pro on?" for both
-  the chip (`/api/public-config`) and the route's 503; `imageProConfigured()` still means the host.
-  ✅ **A LATENT BUG FOUND ON THE WAY:** `__IMAGE_SEED`, the test pin for the free URL's seed, had never
-  once pinned anything — `Number.isFinite('5')` is false for the string an env value always is. Fixed
-  in the shared `pollinationsSeed`, with a test that reads the seed back.
-  Test-locked and reversion-proven four ways in `tests/thePaidTierAsksPollinationsFirst.test.ts`.
-
 - **🧮 `AI_IMAGE_FREE_PAID_DAILY_CAP` — the PLATFORM-WIDE daily ceiling on images the FREE tier gets
   from a PAID engine (built 2026-09-21; the number PR #3234 left open). ⚠️ NOT set, and the code default
   is **300 a day across the whole platform**.** Read by `src/server/lib/imageFreePaidBudget.ts`; its
-  single reader is `allowPaidRung()` in `routes/imageGen.ts` (the FREE route only — Pro's bound is the
-  wallet). `0` ⇒ the free tier never touches a paid engine (the free provider or nothing); an unreadable
+  single reader is `allowPaidRung()` in `routes/imageGen.ts`. `0` ⇒ the free tier never touches a paid engine (the free provider or nothing); an unreadable
   value ⇒ the default, **never unlimited** (the `AGENTV3_FEATURE_HEAL_PCT` lesson); only the explicit
   word `off` lifts it.
   🔴 **WHY:** the free tier costs ₹0 while the free provider serves; its paid rungs (Gemini, Grok) and an

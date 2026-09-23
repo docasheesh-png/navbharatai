@@ -73,9 +73,4 @@ describe('🔒 SOURCE — one reader, after the user\'s own allowance, and the c
     expect(deliver).toMatch(/if \(paidRung && gate && gate\.allow && !gate\.isFreeListed\) void imageFreePaidBudget\.record\(\);/);
     expect(free.split('imageFreePaidBudget.record(').length).toBe(2);
   });
-
-  it('the Pro route does not consult it — the wallet is that tier\'s bound', () => {
-    const pro = route.slice(route.indexOf("app.post('/api/image/pro/generate'"));
-    expect(pro).not.toContain('imageFreePaidBudget');
-  });
 });

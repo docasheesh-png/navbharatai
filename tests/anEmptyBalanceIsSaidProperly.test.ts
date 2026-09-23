@@ -4,8 +4,8 @@
  *
  * Two defects were behind that instruction, and both are locked here.
  *
- * 🔴 THE SENTENCE WAS A DRIFTED COPY, THREE TIMES (`passGate.ts`, `toolGate.ts`, the Pro image
- * route), already diverging in wording. One builder now, and the source guards below fail if a
+ * 🔴 THE SENTENCE WAS A DRIFTED COPY (`passGate.ts`, `toolGate.ts` and a third route), already
+ * diverging in wording. One builder now, and the source guards below fail if a
  * fourth copy appears.
  *
  * 🔴 AND FOR A WALLET IN DEBT IT WAS FALSE. The refusal fires at `balanceInr <= 0`, and a build may
@@ -133,7 +133,6 @@ describe('🔒 source guards — what tsc and vitest cannot see', () => {
   const ROUTES = [
     'src/server/professionals/passGate.ts',
     'src/server/tools/toolGate.ts',
-    'src/server/routes/imageGen.ts',
   ];
 
   it('no route keeps its own copy of the sentence', () => {

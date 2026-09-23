@@ -225,7 +225,6 @@ describe('the extraction is actually wired to both tiers and to the brief', () =
       .join('\n');
 
   const FREE = 'src/components/ide/AIImageGenerator.tsx';
-  const PRO = 'src/components/ide/ImageStudioPro.tsx';
   const ROUTE = 'src/server/routes/imageGen.ts';
   const EDITOR = 'src/components/ide/TextOverlayEditor.tsx';
 
@@ -235,8 +234,8 @@ describe('the extraction is actually wired to both tiers and to the brief', () =
     // read the COMPOSER (`extractImageText(prompt)`), which was the same thing only while the screen
     // showed exactly one image. It is now a thread whose box is cleared on a successful send, so a
     // user scrolling up to put a phone number on their FIRST image would have been offered the text
-    // of their third request, or nothing at all. It now follows the Pro rule below: the words that
-    // asked for an image are the words offered on it.
+    // of their third request, or nothing at all. The words that asked for an image are the words
+    // offered on it.
     expect(src).toContain('extractImageText(target.prompt)');
     expect(src).not.toMatch(/extractImageText\(prompt\)/);
     // Both props must be fed the SAME findings — a template lays out what the extraction found, so
@@ -244,12 +243,6 @@ describe('the extraction is actually wired to both tiers and to the brief', () =
     const named = src.match(/extracted=\{(\w+)\}/);
     expect(named, 'the extracted prop is not fed a named value').toBeTruthy();
     expect(src).toContain(`layersFromExtracted(${named![1]}`);
-  });
-
-  it('the Pro studio pre-fills from THAT result\'s prompt', () => {
-    const src = code(PRO);
-    expect(/initialLayers=\{layersFromExtracted\(extractImageText\(/.test(src)).toBe(true);
-    expect(src).toContain('target.prompt');
   });
 
   it('the editor actually uses what it is given, rather than accepting a dead prop', () => {

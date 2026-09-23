@@ -39,8 +39,8 @@ export interface ImageGenRequest {
    * The user's OWN picture, as a `data:<mime>;base64,<...>` URL — present only when this request is
    * an EDIT rather than a fresh generation (admin 2026-09-21).
    *
-   * Its presence, not a separate mode field, is what makes this an edit: the same rule the paid tier
-   * already uses (`imageProMode`), so a user never has to set a control to match what they attached.
+   * Its presence, not a separate mode field, is what makes this an edit, so a user never has to set a
+   * control to match what they attached.
    */
   initImage?: string;
 }
@@ -117,10 +117,9 @@ export const IMAGE_SIZE_PIXELS = PRESET_PIXELS;
 /**
  * The pixels ANY size request becomes — a preset id, or the user's own width and height.
  *
- * 🔑 ONE ENTRY POINT FOR BOTH ROUTES. The free route and the Pro route each used to write
- * `IMAGE_SIZE_PIXELS[size] || IMAGE_SIZE_PIXELS.square` for themselves, which was fine while there
- * were four fixed answers and is exactly how a custom size would have ended up understood by one
- * route and ignored by the other. `resolveCustomSize` clamps and rounds, so an unreadable or absurd
+ * 🔑 ONE ENTRY POINT. A caller writing `IMAGE_SIZE_PIXELS[size] || IMAGE_SIZE_PIXELS.square` for
+ * itself was fine while there were four fixed answers, and is exactly how a custom size would end
+ * up understood by one caller and ignored by another. `resolveCustomSize` clamps and rounds, so an unreadable or absurd
  * pair falls back rather than reaching a provider.
  *
  * PURE.
@@ -169,8 +168,8 @@ export function pollinationsSeed(env: NodeJS.ProcessEnv = process.env): number {
  * ⚠️ `nologo=true` IS SENT AND, ON THIS DOOR, IS NOT HONOURED — stated rather than implied. The
  * provider strips its watermark only for a request that carries an account key, and this link
  * carries none BY DESIGN: it is handed to the browser, and a key in a URL a user can copy is a key
- * everybody has. So the free picture carries the provider's mark; the PAID rung (`pollinationsPaid.ts`)
- * is where the key lives and where the mark goes. Do not "fix" this by adding `?key=` here.
+ * everybody has. So the free picture carries the provider's mark. Do not "fix" this by adding
+ * `?key=` here.
  */
 export function pollinationsImageUrl(
   prompt: string,
@@ -334,8 +333,7 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   if (!body || typeof body !== 'object') return false;
   const b = body as Record<string, unknown>;
   // A picture on its own IS a request ("re-render this"), so words are required only when there is
-  // no picture — the same derivation `imageProMode` makes on the paid tier, where an attachment with
-  // no words is a re-imagining rather than an error.
+  // no picture: an attachment with no words is a re-imagining rather than an error.
   const hasInit = typeof b.initImage === 'string' && b.initImage.trim().length > 0;
   if (b.prompt !== undefined && typeof b.prompt !== 'string') return false;
   if (!hasInit && (typeof b.prompt !== 'string' || !b.prompt.trim())) return false;

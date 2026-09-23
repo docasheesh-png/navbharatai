@@ -155,8 +155,7 @@ const num = (n: string) => Number(n).toLocaleString('en-IN');
  * The FIRST issue as a sentence a person can act on — or null when it is not a shape a person
  * could have caused by typing.
  *
- * 🔴 WHY (admin, with a screenshot, 2026-09-23: "paid image generate nahi ho rahi"): a pasted
- * image brief over the 2,000-character limit came back as **"Invalid request body"** — every
+ * 🔴 WHY (admin, with a screenshot, 2026-09-23): a pasted image brief over the 2,000-character limit came back as **"Invalid request body"** — every
  * surface shows the server's `error` verbatim, so the only thing the user learned was that
  * something was wrong. The limit, the length and the remedy were all in `issues`, which no screen
  * reads. This is one helper for all 37 `validateBody` routes rather than a message per route, so a

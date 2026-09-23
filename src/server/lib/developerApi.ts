@@ -350,7 +350,6 @@ export const SCOPE_ROUTES: Readonly<Record<SpecificApiScope, { method: 'GET' | '
   'read:builds': { method: 'GET', path: '/api/v1/builds' },
   'ai:chat': { method: 'POST', path: '/api/v1/chat/completions' },
   'ai:professionals': { method: 'POST', path: '/api/v1/professionals/:id/chat' },
-  'ai:images': { method: 'POST', path: '/api/v1/images/generations' },
 };
 
 // ── Addressing an expert ─────────────────────────────────────────────────────────────────────────
@@ -385,87 +384,6 @@ export function professionalIdFromModel(model: unknown): string | null {
 /** The model name one expert answers under. */
 export function professionalModelName(id: string): string {
   return `${PROFESSIONAL_MODEL_PREFIX}${id}`;
-}
-
-// ── Images ───────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * 🖼️ ONE IMAGE, ONE RUPEE — the price this platform already charges, not a new one (admin 2026-09-22).
- *
- * 🔴 WHY THE API'S IMAGES ARE THE **PRO** TIER AND NOT THE FREE ONE, which is the whole decision here.
- * THE ONE-WALLET LAW forbids inventing a cost, and **no image model is on the rate card** — so a free-
- * tier image genuinely cannot be priced, and its paid rungs are bounded by a platform-wide daily COUNT
- * that exists to stop NavBharatAI's own bill running away. Serving an API caller from that pool would
- * spend a budget the app's own users are inside, for a caller we could not bill. The Pro tier has a
- * real, already-published price (₹1), a real wallet debit and a real margin check — so it is the only
- * honest engine for a door that bills. `IMAGE_PRO_PRICE_INR` stays the single source of that number.
- */
-export const MAX_IMAGES_PER_REQUEST = 4;
-
-export type ImageResponseFormat = 'b64_json' | 'data_url';
-
-export type ImageRequestVerdict =
-  | { ok: true; prompt: string; n: number; size?: string; format: ImageResponseFormat }
-  | { ok: false; reason: 'no-prompt' | 'too-long' | 'bad-n' | 'bad-format' };
-
-export const MAX_IMAGE_PROMPT_CHARS = 2_000;
-
-/**
- * Read an OpenAI-shaped `images/generations` body. PURE, total, never throws.
- *
- * ⚠️ `n` is CLAMPED nowhere — an out-of-range `n` is REFUSED instead, unlike the daily cap which is
- * clamped. The difference is who pays for being wrong: a clamped cap costs the holder nothing, while
- * silently turning `n: 50` into 4 would bill ₹4 for a request the caller believes cost ₹50 and will
- * retry. When money is the unit, say no rather than guess.
- */
-export function readImageRequest(body: unknown): ImageRequestVerdict {
-  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-  const prompt = String(b.prompt ?? '').trim();
-  if (!prompt) return { ok: false, reason: 'no-prompt' };
-  if (prompt.length > MAX_IMAGE_PROMPT_CHARS) return { ok: false, reason: 'too-long' };
-
-  let n = 1;
-  if (b.n !== undefined && b.n !== null && b.n !== '') {
-    const asked = Number(b.n);
-    if (!Number.isInteger(asked) || asked < 1 || asked > MAX_IMAGES_PER_REQUEST) return { ok: false, reason: 'bad-n' };
-    n = asked;
-  }
-
-  let format: ImageResponseFormat = 'b64_json';
-  if (b.response_format !== undefined && b.response_format !== null && b.response_format !== '') {
-    const f = String(b.response_format).trim();
-    // `url` is deliberately NOT accepted: we never hand out a third-party origin (white-label is a
-    // network fact here, not only a wording one), and we host no public image bucket for this. An
-    // honest refusal beats a `url` field carrying something that is not a URL.
-    if (f !== 'b64_json' && f !== 'data_url') return { ok: false, reason: 'bad-format' };
-    format = f;
-  }
-
-  const size = typeof b.size === 'string' && b.size.trim() ? b.size.trim() : undefined;
-  return { ok: true, prompt, n, size, format };
-}
-
-/**
- * An OpenAI-shaped image response. PURE.
- *
- * `b64_json` is bare base64, exactly as the standard has it, so an existing client's `b64_json`
- * handling works untouched. `data_url` is the convenience form for a browser or a quick script —
- * offered because the alternative is every caller writing the same six-line prefix by hand.
- */
-export function imageGenerationResponse(
-  images: ReadonlyArray<{ image: string; mimeType: string }>,
-  opts: { createdMs: number; format: ImageResponseFormat; chargedInr: number },
-): Record<string, unknown> {
-  return {
-    created: Math.floor(opts.createdMs / 1000),
-    model: PUBLIC_MODEL_NAME,
-    data: images.map((img) => (opts.format === 'data_url'
-      ? { data_url: img.image, mime_type: img.mimeType }
-      : { b64_json: img.image.replace(/^data:[^;]+;base64,/, ''), mime_type: img.mimeType })),
-    // What this request actually took off the wallet. A developer metering their own users needs it,
-    // and it is the real debited figure — never the quote, and ₹0 on a free-listed account.
-    chargedInr: opts.chargedInr,
-  };
 }
 
 /** The day a key's spend is counted against — UTC, on the server's clock, like every other rollup. */

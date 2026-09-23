@@ -8,7 +8,6 @@
 //   GET  /api/v1/builds                    read:builds       — the holder's apps, with live links where published
 //   POST /api/v1/chat/completions          ai:chat           — NavBharatAI's AI, on the holder's wallet, capped per key
 //   POST /api/v1/professionals/:id/chat    ai:professionals  — ask one of the ~80 expert AIs by id
-//   POST /api/v1/images/generations        ai:images         — NavBharatAI Pro images, ₹1 each
 //   GET  /api/v1/models                    (any valid key)   — so `client.models.list()` works
 //   GET  /api/v1/key                       (any valid key)   — what THIS key may do, and what it spent today
 //
@@ -32,22 +31,13 @@ import { apiKeyAuth, requireScope, apiAuthOf } from './apiKeys';
 import {
   readChatCompletionRequest, foldMessagesToPrompt, DEVELOPER_API_SYSTEM_PROMPT, keyDecision,
   refusalMessage, refusalStatus, chatCompletionResponse, apiError, takeRateSlot, keyDayKey,
-  normalizeDailyCapInr, professionalIdFromModel, professionalModelName, readImageRequest,
-  imageGenerationResponse, MAX_IMAGES_PER_REQUEST, MAX_IMAGE_PROMPT_CHARS, PUBLIC_MODEL_NAME,
+  normalizeDailyCapInr, professionalIdFromModel, professionalModelName, PUBLIC_MODEL_NAME,
   wantsStream, wantsStreamUsage, chatCompletionStream,
   type RateWindow, type ChatMessage,
 } from '../lib/developerApi';
 import { hasScope, effectiveScopes, FULL_ACCESS_SCOPE } from '../lib/ApiKeyManager';
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChatWithUsage } from '../professionals/engine';
-import { decideImageSafety } from '../lib/imageSafety';
-import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
-import { imagePixelsFor } from '../lib/imageGen';
-import { generateProImages } from '../lib/imageProEngine';
-import { imageProAvailable } from '../lib/pollinationsPaid';
-import { IMAGE_PRO_PRICE_INR, imageProFailureMessage } from '../lib/imageProGen';
-import { debitWalletRolledUp } from '../lib/walletDebit';
-import { featureRollupRef, featureLabel } from '../lib/walletFeature';
 import { routeParam } from '../lib/expressCompat';
 import { apiKeyUsageStore } from '../lib/ApiKeyUsageStore';
 import { userCostStore } from '../lib/UserCostStore';
@@ -103,27 +93,21 @@ function keyAllowedNow(keyId: string, nowMs: number): boolean {
 /**
  * 🔒 THE SPEND GATE — every door that can cost money passes through exactly this, in this order.
  *
- * Extracted from the chat route on 2026-09-22, when experts and images became two more doors that
- * spend the same wallet. Three doors with three hand-written copies of "rate slot, triage, cap,
- * wallet" is the drifted-copy class; one gate is what makes "a banned prompt is refused before a
- * token is spent, whoever is asking and however they ask" true of doors nobody has written yet.
+ * One gate for every door that spends the wallet — chat and the expert doors — so "rate slot, triage,
+ * cap, wallet" cannot drift between them, and a banned prompt is refused before a token is spent,
+ * whoever is asking and however they ask, on doors nobody has written yet too.
  *
  * Order is cheap-first on purpose: every refusal that costs nothing happens before a provider is
  * called. Returns `null` having ALREADY responded when the caller may not proceed.
  *
- * ⚠️ `quotedInr` is the one difference between an AI turn and an image. A chat answer's price is
- * unknown until it exists, so the cap can only be checked as "have you already reached it?". An
- * image's price IS known in advance — so when it is passed, the gate refuses a request that WOULD
- * cross the cap rather than letting it through and reporting the overshoot afterwards. Checking a
- * known price against a stated limit is not an extra rule; it is the limit actually working.
+ * ⚠️ A chat answer's price is unknown until it exists, so the cap is checked as "have you already
+ * reached it?".
  */
 async function spendGate(
   res: Response,
   auth: { userId: string; keyId: string; dailyCapInr?: number },
   now: number,
   words: string,
-  surface: 'chat' | 'image',
-  quotedInr = 0,
 ): Promise<{ capInr: number; freeListed: boolean } | null> {
   if (!keyAllowedNow(auth.keyId, now)) {
     res.status(429).json(apiError('rate_limited', 'Too many requests on this key. Please slow down to under 60 per minute.'));
@@ -132,37 +116,17 @@ async function spendGate(
 
   // SAFETY TRIAGE — the same three-way check the build and chat routes run, for the same reason: a
   // banned request is refused before a token is spent, whoever is asking and however they ask.
-  // An IMAGE request is judged by the image triage, which is the one that carries the picture rules;
-  // a text turn by the prompt triage. Same verdicts, same refusal, different rule book.
   try {
-    if (surface === 'image') {
-      const safety = decideImageSafety(words);
-      if (safety.triage.verdict !== 'allow') {
-        // ⚠️ Recorded HERE rather than through `triageImageRequest`: that helper resolves the uid from
-        // a Firebase token, which an API-key request does not carry, so every flag it recorded on this
-        // door would read `anon`. We know exactly whose key this is.
-        audit(safety.blocked ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
-          { uid: auth.userId, rule: safety.triage.ruleId, class: safety.triage.contentClass, tier: 'api' }, 'warn');
-        void recordSafetyFlag(buildSafetyFlag({
-          uid: auth.userId, triage: safety.triage, surface: 'image', excerpt: safetyExcerpt(words), at: now,
-        })).catch(() => { /* the decision stands either way */ });
-      }
-      if (safety.blocked) {
-        res.status(422).json(apiError('content_policy', safety.message));
+    const triage = triagePrompt(words);
+    if (triage.verdict !== 'allow') {
+      audit(triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
+        { uid: auth.userId, rule: triage.ruleId, class: triage.contentClass, tier: 'api' }, 'warn');
+      void recordSafetyFlag(buildSafetyFlag({
+        uid: auth.userId, triage, surface: 'chat', excerpt: safetyExcerpt(words), at: now,
+      })).catch(() => { /* the decision stands either way */ });
+      if (triage.verdict === 'block') {
+        res.status(422).json(apiError('content_policy', blockMessage(triage.contentClass, words)));
         return null;
-      }
-    } else {
-      const triage = triagePrompt(words);
-      if (triage.verdict !== 'allow') {
-        audit(triage.verdict === 'block' ? 'PROMPT_BLOCKED' : 'PROMPT_FLAGGED',
-          { uid: auth.userId, rule: triage.ruleId, class: triage.contentClass, tier: 'api' }, 'warn');
-        void recordSafetyFlag(buildSafetyFlag({
-          uid: auth.userId, triage, surface: 'chat', excerpt: safetyExcerpt(words), at: now,
-        })).catch(() => { /* the decision stands either way */ });
-        if (triage.verdict === 'block') {
-          res.status(422).json(apiError('content_policy', blockMessage(triage.contentClass, words)));
-          return null;
-        }
       }
     }
   } catch (e) {
@@ -178,9 +142,8 @@ async function spendGate(
     emailForUid(auth.userId),
   ]);
   const freeListed = isAgentV3FreeUser(auth.userId, email);
-  // A known price is added to what has been spent BEFORE the comparison — see the note above.
   const decision = keyDecision({
-    spentTodayInr: spent.spentInr + Math.max(0, quotedInr),
+    spentTodayInr: spent.spentInr,
     capInr,
     walletBalanceInr: balance,
     freeListed,
@@ -190,7 +153,7 @@ async function spendGate(
       decision.reason === 'key-cap' ? 'daily_cap_reached' : 'insufficient_balance',
       refusalMessage(decision.reason, capInr),
       decision.reason === 'key-cap'
-        ? { dailyCapInr: capInr, spentTodayInr: Math.round(spent.spentInr * 100) / 100, ...(quotedInr > 0 ? { wouldCostInr: quotedInr } : {}) }
+        ? { dailyCapInr: capInr, spentTodayInr: Math.round(spent.spentInr * 100) / 100 }
         : {},
     ));
     return null;
@@ -357,7 +320,7 @@ export function registerDeveloperApiRoutes(app: Express): void {
     }
 
     const lastUser = request.messages[request.messages.length - 1].content;
-    const gate = await spendGate(res, auth, now, lastUser, 'chat');
+    const gate = await spendGate(res, auth, now, lastUser);
     if (!gate) return;
 
     const system = request.system ? `${DEVELOPER_API_SYSTEM_PROMPT}\n\n${request.system}` : DEVELOPER_API_SYSTEM_PROMPT;
@@ -403,84 +366,6 @@ export function registerDeveloperApiRoutes(app: Express): void {
       return;
     }
     await answerAsExpert(res, auth, now, routeParam(req.params.id), request.system, request.messages, streamChoiceOf(req.body));
-  });
-
-  // ── ai:images ───────────────────────────────────────────────────────────────────────────────
-  //
-  // 🔴 THE PRO ENGINE, AT THE PRO PRICE — see `MAX_IMAGES_PER_REQUEST` in lib/developerApi.ts for why
-  // the API cannot serve the free tier (no image model is on the rate card, so a free-tier image
-  // cannot be priced, and its paid rungs are bounded by a platform-wide budget the app's own users
-  // are inside). ₹1 an image is the number this platform already publishes; nothing here invents one.
-  app.post('/api/images/generations', ipLimiter, apiKeyAuth, requireScope('ai:images'), async (req: Request, res: Response) => {
-    const auth = apiAuthOf(req);
-    const now = Date.now();
-
-    const request = readImageRequest(req.body);
-    if (!request.ok) {
-      const why: Record<typeof request.reason, string> = {
-        'no-prompt': 'Send a `prompt` describing the image you want.',
-        'too-long': `That prompt is too long. Keep it under ${MAX_IMAGE_PROMPT_CHARS} characters.`,
-        'bad-n': `\`n\` must be a whole number from 1 to ${MAX_IMAGES_PER_REQUEST}.`,
-        'bad-format': '`response_format` must be "b64_json" (the default) or "data_url".',
-      };
-      res.status(400).json(apiError('invalid_request', why[request.reason]));
-      return;
-    }
-
-    // Honest not-available, never a silent fall back to the free provider: that would charge the Pro
-    // price for a picture the caller could have had for nothing. Same rule as the app's own Pro door.
-    if (!imageProAvailable()) {
-      res.status(503).json(apiError('engine_unavailable', imageProFailureMessage('unconfigured')));
-      return;
-    }
-
-    // The price is known before the work, so the cap is checked against it — see `spendGate`.
-    const quotedInr = request.n * IMAGE_PRO_PRICE_INR;
-    const gate = await spendGate(res, auth, now, request.prompt, 'image', quotedInr);
-    if (!gate) return;
-
-    // The same art direction the app's own users get. A paid image through a different door is a
-    // different CALLER, not a worse brief.
-    const crafted = withInlineNegative(craftImagePrompt({ prompt: request.prompt, size: request.size }));
-    const px = imagePixelsFor(request.size);
-
-    // `n` images means `n` calls: the engine delivers one picture per call today, and asking it for a
-    // batch it does not do would bill for pictures that never arrive. Sequential rather than parallel
-    // because each one is a paid provider call and a burst is exactly what the rate limit exists for.
-    const images: Array<{ image: string; mimeType: string }> = [];
-    for (let i = 0; i < request.n; i += 1) {
-      const produced = await generateProImages({ prompt: request.prompt, size: request.size }, 'text-to-image', crafted, px);
-      if (!produced.ok) {
-        // Nothing more will come. Whatever DID arrive is served and charged; if nothing did, the
-        // failure is the answer and nothing is charged at all.
-        if (images.length === 0) {
-          res.status(produced.status).json(apiError('engine_unavailable', produced.message));
-          return;
-        }
-        break;
-      }
-      images.push(...produced.images);
-    }
-
-    // ⚠️ Charged on what was DELIVERED, never on what was asked for — the app route's own rule.
-    const chargedInr = gate.freeListed ? 0 : images.length * IMAGE_PRO_PRICE_INR;
-    res.status(200).json(imageGenerationResponse(images, { createdMs: now, format: request.format, chargedInr }));
-
-    if (chargedInr > 0) {
-      // After the answer and never awaited into it: a money-path failure must not cost the caller the
-      // images they already have. The SAME rollup ref the app's Pro door uses, so one person's images
-      // are one line on their statement however they were made.
-      void debitWalletRolledUp(getServerDb() as never, auth.userId, {
-        billedInr: chargedInr,
-        rollupRef: featureRollupRef('image-pro', now),
-        description: featureLabel('image-pro'),
-        feature: 'image-pro',
-      }).then((r) => {
-        if (!r.ok) console.error(`[DEVAPI] image wallet debit FAILED for ${auth.userId}: ${r.error} — images served, not charged.`);
-      }).catch(() => { /* logged above; never throws into the request */ });
-    }
-    // The key's own counter moves on what was charged, so the daily cap keeps biting.
-    if (images.length > 0) void apiKeyUsageStore.record(auth.keyId, keyDayKey(now), images.length * IMAGE_PRO_PRICE_INR);
   });
 
   // ── any valid key: what can I address? ──────────────────────────────────────────────────────
@@ -560,7 +445,7 @@ async function answerAsExpert(
   }
 
   const last = messages[messages.length - 1].content;
-  const gate = await spendGate(res, auth, now, last, 'chat');
+  const gate = await spendGate(res, auth, now, last);
   if (!gate) return;
 
   // `readChatCompletionRequest` folds every `system` message into `developerSystem`, so nothing in

@@ -1,7 +1,7 @@
 /**
  * A request the validator refuses must say WHY, in words a person can act on.
  *
- * The real failure (admin screenshot, 2026-09-23): a pasted Pro image brief longer than 2,000
+ * The real failure (admin screenshot, 2026-09-23): a pasted image brief longer than 2,000
  * characters came back as "Invalid request body", and the screen shows the server's `error`
  * verbatim — so the user learned nothing. The limit and the real length were in `issues`, which
  * no screen reads.
@@ -19,8 +19,8 @@ function run(schema: ReturnType<typeof vobject>, body: unknown) {
   return { res, next, payload: res.json.mock.calls[0]?.[0] };
 }
 
-// The exact shape of the Pro image route's schema (routes/imageGen.ts `proSchema`).
-const proLike = vobject({
+// The shape of the image route's schema (routes/imageGen.ts `schema`).
+const imageLike = vobject({
   prompt: vstring({ optional: true, max: 2_000 }),
   size: vstring({ optional: true, max: 40 }),
   width: vnumber({ optional: true, int: true, min: 256, max: 2048 }),
@@ -28,7 +28,7 @@ const proLike = vobject({
 
 describe('a too-long prompt says how long, and what the limit is', () => {
   it('the failing case: a 2,431-character brief names both numbers and the remedy', () => {
-    const { res, next, payload } = run(proLike, { prompt: 'x'.repeat(2_431), size: '1:1' });
+    const { res, next, payload } = run(imageLike, { prompt: 'x'.repeat(2_431), size: '1:1' });
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(payload.error).not.toBe('Invalid request body');
@@ -41,7 +41,7 @@ describe('a too-long prompt says how long, and what the limit is', () => {
   });
 
   it('exactly at the limit passes', () => {
-    const { next } = run(proLike, { prompt: 'x'.repeat(2_000) });
+    const { next } = run(imageLike, { prompt: 'x'.repeat(2_000) });
     expect(next).toHaveBeenCalled();
   });
 

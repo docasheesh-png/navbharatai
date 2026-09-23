@@ -3527,6 +3527,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         void loadHistory();
       },
       openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
+      closeSheet: () => setMobileSheet(null),
       openPreview: () => openSurfaceFromFooter('preview'),
       openFiles: () => openSurfaceFromFooter('files'),
       openMore: () => {

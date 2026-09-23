@@ -54,6 +54,7 @@ import {
   type ChatWindow, type ConversationRef,
 } from './lib/chatWindows';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
+import { footerTapPlan, type ModeFooterKey } from './lib/footerSheets';
 import { startFreshCase } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
@@ -4496,7 +4497,7 @@ export default function App() {
               // duplicated the action already in the More sheet. Studio edits the SAME live file map
               // v5.0 builds into (files state + workspace syncer), so this is one feature reached from
               // two places — not a second editor.
-              { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => toggleTab('studio'), active: false },
+              { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => { v3FooterApi.closeSheet(); toggleTab('studio'); }, active: false },
               // The Action Navigator's roll-up (admin 2026-09-21). A TONE, not a boolean: the colour
               // decision lives in ActionDot alone, so this row cannot invent a third meaning for a dot.
               { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history', badgeTone: v3FooterApi.moreBadge, badgeLabel: v3FooterApi.moreBadgeLabel },
@@ -4546,6 +4547,13 @@ export default function App() {
                 <button
                   key={key}
                   onClick={() => {
+                    // ONE SHEET AT A TIME (admin 2026-09-23): the bar paints over the sheets it opens,
+                    // so a tap here must first close whatever another item left open, or the new
+                    // screen comes up UNDER it and nothing seems to switch. See lib/footerSheets.ts.
+                    const plan = footerTapPlan(key as ModeFooterKey, { mode: showModePicker, history: historyPopupOpen });
+                    if (plan.close.includes('mode')) setShowModePicker(false);
+                    if (plan.close.includes('history')) setHistoryPopupOpen(false);
+                    if (!plan.proceed) return;
                     if (key === 'mode') { setShowModePicker(true); return; }
                     // The scoping, the popup-vs-tab decision and the sign-in gate all live in
                     // `openHistoryForCurrentSurface` — the ONE definition the desktop door calls too,

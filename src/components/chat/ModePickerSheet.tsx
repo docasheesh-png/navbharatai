@@ -126,11 +126,18 @@ export function ModePickerSheet({
   );
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Choose AI mode">
+    // UNDER THE FOOTER, like History (admin 2026-09-23: "Mode press karne ke baad History, AI, Settings
+    // kisi par click karo, Mode hat ta hi nahi hai"). This sheet sat at z-200, ABOVE the tab bar's
+    // z-150, and covered it: a tap on another footer item landed on this sheet's rows or backdrop, so
+    // it never switched. At z-130 with `nb-sheet-overlay-flush` — exactly HistoryPopup's footing — the
+    // bar stays on top and tappable, the card ends above it, and the footer's own rule
+    // (lib/footerSheets.ts) closes this sheet when another item is tapped. The overlay reserves the
+    // device inset itself, so the card no longer adds it a second time.
+    <div className="nb-sheet-overlay-flush fixed inset-0 z-[130] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Choose AI mode">
       <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-scrim backdrop-blur-sm" />
       <div
         className="relative w-full sm:max-w-md bg-surface border-t sm:border border-line sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
-        style={{ maxHeight: 'min(72dvh, 40rem)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        style={{ maxHeight: 'min(72dvh, 40rem)' }}
       >
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <h3 className="text-[13px] font-black uppercase tracking-widest text-ink">Choose AI mode</h3>

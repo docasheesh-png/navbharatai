@@ -69,6 +69,7 @@ import { capSessionReports } from '../AgentV3/BuildDiagnostics';
 import { firstPassStatsFromMeta, firstPassHeadline, FIRST_PASS_TARGET } from '../../lib/firstPassQuality';
 import { licenceExposures, licenceExposureHeadline, activeExposureCount } from '../../lib/licenceExposure';
 import { builderScorecard, scorecardHeadline } from '../../lib/builderMetrics';
+import { collectScorecardBuilds, populationNote } from '../lib/scorecardPopulation';
 import { categorizeBuildFailures } from '../lib/buildFailureCategory';
 import { selectStaleDevices, canBroadcast, cohortSummary, updateBroadcastPayload } from '../lib/updateBroadcast';
 import { deviceTokenStore } from '../lib/DeviceTokenStore';
@@ -1085,11 +1086,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/builder-scorecard', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '200'), 10) || 200, 1), 500);
-      const reports = await listAdminBuildReports(limit);
-      // healCount rides along so the scorecard can state the 50/50 law as a number: how often the
-      // builder had to repair its OWN output. It is already on every stored report's meta.
-      const card = builderScorecard(reports);
-      res.json({ ...card, headline: scorecardHeadline(card), window: limit, reportsRead: reports.length });
+      // 🔴 THE SOURCE IS THE WHOLE FIX (admin 2026-09-24: "sahi source laga do"). This used to read
+      // `listAdminBuildReports` — the REPORT INBOX, which a build enters only when the engine judged
+      // the outcome BAD or a user pressed Report. Neither admits a build that worked, so a card
+      // headed "Build success" was reporting the success rate of the complaints, and said nothing
+      // about it. See `scorecardPopulation.ts` for the full account and for why a naive swap would
+      // have destroyed edit survival.
+      const { builds, population } = await collectScorecardBuilds(limit);
+      const card = builderScorecard(builds);
+      res.json({
+        ...card,
+        population,
+        // The population rides INSIDE the headline, not beside it: a note the card could forget to
+        // render is a note that goes missing, and "of 41" with no sample named is what was wrong.
+        headline: `${scorecardHeadline(card)}\n${populationNote(population)}`,
+        window: limit,
+        reportsRead: population.builds,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to compute the builder scorecard.' });
     }

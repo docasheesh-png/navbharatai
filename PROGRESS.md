@@ -79172,6 +79172,73 @@ den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebu
   `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
   the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.
 
+## 2026-09-24 — "sahi source laga do": the Builder scorecard was scoring COMPLAINTS
+
+**Admin sent the Builder scorecard** (41 builds, 90.2% success, 6.49 heals per build, worst 86) — a
+report, so the fifth absolute rule applies. The autopsy's headline finding was not in the numbers.
+
+**🔴 `/api/admin/builder-scorecard` read `listAdminBuildReports()` — the admin REPORT INBOX.** A build
+enters that collection by exactly two routes, and every writer in the repo was counted before the
+claim was made: `shouldAutoReport`, which fires only on `verdict === 'bad'`, and a user pressing
+**Report**. **Neither admits a build that worked.** So a card headed *"Build success: 90.2% of 41"*
+was reporting the success rate of the complaints, and nothing on it said so.
+
+**🔑 THE REPO ALREADY KNEW, IN WRITING.** `/api/admin/failure-categories` (2026-09-16) was moved to
+the comprehensive source, and its docblock names the trap verbatim: *"rather than the user-submitted
+inbox (`listAdminBuildReports`), which is only the builds someone bothered to click Report on and
+would answer a different, biased question."* The instance was fixed; the sibling was never hunted —
+this repo's headline class (autopsy `a38c6fef`), now the seventh recorded instance.
+
+**⚠️ Which direction the bias ran, because it is not the obvious one:** a complaint sample makes the
+engine look **worse** than it is. That is still a defect — it is the number the admin would act on,
+and an honest number can be bad news while a number whose population is unknown is not a number.
+
+**🔴 A NAIVE SWAP WOULD HAVE TRADED ONE PROBLEM FOR ANOTHER.** `listAllDiagnostics` returns ONE row
+per workspace (each workspace's LATEST build). Edit survival groups builds BY workspace, so on that
+source every project would hold exactly one build, `edits` would be 0, and the metric would read
+"unknown" for ever while looking like it had simply found nothing. `scorecardPopulation.ts` therefore
+reads the workspace INDEX from `listAllDiagnostics` and the BUILDS from each workspace's own
+`history` subcollection, bounded at 60 workspaces, 10 queries in flight.
+
+**🔀 AND THE 🔀 BUCKET WAS FREE ALL ALONG.** `counts.workarounds` has been on every report since the
+bucket was written — its own comment explains why it is kept OUT of `autoResolved`: *"a tally that
+counts them as heals hides exactly the debt the tally exists to surface."* The scorecard then showed
+the heal tally and not this one, so the debt was hidden by the scorecard instead. `workaroundPressure`
+now states it as debt, never summed into the heal line.
+
+**The card names its own population**, inside the headline rather than beside it (a note a card could
+forget to render is a note that goes missing): how many builds, from how many workspaces, EVERY
+workspace and not only the reported ones, plus the history bound and any workspace whose history
+could not be read — counted and disclosed, **never folded into "no builds"**, because a failed read
+counted as zero is a metric quietly improving itself on an outage.
+
+**🔒 `tests/theScorecardWasScoringComplaints.test.ts` (27 cases), five reversion proofs:** the source
+pointed back at the inbox; an absent heal count scored as a clean pass; a failed history read dropped
+silently; the history bound removed; an unrecorded build counted as a clean zero workaround.
+
+**⚠️ THE THIRD PROOF DID NOT BITE, AND THE TEST WAS WRONG, NOT THE CODE.** It checked that
+`populationNote` RENDERS `historyUnreadable` and never that the collector INCREMENTS it — so deleting
+both the counter and the fallback passed every case, and the workspace simply vanished from the
+numbers. The suite now drives `collectScorecardBuilds` itself against mocked stores. **That is three
+days running that a guard tested the display instead of the behaviour** (#3248's banner guard, its
+predecessor's file-wide `toContain`, and this).
+
+**⚠️ AND TWO PRE-EXISTING ASSERTIONS HAD PINNED THE BUG.** `builderMetrics.test.ts` asserted
+`toContain('listAdminBuildReports(limit)')` — the fix could not land without deleting an assertion.
+Its own comment states the property it meant (§53: *"no hardcoded benchmark projects. Real builds or
+nothing"*), which is untouched; it is now asserted in its stronger form. **A test that pins an
+implementation pins its bugs too.**
+
+**Also corrected:** the card's window label said *"last 200 builds"* and the window is 200
+**workspaces**.
+
+**Still open (rule 6):** the heal tally is one number with no breakdown — 6.49 per build, worst 86,
+and nothing says WHICH repairs fire. Turning that into a work list needs the issue codes projected
+into the listing, which is a separate change and is not guessed at here.
+
+**Gate, on the final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ · typecheck:server ✅
+· **vitest 29,033 passed | 1 skipped | 0 FAIL** ✅ · build ✅ · test:bundle ✅ · boot:check ✅ ·
+deps:server-gate ✅.
 ## 2026-09-22 — AUTOPSY `21b431e1`: the platform already held the answer and asked the prompt again
 
 **The build.** Workspace `agentv3-…fea1ce73`, build `21b431e1`. **18.1 minutes. ₹164.68 billed to a
@@ -80656,6 +80723,27 @@ ja raha hai, usko chota kar do"*.
   the viewport cap, zero-length start, NaN), the remembered scale, and source guards (no `[0.5, 1,
   2]`, `CORNERS.map`, header-only drag, the fixed ENTER square, pinch captured only while resizing).
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+## 2026-09-24 — The whole message box is the input; History/Mode never grow (admin screenshots)
+
+Admin, with two phone screenshots taken after #3291 merged: *"input box ka pura area hi input box hona
+chahiye. abhi yeh 2 part me divide ho raha hai … jab text jyada bada ho … history/mode button ka size na
+bade, bas input box ka size badhe!"*
+
+- **The inner ring in those screenshots is the old focus outline**, i.e. the #3291 fix had not reached
+  that page yet. Verified in this session's build of `main`: the cascade-layers plugin
+  (`@csstools/postcss-cascade-layers`) now emits `.outline-none` with 8 specificity bumps against
+  `:focus-visible`'s 4, and a focused `textarea.outline-none` computes `outline: none` in Chromium. The
+  live site itself could not be fetched from this environment (egress refused), so "deployed" is not
+  claimed here.
+- **Whole box = one input:** `ComposerShell` now hands a tap anywhere in the box that is not a control
+  to the text (`tapFocusesComposerText`), cursor at the end. `mousedown` is held so the phone keyboard
+  does not close and reopen; focus happens on `click`, which iOS accepts as a user gesture.
+- **Rail never grows:** `RAIL_BUTTON_CLASS` is a fixed `h-10` (was `flex-1`), and the column is
+  `self-end`. At rest 40 + 6 + 40 = 86px = the two-row box, so they still line up; with five lines typed
+  the box went 86 → 186px in Chromium and both buttons stayed 40px.
+- Tests: `tests/theComposerIsOneLineBesideTheFooter.test.ts` (tap routing + rail), updated
+  `tests/chatComposerAlignment.test.ts` (the rest-height equality now includes the Send slot, and a
+  fixed-height lock). ⚠️ Installed phones need a fresh `.aab`/`.ipa` (admin's call).
 ## 2026-09-24 — Code Studio: the editor is the SAME on a phone — the width gate is gone (admin: "mobile me woh sab kaam hone chahiye jo desktop me ho sakte hai")
 
 **Series:** PR A of four (A: engine · B: resizable shortcut popup · C: every shortcut verified in a real
@@ -80760,3 +80848,52 @@ Same shape as the Studio change of 2026-09-23, whose test pinned the old Preview
 
 - Test: `tests/emptyPreviewOpens.test.ts` (reversion-proven: fails 2/6 against the old code).
 - `AppKnowledgeBase.ts` `agentv3_preview` now says the button opens even with no app.
+
+## 2026-09-24 (2) — "jo rah gaya hai karo": WHICH repairs fire
+
+PR #3298 closed by naming the one thing it did not do: *"the heal tally is one number with no
+breakdown — 6.49 per build, worst 86, and nothing says WHICH repairs fire."* The 50/50 law asks for
+the class to be traced and prevented upstream; **a rate names no class.**
+
+`summarizeHealCodes` (`healBreakdown.ts`, pure) counts the `autoResolved` entries by code and is
+projected into **BOTH** readers of a stored report — the all-workspaces listing AND the per-workspace
+history, which is where the scorecard now gets its builds. **Zero extra I/O**, the same argument
+`modelPerformance` makes: both already hold the whole report in memory.
+
+**🔴 THE HARD PART IS COMPLETENESS, NOT COUNTING.** `trimReportForStorage` caps `issues` at **500**
+while `counts` keeps the build's REAL numbers — so the **86-heal build**, the biggest contributor to
+the rate and the one the ranking most needs, is the likeliest to have been trimmed. Presenting the
+visible codes as the whole list would be `reportTruncation.ts`'s own bug in a new place, and that
+module records this repo paying for that confusion **three times** (40 of 312 model calls reported as
+forty; `liveTokens` printing `0 in · 0 out`; `JOURNEY_PASSED` on a run that launched no browser).
+
+So the tally is cross-checked against `counts.autoResolved` and the difference is reported as
+`unattributed` — carried through the aggregate and stated **inside the headline sentence**, never as
+a footnote a card could drop. That check is stronger than reading `truncation.channels.issues`: it
+compares what can be SEEN against the real total directly, and still works on a legacy report written
+before that field existed.
+
+**Three honesty properties, each reversion-proven:**
+- A build with **no breakdown is EXCLUDED**, never scored as having healed nothing — a legacy row
+  counted as clean would make the list look better as the window ages.
+- `unattributed` is **never folded into** `attributed`.
+- The per-code **BUILD count rides beside the heal count**, because 86 heals in ONE build and 86
+  across 43 are different problems whose fixes are different.
+
+**⚠️ Said plainly in the module rather than assumed:** `counts.autoResolved` is the scorecard's
+EXISTING definition of a heal, inherited rather than invented — and that flag marks more than
+repairs (`importTurnObservation` sets it to keep a sub-agent's finding out of OUR unresolved tally).
+So the breakdown may well show that part of the 6.49 was never a repair at all. **That is the first
+thing it is FOR**; pre-filtering to the codes that look like repairs would hide exactly that answer.
+
+**🔒 `tests/whichRepairsFire.test.ts` (25 cases), four reversion proofs:** a trimmed timeline
+presented as complete; an unmeasured build counted as clean; the shortfall hidden from the headline;
+the history projection dropped (the scorecard's own source of builds).
+
+**Gate, on the merged final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ ·
+typecheck:server ✅ · **vitest 29,600 passed | 1 skipped | 0 FAIL** ✅ · build ✅ · test:bundle ✅ ·
+boot:check ✅ · deps:server-gate ✅.
+
+**What to watch on the first real read:** the `Most-repaired:` line. A large `unattributed` means the
+500-entry cap is hiding the biggest builds' repairs and the cap is the next thing to look at; a small
+one means the ranking is real and its top code is the upstream fix to go and build.

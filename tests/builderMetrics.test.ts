@@ -214,15 +214,27 @@ describe('the admin can actually see it', () => {
     expect(admin).toContain("app.get('/api/admin/builder-scorecard', verifyAdminToken");
   });
 
-  it('it computes from the STORED reports, not a benchmark app', () => {
+  it('it computes from the STORED builds, not a benchmark app', () => {
     // §53 of the directive: no hardcoded benchmark projects. Real builds or nothing.
-    expect(admin).toContain('listAdminBuildReports(limit)');
-    expect(admin).toContain('builderScorecard(reports)');
+    //
+    // 🔴 RE-AIMED 2026-09-24, and this pair had PINNED THE BUG. It asserted
+    // `toContain('listAdminBuildReports(limit)')` — the admin REPORT INBOX, which a build enters only
+    // when the engine judged it BAD or a user pressed Report. So the scorecard was scoring
+    // complaints, and this test made that source mandatory: the fix could not land without deleting
+    // an assertion. The PROPERTY meant here is the §53 one in the comment above — real stored builds,
+    // never a synthetic benchmark — and it is now asserted in its stronger form: every workspace, not
+    // only the reported ones. `theScorecardWasScoringComplaints.test.ts` holds the source guard.
+    expect(admin).toContain('collectScorecardBuilds(limit)');
+    expect(admin).toContain('builderScorecard(builds)');
   });
 
   it('it returns the honest headline alongside the raw numbers', () => {
     expect(admin).toContain('scorecardHeadline(card)');
-    expect(admin).toContain('reportsRead: reports.length');
+    // RE-AIMED with the pair above: the count reported is the number of BUILDS measured, which is no
+    // longer the length of an inbox listing.
+    expect(admin).toContain('reportsRead: population.builds');
+    // And the card must name its own population — "of 41" with no sample named is what was wrong.
+    expect(admin).toContain('populationNote(population)');
   });
 });
 

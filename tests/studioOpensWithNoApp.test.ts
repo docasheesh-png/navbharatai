@@ -35,9 +35,9 @@ describe('the footer never disables Studio', () => {
     expect(app).not.toMatch(/id === 'studio' && !hasGeneratedCode/);
   });
 
-  it('…and Preview keeps its gate, because with no app there is nothing to render', () => {
-    expect(app).toContain("const isDisabled = id === 'preview' && !(v3Preview.workspaceId || hasGeneratedCode);");
-  });
+  // SUPERSEDED 2026-09-24: Preview used to keep its gate here ("with no app there is nothing to
+  // render"). The admin asked for the opposite — the empty preview opens — and
+  // tests/emptyPreviewOpens.test.ts now owns that rule.
 
   it('the stripper does not simply blank the file (a guard against a vacuous pass)', () => {
     expect(app).toContain("{ id: 'studio' as ViewType,");

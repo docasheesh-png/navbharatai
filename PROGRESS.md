@@ -80501,3 +80501,28 @@ package negotiates br, then gzip). The real finding was not speed. It was DATA L
   - the sandbox dist pull-back as tar.gz instead of base64 JSON.
 - **Open, not done here:** `DiagnosticsStore` still caps a report's commands and logs for size. Those
   caps also serve readability, so they were deliberately not changed in this pass.
+
+## 2026-09-24 — A request about an app that is not here is answered, not built (closes #3277's open root cause 1)
+
+The WORKNEX prompt (autopsy 0d297b25) said *"The WORKNEX app is already developed in this Replit project.
+DO NOT rebuild it from scratch … build the APK"*, and the workspace held only our starter. #3277 stopped
+that build from being called a success or billed; this stops it from STARTING.
+
+- **`projectElsewhere.ts`** (pure): fires only when the message (1) claims an app that already exists,
+  (2) places it elsewhere (a named tool: Replit, Lovable, Bolt, GitHub …) or forbids rebuilding it, and
+  (3) the workspace holds no user code (`userAppExists`, fail-safe) — and nothing is being imported on
+  this turn. The turn then goes to the chat lane with a steer: the app is not here yet, how to bring it
+  in (the exact "Import Repo" and "Import project (.zip)" paths), where the APK is made once it is here,
+  and — when the app is Expo/React Native, Flutter or native — the honest limit that NavBharatAI builds
+  web apps and packages those. It ends by offering to build something new here instead.
+- **A failed reply never becomes a build:** if the chat engine is unreachable, this turn falls back to a
+  fixed-text answer rather than to the build path (every other chat turn keeps its old fallback).
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE — `wantsFreshStart` matched "from scratch" inside "DO NOT rebuild
+  it from scratch".** That predicate feeds the two guards that PROTECT an existing app, so the most
+  emphatic "keep my app" sentence read as an order to wipe it (the rebuild-confirmation gate then asked
+  the user whether to replace their app). Negation is now read on both sides — English before the
+  phrase, Hindi (`mat`/`na`/`nahi`) after it; one un-negated occurrence still counts.
+- `AppKnowledgeBase.ts`: the zip and GitHub import entries name Replit and state the new behaviour.
+- Test-locked in `tests/theAppTheyMeantIsNotHere.test.ts` (33 cases, including a precision corpus of
+  ordinary prompts that must NOT be answered). Reversion-proven: undoing either fix fails 11.
+- ⚠️ **Still open (unchanged):** the fast-lane routing on complex mega-roadmap builds (#3277 item 2).

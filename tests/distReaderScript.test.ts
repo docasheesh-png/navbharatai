@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
+import { gunzipSync } from 'zlib';
+import { distReaderScript } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 
 /**
  * Admin 2026-08-19, fourth failure in one Publish flow:
@@ -69,8 +73,9 @@ describe('the dist reader never goes through a shell', () => {
   it('returns its result through a FILE, not captured stdout', () => {
     // A base64'd dist/ is easily megabytes; a truncated stdout would fail JSON.parse with a message
     // that looks nothing like its cause — the same lesson one layer along.
-    expect(src).toContain('const resultPath = `/tmp/nb_dist_${runId}.json`');
-    expect(src).toContain('await sandbox.files.read(resultPath)');
+    // 2026-09-24: the file is GZIPPED JSON, read back as bytes (a dist/ is mostly text and packs 3–4×).
+    expect(src).toContain('const resultPath = `/tmp/nb_dist_${runId}.json.gz`');
+    expect(src).toContain("await sandbox.files.read(resultPath, { format: 'bytes' })");
     // The browser-daemon path legitimately parses stdout (its payload is small and shellQuote'd), so
     // this is scoped to the dist reader rather than the whole file.
     const at = src.indexOf('async downloadDistFiles');
@@ -86,34 +91,37 @@ describe('the dist reader never goes through a shell', () => {
     expect(fixed).toEqual([]);
   });
 
-  it('THE SCRIPT IT WRITES IS VALID JAVASCRIPT — the assertion that would have caught this', () => {
-    // Reconstructs the reader exactly as the actuator assembles it and asks node's own parser. A
-    // syntax error here is the bug, and no amount of reading the string would have proved it absent.
-    const distPath = '/home/user/workspace/dist';
-    const outPath = '/home/user/workspace/out';
-    const resultPath = '/tmp/nb_dist.json';
-    const readerScript = [
-      "const fs=require('fs'),path=require('path');",
-      "function walk(d,b,o){",
-      "  try{for(const f of fs.readdirSync(d)){",
-      "    const a=path.join(d,f),r=(b?b+'/':'')+f;",
-      "    if(fs.statSync(a).isDirectory()) walk(a,r,o);",
-      "    else o[r]=fs.readFileSync(a).toString('base64');",
-      "  }}catch(e){}",
-      "  return o;",
-      "}",
-      "let out={};",
-      `const dirs=${JSON.stringify([distPath, outPath])};`,
-      "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
-      "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
-      `fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify(out));`,
-    ].join('\n');
+  it('THE SCRIPT IT WRITES IS VALID JAVASCRIPT — and, since 2026-09-24, it is RUN, not re-typed', () => {
+    // This used to rebuild the script by hand inside the test — a second copy that could drift from
+    // the one the actuator ships. The actuator now exports the ONE builder, and this runs it for real
+    // in node against a real directory, then decodes exactly what the actuator decodes.
+    const root = mkdtempSync(join(tmpdir(), 'dist-reader-'));
+    const dist = join(root, 'dist');
+    mkdirSync(join(dist, 'assets'), { recursive: true });
+    writeFileSync(join(dist, 'index.html'), '<div id="root"></div>');
+    writeFileSync(join(dist, 'assets', 'app.js'), 'console.log("नमस्ते")'.repeat(200));
+    writeFileSync(join(dist, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 255]));
+    const out = join(root, 'out.json.gz');
+    const scriptPath = join(root, 'reader.cjs');
+    const script = distReaderScript([join(root, 'missing'), dist], out);
+    expect(() => new Function(script)).not.toThrow();
+    writeFileSync(scriptPath, script);
+    execFileSync(process.execPath, [scriptPath]);
+    const map = JSON.parse(gunzipSync(readFileSync(out)).toString('utf8')) as Record<string, string>;
+    expect(Object.keys(map).sort()).toEqual(['assets/app.js', 'index.html', 'logo.png']);
+    expect(Buffer.from(map['assets/app.js'], 'base64').toString('utf8')).toBe('console.log("नमस्ते")'.repeat(200));
+    expect(Buffer.from(map['logo.png'], 'base64')).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 255]));
+    // And it really is smaller than the plain JSON it replaced.
+    expect(readFileSync(out).length).toBeLessThan(Buffer.byteLength(JSON.stringify(map)) / 2);
+  });
 
-    expect(() => new Function(readerScript)).not.toThrow();
-    // Both search paths must survive into the script — losing one silently would make a Next.js
-    // static export unpublishable with no error anyone could read.
-    expect(readerScript).toContain(distPath);
-    expect(readerScript).toContain(outPath);
+  it('an empty build exits 2 — the code the caller turns into "No build output found"', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dist-reader-empty-'));
+    const scriptPath = join(root, 'reader.cjs');
+    writeFileSync(scriptPath, distReaderScript([join(root, 'dist')], join(root, 'o.gz')));
+    let code = 0;
+    try { execFileSync(process.execPath, [scriptPath], { stdio: 'pipe' }); } catch (e) { code = (e as { status: number }).status; }
+    expect(code).toBe(2);
   });
 
   it('the empty case exits non-zero with a sentence, not a thrown stack', () => {

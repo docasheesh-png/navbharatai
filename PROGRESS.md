@@ -80501,3 +80501,24 @@ package negotiates br, then gzip). The real finding was not speed. It was DATA L
   - the sandbox dist pull-back as tar.gz instead of base64 JSON.
 - **Open, not done here:** `DiagnosticsStore` still caps a report's commands and logs for size. Those
   caps also serve readability, so they were deliberately not changed in this pass.
+
+## 2026-09-24 — One focus ring, not two (admin screenshot, Wellness / Counsellor AI, full screen)
+
+Admin: *"navbharatai free ke sabhi module me, full screen mode me input box me aise 2 box jaise dikh rahe
+hai! isko fix karo!!"* — a tapped composer showed its own indigo `focus-within` border AND a second ring
+around the textarea inside it.
+
+- **Root cause:** the global `:focus-visible { outline: 2px solid #6366f1 }` in `src/index.css` was
+  UNLAYERED. An unlayered rule beats every layered one regardless of specificity, and Tailwind v4's
+  utilities are in `@layer utilities` — so `outline-none` / `focus:outline-none` were overruled on all
+  ~300 elements that use them (almost all of which pair it with their own `focus:border-*` / `focus:ring-*`).
+  A text field is focus-visible on every tap, hence the second box. Its `border-radius: 4px` also
+  overrode `rounded-*` on focused elements.
+- **Fix:** the rule moved into `@layer base`. Keyboard users keep the ring on every element that does not
+  opt out; an opt-out now means what it says. Verified in Chromium against the built CSS: focused
+  `textarea.outline-none` computed `solid 2px` before → `none` after; a Tab-focused plain button still
+  gets the indigo ring; the composer screenshot shows one box.
+- **Siblings:** every other unlayered global rule in `index.css` was listed; none sets a property a
+  utility on the same element opts out of. `tests/oneFocusRingNotTwo.test.ts` fails on any unlayered
+  `:focus*` rule that sets outline or radius (reversion-proven).
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).

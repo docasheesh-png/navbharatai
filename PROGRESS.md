@@ -80457,7 +80457,10 @@ index.html. All three causes were ours.
 - ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
   hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
   measurement: its repeat share should fall well below 63%.
-- **Same day, second PR — the web bundle is compressed once at build time.**
+
+## 2026-09-24 — Compression audit, part 2: the web bundle is compressed once at build time
+
+- **Why.** The admin asked for whatever makes NavBharatAI world class, after the zstd/brotli audit. Part 1 (storage) is PR #3287.
   - `scripts/precompress.mjs` (Dockerfile only) and `lib/precompressedStatic.ts`.
   - The JS/CSS bundle is 14% smaller than today's per-request brotli-4, with 0 CPU per request.
   - The image build takes about 18 s longer.

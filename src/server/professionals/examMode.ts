@@ -371,10 +371,134 @@ export interface ExamPaper {
  * a prompt that asks nicely and a parser that insists is the combination that cannot ship a
  * three-option question.
  */
+/**
+ * 📄 THE PAPER'S COMPOSITION — 40% past-paper questions, 30% close variants, 30% fresh but likely
+ * (admin 2026-09-24, verbatim: *"40% = pyq · 30% = pyq se milte julte · 30% = new but, exam me ane
+ * ki puri sambhavna"*).
+ *
+ * 🔴 AND IT PRINTS NOTHING ON THE SCREEN — that is the whole design, not an omission.
+ *
+ * The first draft of this was going to tag each question ("Past paper", "UPSC 2019"). The admin
+ * removed the idea in one sentence: *"hame yeh sabit hi nahi karna hai ki yeh pyq hai, hame bs
+ * question dene hai. user khud samajh jayega."* They are right, and the reason is worth keeping so
+ * nobody adds the badge back thinking it is an improvement:
+ *
+ *   **We cannot VERIFY that a question was really asked in a past paper.** A web search returns
+ *   coaching blogs and PDF listings, not an authoritative bank; the generator's own word is not
+ *   evidence. So a "PYQ" badge is a claim this platform cannot stand behind — and it would be made
+ *   to a student, about their own exam, where a false fact costs real marks. The second absolute
+ *   rule's two states apply exactly: a badge we cannot prove is "built but not really working".
+ *
+ * Composition is a different thing from provenance, and it survives the same objection: asking the
+ * generator to DRAW 40% of the paper from questions that have genuinely appeared makes the paper
+ * better whether or not any individual one can be traced. The student reads the questions and judges
+ * for themselves — which is what they already do with every coaching book they own.
+ *
+ * ⚠️ IT ONLY APPLIES WHEN AN EXAM IS SELECTED, and that is a correctness rule rather than a caution.
+ * "Previous year" has no referent without a paper it is previous to: on a plain "Trigonometry, medium,
+ * 10 questions" there is no past paper to draw from, and demanding 40% of one would be asking the
+ * generator to invent a provenance. The condition is `examTargetBrief` returning something — the SAME
+ * answer the prompt already uses to decide it knows the exam, never a second rule that can disagree
+ * with it.
+ */
+export interface ExamBlend {
+  /** Questions drawn from ones that have genuinely appeared in that exam's past papers. */
+  past: number;
+  /** Close variants — the same idea and difficulty, re-cut so it is not a copy. */
+  similar: number;
+  /** New questions that fit the exam's current pattern and are genuinely likely to appear. */
+  fresh: number;
+}
+
+/** The admin's split, as fractions. Named so the three numbers exist in exactly one place. */
+const BLEND_PAST = 0.4;
+const BLEND_SIMILAR = 0.3;
+
+/**
+ * Split `count` into the three buckets as WHOLE questions that sum to exactly `count`.
+ *
+ * Largest-remainder, with ties broken toward `past` then `similar` — so a paper can never be one
+ * question short or long, and a SMALL paper still leads with the bucket the admin weighted highest
+ * (5 → 2/2/1, 3 → 1/1/1, 1 → 1/0/0). A naive `Math.round` on each share does not have that property:
+ * it gives 2/2/2 for a 5-question paper, i.e. a sixth question nobody asked for.
+ *
+ * PURE.
+ */
+export function examBlend(count: number): ExamBlend {
+  const raw = Number(count);
+  // `Math.floor(Infinity)` is Infinity, so the guard has to be finiteness and not just `|| 0`.
+  // `normalizeExamSpec` clamps to 1..EXAM_MAX_QUESTIONS long before this, but a function whose whole
+  // job is "these three numbers add up" must be total on its own.
+  const n = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+  if (n <= 0) return { past: 0, similar: 0, fresh: 0 };
+  const exact = [n * BLEND_PAST, n * BLEND_SIMILAR, n * (1 - BLEND_PAST - BLEND_SIMILAR)];
+  const base = exact.map((x) => Math.floor(x));
+  let left = n - base.reduce((a, b) => a + b, 0);
+  // Order by remainder, descending; a tie keeps the declaration order (past, similar, fresh).
+  const order = exact
+    .map((x, i) => ({ i, rem: x - Math.floor(x) }))
+    .sort((a, b) => (b.rem - a.rem) || (a.i - b.i));
+  for (const { i } of order) {
+    if (left <= 0) break;
+    base[i] += 1;
+    left -= 1;
+  }
+  return { past: base[0], similar: base[1], fresh: base[2] };
+}
+
+/**
+ * The composition paragraph, or '' when it does not apply.
+ *
+ * '' for: the feature switched off, no exam selected, or a bucket count of zero on a paper too small
+ * to carry three kinds. An empty string leaves `examPaperInstruction` byte-identical to what it built
+ * before this existed, which is what makes the kill switch a real revert.
+ */
+export function examBlendInstruction(spec: ExamSpec, enabled: boolean): string {
+  if (!enabled) return '';
+  if (!examTargetBrief(spec)) return '';
+  const b = examBlend(spec.count);
+  if (b.past <= 0) return '';
+  const lines = [
+    `COMPOSITION — set the paper from three kinds of question, in these exact numbers:`,
+    `• ${b.past} that have genuinely been ASKED IN PAST PAPERS of this exam. Draw on the real papers you know. Keep the question's own difficulty and phrasing style rather than simplifying it.`,
+  ];
+  if (b.similar > 0) {
+    lines.push(`• ${b.similar} CLOSE VARIANTS of past questions — the same concept and the same standard, re-cut with different numbers, a different case or a different angle so it is a fresh question rather than a copy.`);
+  }
+  if (b.fresh > 0) {
+    lines.push(`• ${b.fresh} NEW questions that have a real chance of appearing next — built on the topics this exam has been weighting recently and the way it has been framing them.`);
+  }
+  lines.push(
+    `Mix the three kinds throughout the paper; do not put them in blocks.`,
+    // 🔒 The one thing the generator must NOT do, stated to it directly. Without this line a model
+    // routinely writes "(UPSC 2019)" into the question text itself, which puts the unverifiable claim
+    // back on the student's screen through the one field that is printed verbatim.
+    `Do NOT label any question with a year, a paper name or which of the three kinds it is — not in the question, not in the explanation, not anywhere. The student is given the questions, not a provenance claim.`,
+  );
+  return lines.join('\n');
+}
+
+/**
+ * Is the composition rule applied at all? ON unless explicitly `off`.
+ *
+ * `PROFESSIONAL_EXAM_PYQ=off` is the instant, no-deploy revert: `examBlendInstruction` then returns
+ * '' and `examPaperInstruction` is byte-identical to what it built before this existed. Default ON
+ * because the admin asked for it and a feature that needs a console key before it does anything is
+ * how "10 free messages" stayed switched off in this same directory for two months.
+ *
+ * ⚠️ Read HERE rather than imported from `professionalPaid.ts` on purpose: this module has no imports
+ * at all, and that is what lets every function in it be unit-tested without a server. A bare
+ * `process.env` read keeps that property; an import would not.
+ */
+export function examPyqEnabled(): boolean {
+  return String(process.env.PROFESSIONAL_EXAM_PYQ || '').trim().toLowerCase() !== 'off';
+}
+
 export function examPaperInstruction(spec: ExamSpec): string {
   const exam = examTargetBrief(spec);
   const subject = spec.subject || (exam ? 'the subjects that exam itself tests — spread the paper across them as the real paper does' : '');
   const scope = spec.topic ? `${subject} — specifically: ${spec.topic}` : `${subject} (cover it broadly)`;
+  const blend = examBlendInstruction(spec, examPyqEnabled());
   return [
     `Set an objective (multiple-choice) test paper. Return ONLY JSON — no prose before or after, no markdown fence.`,
     ``,
@@ -383,6 +507,7 @@ export function examPaperInstruction(spec: ExamSpec): string {
     `DIFFICULTY: ${levelBrief(spec.level)}`,
     `NUMBER OF QUESTIONS: exactly ${spec.count}.`,
     ``,
+    ...(blend ? [blend, ``] : []),
     `SHAPE — a JSON object: { "read": { "subject": string, "topic": string }, "questions": [ { "question": string, "options": [string, string, string, string], "correctIndex": 0-3, "explanation": string, "topic": string, "level": "low" | "medium" | "hard" } ] }`,
     ``,
     `RULES, all of them required:`,

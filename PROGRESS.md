@@ -80502,6 +80502,49 @@ package negotiates br, then gzip). The real finding was not speed. It was DATA L
 - **Open, not done here:** `DiagnosticsStore` still caps a report's commands and logs for size. Those
   caps also serve readability, so they were deliberately not changed in this pass.
 
+## 2026-09-24 — A request about an app that is not here is answered, not built (closes #3277's open root cause 1)
+
+The WORKNEX prompt (autopsy 0d297b25) said *"The WORKNEX app is already developed in this Replit project.
+DO NOT rebuild it from scratch … build the APK"*, and the workspace held only our starter. #3277 stopped
+that build from being called a success or billed; this stops it from STARTING.
+
+- **`projectElsewhere.ts`** (pure): fires only when the message (1) claims an app that already exists,
+  (2) places it elsewhere (a named tool: Replit, Lovable, Bolt, GitHub …) or forbids rebuilding it, and
+  (3) the workspace holds no user code (`userAppExists`, fail-safe) — and nothing is being imported on
+  this turn. The turn then goes to the chat lane with a steer: the app is not here yet, how to bring it
+  in (the exact "Import Repo" and "Import project (.zip)" paths), where the APK is made once it is here,
+  and — when the app is Expo/React Native, Flutter or native — the honest limit that NavBharatAI builds
+  web apps and packages those. It ends by offering to build something new here instead.
+- **A failed reply never becomes a build:** if the chat engine is unreachable, this turn falls back to a
+  fixed-text answer rather than to the build path (every other chat turn keeps its old fallback).
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE — `wantsFreshStart` matched "from scratch" inside "DO NOT rebuild
+  it from scratch".** That predicate feeds the two guards that PROTECT an existing app, so the most
+  emphatic "keep my app" sentence read as an order to wipe it (the rebuild-confirmation gate then asked
+  the user whether to replace their app). Negation is now read on both sides — English before the
+  phrase, Hindi (`mat`/`na`/`nahi`) after it; one un-negated occurrence still counts.
+- `AppKnowledgeBase.ts`: the zip and GitHub import entries name Replit and state the new behaviour.
+- Test-locked in `tests/theAppTheyMeantIsNotHere.test.ts` (33 cases, including a precision corpus of
+  ordinary prompts that must NOT be answered). Reversion-proven: undoing either fix fails 11.
+- ⚠️ **Still open (unchanged):** the fast-lane routing on complex mega-roadmap builds (#3277 item 2).
+
+## 2026-09-24 — Code Studio terminal on a phone: the duplicate command box is gone (admin-asked)
+
+Admin, with a screenshot of the terminal's bottom row: *"terminal ke andar ek extra input box hai … isko
+hide kar do! user direct terminal ko andar hi command de dega"* (and: *"aap ko agar sahi lage to hatana"*).
+
+- **Removed:** the line input and its Run button (`ShellTerminal.tsx`). Typing inside the terminal box has
+  worked on phones since 2026-08-05 through the invisible bridge input, so the box was a second way to do
+  the same thing — and when the shell was down it showed a disabled field reading "Terminal not
+  available", beside the box's own "Try again" button that already said so.
+- **Kept, on purpose (the part of the ask I did not follow literally):** the ^C / Tab / ↑ / ↓ keys. A phone
+  keyboard has none of them, and without ^C a running dev server cannot be stopped from a phone at all.
+  They now disable themselves when the shell is gone, and a short "Tap the terminal to type" hint sits
+  where the box was, because nothing else on screen said the terminal itself takes typing.
+- Two test files re-aimed with reasons (`shellTerminalInput`, `noKeyboardUntilAsked`); the knowledge base's
+  Terminal entry now says how to type on a phone.
+- ⚠️ **Honest risk:** the bridge is now the ONLY typing path on touch. It has been live since 2026-08-05 and
+  the admin types through it, but it has not been verified on every phone keyboard. If a phone cannot type
+  in the box, reverting this change brings the box back with no other effect.
 ## 2026-09-24 — One focus ring, not two (admin screenshot, Wellness / Counsellor AI, full screen)
 
 Admin: *"navbharatai free ke sabhi module me, full screen mode me input box me aise 2 box jaise dikh rahe
@@ -80558,3 +80601,20 @@ aap isko kuch aur add / upgrade karna chahoge to kar dena!!"*
 - **Next (PR B–D):** corner-handle resize + pinch on the shortcut popup and the ENTER button inside it;
   every shortcut pressed in a real browser on a phone viewport with its effect asserted; the CUSTOM
   face (flip, combo input + Go, full desktop key grid, cursor tool merged, `CursorPopup.tsx` retired).
+## 2026-09-24 — An empty Preview opens instead of doing nothing (admin: "khali preview open ho jaye")
+
+**Reported:** on the home page, with nothing built, tapping Preview did nothing at all.
+
+**Cause:** two doors, two different gates, both `disabled`. The mobile footer disabled Preview until a
+v3 workspace or generated code existed; the desktop sidebar disabled it until generated code existed —
+stricter than the footer, so a user with a real v3 workspace could still find it greyed out there.
+
+**Fix:** neither door is ever disabled now (Files keeps its own gate — not asked, not changed). The
+screen they open already existed: with no workspace PreviewSurface never starts a load, nothing sets an
+error, and `previewEmptyKind` returns `no-app-yet` — the "Your app will appear here" welcome.
+Verified in a real phone-sized browser against the dev server: before the change the button was
+disabled; after it, one tap lands on Preview with the welcome visible and the tab marked current.
+Same shape as the Studio change of 2026-09-23, whose test pinned the old Preview gate and now points here.
+
+- Test: `tests/emptyPreviewOpens.test.ts` (reversion-proven: fails 2/6 against the old code).
+- `AppKnowledgeBase.ts` `agentv3_preview` now says the button opens even with no app.

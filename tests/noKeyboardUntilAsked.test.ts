@@ -89,13 +89,15 @@ describe('the terminal: tapping TERMINAL asks for a terminal, not for a text fie
   });
 
   it('🔑 and NOTHING is lost — both ways to start typing are still one tap', () => {
-    // The command bar is still rendered on touch, and tapping the terminal box still arms the bridge.
+    // The helper-key row is still rendered on touch, and tapping the terminal box still arms the bridge.
     // Without these the fix would trade the admin's problem for a terminal nobody can type in.
     expect(term).toContain('{showCommandBar && (');
     expect(term).toContain('onClick={focusBridge}');
-    // And a press in the bar still keeps focus across helper-key taps, so the keyboard does not
-    // flicker shut mid-command.
-    expect(term).toContain('barInputRef.current?.focus();');   // inside sendBarCommand
+    // And a press on a helper key still keeps focus (now the bridge's), so the keyboard does not
+    // flicker shut mid-command. Re-aimed 2026-09-24: the bar's line input — and its own focus call —
+    // were removed as a duplicate of typing in the box.
+    expect(term).toContain('onPointerDown={keepFocus}');
+    expect(term).toContain('keepFocus = (e: React.PointerEvent) => e.preventDefault()');
   });
 
   it('a desktop keeps its auto-focus: a mouse has no keyboard to raise', () => {

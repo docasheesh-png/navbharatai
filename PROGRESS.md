@@ -80373,6 +80373,64 @@ was charged **₹47.36** of the welcome balance with the full markup.
 3. **Expo/React Native is not a stack NavBharatAI builds** (it builds web apps and packages them with
    Capacitor). The honest answer to "build an Expo APK" names that, and offers the Phone build path.
 
+---
+
+## 2026-09-24 — 📚 EXAM MODE IS SET FROM PREVIOUS-YEAR QUESTIONS (40 / 30 / 30)
+
+**Admin, verbatim:** *"teacher ai → exam mode! exam mode me jo questions puche jaye woh PYQ (previous
+year question) hone chahiye … kuch new question bhi banaye jo pyq se milte julte ho, kuch aise question
+jo next exam me ane ki puri sambhavna hai!!! 40% pyq / 30% pyq se milte julte / 30% new but, exam me
+ane ki puri sambhavna."*
+
+**I objected first, and the admin overruled it in one line** — recorded because the correction IS the
+design: *"hame yeh sabit hi nahi karna hai ki yeh pyq hai, hame bs question dene hai. user khud, samajh
+jayega."* My objection was that we cannot PROVE any individual question is a genuine previous-year
+question, so a "PYQ" badge would be the unverifiable claim the second absolute rule calls a fake
+feature. That objection survives — **for the badge**. It never applied to the COMPOSITION, and the
+admin was right that the two are different things: asking the generator to DRAW 40% of the paper from
+questions that have genuinely appeared makes the paper better whether or not any one of them can be
+traced, exactly as every coaching book in India already works.
+
+**So: composition is asked for, provenance is forbidden — in the same paragraph.**
+
+**What shipped (`src/server/professionals/examMode.ts`):**
+- `examBlend(count)` — splits a paper into `past / similar / fresh` by **largest remainder**, so the
+  three numbers sum to EXACTLY what the student asked for. `Math.round` per share gives 2/2/2 for a
+  5-question paper — a sixth question nobody ordered. 10 → 4/3/3, 20 → 8/6/6, 30 → 12/9/9, 5 → 2/2/1,
+  1 → 1/0/0. A bucket that rounds to zero is not asked for in a sentence saying zero.
+- `examBlendInstruction(spec, enabled)` — the COMPOSITION paragraph, ending in the line that matters
+  most: *"Do NOT label any question with a year, a paper name or which of the three kinds it is — not
+  in the question, not in the explanation, not anywhere."* Without it a model routinely writes
+  "(UPSC 2019)" into the question text, which puts the unverifiable claim back on the student's screen
+  through the one field the surface prints verbatim.
+- `examPyqEnabled()` — `PROFESSIONAL_EXAM_PYQ`, default ON, `off` is the no-deploy revert. Read with a
+  bare `process.env` rather than imported from `professionalPaid.ts` deliberately: this module has **no
+  imports at all**, which is what lets every function in it be unit-tested without a server.
+
+**⚠️ It applies ONLY when an exam is selected**, and that is correctness rather than caution:
+"previous year" has no referent without a paper it is previous to. The condition is `examTargetBrief`
+returning something — the SAME answer the prompt already uses to decide it knows the exam, never a
+second rule that can disagree with it.
+
+**💸 NOT ONE extra model call, and no web search.** The admin's words were *"internet scanners kar ke
+pyq dekh le"*, and the reading that would have added a search call per paper is the one the test
+forbids: the composition is an instruction inside the SAME single call that already writes the paper.
+`runProfessionalChatWithUsage` still appears exactly once in that route, and `liveSearchContext` does
+not appear at all.
+
+**🐛 A real bug the test found, in code I had just written:** `Math.floor(Infinity)` is Infinity, so
+`examBlend(Infinity)` returned `{ past: Infinity, … }`. `normalizeExamSpec` clamps to 1..30 long before
+this, so it was unreachable in production — but a function whose whole job is "these three numbers add
+up" must be total on its own. Guard is `Number.isFinite`, not `|| 0`.
+
+**Test-locked and proven by reversion four ways** (`tests/theExamAsksWhatTheExamAsks.test.ts`, 26
+cases): dropping the spread that puts the block in the prompt (3 fail — `tsc` and `vitest` cannot see a
+computed string that is never used), deleting the do-not-label line (1), swapping largest-remainder for
+`Math.round` (5), and breaking the `off` switch (2).
+
+`AppKnowledgeBase.ts` updated in the same change (the exam-mode entry now describes the 40/30/30 mix,
+says the questions are not stamped with a year or paper name, and carries `pyq` / `previous year
+question` / `purane question` / `pichle saal ke question` among its keywords).
 ## 2026-09-24 — One line when the footer carries History and Mode (admin screenshot)
 
 Admin, verbatim: *"jab navbharatai free chat ke sabhi ai me footer on hai, (full screen exit hai) to input box
@@ -80587,6 +80645,41 @@ bade, bas input box ka size badhe!"*
 - Tests: `tests/theComposerIsOneLineBesideTheFooter.test.ts` (tap routing + rail), updated
   `tests/chatComposerAlignment.test.ts` (the rest-height equality now includes the Send slot, and a
   fixed-height lock). ⚠️ Installed phones need a fresh `.aab`/`.ipa` (admin's call).
+## 2026-09-24 — Code Studio: the editor is the SAME on a phone — the width gate is gone (admin: "mobile me woh sab kaam hone chahiye jo desktop me ho sakte hai")
+
+**Series:** PR A of four (A: engine · B: resizable shortcut popup · C: every shortcut verified in a real
+browser · D: the CUSTOM keyboard face). Admin's brief, verbatim: *"pura editor desktop jaisa kaam kare,
+aap isko kuch aur add / upgrade karna chahoge to kar dena!!"*
+
+- **What was found first, and why it is PR A:** `Editor.tsx` swapped Monaco for a plain `<textarea>`
+  on `window.innerWidth < 768`, on a comment reading "to avoid Monaco memory issues" that nothing in
+  this repo ever measured. The textarea never calls `onMount`, so on every phone `editorInstance` was
+  `null` — and `CodeStudio.tsx`'s `handleShortcut` dispatches ~55 of the 82 Shortcuts-panel entries
+  through that instance (undo/redo, select all, comment, move line, find/replace, go to line, format,
+  fold, rename, quick fix, multi-cursor…). Every one was a tap that did nothing, with no error to
+  find. The Cursor popup is gated on the same instance and never opened on a phone. And CodeStudio
+  had carried a PHONE-TUNED Monaco option set since 2026-07-31 (no minimap, no sticky scroll, 14px
+  touch scrollbars) that this gate threw away before it could apply — two months of tuning for an
+  editor that never ran there. Fixing shortcuts one by one on top of that would have been surface work.
+- **Measured before the default moved** (Playwright, Chromium, 390×844 mobile viewport, the real
+  built `dist/monaco`, an 8,000-line TypeScript file): load 0.4–1.9 s; JS heap **28–30 MB** after
+  load, **37–42 MB** typing and scrolling; **2.03 MB** on the wire at brotli-11 (22 files; the
+  TypeScript worker is 1.06 MB of it and is cached a day since #3288). Not a reason for a gate.
+- **Fix:** `src/components/ide/editorEngine.ts` — ONE pure rule, `decideEditorEngine({ liteEditor,
+  monacoFailed })`, with no viewport input at all. The textarea is reached two ways only: a real
+  load failure (unchanged — a file must always open) and **Settings → Editor engine → Lite editor**,
+  a persisted USER choice (`ide_liteEditor`) for a device that genuinely cannot run the full editor.
+  `Editor.tsx` reads the rule; `CodeStudio` owns the state and passes it to BOTH panes. The
+  `React.memo` comparator now compares `liteEditor` — it swallowed every prop change, so without that
+  the toggle would have written localStorage and changed nothing until a reload.
+- **Tests:** `tests/theEditorIsTheSameOnAPhone.test.ts` — the rule, the preference (including a
+  throwing store), and source guards: no `innerWidth <` in `Editor.tsx`, the fallback still present,
+  the comparator, both panes wired, the phone tuning still present so the two facts stay tied.
+- **Knowledge base:** the IDE entry says the editor is the same on a phone and where the Lite switch is.
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+- **Next (PR B–D):** corner-handle resize + pinch on the shortcut popup and the ENTER button inside it;
+  every shortcut pressed in a real browser on a phone viewport with its effect asserted; the CUSTOM
+  face (flip, combo input + Go, full desktop key grid, cursor tool merged, `CursorPopup.tsx` retired).
 ## 2026-09-24 — An empty Preview opens instead of doing nothing (admin: "khali preview open ho jaye")
 
 **Reported:** on the home page, with nothing built, tapping Preview did nothing at all.

@@ -22,6 +22,7 @@ import {
   EDITOR_THEMES, registerEditorThemes, loadSavedTheme, saveTheme,
   type EditorThemeId,
 } from './monacoThemes';
+import { decideEditorEngine } from './editorEngine';
 
 // Load Monaco from our OWN origin, not a CDN. `scripts/copyMonaco.mjs` copies the installed
 // monaco-editor `min/vs` into `public/monaco/vs` at build time, so `/monaco/vs` is served as a
@@ -71,6 +72,11 @@ interface EditorProps {
   activeBreakpoints?: number[];
   /** P-DEV.3: toggle a breakpoint when the user clicks the line's gutter glyph margin. */
   onBreakpointToggle?: (file: string, line: number) => void;
+  /**
+   * The user chose the plain editor in Settings (see `editorEngine.ts`). This — and a Monaco load
+   * failure — are the ONLY two things that pick the textarea. Screen width is not one of them.
+   */
+  liteEditor?: boolean;
 }
 
 export const Editor: React.FC<EditorProps> = React.memo(({
@@ -95,6 +101,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onNavigateOpen,
   activeBreakpoints,
   onBreakpointToggle,
+  liteEditor = false,
 }) => {
   const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
   const editorRef = useRef<any>(null);
@@ -108,14 +115,18 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   // once-registered F12/Shift+F12 actions always read fresh values.
   const navRef = useRef<{ allFiles?: Record<string, string>; fileName: string; onOpen?: (p: string, l?: number, c?: number) => void }>({ fileName });
   navRef.current = { allFiles, fileName, onOpen: onNavigateOpen };
-  // 8.2 — lightweight textarea fallback on mobile to avoid Monaco memory issues
-  const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
-  // Monaco loads its core from a CDN (see loader.config above). If that CDN is unreachable
-  // (offline, firewall/CSP, region block, CDN hiccup) the loader hangs and the editor shows
-  // "Loading editor…" forever. Detect that — on init failure OR a timeout — and fall back to
-  // the plain textarea editor so files ALWAYS open. The happy path (CDN reachable) is unchanged.
+  // 🔴 THE PHONE GETS THE SAME EDITOR AS THE DESKTOP (admin 2026-09-24). This used to read
+  // `window.innerWidth < 768` and pick a `<textarea>` on that alone — which silently disabled every
+  // editor-dispatched shortcut and the Cursor popup on every phone, because the textarea never
+  // reports an `onMount` instance. The full reasoning and the measurement that retired the gate live
+  // in `editorEngine.ts`. The two remaining ways to reach the textarea are an explicit user choice
+  // (`liteEditor`, Settings) and a genuine load failure (below).
+  //
+  // Monaco loads from our own origin (see loader.config above). If that fails — offline, a blocked
+  // script, a hung loader — the editor would show "Loading editor…" forever. Detect that, on init
+  // failure OR a timeout, and fall back to the plain textarea so files ALWAYS open.
   const [monacoFailed, setMonacoFailed] = useState(false);
-  const useTextarea = isMobile || monacoFailed;
+  const useTextarea = decideEditorEngine({ liteEditor, monacoFailed }) === 'textarea';
   // P-DEV.9 — runtime-selectable editor theme (persisted), defaulting to the saved choice or the prop.
   const [theme, setThemeState] = useState<EditorThemeId>(() => loadSavedTheme(editorTheme as EditorThemeId));
 
@@ -143,7 +154,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   const changeTheme = (id: EditorThemeId) => { setThemeState(id); saveTheme(id); };
 
   useEffect(() => {
-    if (isMobile || monacoFailed) return;
+    if (useTextarea) return;
     let active = true;
     const timer = setTimeout(() => {
       if (active) {
@@ -163,7 +174,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         }
       });
     return () => { active = false; clearTimeout(timer); };
-  }, [isMobile, monacoFailed]);
+  }, [useTextarea]);
 
   useEffect(() => {
     return () => {
@@ -394,7 +405,8 @@ export const Editor: React.FC<EditorProps> = React.memo(({
         </div>
       )}
 
-      {/* Editor — Monaco when available; plain textarea on mobile or if Monaco can't load */}
+      {/* Editor — Monaco on every screen size; the plain textarea only by the user's choice or when
+          Monaco could not load (editorEngine.ts) */}
       {/* min-h-0 for the same reason as the file list: a flex-1 child in a `flex flex-col h-full`
           needs it so the item can shrink to the available height instead of being floored at its
           content height by the default `min-height:auto`. Without it, on a small screen the editor
@@ -520,8 +532,11 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     </div>
   );
 }, (prev, next) => {
-  return prev.content === next.content && 
-         prev.fileName === next.fileName && 
+  // `liteEditor` MUST be compared: this memo swallows every other prop change, so without it the
+  // Settings toggle would write localStorage and change nothing on screen until the next reload.
+  return prev.content === next.content &&
+         prev.fileName === next.fileName &&
          prev.activeTab === next.activeTab &&
-         prev.openTabs.length === next.openTabs.length;
+         prev.openTabs.length === next.openTabs.length &&
+         prev.liteEditor === next.liteEditor;
 });

@@ -32,7 +32,7 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
   { category: '🔥 MOST IMPORTANT', key: 'ctrl+b', label: 'Toggle Sidebar', command: 'workbench.action.toggleSidebarVisibility', keys: ['Ctrl', 'B'] },
   { category: '🔥 MOST IMPORTANT', key: 'ctrl+`', label: 'Toggle Terminal', command: 'workbench.action.terminal.toggleTerminal', keys: ['Ctrl', '`'] },
   { category: '🔥 MOST IMPORTANT', key: 'ctrl+s', label: 'Save File', command: 'base.action.save', keys: ['Ctrl', 'S'] },
-  { category: '🔥 MOST IMPORTANT', key: 'ctrl+k s', label: 'Save All Files', command: 'workbench.action.files.saveAll', keys: ['Ctrl', 'K', 'S'] },
+  { category: '🔥 MOST IMPORTANT', key: 'ctrl+shift+s', label: 'Save All Files', command: 'workbench.action.files.saveAll', keys: ['Ctrl', 'Shift', 'S'] },
   { category: '🔥 MOST IMPORTANT', key: 'ctrl+z', label: 'Undo', command: 'undo', keys: ['Ctrl', 'Z'] },
   { category: '🔥 MOST IMPORTANT', key: 'ctrl+y', label: 'Redo', command: 'redo', keys: ['Ctrl', 'Y'] },
   { category: '🔥 MOST IMPORTANT', key: 'ctrl+x', label: 'Cut Line', command: 'editor.action.clipboardCutAction', keys: ['Ctrl', 'X'] },
@@ -84,15 +84,21 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
   { category: '🧠 CODE NAVIGATION', key: 'ctrl+shift+o', label: 'Go to Symbol', command: 'editor.action.quickOutline', keys: ['Ctrl', 'Shift', 'O'] },
   { category: '🧠 CODE NAVIGATION', key: 'ctrl+g', label: 'Go to Line', command: 'editor.action.gotoLine', keys: ['Ctrl', 'G'] },
   { category: '🧠 CODE NAVIGATION', key: 'ctrl+t', label: 'Search Symbols in File', command: 'workbench.action.showAllSymbols', keys: ['Ctrl', 'T'] },
-  { category: '🧠 CODE NAVIGATION', key: 'alt+left', label: 'Go Back', command: 'workbench.action.navigateBack', keys: ['Alt', '←'] },
-  { category: '🧠 CODE NAVIGATION', key: 'alt+right', label: 'Go Forward', command: 'workbench.action.navigateForward', keys: ['Alt', '→'] },
+  // Go Back / Go Forward walk the CURSOR's own position history (Monaco's cursorUndo / cursorRedo) —
+  // they used to call the browser's history.back(), which left Code Studio (audit 2026-09-24).
+  { category: '🧠 CODE NAVIGATION', key: 'alt+left', label: 'Go Back (previous cursor spot)', command: 'workbench.action.navigateBack', keys: ['Alt', '←'] },
+  { category: '🧠 CODE NAVIGATION', key: 'alt+right', label: 'Go Forward (next cursor spot)', command: 'workbench.action.navigateForward', keys: ['Alt', '→'] },
 
   // ⚡ CODE FORMATTING
   { category: '⚡ CODE FORMATTING', key: 'shift+alt+f', label: 'Format Document', command: 'editor.action.formatDocument', keys: ['Shift', 'Alt', 'F'] },
   { category: '⚡ CODE FORMATTING', key: 'ctrl+k ctrl+f', label: 'Format Selection', command: 'editor.action.formatSelection', keys: ['Ctrl', 'K', 'F'] },
   { category: '⚡ CODE FORMATTING', key: 'ctrl+space', label: 'IntelliSense Suggestions', command: 'editor.action.triggerSuggest', keys: ['Ctrl', 'Space'] },
   { category: '⚡ CODE FORMATTING', key: 'ctrl+shift+space', label: 'Parameter Hints', command: 'editor.action.triggerParameterHints', keys: ['Ctrl', 'Shift', 'Space'] },
-  { category: '⚡ CODE FORMATTING', key: 'tab', label: 'Accept Suggestion', command: 'acceptSelectedSuggestion', keys: ['Tab'] },
+  // NOT LISTED: "Accept Suggestion" (Tab → acceptSelectedSuggestion). Verified dead from this popup
+  // (audit 2026-09-24): the tap that picks it takes focus off the editor, and Monaco closes the
+  // suggestion list on blur — so by the time ENTER runs there is nothing to accept. It is not a
+  // Monaco bug and not fixable from here; a physical Tab still accepts, and on a phone a suggestion
+  // is tapped directly. A listed shortcut that cannot work is the dead-control class this panel bans.
 
   // 🧩 TERMINAL SHORTCUTS
   { category: '🧩 TERMINAL SHORTCUTS', key: 'ctrl+shift+`', label: 'New Terminal', command: 'workbench.action.terminal.new', keys: ['Ctrl', 'Shift', '`'] },

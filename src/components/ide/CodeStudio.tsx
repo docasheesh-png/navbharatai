@@ -623,10 +623,26 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     if (activeFile === oldPath) setActiveFile(target);
   };
 
+  /**
+   * Run a Monaco action WITH the editor focused. Every `getAction(id).run()` in this file used to run
+   * on whatever had focus at the time — and after a tap in the Shortcuts popup that is the popup, so
+   * `editor.action.quickOutline` threw "Quick input service needs a focused editor to work" and Ctrl+T
+   * did nothing (shortcut audit 2026-09-24). The generic passthrough in handleShortcut always focused
+   * first; these call sites had drifted from it. One helper, so they cannot drift again.
+   */
+  const runEditorAction = (id: string) => {
+    if (!editorInstance) return;
+    editorInstance.focus();
+    // `cursorUndo` / `cursorRedo` and friends are core commands, not actions — `getAction` is null for
+    // them, and `trigger` is the door both kinds share.
+    const action = editorInstance.getAction(id);
+    if (action) action.run(); else editorInstance.trigger('keyboard', id, {});
+  };
+
   const handleShortcut = (keys: string[], command?: string) => {
 
     // 1. Direct Editor Commands
-    if (editorInstance && command && (command.startsWith('editor.') || command.startsWith('actions.') || command.startsWith('cursor') || command === 'undo' || command === 'redo' || command === 'acceptSelectedSuggestion')) {
+    if (editorInstance && command && command !== 'editor.debug.action.toggleBreakpoint' && (command.startsWith('editor.') || command.startsWith('actions.') || command.startsWith('cursor') || command === 'undo' || command === 'redo' || command === 'acceptSelectedSuggestion')) {
       editorInstance.focus();
       editorInstance.trigger('keyboard', command, {});
     }
@@ -699,7 +715,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               const visiblePath = splitOpen && focusedPane === 'right' ? splitActive : activeFile;
               if (next[visiblePath] !== undefined) editorInstance?.setValue(next[visiblePath]);
             }
-            if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
+            if (editorFormatOnSave) runEditorAction('editor.action.formatDocument');
             setDirtyTabs(new Set());
           }
           break;
@@ -745,10 +761,13 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           setIsDebugPanelOpen(false);
           break;
         case 'workbench.action.navigateBack':
-          window.history.back();
-          break;
         case 'workbench.action.navigateForward':
-          window.history.forward();
+          // Alt+← / Alt+→ used to call `window.history.back()` / `.forward()` — the BROWSER's back
+          // button. Verified in a real browser (shortcut audit 2026-09-24): the cursor did not move and
+          // `history.back` fired, which in the app takes the user OUT of Code Studio. What VS Code's
+          // Go Back/Forward does inside an editor is walk the cursor's own position history, and Monaco
+          // ships exactly that as `cursorUndo` / `cursorRedo` (Ctrl+U is the same walk backwards).
+          runEditorAction(command === 'workbench.action.navigateBack' ? 'cursorUndo' : 'cursorRedo');
           break;
         case 'workbench.action.toggleZenMode':
           // Toggle full screen or similar
@@ -770,13 +789,23 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         case 'workbench.action.focusFirstEditorGroup':
           if (editorInstance) editorInstance.focus();
           break;
+        case 'editor.debug.action.toggleBreakpoint': {
+          // F9. This is a VS CODE command id, not a Monaco one: the generic `editor.` passthrough above
+          // handed it to Monaco, which threw "command … not found" (shortcut audit 2026-09-24) — a
+          // breakpoint key that has never set a breakpoint. The debugger's own gutter-click path is the
+          // real action; run it on the line the cursor is on, in the pane being edited.
+          const bpPath = splitOpen && focusedPane === 'right' ? splitActive : activeFile;
+          const line = editorInstance?.getPosition?.()?.lineNumber;
+          if (bpPath && typeof line === 'number') handleToggleBreakpoint(bpPath, line);
+          break;
+        }
         // ── Four shortcuts the panel ADVERTISED but nothing handled (audit 2026-08-04) ──────────
         // Each is now the real action, not an approximation. A shortcut listed in the Shortcuts panel
         // is a promise; one that silently does nothing is the same defect as a button with no onClick.
         case 'expandLineSelection':
           // Monaco owns this id, but it lacks the `editor.`/`actions.` prefix the generic passthrough
           // matches on — so Ctrl+L fell through every branch and did nothing.
-          editorInstance?.getAction('expandLineSelection')?.run();
+          runEditorAction('expandLineSelection');
           break;
         case 'workbench.action.files.openFile':
           // Ctrl+O — the same quick-open Ctrl+P already runs. Opening a file IS the quick-open.
@@ -786,7 +815,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
           // Ctrl+T — Monaco's quick outline: the symbols of the file you are in. Honestly scoped, and
           // the Shortcuts panel now says "in File" rather than promising a whole-project symbol index
           // we do not build.
-          editorInstance?.getAction('editor.action.quickOutline')?.run();
+          runEditorAction('editor.action.quickOutline');
           break;
         case 'workbench.action.reopenClosedEditor': {
           // Ctrl+Shift+T — genuinely reopens the last tab you closed, newest first, skipping any file
@@ -819,7 +848,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             editorInstance?.setValue(finalContent);
           }
           // A12: Format on Save
-          if (editorFormatOnSave) editorInstance?.getAction('editor.action.formatDocument')?.run();
+          if (editorFormatOnSave) runEditorAction('editor.action.formatDocument');
           // A10: mark file as saved
           savedFilesRef.current[savePath] = finalContent;
           setDirtyTabs(prev => { const next = new Set(prev); next.delete(savePath); return next; });
@@ -843,10 +872,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         setIsPanelOpen(prev => !prev);
       } else if (shortcutStr.includes('ctrl+g')) {
         // A15: Go to Line
-        editorInstance?.getAction('editor.action.gotoLine')?.run();
+        runEditorAction('editor.action.gotoLine');
       } else if (shortcutStr.includes('ctrl+d')) {
         // A18: Select next occurrence (adds cursor to next match)
-        editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run();
+        runEditorAction('editor.action.addSelectionToNextFindMatch');
       }
     }
   };
@@ -1219,24 +1248,24 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      } catch { /* clipboard permission denied — Ctrl+V still works in the editor */ }
                    } },
                    { divider: true },
-                   { label: 'Find', shortcut: 'Ctrl+F', run: () => editorInstance?.getAction('actions.find')?.run() },
-                   { label: 'Replace', shortcut: 'Ctrl+H', run: () => editorInstance?.getAction('editor.action.startFindReplaceAction')?.run() },
+                   { label: 'Find', shortcut: 'Ctrl+F', run: () => runEditorAction('actions.find') },
+                   { label: 'Replace', shortcut: 'Ctrl+H', run: () => runEditorAction('editor.action.startFindReplaceAction') },
                    { label: 'Find in Files', shortcut: 'Ctrl+Shift+F', run: () => handleShortcut([], 'workbench.action.findInFiles') },
                    { divider: true },
-                   { label: 'Toggle Line Comment', shortcut: 'Ctrl+/', run: () => editorInstance?.getAction('editor.action.commentLine')?.run() },
-                   { label: 'Format Document', shortcut: 'Shift+Alt+F', run: () => editorInstance?.getAction('editor.action.formatDocument')?.run() },
+                   { label: 'Toggle Line Comment', shortcut: 'Ctrl+/', run: () => runEditorAction('editor.action.commentLine') },
+                   { label: 'Format Document', shortcut: 'Shift+Alt+F', run: () => runEditorAction('editor.action.formatDocument') },
                  ] },
                  { name: 'Selection', items: [
-                   { label: 'Select All', shortcut: 'Ctrl+A', run: () => editorInstance?.getAction('editor.action.selectAll')?.run() },
-                   { label: 'Expand Selection', shortcut: 'Shift+Alt+→', run: () => editorInstance?.getAction('editor.action.smartSelect.expand')?.run() },
-                   { label: 'Add Next Occurrence', shortcut: 'Ctrl+D', run: () => editorInstance?.getAction('editor.action.addSelectionToNextFindMatch')?.run() },
+                   { label: 'Select All', shortcut: 'Ctrl+A', run: () => runEditorAction('editor.action.selectAll') },
+                   { label: 'Expand Selection', shortcut: 'Shift+Alt+→', run: () => runEditorAction('editor.action.smartSelect.expand') },
+                   { label: 'Add Next Occurrence', shortcut: 'Ctrl+D', run: () => runEditorAction('editor.action.addSelectionToNextFindMatch') },
                    { divider: true },
-                   { label: 'Add Cursor Above', shortcut: 'Ctrl+Alt+↑', run: () => editorInstance?.getAction('editor.action.insertCursorAbove')?.run() },
-                   { label: 'Add Cursor Below', shortcut: 'Ctrl+Alt+↓', run: () => editorInstance?.getAction('editor.action.insertCursorBelow')?.run() },
+                   { label: 'Add Cursor Above', shortcut: 'Ctrl+Alt+↑', run: () => runEditorAction('editor.action.insertCursorAbove') },
+                   { label: 'Add Cursor Below', shortcut: 'Ctrl+Alt+↓', run: () => runEditorAction('editor.action.insertCursorBelow') },
                    { divider: true },
-                   { label: 'Move Line Up', shortcut: 'Alt+↑', run: () => editorInstance?.getAction('editor.action.moveLinesUpAction')?.run() },
-                   { label: 'Move Line Down', shortcut: 'Alt+↓', run: () => editorInstance?.getAction('editor.action.moveLinesDownAction')?.run() },
-                   { label: 'Copy Line Down', shortcut: 'Shift+Alt+↓', run: () => editorInstance?.getAction('editor.action.copyLinesDownAction')?.run() },
+                   { label: 'Move Line Up', shortcut: 'Alt+↑', run: () => runEditorAction('editor.action.moveLinesUpAction') },
+                   { label: 'Move Line Down', shortcut: 'Alt+↓', run: () => runEditorAction('editor.action.moveLinesDownAction') },
+                   { label: 'Copy Line Down', shortcut: 'Shift+Alt+↓', run: () => runEditorAction('editor.action.copyLinesDownAction') },
                  ] },
                  { name: 'View', items: [
                    // Split view was reachable only by Ctrl+\ — a feature nobody can find is a feature
@@ -1353,7 +1382,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            </div>
            {/* A6: Format document */}
            <button
-             onClick={() => editorInstance?.getAction('editor.action.formatDocument')?.run()}
+             onClick={() => runEditorAction('editor.action.formatDocument')}
              title="Format document (Shift+Alt+F)"
              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
@@ -1385,14 +1414,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            >↵</button>
            {/* A9: Code folding */}
            <button
-             onClick={() => editorInstance?.getAction('editor.foldAll')?.run()}
+             onClick={() => runEditorAction('editor.foldAll')}
              title="Fold All (Ctrl+K Ctrl+0)"
              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              <Minimize2 className="w-3 h-3" />
            </button>
            <button
-             onClick={() => editorInstance?.getAction('editor.unfoldAll')?.run()}
+             onClick={() => runEditorAction('editor.unfoldAll')}
              title="Unfold All (Ctrl+K Ctrl+J)"
              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
@@ -1400,14 +1429,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            </button>
            {/* A15/A16/A18: Quick-access shortcuts in toolbar */}
            <button
-             onClick={() => editorInstance?.getAction('actions.find')?.run()}
+             onClick={() => runEditorAction('actions.find')}
              title="Find (Ctrl+F)"
              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >
              <Search className="w-3 h-3" />
            </button>
            <button
-             onClick={() => editorInstance?.getAction('editor.action.gotoLine')?.run()}
+             onClick={() => runEditorAction('editor.action.gotoLine')}
              title="Go to Line (Ctrl+G)"
              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest text-faint hover:text-ink transition-all"
            >

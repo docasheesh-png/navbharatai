@@ -80779,6 +80779,58 @@ aap isko kuch aur add / upgrade karna chahoge to kar dena!!"*
 - **Next (PR B–D):** corner-handle resize + pinch on the shortcut popup and the ENTER button inside it;
   every shortcut pressed in a real browser on a phone viewport with its effect asserted; the CUSTOM
   face (flip, combo input + Go, full desktop key grid, cursor tool merged, `CursorPopup.tsx` retired).
+
+## 2026-09-24 — Every Code Studio shortcut pressed in a real browser; the dead ones root-caused (PR C of four)
+
+Admin: *"select a shortcut function me jo list option hoti hai — sabhi list ko ek ek kar ke verify karo!
+kon kon se shortcut kam kar rahe hai, kon kon se nahi! jo kaam kar rahe hai, unko aur rocksolid banao,
+aur jo kaam nahi kar rahe hai, usko working karo!"*
+
+**How it was verified — not by reading code.** `scripts/ideShortcutAudit/` (committed, not in CI):
+a Vite harness page mounts the WHOLE Code Studio with stub props (no login, no server, every outbound
+request aborted), and `audit.mjs` drives it in Chromium — 390×844 phone and 1280×800 desktop — picks
+each of the 82 entries through the popup, presses ENTER, and asserts an OBSERVABLE effect: a moved
+cursor, a changed line count, a widget on screen, a selection, a callback. One line per shortcut.
+
+**Pass 1 (on PR A + B): 71 OK on the phone, 73 on the desktop.** The difference was two probes of
+mine (fixed). Nine were dead on both, and every one had a root cause in the code:
+
+1. 🔴 **THE BIG ONE — not a popup bug at all.** `Editor.tsx` reported `onMount(null)` from
+   `useEffect(…, [onMount])`, and CodeStudio passes `onMount` as an inline arrow — a new identity on
+   EVERY render, i.e. on every keystroke (`content` is a memo key). React ran the cleanup each time, so
+   `editorInstance` was **null from the first character typed until the editor was clicked again**.
+   Every `editorInstance?.…` command — Undo from the menu, Format Document, every popup shortcut
+   reaching the editor — silently did nothing in that window. Proven: Undo through the popup worked on
+   an untouched file and did nothing after one edit; the instrumented editor received NO call at all.
+   Fix: a ref carries the latest callback and the unmount effect has no dependencies.
+2. 🔴 **A gutter click stored its breakpoint and drew NO glyph until the next keystroke** (found
+   through F9): the `Editor` memo comparator named four props and swallowed every other change —
+   `activeBreakpoints`, `dirtyTabs`, `editorOptions` (font size!), `editorTheme`, `hideHeaderDebug`.
+   It now names every paint-affecting prop. Verified: `afterClick: 0 → 1`.
+3. **F9** dispatched `editor.debug.action.toggleBreakpoint`, a VS CODE id Monaco does not have —
+   "command … not found" on every press, ever. Now the debugger's own toggle on the cursor line, in
+   the pane being edited; the generic `editor.` passthrough is told to leave it alone.
+4. **Alt+← / Alt+→** called `window.history.back()` / `.forward()` — the browser's Back button, which
+   leaves Code Studio. Now Monaco's `cursorUndo` / `cursorRedo` (the cursor's own position history);
+   labelled "Go Back (previous cursor spot)".
+5. **Ctrl+T** threw "Quick input service needs a focused editor to work": four sites ran
+   `getAction(id).run()` on whatever had focus (after a popup tap, the popup). ONE helper,
+   `runEditorAction`, focuses first; the 19 menu-bar and toolbar sites were the same class and use it.
+6. **"Accept Suggestion" (Tab) is structurally impossible from the popup** — the tap that picks it
+   closes the suggestion list — so it is no longer listed, with the reason beside where it was.
+7. **"Save All Files"** was labelled Ctrl+K S; the physical listener binds Ctrl+Shift+S. Label fixed.
+
+**Pass 2, all fixes in: 81 of 81 listed shortcuts OK on the phone AND on the desktop** (82 minus the one
+honestly delisted). Zero page errors.
+
+- **Tests:** `tests/everyShortcutWasPressedInARealBrowser.test.ts` — source guards for each root cause
+  (the ref-carried unmount report, the comparator's prop list, no bare `getAction().run()`, the
+  navigate mapping, the F9 case and its passthrough exclusion, the delisting, the Save All key).
+- **Knowledge base:** the KEYBOARD SHORTCUTS bullet says what was verified and what changed.
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+- **Next (PR D):** the CUSTOM face — flip, a combo box + GO, the full desktop key grid, the cursor
+  tool merged, `CursorPopup.tsx` retired; `scripts/ideShortcutAudit/customFace.mjs` will prove it the
+  same way.
 ## 2026-09-24 — An empty Preview opens instead of doing nothing (admin: "khali preview open ho jaye")
 
 **Reported:** on the home page, with nothing built, tapping Preview did nothing at all.

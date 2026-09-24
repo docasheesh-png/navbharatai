@@ -80468,3 +80468,30 @@ index.html. All three causes were ours.
   - The static-site ZIP export uses DEFLATE, where JSZip's default is STORE.
   - Kill switch `STATIC_PRECOMPRESSED=off`.
   - Tested over real HTTP in server.ts middleware order (`tests/theBundleIsCompressedOnceNotPerRequest.test.ts`).
+## 2026-09-24 — Compression audit → stored data is compressed, not dropped (admin: "world class banaye woh build karo")
+
+The admin asked what zstd and brotli are, and where NavBharatAI should use which. The audit
+corrected my own first answer: the main server ALREADY serves brotli (the `compression` 1.8.1
+package negotiates br, then gzip). The real finding was not speed. It was DATA LOSS at Firestore's
+1 MiB document limit, in three stores:
+- **The Time Machine** kept the first ~900K characters of an app and silently dropped the rest.
+  - The limit was measured in characters, so a Hindi-heavy app could exceed 1 MiB and lose the
+    version entirely.
+  - Now: a shared helper `lib/compactStore.ts` (brotli, tagged, byte-measured) stores the app packed
+    when it does not fit as plain text. Measured on this repo's sources, brotli shrinks them 4.1×.
+  - Whatever still does not fit is counted (`omittedFileCount`) and told to the user on restore.
+  - `list()` now selects metadata only; before, it downloaded up to 50 whole apps to throw them away.
+- **The admin build-report session** used to drop older builds. It is now fitted by its PACKED size.
+  `select('meta')` is used on the list.
+- **Transcript turns** over 600 KB are packed instead of being replaced by "too large to save".
+- Kill switch `AGENTV3_COMPACT_STORAGE=off`.
+- Small payloads are byte-identical to before, so rolling back is safe.
+- Test-locked in `tests/aBigAppsVersionIsKeptWhole.test.ts` and `tests/adminReportParts.test.ts`. The
+  byte-measure fix is proven by reversion.
+- Next, from the same audit:
+  - precompressed static bundle;
+  - the Monaco files' 1-year immutable cache (the files are not content-hashed);
+  - the static-zip export that stores rather than compresses;
+  - the sandbox dist pull-back as tar.gz instead of base64 JSON.
+- **Open, not done here:** `DiagnosticsStore` still caps a report's commands and logs for size. Those
+  caps also serve readability, so they were deliberately not changed in this pass.

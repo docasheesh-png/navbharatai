@@ -1699,6 +1699,20 @@ the code (it is actually read somewhere) on 2026-07-11.
   cache (`UNHASHED_ASSET_CACHE`) instead of one year `immutable`. ⚠️ `firebase.json` was NOT given the
   same rule: the main app is served by Cloud Run, and Firebase's precedence for overlapping header
   globs was not verified.
+- **🗜️ `AGENTV3_COMPACT_STORAGE` — stored data is compressed instead of dropped (built 2026-09-24, admin:
+  *"jo hamari navbharatai ko world class banaye woh build karo"*). ⚠️ NOT set, and the code default is
+  ON**; `off` is the no-deploy revert (never compress; the old byte-measured drop). Helper:
+  `src/server/lib/compactStore.ts` (brotli q5, tagged `br1`, sizes in UTF-8 BYTES). Used by three stores:
+  the **Time Machine** (`BuildHistoryStore` — an app that does not fit as plain text is stored packed,
+  whatever still does not fit is counted in `omittedFileCount` and told to the user on restore), the
+  **admin build-report session** (`AdminBuildReportStore` — fitted by its PACKED size, so "N older builds
+  omitted" becomes rare), and **transcript turns over 600 KB** (`FirestoreConversationStore`).
+  🔒 **Small payloads are stored byte-for-byte as before**, so a rollback of the code still reads them.
+  Only data that USED to be dropped is written packed. Readers accept both forms forever, and an
+  undecodable payload reads as omitted, never as an empty app (an empty version would wipe a workspace
+  on restore).
+  ⚠️ **Why not zstd:** in Node 22, which is our runtime image, `zlib.zstd*` is still EXPERIMENTAL, and this
+  format must stay readable for the life of every stored version. The tag leaves room for `zs1` later.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

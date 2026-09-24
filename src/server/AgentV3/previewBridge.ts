@@ -449,3 +449,34 @@ export function withoutPreviewBridge(path: string, content: string): string {
   if (typeof content !== 'string' || !content) return content;
   return isHtmlDocumentPath(path) ? stripPreviewBridge(content) : content;
 }
+
+/**
+ * Where OUR script sits inside a sandbox `index.html`, as 1-based inclusive line numbers, or null.
+ *
+ * 🔴 WHY (autopsy f15a9bcc, 2026-09-23): a runtime repair pass spent TWELVE steps paging through the
+ * sandbox `index.html` with `sed -n '1,200p'`, `'200,260p'`, `'280,300p'` … reading our 330-line console
+ * mirror as if it were the user's app and chasing a 502 inside it. `read_file` already strips the bridge;
+ * a shell command cannot be stripped reliably (a line range cuts the script in half), so the bash tool
+ * tells the model which lines are ours instead. PURE.
+ */
+export function bridgeLineRange(html: string): { from: number; to: number } | null {
+  if (typeof html !== 'string' || !html.includes(PREVIEW_BRIDGE_MARKER)) return null;
+  const lines = html.split('\n');
+  const marker = lines.findIndex((l) => l.includes(PREVIEW_BRIDGE_MARKER));
+  if (marker < 0) return null;
+  let from = marker;
+  while (from > 0 && !/<script\b/i.test(lines[from])) from--;
+  let to = marker;
+  while (to < lines.length - 1 && !/<\/script>/i.test(lines[to])) to++;
+  return { from: from + 1, to: to + 1 };
+}
+
+/** The note a shell command that touched `index.html` gets. '' when the file carries no bridge. PURE. */
+export function bridgeShellNote(html: string): string {
+  const r = bridgeLineRange(html);
+  if (!r) return '';
+  return `[NOTE — lines ${r.from}–${r.to} of the sandbox index.html are NavBharatAI's own live-preview script `
+    + `(the <script> containing ${PREVIEW_BRIDGE_MARKER}). It exists only in this sandbox copy for the preview console, `
+    + 'is removed from everything read_file shows you and from everything that is published, and is NOT part of this app — '
+    + 'do not read, debug or edit it. Use read_file index.html to see the app\'s real file.]';
+}

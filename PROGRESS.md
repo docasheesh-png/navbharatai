@@ -80430,3 +80430,30 @@ fake/placeholder code", because it knew only `fakeData` / `mockData` / `dummyDat
   fast lane's per-file prompt. It says a browser cannot find strangers over Bluetooth and that other
   users' data needs a shared online database. Example entries must be labelled on screen as examples.
 - Test-locked in `tests/madeUpPeopleAreDisclosed.test.ts`.
+
+## 2026-09-24 — "Builder bhatakta tha": three ways WE made the full builder wander, fixed (admin-mandated)
+
+The admin asked for the full builder's wandering to be fixed. The evidence is build f15a9bcc's own
+report: 64 reads over 24 files, 40 of them re-reading an unchanged file, and 12 `sed` steps inside
+index.html. All three causes were ours.
+1. **A fresh sub-agent was told it already had a file it had never seen.**
+   - Since f97eb0ec the read ledger has been shared with sub-agents so the report counts their re-reads.
+     That is right, and it stays.
+   - But the same ledger also drove the NOTICE. So a specialist's FIRST read came back with "you have
+     now read X the 6th time… you already have it". The reviewer was even told "STOP — do not read this
+     path again" about a file it had never opened.
+   - Now the notice reads this agent's OWN reads (`_ownReads`, never shared), and the shared ledger
+     still feeds the report.
+2. **The handoff carried a sentence, not the files.** The architect held `src/BusinessContext.tsx` and
+   delegated seven tasks that named it. Each specialist started empty and read it again, usually twice.
+   - The spawn now attaches the files the instruction NAMES, as they are on disk (`taskHandoff.ts`).
+     It is bounded: 6 files, 14k characters each, 36k in total. A file that does not fit is read the
+     ordinary way.
+   - The child counts them as already read, so an unchanged re-read gets the honest nudge.
+3. **A repair pass paged through our own script.** `read_file` strips the preview bridge, but a shell
+   command cannot. So any bash command that names index.html now gets a note giving the exact line
+   range of NavBharatAI's preview script and saying it is not the app (`bridgeShellNote`).
+- Test-locked and proven by reversion in `tests/aFreshAgentIsNotToldItHasAFile.test.ts`.
+- ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
+  hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
+  measurement: its repeat share should fall well below 63%.

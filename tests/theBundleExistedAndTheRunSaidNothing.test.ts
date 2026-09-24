@@ -149,11 +149,16 @@ describe('the ids the summary reads are really declared', () => {
 });
 
 describe('the upload itself stays possible', () => {
-  it('commits the edit without asking Google to auto-submit it for review', () => {
-    // Google refuses to auto-submit while an app has a change it will not take automatically — the
-    // app was under a Broken Functionality enforcement on the day. Without this the upload dies on
-    // its very last line, AFTER "Successfully uploaded 1 artifacts", and the edit is rolled back.
-    expect(step(UPLOAD)).toMatch(/^\s+changesNotSentForReview:\s*true\s*$/m);
+  it('the review flag is wired to an input, because Google flips which value it demands', () => {
+    // It is a fact about the app's review state, not a setting we choose, and BOTH values have
+    // already failed a real run in opposite directions: #127 (2026-09-22) died without it —
+    // "Please set the query parameter changesNotSentForReview to true" — and #131 (2026-09-24)
+    // died with it hardcoded true — "The query parameter changesNotSentForReview must not be set".
+    // So what this pins is that the parameter is still SENT and still steerable, never a value.
+    expect(step(UPLOAD)).toMatch(/^\s+changesNotSentForReview:\s*\$\{\{\s*inputs\.changes_not_sent_for_review\s*\}\}\s*$/m);
+    expect(workflow).toMatch(/^\s{6}changes_not_sent_for_review:\s*$/m);
+    // Default false — today's answer, and the one that needs no human to remember anything.
+    expect(workflow.slice(workflow.indexOf('changes_not_sent_for_review:'))).toMatch(/type:\s*boolean\s*\n\s*default:\s*false/);
   });
 
   it('is still pinned to a full commit SHA, since it receives the Play service-account JSON', () => {

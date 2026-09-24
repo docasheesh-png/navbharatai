@@ -291,18 +291,20 @@ export const ReferralPanel: React.FC<{
         {isAndroid && !referred && (
           <div className="mt-5 border-t border-line pt-5">
             <h5 className="text-[10px] font-black uppercase tracking-widest text-muted">Have a friend&rsquo;s code?</h5>
-            <div className="mt-2.5 flex gap-3">
+            {/* Stacked, like the promo code box: side by side the input's minimum width pushed the button
+                off a narrow phone, and this panel only ever shows on a phone. */}
+            <div className="mt-2.5 flex flex-col gap-3">
               <input
                 type="text"
                 value={codeInput}
                 onChange={(e) => setCodeInput(e.target.value)}
                 placeholder="Enter referral code"
-                className="flex-1 rounded-xl border border-line bg-surface px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-ink transition-colors focus:border-amber-500 focus:outline-none"
+                className="w-full min-w-0 rounded-xl border border-line bg-surface px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-ink transition-colors focus:border-amber-500 focus:outline-none"
               />
               <button
                 onClick={redeem}
                 disabled={busy !== null || !codeInput.trim()}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-6 py-3 text-[9px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-on-accent"
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-6 py-3 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-on-accent"
               >
                 {busy === 'redeem' && <Loader2 className="h-3 w-3 animate-spin" />} Apply
               </button>

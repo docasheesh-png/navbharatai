@@ -558,18 +558,22 @@ export function BillingPanel(props: BillingPanelProps) {
                       <h4 className="text-xs font-black text-ink uppercase tracking-wider">Redeem Reward Coupons</h4>
                       <p className="text-[10px] text-muted font-bold font-mono">Each promo code can only be applied once.</p>
                     </div>
-                    <div className="flex gap-3">
+                    {/* The button sits UNDER the box, full width (admin 2026-09-24, phone screenshot: "apply code
+                        button screen se bahar ja raha hai"). Side by side, an <input> will not shrink below its
+                        built-in minimum width, so on a narrow phone the row was wider than the screen and the
+                        button was pushed off it. Stacked, both always fit, and the tap target is the full width. */}
+                    <div className="flex flex-col gap-3">
                       <input
                         type="text"
                         placeholder="Enter your promo code"
                         value={couponCodeInput}
                         onChange={(e) => onSetCouponCodeInput(e.target.value)}
-                        className="flex-1 bg-surface border border-line rounded-xl px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest text-ink focus:outline-none focus:border-amber-500 transition-colors"
+                        className="w-full min-w-0 bg-surface border border-line rounded-xl px-4 py-3 text-xs font-mono font-bold uppercase tracking-widest text-ink focus:outline-none focus:border-amber-500 transition-colors"
                       />
                       <button
                         onClick={() => onRedeemPromoCoupon(couponCodeInput)}
                         disabled={isRedeemingCoupon || !couponCodeInput}
-                        className="px-6 py-3 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-muted text-black rounded-xl font-black uppercase tracking-widest text-[9px] transition-all duration-200"
+                        className="w-full px-6 py-3 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-muted text-black rounded-xl font-black uppercase tracking-widest text-[10px] transition-all duration-200"
                       >
                         {isRedeemingCoupon ? 'VALIDATING...' : 'APPLY CODE'}
                       </button>

@@ -80408,3 +80408,25 @@ This follows autopsy 3ab93068. The admin accepted items 1 and 3 of its open list
 - Test-locked and proven by reversion in `tests/aBigAppKeepsItsContract.test.ts`.
 - ⚠️ **Not measured yet.** Whether the repair share really drops is the next complex build's
   `FAST_LANE_PHASES` line to read.
+
+## 2026-09-24 — Made-up data about other people is caught, disclosed, and not invented upstream (admin-approved)
+
+This is item 2 of autopsy 3ab93068/f15a9bcc. Build f15a9bcc generated four "nearby vendors" around the
+user and listed them as real. The reviewer passed it, and the fake-code check reported "No
+fake/placeholder code", because it knew only `fakeData` / `mockData` / `dummyData`.
+
+- **Detection is precision-first.** `AuthenticityAnalysis` gains `simulated-data`: a made-up word
+  (simulate / mock / fake / dummy) AND a noun for other people's data (vendors, users, drivers,
+  followers, nearby …), run on camelCase-split lines.
+  - An app's own catalogue (`sampleProducts`, a seeded menu) is not flagged, nor is physics `simulate…`.
+  - Tests and mock folders are ignored. The golden templates are a canary and none of them trips it.
+- **The severity is MEDIUM on purpose.** A `high` finding is a readiness blocker that fails the build
+  and orders a heal to "implement it for real". The real version needs a shared database the user has
+  not chosen, so that heal cannot succeed.
+- **Disclosure.** A finding in a file the app loads appends one plain sentence to the user's summary
+  (`simulatedDataNotice`): which file shows demo data, why, and an offer to set up a shared database.
+  It records `SIMULATED_DATA_SHIPPED` (warning).
+- **Prevention.** `NO_INVENTED_PEOPLE_RULE` is added to the architect prompt, with its twin in the
+  fast lane's per-file prompt. It says a browser cannot find strangers over Bluetooth and that other
+  users' data needs a shared online database. Example entries must be labelled on screen as examples.
+- Test-locked in `tests/madeUpPeopleAreDisclosed.test.ts`.

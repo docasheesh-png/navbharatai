@@ -4583,24 +4583,21 @@ export default function App() {
             { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },
           ].map(({ id, icon: Icon, label }) => {
             const isActive = activeView === id;
-            // Preview is v5.0-first (admin 2026-07-07: one preview, three gates): enable it whenever a v3
-            // workspace exists, not only for the retired v2 generatedCode path.
-            // Studio is NEVER disabled (admin 2026-09-23: "agar koi open app nahi hai, to bhi studio open
-            // ho jaye, bas andar koi file na dikhe"). It used to be gated on `hasGeneratedCode`, so with no
-            // app the button was dead — while the desktop sidebar opened the same screen without a gate.
-            // CodeStudio already renders an honest "Empty workspace" state with a New File button, so an
-            // IDE with nothing in it is a real screen, not a broken one. Preview keeps its gate: with no
-            // app there is nothing to render.
-            const isDisabled = id === 'preview' && !(v3Preview.workspaceId || hasGeneratedCode);
+            // NO BUTTON HERE IS EVER DISABLED. Studio went first (admin 2026-09-23: "agar koi open app nahi
+            // hai, to bhi studio open ho jaye, bas andar koi file na dikhe") and Preview followed (admin
+            // 2026-09-24: "jab preview me kuch na ho, aur preview par click kiya jaye, to khali preview open
+            // ho jaye"). Preview used to be disabled until a workspace or generated code existed, so on
+            // the home page the tap did NOTHING — no screen, no word. PreviewSurface already has an honest
+            // screen for exactly that case ("Your app will appear here", previewEmptyKind 'no-app-yet'),
+            // so an empty preview is a real screen, not a broken one.
             return (
               <button
                 key={id}
-                disabled={isDisabled}
-                onClick={() => { if (!isDisabled) toggleTab(id); }}
+                onClick={() => toggleTab(id)}
                 aria-label={label}
                 aria-current={isActive ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${
-                  isActive ? 'text-accent-text' : isDisabled ? 'text-faint' : 'text-faint'
+                  isActive ? 'text-accent-text' : 'text-faint'
                 }`}
               >
                 <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />

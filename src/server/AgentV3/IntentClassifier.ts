@@ -332,7 +332,40 @@ const FRESH_START_SIGNALS: readonly string[] = [
  */
 export function wantsFreshStart(message: string): boolean {
   if (typeof message !== 'string' || !message.trim()) return false;
-  return matchesSignal(message.toLowerCase(), FRESH_START_SIGNALS);
+  const haystack = normalizeApostrophes(message.toLowerCase());
+  return FRESH_START_SIGNALS.some((signal) => containsUnnegatedSignal(haystack, signal));
+}
+
+/**
+ * 🔴 "DO NOT REBUILD IT FROM SCRATCH" IS NOT A REQUEST TO START FRESH (autopsy 0d297b25, 2026-09-23).
+ *
+ * `wantsFreshStart` matched its signals as bare words, so the WORKNEX prompt — *"The app is already
+ * developed … DO NOT rebuild it from scratch and DO NOT delete or break any existing feature"* — read
+ * as an explicit order to wipe the project. It feeds the two guards that PROTECT an existing app (the
+ * build→edit downgrade and `rebuildGuardFlipsToEdit`), so a user who wrote the most emphatic
+ * "keep my app" sentence possible had it read as its opposite, and the rebuild-confirmation gate then
+ * asked them whether to replace their app. A negated occurrence is skipped; one un-negated occurrence
+ * elsewhere in the message still counts ("don't keep this — start over from scratch").
+ *
+ * English negation comes BEFORE the phrase ("do not … from scratch"), Hindi negation AFTER it
+ * ("scratch se shuru mat karo"), so both windows are read. Precision-first in the SAFE direction:
+ * missing a genuine fresh start costs one confirmation-free edit the user can repeat; reading a
+ * "keep it" as "wipe it" is the harm.
+ */
+const NEGATION_BEFORE = /\b(?:do\s+not|don't|dont|never|must\s+not|should\s+not|shouldn't|without|no\s+need\s+to|avoid|mat|na|nahi|nahin)\b(?:[\s,]+[a-z'-]+){0,4}[\s,]*$/;
+const NEGATION_AFTER = /^[\s,]*(?:[a-z'-]+[\s,]+){0,1}(?:mat|na|nahi|nahin|not)\b/;
+
+function containsUnnegatedSignal(haystack: string, signal: string): boolean {
+  for (let idx = haystack.indexOf(signal); idx !== -1; idx = haystack.indexOf(signal, idx + 1)) {
+    const before = idx === 0 ? '' : haystack[idx - 1];
+    const after = idx + signal.length >= haystack.length ? '' : haystack[idx + signal.length];
+    if (before !== '' && /[a-z0-9]/.test(before)) continue;
+    if (after !== '' && /[a-z0-9]/.test(after)) continue;
+    if (NEGATION_BEFORE.test(haystack.slice(Math.max(0, idx - 48), idx))) continue;
+    if (NEGATION_AFTER.test(haystack.slice(idx + signal.length, idx + signal.length + 24))) continue;
+    return true;
+  }
+  return false;
 }
 
 /**

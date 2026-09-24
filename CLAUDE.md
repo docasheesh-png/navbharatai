@@ -1766,6 +1766,30 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⚠️ **SAID PLAINLY, because the admin chose it knowing:** "paid" = real cost + markup, and the
   professionals' leader model is the free GLM-flash rung for BOTH tiers, so many paid answers still
   cost ₹0. That is the admin's "Asli kharcha + markup" decision, not a bug.
+
+- **📚 EXAM MODE IS SET FROM PREVIOUS-YEAR QUESTIONS — 40 / 30 / 30 (admin 2026-09-24).**
+  `PROFESSIONAL_EXAM_PYQ` — ⚠️ **NOT set, and the code default is ON**; `off` is the instant,
+  no-deploy revert and leaves the paper prompt byte-identical to what it built before. Read by
+  `examPyqEnabled()` in `src/server/professionals/examMode.ts`.
+  Admin: *"exam mode me jo questions puche jaye woh PYQ (previous year question) hone chahiye …
+  40% pyq / 30% pyq se milte julte / 30% new but, exam me ane ki puri sambhavna"*. `examBlend`
+  splits the paper by largest remainder so the three counts sum to EXACTLY what was asked (5 → 2/2/1;
+  `Math.round` per share gives 2/2/2, a sixth question nobody ordered).
+  🔴 **COMPOSITION IS ASKED FOR; PROVENANCE IS FORBIDDEN, and that is the admin's own correction.**
+  I objected that we cannot PROVE a question is a genuine PYQ; they answered *"hame yeh sabit hi nahi
+  karna hai ki yeh pyq hai, hame bs question dene hai. user khud, samajh jayega."* So the prompt tells
+  the generator where to draw each question from and, in the same paragraph, **never to write a year,
+  a paper name or a kind onto any question** — a "(UPSC 2019)" in the question text is an unverifiable
+  claim reaching a student through the one field the surface prints verbatim, i.e. the fake badge the
+  second absolute rule forbids. A better-composed paper is not a badge.
+  ⚠️ **ONLY WITH AN EXAM SELECTED** (`examTargetBrief` non-empty — the SAME answer the prompt already
+  uses, never a second rule that can disagree with it): "previous year" has no referent on a plain
+  "Trigonometry, 10 questions", and demanding 40% of one there would be asking the generator to invent
+  the provenance this design refuses to print.
+  💸 **It costs NOT ONE extra call and no web search.** The composition is an instruction inside the
+  SAME single model call that already writes the paper — test-locked, because "scan the internet for
+  PYQ" is the reading of the request that would have added a search per paper.
+  Test-locked and **reversion-proven four ways** in `tests/theExamAsksWhatTheExamAsks.test.ts`.
 - **The MID-BUILD cost stop (shipped 2026-09-13):** `AGENTV3_BUILD_COST_CEILING_USD` — ⚠️ **NOT set,
   and the code default is what governs today.** The ceiling on ONE build's REAL provider cost, in USD.
   **Default $5**, capped at $50, read by `src/server/AgentV3/buildCostCeiling.ts` and evaluated inside

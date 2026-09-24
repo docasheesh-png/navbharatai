@@ -26,10 +26,13 @@ import { Layers, ChevronDown } from 'lucide-react';
 
 /**
  * One half of the composer's left column (History above, Mode below). Shared by both buttons so the
- * two halves can never differ in size. `flex-1` splits the column's height between them.
+ * two halves can never differ in size. The height is FIXED (`h-10`), never a share of the column: it
+ * used to be `flex-1`, so a message that grew the box stretched both buttons with it (admin 2026-09-24:
+ * *"history/mode button ka size na bade, bas input box ka size badhe"*). Two of them plus the 6px gap
+ * are 86px, exactly the two-row box at rest.
  */
 export const RAIL_BUTTON_CLASS =
-  'flex-1 min-h-[36px] w-11 md:w-auto md:px-3 shrink-0 flex items-center justify-center gap-1.5 rounded-xl border border-line bg-card text-[11px] font-bold text-muted hover:text-ink hover:border-indigo-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500';
+  'h-10 w-11 md:w-auto md:px-3 shrink-0 flex items-center justify-center gap-1.5 rounded-xl border border-line bg-card text-[11px] font-bold text-muted hover:text-ink hover:border-indigo-500 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500';
 
 export interface ModeButtonProps {
   /** Open the picker. `undefined` ⇒ render nothing (the bottom bar is carrying Mode). */

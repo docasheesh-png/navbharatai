@@ -120,3 +120,66 @@ describe('every AI surface passes both openers through, so it lands on the right
     });
   }
 });
+
+// ── THE WHOLE BOX IS THE INPUT, and the rail never grows (admin 2026-09-24, two phone screenshots:
+// "input box ka pura area hi input box hona chahiye … history/mode button ka size na bade, bas input
+// box ka size badhe"). ──────────────────────────────────────────────────────────────────────────────
+import { tapFocusesComposerText } from '../src/components/chat/ComposerShell';
+
+/** A minimal element: its ancestors, and the selector it matches (if any), are all a tap needs. */
+function fakeEl(matches: string | null, parent: any = null): any {
+  const el: any = {
+    parent,
+    matches,
+    closest(sel: string) {
+      for (let n: any = el; n; n = n.parent) {
+        if (n.matches && sel.split(',').map((s) => s.trim()).includes(n.matches)) return n;
+      }
+      return null;
+    },
+  };
+  return el;
+}
+function fakeBox(): any {
+  const box: any = fakeEl(null);
+  box.contains = (n: any) => { for (let x = n; x; x = x.parent) if (x === box) return true; return false; };
+  return box;
+}
+
+describe('a tap anywhere in the box that is not a control goes to the text', () => {
+  it('the empty area beside the icons focuses the text', () => {
+    const box = fakeBox();
+    const emptyRow = fakeEl(null, box);
+    expect(tapFocusesComposerText(emptyRow, box)).toBe(true);
+    expect(tapFocusesComposerText(box, box)).toBe(true);
+  });
+
+  it('a tap on a control — or on the icon inside one — is left to that control', () => {
+    const box = fakeBox();
+    const send = fakeEl('button', box);
+    const icon = fakeEl(null, send);
+    expect(tapFocusesComposerText(send, box)).toBe(false);
+    expect(tapFocusesComposerText(icon, box)).toBe(false);
+    expect(tapFocusesComposerText(fakeEl('textarea', box), box)).toBe(false);
+  });
+
+  it('a tap outside the box, or with no box, does nothing', () => {
+    const box = fakeBox();
+    expect(tapFocusesComposerText(fakeEl(null), box)).toBe(false);
+    expect(tapFocusesComposerText(fakeEl(null, box), null)).toBe(false);
+    expect(tapFocusesComposerText(null, box)).toBe(false);
+  });
+
+  it('both layouts wire the handler onto the box itself', () => {
+    const SHELL = read('src/components/chat/ComposerShell.tsx');
+    const wired = SHELL.match(/ref=\{wholeBox\.ref\} onMouseDown=\{wholeBox\.onMouseDown\} onClick=\{wholeBox\.onClick\}/g) ?? [];
+    expect(wired.length).toBe(2);
+  });
+});
+
+describe('the History / Mode column does not grow with the message', () => {
+  it('the column sits at the bottom and does not stretch', () => {
+    const html = render({ history: true, mode: true });
+    expect(html).toMatch(/class="[^"]*\bself-end\b[^"]*" data-composer-rail=""/);
+  });
+});

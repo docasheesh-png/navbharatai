@@ -380,7 +380,7 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
-import { withoutPreviewBridge } from './previewBridge';
+import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -2179,6 +2179,8 @@ export class ToolDispatcher {
   private _readLoopStops = 0;
 
   private _readLedger: ReadLedger = new Map();
+  /** THIS agent's own reads — never shared, because it answers "what is in MY context?". See read_file. */
+  private readonly _ownReads: ReadLedger = new Map();
 
   /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
   readLedgerCounts(): Map<string, number> {
@@ -2228,6 +2230,16 @@ export class ToolDispatcher {
    */
   shareReadLedger(ledger: ReadLedger): void {
     this._readLedger = ledger;
+  }
+
+  /**
+   * A file handed to this agent in its task (taskHandoff.ts) is in its context already, so it counts as
+   * this agent's first read: a re-read of it unchanged then gets the honest "you already have it".
+   * Touches only this agent's OWN reads — never the shared ledger, which counts real reads for the report.
+   */
+  noteHandedOff(path: string, content: string): void {
+    if (!path || typeof content !== 'string') return;
+    this._ownReads.set(path, { count: 1, content, writeSeq: this._writeSeq, stalls: 0 });
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
@@ -2677,14 +2689,26 @@ export class ToolDispatcher {
         // after an edit resets it to zero and never escalates. At READ_LOOP_LIMIT the wording becomes
         // a stop. The content is still returned in full — see repeatedReads.ts for why that line is
         // not negotiable.
+        // 🔴 TWO LEDGERS, TWO QUESTIONS (autopsy f15a9bcc, 2026-09-23). The shared ledger answers "how
+        // much re-reading did this BUILD do?" for the report, across every agent. The notice answers a
+        // different question — "have YOU already got this file?" — and only THIS agent's own reads can
+        // answer it, because a sub-agent starts with an empty context. Driving the notice from the
+        // shared ledger told fresh sub-agents, on their FIRST read, "you already have it" and even
+        // "STOP — do not read this path again" (the reviewer was told so about a file it had never
+        // seen). A model told it holds a file it does not hold works blind — that is wandering we caused.
         const prior = this._readLedger.get(reqPath);
         const readCount = (prior?.count ?? 0) + 1;
         const unchanged = prior !== undefined && prior.content === full;
         const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
         const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
         this._readLedger.set(reqPath, { count: readCount, content: full, writeSeq: this._writeSeq, stalls });
-        const notice = repeatedReadNotice(reqPath, readCount, unchanged, stalls);
-        if (stalls >= READ_LOOP_LIMIT) this._readLoopStops++;
+        const own = this._ownReads.get(reqPath);
+        const ownCount = (own?.count ?? 0) + 1;
+        const ownUnchanged = own !== undefined && own.content === full;
+        const ownStalls = ownUnchanged && own.writeSeq === this._writeSeq ? own.stalls + 1 : 0;
+        this._ownReads.set(reqPath, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
+        const notice = repeatedReadNotice(reqPath, ownCount, ownUnchanged, ownStalls);
+        if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops++;
 
         if (sl === null && el === null) return notice ? `${notice}${full}` : full;
         const lines = full.split('\n');
@@ -3461,6 +3485,15 @@ export class ToolDispatcher {
         // repo has already been burned by); we read the output the command already produced and tell the
         // agent the truth. Silent unless a gate tool was piped, exit was 0, AND the output carries a real
         // compiler/test error. Kill switch AGENTV3_PIPED_GATE_CHECK=off.
+        // OUR SCRIPT IS NOT THE APP (autopsy f15a9bcc) — see bridgeShellNote. Only a command that names the
+        // root index.html pays the one extra read, and an unreadable file adds nothing.
+        if (/(^|[\s'"/])index\.html?\b/.test(command)) {
+          try {
+            const html = await this.actuator.readFile(this.workspaceId, 'index.html');
+            const note = bridgeShellNote(typeof html === 'string' ? html : '');
+            if (note) out = `${out}\n\n${note}`;
+          } catch { /* a note is best-effort — the command's own output stands */ }
+        }
         if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
           const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
           if (lie) out = `${out}\n\n${lie}`;

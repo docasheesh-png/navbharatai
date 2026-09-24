@@ -45,7 +45,7 @@ import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemot
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
-import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -536,6 +536,7 @@ import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnos
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
 import { entryIsStillTheStarter, starterRenderNote } from '../AgentV3/stillTheStarterApp';
+import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
@@ -10273,6 +10274,25 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';
     }
+    /**
+     * 🔴 THE APP THEY ASKED ABOUT IS NOT HERE (autopsy 0d297b25). "The WORKNEX app is already developed
+     * in this Replit project … build the APK" reached a workspace holding only our starter, and a
+     * four-minute build discovered what these three facts already said. Answered instead — one message
+     * that names how to bring the project in. See projectElsewhere.ts for the precision rules; the
+     * workspace half is `userAppExists`, which is fail-safe (an unreadable listing counts as an app).
+     */
+    const projectElsewhere = readProjectElsewhere(prompt);
+    const answerProjectElsewhere = shouldAnswerProjectElsewhere({
+      prompt,
+      userAppExists,
+      importing: zipImports.length > 0
+        || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+        || rawAttachments.length > 0,
+    });
+    if (answerProjectElsewhere) {
+      console.log(`[AGENTV3] the prompt is about an existing app${projectElsewhere.host ? ` in ${projectElsewhere.host}` : ''} that this workspace does not hold — answering instead of building`);
+      intent = 'chat';
+    }
 
     /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
@@ -10463,7 +10483,7 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -10474,7 +10494,10 @@ async function noteBuildOutcome(
           // Bounded (30s) — the plain-chat reply runs on an early-exit path BEFORE the deadline timer
           // is armed; without this a stalled provider hangs the whole request forever. On timeout the
           // catch below falls through to the normal build path so the user still gets an answer.
-          const { response } = await raceTimeout(
+          // A reply that could not be generated must NOT fall through to a build when the whole point of
+          // this turn is that there is nothing here to build (projectElsewhere.ts) — that fallback is the
+          // exact outcome being prevented, so it degrades to the deterministic answer instead.
+          const routed = await raceTimeout(
             chatRouter.route(
               chatPrompt,
               LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' +
@@ -10493,7 +10516,8 @@ async function noteBuildOutcome(
                     + "brief example of the kind of answer that helps (for instance a shop billing app "
                     + "with GST). Be warm and brief — they are one sentence away from starting."
                   : '')
-                + (ambiguousBuildAsk && !clarifyWhatToBuild
+                + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
+                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
@@ -10503,10 +10527,18 @@ async function noteBuildOutcome(
             ),
             30_000,
             'chatRouter.route',
-          );
-          reply = response.content + providerDebugTag(response.provider);
+          ).catch((err: unknown) => {
+            if (answerProjectElsewhere) return null;
+            throw err;
+          });
+          const response = routed?.response;
+          reply = response && response.content && response.content.trim()
+            ? response.content + providerDebugTag(response.provider)
+            : answerProjectElsewhere
+              ? projectElsewhereFallback(projectElsewhere)
+              : (response?.content ?? '') + (response ? providerDebugTag(response.provider) : '');
           // Cache only a real, non-empty reply (never cache an empty/failed generation).
-          if (cacheable && response.content && response.content.trim()) {
+          if (cacheable && response && response.content && response.content.trim()) {
             chatResponseCache.set(cacheKey, reply);
           }
         }
@@ -12690,7 +12722,7 @@ async function noteBuildOutcome(
         if (isBudgetEndedError(err)) {
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
-            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — moving to the next one`,
+            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
             autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
           });
           return;
@@ -16095,7 +16127,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
@@ -19919,6 +19951,26 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
+
+      // 🔴 MADE-UP PEOPLE ARE DISCLOSED, NOT SHIPPED AS REAL (autopsy f15a9bcc, 2026-09-23). That build
+      // listed four generated "nearby vendors" as real and the user was told the feature was done. The
+      // files THIS turn wrote are scanned (only the ones the app actually loads), and a finding adds one
+      // plain sentence to the summary: what is demo data, why, and the real path. Never a failed build —
+      // the real version needs a database the user has not chosen yet; saying so is the honest outcome.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const invented = simulatedDataIssues(Object.fromEntries(writtenFiles))
+            .filter((i) => !isUnreachable(dispatcher.lastReachability, i.file));
+          if (invented.length > 0) {
+            result = { ...result, summary: `${result.summary}${simulatedDataNotice(invented)}` };
+            buildDiag.record({
+              phase: 'readiness', severity: 'warning', code: 'SIMULATED_DATA_SHIPPED', autoResolved: false,
+              message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
+              detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
+            });
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the

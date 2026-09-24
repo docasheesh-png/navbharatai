@@ -671,7 +671,10 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
       for (const [path, content] of entries) zip.file(path, typeof content === 'string' ? content : String(content ?? ''));
-      const blob = await zip.generateAsync({ type: 'blob' });
+      // JSZip's default is STORE — a ZIP with no compression at all, several times larger than it needs
+      // to be (compression audit, 2026-09-24). DEFLATE is the standard ZIP compression every unzip
+      // tool reads; level 6 is the usual speed/size balance.
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
       const fileName = sanitizeZipName(configs.static?.zipName);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

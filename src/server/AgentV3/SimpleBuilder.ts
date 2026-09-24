@@ -44,6 +44,26 @@ export interface SimpleFileSpec {
 
 const HEAVY_OR_UNSAFE = /^(node_modules|\.git|dist|build)\//;
 
+/** The lane's budget for an ordinary request — unchanged since 2026-07. */
+export const FAST_LANE_BUDGET_MS = 240_000;
+/**
+ * The lane's budget for a COMPLEX request (admin-approved 2026-09-24, autopsy 3ab93068).
+ *
+ * 480 s, from that build's own measured phases on the rung complex builds open on: plan 40 s + a
+ * contract given its full 90 s cap + three dependency tiers at ~100 s each ≈ 430 s, with headroom. The
+ * 240 s budget cannot hold that at all — which is why its contract was cut and its repair ran 419 s.
+ * Tunable without a deploy (`AGENTV3_FASTLANE_COMPLEX_SECONDS`, 240–900); an unreadable value falls back
+ * to the default, never to "no limit".
+ */
+export const FAST_LANE_COMPLEX_BUDGET_MS = 480_000;
+export function fastLaneBudgetMs(complex: boolean, env: NodeJS.ProcessEnv = process.env): number {
+  if (!complex) return FAST_LANE_BUDGET_MS;
+  const raw = String(env.AGENTV3_FASTLANE_COMPLEX_SECONDS ?? '').trim();
+  const n = raw === '' ? NaN : Number(raw);
+  if (!Number.isFinite(n)) return FAST_LANE_COMPLEX_BUDGET_MS;
+  return Math.min(900, Math.max(240, Math.round(n))) * 1000;
+}
+
 /**
  * The app's ROOT COMPONENT — the file `main.tsx` mounts. Every other file is only reachable through it.
  */
@@ -250,6 +270,7 @@ export function fileSystemPrompt(framework: string): string {
     'RULES:',
     '- Output ONLY that one file block — no prose, no explanation, no markdown fences.',
     '- Write the COMPLETE, real file — no TODOs, no placeholders, no "..." stubs.',
+    '- Never generate simulated/mock data about OTHER people (nearby shops, other users, followers, drivers) and present it as real — showing other people\'s data needs a shared online database. Example entries shown for layout must be labelled on screen as examples.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     ...exportImportConvention(framework),
     ...DESIGN_CONTRACT,
@@ -843,6 +864,11 @@ export interface SimpleBuildDeps {
    * see `ensureEntryPlanned` / `unwrittenEntries` (autopsy 3ab93068).
    */
   starterEntryPath?: string;
+  /**
+   * The request was judged COMPLEX (`complexityRouting.ts`, score above its 40 line). A complex lane
+   * gets a larger budget and never skips its shared contract — see `fastLaneBudgetMs`.
+   */
+  complex?: boolean;
   /** Max concurrent per-file generation calls (default 5). */
   concurrency?: number;
   /** Hard cap (ms) on the manifest + all per-file generation + writes (default 240 s). */
@@ -981,6 +1007,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const phasesNow = (): SimpleBuildResult['phases'] => (clock.startedAt
     ? {
       planMs: clock.planMs, contractMs: clock.contractMs, generateMs: clock.generateMs,
+      ...(clock.contractOutcome ? { contractOutcome: clock.contractOutcome, contractCapMs: clock.contractCapMs } : {}),
       verifyMs: clock.verifyMs, repairMs: clock.repairMs,
       verifyRuns: clock.verifyRuns, repairRuns: clock.repairRuns,
       totalMs: Date.now() - clock.startedAt,
@@ -992,7 +1019,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // are hoisted OUT of the closure for exactly the reason `generatedSoFar` below is: on the failure
   // path — the path this measurement exists for — the closure's locals are gone before the caller can
   // ask. A measurement that only survives success answers the wrong question.
-  const clock = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
+  const clock: { startedAt: number; planMs: number; contractMs: number; generateMs: number; verifyMs: number; repairMs: number; verifyRuns: number; repairRuns: number; contractOutcome?: FastLanePhases['contractOutcome']; contractCapMs?: number } = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
+  // One budget for the whole lane, read ONCE — the race below and the tier arithmetic inside must agree.
+  const laneBudgetMs = deps.overallTimeoutMs ?? fastLaneBudgetMs(deps.complex === true);
   const generatedSoFar: OneShotFile[] = [];
   // The contract module (see `contractModule`) — '' / null when the contract stays prose-only.
   let contractPath = '';
@@ -1025,7 +1054,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // each cap from what the budget can still afford, so a slow plan shrinks the contract's cap instead
       // of compounding with it, and the file-generation phase keeps its reserved majority.
       const configuredPlanCap = deps.planTimeoutMs ?? 90_000;
-      const overallMs = deps.overallTimeoutMs ?? 240_000;
+      const overallMs = laneBudgetMs;
       const laneStartedAt = Date.now();
       clock.startedAt = laneStartedAt;
       const planCap = preambleCapMs(overallMs, 0, configuredPlanCap);
@@ -1099,7 +1128,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // 243s) — so the optional pass bought the bail that then threw the contract away with everything
       // else, and a 26.7-minute full-builder rebuild followed. The contract is already declared
       // skippable a few lines up for exactly this reason; this applies that rule to the tier budget.
-      const contractAffordable = canAffordSharedContract({
+      // 🔴 A BIG APP'S CONTRACT IS NOT OPTIONAL (autopsy 3ab93068, admin-approved 2026-09-24). The rule
+      // above calls the contract best-effort, and for a small app it is. For a COMPLEX one the evidence
+      // runs the other way: that build's contract was cut at 56 s, the per-file calls then disagreed on
+      // names and shapes (`lat` vs `latitude`, an unexported context), and three repair rounds spent
+      // 419 s — 63% of the lane — putting back what the contract would have agreed up front. A complex
+      // lane is given a larger budget (`fastLaneBudgetMs`) precisely so the contract fits, and is never
+      // talked out of it by the projection; if it still overruns, the tier checks hand off as before.
+      const contractAffordable = deps.complex === true ? contractCap > 0 : canAffordSharedContract({
         preambleCallMs: planCallMs,
         tiers: populatedTiers,
         elapsedMs: Date.now() - laneStartedAt,
@@ -1126,7 +1162,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
         contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
         clock.contractMs = contractCallMs;
+        clock.contractCapMs = contractCap;
+        // Name what happened, so the report never has to guess which clock ended the call.
+        clock.contractOutcome = contract ? 'written' : (contractCallMs >= contractCap - 1_000 ? 'cut' : 'failed');
       } else if (shareContract) {
+        clock.contractOutcome = 'skipped';
         // 🔴 ONE SKIP, ONE SENTENCE (autopsy f97eb0ec, 2026-09-20). This used to be TWO logs: an
         // `if (!contractAffordable)` above and this `else`, and they are not exclusive — an
         // unaffordable contract satisfied both, so the user was told the pass was skipped twice, in
@@ -1396,7 +1436,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         try { void Promise.resolve(deps.onFilesReady(written)).catch(() => {}); } catch { /* a hook failure never touches the build */ }
       }
       return written;
-    })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');
+    })(), laneBudgetMs, 'simple-build');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
     const reason = e instanceof Error ? e.message : String(e);

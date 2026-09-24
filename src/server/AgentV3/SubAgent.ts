@@ -1,3 +1,5 @@
+import { collectHandoff, handoffBlock } from './taskHandoff';
+import { withoutPreviewBridge } from './previewBridge';
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { TurnRunner } from './ClaudeClient';
@@ -304,6 +306,19 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         : '',
       verification,
     ].filter(Boolean);
+    // THE HANDOFF CARRIES THE FILES, NOT ONLY A SENTENCE (admin 2026-09-24) — see taskHandoff.ts. The
+    // child is told it holds them, so a later re-read of an unchanged one gets the honest notice.
+    try {
+      const handed = await collectHandoff(instruction, async (p) => {
+        const raw = await deps.actuator.readFile(deps.workspaceId, p);
+        return typeof raw === 'string' ? withoutPreviewBridge(p, raw) : null;
+      });
+      const block = handoffBlock(handed);
+      if (block) {
+        contextBlocks.push(block);
+        for (const f of handed) childDispatcher.noteHandedOff(f.path, f.content);
+      }
+    } catch { /* a handoff is a head start, never a requirement — the child can still read */ }
     const fullInstruction = contextBlocks.length
       ? `${contextBlocks.join('\n\n')}\n\n---\nYour task: ${instruction}`
       : instruction;

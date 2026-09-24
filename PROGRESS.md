@@ -80431,3 +80431,195 @@ computed string that is never used), deleting the do-not-label line (1), swappin
 `AppKnowledgeBase.ts` updated in the same change (the exam-mode entry now describes the 40/30/30 mix,
 says the questions are not stamped with a year or paper name, and carries `pyq` / `previous year
 question` / `purane question` / `pichle saal ke question` among its keywords).
+## 2026-09-24 — One line when the footer carries History and Mode (admin screenshot)
+
+Admin, verbatim: *"jab navbharatai free chat ke sabhi ai me footer on hai, (full screen exit hai) to input box
+double line dikhane ki jarurat nahi hai … ab jab history button footer me hai, to input box single line me
+chalega!! sabhi mode ke liye badlo"*.
+
+`ComposerShell` now picks its layout from ONE fact: is the History / Mode column beside it? Both openers are
+`undefined` exactly when the phone's bottom bar is on screen (App derives it once, from `showsGlobalMobileNav`),
+so no column ⇒ one line — text, attach · mic · voice, Send, side by side; column ⇒ the two-row box sketched on
+2026-09-23. Every AI surface renders the shell, so all of them follow. Send's 72px minimum moved from the button
+class into the two-row slot (`SEND_SLOT_CLASS`), which is what makes a one-line box possible at all; the
+placeholder is held to one line so a long hint is clipped rather than half-shown. Rendered at 390px and 1280px
+against the built stylesheet: one-line 54px, two-row 86px. Test-locked in
+`tests/theComposerIsOneLineBesideTheFooter.test.ts`.
+
+**Also corrected:** CLAUDE.md still called the stopped-build "double discount" OPEN; it was decided and shipped
+on 2026-09-21 (real-cost floor, commit `6844b99f`). Noted in place so it is not re-raised again.
+## 2026-09-24 — A big app keeps its shared contract; the report names the contract's own clock (admin-approved)
+
+This follows autopsy 3ab93068. The admin accepted items 1 and 3 of its open list.
+- **Item 1, reversed from my first proposal.** I first proposed sending complex apps straight to the
+  full builder. The code and the same report say otherwise. The fast lane was adopted on 2026-07-06
+  *because* the full builder wandered, and this report's own full-builder turn took 15.9 min and ₹385,
+  with 63% of its reads repeated.
+  - The defect was the budget, not the lane: a complex app opens on a reasoning rung, its plan took
+    40 s, and its contract was cut at 56 s by its share of 240 s.
+  - So a complex lane now gets 480 s (`fastLaneBudgetMs`, env `AGENTV3_FASTLANE_COMPLEX_SECONDS`) and
+    never skips its contract. An ordinary lane is unchanged.
+- **Item 3: the clock is named.** The lane set the clock, so the lane reports which one it was.
+  - `FastLanePhases.contractOutcome` is `written`, `cut`, `failed` or `skipped`, plus the cap it ran
+    under, and `FAST_LANE_PHASES` prints it.
+  - The PROVIDER_FALLBACK line for a clock-ended call no longer claims "moving to the next one".
+- Test-locked and proven by reversion in `tests/aBigAppKeepsItsContract.test.ts`.
+- ⚠️ **Not measured yet.** Whether the repair share really drops is the next complex build's
+  `FAST_LANE_PHASES` line to read.
+
+## 2026-09-24 — Made-up data about other people is caught, disclosed, and not invented upstream (admin-approved)
+
+This is item 2 of autopsy 3ab93068/f15a9bcc. Build f15a9bcc generated four "nearby vendors" around the
+user and listed them as real. The reviewer passed it, and the fake-code check reported "No
+fake/placeholder code", because it knew only `fakeData` / `mockData` / `dummyData`.
+
+- **Detection is precision-first.** `AuthenticityAnalysis` gains `simulated-data`: a made-up word
+  (simulate / mock / fake / dummy) AND a noun for other people's data (vendors, users, drivers,
+  followers, nearby …), run on camelCase-split lines.
+  - An app's own catalogue (`sampleProducts`, a seeded menu) is not flagged, nor is physics `simulate…`.
+  - Tests and mock folders are ignored. The golden templates are a canary and none of them trips it.
+- **The severity is MEDIUM on purpose.** A `high` finding is a readiness blocker that fails the build
+  and orders a heal to "implement it for real". The real version needs a shared database the user has
+  not chosen, so that heal cannot succeed.
+- **Disclosure.** A finding in a file the app loads appends one plain sentence to the user's summary
+  (`simulatedDataNotice`): which file shows demo data, why, and an offer to set up a shared database.
+  It records `SIMULATED_DATA_SHIPPED` (warning).
+- **Prevention.** `NO_INVENTED_PEOPLE_RULE` is added to the architect prompt, with its twin in the
+  fast lane's per-file prompt. It says a browser cannot find strangers over Bluetooth and that other
+  users' data needs a shared online database. Example entries must be labelled on screen as examples.
+- Test-locked in `tests/madeUpPeopleAreDisclosed.test.ts`.
+
+## 2026-09-24 — "Builder bhatakta tha": three ways WE made the full builder wander, fixed (admin-mandated)
+
+The admin asked for the full builder's wandering to be fixed. The evidence is build f15a9bcc's own
+report: 64 reads over 24 files, 40 of them re-reading an unchanged file, and 12 `sed` steps inside
+index.html. All three causes were ours.
+1. **A fresh sub-agent was told it already had a file it had never seen.**
+   - Since f97eb0ec the read ledger has been shared with sub-agents so the report counts their re-reads.
+     That is right, and it stays.
+   - But the same ledger also drove the NOTICE. So a specialist's FIRST read came back with "you have
+     now read X the 6th time… you already have it". The reviewer was even told "STOP — do not read this
+     path again" about a file it had never opened.
+   - Now the notice reads this agent's OWN reads (`_ownReads`, never shared), and the shared ledger
+     still feeds the report.
+2. **The handoff carried a sentence, not the files.** The architect held `src/BusinessContext.tsx` and
+   delegated seven tasks that named it. Each specialist started empty and read it again, usually twice.
+   - The spawn now attaches the files the instruction NAMES, as they are on disk (`taskHandoff.ts`).
+     It is bounded: 6 files, 14k characters each, 36k in total. A file that does not fit is read the
+     ordinary way.
+   - The child counts them as already read, so an unchanged re-read gets the honest nudge.
+3. **A repair pass paged through our own script.** `read_file` strips the preview bridge, but a shell
+   command cannot. So any bash command that names index.html now gets a note giving the exact line
+   range of NavBharatAI's preview script and saying it is not the app (`bridgeShellNote`).
+- Test-locked and proven by reversion in `tests/aFreshAgentIsNotToldItHasAFile.test.ts`.
+- ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
+  hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
+  measurement: its repeat share should fall well below 63%.
+
+## 2026-09-24 — Compression audit, part 3: the built site comes back from the sandbox gzipped
+
+- **Old behaviour.** On publish (and wherever `downloadDistFiles` is used), the sandbox wrote the built site as base64 JSON, which is a third bigger than the files. It then went back over the network uncompressed.
+- **Now.** The same map is written gzipped and read back as bytes. That is the `format: 'bytes'` call the screenshot path has used in production for months. Text assets pack 3–4×.
+- **One builder.** The reader script is now one exported builder, `distReaderScript`. `tests/distReaderScript.test.ts` used to re-type the script by hand; it now RUNS the real one in node against a real directory (Hindi text and binary bytes included) and decodes it the way the actuator does.
+- **Not changed.** The older `src/server/EngineerAI/actuators/E2BActuator.ts` (legacy Engineer AI) was left alone.
+## 2026-09-24 — Compression audit, part 2: the web bundle is compressed once at build time
+
+- **Why.** The admin asked for whatever makes NavBharatAI world class, after the zstd/brotli audit. Part 1 (storage) is PR #3287.
+  - `scripts/precompress.mjs` (Dockerfile only) and `lib/precompressedStatic.ts`.
+  - The JS/CSS bundle is 14% smaller than today's per-request brotli-4, with 0 CPU per request.
+  - The image build takes about 18 s longer.
+  - `/monaco/` and `/vendor/` (not content-hashed) lose their 1-year `immutable` cache.
+  - The static-site ZIP export uses DEFLATE, where JSZip's default is STORE.
+  - Kill switch `STATIC_PRECOMPRESSED=off`.
+  - Tested over real HTTP in server.ts middleware order (`tests/theBundleIsCompressedOnceNotPerRequest.test.ts`).
+## 2026-09-24 — Compression audit → stored data is compressed, not dropped (admin: "world class banaye woh build karo")
+
+The admin asked what zstd and brotli are, and where NavBharatAI should use which. The audit
+corrected my own first answer: the main server ALREADY serves brotli (the `compression` 1.8.1
+package negotiates br, then gzip). The real finding was not speed. It was DATA LOSS at Firestore's
+1 MiB document limit, in three stores:
+- **The Time Machine** kept the first ~900K characters of an app and silently dropped the rest.
+  - The limit was measured in characters, so a Hindi-heavy app could exceed 1 MiB and lose the
+    version entirely.
+  - Now: a shared helper `lib/compactStore.ts` (brotli, tagged, byte-measured) stores the app packed
+    when it does not fit as plain text. Measured on this repo's sources, brotli shrinks them 4.1×.
+  - Whatever still does not fit is counted (`omittedFileCount`) and told to the user on restore.
+  - `list()` now selects metadata only; before, it downloaded up to 50 whole apps to throw them away.
+- **The admin build-report session** used to drop older builds. It is now fitted by its PACKED size.
+  `select('meta')` is used on the list.
+- **Transcript turns** over 600 KB are packed instead of being replaced by "too large to save".
+- Kill switch `AGENTV3_COMPACT_STORAGE=off`.
+- Small payloads are byte-identical to before, so rolling back is safe.
+- Test-locked in `tests/aBigAppsVersionIsKeptWhole.test.ts` and `tests/adminReportParts.test.ts`. The
+  byte-measure fix is proven by reversion.
+- Next, from the same audit:
+  - precompressed static bundle;
+  - the Monaco files' 1-year immutable cache (the files are not content-hashed);
+  - the static-zip export that stores rather than compresses;
+  - the sandbox dist pull-back as tar.gz instead of base64 JSON.
+- **Open, not done here:** `DiagnosticsStore` still caps a report's commands and logs for size. Those
+  caps also serve readability, so they were deliberately not changed in this pass.
+
+## 2026-09-24 — A request about an app that is not here is answered, not built (closes #3277's open root cause 1)
+
+The WORKNEX prompt (autopsy 0d297b25) said *"The WORKNEX app is already developed in this Replit project.
+DO NOT rebuild it from scratch … build the APK"*, and the workspace held only our starter. #3277 stopped
+that build from being called a success or billed; this stops it from STARTING.
+
+- **`projectElsewhere.ts`** (pure): fires only when the message (1) claims an app that already exists,
+  (2) places it elsewhere (a named tool: Replit, Lovable, Bolt, GitHub …) or forbids rebuilding it, and
+  (3) the workspace holds no user code (`userAppExists`, fail-safe) — and nothing is being imported on
+  this turn. The turn then goes to the chat lane with a steer: the app is not here yet, how to bring it
+  in (the exact "Import Repo" and "Import project (.zip)" paths), where the APK is made once it is here,
+  and — when the app is Expo/React Native, Flutter or native — the honest limit that NavBharatAI builds
+  web apps and packages those. It ends by offering to build something new here instead.
+- **A failed reply never becomes a build:** if the chat engine is unreachable, this turn falls back to a
+  fixed-text answer rather than to the build path (every other chat turn keeps its old fallback).
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE — `wantsFreshStart` matched "from scratch" inside "DO NOT rebuild
+  it from scratch".** That predicate feeds the two guards that PROTECT an existing app, so the most
+  emphatic "keep my app" sentence read as an order to wipe it (the rebuild-confirmation gate then asked
+  the user whether to replace their app). Negation is now read on both sides — English before the
+  phrase, Hindi (`mat`/`na`/`nahi`) after it; one un-negated occurrence still counts.
+- `AppKnowledgeBase.ts`: the zip and GitHub import entries name Replit and state the new behaviour.
+- Test-locked in `tests/theAppTheyMeantIsNotHere.test.ts` (33 cases, including a precision corpus of
+  ordinary prompts that must NOT be answered). Reversion-proven: undoing either fix fails 11.
+- ⚠️ **Still open (unchanged):** the fast-lane routing on complex mega-roadmap builds (#3277 item 2).
+
+## 2026-09-24 — Code Studio terminal on a phone: the duplicate command box is gone (admin-asked)
+
+Admin, with a screenshot of the terminal's bottom row: *"terminal ke andar ek extra input box hai … isko
+hide kar do! user direct terminal ko andar hi command de dega"* (and: *"aap ko agar sahi lage to hatana"*).
+
+- **Removed:** the line input and its Run button (`ShellTerminal.tsx`). Typing inside the terminal box has
+  worked on phones since 2026-08-05 through the invisible bridge input, so the box was a second way to do
+  the same thing — and when the shell was down it showed a disabled field reading "Terminal not
+  available", beside the box's own "Try again" button that already said so.
+- **Kept, on purpose (the part of the ask I did not follow literally):** the ^C / Tab / ↑ / ↓ keys. A phone
+  keyboard has none of them, and without ^C a running dev server cannot be stopped from a phone at all.
+  They now disable themselves when the shell is gone, and a short "Tap the terminal to type" hint sits
+  where the box was, because nothing else on screen said the terminal itself takes typing.
+- Two test files re-aimed with reasons (`shellTerminalInput`, `noKeyboardUntilAsked`); the knowledge base's
+  Terminal entry now says how to type on a phone.
+- ⚠️ **Honest risk:** the bridge is now the ONLY typing path on touch. It has been live since 2026-08-05 and
+  the admin types through it, but it has not been verified on every phone keyboard. If a phone cannot type
+  in the box, reverting this change brings the box back with no other effect.
+## 2026-09-24 — One focus ring, not two (admin screenshot, Wellness / Counsellor AI, full screen)
+
+Admin: *"navbharatai free ke sabhi module me, full screen mode me input box me aise 2 box jaise dikh rahe
+hai! isko fix karo!!"* — a tapped composer showed its own indigo `focus-within` border AND a second ring
+around the textarea inside it.
+
+- **Root cause:** the global `:focus-visible { outline: 2px solid #6366f1 }` in `src/index.css` was
+  UNLAYERED. An unlayered rule beats every layered one regardless of specificity, and Tailwind v4's
+  utilities are in `@layer utilities` — so `outline-none` / `focus:outline-none` were overruled on all
+  ~300 elements that use them (almost all of which pair it with their own `focus:border-*` / `focus:ring-*`).
+  A text field is focus-visible on every tap, hence the second box. Its `border-radius: 4px` also
+  overrode `rounded-*` on focused elements.
+- **Fix:** the rule moved into `@layer base`. Keyboard users keep the ring on every element that does not
+  opt out; an opt-out now means what it says. Verified in Chromium against the built CSS: focused
+  `textarea.outline-none` computed `solid 2px` before → `none` after; a Tab-focused plain button still
+  gets the indigo ring; the composer screenshot shows one box.
+- **Siblings:** every other unlayered global rule in `index.css` was listed; none sets a property a
+  utility on the same element opts out of. `tests/oneFocusRingNotTwo.test.ts` fails on any unlayered
+  `:focus*` rule that sets outline or radius (reversion-proven).
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).

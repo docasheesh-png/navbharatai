@@ -696,11 +696,26 @@ html.nb-native-shell .nb-selectable {
   scroll-behavior: auto !important;
 }
 
-/* L18: Visible focus outline for keyboard navigation */
-:focus-visible {
-  outline: 2px solid #6366f1;
-  outline-offset: 2px;
-  border-radius: 4px;
+/* L18: Visible focus outline for keyboard navigation.
+
+   🔴 IT MUST LIVE IN `@layer base` — admin 2026-09-24, with a phone screenshot of a professional's
+   message box drawing a SECOND box inside itself ("input box me aise 2 box jaise dikh rahe hai").
+   It used to be unlayered, and in the cascade an UNLAYERED rule beats every LAYERED one whatever its
+   specificity — so it overrode Tailwind's `outline-none` / `focus:outline-none` utilities (which live
+   in `@layer utilities`) on all ~300 elements that use them. A text field counts as focus-visible on
+   every tap, so each tapped textarea drew this 2px indigo ring (radius 4px, 2px out) INSIDE the
+   composer's own rounded `focus-within` border: two boxes. Nearly every `outline-none` in the app is
+   paired with its own indicator (`focus:border-*`, `focus:ring-*`), which is the author saying "not
+   the outline, this instead" — that choice was being silently overruled everywhere.
+   In the base layer it is still the default ring for every element that does not opt out (a plain
+   button reached by Tab keeps it), and an opt-out finally means what it says.
+   Locked by `tests/oneFocusRingNotTwo.test.ts`. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 /* E12: Prevent iOS modal scroll from propagating to body (body lock) */

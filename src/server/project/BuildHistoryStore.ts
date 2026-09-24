@@ -17,6 +17,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { MAX_SAVED_VERSIONS } from '../../lib/versionRetention';
+import { fitFilesPacked, unpackJson, utf8Bytes, compactStorageEnabled, MAX_PACKED_BYTES, type PackedEncoding } from '../lib/compactStore';
 
 export interface VersionEntry {
   id: string;
@@ -29,9 +30,22 @@ export interface VersionEntry {
   ok: boolean;
   /** Only present on get(), not on list() */
   files?: Record<string, string>;
+  /**
+   * How many files the version really HOLDS. Absent on versions written before 2026-09-24, which could
+   * hold fewer than `fileCount` with nothing saying so.
+   */
+  storedFileCount?: number;
+  /** Files that did not fit even compressed. 0 means the version is the whole app. */
+  omittedFileCount?: number;
 }
 
 export type VersionMeta = Omit<VersionEntry, 'files'>;
+
+/** The document as stored: legacy `files`, or the packed form. Never both. */
+type StoredVersion = VersionEntry & { filesEnc?: PackedEncoding; filesPacked?: unknown };
+
+/** Metadata fields only — what `list()` asks Firestore for, so a list never downloads fifty apps. */
+const META_FIELDS = ['id', 'sessionId', 'commitMessage', 'createdAt', 'fileCount', 'isEdit', 'tier', 'ok', 'storedFileCount', 'omittedFileCount'] as const;
 
 // THE CAP LIVES IN src/lib/versionRetention.ts, not here — the Time Machine PRINTS this number to the
 // user ("your newest 50 versions are kept"), and a screen that states another module's constant is how
@@ -40,18 +54,55 @@ export type VersionMeta = Omit<VersionEntry, 'files'>;
 const MAX_VERSIONS_PER_WORKSPACE = MAX_SAVED_VERSIONS;
 const MAX_VERSION_BYTES = 900_000; // 900KB — safely under Firestore 1MB doc limit
 
-/** Truncate files payload to fit Firestore doc size limit. */
-function capFiles(files: Record<string, string>): Record<string, string> {
-  const entries = Object.entries(files);
-  const result: Record<string, string> = {};
+/**
+ * How a version's files are stored. PURE — exported for tests.
+ *
+ * 🔴 WHY (2026-09-24). This used to keep the first ~900 KB of an app and silently drop the rest, and
+ * it measured that 900 KB in JavaScript CHARACTERS: a Hindi-heavy app is up to 3 bytes a character,
+ * so its "900 KB" document could be 2.7 MB, the write threw, and the version was lost entirely. The
+ * Time Machine then offered a restore of something that never existed, or nothing at all.
+ *
+ *   • it fits as plain text (measured in BYTES) ⇒ stored exactly as before, byte for byte. Most apps.
+ *     This keeps the common path unchanged AND means a rollback of this code can still read them.
+ *   • it does not ⇒ stored COMPRESSED (text packs 4–6×), so a multi-megabyte app is kept whole.
+ *   • even compressed it does not fit ⇒ the longest prefix that fits, and the version RECORDS how many
+ *     files were left out instead of pretending to be complete.
+ *
+ * `AGENTV3_COMPACT_STORAGE=off` is the no-deploy revert: never compress, byte-measured truncation.
+ */
+export function planVersionFiles(
+  files: Record<string, string>,
+  env: NodeJS.ProcessEnv = process.env,
+):
+  | { mode: 'plain'; files: Record<string, string>; omitted: string[] }
+  | { mode: 'packed'; files: Record<string, string>; omitted: string[]; packed: ReturnType<typeof fitFilesPacked>['packed'] } {
+  const entries = Object.entries(files ?? {}).filter(([p, c]) => typeof p === 'string' && typeof c === 'string');
+  const plain: Record<string, string> = {};
+  const omitted: string[] = [];
   let bytes = 0;
   for (const [path, content] of entries) {
-    const size = path.length + content.length;
-    if (bytes + size > MAX_VERSION_BYTES) break;
-    result[path] = content;
-    bytes += size;
+    const size = utf8Bytes(path) + utf8Bytes(content);
+    if (omitted.length === 0 && bytes + size <= MAX_VERSION_BYTES) {
+      plain[path] = content;
+      bytes += size;
+    } else {
+      omitted.push(path);
+    }
   }
-  return result;
+  if (omitted.length === 0) return { mode: 'plain', files: plain, omitted };
+  if (!compactStorageEnabled(env)) {
+    return { mode: 'plain', files: plain, omitted };
+  }
+  const fitted = fitFilesPacked(Object.fromEntries(entries), MAX_PACKED_BYTES);
+  return { mode: 'packed', files: fitted.files, omitted: fitted.omitted, packed: fitted.packed };
+}
+
+/** Read a stored version's files, whichever form they were written in. Unreadable ⇒ null, never `{}`. */
+export function readVersionFiles(data: StoredVersion): Record<string, string> | null {
+  if (data.filesEnc) {
+    try { return unpackJson<Record<string, string>>(data.filesEnc, data.filesPacked); } catch { return null; }
+  }
+  return data.files && typeof data.files === 'object' ? data.files : null;
 }
 
 class BuildHistoryStore {
@@ -97,7 +148,8 @@ class BuildHistoryStore {
     try {
       const col = this.versionsCol(db, sessionId);
       const id = `v_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const doc: VersionEntry = {
+      const plan = planVersionFiles(entry.files);
+      const doc: StoredVersion = {
         id,
         sessionId,
         commitMessage: entry.commitMessage,
@@ -106,8 +158,19 @@ class BuildHistoryStore {
         isEdit: entry.isEdit,
         tier: entry.tier,
         ok: entry.ok,
-        files: capFiles(entry.files),
+        storedFileCount: Object.keys(plan.files).length,
+        // A caller may already have left files out before handing them over (a raw-size bound), so the
+        // honest count is whichever is larger: what we dropped, or what we were told existed but never got.
+        omittedFileCount: Math.max(plan.omitted.length, entry.fileCount - Object.keys(plan.files).length, 0),
+        ...(plan.mode === 'packed'
+          ? { filesEnc: plan.packed.enc, filesPacked: plan.packed.data }
+          : { files: plan.files }),
       };
+      // `tier` is optional and Firestore rejects an explicit `undefined`.
+      if (doc.tier === undefined) delete doc.tier;
+      if (plan.omitted.length > 0) {
+        console.warn(`[BuildHistory] version for ${sessionId} left out ${plan.omitted.length} file(s) that did not fit even compressed`);
+      }
       await col.doc(id).set(doc);
       // ⚠️ THE TRIM HAS ITS OWN try ON PURPOSE. Past this line the version EXISTS and is restorable;
       // retention is housekeeping. Folding the two together would report a saved version as unsaved
@@ -132,12 +195,16 @@ class BuildHistoryStore {
     const db = this.getDb();
     if (!db) return [];
     try {
+      // `select` asks for the metadata only. The list used to download every version's WHOLE file set
+      // (up to fifty apps) just to throw it away — and with compressed versions that would also mean
+      // shipping payloads nobody decodes.
       const snap = await this.versionsCol(db, sessionId)
+        .select(...META_FIELDS)
         .orderBy('createdAt', 'desc')
         .limit(MAX_VERSIONS_PER_WORKSPACE)
         .get();
       return snap.docs.map(d => {
-        const { files: _files, ...meta } = d.data() as VersionEntry;
+        const { files: _files, filesPacked: _p, filesEnc: _e, ...meta } = d.data() as StoredVersion;
         return meta as VersionMeta;
       });
     } catch {
@@ -152,7 +219,11 @@ class BuildHistoryStore {
     try {
       const doc = await this.versionsCol(db, sessionId).doc(versionId).get();
       if (!doc.exists) return null;
-      return doc.data() as VersionEntry;
+      const { files: _files, filesPacked: _p, filesEnc: _e, ...meta } = doc.data() as StoredVersion;
+      const files = readVersionFiles(doc.data() as StoredVersion);
+      // A version whose payload cannot be decoded is NOT an empty app — returning `{}` would let a
+      // restore wipe the workspace. No files ⇒ callers treat it as not restorable.
+      return files ? { ...meta, files } : { ...meta };
     } catch {
       return null;
     }

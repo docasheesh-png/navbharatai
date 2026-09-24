@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../src/components/chat/ComposerShell';
+import { COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS, SEND_SLOT_CLASS } from '../src/components/chat/ComposerShell';
 import { RAIL_BUTTON_CLASS } from '../src/components/chat/ModeButton';
 
 const SRC = readFileSync(join(__dirname, '..', 'src/components/ide/AIChat.tsx'), 'utf8');
@@ -95,14 +95,22 @@ describe('nothing is placed by a hand-tuned offset', () => {
 });
 
 describe('the tap targets did not shrink', () => {
-  it('Send and Stop are as tall as the box and wider than a 36px control', () => {
+  it('Send and Stop fill their slot and are wider than a 36px control', () => {
     expect(SEND).toContain('className={COMPOSER_SEND_CLASS}');
     expect(SEND).toContain('className={COMPOSER_STOP_CLASS}');
     for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) {
       expect(cls).toContain('h-full');
-      expect(px(cls.match(/min-h-\[(\d+)px\]/))).toBeGreaterThanOrEqual(72);
+      expect(cls).toContain('min-h-10'); // never below a 40px target, in either layout
       expect(cls).toContain('w-11'); // 44px
     }
+  });
+
+  it('beside the History / Mode column, Send is still at least 72px tall (the two-row box)', () => {
+    // The slot owns the height now (2026-09-24), so the one-line box can exist at all: 84px slot minus
+    // its 6px padding top and bottom leaves 72px for the button, exactly as before.
+    expect(px(SEND_SLOT_CLASS.twoRows.match(/min-h-\[(\d+)px\]/)) - 12).toBeGreaterThanOrEqual(72);
+    expect(SEND_SLOT_CLASS.twoRows).toContain('p-1.5');
+    expect(SEND_SLOT_CLASS.oneLine).not.toMatch(/min-h-\[/);
   });
 
   it('the box at rest is tall enough for the two rail buttons beside it', () => {

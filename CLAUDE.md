@@ -1686,6 +1686,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   version) is still never merged into the workspace — the assembled file carries Capacitor deps and the
   sentinel script, so copying it back would break the app's own build — and the next ship regenerates
   it from the workspace. A dependency-only merge is a separate change.
+- **📦 `STATIC_PRECOMPRESSED` — the web bundle is compressed ONCE at build time (built 2026-09-24).
+  ⚠️ NOT set, and the code default is ON**; `off` is the no-deploy revert to per-request compression.
+  `scripts/precompress.mjs` runs in the **Dockerfile only** and writes brotli-11 and gzip-9 copies beside
+  every asset under `assets/`, `monaco/` and `vendor/`: measured, 31.7 MB raw → 5.8 MB brotli, and
+  the JS/CSS bundle is **14% smaller** than the quality-4 brotli the per-request middleware sends,
+  at **zero CPU per request**. It adds about 18 s to the image build.
+  `lib/precompressedStatic.ts` serves the copies before `express.static`, and falls through whenever
+  there is no copy. 🔒 **Never add it to `npm run build`**: Capacitor copies `dist/` into the phone
+  apps, which load from their own disk, so the copies would only make the download bigger. A test
+  enforces this. Same change: `/monaco/` and `/vendor/` are not content-hashed, so they get a one-day
+  cache (`UNHASHED_ASSET_CACHE`) instead of one year `immutable`. ⚠️ `firebase.json` was NOT given the
+  same rule: the main app is served by Cloud Run, and Firebase's precedence for overlapping header
+  globs was not verified.
+- **🗜️ `AGENTV3_COMPACT_STORAGE` — stored data is compressed instead of dropped (built 2026-09-24, admin:
+  *"jo hamari navbharatai ko world class banaye woh build karo"*). ⚠️ NOT set, and the code default is
+  ON**; `off` is the no-deploy revert (never compress; the old byte-measured drop). Helper:
+  `src/server/lib/compactStore.ts` (brotli q5, tagged `br1`, sizes in UTF-8 BYTES). Used by three stores:
+  the **Time Machine** (`BuildHistoryStore` — an app that does not fit as plain text is stored packed,
+  whatever still does not fit is counted in `omittedFileCount` and told to the user on restore), the
+  **admin build-report session** (`AdminBuildReportStore` — fitted by its PACKED size, so "N older builds
+  omitted" becomes rare), and **transcript turns over 600 KB** (`FirestoreConversationStore`).
+  🔒 **Small payloads are stored byte-for-byte as before**, so a rollback of the code still reads them.
+  Only data that USED to be dropped is written packed. Readers accept both forms forever, and an
+  undecodable payload reads as omitted, never as an empty app (an empty version would wipe a workspace
+  on restore).
+  ⚠️ **Why not zstd:** in Node 22, which is our runtime image, `zlib.zstd*` is still EXPERIMENTAL, and this
+  format must stay readable for the life of every stored version. The tag leaves room for `zs1` later.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH
@@ -3102,6 +3129,11 @@ the flag entries above promise.
   can cost NavBharatAI money rather than merely earning nothing. Both rules are individually correct
   and admin-mandated; their composition was never decided. Raised to the admin — billing is not a
   session's call.
+  ✅ **DECIDED AND SHIPPED 2026-09-21 — this paragraph stayed "OPEN" after it closed, and a session
+  (mine, 2026-09-23) re-asked the admin from it.** The admin chose *"floor + naya message"*:
+  `cancelledBuildBilling.ts` now bills `min(decided, max(realCost + sandbox, decided / 2))`, so a
+  cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
+  `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates
@@ -4039,6 +4071,15 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
   today — and a test asserts the two produce identical ladders so they cannot drift.
+- ⏱️ **A COMPLEX build's fast lane gets room for its contract (admin-approved 2026-09-24, autopsy
+  3ab93068). `AGENTV3_FASTLANE_COMPLEX_SECONDS` is NOT set; the code default of 480 s governs, clamped
+  to 240–900, and an unreadable value falls back to 480, never to "no limit".** Opening a complex app on
+  a reasoning rung made its plan call take 40 s. Its shared contract was then cut at 56 s by its share of
+  the 240 s budget, and the missing contract cost 419 s of repair. So a complex lane gets the larger budget
+  and is never talked out of its contract (`fastLaneBudgetMs`). An ordinary lane keeps 240 s, unchanged.
+  The `FAST_LANE_PHASES` line now names the contract's own clock (`stopped at its own Ns cap`) instead of
+  leaving *"build budget reached"* to be read as the whole build. **Watch: the repair share of complex
+  builds in that line.**
 
 🏗️ **`AGENTV3_PROJECT_MODE` — SOFTWARE PROJECT MODE. BUILT, WIRED, TESTED, AND ASLEEP SINCE
 2026-07-04. ⚠️ Recorded here on 2026-09-17 because it was MISSING FROM THIS REGISTRY ENTIRELY** —

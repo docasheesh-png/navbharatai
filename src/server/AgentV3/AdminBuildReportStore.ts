@@ -16,7 +16,21 @@ import { audit } from '../lib/audit';
 import { trimReportForStorage } from './DiagnosticsStore';
 import { outcomeCodeOf, severityOfOutcome, type BuildDiagnosticsReport } from './BuildDiagnostics';
 
+import { fitNewestPacked, packJson, unpackJson, utf8Bytes, compactStorageEnabled, type PackedEncoding } from '../lib/compactStore';
 const COLLECTION = 'admin_build_reports';
+
+/**
+ * The session's builds as STORED (2026-09-24). A session is the biggest thing in a report record and
+ * it is repetitive JSON, so it is stored COMPRESSED (`lib/compactStore.ts`) — about 5–10× more builds
+ * fit in the same 1 MiB document, and "N older builds omitted — too large to store" becomes rare
+ * instead of routine. The in-memory record keeps `builds` as a plain array: only `save`/`get` see the
+ * packed form, so every reader above them is unchanged.
+ */
+interface StoredSession {
+  builds?: unknown[];
+  buildsEnc?: PackedEncoding;
+  buildsPacked?: unknown;
+}
 /** Keep the inbox bounded on read; the collection itself is admin-managed. */
 export const ADMIN_REPORTS_DEFAULT_LIMIT = 100;
 
@@ -319,6 +333,7 @@ export function buildAdminReportRecord(
    * is exactly the case where the missing builds are invisible and the number looks trustworthy.
    */
   historyUnreadable?: boolean,
+  env: NodeJS.ProcessEnv = process.env,
 ): AdminBuildReportRecord {
   const trimmed = trimReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
@@ -348,11 +363,16 @@ export function buildAdminReportRecord(
   let fittedSession: { kept: BuildDiagnosticsReport[]; omitted: number } | null = null;
   if (trimmedSession.length > 1) {
     let overhead = ADMIN_RECORD_SAFETY_BYTES;
-    try { overhead += JSON.stringify(trimmed)?.length ?? 0; } catch { overhead += FIRESTORE_DOC_LIMIT_BYTES; }
+    // UTF-8 BYTES, not characters: a report full of Devanagari is up to 3× larger on Firestore's side.
+    try { overhead += utf8Bytes(JSON.stringify(trimmed) ?? ''); } catch { overhead += FIRESTORE_DOC_LIMIT_BYTES; }
     const budget = FIRESTORE_DOC_LIMIT_BYTES - overhead;
-    fittedSession = budget > 0
-      ? fitSessionToDocument(trimmedSession, budget)
-      : { kept: [], omitted: trimmedSession.length }; // focused report alone already fills the doc
+    // The session is stored compressed (see `StoredSession`), so it is fitted by its PACKED size —
+    // the same bytes `saveAdminBuildReport` will write. Off ⇒ the old plain fit, byte for byte.
+    fittedSession = budget <= 0
+      ? { kept: [], omitted: trimmedSession.length } // focused report alone already fills the doc
+      : compactStorageEnabled(env)
+        ? (({ kept, omitted }) => ({ kept, omitted }))(fitNewestPacked(trimmedSession, budget))
+        : fitSessionToDocument(trimmedSession, budget);
   }
 
   return {
@@ -414,6 +434,39 @@ export function buildAdminReportRecord(
   };
 }
 
+/**
+ * The record as written: the session's builds packed when compact storage is on. PURE — exported for
+ * tests. A record without a multi-build session is returned unchanged.
+ */
+export function toStoredRecord(record: AdminBuildReportRecord, env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
+  const builds = record.session?.builds;
+  if (!record.session || !Array.isArray(builds) || builds.length === 0 || !compactStorageEnabled(env)) {
+    return record as unknown as Record<string, unknown>;
+  }
+  const { builds: _b, ...rest } = record.session;
+  const packed = packJson(builds);
+  return { ...record, session: { ...rest, buildsEnc: packed.enc, buildsPacked: packed.data } };
+}
+
+/**
+ * The record as read: a packed session is unpacked back into `builds`. A payload that cannot be
+ * decoded becomes an EMPTY session whose builds are counted as omitted — the focused report is
+ * untouched, and the admin is told builds existed rather than shown a confident one-build session.
+ */
+export function fromStoredRecord(raw: Record<string, unknown>): AdminBuildReportRecord {
+  const rec = raw as unknown as AdminBuildReportRecord & { session?: AdminBuildReportRecord['session'] & StoredSession };
+  const s = rec.session as (StoredSession & { count?: number; omittedBuilds?: number }) | undefined;
+  if (!s || !s.buildsEnc) return rec;
+  const { buildsEnc, buildsPacked, ...rest } = s;
+  try {
+    const builds = unpackJson<BuildDiagnosticsReport[]>(buildsEnc, buildsPacked);
+    return { ...rec, session: { ...(rest as object), builds } as AdminBuildReportRecord['session'] };
+  } catch {
+    const count = typeof s.count === 'number' ? s.count : 0;
+    return { ...rec, session: { ...(rest as object), builds: [], count, omittedBuilds: count } as AdminBuildReportRecord['session'] };
+  }
+}
+
 /** Persist one reported build into the admin inbox. Best-effort; never throws; no-op under VITEST. */
 export async function saveAdminBuildReport(record: AdminBuildReportRecord): Promise<boolean> {
   if (!record?.meta?.id) return false;
@@ -421,7 +474,7 @@ export async function saveAdminBuildReport(record: AdminBuildReportRecord): Prom
   const db = getDb();
   if (!db) return false;
   try {
-    await db.collection(COLLECTION).doc(record.meta.id).set({ ...record, savedAt: Date.now() }, { merge: false });
+    await db.collection(COLLECTION).doc(record.meta.id).set({ ...toStoredRecord(record), savedAt: Date.now() }, { merge: false });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -436,7 +489,9 @@ export async function listAdminBuildReports(limit = ADMIN_REPORTS_DEFAULT_LIMIT)
   const db = getDb();
   if (!db) return [];
   try {
-    const snap = await db.collection(COLLECTION).orderBy('meta.reportedAt', 'desc').limit(Math.max(1, limit)).get();
+    // `select('meta')`: the list shows metadata only, and used to download up to 100 whole ~1 MB records
+    // to throw them away.
+    const snap = await db.collection(COLLECTION).select('meta').orderBy('meta.reportedAt', 'desc').limit(Math.max(1, limit)).get();
     return snap.docs.map((d) => (d.data() as AdminBuildReportRecord).meta).filter(Boolean);
   } catch {
     return [];
@@ -480,7 +535,8 @@ export async function getAdminBuildReport(id: string): Promise<AdminBuildReportR
   try {
     const doc = await db.collection(COLLECTION).doc(id).get();
     if (!doc.exists) return null;
-    return (doc.data() as AdminBuildReportRecord) ?? null;
+    const data = doc.data();
+    return data ? fromStoredRecord(data) : null;
   } catch {
     return null;
   }

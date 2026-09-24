@@ -130,6 +130,10 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   const genRef = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: 'connecting' });
   /**
+   * ⚠️ 2026-09-24: the bar's LINE INPUT and Run button were removed (admin: typing belongs in the
+   * terminal box, which the bridge below already delivers). `showCommandBar` now governs the bridge
+   * and the helper-key row only; the history below is kept because it is why the bridge exists.
+   *
    * TOUCH DEVICES GET A REAL COMMAND BAR (admin 2026-08-05, second live report: "terminal me kuch
    * bhi type nahi ho raha hai!!!" — on an iPhone, keyboard open, nothing typed).
    *
@@ -144,8 +148,6 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
    * (touch) pointers.
    */
   const [showCommandBar] = useState<boolean>(softKeyboardWouldOpen);
-  const [barText, setBarText] = useState('');
-  const barInputRef = useRef<HTMLInputElement | null>(null);
   /**
    * DIRECT TYPING INSIDE THE TERMINAL BOX on touch devices (admin 2026-08-05, third report: the
    * command bar types fine — "waha to type ho raha hai, work bhi kar raha hai" — "par mujhe terminal
@@ -244,8 +246,9 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     //
     // ⚠️ The line it replaces was itself a fix, and its reasoning still holds: when focus IS wanted on
     // touch it must go to the command bar, never to xterm, whose keys a soft keyboard cannot reach.
-    // That is preserved — what changed is only WHO decides. Both ways in are one tap and unchanged:
-    // the command bar is visible at the bottom, and tapping the terminal box arms `focusBridge`.
+    // That is preserved — what changed is only WHO decides. The way in is one tap: tapping the
+    // terminal box arms `focusBridge` (since 2026-09-24 the only typing path on touch — the separate
+    // line input was removed as a duplicate; the helper-key row below remains).
     // A desktop keeps its auto-focus: a mouse has no keyboard to raise, and clicking TERMINAL there
     // has always meant "let me type".
     const t = setTimeout(() => {
@@ -664,15 +667,13 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     void start(term, fit, () => genRef.current === gen);
   };
 
-  const sendBarCommand = () => {
-    // '\r' is what pressing Enter in a real TTY sends. The PTY echoes the command back through the
-    // stream, so the typed line appears in the terminal exactly as if xterm had sent it key by key.
-    void sendInput(barText + '\r');
-    setBarText('');
-    barInputRef.current?.focus();
-  };
-  /** Keeps the command-bar input focused (and the phone keyboard open) across helper-key taps. */
+  /**
+   * Keeps whatever holds focus — the bridge, when the user is typing in the terminal box — focused
+   * across helper-key taps, so the phone keyboard does not flicker shut mid-command.
+   */
   const keepFocus = (e: React.PointerEvent) => e.preventDefault();
+  /** The shell is gone: the helper keys would send to nothing, so they say so by being disabled. */
+  const shellGone = status.kind === 'exited' || status.kind === 'unavailable';
 
   /**
    * Forward whatever changed in the bridge to the PTY, then reset to the sentinel. Runs on every
@@ -764,37 +765,24 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         )}
       </div>
       {showCommandBar && (
+        // 🔑 THE KEYS A PHONE KEYBOARD DOES NOT HAVE — and nothing else (admin 2026-09-24: the line
+        // input here duplicated typing IN the terminal box, "isko hide kar do! user direct terminal ko
+        // andar hi command de dega"). Typing goes through the bridge above: tap the box and type. What
+        // a soft keyboard cannot produce stays here, because a shell is unusable without it — Ctrl+C is
+        // the only way to stop a running dev server, Tab completes, the arrows walk history.
         <div className="shrink-0 border-t border-line bg-surface px-1.5 py-1.5 flex items-center gap-1.5">
-          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x03')} aria-label="Send Ctrl+C (interrupt)"
-            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">^C</button>
-          <button onPointerDown={keepFocus} onClick={() => void sendInput('\t')} aria-label="Send Tab (completion)"
-            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">Tab</button>
-          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[A')} aria-label="History up"
-            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">↑</button>
-          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[B')} aria-label="History down"
-            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink">↓</button>
-          <input
-            ref={barInputRef}
-            value={barText}
-            onChange={(e) => setBarText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendBarCommand(); } }}
-            disabled={status.kind === 'exited' || status.kind === 'unavailable'}
-            placeholder={
-              status.kind === 'exited' ? 'Terminal closed — tap "Restart terminal"'
-              : status.kind === 'unavailable' ? 'Terminal not available — tap "Try again"'
-              : status.kind === 'connecting' ? 'Type a command — it runs when the workspace is ready'
-              : 'Type a command…'
-            }
-            aria-label="Terminal command input"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            autoComplete="off"
-            enterKeyHint="send"
-            className="flex-1 min-w-0 bg-card border border-line rounded px-2.5 py-1.5 text-[13px] text-body font-mono outline-none focus:border-indigo-500"
-          />
-          <button onPointerDown={keepFocus} onClick={sendBarCommand} aria-label="Run command"
-            className="shrink-0 px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-on-accent text-[12px] font-bold">Run</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x03')} disabled={shellGone} aria-label="Send Ctrl+C (interrupt)"
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink disabled:opacity-40">^C</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\t')} disabled={shellGone} aria-label="Send Tab (completion)"
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink disabled:opacity-40">Tab</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[A')} disabled={shellGone} aria-label="History up"
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink disabled:opacity-40">↑</button>
+          <button onPointerDown={keepFocus} onClick={() => void sendInput('\x1b[B')} disabled={shellGone} aria-label="History down"
+            className="shrink-0 px-2 py-1.5 rounded border border-line text-muted text-[11px] font-mono hover:text-ink disabled:opacity-40">↓</button>
+          {!shellGone && (
+            // Without the old input box, nothing on screen said the box itself takes typing.
+            <span className="ml-auto pr-1 text-[11px] text-muted truncate">Tap the terminal to type</span>
+          )}
         </div>
       )}
     </div>

@@ -15,6 +15,7 @@ import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stopp
 import { trimChannel, dropChannel, mergeTruncation } from './reportTruncation';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
+import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -476,6 +477,15 @@ export interface DiagnosticsHistoryEntry {
    * Truncated here: a full build prompt can be thousands of characters and this list must stay cheap.
    */
   prompt?: string;
+  /**
+   * WHICH repairs this build ran, and how many it could not name — the work list behind the heal
+   * RATE (admin 2026-09-24). Free: both readers already hold the whole report in memory.
+   *
+   * `undefined` means "this row was never measured" (a legacy entry, or a summary that threw), NOT
+   * "no heals" — `healBreakdown` excludes it rather than scoring it as a clean build. See
+   * `healBreakdown.ts` for why the tally carries its own completeness.
+   */
+  healCodes?: HealCodeTally | null;
 }
 
 /** Enough to tell two edits apart in a list; far short of shipping the whole prompt in a listing. */
@@ -697,6 +707,9 @@ async function listDiagnosticsHistoryInner(
         // across a session were invisible in all three of them.
         dataLossCount: Array.isArray(r.dataLossEvents) ? r.dataLossEvents.length : 0,
         prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
+        // Read-only aggregation over a report this query already holds. Wrapped for the same reason
+        // `modelPerformance` is: an observability field must never fail the listing that carries it.
+        healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
       }];
     });
   }
@@ -856,6 +869,7 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
         modelPerformance: (() => {
           try { return summarizeModelPerformance(r); } catch { return null; }
         })(),
+        healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
       };
     });
   } catch {

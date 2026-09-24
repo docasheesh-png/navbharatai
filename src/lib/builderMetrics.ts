@@ -47,6 +47,11 @@ export interface BuildMetricInput {
    * one bucket the tally could not see.
    */
   workaroundCount?: number | null;
+  /**
+   * WHICH repairs this build ran, with its own completeness. `undefined` ⇒ never measured, and the
+   * breakdown EXCLUDES it rather than scoring it as a build that healed nothing.
+   */
+  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null } | null;
 }
 
 /** Builds that can actually be judged: finished, with a real verdict. */
@@ -290,6 +295,82 @@ export function workaroundPressure(builds: readonly BuildMetricInput[]): Workaro
   };
 }
 
+export interface HealCodeRow {
+  code: string;
+  /** Heals of this code across the window. */
+  heals: number;
+  /** How many DISTINCT builds ran it — one build healing 86 times is not a widespread class. */
+  builds: number;
+}
+
+export interface HealBreakdown {
+  /** Builds carrying a breakdown at all — the denominator, never the window's size. */
+  builds: number;
+  /** The heaviest codes first, then alphabetically so the order is stable for a given window. */
+  top: HealCodeRow[];
+  /** Heals this list can name. */
+  attributed: number;
+  /**
+   * Heals that HAPPENED and could not be named, because the stored timeline was trimmed at 500
+   * entries while `counts` kept the build's real number. Never folded into `attributed`, and never
+   * hidden: a work list that quietly omits the biggest build's repairs is the wrong work list.
+   */
+  unattributed: number;
+  /** Builds whose total was unrecorded, so nobody can say whether their list was complete. */
+  completenessUnknown: number;
+}
+
+/** How many codes the headline names. The rest are still counted in `attributed`. */
+export const HEAL_CODES_SHOWN = 6;
+
+/**
+ * WHICH REPAIRS FIRE — the 50/50 law's missing half, as a ranked list.
+ *
+ * The heal RATE says the engine repairs itself on 4 builds in 5. It cannot say what to fix. This
+ * turns the same data into the thing the law actually asks for: *"trace why the bug class exists and
+ * prevent it upstream"* — you cannot trace a class nobody has named.
+ *
+ * 🔒 THREE HONESTY PROPERTIES, none of them decoration:
+ * • A build with no breakdown is EXCLUDED, exactly as `healPressure` excludes one with no count — a
+ *   legacy row scored as "healed nothing" would make the list look better as the window ages.
+ * • `unattributed` is carried through and reported. The build with 86 heals is precisely the one
+ *   whose timeline the 500-entry cap will have trimmed, so the biggest contributor to the rate is
+ *   the likeliest to be partly invisible. Presenting the visible codes as the whole list would be
+ *   the `reportTruncation` bug in a new place.
+ * • `builds` per code is kept beside `heals`, because 86 heals in ONE build and 86 across 43 builds
+ *   are different problems and the fix for each is different.
+ *
+ * PURE.
+ */
+export function healBreakdown(builds: readonly BuildMetricInput[]): HealBreakdown {
+  const rows = judgeable(builds).filter((b) => b.healCodes && typeof b.healCodes === 'object');
+  const heals = new Map<string, number>();
+  const seenIn = new Map<string, number>();
+  let attributed = 0;
+  let unattributed = 0;
+  let completenessUnknown = 0;
+
+  for (const b of rows) {
+    const tally = b.healCodes as NonNullable<BuildMetricInput['healCodes']>;
+    for (const [code, n] of Object.entries(tally.codes ?? {})) {
+      if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) continue;
+      heals.set(code, (heals.get(code) ?? 0) + n);
+      seenIn.set(code, (seenIn.get(code) ?? 0) + 1);
+      attributed += n;
+    }
+    if (typeof tally.unattributed === 'number' && tally.unattributed > 0) unattributed += tally.unattributed;
+    if (tally.unattributed === null || tally.unattributed === undefined) completenessUnknown += 1;
+  }
+
+  const top = [...heals.entries()]
+    .map(([code, n]) => ({ code, heals: n, builds: seenIn.get(code) ?? 0 }))
+    // Heaviest first; ties broken by NAME so the same window always renders the same order.
+    .sort((a, b) => (b.heals - a.heals) || a.code.localeCompare(b.code))
+    .slice(0, HEAL_CODES_SHOWN);
+
+  return { builds: rows.length, top, attributed, unattributed, completenessUnknown };
+}
+
 export interface BuilderScorecard {
   success: BuildSuccess;
   survival: EditSurvival;
@@ -299,6 +380,8 @@ export interface BuilderScorecard {
   heal: HealPressure;
   /** How often it routed AROUND a problem instead — the deferred-debt half of the same law. */
   workaround: WorkaroundPressure;
+  /** WHICH repairs fire — the heal rate turned into a work list. */
+  healCodes: HealBreakdown;
 }
 
 export function builderScorecard(builds: readonly BuildMetricInput[]): BuilderScorecard {
@@ -309,6 +392,7 @@ export function builderScorecard(builds: readonly BuildMetricInput[]): BuilderSc
     cost: costPerWorkingApp(builds),
     heal: healPressure(builds),
     workaround: workaroundPressure(builds),
+    healCodes: healBreakdown(builds),
   };
 }
 
@@ -380,6 +464,29 @@ export function scorecardHeadline(card: BuilderScorecard): string {
       `Workarounds: ${pct(card.workaround.rate)} of ${card.workaround.builds} build(s) routed AROUND a `
       + `problem instead of fixing it (${card.workaround.perBuild} per build on average, worst `
       + `${card.workaround.worst}). A workaround is a deferred root cause, never a win.`,
+    );
+  }
+
+  // 🔧 THE WORK LIST. The line above says the engine repairs itself; this one says what to go and
+  // prevent. Silent when nothing was measured, so "no build recorded a breakdown" and "no heals
+  // fired" stay different statements.
+  if (card.healCodes.builds > 0 && card.healCodes.top.length > 0) {
+    const named = card.healCodes.top
+      .map((r) => `${r.code} ×${r.heals} (${r.builds} build${r.builds === 1 ? '' : 's'})`)
+      .join(', ');
+    // The caveat rides IN the sentence, never as a footnote a card could drop: the build with the
+    // most heals is the likeliest to have had its timeline trimmed, so it is the likeliest to be
+    // missing from the very list meant to rank it.
+    const missing = card.healCodes.unattributed > 0
+      ? ` ${card.healCodes.unattributed} further repair(s) happened and could not be named — those builds' `
+        + 'timelines were trimmed before storage, so this ranking is incomplete by that much.'
+      : '';
+    const unknown = card.healCodes.completenessUnknown > 0
+      ? ` ${card.healCodes.completenessUnknown} build(s) recorded no total, so their lists cannot be checked for completeness.`
+      : '';
+    lines.push(
+      `Most-repaired: ${named} — across ${card.healCodes.builds} build(s) carrying a breakdown, `
+      + `${card.healCodes.attributed} repair(s) named.${missing}${unknown}`,
     );
   }
 

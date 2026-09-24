@@ -165,3 +165,76 @@ describe('the upload itself stays possible', () => {
     expect(step(UPLOAD)).toMatch(/uses:\s*r0adkll\/upload-google-play@[0-9a-f]{40}\b/);
   });
 });
+
+/**
+ * THE SIBLING, HUNTED (2026-09-24).
+ *
+ * The fixes above were made to `android-aab.yml` alone and the iOS workflow was never looked at —
+ * the "instance fixed, class not" pattern this repo keeps paying for. `ios-ipa.yml` carried BOTH
+ * defects, and the second one is worse there than it ever was on Android:
+ *
+ *   - its Summary had no `if: always()`, so a failed upload erased the note saying the .ipa exists;
+ *   - its Summary asserted the upload from `inputs.upload` — and unlike Android's, the iOS upload
+ *     step has **no `if:` guard at all**. It is named "Build, sign & upload", the upload lives
+ *     inside the Fastfile behind `DO_UPLOAD`, so the step is GREEN whether or not anything was ever
+ *     sent to Apple. Nothing in a finished run — not the step list, not the conclusion, not the
+ *     artifacts — could distinguish "uploaded to TestFlight" from "built and kept on the runner".
+ *
+ * The admin asked exactly that question ("ipa/aab upload nhi hua??") and the honest answer was that
+ * the run could not be made to say. The Fastfile now writes `uploaded=true` to `$GITHUB_OUTPUT`
+ * only after `upload_to_testflight` returns, and the summary reads that. A fact, from the thing it
+ * describes.
+ */
+describe('the iOS run can prove whether the binary reached TestFlight', () => {
+  const ios = readFileSync(resolve(root, '.github/workflows/ios-ipa.yml'), 'utf8');
+  const fastfile = readFileSync(resolve(root, 'fastlane/Fastfile'), 'utf8');
+
+  function iosStep(name: string): string {
+    const head = `      - name: ${name}\n`;
+    const at = ios.indexOf(head);
+    expect(at, `step "${name}" not found in ios-ipa.yml`).toBeGreaterThan(-1);
+    const rest = ios.slice(at + head.length);
+    const next = rest.indexOf('\n      - name: ');
+    return next === -1 ? rest : rest.slice(0, next);
+  }
+
+  const IOS_SUMMARY = iosStep('Summary');
+  const FASTLANE = 'Build, sign & upload to TestFlight (fastlane)';
+
+  it('the summary survives a failed upload, so the .ipa is never reported as missing', () => {
+    expect(IOS_SUMMARY).toMatch(/^\s+if:\s*always\(\)\s*$/m);
+  });
+
+  it('reports the upload from what the Fastfile recorded, never from the input that asked for it', () => {
+    // The whole point: `inputs.upload` states an intention. `steps.fastlane.outputs.uploaded` is
+    // written on one line that is only reachable after upload_to_testflight has returned.
+    expect(IOS_SUMMARY).toContain('steps.fastlane.outputs.uploaded');
+    expect(iosStep(FASTLANE)).toMatch(/^\s{8}id:\s*fastlane\s*$/m);
+  });
+
+  it('distinguishes the three real outcomes — delivered, asked for but not delivered, not asked', () => {
+    expect(IOS_SUMMARY).toMatch(/\*\*Uploaded to App Store Connect/);
+    expect(IOS_SUMMARY).toMatch(/Nothing was uploaded, although/);
+    expect(IOS_SUMMARY).toMatch(/Not uploaded\*\* — \\`upload\\` was not ticked/);
+  });
+
+  it('does not claim an .ipa when the build/sign step did not succeed', () => {
+    expect(IOS_SUMMARY).toMatch(/steps\.fastlane\.outcome.*!=.*success|!=\s*"success"/s);
+    expect(IOS_SUMMARY).toContain('The .ipa was NOT built');
+  });
+
+  it('the Fastfile records the upload ONLY after upload_to_testflight returns', () => {
+    const at = fastfile.indexOf('upload_to_testflight(opts)');
+    expect(at, 'upload_to_testflight call not found').toBeGreaterThan(-1);
+    const marker = fastfile.indexOf('uploaded=true');
+    expect(marker, 'the Fastfile never records the upload').toBeGreaterThan(at);
+    // And it must live inside the DO_UPLOAD branch — a record written unconditionally would be the
+    // same lie in a new place.
+    expect(fastfile.indexOf('DO_UPLOAD')).toBeLessThan(marker);
+    expect(fastfile.slice(at, marker)).not.toContain('\n    end');
+  });
+
+  it('still waits for Apple to finish processing, so "uploaded" means available', () => {
+    expect(fastfile).toMatch(/skip_waiting_for_build_processing:\s*false/);
+  });
+});

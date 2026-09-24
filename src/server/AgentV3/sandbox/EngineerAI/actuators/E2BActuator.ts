@@ -74,6 +74,7 @@ import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
 import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from '../../../previewBridge';
+import { gunzipSync } from 'zlib';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -619,6 +620,32 @@ function extractDevPort(command: string): number {
  * into it. That is expensive and it is invisible in a report that only says "resumed=yes".
  */
 export type SandboxOrigin = 'warm' | 'resumed' | 'created-after-failed-resume' | 'created-fresh';
+
+/**
+ * The script that collects a built site inside the sandbox. PURE — exported so a test can RUN it.
+ *
+ * It walks the first candidate directory that has files, maps each relative path to its base64 bytes,
+ * and writes that map as GZIPPED JSON to `resultPath`. Exit 2 means "no build output here" — the
+ * caller turns that into its own honest sentence. Uses only Node built-ins, so it resolves anywhere.
+ */
+export function distReaderScript(dirs: string[], resultPath: string): string {
+  return [
+    "const fs=require('fs'),path=require('path'),zlib=require('zlib');",
+    "function walk(d,b,o){",
+    "  try{for(const f of fs.readdirSync(d)){",
+    "    const a=path.join(d,f),r=(b?b+'/':'')+f;",
+    "    if(fs.statSync(a).isDirectory()) walk(a,r,o);",
+    "    else o[r]=fs.readFileSync(a).toString('base64');",
+    "  }}catch(e){}",
+    "  return o;",
+    "}",
+    "let out={};",
+    `const dirs=${JSON.stringify(dirs)};`,
+    "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
+    "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
+    `fs.writeFileSync(${JSON.stringify(resultPath)}, zlib.gzipSync(Buffer.from(JSON.stringify(out)),{level:6}));`,
+  ].join('\n');
+}
 
 export class E2BActuator implements IEngineerActuator {
   private sandboxes = new Map<string, Sandbox>();
@@ -2993,23 +3020,8 @@ ${paintWaitJs('p')}
     // sandbox does not slowly fill /tmp with them.
     const runId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     const readerPath = `/tmp/nb_read_dist_${runId}.cjs`;
-    const resultPath = `/tmp/nb_dist_${runId}.json`;
-    const readerScript = [
-      "const fs=require('fs'),path=require('path');",
-      "function walk(d,b,o){",
-      "  try{for(const f of fs.readdirSync(d)){",
-      "    const a=path.join(d,f),r=(b?b+'/':'')+f;",
-      "    if(fs.statSync(a).isDirectory()) walk(a,r,o);",
-      "    else o[r]=fs.readFileSync(a).toString('base64');",
-      "  }}catch(e){}",
-      "  return o;",
-      "}",
-      "let out={};",
-      `const dirs=${JSON.stringify(searchPaths)};`,
-      "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
-      "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
-      `fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify(out));`,
-    ].join('\n');
+    const resultPath = `/tmp/nb_dist_${runId}.json.gz`;
+    const readerScript = distReaderScript(searchPaths, resultPath);
 
     await sandbox.files.write(readerPath, readerScript);
 
@@ -3042,7 +3054,13 @@ ${paintWaitJs('p')}
       );
     }
 
-    const raw = await sandbox.files.read(resultPath).catch(() => '');
+    // The result is GZIPPED JSON read back as BYTES (compression audit, 2026-09-24). It used to be plain
+    // base64 JSON read as text — a built site inflated by a third, then sent uncompressed. Text assets
+    // (the bulk of a dist/) pack 3–4× before they cross the network, and `format: 'bytes'` is the same
+    // SDK call the screenshot path has used in production for months.
+    const packed = await sandbox.files.read(resultPath, { format: 'bytes' }).catch(() => null);
+    let raw = '';
+    try { raw = packed && packed.length ? gunzipSync(Buffer.from(packed)).toString('utf8') : ''; } catch { raw = ''; }
     // Best-effort tidy-up: a resumed sandbox lives for days, and one of these per publish adds up.
     // Deliberately AFTER the read and never awaited into the result — a cleanup that could fail the
     // publish would be a worse bug than the litter it prevents.

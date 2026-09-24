@@ -93,8 +93,15 @@ describe('ShellTerminal mobile command bar', () => {
     expect(code).toContain('showCommandBar');
   });
 
-  it('submits through the SAME sendInput path, with the real TTY line ending', () => {
-    expect(code).toContain("void sendInput(barText + '\\r')");
+  it('🔴 SUPERSEDED 2026-09-24 — the line input and Run button are GONE; typing happens IN the box', () => {
+    // This case asserted the bar's own submit (`sendInput(barText + '\r')`). The admin removed that
+    // input as a duplicate of typing inside the terminal box: "isko hide kar do! user direct terminal
+    // ko andar hi command de dega". Typing now reaches the PTY only through the bridge, whose Enter
+    // sends the same TTY line ending the bar used to.
+    expect(code).not.toContain('sendBarCommand');
+    expect(code).not.toContain('Terminal command input');
+    expect(code).toContain("e.key === 'Enter' ? '\\r'");
+    expect(code).toContain('onClick={focusBridge}');
   });
 
   it('carries the keys a shell is unusable without: interrupt, completion, history', () => {
@@ -106,17 +113,22 @@ describe('ShellTerminal mobile command bar', () => {
 
   it('disables the mobile-hostile keyboard behaviours a command input cannot survive', () => {
     // autoCapitalize/autoCorrect would turn `npm` into `Npm` and "correct" flags into words —
-    // a command bar with autocorrect on is a bug generator, not a terminal.
-    expect(code).toContain('autoCapitalize="none"');
-    expect(code).toContain('autoCorrect="off"');
-    expect(code).toContain('spellCheck={false}');
-    expect(code).toContain('enterKeyHint="send"');
+    // an input with autocorrect on is a bug generator, not a terminal. Asserted on the bridge now,
+    // the one input that remains (`enterKeyHint="send"` left with the removed line input).
+    const bridge = code.slice(code.indexOf('aria-label="Terminal direct input"') - 400, code.indexOf('aria-label="Terminal direct input"') + 400);
+    expect(bridge).toContain('autoCapitalize="none"');
+    expect(bridge).toContain('autoCorrect="off"');
+    expect(bridge).toContain('spellCheck={false}');
   });
 
-  it('is never a dead control: input disabled with an honest placeholder when the shell is gone', () => {
-    expect(code).toMatch(/disabled=\{status\.kind === 'exited' \|\| status\.kind === 'unavailable'\}/);
-    expect(code).toContain('Terminal closed');
-    expect(code).toContain('Terminal not available');
+  it('is never a dead control: the helper keys disable themselves when the shell is gone', () => {
+    // Re-aimed 2026-09-24: the disabled line input and its placeholder went with the input. The keys
+    // that remain would send to nothing on a dead shell, so they carry the same rule, and the box's
+    // own "Try again" / "Restart terminal" button is the way back (unchanged).
+    expect(code).toContain("const shellGone = status.kind === 'exited' || status.kind === 'unavailable';");
+    expect((code.match(/disabled=\{shellGone\}/g) || []).length).toBe(4);
+    expect(code).toContain("'Restart terminal' : 'Try again'");
+    expect(code).toContain('Tap the terminal to type');
   });
 
   it('helper keys keep the input focused so the phone keyboard stays open between taps', () => {

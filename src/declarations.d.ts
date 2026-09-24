@@ -255,6 +255,7 @@ declare module 'lucide-react' {
   export const Rocket: Icon;
   export const RotateCcw: Icon;
   export const Save: Icon;
+  export const Scissors: Icon;
   export const Search: Icon;
   export const Send: Icon;
   export const Settings: Icon;

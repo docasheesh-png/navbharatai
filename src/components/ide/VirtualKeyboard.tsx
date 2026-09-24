@@ -1,8 +1,11 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Keyboard, X, Search, Move, ChevronDown, Maximize2, CornerDownLeft } from 'lucide-react';
+import { Keyboard, X, Search, ChevronDown, Maximize2, CornerDownLeft, SlidersHorizontal, ListChecks } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls, useMotionValue } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { availableItems, type EditorCapability } from './editorCapabilities';
+import { CustomFace } from './CustomFace';
+import type { EditorLike } from './dispatchCombo';
+import { readPopupFace, writePopupFace, type PopupFace } from './popupFace';
 import {
   CORNERS, type Corner, type GestureStart,
   cornerGestureStart, pinchGestureStart, scaleFromGesture, readPopupScale, writePopupScale,
@@ -152,8 +155,16 @@ const VS_CODE_SHORTCUTS: ShortcutEntry[] = [
 interface VirtualKeyboardProps {
   onShortcutTrigger: (keys: string[], key?: string) => void;
   onClose: () => void;
-  onToggleCursor?: () => void;
+  /** The Monaco instance the CUSTOM face types into and sends keys to; null when no file is open. */
+  editor?: EditorLike | null;
+  /** Which face to open on. The ActivityBar's Cursor button opens straight onto CUSTOM. */
+  initialFace?: PopupFace;
+  /** Reported when the face changes, so the ActivityBar's Cursor button can show it as active. */
+  onFaceChange?: (face: PopupFace) => void;
 }
+
+/** The Shortcuts-panel list, in the shape the combo engine reads (label, key, command, keys). */
+export const SHORTCUT_TABLE = VS_CODE_SHORTCUTS.map(({ key, label, command, keys }) => ({ key, label, command, keys }));
 
 /** Where each corner handle sits, and the cursor a mouse shows over it. */
 const CORNER_STYLE: Record<Corner, string> = {
@@ -166,8 +177,19 @@ const CORNER_STYLE: Record<Corner, string> = {
 export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
   onShortcutTrigger,
   onClose,
-  onToggleCursor
+  editor = null,
+  initialFace,
+  onFaceChange,
 }) => {
+  // Two faces on one card (admin 2026-09-24: "jaise hi user CUSTOM par click kare, to popup flip back
+  // ho jaye"): SHORTCUTS is the dropdown + ENTER; CUSTOM is the input box + GO + the desktop keyboard
+  // + the cursor tool. The last face is remembered, unless the caller asks for one.
+  const [face, setFace] = useState<PopupFace>(() => initialFace ?? readPopupFace(typeof localStorage === 'undefined' ? null : localStorage));
+  const flipTo = (next: PopupFace) => {
+    setFace(next);
+    writePopupFace(typeof localStorage === 'undefined' ? null : localStorage, next);
+    onFaceChange?.(next);
+  };
   const [search, setSearch] = useState('');
   const [selectedShortcut, setSelectedShortcut] = useState<ShortcutEntry | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -339,7 +361,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
               </div>
               <div className="min-w-0">
                  <h2 className="text-xs font-black text-ink uppercase tracking-[0.2em] truncate">NavBharat AI Code Studio</h2>
-                 <p className="text-[9px] font-bold text-faint uppercase truncate">VS Code – Master Keyboard Shortcuts</p>
+                 <p className="text-[9px] font-bold text-faint uppercase truncate">{face === 'custom' ? 'Custom keys – type any combination' : 'VS Code – Master Keyboard Shortcuts'}</p>
               </div>
            </div>
 
@@ -368,8 +390,22 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
            </div>
         </div>
 
-        {/* Row 2: The Selector (Dropdown + Enter) */}
-        <div className="p-4 sm:p-6 bg-well flex flex-col gap-5 relative">
+        {/* Row 2: the FACE. A flip through the card's edge — each face turns away and the other turns
+            in, so two faces of different heights never have to share one box. */}
+        <div className="bg-well relative" style={{ perspective: '1200px' }}>
+        <AnimatePresence mode="wait" initial={false}>
+        {face === 'custom' ? (
+          <motion.div key="custom" data-face="custom" initial={{ rotateY: -90, opacity: 0 }} animate={{ rotateY: 0, opacity: 1 }} exit={{ rotateY: 90, opacity: 0 }} transition={{ duration: 0.22 }} style={{ transformOrigin: 'center', backfaceVisibility: 'hidden' }} className="p-4 sm:p-5 flex flex-col gap-4">
+            <CustomFace editor={editor} table={SHORTCUT_TABLE} runShortcut={onShortcutTrigger} />
+            <div className="flex items-center justify-between gap-3 px-1">
+              <button type="button" onClick={() => flipTo('shortcuts')} aria-label="Back to shortcuts" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-raised border border-line text-muted hover:text-ink font-black text-[10px] uppercase tracking-widest">
+                <ListChecks className="w-3.5 h-3.5" /> Shortcuts
+              </button>
+              <div className="hidden sm:block text-[9px] font-bold text-faint uppercase tracking-[0.2em] text-right truncate">Build any combination, then GO</div>
+            </div>
+          </motion.div>
+        ) : (
+        <motion.div key="shortcuts" data-face="shortcuts" initial={{ rotateY: 90, opacity: 0 }} animate={{ rotateY: 0, opacity: 1 }} exit={{ rotateY: -90, opacity: 0 }} transition={{ duration: 0.22 }} style={{ transformOrigin: 'center', backfaceVisibility: 'hidden' }} className="p-4 sm:p-6 flex flex-col gap-5 relative">
            <div className="flex gap-3 h-14">
               {/* Dropdown Selector Box — `min-w-0` lets it shrink so the ENTER button beside it never
                   overflows the popup on a narrow phone (it did, at px-8 beside a flex-1 that could not give). */}
@@ -468,20 +504,26 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
               </button>
            </div>
 
-           {/* Secondary Actions */}
+           {/* Secondary Actions — CUSTOM flips the card over (admin 2026-09-24: the "Switch to Cursor
+               Tool" text became this button; the cursor tool lives on the other face) */}
            <div className="flex items-center justify-between gap-3 px-1">
               <button
-                onClick={onToggleCursor}
-                className="flex items-center gap-2 text-faint hover:text-accent-text transition-colors font-black text-[10px] uppercase tracking-widest shrink-0"
+                type="button"
+                onClick={() => flipTo('custom')}
+                aria-label="Custom"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-accent-text hover:bg-indigo-500/25 transition-colors font-black text-[10px] uppercase tracking-widest shrink-0"
               >
-                <Move className="w-3 h-3" />
-                Switch to Cursor Tool
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                Custom
               </button>
               {/* A hint, hidden where it would only truncate (under 640px it read "SELECT FU…"). */}
               <div className="hidden sm:block text-[9px] font-bold text-faint uppercase tracking-[0.2em] text-right truncate">
                  Select Function & Press Enter to Execute
               </div>
            </div>
+        </motion.div>
+        )}
+        </AnimatePresence>
         </div>
 
         {/* Footer Branding */}

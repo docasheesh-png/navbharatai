@@ -20,14 +20,14 @@ import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { softKeyboardWouldOpen } from '../../lib/dismissKeyboard';
-import { CursorPopup } from './CursorPopup';
+import type { PopupFace } from './popupFace';
 import { IDEScreen, Tab } from '../../types/ide';
 import { AgentMode } from './ModeSelector';
 import { ThemeMode, THEME_MODES } from '../../lib/theme';
 import { readLiteEditorPreference, writeLiteEditorPreference } from './editorEngine';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
-import { Menu as MenuIcon, X, Maximize2, Minimize2, ChevronUp, ChevronDown, Search, Keyboard, Bot, Monitor, FileCode, Plus, AlignJustify, Map, Code2, MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck, UploadCloud, BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces, RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle, Loader2, Files as FilesIcon, GitBranch, Terminal as TerminalIcon } from 'lucide-react';
+import { Menu as MenuIcon, X, Maximize2, Minimize2, ChevronUp, ChevronDown, Search, Keyboard, Bot, Monitor, FileCode, Plus, AlignJustify, Map, Code2, MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck, UploadCloud, BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces, RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle, Loader2, Files as FilesIcon, GitBranch, Terminal as TerminalIcon, SlidersHorizontal } from 'lucide-react';
 
 interface CodeStudioProps {
   files: Record<string, string>;
@@ -242,7 +242,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
     window.addEventListener('keydown', onEsc);
     return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onEsc); };
   }, [openMenu]);
-  const [isCursorPopupOpen, setIsCursorPopupOpen] = useState(false);
+  // The popup's face, mirrored here so the ActivityBar's Cursor button can show as active. The old
+  // standalone Cursor popup is retired: its functions live on the Shortcuts popup's CUSTOM face.
+  const [shortcutsFace, setShortcutsFace] = useState<PopupFace>('shortcuts');
+  const [shortcutsInitialFace, setShortcutsInitialFace] = useState<PopupFace | undefined>(undefined);
   /**
    * The editor every command acts on. With a split open this FOLLOWS FOCUS — both panes report
    * themselves here when focused — so Find, Format, Undo and the status bar all target the pane the
@@ -288,7 +291,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
       return;
     }
     if (screen === 'cursor') {
-      setIsCursorPopupOpen(prev => !prev);
+      // Open the Shortcuts popup straight onto its CUSTOM face (or close it if that face is showing).
+      if (isShortcutsOpen && shortcutsFace === 'custom') { setIsShortcutsOpen(false); return; }
+      setShortcutsInitialFace('custom');
+      setShortcutsFace('custom');
+      setIsShortcutsOpen(true);
       return;
     }
     setActiveScreen(screen);
@@ -1197,13 +1204,12 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
 
       <AnimatePresence>
         {isShortcutsOpen && (
-          <VirtualKeyboard 
-            onClose={() => setIsShortcutsOpen(false)} 
+          <VirtualKeyboard
+            onClose={() => { setIsShortcutsOpen(false); setShortcutsInitialFace(undefined); }}
             onShortcutTrigger={handleShortcut}
-            onToggleCursor={() => {
-              setIsShortcutsOpen(false);
-              setIsCursorPopupOpen(true);
-            }}
+            editor={editorInstance}
+            initialFace={shortcutsInitialFace}
+            onFaceChange={setShortcutsFace}
           />
         )}
       </AnimatePresence>
@@ -1533,8 +1539,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
            <ActivityBar 
              activeScreen={activeScreen}
              onScreenChange={handleScreenChange}
-             isShortcutsOpen={isShortcutsOpen}
-             isCursorPopupOpen={isCursorPopupOpen}
+             isShortcutsOpen={isShortcutsOpen && shortcutsFace !== 'custom'}
+             isCursorPopupOpen={isShortcutsOpen && shortcutsFace === 'custom'}
            />
         )}
 
@@ -1754,17 +1760,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
              </div>
           )}
 
-          <AnimatePresence>
-            {isCursorPopupOpen && editorInstance && (
-              <CursorPopup
-                editor={editorInstance}
-                onClose={() => setIsCursorPopupOpen(false)}
-                onToggleKeyboard={() => setIsShortcutsOpen(!isShortcutsOpen)}
-                isKeyboardOpen={isShortcutsOpen}
-              />
-            )}
-          </AnimatePresence>
-
           {/* N1-N9: AI code action toolbar — appears when text is selected in editor */}
           <AnimatePresence>
             {selectedCode.trim() && activeScreen !== 'preview' && (
@@ -1956,6 +1951,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    // seam the user notices before the sentence that matters.
                    { label: zipText.menuLabel, Icon: UploadCloud, onTap: () => { setZipError(''); setZipConfirmOpen(true); } },
                    { label: 'Shortcuts', Icon: Keyboard, onTap: () => setIsShortcutsOpen(true) },
+                   { label: 'Custom keys', Icon: SlidersHorizontal, onTap: () => { setShortcutsInitialFace('custom'); setShortcutsFace('custom'); setIsShortcutsOpen(true); } },
                  ]).map(({ label, Icon, onTap }) => (
                    <button
                      key={label}

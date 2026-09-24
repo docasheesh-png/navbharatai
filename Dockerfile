@@ -40,6 +40,11 @@ ENV VITE_PREVIEW_ORIGIN=$VITE_PREVIEW_ORIGIN
 
 RUN npm run build
 
+# Compress the web assets ONCE at maximum level so the server streams ready-made .br/.gz files
+# (scripts/precompress.mjs). Here and not in `npm run build`, because Capacitor copies dist/ into the
+# phone apps, which load from local disk and would only grow.
+RUN node scripts/precompress.mjs dist
+
 # Drop the build/test toolchain from node_modules NOW, so the runtime stage copies production
 # dependencies only.
 #

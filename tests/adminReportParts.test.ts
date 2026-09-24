@@ -3,7 +3,22 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ordinal, partCount, reportParts, partJson, partsSummary } from '../src/components/adminReportParts';
 import { copyTextToClipboard } from '../src/lib/copyText';
-import { buildAdminReportRecord, fitSessionToDocument, FIRESTORE_DOC_LIMIT_BYTES } from '../src/server/AgentV3/AdminBuildReportStore';
+import { buildAdminReportRecord, fitSessionToDocument, toStoredRecord, fromStoredRecord, FIRESTORE_DOC_LIMIT_BYTES } from '../src/server/AgentV3/AdminBuildReportStore';
+import { randomBytes } from 'crypto';
+
+/**
+ * The size Firestore charges for the STORED record (2026-09-24): the session is packed into bytes,
+ * so the document is its plain JSON plus the packed payload's length — never `JSON.stringify` of a
+ * Buffer, which would count every byte as a decimal number.
+ */
+function storedBytes(rec: Parameters<typeof toStoredRecord>[0]): number {
+  const stored = toStoredRecord(rec) as { session?: { buildsPacked?: Buffer } };
+  const packed = stored.session?.buildsPacked;
+  const plain = packed ? { ...stored, session: { ...stored.session, buildsPacked: undefined } } : stored;
+  return Buffer.byteLength(JSON.stringify(plain), 'utf8') + (packed ? packed.length : 0);
+}
+/** Text that does not compress — the only honest way to make a size cap bite on a packed store. */
+const noise = (n: number) => randomBytes(Math.ceil(n * 0.75)).toString('base64').slice(0, n);
 import type { BuildDiagnosticsReport } from '../src/server/AgentV3/BuildDiagnostics';
 
 /**
@@ -72,8 +87,8 @@ describe('the record CARRIES the whole session (promise 1)', () => {
   });
 
   it('the focused build is ALWAYS present even when the session list is huge (size cap counts, never hides)', () => {
-    // A big fake body per build so the byte cap genuinely bites.
-    const fat = (t: number) => rep(t, { summary: 'x'.repeat(400_000) });
+    // A big INCOMPRESSIBLE body per build so the byte cap genuinely bites even packed.
+    const fat = (t: number) => rep(t, { summary: noise(400_000) });
     const builds = Array.from({ length: 40 }, (_, i) => fat(1_000 + i));
     const rec = buildAdminReportRecord(builds[builds.length - 1], ctx, builds);
     expect(rec.session!.count).toBe(40);
@@ -91,12 +106,41 @@ describe('the record CARRIES the whole session (promise 1)', () => {
    * focused build that arrived fine before the change. The budget must come from the real sink.
    */
   it('the stored record ALWAYS fits a Firestore document, however long the session', () => {
-    const fat = (t: number) => rep(t, { summary: 'x'.repeat(200_000) });
+    const fat = (t: number) => rep(t, { summary: noise(200_000) });
     const builds = Array.from({ length: 20 }, (_, i) => fat(1_000 + i));
     const rec = buildAdminReportRecord(builds[builds.length - 1], ctx, builds);
-    expect(JSON.stringify(rec).length).toBeLessThan(FIRESTORE_DOC_LIMIT_BYTES);
+    expect(storedBytes(rec)).toBeLessThan(FIRESTORE_DOC_LIMIT_BYTES);
     expect(rec.session!.count).toBe(20);
     expect(rec.session!.omittedBuilds).toBeGreaterThan(0);
+  });
+
+  it('2026-09-24: a long session of ordinary (repetitive) builds is now kept WHOLE — stored compressed', () => {
+    // 20 builds × 200 KB of text used to drop most of the session; packed, all of it fits.
+    const fat = (t: number) => rep(t, { summary: 'build step output '.repeat(11_000) });
+    const builds = Array.from({ length: 20 }, (_, i) => fat(1_000 + i));
+    const rec = buildAdminReportRecord(builds[builds.length - 1], ctx, builds);
+    expect(rec.session!.omittedBuilds).toBe(0);
+    expect(rec.session!.builds).toHaveLength(20);
+    expect(storedBytes(rec)).toBeLessThan(FIRESTORE_DOC_LIMIT_BYTES);
+    // And it reads back exactly.
+    const back = fromStoredRecord(toStoredRecord(rec));
+    expect(back.session!.builds).toEqual(rec.session!.builds);
+  });
+
+  it('AGENTV3_COMPACT_STORAGE=off: the old plain fit, and nothing is packed on save', () => {
+    const fat = (t: number) => rep(t, { summary: 'build step output '.repeat(11_000) });
+    const builds = Array.from({ length: 20 }, (_, i) => fat(1_000 + i));
+    const off = { AGENTV3_COMPACT_STORAGE: 'off' } as NodeJS.ProcessEnv;
+    const rec = buildAdminReportRecord(builds[builds.length - 1], ctx, builds, false, off);
+    expect(rec.session!.omittedBuilds).toBeGreaterThan(0);
+    expect((toStoredRecord(rec, off) as { session: { buildsEnc?: string } }).session.buildsEnc).toBeUndefined();
+  });
+
+  it('a packed session that cannot be decoded reads as omitted builds, never as a one-build session', () => {
+    const raw = { meta: { id: 'x' }, report: rep(1), session: { count: 5, omittedBuilds: 0, buildsEnc: 'br1', buildsPacked: Buffer.from('junk') } };
+    const back = fromStoredRecord(raw as never);
+    expect(back.session!.builds).toEqual([]);
+    expect(back.session!.omittedBuilds).toBe(5);
   });
 
   it('when even ONE build will not fit, the session is empty but the omission is still declared', () => {

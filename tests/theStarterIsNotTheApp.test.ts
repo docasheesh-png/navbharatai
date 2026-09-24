@@ -8,7 +8,7 @@
  * component, and (B) a page that IS the starter can no longer count as a rendered app anywhere a render
  * verdict is made.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -97,6 +97,11 @@ describe('layer A — the fast lane never finishes without the app root', () => 
   it('THE EXACT FAILURE: out of budget after the first tier — hands off instead of "succeeding" without App.tsx', async () => {
     const written: string[][] = [];
     const logs: string[] = [];
+    // The clock is MOVED, not waited on (2026-09-24): a real 700 ms sleep inside a 2 s lane left the
+    // outcome to the runner's load. Only `Date` is faked — the lane measures its tiers with Date.now() —
+    // and the first tier's two concurrent files each spend half of its 700 ms.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
     const r = await runSimpleBuild({
       prompt: 'vendor status app', framework: 'vite-react', scaffoldPaths: ['index.html', 'src/App.tsx'],
       shareContract: false, overallTimeoutMs: 2000,
@@ -105,7 +110,7 @@ describe('layer A — the fast lane never finishes without the app root', () => 
           return 'src/types.ts :: state\nsrc/utils.ts :: helpers\nsrc/Widget.tsx :: a widget\nsrc/App.tsx :: root';
         }
         const p = pathOf(user);
-        if (p === 'src/types.ts' || p === 'src/utils.ts') await new Promise((res) => setTimeout(res, 700)); // a slow first tier
+        if (p === 'src/types.ts' || p === 'src/utils.ts') vi.setSystemTime(Date.now() + 350); // a slow first tier: 700 ms in all
         return block(p);
       },
       writeFiles: async (f: OneShotFile[]) => { written.push(f.map((x) => x.path)); },
@@ -115,6 +120,7 @@ describe('layer A — the fast lane never finishes without the app root', () => 
     expect(r.reason).toContain('stopped early');
     expect(r.salvagedPaths?.sort()).toEqual(['src/types.ts', 'src/utils.ts']); // finished work reaches the full builder
     expect(written.flat()).not.toContain('src/App.tsx');
+    } finally { vi.useRealTimers(); }
   });
 
   it('a root whose own generation call failed is the same failure, not a smaller success', async () => {

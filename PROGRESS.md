@@ -80457,3 +80457,11 @@ index.html. All three causes were ours.
 - ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
   hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
   measurement: its repeat share should fall well below 63%.
+- **Same day, second PR — the web bundle is compressed once at build time.**
+  - `scripts/precompress.mjs` (Dockerfile only) and `lib/precompressedStatic.ts`.
+  - The JS/CSS bundle is 14% smaller than today's per-request brotli-4, with 0 CPU per request.
+  - The image build takes about 18 s longer.
+  - `/monaco/` and `/vendor/` (not content-hashed) lose their 1-year `immutable` cache.
+  - The static-site ZIP export uses DEFLATE, where JSZip's default is STORE.
+  - Kill switch `STATIC_PRECOMPRESSED=off`.
+  - Tested over real HTTP in server.ts middleware order (`tests/theBundleIsCompressedOnceNotPerRequest.test.ts`).

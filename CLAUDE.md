@@ -1686,6 +1686,19 @@ the code (it is actually read somewhere) on 2026-07-11.
   version) is still never merged into the workspace — the assembled file carries Capacitor deps and the
   sentinel script, so copying it back would break the app's own build — and the next ship regenerates
   it from the workspace. A dependency-only merge is a separate change.
+- **📦 `STATIC_PRECOMPRESSED` — the web bundle is compressed ONCE at build time (built 2026-09-24).
+  ⚠️ NOT set, and the code default is ON**; `off` is the no-deploy revert to per-request compression.
+  `scripts/precompress.mjs` runs in the **Dockerfile only** and writes brotli-11 and gzip-9 copies beside
+  every asset under `assets/`, `monaco/` and `vendor/`: measured, 31.7 MB raw → 5.8 MB brotli, and
+  the JS/CSS bundle is **14% smaller** than the quality-4 brotli the per-request middleware sends,
+  at **zero CPU per request**. It adds about 18 s to the image build.
+  `lib/precompressedStatic.ts` serves the copies before `express.static`, and falls through whenever
+  there is no copy. 🔒 **Never add it to `npm run build`**: Capacitor copies `dist/` into the phone
+  apps, which load from their own disk, so the copies would only make the download bigger. A test
+  enforces this. Same change: `/monaco/` and `/vendor/` are not content-hashed, so they get a one-day
+  cache (`UNHASHED_ASSET_CACHE`) instead of one year `immutable`. ⚠️ `firebase.json` was NOT given the
+  same rule: the main app is served by Cloud Run, and Firebase's precedence for overlapping header
+  globs was not verified.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH

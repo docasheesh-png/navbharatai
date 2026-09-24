@@ -114,9 +114,20 @@ describe('the tap targets did not shrink', () => {
   });
 
   it('the box at rest is tall enough for the two rail buttons beside it', () => {
-    // text row (min 40) + control row (36 + pb-1) ≥ two rail buttons (min 36 each) + the 6px gap.
+    // The box at rest is the taller of its two columns — text row (min 40) + control row (36 + pb-1),
+    // or the Send slot (min 84) — plus its 1px border top and bottom. The rail is two FIXED buttons
+    // (h-10 = 40px each) and the 6px gap: 86px, exactly the box, so the two line up at rest.
     const text = px(COMPOSER_TEXTAREA_CLASS.match(/min-h-\[(\d+)px\]/));
-    const rail = px(RAIL_BUTTON_CLASS.match(/min-h-\[(\d+)px\]/));
-    expect(text + 36 + 4).toBeGreaterThanOrEqual(rail * 2 + 6);
+    const slot = px(SEND_SLOT_CLASS.twoRows.match(/min-h-\[(\d+)px\]/));
+    const railStep = RAIL_BUTTON_CLASS.match(/(?:^|\s)h-(\d+)(?:\s|$)/);
+    expect(railStep).not.toBeNull();
+    const rail = Number(railStep![1]) * 4;
+    const boxAtRest = Math.max(text + 36 + 4, slot) + 2;
+    expect(boxAtRest).toBe(rail * 2 + 6);
+  });
+
+  it('the rail buttons have a FIXED height — a growing message never stretches them', () => {
+    expect(RAIL_BUTTON_CLASS).not.toMatch(/(?:^|\s)flex-1(?:\s|$)/);
+    expect(RAIL_BUTTON_CLASS).toMatch(/(?:^|\s)h-\d+(?:\s|$)/);
   });
 });

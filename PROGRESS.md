@@ -80624,6 +80624,27 @@ around the textarea inside it.
   `:focus*` rule that sets outline or radius (reversion-proven).
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
 
+## 2026-09-24 — The whole message box is the input; History/Mode never grow (admin screenshots)
+
+Admin, with two phone screenshots taken after #3291 merged: *"input box ka pura area hi input box hona
+chahiye. abhi yeh 2 part me divide ho raha hai … jab text jyada bada ho … history/mode button ka size na
+bade, bas input box ka size badhe!"*
+
+- **The inner ring in those screenshots is the old focus outline**, i.e. the #3291 fix had not reached
+  that page yet. Verified in this session's build of `main`: the cascade-layers plugin
+  (`@csstools/postcss-cascade-layers`) now emits `.outline-none` with 8 specificity bumps against
+  `:focus-visible`'s 4, and a focused `textarea.outline-none` computes `outline: none` in Chromium. The
+  live site itself could not be fetched from this environment (egress refused), so "deployed" is not
+  claimed here.
+- **Whole box = one input:** `ComposerShell` now hands a tap anywhere in the box that is not a control
+  to the text (`tapFocusesComposerText`), cursor at the end. `mousedown` is held so the phone keyboard
+  does not close and reopen; focus happens on `click`, which iOS accepts as a user gesture.
+- **Rail never grows:** `RAIL_BUTTON_CLASS` is a fixed `h-10` (was `flex-1`), and the column is
+  `self-end`. At rest 40 + 6 + 40 = 86px = the two-row box, so they still line up; with five lines typed
+  the box went 86 → 186px in Chromium and both buttons stayed 40px.
+- Tests: `tests/theComposerIsOneLineBesideTheFooter.test.ts` (tap routing + rail), updated
+  `tests/chatComposerAlignment.test.ts` (the rest-height equality now includes the Send slot, and a
+  fixed-height lock). ⚠️ Installed phones need a fresh `.aab`/`.ipa` (admin's call).
 ## 2026-09-24 — Code Studio: the editor is the SAME on a phone — the width gate is gone (admin: "mobile me woh sab kaam hone chahiye jo desktop me ho sakte hai")
 
 **Series:** PR A of four (A: engine · B: resizable shortcut popup · C: every shortcut verified in a real

@@ -24,6 +24,7 @@ import { CursorPopup } from './CursorPopup';
 import { IDEScreen, Tab } from '../../types/ide';
 import { AgentMode } from './ModeSelector';
 import { ThemeMode, THEME_MODES } from '../../lib/theme';
+import { readLiteEditorPreference, writeLiteEditorPreference } from './editorEngine';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { Menu as MenuIcon, X, Maximize2, Minimize2, ChevronUp, ChevronDown, Search, Keyboard, Bot, Monitor, FileCode, Plus, AlignJustify, Map, Code2, MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck, UploadCloud, BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces, RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle, Loader2, Files as FilesIcon, GitBranch, Terminal as TerminalIcon } from 'lucide-react';
@@ -270,6 +271,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   const [editorFinalNewline, setEditorFinalNewline] = useState<boolean>(() => localStorage.getItem('ide_finalNewline') !== 'off');
   // A17: Editor theme (dark/light)
   const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'vs'>(() => (localStorage.getItem('ide_theme') as 'vs-dark' | 'vs') || 'vs-dark');
+  // The editor ENGINE is a user choice, never a screen-width guess (editorEngine.ts, 2026-09-24).
+  // Default: the full editor everywhere, phones included. "Lite" is for a device that cannot run it.
+  const [liteEditor, setLiteEditor] = useState<boolean>(() => readLiteEditorPreference(localStorage));
   // A10: Track per-file "saved" snapshots so we can show an unsaved-changes dot
   const savedFilesRef = React.useRef<Record<string, string>>({});
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
@@ -1052,6 +1056,32 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                        {THEME_MODES.map(mode => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
                     </select>
                  </div>
+                 {/* EDITOR ENGINE (2026-09-24). The full editor now runs on phones too — it used to be
+                     swapped for a plain textarea on any screen under 768px, which silently killed most
+                     shortcuts there. "Lite" is the honest escape hatch for a device that genuinely
+                     cannot run it: a choice the user makes, persisted, never a guess from the width. */}
+                 <div className="space-y-2">
+                    <label className="text-[9px] font-black text-muted uppercase">Editor engine</label>
+                    <button
+                       type="button"
+                       role="switch"
+                       aria-checked={liteEditor}
+                       onClick={() => { const v = !liteEditor; setLiteEditor(v); writeLiteEditorPreference(localStorage, v); }}
+                       className="w-full bg-well border border-line rounded-lg px-4 py-3 text-xs flex items-center justify-between text-body hover:border-indigo-500/50 transition-colors"
+                    >
+                       <span className="text-left">
+                          <span className="block font-bold">{liteEditor ? 'Lite editor (plain text)' : 'Full editor'}</span>
+                          <span className="block text-[10px] text-muted mt-0.5">
+                            {liteEditor
+                              ? 'Plain text box — shortcuts, find, format and multi-cursor are off. Tap to switch back.'
+                              : 'Syntax highlighting, every shortcut, find & replace, format. Tap for the lite editor if this device struggles.'}
+                          </span>
+                       </span>
+                       <span className={cn('shrink-0 ml-3 w-9 h-5 rounded-full relative transition-colors', liteEditor ? 'bg-accent' : 'bg-raised border border-line')}>
+                          <span className={cn('absolute top-0.5 w-4 h-4 rounded-full transition-all', liteEditor ? 'left-[18px] bg-on-accent' : 'left-0.5 bg-card border border-line')} />
+                       </span>
+                    </button>
+                 </div>
              </div>
           </div>
         );
@@ -1602,6 +1632,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onDebug={() => setIsDebugPanelOpen(true)}
                 onSave={handleSaveActiveFile}
                 hideHeaderDebug={isMobile}
+                liteEditor={liteEditor}
                 dirtyTabs={dirtyTabs}
                 editorTheme={editorTheme}
                 editorOptions={{
@@ -1670,6 +1701,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                    onDebug={() => setIsDebugPanelOpen(true)}
                    onSave={handleSaveActiveFile}
                    hideHeaderDebug={isMobile}
+                   liteEditor={liteEditor}
                    dirtyTabs={dirtyTabs}
                    editorTheme={editorTheme}
                    editorOptions={{

@@ -80526,3 +80526,22 @@ that build from being called a success or billed; this stops it from STARTING.
 - Test-locked in `tests/theAppTheyMeantIsNotHere.test.ts` (33 cases, including a precision corpus of
   ordinary prompts that must NOT be answered). Reversion-proven: undoing either fix fails 11.
 - ⚠️ **Still open (unchanged):** the fast-lane routing on complex mega-roadmap builds (#3277 item 2).
+
+## 2026-09-24 — Code Studio terminal on a phone: the duplicate command box is gone (admin-asked)
+
+Admin, with a screenshot of the terminal's bottom row: *"terminal ke andar ek extra input box hai … isko
+hide kar do! user direct terminal ko andar hi command de dega"* (and: *"aap ko agar sahi lage to hatana"*).
+
+- **Removed:** the line input and its Run button (`ShellTerminal.tsx`). Typing inside the terminal box has
+  worked on phones since 2026-08-05 through the invisible bridge input, so the box was a second way to do
+  the same thing — and when the shell was down it showed a disabled field reading "Terminal not
+  available", beside the box's own "Try again" button that already said so.
+- **Kept, on purpose (the part of the ask I did not follow literally):** the ^C / Tab / ↑ / ↓ keys. A phone
+  keyboard has none of them, and without ^C a running dev server cannot be stopped from a phone at all.
+  They now disable themselves when the shell is gone, and a short "Tap the terminal to type" hint sits
+  where the box was, because nothing else on screen said the terminal itself takes typing.
+- Two test files re-aimed with reasons (`shellTerminalInput`, `noKeyboardUntilAsked`); the knowledge base's
+  Terminal entry now says how to type on a phone.
+- ⚠️ **Honest risk:** the bridge is now the ONLY typing path on touch. It has been live since 2026-08-05 and
+  the admin types through it, but it has not been verified on every phone keyboard. If a phone cannot type
+  in the box, reverting this change brings the box back with no other effect.

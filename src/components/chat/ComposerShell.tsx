@@ -182,7 +182,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
   ) : null;
   if (!rail) {
     return (
-      <div ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} className={`${COMPOSER_BOX_CLASS} flex items-stretch cursor-text`} data-composer-layout="one-line">
+      <div className={`${COMPOSER_BOX_CLASS} flex items-stretch cursor-text`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} data-composer-layout="one-line">
         {/* `[&>textarea]:pb-2.5` evens the textarea's padding out: its shared class keeps a small bottom
             pad for the two-row box, where the control row sits right under it. Alone on a line it
             would sit visibly high.
@@ -199,7 +199,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
   return (
     <div className="flex items-stretch gap-2" data-composer-layout="two-rows">
       {rail}
-      <div ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch cursor-text`}>
+      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch cursor-text`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
         <div className="relative flex-1 min-w-0 flex flex-col">
           {children}
           <div className="flex items-center justify-end gap-1 px-1.5 pb-1">{controls}</div>

@@ -463,7 +463,7 @@ export function fromStoredRecord(raw: Record<string, unknown>): AdminBuildReport
     return { ...rec, session: { ...(rest as object), builds } as AdminBuildReportRecord['session'] };
   } catch {
     const count = typeof s.count === 'number' ? s.count : 0;
-    return { ...rec, session: { ...(rest as object), builds: [], omittedBuilds: count } as AdminBuildReportRecord['session'] };
+    return { ...rec, session: { ...(rest as object), builds: [], count, omittedBuilds: count } as AdminBuildReportRecord['session'] };
   }
 }
 

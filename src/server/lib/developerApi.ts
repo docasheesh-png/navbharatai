@@ -21,7 +21,8 @@
 // 🔑 OPENAI-COMPATIBLE ON PURPOSE. `POST /chat/completions` with `messages: [{role, content}]` in and
 // `choices[0].message.content` out is the shape every AI SDK on earth already speaks. A developer
 // points their existing client at our base URL and it works; a bespoke shape would cost them a
-// rewrite for no gain. Non-streaming only for now — said plainly rather than half-built.
+// rewrite for no gain. `stream: true` is honoured in the protocol and delivers the answer in ONE piece
+// — see `chatCompletionStream` for why that is the honest design, not a shortcut.
 //
 // PURE — no I/O, no clock, no env. The route owns every byte of I/O.
 
@@ -204,6 +205,86 @@ export function chatCompletionResponse(
   };
 }
 
+// ── Streaming ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Did the caller ask for a streamed answer? PURE.
+ *
+ * Only the literal `true` counts — `"true"`, `1` and `"yes"` are not what any SDK sends, and reading a
+ * truthy-looking string as consent would switch a caller's response FORMAT on a value they never meant.
+ */
+export function wantsStream(body: unknown): boolean {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  return b.stream === true;
+}
+
+/** Did the caller ask for the usage chunk? The standard spelling is `stream_options.include_usage`. */
+export function wantsStreamUsage(body: unknown): boolean {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const o = (b.stream_options && typeof b.stream_options === 'object' ? b.stream_options : {}) as Record<string, unknown>;
+  return o.include_usage === true;
+}
+
+/**
+ * 🌊 A streamed chat completion, as the exact server-sent events a standard SDK reads. PURE.
+ *
+ * 🔴 WHY THIS EXISTS (found 2026-09-23, in the API that shipped the day before). Nothing read `stream`.
+ * A chat UI built on a standard SDK almost always sends `stream: true`, received a plain JSON body,
+ * parsed it as an event stream, found no events, and handed the developer an EMPTY answer — which had
+ * already been charged to their wallet. A paid answer nobody could read.
+ *
+ * 🔒 WHY ONE PIECE AND NOT TOKEN-BY-TOKEN — the part a later session will want to "improve", so it is
+ * written down. The streaming provider path in this repo reports NO token counts (`routeStream` logs
+ * `usageMeasured: false`), and THE ONE-WALLET LAW charges ₹0 for an unmeasured turn rather than
+ * inventing a number. Real token streaming on this door would therefore let every API caller get every
+ * answer FREE, silently, on NavBharatAI's bill. So the answer comes from the SAME measured call the
+ * non-streaming door makes, and is written out as a valid event stream: one content chunk, one finish
+ * chunk, the usage chunk if it was asked for and was measured, then `[DONE]`. The developer's code works
+ * unchanged, the bill is the real one, and the only thing absent is the incremental arrival — which is
+ * said plainly on the Developer Tools page rather than implied. **Do not swap this for a live stream
+ * until the streaming path reports usage**; the day it does, this function is the only thing to change.
+ *
+ * ⚠️ The usage chunk carries `choices: []`, exactly as the standard has it: a client that reads
+ * `choices[0]` on every chunk must be able to tell the usage event apart, and an empty array is how.
+ */
+export function chatCompletionStream(
+  content: string,
+  opts: {
+    id: string;
+    createdMs: number;
+    model?: string;
+    includeUsage?: boolean;
+    usage?: { inputTokens?: number; outputTokens?: number } | null;
+  },
+): string[] {
+  const base = {
+    id: `chatcmpl-${opts.id}`,
+    object: 'chat.completion.chunk',
+    created: Math.floor(opts.createdMs / 1000),
+    model: opts.model || PUBLIC_MODEL_NAME,
+  };
+  const event = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
+  const out = [
+    event({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] }),
+    event({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+  ];
+  if (opts.includeUsage) {
+    const inTok = Number(opts.usage?.inputTokens);
+    const outTok = Number(opts.usage?.outputTokens);
+    // Same rule as the non-streaming response: a count is sent only when it was MEASURED. An absent
+    // usage chunk means "not measured" — a zero would be a claim, and a developer may bill on it.
+    if (Number.isFinite(inTok) && Number.isFinite(outTok) && (inTok > 0 || outTok > 0)) {
+      out.push(event({
+        ...base,
+        choices: [],
+        usage: { prompt_tokens: Math.round(inTok), completion_tokens: Math.round(outTok), total_tokens: Math.round(inTok + outTok) },
+      }));
+    }
+  }
+  out.push('data: [DONE]\n\n');
+  return out;
+}
+
 export type ApiErrorCode =
   | 'missing_scope' | 'invalid_request' | 'content_policy' | 'daily_cap_reached'
   | 'insufficient_balance' | 'rate_limited' | 'engine_unavailable'
@@ -269,7 +350,6 @@ export const SCOPE_ROUTES: Readonly<Record<SpecificApiScope, { method: 'GET' | '
   'read:builds': { method: 'GET', path: '/api/v1/builds' },
   'ai:chat': { method: 'POST', path: '/api/v1/chat/completions' },
   'ai:professionals': { method: 'POST', path: '/api/v1/professionals/:id/chat' },
-  'ai:images': { method: 'POST', path: '/api/v1/images/generations' },
 };
 
 // ── Addressing an expert ─────────────────────────────────────────────────────────────────────────
@@ -304,87 +384,6 @@ export function professionalIdFromModel(model: unknown): string | null {
 /** The model name one expert answers under. */
 export function professionalModelName(id: string): string {
   return `${PROFESSIONAL_MODEL_PREFIX}${id}`;
-}
-
-// ── Images ───────────────────────────────────────────────────────────────────────────────────────
-
-/**
- * 🖼️ ONE IMAGE, ONE RUPEE — the price this platform already charges, not a new one (admin 2026-09-22).
- *
- * 🔴 WHY THE API'S IMAGES ARE THE **PRO** TIER AND NOT THE FREE ONE, which is the whole decision here.
- * THE ONE-WALLET LAW forbids inventing a cost, and **no image model is on the rate card** — so a free-
- * tier image genuinely cannot be priced, and its paid rungs are bounded by a platform-wide daily COUNT
- * that exists to stop NavBharatAI's own bill running away. Serving an API caller from that pool would
- * spend a budget the app's own users are inside, for a caller we could not bill. The Pro tier has a
- * real, already-published price (₹1), a real wallet debit and a real margin check — so it is the only
- * honest engine for a door that bills. `IMAGE_PRO_PRICE_INR` stays the single source of that number.
- */
-export const MAX_IMAGES_PER_REQUEST = 4;
-
-export type ImageResponseFormat = 'b64_json' | 'data_url';
-
-export type ImageRequestVerdict =
-  | { ok: true; prompt: string; n: number; size?: string; format: ImageResponseFormat }
-  | { ok: false; reason: 'no-prompt' | 'too-long' | 'bad-n' | 'bad-format' };
-
-export const MAX_IMAGE_PROMPT_CHARS = 2_000;
-
-/**
- * Read an OpenAI-shaped `images/generations` body. PURE, total, never throws.
- *
- * ⚠️ `n` is CLAMPED nowhere — an out-of-range `n` is REFUSED instead, unlike the daily cap which is
- * clamped. The difference is who pays for being wrong: a clamped cap costs the holder nothing, while
- * silently turning `n: 50` into 4 would bill ₹4 for a request the caller believes cost ₹50 and will
- * retry. When money is the unit, say no rather than guess.
- */
-export function readImageRequest(body: unknown): ImageRequestVerdict {
-  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-  const prompt = String(b.prompt ?? '').trim();
-  if (!prompt) return { ok: false, reason: 'no-prompt' };
-  if (prompt.length > MAX_IMAGE_PROMPT_CHARS) return { ok: false, reason: 'too-long' };
-
-  let n = 1;
-  if (b.n !== undefined && b.n !== null && b.n !== '') {
-    const asked = Number(b.n);
-    if (!Number.isInteger(asked) || asked < 1 || asked > MAX_IMAGES_PER_REQUEST) return { ok: false, reason: 'bad-n' };
-    n = asked;
-  }
-
-  let format: ImageResponseFormat = 'b64_json';
-  if (b.response_format !== undefined && b.response_format !== null && b.response_format !== '') {
-    const f = String(b.response_format).trim();
-    // `url` is deliberately NOT accepted: we never hand out a third-party origin (white-label is a
-    // network fact here, not only a wording one), and we host no public image bucket for this. An
-    // honest refusal beats a `url` field carrying something that is not a URL.
-    if (f !== 'b64_json' && f !== 'data_url') return { ok: false, reason: 'bad-format' };
-    format = f;
-  }
-
-  const size = typeof b.size === 'string' && b.size.trim() ? b.size.trim() : undefined;
-  return { ok: true, prompt, n, size, format };
-}
-
-/**
- * An OpenAI-shaped image response. PURE.
- *
- * `b64_json` is bare base64, exactly as the standard has it, so an existing client's `b64_json`
- * handling works untouched. `data_url` is the convenience form for a browser or a quick script —
- * offered because the alternative is every caller writing the same six-line prefix by hand.
- */
-export function imageGenerationResponse(
-  images: ReadonlyArray<{ image: string; mimeType: string }>,
-  opts: { createdMs: number; format: ImageResponseFormat; chargedInr: number },
-): Record<string, unknown> {
-  return {
-    created: Math.floor(opts.createdMs / 1000),
-    model: PUBLIC_MODEL_NAME,
-    data: images.map((img) => (opts.format === 'data_url'
-      ? { data_url: img.image, mime_type: img.mimeType }
-      : { b64_json: img.image.replace(/^data:[^;]+;base64,/, ''), mime_type: img.mimeType })),
-    // What this request actually took off the wallet. A developer metering their own users needs it,
-    // and it is the real debited figure — never the quote, and ₹0 on a free-listed account.
-    chargedInr: opts.chargedInr,
-  };
 }
 
 /** The day a key's spend is counted against — UTC, on the server's clock, like every other rollup. */

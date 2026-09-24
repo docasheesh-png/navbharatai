@@ -167,17 +167,17 @@ describe('the templates are reachable from both tiers', () => {
     expect(src).toContain('layersFromTemplate(');
   });
 
-  it('both tiers hand the editor the findings a template fills from', () => {
+  it('the generator hands the editor the findings a template fills from', () => {
     // ⚠️ REPOINTED 2026-09-21, and the reason is worth keeping: the free generator became a THREAD,
     // so it hoists the findings into one `const found = extractImageText(target.prompt)` and feeds
     // both props from it instead of calling the extractor twice inline. The property this case
     // exists to guard did not change — the editor is handed findings taken from THAT image's own
     // request — so it is now asserted directly rather than through one call shape.
-    for (const f of ['src/components/ide/AIImageGenerator.tsx', 'src/components/ide/ImageStudioPro.tsx']) {
+    for (const f of ['src/components/ide/AIImageGenerator.tsx']) {
       const src = code(f);
       expect(src, `${f} does not pass an extracted prop`).toMatch(/extracted=\{/);
-      // `\b` rather than a closing paren: the paid studio writes `target.prompt || ''`, and the
-      // property being guarded is WHICH prompt is read, not how it is defaulted.
+      // `\b` rather than a closing paren: the property being guarded is WHICH prompt is read, not
+      // how it is defaulted.
       expect(src, `${f} does not extract from that image's own prompt`).toMatch(/extractImageText\(target\.prompt\b/);
     }
   });

@@ -56,6 +56,22 @@ export const CREDENTIAL_SILENCE_RULE =
   'password", "a Stripe live key") and say where to look.';
 
 /**
+ * NEVER INVENT OTHER PEOPLE (autopsy f15a9bcc, 2026-09-23). Asked for "nearby shops that are open, over
+ * Bluetooth", a build generated four fake "nearby vendors" around the user and presented them as real —
+ * because a browser cannot see other people's devices and the app had no shared database, and the model
+ * filled the gap with invented data instead of saying so. The user sees a working feature that is not one.
+ * The rule names the two facts a model most often gets wrong here, and the honest real path.
+ */
+export const NO_INVENTED_PEOPLE_RULE =
+  'NEVER INVENT OTHER PEOPLE\'S DATA: if a feature needs data about OTHER users, other devices or the ' +
+  'real world — nearby shops, other users, followers, drivers, live locations — do NOT generate ' +
+  'simulated, mock or sample entries and present them as real. A web app cannot advertise or scan over ' +
+  'Bluetooth to find strangers, and one user can only see another user\'s data through a shared online ' +
+  'database. Build everything that works for this user now, and say plainly in your summary which part ' +
+  'needs a shared database, offering to set one up. If you show example entries for layout, label them ' +
+  'on screen as examples.';
+
+/**
  * CODE LITERACY IN THE USER'S LANGUAGE (ROADMAP 9.1a-c, shipped 2026-08-27).
  *
  * The Indic-language work everywhere else in this codebase is about which language the GENERATED
@@ -431,6 +447,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '',
     EMOJI_RULE,
     '',
+    NO_INVENTED_PEOPLE_RULE,
+    '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
     '  question, respond warmly and briefly — do NOT call any tools, just talk.',
@@ -603,6 +621,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  a card/panel, primary+secondary buttons, a field, an empty state) using CSS variables for the',
     '  palette, and reuse those on every page. The rule is the OUTCOME, never the specific class name.',
     '  If you are unsure whether the kit is present, LOOK — read the project\'s global stylesheet first.',
+    '- 🖼️ NEVER INVENT AN IMAGE URL. A photo address you have not seen load — above all a made-up',
+    '  images.unsplash.com/photo-<id> — is a guess, and a wrong id returns an error PAGE, which the browser',
+    '  blocks as a broken image (net::ERR_BLOCKED_BY_ORB): the user sees an empty frame on the first screen.',
+    '  Use images the user gave you; otherwise draw the picture yourself. Where the kit is present that is',
+    '  `.nb-img` (a tinted gradient panel, 16:9) or `.nb-img nb-img-square` (a tile) with an emoji or icon',
+    '  inside; elsewhere a CSS gradient panel, an emoji or icon in a coloured tile, or a small inline SVG.',
+    '  A designed placeholder always renders; a guessed photo often does not.',
     '- ✨ MOTION IS ALREADY WIRED (Phase 3.3) — the difference between an app that feels BUILT and one',
     '  that feels generated. Buttons, nav items and cards already transition on hover/press; dialogs',
     '  already arrive. What YOU add: `.nb-rise` (or `.nb-fade`) on a panel or list that appears after',

@@ -149,7 +149,12 @@ const IOS_SECRETS: RequiredSecret[] = [
 // which is why this is the fix for the class rather than another round of backslashes. The regression
 // test parses every generated run: block with bash -n, so any future escaping mistake fails CI.
 
-const FAILURE_DIAGNOSTIC = (): string => `
+// ⚠️ THE PLATFORM IS A PARAMETER (2026-09-22). This was Android-only prose testing an Android-only
+// directory, and the iOS workflow carried NO diagnostic step at all — so every iOS failure reached the
+// user with no stage and no explanation, and the self-repair loop had no NBAI_FAILED_STAGE to read.
+// Bolting the Android version onto iOS would have been worse than nothing: it tests `-d android`, which
+// is never present on an iOS build, so every iOS failure would have been labelled `capacitor`.
+const FAILURE_DIAGNOSTIC = (platform: 'android' | 'ios' = 'android'): string => `
       # Runs only when something above failed. See mobileShipKit.ts for why this exists.
       - name: Explain what stopped the build
         if: failure()
@@ -160,12 +165,12 @@ const FAILURE_DIAGNOSTIC = (): string => `
           elif [ ! -d dist ] && [ ! -d build ] && [ ! -d out ] && [ ! -d www ]; then
             STAGE=webbuild
             WHY="The libraries installed fine, but your app itself did not compile, so there was nothing to package. The error further up names the exact file and line."
-          elif [ ! -d android ]; then
+          elif [ ! -d ${platform} ]; then
             STAGE=capacitor
-            WHY="Your app compiled correctly. It stopped while creating the Android project around it."
+            WHY="Your app compiled correctly. It stopped while creating the ${platform === 'ios' ? 'iOS' : 'Android'} project around it."
           else
-            STAGE=android
-            WHY="Your app compiled correctly. It stopped while building the Android app itself."
+            STAGE=${platform}
+            WHY="Your app compiled correctly. It stopped while building the ${platform === 'ios' ? 'iOS' : 'Android'} app itself."
           fi
           echo "NBAI_FAILED_STAGE=$STAGE"
           {
@@ -192,10 +197,21 @@ const FAILURE_DIAGNOSTIC = (): string => `
 // that also fails do we re-scaffold the whole project fresh (android/ is generated — nothing custom is
 // lost). The final guard now verifies BOTH the script and the jar, and fails honestly if either is
 // still absent.
-const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
-        run: |
-          set -e
-          # G17: Capacitor wraps the built web page. If the build produced no index.html in the folder
+/**
+ * IS THERE A PAGE TO WRAP? — ONE definition, used by EVERY lane that runs `cap sync` (autopsy 2026-09-22).
+ *
+ * Capacitor wraps exactly one file, `<webDir>/index.html`. This block finds the configured webDir, and
+ * when the build put the page somewhere else it points the config at the folder the build really made;
+ * only when there is no page anywhere does it stop, with the stage named honestly as `capacitor` rather
+ * than blaming the app's own compile.
+ *
+ * 🔴 IT USED TO LIVE ONLY IN THE ANDROID STEP. The iOS lane ran `cap sync ios` with no guard at all, so
+ * the same app died there inside Capacitor with a raw path error that `diagnose()` does not classify —
+ * the drifted-sibling class this repo has paid for repeatedly. It is a shared constant now, never a copy,
+ * so a lane added later cannot be born without it. `tests/theStaticAppStaysStatic.test.ts` asserts every
+ * `cap sync` lane carries it.
+ */
+const ENSURE_WEB_PAGE_GUARD = `          # G17: Capacitor wraps the built web page. If the build produced no index.html in the folder
           # named as webDir, there is nothing to wrap and cap sync dies with a confusing path error three
           # steps later. Detect the ACTUAL configured webDir (reads .ts/.js/.json as text — \\x27/\\x22 are
           # ' and " so nothing here needs shell-quoting) and fail early with a plain message. This only ever
@@ -212,11 +228,24 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             # BUILD OUTPUT folders only. "public" is deliberately NOT here: in Create React App it is
             # the SOURCE folder holding the un-built index.html template, so falling back to it would
             # package a broken shell and call it a success — worse than the honest failure below.
-            for d in dist build out www dist/spa .output/public; do
+            #
+            # ⚠️ THIS LIST MUST COVER EVERY FRAMEWORK DEFAULT detectWebDir RETURNS (autopsy 2026-09-22).
+            # The two live in different files and had already drifted: Remix's "build/client" and
+            # Angular's nested "<outputPath>/browser" are both real answers from that function and
+            # neither was searched here, so an app the assembler pointed at correctly could still fail
+            # this guard with "no index.html in any of the usual build folders".
+            # tests/theStaticAppStaysStatic.test.ts asserts the two agree PER FRAMEWORK, so a rung added
+            # to one fails CI until the other knows it.
+            # 🔒 It is deliberately NOT a claim about every possible answer: a custom Vite outDir or a
+            # custom angular.json outputPath can name any folder on earth, and no fixed list can cover
+            # that. Those are exactly the case the config itself already points at correctly — this
+            # fallback exists for when the config is WRONG, and an app whose config is right never
+            # reaches it. An unmatched glob stays literal and simply fails -f, so it costs nothing.
+            for d in dist build out www dist/spa build/client .output/public dist/*/browser build/*/browser; do
               if [ -f "$d/index.html" ]; then FOUND="$d"; break; fi
             done
             if [ -n "$FOUND" ]; then
-              echo "::warning::Your app builds to \"$FOUND\", not \"$WEBDIR\" — pointing the Android wrapper at the folder your build really produced."
+              echo "::warning::Your app builds to \"$FOUND\", not \"$WEBDIR\" — pointing the app wrapper at the folder your build really produced."
               # No \$ anywhere in this script: it sits inside double quotes, so a regex backreference
               # written as a dollar-group would be eaten by the shell before node ever saw it.
               node -e "const fs=require('fs');const d=process.argv[1];const f=['capacitor.config.ts','capacitor.config.js','capacitor.config.json'].find(x=>fs.existsSync(x));if(f){const t=fs.readFileSync(f,'utf8');const n=t.replace(/(webDir\\s*[:=]\\s*)([\\x27\\x22])[^\\x27\\x22]+\\2/,function(m,a,q){return a+q+d+q;});if(n!==t)fs.writeFileSync(f,n);}" "$FOUND" || true
@@ -231,7 +260,12 @@ const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
             echo "::error::Your app compiled, but it produced no web page to wrap: no index.html was found in \"$WEBDIR\" or in any of the usual build folders. Check that your build script really writes the finished site to a folder."
             exit 1
           fi
-          if [ ! -d android ]; then
+`;
+
+const ENSURE_ANDROID_STEP = `      - name: Generate and sync the Android project
+        run: |
+          set -e
+${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
             npx cap add android
           fi
           npx cap sync android
@@ -390,6 +424,74 @@ const gradleBuildRun = (gradleCmd: string): string => `          cd android
 // syntax error fails the bundler too, so a genuinely broken app still stops here — nothing broken can
 // ride the fallback. The heap is forced up front for the same reason the Gradle step forces 4g: a large
 // app must not die on Node's default.
+// ── CACHES (2026-09-22, "toote hi na"): a retry should not pay for the runner's downloads twice ──
+//
+// Nothing here was cached. Every attempt — the first AND each repair's re-run — downloaded the app's
+// npm packages, Gradle's distribution and every Android dependency from scratch, which is most of a
+// five-minute run. The user's own workflows in this repository never cached either, so there was no
+// proven pattern to copy; `actions/cache` IS proven here (image-scan.yml).
+//
+// 🔒 TWO THINGS THE OBVIOUS SHAPE GETS WRONG, and why this shape avoids them:
+//   • `actions/setup-node` with `cache: npm` HARD-FAILS with no lock file, and NavBharatAI never
+//     pushes one (see the comment on the setup-node step). So the npm cache is `~/.npm` itself,
+//     keyed on package.json — restored before the install, saved after it — which needs no lock file
+//     and is content the install step reads anyway.
+//   • The Android project does not exist when the job starts (`npx cap add android` creates it), so
+//     a Gradle cache cannot key on the wrapper file. It keys on the Java pin and package.json — the
+//     two things that decide what Gradle will fetch — and restores by prefix so a near miss still
+//     lands most of it. Saved after a run that FAILED too (`!cancelled()`): a run that died at Gradle
+//     still downloaded Gradle, and the retry after the repair is exactly the run that should not pay
+//     for it again — but never after a cancel, and never when the restore step itself never ran (a job
+//     that died at its pre-flight has nothing to save, and `outcome != 'skipped'` says so).
+// A cache miss changes nothing; a corrupt cache is npm's and Gradle's own problem to detect, which
+// they do — neither trusts a cached artefact without its checksum.
+// 🔒 `continue-on-error: true` on all four: a cache is a speed-up, and a cache service outage, a
+// reserve conflict or a corrupt archive must never turn a build that would have passed into a red run.
+const NPM_CACHE_RESTORE = `      - name: Restore the library cache
+        id: nbai-npm-cache
+        uses: actions/cache/restore@v6
+        continue-on-error: true
+        with:
+          path: ~/.npm
+          key: nbai-npm-\${{ runner.os }}-\${{ hashFiles('package.json') }}
+          restore-keys: |
+            nbai-npm-\${{ runner.os }}-
+`;
+
+const NPM_CACHE_SAVE = `      - name: Save the library cache
+        if: \${{ !cancelled() && steps.nbai-npm-cache.outcome != 'skipped' && steps.nbai-npm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        continue-on-error: true
+        with:
+          path: ~/.npm
+          key: nbai-npm-\${{ runner.os }}-\${{ hashFiles('package.json') }}
+`;
+
+const gradleCacheRestore = (java: number): string => `      - name: Restore the Gradle cache
+        id: nbai-gradle-cache
+        uses: actions/cache/restore@v6
+        continue-on-error: true
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
+          restore-keys: |
+            nbai-gradle-\${{ runner.os }}-java${java}-
+            nbai-gradle-\${{ runner.os }}-
+`;
+
+const gradleCacheSave = (java: number): string => `      - name: Save the Gradle cache
+        if: \${{ !cancelled() && steps.nbai-gradle-cache.outcome != 'skipped' && steps.nbai-gradle-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        continue-on-error: true
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: nbai-gradle-\${{ runner.os }}-java${java}-\${{ hashFiles('package.json') }}
+`;
+
 const WEB_BUILD_STEP = `      - name: Build the web app
         env:
           NODE_OPTIONS: --max-old-space-size=4096
@@ -447,7 +549,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-      - name: Install the app's libraries
+${NPM_CACHE_RESTORE}      - name: Install the app's libraries
         run: |
           set -e
           if [ -f package-lock.json ]; then
@@ -456,7 +558,7 @@ jobs:
             npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
           fi
 
-${WEB_BUILD_STEP}
+${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
       #
@@ -468,14 +570,14 @@ ${WEB_BUILD_STEP}
       #
       # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
       # project is what actually broke, it is verified before anything downstream depends on it.
-${ENSURE_ANDROID_STEP}
+${gradleCacheRestore(java)}${ENSURE_ANDROID_STEP}
 
       # assembleDebug signs with Android's universal debug key, so no keystore and no secrets are
       # needed — this is what makes the whole flow one click for a non-technical user.
       - name: Build the installable APK
         run: |
 ${gradleBuildRun('assembleDebug --no-daemon')}
-
+${gradleCacheSave(java)}
       - name: Upload the .apk
         uses: actions/upload-artifact@v4
         with:
@@ -561,7 +663,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-      - name: Install the app's libraries
+${NPM_CACHE_RESTORE}      - name: Install the app's libraries
         run: |
           set -e
           if [ -f package-lock.json ]; then
@@ -570,7 +672,7 @@ jobs:
             npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
           fi
 
-${WEB_BUILD_STEP}
+${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
       #
@@ -582,7 +684,7 @@ ${WEB_BUILD_STEP}
       #
       # The correct test for "already there" is to LOOK, not to ignore errors. And because a missing
       # project is what actually broke, it is verified before anything downstream depends on it.
-${ENSURE_ANDROID_STEP}
+${gradleCacheRestore(java)}${ENSURE_ANDROID_STEP}
 
       # Play REJECTS a re-used versionCode, so stamp it with the always-increasing run number.
       - name: Stamp a unique versionCode
@@ -627,7 +729,7 @@ ${ENSURE_ANDROID_STEP}
           KEY_PASS: \${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
 ${gradleBuildRun('bundleRelease assembleRelease')}
-
+${gradleCacheSave(java)}
       - name: Upload the .aab (for Google Play)
         uses: actions/upload-artifact@v4
         with:
@@ -736,7 +838,7 @@ jobs:
       #   2. When the real failure was a peer-dependency conflict (ERESOLVE), there was no recovery at
       #      all, even though npm ships the exact fix for it.
       # So: run the command that fits what is actually here, and keep ONE honest fallback.
-      - name: Install the app's libraries
+${NPM_CACHE_RESTORE}      - name: Install the app's libraries
         run: |
           set -e
           if [ -f package-lock.json ]; then
@@ -745,7 +847,7 @@ jobs:
             npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
           fi
 
-${WEB_BUILD_STEP}
+${NPM_CACHE_SAVE}${WEB_BUILD_STEP}
 
       # DO NOT swallow a failure here (root cause of a real build, 2026-08-03).
       #
@@ -760,7 +862,7 @@ ${WEB_BUILD_STEP}
       - name: Generate and sync the iOS project
         run: |
           set -e
-          if [ ! -d ios ]; then
+${ENSURE_WEB_PAGE_GUARD}          if [ ! -d ios ]; then
             npx cap add ios
           fi
           npx cap sync ios
@@ -838,6 +940,7 @@ ${WEB_BUILD_STEP}
         run: |
           rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_\${IOS_ASC_KEY_ID}.p8" || true
           rm -f "$RUNNER_TEMP/AuthKey_\${IOS_ASC_KEY_ID}.p8" || true
+${FAILURE_DIAGNOSTIC('ios')}
 
       - name: Summary
         run: |

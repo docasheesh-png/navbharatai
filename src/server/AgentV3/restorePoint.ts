@@ -33,8 +33,16 @@
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
-/** Never let one restore point grow past what the store can hold; it caps again internally. */
-export const MAX_RESTORE_POINT_BYTES = 900_000;
+/**
+ * The most RAW source (UTF-8 bytes) handed to the store for one restore point.
+ *
+ * It used to be 900,000 CHARACTERS — the store's plain-text cap copied here — so an app bigger than
+ * that lost its tail before the store ever saw it. The store now compresses (text packs 4–6×), so the
+ * ceiling here is only a bound on the work: 6 MB of source is well past what 900 KB of packed text
+ * can hold, so nothing that could have been kept is dropped by this line. Whatever is left out, here
+ * or in the store, is counted in the version's `omittedFileCount`.
+ */
+export const MAX_RESTORE_POINT_BYTES = 6_000_000;
 
 /**
  * The key the Time Machine reads.
@@ -187,10 +195,12 @@ export async function saveRestorePoint(opts: {
   }
   const trimmed: Record<string, string> = {};
   let bytes = 0;
+  let totalFiles = 0;
   for (const [path, content] of Object.entries(files)) {
     if (typeof path !== 'string' || typeof content !== 'string') continue;
-    const size = path.length + content.length;
-    if (bytes + size > MAX_RESTORE_POINT_BYTES) break;
+    totalFiles += 1;
+    const size = Buffer.byteLength(path, 'utf8') + Buffer.byteLength(content, 'utf8');
+    if (bytes + size > MAX_RESTORE_POINT_BYTES) continue;
     trimmed[path] = content;
     bytes += size;
   }
@@ -206,8 +216,9 @@ export async function saveRestorePoint(opts: {
   let landed = false;
   try {
     landed = (await io.save(key, {
-      commitMessage: restorePointMessage(opts.prompt, fileCount),
-      fileCount,
+      commitMessage: restorePointMessage(opts.prompt, totalFiles),
+      // The WHOLE app's count — the store compares it with what it kept and records the difference.
+      fileCount: totalFiles,
       files: trimmed,
       isEdit: opts.isEdit === true,
       tier: opts.tier,

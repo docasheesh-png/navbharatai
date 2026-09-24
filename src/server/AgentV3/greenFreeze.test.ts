@@ -103,7 +103,7 @@ describe('the allowlist — the user\'s own requests still write to a green app'
   //   • on the normal path it runs BEFORE the preview is browsed, so no latch exists yet and this entry
   //     is not what lets it write — it is here so a RESUMED already-green session behaves the same way
   //     instead of silently doing nothing on one path and working on the other.
-  it('the allowlist is exactly the five user-request / safety / restore passes', () => {
+  it('the allowlist is exactly the six user-request / safety / restore / verified-repair passes', () => {
     // This test IS the deliberate act the module header asks for — the list may only grow when someone
     // has to come here and say why. 'sandbox-file-restore' was added 2026-08-20 after the freeze broke
     // a real publish: re-seeding an EMPTY sandbox from the durable store writes through the same
@@ -114,9 +114,16 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     // ALTERING a working app, and a restore alters nothing. It copies the app's own durable bytes into
     // a machine that has none, and only ever when that machine is empty. Refusing it did not protect
     // the app; it stranded it.
+    //
+    // 'reviewer-functional-repair' was added 2026-09-23 (autopsy ac41a924, admin: "han to fix karo") —
+    // a working news site shipped with every article as one paragraph and footer links into "page not
+    // found", both found by the reviewer and both left alone because on a green app it could only
+    // suggest. It is the one entry here with a history of harm (the 2026-08-12 .env erasure), so it
+    // carries three restraints no other pass needs: functional findings only, verifyAfterFix with an
+    // unproven result UNDONE rather than kept, and a hard refusal of every .env file (asserted below).
     expect([...ALLOWED_PASSES].sort()).toEqual([
       'design-consistency-heal', 'feature-presence-heal', 'green-guard-restore',
-      'runtime-error-autofix', 'sandbox-file-restore',
+      'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
     ]);
   });
 });

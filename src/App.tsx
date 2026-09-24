@@ -54,6 +54,7 @@ import {
   type ChatWindow, type ConversationRef,
 } from './lib/chatWindows';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
+import { footerTapPlan, type ModeFooterKey } from './lib/footerSheets';
 import { startFreshCase } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
@@ -315,6 +316,10 @@ export default function App() {
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
     verifyBillingPayment,
     redeemPromoCoupon,
+    giftFaceInput, setGiftFaceInput,
+    isBuyingGift, giftError,
+    giftCodes, giftBounds, lastGiftCode,
+    fetchGiftCodes, createGiftOrder,
   } = usePaymentEngine({ user, addLog });
 
   // 💳 THE TOP-UP TRAIL (admin 2026-09-22: "agar balance khatam hai, to ☰ menu → wallet and billing →
@@ -1072,11 +1077,17 @@ export default function App() {
   }, [githubRepoContext]);
 
   const [isSearching, setIsSearching] = useState(false);
-  const [files, setFiles] = useState<FileSystem>({
-    'index.html': `<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Welcome to Navbharat AI Sandbox</h2><p>Edit index.html to see changes or ask AI to build something!</p></div></body></html>`,
-    'script.js': 'console.log("Welcome to your AI workspace");',
-    'style.css': 'body { margin: 0; font-family: system-ui; }'
-  });
+  // A user with no app has NO files — the state starts EMPTY, the same `{}` a New Chat resets it to
+  // (admin 2026-09-23: "studio open ho jaye, bas andar koi file na dikhe, kyu ki file hai hi nahi").
+  // It used to start with three placeholder files (a "Welcome to Navbharat AI Sandbox" index.html, a
+  // script.js and a style.css), which did two kinds of harm nobody could see:
+  //   1. Code Studio opened on files that do not exist, instead of its own "Empty workspace" screen.
+  //   2. The workspace hydration below is guarded on `files` being EMPTY ("never clobber what is already
+  //      open"), and the placeholders made it never empty — so an app built in an earlier session
+  //      never loaded into Code Studio, the exact bug that effect was written for (2026-08-05).
+  // That placeholder page has also reached a real publish once (see server/AgentV3/publishablePayload.ts).
+  // Do not seed this state with example files again.
+  const [files, setFiles] = useState<FileSystem>({});
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
@@ -3314,6 +3325,61 @@ export default function App() {
   const modePickerOpener = showsGlobalMobileNav ? undefined : () => setShowModePicker(true);
 
   /**
+   * OPEN CHAT HISTORY FOR WHATEVER SURFACE IS ON SCREEN — one definition, every door.
+   *
+   * 🔴 WHY THIS EXISTS (admin 2026-09-22: *"mobile to footer me jo jo options hai, kuch options
+   * desktop me gayab ho gaye hai — jaise navbharatai free me, history"*). Chat history had exactly
+   * ONE door in the whole client: the mode-surface footer's History item. That bar renders only
+   * when `effectiveDeviceMode === 'mobile'`, and `history` sits in SidebarNav's `SIDEBAR_HIDDEN`
+   * — removed on 2026-08-11 with the reason *"inko need nahi hai, yeh sab AI ke andar already
+   * hai … History: the per-AI footer"*. That reason is TRUE ON A PHONE AND FALSE ON A DESKTOP, so
+   * a desktop user could not reach their own conversations at all.
+   *
+   * ⚠️ THE CLASS WAS ALREADY FOUND ONCE, FOR THE BUTTON SITTING BESIDE THIS ONE IN THE SAME ROW.
+   * `ModeButton`'s docblock says it in as many words — *"on a PHONE they all do, because the bottom
+   * bar's Mode item is rendered for exactly that list. On desktop there is no bottom bar"*. Mode was
+   * fixed; History, one item along the same four-item footer, was never hunted. That is this repo's
+   * headline class (autopsy `a38c6fef`): the instance fixed, the sibling left.
+   *
+   * 🔒 IT IS ONE FUNCTION BECAUSE THE DECISION IS NOT TRIVIAL. Three rules ride on it — the list's
+   * scope (`historyFilterFor`), whether it opens as a popup over the chat or as its own tab
+   * (`historySurfaceFor`), and the sign-in gate. A second copy at the desktop door would drift from
+   * this one the first time any of the three changed, and nothing would fail: the two doors would
+   * simply start showing different lists.
+   */
+  const openHistoryForCurrentSurface = useCallback(() => {
+    // History scoping (admin 2026-08-11, amended 2026-08-25): the FREE surface shows Free + Doctor +
+    // every professional conversation, each with its mode tag — one unified list.
+    setHistoryInitialFilter(historyFilterFor(activeView as string));
+    if (historySurfaceFor(activeView as string) === 'popup') {
+      // The SAME auth gate the tab uses, CALLED rather than re-implemented: history is sign-in-only,
+      // and a second copy of that rule would drift. `authGateDecision` opens optimistically while
+      // Firebase is still restoring, so a returning user is never shown the login screen by mistake.
+      if (authGateDecision('history', !!user, loadingUser) === 'login') {
+        pendingViewAfterLoginRef.current = 'history';
+        setShowAuth(true);
+        addLog('Chat history requires an active session. Please login.', 'warn');
+        return;
+      }
+      // POPUP OVER THE CHAT: you glance at the list and you are back in the same conversation,
+      // exactly as Pro v5.0 behaves.
+      setHistoryPopupOpen(true);
+      return;
+    }
+    toggleTab('history' as ViewType);
+  }, [activeView, user, loadingUser, addLog, toggleTab]);
+
+  /**
+   * The free chat's composer History button (admin 2026-09-23: "input box wali line me, mode selecter se
+   * pahle … only in desktop"). `undefined` exactly when `modePickerOpener` is — i.e. while the bottom
+   * bar, which already carries History AND Mode, is on screen — so a phone never shows two History
+   * controls. It reads that answer rather than asking `showsGlobalMobileNav` a second time: the "is the
+   * bar there?" gate is derived ONCE (tests/freeChatModeOnDesktop.test.ts holds it to one). Otherwise it
+   * is the ONE opener above, so the composer door and the bottom-bar door always open the same list.
+   */
+  const historyOpener = modePickerOpener ? openHistoryForCurrentSurface : undefined;
+
+  /**
    * …and publish that same answer to CSS, for the THIRD consumer of it.
    *
    * The bar is `fixed bottom-0` at z-150, so it paints over every dialog below that z-index. Two
@@ -3422,6 +3488,10 @@ export default function App() {
 
       <SidebarNav
         onReportProblem={() => { setReportMode('choose'); setReportOpen(true); }}
+        // THE DESKTOP'S DOOR TO CHAT HISTORY (admin 2026-09-22). The phone's bottom bar carries
+        // History; this rail carries it everywhere else, and both call the SAME opener, so the
+        // scope, the popup-vs-tab decision and the sign-in gate can never disagree between them.
+        onOpenHistory={openHistoryForCurrentSurface}
         unreadReports={unreadReports}
         unreadNotifications={inbox.unread}
         walletNeedsTopUp={needsTopUp}
@@ -3460,8 +3530,17 @@ export default function App() {
             </div>
           </div>
         }>
+        {/* THE FULL-HEIGHT VIEWS TAKE THE HEIGHT THEY ARE GIVEN, NOT A HAND-TYPED GUESS OF IT
+            (admin 2026-09-23: "input box aur footer me bahut jyada space khali hai"). They used to be
+            sized `100dvh − 3.5rem − notch`, i.e. on the premise that the header is 3.5rem. TopNav is
+            `h-10` — 2.5rem — so every chat, Studio, Preview and Shell screen ended 16px short of the
+            viewport, leaving a dead strip under the composer on every device (and 3.5rem short in
+            focus mode, where there is no header at all). This box is a stretched item of `main`, whose
+            height is already exactly what is left under whatever header is on screen, so with the
+            calc gone it fills that space by construction and cannot drift from the header again.
+            `min-h-0` + `overflow-hidden` still bound it, so the chat scrolls inside, not the page. */}
         <div ref={screenRef} className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:h-[calc(100dvh-3.5rem-var(--nb-safe-top))] max-h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem-var(--nb-safe-top))]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          ['chat', 'nbi_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
@@ -3587,6 +3666,7 @@ export default function App() {
               // button instead — gated on the SAME condition that renders the bar, so exactly one of
               // the two exists on any screen, and both open the one `showModePicker` sheet below.
               onOpenModePicker={modePickerOpener}
+              onOpenHistory={historyOpener}
             />
           )}
 
@@ -3724,7 +3804,7 @@ export default function App() {
           {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
           {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
             <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} onOpenModePicker={modePickerOpener} />
+              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} onOpenModePicker={modePickerOpener} onOpenHistory={historyOpener} />
             </div>
           )}
 
@@ -3823,7 +3903,7 @@ export default function App() {
             const onScreen = activeChat?.id === win.id;
             return (
               <div key={win.id} className={onScreen ? 'flex-1 overflow-hidden h-full min-h-0 max-h-full' : 'hidden'}>
-                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onScreen={onScreen} onOpenModePicker={modePickerOpener} />
+                <ProfessionalChat config={cfg} userId={user?.uid} conversationId={win.id} onScreen={onScreen} onOpenModePicker={modePickerOpener} onOpenHistory={historyOpener} />
               </div>
             );
           })}
@@ -3901,6 +3981,14 @@ export default function App() {
               onRefreshReferral={referralProgress.refresh}
               onSetBuyAmountInput={setBuyAmountInput}
               onCreateBillingOrder={createBillingOrder}
+              giftFaceInput={giftFaceInput}
+              onSetGiftFaceInput={setGiftFaceInput}
+              isBuyingGift={isBuyingGift}
+              giftError={giftError}
+              giftCodes={giftCodes}
+              giftBounds={giftBounds}
+              lastGiftCode={lastGiftCode}
+              onCreateGiftOrder={createGiftOrder}
               onToast={addToast}
               monthlyAiCost={monthlyAiCost}
             />
@@ -4068,7 +4156,7 @@ export default function App() {
                 if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }
                 // Everything else opens a NEW chat, which is the whole point of the change.
                 if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
-                // The image studio is Other Tools' own view — free and paid together, nothing forked.
+                // The image studio is Other Tools' own view — nothing forked.
                 // Opened from HERE it lives inside the chat tab the user is in (no header chip of its
                 // own, that tab stays lit) and takes one of the five slots; already open, it is simply
                 // shown, through whichever door it came in by (from Other Tools it keeps its own tab).
@@ -4144,6 +4232,7 @@ export default function App() {
 
           <ViewPanels
             onOpenModePicker={modePickerOpener}
+            onOpenHistory={historyOpener}
             effectiveDeviceMode={effectiveDeviceMode}
             storeInitialTab={storeTarget?.tab}
             storePublishWorkspaceId={storeTarget?.workspaceId ?? null}
@@ -4409,7 +4498,7 @@ export default function App() {
               // duplicated the action already in the More sheet. Studio edits the SAME live file map
               // v5.0 builds into (files state + workspace syncer), so this is one feature reached from
               // two places — not a second editor.
-              { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => toggleTab('studio'), active: false },
+              { key: 'studio',  icon: Smartphone,     label: 'Code Studio', onTap: () => { v3FooterApi.closeSheet(); toggleTab('studio'); }, active: false },
               // The Action Navigator's roll-up (admin 2026-09-21). A TONE, not a boolean: the colour
               // decision lives in ActionDot alone, so this row cannot invent a third meaning for a dot.
               { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history', badgeTone: v3FooterApi.moreBadge, badgeLabel: v3FooterApi.moreBadgeLabel },
@@ -4459,31 +4548,18 @@ export default function App() {
                 <button
                   key={key}
                   onClick={() => {
+                    // ONE SHEET AT A TIME (admin 2026-09-23): the bar paints over the sheets it opens,
+                    // so a tap here must first close whatever another item left open, or the new
+                    // screen comes up UNDER it and nothing seems to switch. See lib/footerSheets.ts.
+                    const plan = footerTapPlan(key as ModeFooterKey, { mode: showModePicker, history: historyPopupOpen });
+                    if (plan.close.includes('mode')) setShowModePicker(false);
+                    if (plan.close.includes('history')) setHistoryPopupOpen(false);
+                    if (!plan.proceed) return;
                     if (key === 'mode') { setShowModePicker(true); return; }
-                    // History scoping (admin 2026-08-11, amended 2026-08-25): the FREE surface now shows
-                    // Free + Doctor + every professional conversation, each with its mode tag — one
-                    // unified list ("free ki history me sabhi ayegi tag ke sath"). The Professionals
-                    // hub keeps its professional-only view.
-                    if (id === 'history') {
-                      setHistoryInitialFilter(historyFilterFor(activeView as string));
-                      // POPUP OVER THE CHAT on the Free surface — you glance at the list and you are
-                      // back in the same conversation, exactly as Pro v5.0 behaves. Every other
-                      // surface keeps the History tab byte-for-byte.
-                      if (historySurfaceFor(activeView as string) === 'popup') {
-                        // The SAME auth gate the tab uses, called rather than re-implemented: history
-                        // is sign-in-only, and a second copy of that rule would drift. authGateDecision
-                        // opens optimistically while Firebase is still restoring, so a returning user
-                        // is never shown the login screen by mistake.
-                        if (authGateDecision('history', !!user, loadingUser) === 'login') {
-                          pendingViewAfterLoginRef.current = 'history';
-                          setShowAuth(true);
-                          addLog('Chat history requires an active session. Please login.', 'warn');
-                          return;
-                        }
-                        setHistoryPopupOpen(true);
-                        return;
-                      }
-                    }
+                    // The scoping, the popup-vs-tab decision and the sign-in gate all live in
+                    // `openHistoryForCurrentSurface` — the ONE definition the desktop door calls too,
+                    // so the two can never show different lists. See its docblock for why.
+                    if (id === 'history') { openHistoryForCurrentSurface(); return; }
                     if (id) toggleTab(id);
                   }}
                   aria-label={label}
@@ -4509,7 +4585,13 @@ export default function App() {
             const isActive = activeView === id;
             // Preview is v5.0-first (admin 2026-07-07: one preview, three gates): enable it whenever a v3
             // workspace exists, not only for the retired v2 generatedCode path.
-            const isDisabled = id === 'preview' ? !(v3Preview.workspaceId || hasGeneratedCode) : (id === 'studio' && !hasGeneratedCode);
+            // Studio is NEVER disabled (admin 2026-09-23: "agar koi open app nahi hai, to bhi studio open
+            // ho jaye, bas andar koi file na dikhe"). It used to be gated on `hasGeneratedCode`, so with no
+            // app the button was dead — while the desktop sidebar opened the same screen without a gate.
+            // CodeStudio already renders an honest "Empty workspace" state with a New File button, so an
+            // IDE with nothing in it is a real screen, not a broken one. Preview keeps its gate: with no
+            // app there is nothing to render.
+            const isDisabled = id === 'preview' && !(v3Preview.workspaceId || hasGeneratedCode);
             return (
               <button
                 key={id}

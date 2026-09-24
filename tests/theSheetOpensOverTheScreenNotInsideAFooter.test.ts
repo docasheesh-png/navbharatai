@@ -16,15 +16,13 @@ import {
 import { IMAGE_SIZE_PIXELS, imagePixelsFor, isValidImageGenRequest } from '../src/server/lib/imageGen';
 
 /**
- * 🔴 "PRO (PAID) IMAGE SIZE/FORMATE (1:1 DEFAULT) CHANGE NAHI HO RAHA" (admin 2026-09-21).
+ * 🔴 AN IMAGE SIZE SELECTOR THAT COULD NOT BE CHANGED (admin 2026-09-21).
  *
- * THE CAUSE, and it was one CSS class in a different file from the broken control. `ImageStudioPro`'s
- * footer carries `backdrop-blur`. An element with a `backdrop-filter` — exactly like `transform` and
- * `filter` — becomes the CONTAINING BLOCK for every `position: fixed` descendant. So the selector's
+ * THE CAUSE, and it was one CSS class in a different file from the broken control: a footer carrying
+ * `backdrop-blur`. An element with a `backdrop-filter` — exactly like `transform` and `filter` —
+ * becomes the CONTAINING BLOCK for every `position: fixed` descendant. So the selector's
  * `fixed inset-0` sheet resolved against that ~100px footer strip instead of the viewport, the
  * panel's `overflow-hidden` clipped what was left, and the list opened where nobody could see it.
- * The free tier's four identical selectors worked, because its dock has no blur — which is exactly
- * why the admin reported Pro and not Free.
  *
  * 🔑 THE FIX IS A PORTAL, NOT DELETING THE BLUR. Removing the blur fixes today and leaves the trap
  * armed: any ancestor later gaining a transform, a filter or `contain` re-breaks it, silently, from
@@ -95,14 +93,6 @@ describe('🔒 a full-screen sheet is rendered into the body, so no ancestor can
     expect(fixed, 'these now portal — remove them from NOT_YET_PORTALLED').toEqual([]);
     const gone = NOT_YET_PORTALLED.filter((f) => !sheets.includes(f));
     expect(gone, 'these no longer have a sheet — remove them from NOT_YET_PORTALLED').toEqual([]);
-  });
-});
-
-describe('🔒 the blur that caused it is still there, and no longer matters', () => {
-  it('the paid studio keeps its backdrop blur', () => {
-    // Deliberate: the fix is not "remove the thing that exposed the bug". If this class is ever
-    // dropped, the portal is still what makes the sheet work — and a future blur cannot re-break it.
-    expect(code(read('src/components/ide/ImageStudioPro.tsx'))).toContain('backdrop-blur');
   });
 });
 
@@ -207,31 +197,28 @@ describe('🔒 a custom size is one rule, shared by the picker and the generator
 describe('🔒 the two numbers really reach the server', () => {
   const routes = code(read('src/server/routes/imageGen.ts'));
   const free = code(read('src/components/ide/AIImageGenerator.tsx'));
-  const pro = code(read('src/components/ide/ImageStudioPro.tsx'));
 
-  it('🔴 BOTH request schemas declare width and height', () => {
+  it('🔴 the request schema declares width and height', () => {
     // `vobject` DROPS a key it does not declare, so a width sent by the client and missing from the
     // schema would vanish between the picker and the generator with nothing failing — the picker
     // would print 768 × 1280 and the server would make a square.
     const declarations = routes.match(/width: vnumber\(/g) || [];
-    expect(declarations.length, 'a schema is missing width').toBe(2);
-    expect((routes.match(/height: vnumber\(/g) || []).length, 'a schema is missing height').toBe(2);
+    expect(declarations.length, 'the schema is missing width').toBe(1);
+    expect((routes.match(/height: vnumber\(/g) || []).length, 'the schema is missing height').toBe(1);
   });
 
-  it('both tiers send them, and only for a custom size', () => {
-    for (const [name, src] of [['free', free], ['pro', pro]] as const) {
-      expect(src, `${name} does not send a resolved custom size`).toMatch(/size === CUSTOM_SIZE_ID \? resolveCustomSize\(/);
-    }
+  it('the generator sends them, and only for a custom size', () => {
+    expect(free, 'the generator does not send a resolved custom size').toMatch(/size === CUSTOM_SIZE_ID \? resolveCustomSize\(/);
   });
 
   it('what is SENT is already through the server’s own clamp', () => {
     // So the number the picker printed and the number the generator receives are the same number —
     // the picker cannot advertise a size the server will quietly change.
-    for (const src of [free, pro]) expect(src).toMatch(/resolveCustomSize\(custom[WH]/);
+    expect(free).toMatch(/resolveCustomSize\(custom[WH]/);
   });
 
-  it('both pickers offer the custom option', () => {
-    for (const src of [free, pro]) expect(src).toContain('CUSTOM_SIZE_ID');
+  it('the picker offers the custom option', () => {
+    expect(free).toContain('CUSTOM_SIZE_ID');
     expect(code(read('src/components/ide/CustomSizeFields.tsx'))).toMatch(/type="number"/);
   });
 
@@ -248,20 +235,6 @@ describe('🔒 the free tier says what it is FOR, beside the box where it is use
 
   it('names the work it is good at', () => {
     expect(free).toMatch(/logos, icons, banners, illustrations/);
-  });
-
-  it('offers Pro as a real control, not as a sentence', () => {
-    // Advice the user cannot act on where they are standing is a dead end. This is the same tier
-    // state the toggle above uses — one source, so the two can never disagree.
-    const note = free.slice(free.indexOf('Free images are made'));
-    expect(note).toMatch(/setChosenTier\('pro'\)/);
-  });
-
-  it('🔴 and it is hidden entirely when Pro cannot serve', () => {
-    // Pointing at a door that does not open is worse than saying nothing.
-    const note = free.slice(free.indexOf('Free images are made'));
-    expect(note.indexOf('!proOff'), 'the Pro offer is not gated on Pro being available').toBeGreaterThan(-1);
-    expect(note.indexOf('!proOff')).toBeLessThan(note.indexOf('setChosenTier'));
   });
 
   it('names no vendor and quotes no price on the free path', () => {

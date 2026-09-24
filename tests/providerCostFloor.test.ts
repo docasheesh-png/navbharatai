@@ -133,7 +133,10 @@ describe('WIRING — the cost is measured from the call that paid it', () => {
   });
 
   it('a 429 keeps the plain strike — a fast rejection has no cost to cover', () => {
-    const at = src.indexOf('isRateLimitProviderError(err)');
+    // ⚠️ ANCHORED ON THE BRANCH, not on the first mention of the predicate (2026-09-22). The waste
+    // ledger added above asks the same predicate to NAME the failure kind, and that mention comes
+    // first in the file — so `indexOf` walked to a ternary and this guard read the wrong window.
+    const at = src.indexOf('} else if (isRateLimitProviderError(err)) {');
     const seg = src.slice(at, at + 900);
     expect(seg).toContain('cooldowns.strike(name, now());');
     expect(seg).not.toContain('costMs');

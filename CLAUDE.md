@@ -166,8 +166,8 @@ promised to build it.** Every model refused — the model's virtue, never our de
 
 - `ILLEGAL_RULES.ADULT_CONTENT` → `triagePrompt` returns **`block`**, before a sandbox or a token.
   One triage serves BOTH the build route and the chat route, so the ban covers both by construction.
-  🔴 **CORRECTED 2026-09-21 — IT SERVED NEITHER IMAGE ROUTE.** `/api/image/generate` and
-  `/api/image/pro/generate` never called `triagePrompt`; the only thing between a pornographic prompt
+  🔴 **CORRECTED 2026-09-21 — IT DID NOT SERVE THE IMAGE ROUTE.** `/api/image/generate` never called
+  `triagePrompt`; the only thing between a pornographic prompt
   and a picture was whichever provider happened to refuse, and the free provider's anonymous door has
   safety OFF. A PR description (#3234) had stated the ban was enforced there "as before" — written from
   this paragraph, not from the route. Now all THREE surfaces run the same triage
@@ -1558,85 +1558,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
-- **🖼️ AI IMAGE STUDIO PRO — the ₹1/image paid tier. ✅ THE ADMIN SET ALL THREE IN CLOUD RUN
-  2026-09-21:** `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, and `IMAGE_PRO_AUTH_SCHEME` = **`bearer`**.
-  Read by `src/server/lib/imageProGen.ts`; the route is `POST /api/image/pro` (`routes/imageGen.ts`).
-  Recorded hand-to-hand, the same session it was said, per this registry's own rule.
-  🔴 **THE THIRD KEY IS THE ONE THAT LOOKS OPTIONAL AND IS NOT.** `imageProAuthHeaders` defaults to
-  `Authorization: Key <token>`; the host this tier was priced around wants `Bearer <token>`, so
-  without it every call is a 401 and the toggle looks broken rather than misconfigured. The other two
-  accepted values are `key` and `x-key` — one word, three hosts, which is why it is an env and not
-  three code paths.
-  ⚠️ **SETTING THE KEYS IS NOT ENOUGH ON ITS OWN, and this was found by reading the vendor's API docs
-  BEFORE telling the admin to buy anything.** The host is **ASYNCHRONOUS by default**: the POST answers
-  with a prediction id and the picture appears later at a separate result URL, and even in sync mode a
-  task slower than its wait window comes back **HTTP 200** carrying `status: processing`. Every one of
-  its documented response shapes returned `null` from `parseImageProResponse` — verified by running
-  our own parser over them, not reasoned about — so a correctly-configured Pro tier would have
-  produced an honest *"could not finish"* on every single press. Fixed in PR #3215 (`enable_sync_mode`,
-  `data.outputs`, `pendingResultUrl`, `jobFailed`, and a poll loop bounded by the SAME
-  `IMAGE_PRO_TIMEOUT_MS` clock). **Until that PR is merged the keys change nothing** — which is the
-  order to follow: merge, then test.
-  📌 Optional, all with working code defaults: `IMAGE_PRO_ENABLED` (`off` is the kill switch),
-  `IMAGE_PRO_COST_USD` (what one image really costs us — **$0.005**, invoice-anchored, and the basis
-  of `imageProMarginWarning`), `IMAGE_PRO_TEXT_MODEL` / `IMAGE_PRO_EDIT_MODEL` (a family, not one
-  model: a fresh-generation model handed an image and an instruction quietly ignores one of them),
-  and `IMAGE_PRO_MODEL` (overrides BOTH — the escape hatch for a host serving one endpoint, not the
-  normal path).
-  ⚠️ **NOT ONE REAL CALL has been made against the host from any session** — its site is refused by
-  the execution environment's egress policy, so every shape above comes from its published
-  documentation. The first real request is the first real evidence. When it fails, the server log
-  names the cause rather than degrading in silence: `[IMAGE PRO] host returned HTTP 401` (the key or
-  the auth scheme), `HTTP 404` (the endpoint or the model id), `polling returned HTTP …`, or
-  `no image in a 200 response` (a response shape we do not yet read).
-  🔒 **A failure costs the user ₹0** — nothing is charged unless an image is delivered, which is the
-  same "working result or free" law a build obeys, and it is untouched by any of this.
-
-- **🌼 `POLLINATIONS_API_KEY` — the PAID image tier's FIRST engine (built 2026-09-21; admin: *"free wale
-  me user ki ip, paid me hamari … paid pahle pollination use ho, fallback me IMAGE_PRO_KEY"*).** Read by
-  `src/server/lib/pollinationsPaid.ts`; applied in `POST /api/image/pro/generate` (`routes/imageGen.ts`)
-  as RUNG 1, with the `IMAGE_PRO_KEY` host as RUNG 2. Optional beside it: `IMAGE_PRO_POLLINATIONS`
-  (`off` turns off ONLY this rung — Pro goes straight to the host) and `IMAGE_PRO_POLLINATIONS_MODEL`
-  (default `tongyi-mai/z-image-turbo`, the model the tier was priced around).
-  ⚠️ **WHETHER IT IS SET IS UNCONFIRMED.** The admin obtained an `sk_` key at `enter.pollinations.ai/keys`
-  on 2026-09-21 and was asked to save it under exactly this name in Cloud Run; they wrote *"maine api add
-  kar di hai"* without naming where. Per this registry's own rule it is not recorded as SET until they
-  say so. **How to tell without asking:** on the next Pro image the server log carries either
-  `[IMAGE PRO] pollinations delivered — usage {…}` or `[IMAGE PRO] pollinations rung failed (…)`; with
-  the key unset there is NO pollinations line at all and the host serves as before.
-  🔑 **WHAT THE KEY BUYS IS THE PICTURE, not only the bill.** On the anonymous door the free tier uses,
-  `nologo` is IGNORED (the watermark stays) and `private` must be asked for or the picture can appear
-  on the provider's public feed. A keyed request honours both — that is the "privacy + watermark" the
-  admin put first in the order list. The free link now asks `private=true` too; it still carries no
-  key BY DESIGN, because it is handed to the user's browser (`IMAGE_GEN_CLIENT_FETCH`) and a key in a
-  URL a user can copy is a key everybody has. **Do not "fix" the free watermark by adding `?key=`
-  there.** The watermark is the free door's price; the paid door is where it goes.
-  🔒 **THE KEY TRAVELS IN A HEADER (`Authorization: Bearer`), NEVER IN THE URL**, though the provider
-  accepts `?key=` — a URL ends up in logs and error messages, a header does not. The URL builder does
-  not take the key as an input, and a test asserts it is absent from the output.
-  💰 **THE COST IS MEASURED, NOT ASSUMED.** The provider bills in pollen (1 pollen = $1) at a per-model
-  rate no session can read (`gen.pollinations.ai` is refused by the execution environment's egress
-  policy), and reports each request's usage in `x-usage-*` response headers. Every delivery logs them
-  admin-only — the first real Pro image is the first real number. `IMAGE_PRO_COST_USD` ($0.005) still
-  prices the margin warning until then; **retune it from that log line, never from a guess.** The
-  admin's wallet on 2026-09-21 held **0.25 quest pollen and 0 paid**; some models need paid pollen, so
-  a `402` (no pollen) or `403` (key lacks the model) on the first try is a config fact, not a bug, and
-  the log names which — the image still arrives, from the host.
-  ⚠️ **AN EDIT STAYS ON THE HOST.** The keyed door takes words; the user's own photograph is never
-  turned into a link. So `initImage` requests go to `IMAGE_PRO_KEY` as before, and with the host
-  unconfigured an edit on Pro is honestly "not switched on" rather than a fresh picture that ignores
-  the attachment. `imageProAvailable()` (either engine) is now the ONE owner of "is Pro on?" for both
-  the chip (`/api/public-config`) and the route's 503; `imageProConfigured()` still means the host.
-  ✅ **A LATENT BUG FOUND ON THE WAY:** `__IMAGE_SEED`, the test pin for the free URL's seed, had never
-  once pinned anything — `Number.isFinite('5')` is false for the string an env value always is. Fixed
-  in the shared `pollinationsSeed`, with a test that reads the seed back.
-  Test-locked and reversion-proven four ways in `tests/thePaidTierAsksPollinationsFirst.test.ts`.
-
 - **🧮 `AI_IMAGE_FREE_PAID_DAILY_CAP` — the PLATFORM-WIDE daily ceiling on images the FREE tier gets
   from a PAID engine (built 2026-09-21; the number PR #3234 left open). ⚠️ NOT set, and the code default
   is **300 a day across the whole platform**.** Read by `src/server/lib/imageFreePaidBudget.ts`; its
-  single reader is `allowPaidRung()` in `routes/imageGen.ts` (the FREE route only — Pro's bound is the
-  wallet). `0` ⇒ the free tier never touches a paid engine (the free provider or nothing); an unreadable
+  single reader is `allowPaidRung()` in `routes/imageGen.ts`. `0` ⇒ the free tier never touches a paid engine (the free provider or nothing); an unreadable
   value ⇒ the default, **never unlimited** (the `AGENTV3_FEATURE_HEAL_PCT` lesson); only the explicit
   word `off` lifts it.
   🔴 **WHY:** the free tier costs ₹0 while the free provider serves; its paid rungs (Gemini, Grok) and an
@@ -1653,6 +1578,141 @@ the code (it is actually read somewhere) on 2026-07-11.
   **What to watch:** `[IMAGE_GEN] free-tier PAID image cap reached` in the server log (once per process
   per day) — the number that says whether 300 is right, and how often the free provider is really failing.
 
+- **📱 THE PHONE-BUILD REPAIR LOOP — "loop theek karo, model nahi" (admin 2026-09-22; built the same
+  day, two PRs).** Three keys, none set, all with working code defaults. `MOBILE_SHIP_REAL_BUILD`
+  (**default ON**; `off` reverts) — before a repository is prepared, the app's own `npm run build` is
+  run in the sandbox it is already living in, so a compile error is met in seconds here rather than
+  five minutes into a GitHub run that costs one of the user's three attempts. It NEVER starts a machine
+  (`hasLiveSandbox`, an in-memory lookup), is bounded by `MOBILE_SHIP_REAL_BUILD_MS` (**180 s**, floor
+  10 s, cap 600 s; malformed ⇒ default, never "no limit"), and is not stricter than the runner (a
+  type-only failure is rescued there by the workflow's bundler fallback, judged by the SAME classifier).
+  Read by `src/server/lib/mobileShipRealBuild.ts`. ⚠️ Recorded here a PR late — #3249 shipped it and
+  this registry did not say so, the drift this registry exists to prevent.
+  `MOBILE_AUTOFIX_AI_ROUNDS` (**default 4**, clamped 1–8; malformed ⇒ 4) — how many model calls one
+  AI repair may spend. Read by `aiRepairMaxRounds` in `mobileBuildAiRepair.ts`.
+  🔴 **WHY THE LOOP AND NOT THE MODEL.** The admin's own `.aab` built through Claude works every time;
+  a user's APK *"80% baar fail hoti hai aur theek nahi hoti."* The difference was never which model
+  answers. The AI repair was a ONE-SHOT blind patch: one prompt over whichever files the log happened to
+  name, one reply, COMMITTED without being run, and a GitHub run to learn whether it worked — while
+  `mobileShipPreflight` re-verified every one of its own rounds and called an unverified fix a MISS.
+  `runAiRepairLoop` is Claude Code's loop, bounded: (1) the model may **ask for a file** with
+  `{"needFiles": [...]}`, chosen ONLY from a listing we supplied (`listRepoTree`), so the allowlist is
+  not loosened — it picks from a menu, it never invents a path; (2) every candidate is **run through the
+  app's own sandbox build** (`makeRepairVerifier`) before it is committed, and a change the build
+  rejected is NEVER committed on any round; (3) a verified failure is **fed back in the build's own
+  words**, with the candidate still in view, so the next round corrects the previous change.
+  🔒 **WHAT DID NOT CHANGE:** the allowlisted paths, the forbidden secrets/keystore/lockfile paths,
+  full-content-not-diff, the size caps, no delete / no new file / no shell, the named revertable commit,
+  the White-Label sentences, and the weak tier's chain (GLM→Kimi, never Sonnet/Opus) — the model
+  chain is untouched by design.
+  ⚠️ **THE SANDBOX CAN JUDGE ONLY THE APP'S OWN BUILD** (`sandboxCanJudge`: the `install` and
+  `webbuild` stages, or an unmarked log read as the app not compiling). A Gradle, Xcode or Capacitor
+  failure gets the old one-shot behaviour, now LABELLED `verified: false` in the response and counted as
+  `unverified-fix` on the admin's Phone-build-outcomes card — so the ratio of verified to unverified is
+  the number that says whether the verifier is reaching real builds. The repair MAY wake a paused
+  sandbox (a resume, seconds, a few paise) and seeds an empty one from the durable store: it holds a
+  real failure and a real five-minute cost to avoid, unlike the ship-time check above. The sandbox is
+  the user's workspace, BORROWED: every file written is snapshotted and put back — on failure, timeout,
+  throw AND success — except the app's own source on success, which the route also merges into the
+  durable workspace (the pre-flight's own rule, applied from the other end). Repository-only files
+  (the workflow, the assembled package.json, capacitor.config.ts) are never left in the workspace.
+  🔴 **`build()` SAYS SUCCESS FOR A MACHINE WITH NO package.json** ("no build step — static project"),
+  so an empty or paused sandbox would have PASSED the ship-time check without building anything.
+  `sandboxHoldsApp` reads the marker back first on both paths; a read that fails is "could not tell",
+  never a pass. Found while writing the verifier, in code merged that morning.
+  🔴 **EVERY REPAIR USED TO START TWO GITHUB RUNS.** The route dispatched the workflow after its commit,
+  and the panel dispatched again at the top of its next attempt — both billed against the user's
+  Actions minutes, the panel watching whichever appeared first. The panel has owned the dispatch since
+  the loop was written and an old bundled Android client will keep dispatching whatever the server
+  does, so the server stopped: `fixed: true` means "committed — build again", one run per repair for
+  every client. Also: a comment-only rewrite is no longer a `fixed: true` (`isMeaningfulChange`), the
+  four credential classes (`cureFamily === 'user-credentials'`) end the request before a model or an
+  attempt is spent, and the panel's last sentence says whether anything was really repaired instead of
+  claiming a repair on every exhausted cycle.
+  💸 **WHAT IT COSTS, plainly:** up to 4 model calls per autofix instead of 1, on the weak tier paid by
+  NavBharatAI, plus a sandbox resume per verification. The bet is the same as `AGENTV3_COMPLEX_TO_KIMI`'s:
+  a blind fix that fails is paid twice, once in the call and once in the five-minute run it triggers.
+  **Watch:** `fixed` vs `unverified-fix` vs `gave-up` on the card, and whether the failure rate moves.
+  🏗️ **THE APP IS BUILT HERE; GITHUB ONLY PACKAGES IT (same day, third PR — admin: *"aapne 5 point
+  bataye hai, sab karo … toote hi na wala banao"*).** Two more keys, neither set, both with working code
+  defaults: `MOBILE_SHIP_PREBUILT` (**default ON**; `off` reverts to the source ship for every app) and
+  `MOBILE_SHIP_PREBUILT_MS` (**240 s**, floor 30 s, cap 600 s; malformed ⇒ default). Read by
+  `src/server/lib/mobileShipPrebuilt.ts`. Before a repository is prepared, the app's own PRODUCTION build
+  runs in its sandbox, the output is read with the ONE reader the platform already has (`downloadDistFiles`,
+  which strips the preview bridge) and ships as `www/` with the static no-op build script — so the runner
+  compiles NOTHING, and the step most phone builds died in does not exist for that repository.
+  `www/.nbai-prebuilt` is the stamp; the pushed package.json keeps only Capacitor and the plugins the
+  MACHINE named (read from `node_modules`, `null` ⇒ nothing trimmed), so the runner's install is seconds.
+  ⚠️ **CORRECTION TO THE SENTENCE ABOVE — "It NEVER starts a machine" is true of `runRealBuildCheck` and
+  of nothing else on this path any more.** The prebuild MAY wake a paused sandbox and seed an empty one
+  (`ensureWorkspaceFilesInSandbox`), deliberately: that rule was written for an OPPORTUNISTIC check beside
+  a ship that would proceed either way; this IS the ship's build, and a resume (seconds, paise) against
+  a failed five-minute run is the trade the admin chose. The check now runs only where the prebuild
+  never STARTED a build — a build that ran here (shipped, timed out, or unreadable) is its answer, and a
+  second one in the same machine would double the cost. Presence of `hasLiveSandbox` is what marks a
+  sandbox-backed actuator; the local one has none, so a test never builds on disk.
+  🔒 **Every stand-down is a fall-through to the source ship, exactly as before; the ONE refusal is a
+  build that failed here in a way the runner would fail too** — the same 422 `real-build-failed`.
+  `www/` is OWNED by the push: what an earlier push left there and this one does not carry is removed in
+  the same commit (`commitFiles(..., removePaths)`, `listRepoPathsUnder`), or a hashed bundle from last
+  week is packaged into the phone app for ever.
+  📏 **Measured from here on:** `ships.prebuilt / source` and `prebuildSkips.<reason>` on the day rollup,
+  shown on the admin's Phone-build-outcomes card as "How the app reached GitHub" — the number that says
+  whether the runner still compiles apps at all, and which fallback fires when it does.
+  🔁 **The rest of the same PR, no keys:** the generated workflows cache `~/.npm` (keyed on
+  `package.json`, the one manifest that IS pushed — NEVER setup-node's `cache: npm`, which hard-fails
+  without a lock file) and, on Android, `~/.gradle/{caches,wrapper}` (keyed on the Java pin), saved
+  `if: always()` so the retry after a repair does not pay for the first run's downloads; the panel
+  carries an attempt HISTORY to each autofix (`mobileRepairHistory.ts`: the same failure back after a
+  rules refresh skips the rules, after an AI change tells the model its own change failed, after
+  NOTHING ends the cycle honestly), every autofix answer carries the tool's own last words
+  (`failureLine`) so a repeat is recognisable, and the panel says which of THREE things a repair was —
+  built and checked here first, a packaging step the sandbox cannot judge (`judgeable: false`), or one
+  it could not check on this request. And a class fixed on the way: the verifier and the workspace heal
+  took a REPOSITORY path as a WORKSPACE path, so a static repo's `www/index.html` was "nothing to test"
+  and a root `index.html` / `vite.config.ts` was never app source — `workspacePathForRepoPath` +
+  `detectRepoLayout` (assembler) and `REPO_ONLY_PATH` (`isAppSourcePath`) now decide both.
+  🔴 **THE REVIEW'S CRITICAL CATCH, recorded because it is true of EVERY static ship before this
+  date: Capacitor's CLI reads `capacitor.config.ts` with the PROJECT's TypeScript** (`@capacitor/cli`
+  config.js fatals *"Could not find installation of TypeScript"*), and a package.json assembled for a
+  hand-written static app declared only `@capacitor/cli`. `buildPackageJson` now declares `typescript`
+  for every kind (never overriding the app's own range), and `TYPESCRIPT_MISSING` is a classifier class
+  with a rules repair for old repositories. Also from the review: a refusal needs a POSITIVE app fault
+  (`APP_FAULT_CODES` — `UNKNOWN` falls through to the source ship), nothing is ever deleted from the
+  machine (a stale MARKER replaces the first draft's `rm -rf`), only `www/` paths RECORDED in
+  `www/.nbai-shipped` are ever removed from a repository, and the prebuild stands down beside a build
+  in flight (`isBuildActive` / `isGreenLatched` ⇒ `build-in-flight`).
+  ⚠️ **NOT done, said plainly:** a verified AI fix to the REPOSITORY's package.json (a dependency
+  version) is still never merged into the workspace — the assembled file carries Capacitor deps and the
+  sentinel script, so copying it back would break the app's own build — and the next ship regenerates
+  it from the workspace. A dependency-only merge is a separate change.
+- **📦 `STATIC_PRECOMPRESSED` — the web bundle is compressed ONCE at build time (built 2026-09-24).
+  ⚠️ NOT set, and the code default is ON**; `off` is the no-deploy revert to per-request compression.
+  `scripts/precompress.mjs` runs in the **Dockerfile only** and writes brotli-11 and gzip-9 copies beside
+  every asset under `assets/`, `monaco/` and `vendor/`: measured, 31.7 MB raw → 5.8 MB brotli, and
+  the JS/CSS bundle is **14% smaller** than the quality-4 brotli the per-request middleware sends,
+  at **zero CPU per request**. It adds about 18 s to the image build.
+  `lib/precompressedStatic.ts` serves the copies before `express.static`, and falls through whenever
+  there is no copy. 🔒 **Never add it to `npm run build`**: Capacitor copies `dist/` into the phone
+  apps, which load from their own disk, so the copies would only make the download bigger. A test
+  enforces this. Same change: `/monaco/` and `/vendor/` are not content-hashed, so they get a one-day
+  cache (`UNHASHED_ASSET_CACHE`) instead of one year `immutable`. ⚠️ `firebase.json` was NOT given the
+  same rule: the main app is served by Cloud Run, and Firebase's precedence for overlapping header
+  globs was not verified.
+- **🗜️ `AGENTV3_COMPACT_STORAGE` — stored data is compressed instead of dropped (built 2026-09-24, admin:
+  *"jo hamari navbharatai ko world class banaye woh build karo"*). ⚠️ NOT set, and the code default is
+  ON**; `off` is the no-deploy revert (never compress; the old byte-measured drop). Helper:
+  `src/server/lib/compactStore.ts` (brotli q5, tagged `br1`, sizes in UTF-8 BYTES). Used by three stores:
+  the **Time Machine** (`BuildHistoryStore` — an app that does not fit as plain text is stored packed,
+  whatever still does not fit is counted in `omittedFileCount` and told to the user on restore), the
+  **admin build-report session** (`AdminBuildReportStore` — fitted by its PACKED size, so "N older builds
+  omitted" becomes rare), and **transcript turns over 600 KB** (`FirestoreConversationStore`).
+  🔒 **Small payloads are stored byte-for-byte as before**, so a rollback of the code still reads them.
+  Only data that USED to be dropped is written packed. Readers accept both forms forever, and an
+  undecodable payload reads as omitted, never as an empty app (an empty version would wipe a workspace
+  on restore).
+  ⚠️ **Why not zstd:** in Node 22, which is our runtime image, `zlib.zstd*` is still EXPERIMENTAL, and this
+  format must stay readable for the life of every stored version. The tag leaves room for `zs1` later.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH
@@ -1680,6 +1740,32 @@ the code (it is actually read somewhere) on 2026-07-11.
   **What to watch:** how often `MARKUP_WAIVED_NO_PREVIEW` appears. A high rate is not a billing problem —
   it is the engine failing to prove its own work, and the number that says so.
 
+- **🎓 PROFESSIONALS: 10 FREE MESSAGES A DAY, THEN PAID — and Exam mode's 5 free QUESTIONS (built
+  2026-09-23; admin, verbatim: *"professional ai me din ke 10 message free honge, fir paid hoga. aapne
+  sabke liye sab free kar diya. teacher ai ka exam mode me only 5 questions per day free ho"*). Three
+  keys, NONE set, all with working code defaults: `PROFESSIONAL_FREE_QUOTA` (**default ON**; `off` is the
+  no-deploy revert to the previous behaviour exactly), `PROFESSIONAL_FREE_DAILY_LIMIT` (**default now 10**
+  — it had drifted to 50 in code), `PROFESSIONAL_EXAM_FREE_QUESTIONS` (**default 5**). Read by
+  `src/server/professionals/professionalPaid.ts`; decided in `passGate.ts` (`gateProfessionalTurn`,
+  `gateProfessionalExam`).
+  🔴 **WHY "SAB FREE" WAS TRUE:** the allowance rode on `PROFESSIONAL_PAID_ENABLED` — the switch for
+  SELLING a Pass, which was retired and never set — so nothing was ever counted; and even switched on,
+  nothing told the charge that a counted free message was free. Counting now has its own switch, and
+  `billableFraction` on the charge context (`aiTurnCharge.ts`) carries "this one is free" to the wallet:
+  `0` ⇒ reason `free-allowance`, never a debit.
+  🔒 **THE ORDER:** free messages first (free chain, never charged, **never refused for an empty
+  wallet**); the 11th and every later answer is ALLOWED on the paid chain and charged its real cost +
+  markup from the one wallet, refused only when that wallet is empty (with the free-used reason named).
+  Doctor AI shares the same 10. Free-list and a Pass holder stay unlimited. **A guest must now sign in**
+  — an anonymous allowance cannot be counted, so guests who used Teacher AI etc. without limit now see
+  the sign-in card (which gained a real Sign in button). Without `AI_WALLET_SPEND=on`, "then paid"
+  cannot be charged, so past the allowance is the honest block, never a silent free answer.
+  🎓 **EXAM:** its own counter (`professional_exam_usage`), in QUESTIONS — a paper is SPLIT (2 free left
+  + 10 asked = 2 free, 8 paid, charged `8/10` of the paper's real cost), priced on what was DELIVERED.
+  An unusable paper is now charged NOTHING (the charge used to run before that check).
+  ⚠️ **SAID PLAINLY, because the admin chose it knowing:** "paid" = real cost + markup, and the
+  professionals' leader model is the free GLM-flash rung for BOTH tiers, so many paid answers still
+  cost ₹0. That is the admin's "Asli kharcha + markup" decision, not a bug.
 - **The MID-BUILD cost stop (shipped 2026-09-13):** `AGENTV3_BUILD_COST_CEILING_USD` — ⚠️ **NOT set,
   and the code default is what governs today.** The ceiling on ONE build's REAL provider cost, in USD.
   **Default $5**, capped at $50, read by `src/server/AgentV3/buildCostCeiling.ts` and evaluated inside
@@ -1947,9 +2033,22 @@ the code (it is actually read somewhere) on 2026-07-11.
   as the 2026-09-02 incident where the policy said "we never share your data with advertisers" while
   the Meta pixel was being built.
 - **🔗 ANDROID APP LINKS — a navbharatai.com link opens the APP, not a browser (built 2026-09-19).
-  ⚠️ `ANDROID_CERT_SHA256` is NOT set, and unset means today's behaviour exactly** — the
+  ✅ `ANDROID_CERT_SHA256` IS SET, WITH BOTH CERTIFICATES (admin, 2026-09-22)** — recorded hand-to-hand
+  the same session, per this registry's own rule. Verified rather than taken on trust: both hosts were
+  fetched and returned IDENTICAL JSON carrying TWO well-formed fingerprints, the app signing key and
+  the upload key, and `package_name` `com.navbharat.ai` — which matches `capacitor.config.ts`'s
+  `appId` and `build.gradle`'s `applicationId`. The values are not written here (names only), but note
+  that a fingerprint is public by construction: it is published at that URL by every app on earth with
+  App Links on. **The keystore is the secret; the fingerprint is its public identity.**
+  ⚠️ **THE SERVER HALF IS DONE; THE APP HALF IS NOT, AND THAT IS THE THING TO CHECK FIRST if links
+  still open a browser.** The manifest claim landed on 2026-09-19 (`23e81dc9`), and the build LIVE on
+  Play at that moment was **116, built 2026-09-15** — verified by reading its manifest at that commit,
+  not inferred from the date: it carries **no `autoVerify` intent filter at all**. So on 116 the app
+  never asks Android for those links and no server-side fix can change that. It takes a build from
+  2026-09-19 or later to test any of this.
+  ⚠️ **The old wording of this entry said the key was NOT set, and unset meant** — the
   `/.well-known/assetlinks.json` route answers 404, Android's verification fails, and every link keeps
-  going to the browser as it does now. Read by `src/server/lib/assetLinks.ts`; the route is mounted in
+  going to the browser. Read by `src/server/lib/assetLinks.ts`; the route is mounted in
   `server.ts` BESIDE the Apple one and for the same reason (`express.static`'s `dotfiles` default is
   `ignore`, so a `.well-known` path never reaches it).
   🔴 **THE VALUE IS NOT A SECRET, which is why it may be discussed here at all.** It is the SHA-256
@@ -2704,6 +2803,38 @@ the flag entries above promise.
   `fromThisBuild`). Test-locked and reversion-proven four ways in
   `tests/aWorkingAppIsNeverLostToItsOwnBuild.test.ts`. **What to watch:** `IN_BUILD_GREEN` appearing
   a minute or two into builds, and `GREEN_GUARD_RESTORED` on FIRST builds — which was impossible before.
+- **`AGENTV3_GREEN_FUNCTIONAL_REPAIR`** (default ON, `off` restores suggest-only exactly — added
+  2026-09-23, autopsy ac41a924, admin: *"han to fix karo"*) — **a real bug in a working app gets ONE
+  verified repair.** Green Stop made every reviewer finding on a green app a suggestion. That is right
+  for the engine's opinions, but it shipped a news site whose articles all rendered as ONE paragraph and
+  whose footer linked into "page not found". The reviewer found both, and was allowed only to suggest.
+  Now `selectGreenRepairable` (`ReviewerAgent.ts`) picks the findings that name BROKEN behaviour.
+  Criticals as well as warnings qualify, but only when the text is functional, so *"move keys to a
+  vault"* stays an offer. One pass fixes them in pass `reviewer-functional-repair`, wrapped in
+  `verifyAfterFix`.
+  🔒 **FOUR RESTRAINTS NO OTHER ALLOWED PASS CARRIES, because it is the one with a history of harm (the
+  2026-08-12 `.env` erasure).**
+  • An unproven result is UNDONE, not kept.
+  • A repair that does not finish inside its budget is stopped and undone.
+  • The pass may never write a `.env*` file (`SECRET_FILE_DENIED_PASSES` in `greenFreeze.ts`).
+  • It never runs without a snapshot it took itself.
+  ⚠️ **The budget is the BUILD's clock, not the advisory cap's.** That cap (120 s) is armed before the
+  reviewer runs, so it routinely has ~30 s left. `greenRepairPlan` sizes the repair from the wall clock
+  (max 150 s) and re-arms the cap ONCE, to repair + 40 s check + 20 s settle — still a finite bound.
+  Report codes: `REVIEW_FUNCTIONAL_REPAIRED` / `_UNDONE` / `_SKIPPED`. Whatever it does not fix is still
+  offered, exactly as before.
+  🔴 **SIBLING FIXED IN THE SAME CHANGE: a reverted heal used to be SAVED AGAIN.** Every `verifyAfterFix`
+  revert wrote the snapshot back through the actuator, which the captured-writes map never saw. The
+  end-of-build save lets that map win, so the broken change the sandbox had just undone went back into
+  the durable store. The next restore brought it back. All three revert sites now share
+  `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
+  EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
+  reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+- **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
+  PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
+  (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
+  directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
+  `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
@@ -2974,6 +3105,11 @@ the flag entries above promise.
   can cost NavBharatAI money rather than merely earning nothing. Both rules are individually correct
   and admin-mandated; their composition was never decided. Raised to the admin — billing is not a
   session's call.
+  ✅ **DECIDED AND SHIPPED 2026-09-21 — this paragraph stayed "OPEN" after it closed, and a session
+  (mine, 2026-09-23) re-asked the admin from it.** The admin chose *"floor + naya message"*:
+  `cancelledBuildBilling.ts` now bills `min(decided, max(realCost + sandbox, decided / 2))`, so a
+  cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
+  `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates
@@ -3911,6 +4047,15 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
   today — and a test asserts the two produce identical ladders so they cannot drift.
+- ⏱️ **A COMPLEX build's fast lane gets room for its contract (admin-approved 2026-09-24, autopsy
+  3ab93068). `AGENTV3_FASTLANE_COMPLEX_SECONDS` is NOT set; the code default of 480 s governs, clamped
+  to 240–900, and an unreadable value falls back to 480, never to "no limit".** Opening a complex app on
+  a reasoning rung made its plan call take 40 s. Its shared contract was then cut at 56 s by its share of
+  the 240 s budget, and the missing contract cost 419 s of repair. So a complex lane gets the larger budget
+  and is never talked out of its contract (`fastLaneBudgetMs`). An ordinary lane keeps 240 s, unchanged.
+  The `FAST_LANE_PHASES` line now names the contract's own clock (`stopped at its own Ns cap`) instead of
+  leaving *"build budget reached"* to be read as the whole build. **Watch: the repair share of complex
+  builds in that line.**
 
 🏗️ **`AGENTV3_PROJECT_MODE` — SOFTWARE PROJECT MODE. BUILT, WIRED, TESTED, AND ASLEEP SINCE
 2026-07-04. ⚠️ Recorded here on 2026-09-17 because it was MISSING FROM THIS REGISTRY ENTIRELY** —

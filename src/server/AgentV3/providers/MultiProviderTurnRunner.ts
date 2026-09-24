@@ -64,6 +64,13 @@ export interface MultiProviderOptions {
    */
   onProviderBenched?: (family: string, reason: string) => void;
   /**
+   * One attempt produced NOTHING, and this is what it cost in wall clock.
+   *
+   * Measurement only (autopsy 21b431e1): the bench's trigger is a COUNT of consecutive timeouts and
+   * its cost is a CLOCK, and nothing had ever compared the two. Never read back, never acted on.
+   */
+  onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+  /**
    * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
    * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
    * to price a GLM-flash turn as free and a glm-5.2 turn at the flagship rate). Feeds the
@@ -817,6 +824,26 @@ export function makeMultiProviderTurnRunner(
            * merely observe slowness: we measured it against a floor and acted on it. `canBenchAnother`
            * still guards the last engine, and `abandonedSlowRung` makes this at most once per build.
            */
+          /**
+           * WHAT THIS ATTEMPT COST AND GOT NOTHING FOR (autopsy 21b431e1). Measurement only — it
+           * benches nothing, retries nothing and reads nothing back. One emit, placed BEFORE the
+           * classification below so no branch can forget it, and the kind is taken from the same
+           * predicates the branches use rather than re-derived.
+           *
+           * ⚠️ OUR OWN CLOCK ENDING IS NOT THE VENDOR'S WASTE (autopsy bb688add) — a budget-ended
+           * call is our accounting and is deliberately left out; `isTimeoutProviderError` is the
+           * same test the bench uses, so the two can never disagree about what a timeout is.
+           */
+          //
+          // 🔴 AND THE SENTENCE ABOVE WAS FALSE FOR A DAY (autopsy 3a0a8f7f, 2026-09-23). The comment
+          // promised the exclusion and the code never made it: a fast-lane contract call cut off by
+          // the lane's own cap reached the final `: 'error'` arm and was reported as "1 error (55.9s)"
+          // against KIMI — a vendor fault, in the one line written to stop exactly that. The kind is
+          // now decided by `wasteKindFor`, which says `null` for our own clock, and a test holds it.
+          try {
+            const kind = wasteKindFor(err);
+            if (kind) opts.onAttemptWasted?.(reportName, kind, Math.max(0, now() - attemptStartedAt));
+          } catch { /* telemetry only — it must never replace the error below */ }
           if (isSlowStreamAbandon(err)) {
             abandonedSlowRung = true;
             try {
@@ -835,7 +862,12 @@ export function makeMultiProviderTurnRunner(
           }
           if (isBudgetEndedError(err)) {
             const reason1 = err instanceof Error ? err.message : String(err);
-            throw new Error(`This build's time budget ended before the step could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
+            // ⚠️ "the time allowed for THIS STEP", never "this build's time budget". The deadline handed
+            // down may be a single step's — the fast lane's 90 s plan cap — with most of the build still
+            // ahead, and this runner cannot tell which clock it was. Two autopsies found the same lie:
+            // 0d297b25 (56 minutes left) and ac41a924 (90 s into a 29-minute build). Sibling of the fix
+            // in aFailedProbeIsNotAnAnswer.
+            throw new Error(`The time allowed for this step ran out before it could finish (${reason1}). No provider failed — the work was stopped by our own deadline.`);
           }
           if (isFatalProviderError(err) || isModelUnavailableError(err) || isStarvedBudgetError(err)) {
             // 🔴 A STARVED RUNG IS RETIRED ON ITS FIRST OCCURRENCE, AND THE ARGUMENT IS NOT "PROBABLY"
@@ -908,4 +940,18 @@ export function makeMultiProviderTurnRunner(
       throw new Error(`${prefix}. Last error: ${reason}${fatalProviderHint(reason)}`);
     },
   };
+}
+
+
+/**
+ * What kind of provider waste one failed attempt was — or `null` when it was not the provider's
+ * waste at all because OUR OWN clock ended it (a lane cap, a build budget). Budget-ended is checked
+ * FIRST: such an error can also read as a timeout, and the order is the whole rule. Pure.
+ */
+export function wasteKindFor(err: unknown): 'timeout' | 'crawl' | 'rate-limit' | 'error' | null {
+  if (isBudgetEndedError(err)) return null;
+  if (isSlowStreamAbandon(err)) return 'crawl';
+  if (isTimeoutProviderError(err)) return 'timeout';
+  if (isRateLimitProviderError(err)) return 'rate-limit';
+  return 'error';
 }

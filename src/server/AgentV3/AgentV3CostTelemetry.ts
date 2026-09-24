@@ -78,6 +78,31 @@ export interface CostTelemetryEntry {
    */
   wasLoss?: boolean;
   lossRealCostUsd?: number;
+  /**
+   * 🔴 WHAT THIS BUILD REALLY COST US — the per-model rate card over the provider ledger, priced by
+   * `decideBuildBilling` itself (the SAME code that priced the bill), plus the VM beside it.
+   *
+   * WHY IT IS HERE AT ALL, recorded so nobody re-derives it: every cost figure in the admin usage
+   * report was, until 2026-09-23, `sonnetEquivalentUsd` — a Sonnet-equivalent BASELINE. That is an
+   * honest upper bound and the module said so in words, but the report's own field was called
+   * `marginUsd` and the card painted it RED, so a 30-day window read as a $1,257 LOSS when it was
+   * really "we charged 18% of what Sonnet would have cost". The admin sent that report to ask about
+   * the loss. **The real number already existed one variable away and was thrown on the floor.**
+   *
+   * ⚠️ OPTIONAL, AND AN ABSENT VALUE IS NEVER A ZERO. A lane that does not report it is counted OUT
+   * of `realCostBuilds`, so a partial sum can never be displayed as a total — the coverage count is
+   * what lets the card say "measured on N of M builds" instead of quietly under-stating our spend.
+   */
+  realCostUsd?: number;
+  /** The E2B VM cost of this build (USD), beside the tokens. Same optionality rule as above. */
+  sandboxUsd?: number;
+  /**
+   * Per-(provider, MODEL) token attribution, keyed `PROVIDER|model`. The provider map above cannot
+   * answer what a build cost, because one vendor holds several rungs at very different prices —
+   * `glm-4.7-flashx` is $0.07/MTok and `glm-5.3` is $1.40, a 20x spread under the single key 'GLM';
+   * `kimi-k2.7-code` $0.95 against `kimi-k3` $3.00 under 'KIMI'. Absent on lanes that do not attribute.
+   */
+  modelUsage?: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number }>;
 }
 
 /** Rolled-up counters for one slice (a task type or a start tier). */
@@ -126,8 +151,29 @@ export interface DailyCostTelemetryDoc {
   byProviderUsage?: Record<string, ProviderUsageBreakdown>;
   /** Billing Phase 3 — builds zeroed after spending real tokens (a loss NavBharatAI absorbed). */
   lossBuilds?: number;
-  /** Billing Phase 3 — Sonnet-equivalent baseline cost (USD) of all today's loss builds. */
+  /**
+   * Billing Phase 3 — Sonnet-equivalent baseline cost (USD) of all today's loss builds.
+   * ⚠️ BASELINE, NOT SPEND — see `lossSpendUsd` below for what those builds really cost. The field
+   * keeps its name and its meaning because documents written before 2026-09-23 hold that meaning,
+   * and re-pointing a field at a different number would mix two meanings inside one 30-day window
+   * with nothing on any screen saying so.
+   */
   lossRealCostUsd?: number;
+  /** Per-(provider, model) token totals across the day — the source of the report's per-model rows. */
+  byModelUsage?: Record<string, ProviderUsageBreakdown & { cacheReadInputTokens?: number }>;
+  /** What today's builds REALLY cost in provider tokens (USD), summed over builds that reported it. */
+  totalRealCostUsd?: number;
+  /** What today's builds really cost in E2B VM time (USD), over the same builds. */
+  totalSandboxUsd?: number;
+  /**
+   * How many of today's builds actually reported a real cost. **The two sums above are meaningless
+   * without it**: a day mixing builds that report and builds that do not would otherwise present a
+   * partial sum as the whole day's spend — under-stating our own cost on the exact panel used to
+   * judge it, which is the `E2B_USD_PER_HOUR` drift in a new place.
+   */
+  realCostBuilds?: number;
+  /** What the ZEROED builds really cost (USD, tokens + VM) — the measured twin of lossRealCostUsd. */
+  lossSpendUsd?: number;
   /** P-PE.2 — the most recent architect prompt version id recorded today (traceability). */
   lastPromptVersion?: string;
   updatedAt: number;
@@ -228,6 +274,27 @@ export function foldCostTelemetry(
     };
   }
 
+  // Per-(provider, model) tokens. Same `?? {}` migration pattern as every fold above.
+  const byModelUsage = { ...(doc.byModelUsage ?? {}) };
+  for (const [key, u] of Object.entries(entry.modelUsage ?? {})) {
+    const slot = byModelUsage[key] ?? { builds: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
+    byModelUsage[key] = {
+      builds: slot.builds + 1,
+      inputTokens: slot.inputTokens + (Number.isFinite(u.inputTokens) ? u.inputTokens : 0),
+      outputTokens: slot.outputTokens + (Number.isFinite(u.outputTokens) ? u.outputTokens : 0),
+      cacheReadInputTokens: (slot.cacheReadInputTokens ?? 0)
+        + (Number.isFinite(u.cacheReadInputTokens) ? (u.cacheReadInputTokens as number) : 0),
+    };
+  }
+
+  // 🔒 A BUILD THAT DID NOT REPORT A REAL COST ADDS NOTHING AND IS NOT COUNTED. `measuredReal` is
+  // deliberately a check on the NUMBER, not on truthiness: a genuinely free build costs $0.00 and
+  // must still count toward coverage, while an absent value must not read as a zero-cost build.
+  const measuredReal = Number.isFinite(entry.realCostUsd);
+  const buildRealUsd = measuredReal
+    ? Math.max(0, entry.realCostUsd as number) + Math.max(0, Number.isFinite(entry.sandboxUsd) ? (entry.sandboxUsd as number) : 0)
+    : 0;
+
   return {
     date,
     totalBuilds: doc.totalBuilds + 1,
@@ -244,8 +311,14 @@ export function foldCostTelemetry(
     escalatedBuilds: (doc.escalatedBuilds ?? 0) + ((entry.escalations ?? 0) > 0 ? 1 : 0),
     byLadderDepth,
     byProviderUsage,
+    byModelUsage,
+    totalRealCostUsd: round6((doc.totalRealCostUsd ?? 0) + (measuredReal ? Math.max(0, entry.realCostUsd as number) : 0)),
+    totalSandboxUsd: round6((doc.totalSandboxUsd ?? 0)
+      + (measuredReal && Number.isFinite(entry.sandboxUsd) ? Math.max(0, entry.sandboxUsd as number) : 0)),
+    realCostBuilds: (doc.realCostBuilds ?? 0) + (measuredReal ? 1 : 0),
     lossBuilds: (doc.lossBuilds ?? 0) + (entry.wasLoss ? 1 : 0),
     lossRealCostUsd: round6((doc.lossRealCostUsd ?? 0) + (entry.wasLoss ? (entry.lossRealCostUsd ?? 0) : 0)),
+    lossSpendUsd: round6((doc.lossSpendUsd ?? 0) + (entry.wasLoss ? buildRealUsd : 0)),
     // Carry the latest prompt version when present; otherwise keep the prior value.
     lastPromptVersion: entry.promptVersion ?? doc.lastPromptVersion,
     updatedAt: now,
@@ -280,6 +353,46 @@ export interface UsageReport {
   lossBuilds: number;
   lossRealCostUsd: number;
   perProvider: UsageReportRow[];
+
+  // ── THE MEASURED SIDE (2026-09-23). Everything above prices every engine at Sonnet's rate. ──
+  /**
+   * What the providers REALLY cost, summed from each build's own rate-card figure. `null` when not
+   * one build in the window reported it — never 0, because "we did not measure it" and "it was free"
+   * are different facts and only one of them may be shown as a number.
+   */
+  totalRealCostUsd: number | null;
+  /** The E2B VM cost over the same builds, same null rule. */
+  totalSandboxUsd: number | null;
+  /** Tokens + VM. The one figure to compare against `totalBilledUsd`. */
+  totalRealSpendUsd: number | null;
+  /** billed − real spend. The ACTUAL margin, and `null` while nothing is measured. */
+  realMarginUsd: number | null;
+  /** How many builds in the window reported a real cost, out of `totalBuilds`. */
+  realCostBuilds: number;
+  /**
+   * 🔒 `realCostBuilds / totalBuilds`. A caller MUST show this beside the money: while the window
+   * still holds days written before the real cost was recorded, the sums above cover only part of
+   * it, and a partial sum presented as a total under-states our own spend.
+   */
+  realCostCoverage: number;
+  /** What the zeroed builds really cost us (tokens + VM), same null rule. */
+  lossSpendUsd: number | null;
+  /** Per-(provider, model) rows — the only view that can tell a $0.07 rung from a $1.40 one. */
+  perModel: UsageReportModelRow[];
+  /** Builds by how deep down their tier's ladder they finished ('1', '2', …, 'unknown'). */
+  byLadderDepth: Record<string, number>;
+}
+
+/** One (provider, model) line — tokens at the rung level, which is where price actually varies. */
+export interface UsageReportModelRow {
+  provider: string;
+  /** The model id, or 'unknown' for a slice whose runner never reported one. */
+  model: string;
+  builds: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** The share of inputTokens the provider served from its prefix cache (already inside inputTokens). */
+  cacheReadInputTokens: number;
 }
 
 /**
@@ -297,12 +410,38 @@ export function buildUsageReport(
   let totalBilledUsd = 0;
   let lossBuilds = 0;
   let lossRealCostUsd = 0;
+  let realCostUsd = 0;
+  let sandboxUsd = 0;
+  let realCostBuilds = 0;
+  let lossSpendUsd = 0;
+  let anyRealCost = false;
+  const perModelTokens = new Map<string, { builds: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>();
+  const byLadderDepth: Record<string, number> = {};
   const dates = docs.map(d => d.date).filter(Boolean).sort();
   for (const doc of docs) {
     totalBuilds += doc.totalBuilds || 0;
     totalBilledUsd += doc.totalBilledUsd || 0;
     lossBuilds += doc.lossBuilds ?? 0;
     lossRealCostUsd += doc.lossRealCostUsd ?? 0;
+    // A day written before the real cost was recorded carries no `realCostBuilds`, so it adds nothing
+    // and raises no flag — which is exactly how a mixed window stays honest instead of averaging a
+    // measured day with an unmeasured one and calling the result the month's spend.
+    if ((doc.realCostBuilds ?? 0) > 0) anyRealCost = true;
+    realCostUsd += doc.totalRealCostUsd ?? 0;
+    sandboxUsd += doc.totalSandboxUsd ?? 0;
+    realCostBuilds += doc.realCostBuilds ?? 0;
+    lossSpendUsd += doc.lossSpendUsd ?? 0;
+    for (const [key, u] of Object.entries(doc.byModelUsage ?? {})) {
+      const slot = perModelTokens.get(key) ?? { builds: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
+      slot.builds += u.builds || 0;
+      slot.inputTokens += u.inputTokens || 0;
+      slot.outputTokens += u.outputTokens || 0;
+      slot.cacheReadInputTokens += u.cacheReadInputTokens ?? 0;
+      perModelTokens.set(key, slot);
+    }
+    for (const [depth, b] of Object.entries(doc.byLadderDepth ?? {})) {
+      byLadderDepth[depth] = (byLadderDepth[depth] ?? 0) + (b?.builds || 0);
+    }
     for (const [provider, u] of Object.entries(doc.byProviderUsage ?? {})) {
       const slot = perProviderTokens.get(provider) ?? { builds: 0, inputTokens: 0, outputTokens: 0 };
       slot.builds += u.builds || 0;
@@ -332,6 +471,27 @@ export function buildUsageReport(
     lossBuilds,
     lossRealCostUsd: round6(lossRealCostUsd),
     perProvider,
+    // `null` rather than 0 wherever nothing was measured — see the field docs. The distinction is the
+    // whole point of this half of the report: a zero is a claim about our spend, and an unmeasured
+    // window has no claim to make.
+    totalRealCostUsd: anyRealCost ? round6(realCostUsd) : null,
+    totalSandboxUsd: anyRealCost ? round6(sandboxUsd) : null,
+    totalRealSpendUsd: anyRealCost ? round6(realCostUsd + sandboxUsd) : null,
+    realMarginUsd: anyRealCost ? round6(totalBilledUsd - (realCostUsd + sandboxUsd)) : null,
+    realCostBuilds,
+    realCostCoverage: totalBuilds > 0 ? round6(realCostBuilds / totalBuilds) : 0,
+    lossSpendUsd: anyRealCost ? round6(lossSpendUsd) : null,
+    perModel: [...perModelTokens.entries()]
+      .map(([key, u]) => {
+        // The key is `PROVIDER|model`; a slice whose runner never named a model is stored with an
+        // empty model half and is shown as 'unknown' rather than folded into a real rung's row.
+        const bar = key.indexOf('|');
+        const provider = bar >= 0 ? key.slice(0, bar) : key;
+        const model = bar >= 0 ? key.slice(bar + 1) : '';
+        return { provider, model: model || 'unknown', ...u };
+      })
+      .sort((a, b) => b.inputTokens - a.inputTokens),
+    byLadderDepth,
   };
 }
 

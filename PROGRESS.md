@@ -79239,3 +79239,1396 @@ into the listing, which is a separate change and is not guessed at here.
 **Gate, on the final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ · typecheck:server ✅
 · **vitest 29,033 passed | 1 skipped | 0 FAIL** ✅ · build ✅ · test:bundle ✅ · boot:check ✅ ·
 deps:server-gate ✅.
+## 2026-09-22 — AUTOPSY `21b431e1`: the platform already held the answer and asked the prompt again
+
+**The build.** Workspace `agentv3-…fea1ce73`, build `21b431e1`. **18.1 minutes. ₹164.68 billed to a
+FREE-tier user.** Real cost $0.428 in tokens + $0.0499 of sandbox.
+
+### The five buckets
+
+- ✅ **Self-healed (0).** Nothing was healed. The fast lane's three repair attempts did not converge.
+- 🔀 **Worked around / alternative used (3).** GLM timed out five times (60s ×3, then abandoned for
+  crawling at 26.2s and 42.8s) and was benched twice — the ladder fell to rung 2 of 5. The fast lane
+  spent ~8.5 min and 3 repairs, then handed off (`SIMPLE_BUILD_FALLBACK` / `TYPECHECK_FAILED`).
+  `UNBILLED_BARREN_WORK` absorbed ₹4.64 of turns that produced nothing.
+- ⏭️ **Skipped / ignored (3).** `JOURNEY_NOT_DERIVED` (no addressable form field);
+  `READINESS_WARNING` (`dangerouslySetInnerHTML` at `ChatInterface.tsx:61`; no tests at all);
+  `GREEN_FREEZE_DEFERRED` ×9 — the freeze working, and the app shipping with no test suite.
+- ❌ **Still broken / shipped imperfect (4).** `SCRIPT_INTEGRITY` — `src/App.tsx` carries `"nमैं"`, a
+  corrupted label the user reads verbatim. `REVIEW_INCOMPLETE` — the post-build review timed out at
+  45 s (+11.25 s grace) over 23 files, the `GREEN_REVIEW_LEAN` budget. `DESIGN_CONSISTENCY` 80/100,
+  17 off-grid spacing values. `RELEASE_GATE: YELLOW`.
+- 🥵 **Struggle points (5).** The whole 18.1 minutes for a request the sizer itself filed as *chat*;
+  five provider timeouts; 8.5 minutes in a fast lane that died on **one** `TS2554`; 23 TypeScript
+  writes compiled by nothing; ETA midpoint 7.3 min against 18.1 actual (2.5×, outside the band — and
+  correctly NOT shown to the user, since it was unevidenced).
+
+### The missing subsystem, and it is the same one as `697b38ee`
+
+**There is still no shared evidence ledger.** Two instances in this one build, and in BOTH the module
+that got it wrong had already written the diagnosis into its own docblock:
+
+1. `RequestAnalyser`'s own comment: *"TWO MODULES ANSWER 'IS THIS A BUILD?' AND ONE IS NEVER TOLD THE
+   OTHER'S ANSWER."* It then answers by re-reading the prompt.
+2. `writeTimeTypecheck`'s `probeFailures` comment: *"`probeFailures > 0` with `skippedNoTsconfig > 0`
+   is the shape of a check that disabled itself on a read error."* It then lets it disable itself.
+
+Naming a shape is not acting on it. Both are fixed by being TOLD rather than by guessing better.
+
+### DNA-level fixes (all reversion-proven in `tests/theAnswerWasAlreadyInTheRoom.test.ts`, 16 cases)
+
+**1 · A question-shaped order is filed as an app, not as "hi".** `anAppWasOrderedButNotRecognised`
+(written 2026-09-20 for autopsy `31dc61fd`) requires `userAskedForAnAppToBeBuilt`, i.e. **HIGH**
+confidence — and the 2026-09-13 mood rule caps a QUESTION below HIGH on purpose. So the guard was
+structurally unreachable for the commonest shapes a real Indian user types. Measured on `main`:
+
+| request | intent · conf | filed as |
+|---|---|---|
+| `Create a upsc preparation aap` | new_build HIGH | app_unsized · 15 |
+| `Can you make me a UPPCS preparation app?` | new_build low | **chat · 5** |
+| `kya tum mere liye ek UPPCS preparation app bana sakte ho?` | new_build low | **chat · 5** |
+| `mujhe uppcs ki preparation ke liye ek app chahiye` | new_build low | **chat · 5** |
+
+The last is not a question at all. `AnalyserInput.buildIntent` now carries the route's OWN decision
+(`routes/agentv3.ts`, `buildIntent: intent`). **The precision half is kept, not dropped**: the four
+refusals inside `userAskedForAnAppToBeBuilt` (continuation, problem report, our own "Fix error"
+template, pasted machine error) were EXTRACTED as `describesWorkAlreadyStarted` — one definition, two
+readers — so *"Continue from where you left off and finish the build"* is still `chat` (autopsy
+`697b38ee`). Absent ⇒ today's behaviour exactly. Routing-neutral here (5 → 15 is still the same start
+band); what changes is that the report, the cost telemetry and the prompt audit stop filing real app
+builds under "chat".
+
+**2 · Three unreadable probes are a fact about the READER.** `writeTypecheckNote` read
+`tsconfig.json` and latched the third failure as *"this is not a TypeScript project"* — about a
+workspace whose own `ls -la` in the same report lists `tsconfig.json`, and into which `.tsx` files
+were being written **at that moment**. 23 TypeScript writes went unchecked; the fast lane then died on
+`src/components/StudySession.tsx(24,65): error TS2554` — precisely what this check exists to surface
+at write time. Now only a REAL `'no'` (a genuine `isMissingFileError`) stands the compiler down.
+`probeExhausted` is its own state, and since the probe is reached **only while a `.ts`/`.tsx` file is
+being written**, the compiler itself is asked in the probe's place — a `tsc` with no config prints
+lines with no `file(line,col):` prefix, which `parseTscErrors` does not match, so the genuinely
+config-less case yields zero errors and an empty note. New counters `compiledUnprobed` and
+`projectVerdict`; the report line no longer says "treated as non-TypeScript" about a read it could not
+make.
+
+**3 · SIBLING (rule 3), found while writing case 2's controls: every phone types the wrong
+apostrophe.** Every signal in `IntentClassifier` is written with a straight `'`; iOS smart punctuation
+and Gboard both produce `’`. Measured: `"it isn't working"` → problem report; `"it isn’t working"` →
+**nothing matched**. The whole negated-contraction family — `doesn’t work`, `won’t load`, `isn’t
+showing`, and the ANSWER-ONLY `don’t build` override that exists to STOP an unwanted build — was
+invisible to exactly the users who type it, on a product whose primary surface is a phone. Folded at
+the one reader (`firstSignalWord`), not by doubling six arrays. Same shape as the trailing space that
+made `BRAVE_API_KEY` look configured while every call was rejected.
+
+**4 · SIBLING: Hindi puts the negation either side of the verb.** `chal nahi raha` was listed;
+`nahi chal raha` was not — so *"preview nahi chal raha"*, the exact phrase this file's own comment
+quotes as a problem report, matched nothing. Mirrored spellings only; no widening of what counts.
+
+### The 50/50 law — why the problems arose at all
+
+- The 31dc61fd fix closed the shape its own report contained and did not ask which OTHER shapes route
+  to `new_build` without earning HIGH. **A guard built on a confidence level inherits every rule that
+  caps confidence** — and the mood rule caps questions deliberately. The fix is to stop deriving the
+  fact at all.
+- The probe's retry budget was written as *"a project that genuinely has no tsconfig must not pay a
+  failed read on every write"* — reasoning that never noticed the probe is only ever reached while
+  TypeScript is being written, which makes the expensive case nearly empty and the latch pure loss.
+
+### Still open (rule 6) — recorded, not fixed here
+
+- **`SCRIPT_INTEGRITY`: `"nमैं"` in `src/App.tsx`** — a literal `\n` swallowed into a Devanagari
+  string by the generator. Detected and reported, never repaired; a user reads the corruption.
+- **`REVIEW_INCOMPLETE` at 23 files.** `GREEN_REVIEW_LEAN`'s 45 s budget was sized for a proven-green
+  app's suggestion pass; this build was not green. Whether the lean budget should apply to a
+  YELLOW gate is a real question and is not answered here.
+- **Five provider timeouts before the ladder moved.** The slow-rung bench keys on throughput, not on
+  a timeout count within one lane; five is not obviously the right number to sit through.
+- **No shared evidence ledger.** Third autopsy naming it. Until one exists, this class returns.
+## 2026-09-22 — "Purchage promo code": buy a code with real money and give it away (PR pending)
+
+**Admin, verbatim:** *"promocode credit ke andar ek option aur add karo! **purchage promo code** —
+yaha user promocode purchage kar ke apne family/friend ko gift kar sakta hai! rate wahi jo ham
+charge karte hai, plus 2% pletform fee (hamare liye) + cashfree charges!"*, with the condition
+*"note: yaha jo purchage honge promocode woh real ₹ se honge navbharatai dwara gift kiye gaye
+welcome bonus se nahi!"* — and, after the fee was put to them: ***"2% hi kaafi hai!!"***.
+
+**ONE FEE LINE, NOT TWO — the admin's own decision after the honest objection.** The first request
+named "2% platform fee + cashfree charges". The gateway's real charge cannot be known in advance
+(UPI is **₹0 by regulation**, cards ~2%+GST, and the method is chosen on a later screen), so a
+second line would be a number no statement will ever match — which THE ONE-WALLET LAW forbids even
+when it flatters us. The flat rate already exists to cover it.
+
+**🔴 The fee is ADDED here and DEDUCTED on a recharge, and that is not an inconsistency.** Same 2%,
+two different products: a recharge's amount is what the user is willing to pay (₹500 → ₹490 of
+credit); a gift's FACE VALUE is the product, so a ₹500 code must be worth ₹500 when redeemed
+(₹510 → ₹500). `giftPriceAtPct` lives beside `splitPaymentAtPct` in the shared module, so the buyer
+is shown the exact arithmetic the server charges.
+
+**The admin's "real ₹, not welcome bonus" condition is satisfied BY CONSTRUCTION, not by a check.**
+A code is minted only by the payment-fulfilment path, after Cashfree confirms the money; the buy
+path reads no balance and writes no debit. Paying with the welcome gift is not a case that can arise
+and then be refused — which is the difference between a rule and a guard.
+
+**Three things that would have cost real money, each one line away from the obvious mistake:**
+1. **The claim is on the CODE, not `(code, user)`.** The marketing-coupon path deliberately claims
+   `coupon_<CODE>_<uid>` — one per USER, right for a poster, catastrophic here: ten friends could
+   each redeem the same ₹500. `claimGiftCode` flips the code's own document in a transaction.
+2. **A redeemed gift credits `'paid'`, not `'gift'`.** Every other coupon credit in this repo is
+   `'gift'`, so `'gift'` is what a copied line would say — and `giftSpend` would then tell the
+   recipient their friend's real money cannot buy a hosting plan. It does NOT move
+   `totalMoneySpent` / `lastRechargeAt`, because the RECIPIENT did not pay us.
+3. **The buyer is credited nothing** — the order is written `creditInr: 0` AND fulfilment returns
+   before the wallet block. Either alone is one edit from paying out twice.
+
+**Also:** codes use an alphabet with no `0/O/1/I/L` (10 chars ≈ 2^49, and it gets read aloud);
+randomness is a PARAMETER so it cannot quietly become `Math.random()`; a buyer may not redeem their
+own code; the daily cap (5 codes / ₹5,000) bounds chargeback exposure and **fails CLOSED** on an
+unreadable tally; `GIFT_REDEEM` now counts toward the Promocode capsule; and the share text names no
+vendor, because it leaves the app.
+
+Test-locked in `tests/aBoughtCodeIsSpentOnce.test.ts` (31 cases) and **reversion-proven four ways**
+— crediting `'gift'`, trusting the client's amount, crediting the buyer's wallet, and pricing the
+gift with the recharge split each turn it red. New collections `gift_codes` and `gift_code_daily`
+are classified in `everyCollectionIsClassified`; `gift_code_daily` is erased on account deletion and
+`gift_codes` deliberately is NOT (a code already given away is a third party's property, and a
+payment record is the first of Privacy Policy §9's four stated exceptions). `AppKnowledgeBase` has
+its entry, per the sync rule.
+
+📌 **The capsule slice above shipped as #3247 and was merged by the admin at 15:19 UTC**, so its
+"(PR pending)" heading is stale from that moment — noted here rather than edited there, because these
+entries are append-only. This branch then merged `main` and resolved one conflict in
+`BillingPanel.tsx`: the capsule markup is `main`'s, with this branch's one real change to it kept —
+a redeemed GIFT is promocode credit too, so `GIFT_REDEEM` belongs in that capsule's sum.
+
+🔴 **A REAL BUG FOUND BY RE-READING THE DIFF WHILE CI RAN, in the worst possible place.**
+`mintCodeForOrder` read the order pointer, **WROTE** the code document, and only then read the
+buyer's daily tally. Firestore rejects a transaction that reads after it writes — `payments.ts`
+carries that exact note on its own transaction — so **the very first real gift purchase would have
+thrown after the money had already left the buyer's account**, while they waited for a code that was
+never going to appear. Both reads now precede every write.
+
+⚠️ **Nothing in this repo could have caught it.** The transaction body only executes against a real
+Firestore; the 31 pure and source-level cases never enter it, `tsc` has no opinion about call order,
+and "a get after a set" is not a question a grep can ask. `tests/theGiftMintReadsBeforeItWrites.test.ts`
+drives the real function with a `tx` that raises Firestore's own error on a late read —
+reversion-proven, and it also pins that TWO documents are read inside the transaction (a tally read
+outside it would drop the cap out of the conflict set).
+
+⚠️ **Not verified against a live gateway from any session** — Cashfree cannot be reached from here.
+The first real purchase is the first real evidence, and the honest failure paths are in place: an
+order that somehow carries no face value refunds rather than minting a free code
+(`gift_face_missing` in the server log), and a redemption that loses its claim says which of the
+three reasons applied.
+## 2026-09-22 — 🧩 THE STATIC APP THAT STOPPED BEING STATIC (autopsy: a real APK build, dead in 24 seconds)
+
+The admin forwarded a build report: user app `nagpurcity16-gif/bharat-alpha`, workflow `android-apk.yml`,
+**24 seconds**. Machine ready DONE, libraries DONE, *"Building your app"* DONE, *"Preparing the Android
+project"* FAILED with our own guard's words — *"Your app compiled, but it produced no web page to wrap:
+no index.html was found in \"$WEBDIR\" or in any of the usual build folders."* Three green steps, no app,
+and the report told the user the platform could fix it itself.
+
+**LEDGER (5 buckets):** ✅ self-heal 0 · 🔀 workaround 1 (the G17b fallback searched other folders and
+found nothing) · ⏭️ skipped 2 (compile, package) · ❌ still broken 3 (no APK; the warning that names the
+cause was suppressed; the self-repair makes it permanent) · 🥵 struggle 1 (the whole run, plus the advice
+to press Build again).
+
+🔴 **ROOT CAUSE, MEASURED ON THE REAL FUNCTIONS RATHER THAN REASONED ABOUT: our own assembler writes a
+`build` script into every STATIC app, and our own detector decided "is this app built?" by asking whether
+a build script exists.** `buildPackageJson` writes an honest no-op so that `npm run build` succeeds; from
+that moment the app's package.json looks buildable to everything that reads it back. A static app was
+therefore static exactly ONCE, at assembly. The probe output, on production code:
+
+    [nested index]   kind=static  webDir=www  www/index.html? false   notes=[]
+    [static pkg]     "build": "echo \"Static app — the web files in www/ are used as they are.\""
+    [detectProjectKind(our own assembled repo)] = built
+    [detectWebDir(that repo,'built')]           = dist
+    [repairWebDir]   webDir:'www'  →  webDir:'dist'
+
+**A classifier whose input is manufactured by the thing it classifies has to recognise its own hand.**
+
+**THE FOUR DEFECTS, all fixed at the class and each proven by REVERSION (`tests/theStaticAppStaysStatic.test.ts`,
+10 cases; every fix re-broken in turn and the suite confirmed to fail):**
+
+1. **`detectProjectKind` fooled by our own output.** The no-op script is now the exported constant
+   `STATIC_NO_OP_BUILD`, written by `buildPackageJson` and READ BACK by `detectProjectKind`. Every
+   repository already shipped carries that exact string, so this re-classifies them with no migration.
+2. **The self-repair rewrote a CORRECT `www` into a `dist` that never exists.** `WEB_DIR_MISSING` and
+   `webDirForPackageJson` both hardcoded `'built'`, on the reasoning *"this repair only fires once a build
+   has genuinely produced output"* — false for a static app, whose build is the no-op we wrote. Both now
+   ASK (`detectProjectKind(current)`). With (1) in place the repair returns null for a static app, so a
+   failed build can no longer be made permanently unbuildable. ⚠️ The `detail.expected` no-op guard beside
+   it is DEAD for this path (our own guard message never populates it) — the real guard is `repairWebDir`
+   returning null, which is what (1) makes effective.
+3. **A NESTED index.html counted as a page.** `sawIndex` matched `/(^|\/)index\.html?$/`, so
+   `public/index.html` satisfied it, landed at `www/public/index.html` — and Capacitor opens `www/index.html`
+   and nothing else. The app shipped with no page AND the warning was suppressed by the very file that
+   caused it. The question asked is now the one that matters: is there an index.html at the ROOT?
+4. **Two expressions of one fact had drifted across two files.** `detectWebDir` (TypeScript) names where a
+   framework builds; the generated workflow's G17b fallback (shell) searches for the page when the config
+   is wrong. Remix's `build/client` and Angular's nested `<outputPath>/browser` are real answers from the
+   first and were searched by neither. Added, plus a test that derives the invariant per framework, so a
+   rung added to one fails CI until the other knows it. **`public/` stays OUT** — in Create React App it is
+   the SOURCE template, and packaging it would ship a broken shell as a success.
+
+🔒 **THE MISSING SUBSYSTEM: a pre-flight that refuses a press that cannot succeed.** The precedent is in
+this repo already — `signingReadiness` (2026-09-15) exists because a user pressed a button only GitHub knew
+could not work. There was no equivalent for the page, although the assembler KNOWS at assembly time whether
+a static app has one: the fact sat in `notes` as advice and was pushed anyway. `missingWebPageRefusal`
+(pure) is that gate, wired into `/api/mobile-ship/setup` beside the existing `no-ui` and `missing-assets`
+refusals, and it names the file and the move. ⚠️ **It decides ONLY for a static app.** A built app's page is
+produced on the runner by a build we have not run, so refusing one would be a guess — the same asymmetry
+`signingReadiness` states in its own header.
+
+⚠️ **ONE CANDIDATE I RAISED AND THEN KILLED MYSELF, recorded so nobody re-derives it:** a re-ship does NOT
+flip anything. `assembleMobileProject` always reads the WORKSPACE (`loadWorkspaceFiles`), never the GitHub
+repo, so the round trip that would flip `static`→`built` on a second press does not exist on that path. It
+exists only on the REPAIR path, which does read the repo — which is defect 2.
+
+➕ **SIBLINGS FOUND BY THE SAME AUDIT AND FIXED IN THIS CHANGE (rule 3):**
+- **The iOS lane ran `cap sync ios` with NO page guard at all.** The same app Android self-healed, iOS
+  failed with Capacitor's raw path error — which `diagnose()` does not classify. The guard is ONE shared
+  constant (`ENSURE_WEB_PAGE_GUARD`) used by every `cap sync` lane now, never a copy, and its warning says
+  "app wrapper" rather than "Android wrapper" because it is no longer an Android-only sentence.
+- **The iOS lane had NO failure diagnostic either**, so every iOS failure reached the user with no stage
+  and left the repair loop with no `NBAI_FAILED_STAGE` to read. ⚠️ Bolting the Android step on would have
+  been worse than nothing: it tests for an `android` directory an iOS build never has, so every iOS
+  failure would have been labelled `capacitor`. `FAILURE_DIAGNOSTIC` takes the platform now, `failedStage`
+  knows `ios`, and the STALE_WORKFLOW summary stops saying "the Android project" to an iOS user.
+- **The WEB_DIR_MISSING repair was handed two files** while its own comment promised it honoured a custom
+  Vite `outDir` "from the app's own config". `needs` now fetches the vite/angular config it reads.
+- 🔴 **`failedStage` was reading the SCRIPT, not the answer.** GitHub PRINTS each step's whole `run:`
+  block into the log before running it, so the ensure step's own two `echo "NBAI_FAILED_STAGE=capacitor"`
+  lines appear in every log whether or not they execute — **the admin's own report carries them, colour
+  codes and all, beside the one real marker**. Taking the first match meant an Android build that died at
+  Gradle would have been reported as stopping at `capacitor` and repaired for a stage that never
+  happened. It was right in this report by luck, because both said the same word. Markers that are part
+  of an `echo` COMMAND are now skipped; what a step really emitted is not.
+
+⚠️ **AND ONE CORRECTION TO MY OWN FIRST CUT, recorded because it is the interesting half.** The repair
+first asked `detectProjectKind(current)` — and that function also answers `static` for "there is no build
+script at all", which is right in a WORKSPACE (nothing to build ⇒ the files are the site) and wrong in the
+REPAIR path, where such a repo is simply broken. Three existing tests caught it. The repair asks the
+narrow `isAssembledStaticApp` instead: does the package.json carry the exact no-op WE wrote? That is a
+claim about our own output and nothing else, which is all the repair path is entitled to make.
+
+🔴 **STILL OPEN (rule 6) — found by the same audit, NOT fixed here, and each one is real:**
+- The self-repair loop has **no server-side bound**; the only limit is React state that every Build press
+  resets. An unfixable failure can burn a user's Actions minutes without end.
+- **Every successful repair starts TWO GitHub runs** — `/autofix` dispatches the workflow and the client
+  dispatches it again at the top of the next attempt.
+- **`refresh()` reports `fixed: true` for a comment-only rewrite**, because the repair regenerates the
+  workflow under the REPO name while the original was written under the APP name — so the file always
+  differs and a no-op is reported as a fix.
+- **The build panel claims a repair happened on the final attempt even when every autofix returned
+  `fixed: false`.**
+- The **built** branch never asks whether the app can produce a page at all, and nothing ever looks at the
+  repo ROOT — a user-written `"build": "echo ok"` yields `dist` and the same dead run. Deciding that needs
+  a real "is this a FINISHED page or a source template?" test (`%PUBLIC_URL%`, `src="/src/…"`, does it
+  reference an asset that exists beside it), which is a change of its own and is NOT guessed at here.
+- The user's **icon and background colour reach the Android lanes only** — an iOS build silently ships
+  Capacitor's default icon.
+- `SKIP_PATH` drops any directory segment named `build`/`dist`/`coverage` anywhere in the tree, silently
+  and with no note, so an app folder genuinely called `build/` never reaches the repository.
+- All three export generators default `webDir` to `dist` without ever asking `detectWebDir`, which sits in
+  the same repo. Harmless on the ship path (the assembler's config wins) and a real default elsewhere.
+These are two classes — the loop's honesty and its bounds, and platform parity — and both are separate
+changes, deliberately not piled onto this one.
+
+## 2026-09-22 — 📊 THE NUMBER THIS PIPELINE WROTE DOWN EVERY DAY AND NEVER ONCE READ
+
+Admin: *"jab main Claude se NavBharatAI ka .aab banwata hoon woh har baar ban jaata hai… lekin
+NavBharatAI ka user jab apni app ka APK banata hai to 80% baar fail hoti hai aur theek nahi hoti."*
+Aim: **NavBharatAI apk building = Claude Code apk building.**
+
+### STEP 0 — measured before anything was built, because "80%" is an impression
+
+🔴 **THE IRONY, VERIFIED BY GREP RATHER THAN TAKEN FROM A DOC:** `routes/mobileShip.ts` classifies every
+real failure and writes the class down — `setOutcome(uid, owner, repo, 'failure', diag.code)` — and
+`failureCode` appears in this repository at **exactly four places, all four inside `AppBuildStore.ts`
+itself**: the field, its comment, the parameter, the write. **Nothing has ever read it.**
+
+🔑 **AND THAT RECORD COULD NOT HAVE ANSWERED THE QUESTION ANYWAY**, which is why this is a new counter
+rather than a query. `setOutcome` holds the LATEST outcome for one (user, owner, repo) and a SUCCESS
+explicitly CLEARS the previous failure's code — so an app that failed nine times and then worked
+contributes **zero** failures to any scan of those rows. A biased sample reads as an ABSENCE of the
+problem, which is worse than no measurement because nobody doubts it.
+
+**What shipped (`mobileBuildOutcomeStore.ts`, patterned on `agentv3_engine_use` → `agentv3_sandbox_starts`
+— one document per UTC day, `FieldValue.increment` per key, no new storage idea):**
+- **The denominator** — every finished run, counted ONCE, at the status-poll site. ⚠️ That endpoint is
+  POLLED: `setOutcome` beside it survives a repeat because it overwrites one document, an INCREMENT does
+  not, so the claim is keyed by the RUN ID (`create()`, the same shape `hosting-daily-bill` uses before
+  it moves money).
+- **The numerator** — which class failed, riding the automatic failure report's OWN `create()` claim,
+  which returns true exactly once per run. No second guard to keep in step with the first.
+- **The class now travels on the report at all**: `buildMobileBuildReport` computed `diag.code` on every
+  automatic failure report and dropped it, so the admin's inbox could describe a failure in prose and
+  never say which of the 21 named classes it was.
+- **The cure split** — `repairable` / `user-credentials` / `unclassified`, because the admin's "80%" can
+  be three different problems with three different answers and only one of them is the repair loop. A
+  missing signing key does not move however good the loop gets.
+- **Admin → Reports → "Phone build outcomes"**, deliberately beside `FailureCategoryCard` and NOT merged
+  into it: that card is the AgentV3 **app** build (does the generated app compile?), this is the GitHub
+  **phone** build (does the .apk/.aab/.ipa come out?). Reading either as the other is exactly what an
+  impression like "80%" is made of.
+
+🔒 **THE HONESTY HALF IS STRUCTURAL, not a caveat in a comment.** The class list is a SUBSET of the
+failures (a diagnosis needs a client still polling when the run goes red), so `diagnosisGap` is computed
+and the card prints it ABOVE the breakdown — a reader who has already read the list has already formed
+the impression the sentence exists to bound. A CANCELLED run is in neither side of the rate: a user who
+pressed Stop did not meet a broken build, and counting them would make the number move with impatience
+rather than with reliability. Nothing counted yet reads as *"no finished build has been counted"*, never
+as 0%.
+
+### THE SECOND CHANGE — run the build GitHub will run, here, first
+
+`mobileShipPreflight` already refuses to push an app that cannot parse, whose imports do not resolve, or
+whose packages are undeclared, and its own header says the worst place to find a compile error is a
+GitHub runner. **All three of those checks are STATIC.** The thing that really decides a phone build is
+the app's own `npm run build` — and its first execution anywhere was five minutes into a remote run that
+costs one of the user's three repair attempts. The app is already alive in a sandbox with its
+dependencies installed, because that is where it was built seconds earlier.
+
+`mobileShipRealBuild.ts` runs it there. **Three rules keep it from costing more than it saves, each
+proven by reversion:**
+1. **It NEVER starts a machine.** `hasLiveSandbox` is a new in-memory map lookup on the actuator — no
+   I/O, no provider call. Every other entry point goes through `getSandbox`, which CREATES or RESUMES a
+   billable VM, so an opportunistic check that "just ran a command" would have become the most expensive
+   step in the ship. An actuator that cannot answer counts as NO: a wrong yes starts a machine.
+2. **It is bounded** (180 s default, malformed value takes the default and never "no limit"), and a
+   build that outruns it is *"could not tell"*, never *"your app is broken"*.
+3. 🔴 **It is NOT stricter than the runner it predicts.** `WEB_BUILD_STEP` packages straight from the
+   bundler when only TYPE findings stopped the strict script, so `error TS…` is not a ship blocker there
+   and must not be one here. That judgement is `classifyBuildFailure`'s — the SAME classifier the remote
+   repair loop uses, never a copy — so our prediction and the runner's own diagnosis cannot disagree
+   about the same log. Being stricter than the thing you are predicting refuses apps that really build.
+
+A skip says NOTHING to the user: *"we could not check"* is not information anybody can act on, and it
+would turn a silent optimisation into a worry. The ship proceeds exactly as it did before.
+
+### ⚠️ ONE THEORY I RAISED AND KILLED MYSELF, recorded so nobody re-derives it
+
+I expected `autoFixable: false` to short-circuit the AI tier — which would have made
+`APP_CODE_BUILD_FAILED` (the user's own app not compiling) never reach a model at all, and would have
+been THE root cause. **It is false.** `routes/mobileShip.ts` reads *"the rules cannot fix this class —
+the AI pass is exactly for this case"* and calls `tryAiRepair()` first. The loop's real gaps are the
+ones the brief names, not this.
+
+### 🔒 MEASURING THE PIPELINE DOES NOT MEAN KEEPING A FILE ON THE PEOPLE USING IT
+
+Caught by `tests/everyCollectionIsClassified.test.ts` before either collection ever ran — *"a collection
+is guilty until listed"*, which is exactly what that guard is for. The per-run marker that stops a POLLED
+status endpoint counting one build twice was keyed `${owner}_${repo}_${runId}` and carried `{ owner, repo }`
+in its body. `owner` is a person's GitHub login; the collection grows with every finished build; and it is
+keyed by nothing a user owns, so `deleteUserData` could never have reached it — the `site_analytics` shape,
+before it shipped rather than three days after.
+
+- **The id is now a SHA-256 digest** (`countedDocId`) and the body holds `{ lane, outcome, countedAt }` —
+  what a count IS, and nothing about who ran it. Removing the data beats promising to erase it later.
+- **A plain digest, deliberately not an HMAC.** `siteAnalytics.visitorHash` keys its hash with a secret
+  because an IP address is a 32-bit space anybody can enumerate; this id must instead resolve to the same
+  string FOR EVER, and a rotated secret would make every existing claim unfindable at once — counting every
+  run still being polled a second time, the precise defect the marker exists to prevent.
+- **Both collections are on a retention clock**: the day rollup at 400 days (`day` is its own ISO
+  timestamp, like `build_failures`), the marker at 30 — far past any real poll, because purging it early
+  inflates the very rate this feature was built to measure. The marker is also in `GROWING_COLLECTIONS`,
+  so the Load board's storage warning can see it.
+
+### ✅ C IS BUILT (later the same day, admin: *"navbharatai, github se jo capacitor apk/aab banata hai, usko claude.code level karo"*)
+
+The admin repeated the request after #3249 merged, which under the standing rule is the decision. The
+numbers card exists and starts counting with the next build; C did not wait for it.
+
+**"Loop theek karo, model nahi."** `runAiRepairLoop` (`mobileBuildAiRepair.ts`) + `makeRepairVerifier`
+(`mobileShipRealBuild.ts`) + `listRepoTree` (`githubRepoWrite.ts`):
+- the model may ASK for a file (`{"needFiles": [...]}`), only from a listing we supplied — the allowlist is
+  a menu, never loosened;
+- every candidate is RUN through the app's own sandbox build before commit; a rejected change is never
+  committed, on any round, and once a verified failure exists a later unverifiable round is not committed
+  blind either;
+- a verified failure is fed back in the build's own words with the candidate in view;
+- bounded by `MOBILE_AUTOFIX_AI_ROUNDS` (4, clamped 1–8).
+
+**Siblings found and fixed in the same change:** `build()` passes a machine with no package.json, so the
+ship-time check merged that morning could have certified an empty sandbox — `sandboxHoldsApp` on both
+paths now; every repair started TWO GitHub runs (server dispatch + panel dispatch) — the server stopped;
+a comment-only rewrite reported `fixed: true` — `isMeaningfulChange`; three of the four credential classes
+still reached the AI pass — `cureFamily` ends them first; the panel claimed a repair on every exhausted
+cycle — it now counts what really landed.
+
+**Measured on the admin's card from here on:** `repairs.fixed / unverified-fix / gave-up / miss` per lane.
+The verified share is the number that says whether the sandbox is reaching real builds.
+
+**D (a per-class attempt budget) is deliberately still not built**: with credential classes ending at
+once and each remaining attempt carrying a VERIFIED fix, the fixed 3 already means "3 GitHub runs that
+each started from something that compiled". Whether a fourth is worth the minutes is the card's to say.
+
+### 🔴 STILL OPEN — and the numbers decide the order, which is the brief's own instruction
+
+- **C — the AI repair is a one-shot blind patch, not a loop.** It sees the failing step's log and a
+  capped set of files whose names appear in it, answers once in JSON, and that answer is COMMITTED
+  without being verified — while `mobileShipPreflight` re-verifies every one of its own AI rounds and
+  calls an unverified fix a MISS. The same discipline does not exist on the GitHub side.
+- **D — three blind attempts.** `ATTEMPT_BANDS` gives every app exactly 3, whatever the class. Ten
+  rounds on a missing signing key are ten wasted rounds; the cure there is the one-press key button that
+  already exists.
+- And from the earlier autopsy the same day: the loop has **no server-side bound**, starts **two** GitHub
+  runs per repair, reports `fixed: true` for a comment-only rewrite, and the panel claims a repair
+  happened when every autofix returned `fixed: false`.
+
+**C and D are deliberately NOT built yet.** If the aggregate says most failures are the credentials
+class, their benefit is ZERO and the whole plan should change — which is what Step 0 exists to find out,
+and what the admin's own brief instructs.
+
+### 🏗️ THE APP IS BUILT HERE; GITHUB ONLY PACKAGES IT (2026-09-22, same day, admin: *"aapne 5 point bataye hai, sab karo … toote hi na wala banao"*)
+
+The admin granted full authority on the five points proposed after C, and all five shipped in one PR
+(the third of the day on this pipeline), plus what was found on the way.
+
+1. **Ship the sandbox's own production build as `www/`** (`mobileShipPrebuilt.ts`, `prebuildForShip`):
+   the app's `npm run build` runs in its own sandbox (with the same `npx vite build` rescue for a
+   type-only failure the runner has), the output is read with `downloadDistFiles` (the one reader; it
+   strips the preview bridge), and the assembler ships it as a STATIC repository — source at its own
+   paths, the build under `www/`, `www/.nbai-prebuilt` as the stamp, the sentinel build script — so every
+   static-path mechanism applies by construction and the runner compiles nothing. A stale MARKER is placed
+   in every existing output dir before the build (nothing is deleted — the first draft's `rm -rf` would
+   have removed a webpack project's `build/` source, the review's catch) and an output that still carries
+   it is refused as stale, so the first-non-empty-candidate reader can never ship last week's `dist/`.
+   The pushed package.json keeps only Capacitor, TypeScript and the plugins the machine named
+   (`capacitorPluginScanCommand` reads `node_modules/<dep>/package.json` for the `capacitor` field;
+   `null` ⇒ nothing trimmed); lifecycle scripts go too, or `"prepare": "husky"` runs on an install with
+   no husky. Large text bundles ride as blobs (`PREBUILT_INLINE_TEXT_MAX`) so one trees POST cannot carry
+   megabytes inline (per file AND in aggregate). `www/` is OWNED by the push: `www/.nbai-shipped` records
+   every path written, and `commitFiles(..., removePaths)` removes exactly the recorded paths a later push
+   does not carry — never a `www/` the user already owned. Keys `MOBILE_SHIP_PREBUILT` (on) / `_MS` (240 s).
+2. **The ship's build wakes a paused sandbox and seeds an empty one** — inside the prebuild, not inside
+   `runRealBuildCheck`, whose "never starts a machine" contract and tests stand; the check now runs only
+   where the prebuild never STARTED a build (`buildRan`), so a timed-out build is never followed by a
+   second one in the same machine. `hasLiveSandbox`'s PRESENCE marks a sandbox-backed actuator; the local
+   actuator has none, so `tests/mobileSetupRoute.test.ts` never seeds or builds on disk.
+3. **npm + Gradle caching in the generated workflows** (`actions/cache/restore` + `save`, keyed on
+   `package.json` and the Java pin, saved `if: always()`), never setup-node's `cache: npm`. Cache steps are
+   hidden from the user's step list (`friendlyBuildStep`) and documented in `MOBILE_APK_PIPELINE.md`.
+4. **The panel says which of three things a repair was**: built and checked here first; a packaging step
+   the sandbox cannot judge (`judgeable: false`, from `sandboxCanJudge`); or one it could not check on
+   this request. The exhausted-cycle sentence says when none of the repairs could be checked here.
+5. **Cross-run memory** (`mobileRepairHistory.ts`): the panel carries one record per autofix answer and
+   sends it with the next; the server judges `new` / `repeat-after-rules` (skip the rules tier) /
+   `repeat-after-ai` (the model is told its own committed change failed, in the build's words) /
+   `repeat-after-nothing` (end the cycle honestly). Every answer carries `failureLine`
+   (`failureSignature`: the tool's last words, markers and timestamps stripped) so a repeat is recognisable.
+
+**Found and fixed on the way (rule 3):** the verifier and the workspace heal took a REPOSITORY path as a
+WORKSPACE path — a static-LAYOUT repo's `www/index.html` mapped nowhere, a prebuilt repo's bundle would
+have mapped INTO the workspace, and a root `index.html` / `vite.config.ts` was never app source.
+`detectRepoLayout` + `workspacePathForRepoPath` (assembler) map the path first (and on a static or
+prebuilt repo `package.json` / `capacitor.config.*` map NOWHERE — they are ours, and the repository's
+package.json carries the no-op sentinel, so writing it over the workspace's would turn the sandbox build
+into an echo), and `isAppSourcePath` is now "not a packaging file" (`REPO_ONLY_PATH`) rather than a
+prefix list of source folders. Said plainly: a static APP still has no `npm run build` for the verifier
+to judge it by — a parse-level verifier for static apps is a separate change, not built here.
+
+**Measured from here on:** `ships.prebuilt / source` and `prebuildSkips.<reason>` per day, on the admin's
+card as "How the app reached GitHub". Nothing before this entry shipped prebuilt, so the first real
+number is the first ship after it merges.
+
+**Still open, said plainly:** a verified AI fix to the repository's package.json is never merged into the
+workspace (the assembled file would break the app's own build), so the next ship regenerates it; the
+prebuild reads `buildOutputCandidates`' FIRST non-empty dir, so a framework whose real output dir the
+config reader does not understand ships nothing prebuilt (an honest fall-through, counted as `no-output`);
+and the plugin scan runs `node` in the sandbox — a machine without it (Python apps never reach here) answers
+`null` and nothing is trimmed.
+
+Tests: `tests/theAppIsBuiltHereGithubOnlyPackagesIt.test.ts` (42 cases, incl. source-level reversion
+guards), `tests/anAttemptIsOnlySpentOnSomethingNew.test.ts` (extended), pins updated in
+`theBuildGithubWillRunIsRunHereFirst` and `theLoopNotTheModel`.
+## 2026-09-22 — AUTOPSY `21b431e1`, PART 2: the ₹0 items (admin: "₹0 wale sare complete karo")
+
+Four items, none of which spends a model call. The two that would cost tokens (the review budget; tests
+generated in every build) and the pricing decision are deliberately NOT in this change.
+
+### 1 · `"n` + Devanagari — and the check was accusing CORRECT code as often as broken code
+
+The report said `src/App.tsx` carried a corrupted label. Reading the detector settled something the
+report could not: **`stringLiterals` returns the literal's body as written**, so `"\nमैं"` — a newline
+before Devanagari, which is right — arrived as the characters `\`, `n`, `म`…, the backslash split away
+as punctuation, and the token left behind was **`nमैं`**. Measured before the fix:
+
+    "\nमैं"        -> ["nमैं"]     ← correct source, reported as a corrupted label
+    "पंक्ति\tदो"    -> ["tदो"]     ← correct source, reported as a corrupted label
+
+**That is the exact token the report carried**, so the finding may never have been a defect in the
+user's app at all. Third analyzer in three days caught describing its own blind spot as the user's bug
+(`AccessibilityAnalysis` 2026-09-20, `FeaturePresence` 2026-09-21) — same class each time: a regex
+reading a dialect it was not written for.
+
+- `decodeLiteralEscapes` runs before tokenising. ⚠️ `looksLikePattern` must stay on the RAW body — it
+  reads `\b`, `\d`, `\s`, the very sequences decoding destroys.
+- **And when the check IS right, it now repairs the one shape that needs no guess.** A lone `n`/`t`/`r`
+  standing against Indic text inside a quoted literal is a dropped backslash. `repairLostEscapes` runs
+  as a deterministic pass (same idiom and same place as the CSS and dotenv guards, before the green
+  latch), reports `SCRIPT_INTEGRITY_REPAIRED`, and runs BEFORE the finding is recorded so the warning
+  describes what actually shipped.
+- 🔒 **Nothing is ever deleted from a user's text.** Restoring the backslash turns a VISIBLE wrong
+  letter into INVISIBLE whitespace: right when we are right, harmless when we are wrong. Deleting the
+  letter would be destructive if the reading is wrong. The founding case `"জungle"` needs a word nobody
+  wrote down and is refused, as are `greenमैं`, `n मैं` and anything already escaped.
+- 🔁 The loop closes: after the repair the check no longer complains about that file.
+
+### 2 · `greenFreeze.ts`'s own header promised a carve-out the code deleted six weeks ago
+
+The header said *"Creating a genuinely NEW file is allowed (a new test/doc file cannot break the app)"*.
+`writeRefused`'s docblock, thirty lines below, records that carve-out being removed on 2026-08-12 after
+an adversarial review. Both statements sat in one file. The same report shows nine
+`GREEN_FREEZE_DEFERRED` writes — tests, a manifest, robots.txt, an icon, a service worker — and the
+header said they would have been allowed. Behaviour unchanged (full deny is correct); the header now
+says so and records why.
+
+⚠️ **And the obvious fix for "the app shipped with no tests" is WRONG, recorded so nobody tries it.**
+Widening the freeze to allow test files would let a HALF-landed change through: a test asserting
+behaviour whose accompanying edit was refused makes the app's own suite fail, which `AGENTV3_VACCINE`
+then correctly reports. `sw.js` can break a site outright. The real cause is that `generateIntegrationTests`
+is a TOOL the model calls, so tests were attempted AFTER green; the fix is upstream (tests inside the
+build), it costs generated tokens, and it is NOT in this change.
+
+### 3 · `FAST_LANE_PHASES` — where the 8.5 minutes went
+
+The single most expensive item in the report, and two plausible cures were available: hand off when the
+first verify blames many files, or send the repair only the offending file. **Which one is right depends
+entirely on which phase the minutes were in, and no report carried a phase.** Fixing from a guess is
+what the fourth absolute rule forbids, so the number ships first.
+
+`SimpleBuilder` now clocks plan / contract / generate / verify / repair, with RUN COUNTS beside the
+durations (three compiles is a different problem from one slow compile). ONE `timedVerify` closure
+covers all four verify call sites — four copies of a clock is the drifted-copy class. The ledger is
+hoisted OUT of the lane closure for the same reason `generatedSoFar` is: on the failure path, which is
+the path this exists for, the closure's locals are gone before the caller can ask. The unaccounted
+remainder is PRINTED, never folded into a phase. **Nothing reads it.**
+
+### 4 · `PROVIDER_TIME_WASTED` — what five failed attempts actually cost
+
+"The bench is too slow" is the obvious reading of five failed attempts ending on rung 2 of 5. It may
+well be wrong: **the bench's trigger is a COUNT (two consecutive timeouts on a family) and its cost is
+a CLOCK, and nothing had ever compared them.** Three minutes of a 480-second turn is 37% of the user's
+wait; three minutes of a 30-minute build is noise. The same five timeouts mean opposite things.
+
+One emit in `MultiProviderTurnRunner`, placed BEFORE the classification branches so no branch can forget
+it, with the kind taken from the same predicates the branches use. A budget-ended call is deliberately
+excluded — our own clock is not the vendor's waste (autopsy bb688add). Reported beside `LADDER_DEPTH`,
+outside every feature's conditional (the `READY_BEFORE_END` rule: an instrument inside another feature's
+`if` reports on a biased sample, and a biased sample reads as an ABSENCE of the problem). A share of the
+build's clock is printed ONLY when a real denominator was passed.
+
+Test-locked and reversion-proven in `tests/anEscapeIsNotALetter.test.ts` (12) and
+`tests/theNumberComesBeforeTheFix.test.ts` (13).
+
+### Still open after this change
+
+- **Fast lane's 8.5 minutes** — instrumented, not yet fixed. The fix waits for real `FAST_LANE_PHASES`
+  lines from production builds.
+- **The bench's trigger** — instrumented, not yet changed. Same reason.
+- **Review budget on a non-green build** (costs tokens) · **tests generated in every build** (costs
+  generated tokens) · **the shared evidence ledger** (architecture) · **the double discount on a
+  stopped build** (a pricing decision, the admin's).
+## 2026-09-22 — The Play upload failed on its LAST line, and the log read like a success
+
+`upload_to_play` was ticked for the first time (run **#127**, built from `main`). The bundle built,
+signed and **uploaded**:
+
+```
+Validating tracks: 'internal'
+Uploading android/app/build/outputs/bundle/release/app-release.aab
+Successfully uploaded 1 artifacts
+Committing the Edit
+##[error]Changes cannot be sent for review automatically. Please set the query parameter
+         changesNotSentForReview to true.
+```
+
+**The edit was never committed, so the "successful" upload landed NOTHING.** Google refuses to
+auto-submit an edit for review while an app has a change it will not take automatically — and on this
+day the app was under a **Broken Functionality** enforcement with its previous release rejected. The
+fix is one input, `changesNotSentForReview: true`: the bundle is committed to the internal track and
+the admin presses *Send for review* in the Console. Internal testing needs no review to be installable,
+which is the whole point of uploading there.
+
+⚠️ **It is not a workaround for the rejection and does not make one less likely** — it only stops the
+upload itself from failing. What reaches users stays the admin's decision, taken in the Console.
+
+📌 **What the rejection actually was, and it was NOT the policy strike this session first guessed.**
+Google's label reads *"Loading problems: Your app doesn't open or load"*; their own evidence shows the
+app OPEN on the AI Image Generator with *"Image generation failed — please try again"* three times.
+`interimWelcomeGift.ts` (same day, another session) had already root-caused it: a new account received
+₹0, free images come from a keyless third party with no SLA, its failure falls to a PAID rung, and a
+paid rung is refused on an empty wallet. **A Play reviewer is exactly that user.** All three of the
+fixes that break that chain — the ₹50 interim welcome credit, the client-fetched free image, and the
+free-tier paid-rung ceiling — were verified ABSENT from rejected build 125 (`6a5a6085`) and PRESENT in
+`main`, so build 127 is the first bundle that does not have the defect.
+
+📌 **And the App Links work cannot be tested on the live app at all.** The manifest claim landed
+2026-09-19; build **116**, the one live on Play, was built 2026-09-15 and — read at its own commit —
+carries no `autoVerify` intent filter. Today's server-side work (both certificates published, the
+`/.well-known/` redirect exemption) is correct and verified on both hosts, but it takes a build from
+2026-09-19 or later to demonstrate it.
+
+## 2026-09-22 — IMAGE GENERATOR: the box that did not empty, and the noun that overruled the sentence
+
+Admin, two screenshots: *"1. image generate me messages send hone ke bad bhi, message input box me show
+ho raha hai! 2. image irrelevant ban rahi hai, prompt se koi lena dena hi nahi hai!"*
+
+### 1 · The box emptied only on SUCCESS — a minute after the bubble said "sent"
+
+Both image composers (`AIImageGenerator.tsx`, `ImageStudioPro.tsx`) cleared their input only after
+the picture arrived; on the free tier that is after a 15-second-per-address retry countdown ("trying
+again (52s)" in the screenshot). Every other box in this app clears at send. The old reason was real
+and is kept — *"a FAILED request keeps the words"* — so the fix is clear-at-send + restore-on-failure
+through ONE pure rule, `src/lib/draftAfterSend.ts` (`draftAfterFailedSend`), which restores **only
+into an empty box**: a new brief typed while the old one was in flight is never overwritten. The
+wallet-refusal path restores too (they will send it again after topping up). The words are captured
+once at send (`typed`) because the history row and the bubble still need them after the clear.
+
+### 2 · "Photograph" on the chip, "logo" in the words — and the noun won
+
+Type chip **Photograph**, style **Realistic**, brief *"A minimalist photograph of a clinic logo …
+shot with a shallow depth of field … studio lighting …"*. Reproduced with `craftImagePrompt`; what
+the engine received:
+
+    …photograph… shallow depth of field… studio lighting… professional photography.
+    Design as a LOGO MARK: flat vector style… **no photorealism**… Avoid: …**blurry, out of
+    focus**… **photorealistic**…
+
+One prompt asking for a photograph and forbidding photorealism — the muddle `imagePromptCraft.ts`'s
+own docblock says it exists to prevent — and the picture was a shallow-depth-of-field blur related to
+nothing. Then the note told the user to *"set the Image type to Photograph"* — the chip already set.
+
+**Cause:** "Photograph" matches no purpose pattern, so `detectPurpose` fell through to the WORDS,
+found the noun "logo", and that word-inferred purpose overruled the realism the same words asked for
+explicitly. The module's own principle — *the user's typed intent is the stronger signal* — was
+applied to the style chip and never to this. **Fix:** `detectPurposeWithSource` returns where the
+purpose came from; a purpose CHOSEN on the type chip keeps full authority (a chip-set logo still wins
+over the Realistic chip, unchanged), a purpose merely INFERRED from a noun stands down to `general`
+when the same brief asks for a photo in words, and the photo direction applies. The note now names an
+action that exists (*change the Image type, or write "a photo of"*).
+
+⚠️ **Not changed, and recorded as an open question:** the negatives ride INLINE as "Avoid: …" (~500
+chars) into a provider with no negative-prompt field, and the module admits some models read such a
+list as a request FOR those things — the output was "blurry, out of focus", both in that list. Not
+proven, not guessed at; the verified contradiction above is the fix. The ⭐ enhancer was NOT the
+cause: given "Photograph + Realistic" it wrote a coherent photo brief; the craft layer then fought it.
+
+Test-locked and reversion-proven in `tests/theBoxEmptiesWhenYouPressSend.test.ts` (6) and
+`tests/aNounIsNotAChip.test.ts` (9); all 234 existing composer/craft tests unchanged and green.
+
+## 2026-09-22 — IMAGE GENERATOR, PART 2: the two halves left open, closed (admin: "to fix karo sab")
+
+### 1 · The ⭐ turned a logo into a photograph because of a chip nobody chose
+
+**Root cause (verified):** the style chip DEFAULTS to `photo` (Realistic) — `AIImageGenerator.tsx:209`
+— and the enhancer was handed `Style: Realistic` for the brief *"clinic logo"*. Its own instruction
+says a photographic style *"gets real camera language"*, so it wrote *"a minimalist photograph of a
+clinic logo, shot with a shallow depth of field…"*. The craft layer then read a photo request in the
+words and built a photo. **Two modules, two rules about what a chip may overrule.** The craft layer had
+already learned *"a chip they never touched yields to the words"* for the picture it BUILT; the ⭐ kept
+a rule of its own.
+
+**Fix — one owner.** `resolveImageBrief` (`imagePromptCraft.ts`) now answers every chip-vs-words
+question; `craftImagePrompt` is built from it and the enhancer asks it too (`resolveEnhanceBrief`), so
+they cannot disagree because there is only one of them. Concretely:
+- the style chip is forwarded to the model ONLY when the resolution says it applies; when a flat mark
+  won, the model is told in words to keep it one (`keepTheKindLine`);
+- a rewrite that turned a flat mark into a photograph is REFUSED (`changed-kind`), the same shape as
+  `keepsTheFacts` for the kind of picture rather than its facts — the user's words are kept and the
+  note says how to get a photo of it (say so in the brief);
+- the client sends the chip's **id** (`styleId`) beside its label; the rule reads the id, the model reads
+  the label, and an id is never guessed from a label. Without an id the old behaviour holds exactly.
+
+### 2 · The Avoid list repeated the prompt — and may have contradicted it
+
+The prompt said *sharp, professionally composed, coherent lighting, production quality* and then, ~500
+characters later, *Avoid: … blurry, out of focus, low resolution, cluttered composition …* — into a
+provider with ONE string and no negative field, which `withInlineNegative`'s own comment has always
+said some models read as a request. `compactNegative` drops every negative whose POSITIVE the prompt
+already carries (a fixed table, `NEGATIVE_COVERED_BY_POSITIVE`); everything with no positive form —
+watermark, gibberish text, extra fingers, mockup frame — stays. Measured on the logo case: 8 items gone,
+776 → 663 chars. `crafted.negative` itself is untouched, so a provider with a real negative field still
+gets the whole list. `IMAGE_GEN_INLINE_NEGATIVE=full` restores the long list with no deploy.
+
+⚠️ **Honest about what is proven (rule 6):** that the negatives CAUSED the blur is a suspicion, not a
+measurement — the provider's output cannot be taken from here. What is certain is that a negative whose
+positive is already present adds no instruction, so removing it cannot remove any direction the model
+was given; it can only remove a risk. The admin's next real free image, with and without `=full`, is the
+evidence.
+
+Test-locked and **reversion-proven four ways** in `tests/theStarKeepsTheKindOfPicture.test.ts` (18):
+the star forwards the chip unconditionally again · a kind-changing rewrite is accepted again · the
+Avoid list repeats the prompt again · the craft layer keeps a private second reading of the chips.
+All 109 existing enhancer/craft/composer tests unchanged.
+**The adversarial review (seven finders, three refuters each) found, and the same PR fixed:**
+- 🔴 **CRITICAL — the trimmed package.json dropped `typescript`, and Capacitor's CLI reads
+  `capacitor.config.ts` with the project's own TypeScript** (`@capacitor/cli` config.js: *"Could not find
+  installation of TypeScript … npm install -D typescript"*). Every prebuilt ship would have died at
+  `npx cap add android` — WORSE than the source ship. **And it was true of every hand-written static
+  ship before today**: `buildPackageJson` with no package.json declared only `@capacitor/cli`. Now every
+  pushed package.json declares `typescript` (never overriding a range the app chose), the trimmed one
+  keeps it, and a new classifier class `TYPESCRIPT_MISSING` + rules repair heals old repositories.
+  This may be a large share of the "80% fail" the admin reported — the card will say.
+- 🔴 **`UNKNOWN` was a refusal.** `readRealBuildFailure` blocked on "anything not rescued by the
+  workflow", so a killed build, an out-of-memory or a registry blip became "your app did not compile".
+  Now only a POSITIVE app fault refuses (`APP_FAULT_CODES`); everything else falls through to the source
+  ship, for the check AND the prebuild.
+- **`rm -rf` of every candidate output dir would have deleted a webpack project's `build/` source.**
+  Replaced by a stale MARKER in each existing dir; an output still carrying it is refused as stale.
+  Nothing is ever deleted from the machine.
+- **Stale-`www/` removal listed the folder and deleted "whatever is not ours now"** — a repository the
+  user already owned (a Cordova project, a static site) would have lost its `www/`. Now `www/.nbai-shipped`
+  records what each push wrote, and only recorded paths are ever removed.
+- **A concurrent v5 build's idle-sweep flag would have been cleared by the prebuild's `finally`**, and a
+  Green-Freeze-latched workspace would have been built beside a build in flight. `isBuildActive` on the
+  actuator + `isGreenLatched` ⇒ `build-in-flight` skip; the flag is only ever cleared by the one who set it.
+- **A seed abandoned by the clock kept writing while the build started on a half-seeded machine**, and a
+  cold machine's creation was not on the clock, so a build could start with one second left. The seed's
+  result is honoured, the presence read is raced, and a build is not started with under 45 s remaining.
+- **`@capacitor/ios` under devDependencies vanished with the trim**; runtime packages now move to
+  dependencies. **The screens gate ran after the machine was woken**; it runs first. **Two overlapping
+  setups could build in one sandbox**; a per-workspace in-flight guard answers 409. **Cache saves ran
+  `if: always()` even when the restore never ran**; now `!cancelled() && outcome != 'skipped'`, and every
+  cache step is `continue-on-error` so a cache-service problem can never fail a green build. **The inline
+  tree body was bounded per file but not in aggregate**; now both.
+- **`failureSignature` took the tail of the step, and every Vite failure's tail is the same three stack
+  lines** — two different errors read as one, and a correct AI fix would have been told it "did not fix
+  it". Now the line that NAMES the error is the signature (stack frames, the runner's exit line and npm's
+  boilerplate are noise), and npm's per-run log path and durations are normalised away. **The rules
+  tier's answer carried no `judgeable`**, so the panel said "could not check this one here first" about a
+  Gradle repair it could never have checked; every answer carries it now, and the exhausted-cycle
+  sentence says "packaging-step changes" only when every repair was one. **`repeat-after-nothing` is
+  defence in depth** — the shipped panel ends its cycle on the first `fixed: false`, so no client of
+  ours reaches it; the module header says so. **A stamp read that failed for a non-404 reason** used to
+  read as "no stamp" (prebuilt judged static, the bundle mapped into the workspace root); `repoFileExists`
+  tells a 404 from a failure to check, and an unknown answer falls to the prebuilt side. **The KB sentence
+  overclaimed** ("GitHub never compiles it again") — it now says when the source path still applies.
+
+
+---
+
+## 2026-09-23 — 🌊 A streaming client got an EMPTY answer it had already paid for (a defect in #3246)
+
+Found by checking my own shipped API the day after it merged, not from a report. **Nothing in the
+developer API read `stream`.** A chat UI built on a standard SDK almost always sends `stream: true`; it
+received a plain JSON body, parsed it as an event stream, found no events, and handed the developer an
+**empty answer — already charged to their wallet.** A paid answer nobody could read, reachable by the
+single most common way the API would be called. #3246's own description listed "no streaming" as *not
+done*; that was true and incomplete — "not supported" and "silently returns nothing while billing" are
+different states, and only the first is honest.
+
+### The fix, and the design choice a later session must not "improve"
+
+`stream: true` is now honoured with a real event stream (`chatCompletionStream`, pure): one content
+chunk, one finish chunk, the usage chunk when `stream_options.include_usage` asks for it **and** it was
+measured, then `[DONE]`. Both chat doors write through ONE function (`sendCompletion`), so the plain
+assistant and the experts cannot drift.
+
+🔒 **The answer arrives in ONE piece, deliberately.** This repo's streaming provider path reports **no
+token counts** (`routeStream` logs `usageMeasured: false`), and THE ONE-WALLET LAW charges ₹0 for an
+unmeasured turn rather than inventing a number. Real token-by-token streaming on this door would
+therefore have given **every API caller every answer free, silently, on NavBharatAI's bill.** So the
+stream carries the answer from the SAME measured call the non-streaming door makes, and a test asserts
+the two are charged identically. **Do not swap it for a live stream until the streaming path reports
+usage** — the day it does, `chatCompletionStream` is the only thing to change. The Developer Tools page
+and the knowledge base both say "one piece" plainly, so a developer who chose streaming for speed is
+told rather than left to discover it.
+
+Refusals (400/402/403/422/429/503) stay ordinary JSON with their status — an SDK reads the status
+before deciding whether a body is a stream, so nothing about error handling changes for the caller.
+
+### Locked
+
+`tests/theApiStreamsWhatItCharges.test.ts` — 15 cases, parsing the response **the way an SDK does**
+(split on blank lines, strip `data: `, stop at `[DONE]`), because a test of our own builder alone
+would have passed while the original bug shipped. **Proven by reversion four ways:** the original bug
+itself (stream ignored → 3 fail), content written raw instead of JSON-encoded (an answer containing a
+blank line would end the event early), a usage chunk sent for an unmeasured turn, and the expert door
+dropping the caller's choice. One ordering guard in `theApiGrewFourDoors.test.ts` was re-aimed onto
+`sendCompletion` and made stronger: it used to prove two markers existed, it now proves per door that
+the answer is written BEFORE the money moves.
+### 🧹 THE LAST REVIEW ITEM (2026-09-23, follow-up to #3258)
+
+The seven-finder review that ran over #3258 finished after the merge. Its 35 findings (with heavy
+duplication across finders) were checked one by one against merged `main`: every one had been fixed in
+#3258 except half of one — a **Next.js app with no static export** still woke the sandbox and ran a full
+`next build` (up to the 240 s budget, with the user watching "Preparing…") only to fall through to the
+source ship, because the reader finds no site in a server build. `prebuildForShip` now asks
+`isNextWithoutStaticExport` (the builtSiteCheck helper publish already uses) before any machine is
+touched, and skips with reason `server-app`, shown on the admin card as "a Next.js app with no static
+export". A Next app that DOES export still builds here. Test-locked in
+`tests/theAppIsBuiltHereGithubOnlyPackagesIt.test.ts`.
+
+## 2026-09-23 — "paid image generate nahi ho rahi": the validator said "Invalid request body"
+
+Admin screenshot: a long pasted Pro image brief was refused with **"Invalid request body"**. Root
+cause: `/api/image/pro/generate` (and the free route) cap `prompt` at 2,000 characters, and
+`validateBody` answered every refusal with that one fixed string — the limit and the real length
+sat in `issues`, which no screen reads, while every surface shows `error` verbatim.
+- **Fixed at the class, not the route:** `validate.ts` now derives `error` from the first
+  actionable issue (`humanizeIssue` / `bodyErrorMessage`) for all 37 `validateBody` routes and
+  `validateQuery`; a too-long string carries its real length (`… (got N)`), so the user reads
+  *"Your prompt is too long: 2,431 characters, and the limit is 2,000. Please shorten it and try
+  again — nothing was charged."* `issues` is unchanged for tooling. Test-locked and
+  reversion-proven in `tests/aTooLongPromptSaysHowLong.test.ts`.
+- **Limit deliberately NOT raised:** both image doors put the prompt into a URL, and the image
+  models' text encoders truncate long briefs anyway — a bigger cap would buy a longer URL, not a
+  better picture.
+- ⚠️ **OPEN, deferred on purpose:** a live character counter in the two image composers, so the
+  limit is met BEFORE sending. Both files are being rewritten by PR #3270 right now; touching them
+  would only produce a conflict. Do it after #3270 merges.
+## 2026-09-23 — 📱 Legal links reloaded the whole mobile app ("crash jaisa feel ho raha")
+
+Admin: *"mobile app me navbharatai ke about us me jab terms and conditions etc par click karte hai to open
+nahi ho raha. crash jaisa feel ho raha."*
+
+**Root cause:** About Us carried plain relative links (`/privacy`, `/terms`, `/grievance`). The app is
+BUNDLED, so its WebView origin is `https://localhost`: a relative link there is `https://localhost/terms`,
+the local asset server answers with index.html, and the whole app boots again from its splash screen.
+**Sibling, same class:** the legal documents themselves carry ~25 relative links to each other
+(`/refund`, `/grievance`, `/dpa`, `/security`, `/contact`, `/delete-account`), rendered by ReactMarkdown on
+the in-app Legal page, and every one did the same reload.
+
+**Fix:** `src/lib/legalLinks.ts`, one resolver reading the server's own `legalPaths.ts` table (aliases
+included): an in-app document opens Settings → that Legal page (`navbharat:navigate`, which opens or focuses,
+never closes); `/contact` and `/delete-account` open at navbharatai.com in the browser; anything else is left
+alone. About's links and every `<a>` inside `LegalDocPage` go through it; other web links in a document go
+through `openExternalUrl`, and a swapped document scrolls to its top.
+Verified in Chromium at 390×844: About → Terms → the Refund link inside it, zero page navigations.
+Test: `tests/legalLinksStayInTheApp.test.ts` (14; 7 fail with the components reverted), including a source
+guard that fails on any bare relative `href="/…"` literal in client TSX.
+⚠️ Reaching installed phones needs a fresh `.aab`/`.ipa` (bundled mode) — only when the admin asks.
+---
+
+## 2026-09-23 — Every AI in NavBharatAI FREE uses the free chat's composer
+
+Admin: *"navbharatai free ke andar, sabhi ai aur professionals ke inputbox ko navbharatai free ke jaisa
+kro."* Four surfaces (professionals, Doctor AI, the image generator, Image Studio Pro) each hand-built
+their own composer. They now render one shell, `components/chat/ComposerShell.tsx`, whose classes are
+read back against `AIChat.tsx` by `tests/oneComposerEverywhere.test.ts`, so none of them can drift
+from the free chat again. Mode stays outside on the left; attach / mic / voice / send sit inside on the
+right. Supersedes the 2026-09-20 "Doctor AI like the professionals" layout (recorded in that test).
+Image Studio Pro's amber send became the shared indigo; the ₹1 is still on its chip and tooltip.
+
+**Pending on #3268 (another session, green):** the History button left of Mode. Once it merges, the same
+button goes into the shell's `left` slot on all four surfaces, and the sidebar row is removed as asked.
+## 2026-09-23 — 🎓 PROFESSIONALS: 10 free messages a day, then paid; Exam mode 5 free questions
+
+Admin: *"professional ai me din ke 10 message free honge, fir paid hoga. aapne sabke liye sab free kar
+diya. teacher ai ka exam mode me only 5 questions per day free ho, baaki sab paid"*. Choices (asked):
+paid = real cost + markup; exam allowance SEPARATE from messages; extra questions at the message rate;
+Doctor AI shares the same 10.
+
+**Root cause, verified in code:** the allowance was gated on `PROFESSIONAL_PAID_ENABLED` (the Pass-selling
+switch, never set), so nothing was counted; the default was 50; the charge had no way to know a
+counted message was free; the empty-wallet refusal ran before the allowance; over-allowance was a
+block, not a charge; exam spent one chat message per paper and was billed even for an unusable paper.
+
+**Fixed:** `PROFESSIONAL_FREE_QUOTA` (default on) owns counting; default 10; `billableFraction` on
+`AiChargeContext` (0 ⇒ `free-allowance`); `decideProfessionalAccess` gains opt-in `overQuota: 'paid'`
+(the AI tools keep their block); `gateProfessionalExam` + `professional_exam_usage` count questions,
+split a paper, charge the paid share of what was delivered. UI: "Free used · paid from balance" chip,
+the empty-wallet card names the used free messages, the sign-in card has a real button, the exam
+screen says what the paper costs before Start. Tests: `tests/tenFreeMessagesThenPaid.test.ts` (24,
+reversion-proven), route wiring in `tests/professionalsRoute.test.ts`.
+
+⚠️ **Behaviour change to watch:** guests can no longer use the professionals unsigned. ⚠️ Many paid
+answers still bill ₹0 because the professionals' leader model is free — the admin's chosen model.
+---
+
+## 2026-09-23 — Autopsy `3a0a8f7f` (IP Pharmacy handover form, Weak, ₹152.57, 12.8 min, rendered)
+
+**Tally.** ✅ self-healed 2 (write-time typecheck caught `contue` in `storage.ts`; the platform started
+the preview itself when none was published) · 🔀 worked around 2 (fast lane bailed at 96 s and handed
+its plan to the full builder; ₹4.43 of barren work absorbed) · ⏭️ skipped 3 (no journey derived → gate
+YELLOW; no tests; `GREEN_FREEZE_DEFERRED` ×11) · ❌ shipped imperfect 2 (`REVIEW_INCOMPLETE`;
+`PREVIEW_SNAPSHOT_STALE`) · 🥵 struggles 4 (fast lane 96 s; 529 s to first render on the Kimi rung;
+a **paid AI repair pass whose only act was `npm run dev`**; the reviewer kept calling after its timeout).
+
+**Fixed (root cause):**
+1. **A stopped preview server was repaired by a model.** Since `browseUrl` records its console
+   (2026-09-21), a page opened against a dead server writes `HTTP 502 from <preview>` plus Chromium's
+   echo — "2 runtime error(s)" — and the runtime-error loop spent a full KIMI pass to restart the server.
+   The preview verify loop had this exact rule since 2026-08-12; the sibling loop never got it.
+   `partitionServerDown` (`AutoFix.ts`, pure): 502/503/504 or a refused connection **on the preview's own
+   origin** is server-down (a 500, another origin, or a URL-less echo alone stays an app error). The loop
+   restarts deterministically (`PREVIEW_SERVER_RESTARTED`, once; a second stop is `PREVIEW_SERVER_DOWN`),
+   re-opens the app, and never calls a model for it. The final verdict ignores a stopped server too —
+   it neither accuses the app nor vouches for it.
+2. **`PROVIDER_TIME_WASTED` counted our own clock as a KIMI "error"** — my own #3254, whose comment
+   promised the exclusion the code never made. `wasteKindFor` checks budget-ended first and returns null.
+3. **The reviewer kept spending after we stopped waiting.** `raceTimeout` ended the wait, not the work.
+   The review now carries its own `AbortController` (linked to the build's), aborted in `finally`.
+   The user-facing line no longer calls a 16-file app "large".
+
+Locked in `tests/theStoppedServerIsRestartedNotRepaired.test.ts` (14 cases, budget-ended case
+reversion-proven).
+
+**🔴 OPEN — for the admin, not decided here: the platform's finishing passes run AFTER the freeze.**
+The production-defaults pass (manifest, icon, robots.txt, service worker, meta tags) and the auto-test
+pass run after the app is green-latched, so Green Freeze refuses every write — third autopsy in a row
+(`8a92e5ed`, `21b431e1`, this one). The "by default" defaults effectively never land on a build that
+went green, and the release gate then reports "no test suite". Recommendation: run the deterministic
+defaults BEFORE the preview proof so they are part of what gets verified; tests likewise, or behind
+`verifyAfterFix`. Changing freeze ordering is architecture, so it is raised, not shipped.
+
+**OPEN (rule 6):** why the dev server died between the first render (529 s) and the runtime check
+(~600 s) is not in the report — no process log. **OPEN:** the fast lane on an always-reasoning rung
+(complex → `kimi-k2.7-code`) spent 40 s planning a 10-line list (3,027 output tokens for 799 chars) and
+its contract hit the 56 s cap; the bail was correct, the lane was doomed from the rung choice.
+- ✅ **Same day, the "OPEN" line above is CLOSED by the admin's own instruction** (*"2000+ wala text
+  se send button inactive kar do!!"*): `src/lib/imagePromptLimit.ts` puts the server's limit on both
+  image composers — the send button is off, Enter refuses too, and a counter appears from 90%
+  (`2,431 / 2,000 characters — too long to send. Please shorten it.`). The free generator counts
+  what it SENDS (type + tint wrapped around the words), not only what was typed. The number is
+  asserted equal to the route schemas' `max` (`tests/theSendButtonKnowsTheLimit.test.ts`). ⚠️ This
+  touches the two files PR #3270 is rewriting — a few one-line conflicts are expected for whichever
+  of the two merges second (the `disabled=` lines and the note under the box).
+
+## 2026-09-23 — The free chat's empty screen no longer offers tools free does not have
+
+Admin (with a screenshot): *"navbharatai free me jab koi chat nahi hoti hai to yeh tiles dikhti hai!
+isko theek karo kyu ki yeh function free me hai hi nahi."*
+
+`AIChat` has exactly ONE caller — `NBIChatPanel`, the NavBharatAI FREE chat. Its empty state showed a
+"Ready to architect and build." heading, six IDE tiles (Explain this file, Find bugs, Improve
+performance, Security review, Write tests, Generate README — prompts about an open file the free chat
+never has; `isIde` was true for every non-Pro agent) and a **"Start Security Scan" button that did
+nothing**: it clicked `[title="Security Scan"]`, an element no screen renders (grep finds only the
+selector itself). Removed all three; the heading now reads "Ask me anything." Pro v5.0 keeps its own
+starter cards (`agentv3/starterTemplates.ts`), untouched.
+
+Locked in `tests/theFreeChatOffersOnlyWhatFreeCanDo.test.ts` (5 cases, 4 fail on the old code),
+including a repo-wide guard against any button that "clicks" another element found by its title, and a
+check that `AIChat` still has only the free chat as caller. Installed phones need a fresh `.aab`/`.ipa`.
+## 2026-09-23 — One footer sheet at a time: Mode no longer sits over the footer
+
+Admin: *"navbharatai free ke andar footer ke Mode press karne ke baad History, AI, Settings kisi par click
+karo, Mode hat ta hi nahi hai … footer me koi option open hai, aur 2nd footer option par click kiya jaye
+to, old wala hide ho jaye, new click wala show ho!!"*
+
+**Root cause (measured in Chromium at 390×844, not guessed):** `ModePickerSheet` was `fixed inset-0
+z-[200]`, ABOVE the tab bar's `z-[150]`, and ran to the bottom of the screen — so the footer was covered
+and a tap on History / AI / Settings landed on the sheet's own rows (Playwright reported the sheet
+"intercepts pointer events" on the Settings button). `HistoryPopup` had always been `z-[130]` with
+`nb-sheet-overlay-flush`, i.e. UNDER the bar with room reserved for it; the Mode sheet never got the
+same footing. And even with the bar reachable, no footer item closed the other item's sheet.
+
+**Fix:**
+- `ModePickerSheet` → `nb-sheet-overlay-flush fixed inset-0 z-[130]` (HistoryPopup's footing). The card
+  no longer adds the device inset itself, since the overlay reserves it. It leaves the sheet-contract
+  ratchet (`sheetContractBaseline.json` 17 → 16).
+- `src/lib/footerSheets.ts` (pure): a footer tap first closes the sheet another item opened; a re-tap on
+  the open item closes it. Wired into the Free / Professionals footer.
+- Sibling: Pro v5.0's footer already kept History/More in one `mobileSheet` state, but its **Code
+  Studio** item left that sheet open behind it. `V3FooterApi.closeSheet` now closes it first.
+
+**Verified in the real built app:** Mode → Settings opens Settings; Mode → AI closes the sheet; Mode →
+Mode closes it; the sheet's card ends above the footer. `tests/oneFooterSheetAtATime.test.ts` (8 cases;
+the wiring cases fail against the old code). Installed phones get it only with a fresh `.aab`/`.ipa`.
+---
+
+## 2026-09-23 — The two-row composer (admin sketch), on every AI in NavBharatAI FREE
+
+Admin screenshot: the free chat in full-screen on a phone, box squeezed to a sliver. Root cause: the
+textarea reserved a FIXED ~176px on its right for the controls laid over it, and once History and Mode
+(labelled) sat beside the box it was ~200px wide. Now `ComposerShell` is two rows — text on top at full
+width, attach · mic · voice below, Send as tall as the box on the right (admin: "send button ko bhi 2 line
+me banao") — with History over Mode in a slim left column, icon-only on a phone and labelled from `md` up.
+The free chat (`AIChat.tsx`) now renders the same shell as the professionals, Doctor AI and both image
+screens; every surface also gets the History button (historyOpener threaded through App → ViewPanels).
+Rendered at 390px and 1280px, light and dark, against the real built stylesheet before shipping.
+
+**Not done, raised with the admin:** removing History from the desktop sidebar. The composer's History
+button exists only inside the FREE surfaces, so on Pro / Studio / Wallet the sidebar row is the only
+desktop door — the 2026-08-11 removal is what left desktop without one for six weeks
+(`everyPhoneBarOptionHasADesktopDoor.test.ts`).
+## 2026-09-23 — The paid image tier is REMOVED, permanently (admin-mandated)
+
+Admin, verbatim: *"paid image kam nahi kar raha hai. isko hatao … (image to image) is photo me ek snake
+add karo. reply me wahi same photo aa gaya … aap free image ho rakho. paid wale ko permanently remove kar
+do!!! koi bhi traces na mile, na code me na kahi comment me."*
+
+- **Removed from the code, with its comments and tests:** the paid image screen and its FREE/PRO switch,
+  the paid generate route, both paid engines and their modules, the availability flag in
+  `/api/public-config`, the image permission and image endpoint of the developer API, the wallet's
+  image-purchase line, the edit-strength setting only the paid engine read, two CSS rules and two
+  font-size remaps only the paid screen used, and every comment, knowledge-base line and CLAUDE.md
+  registry entry that described it. `tests/theImageGeneratorHasOneTier.test.ts` locks the result.
+- **Kept, because the free tier uses it:** the photo-reading helpers moved to `lib/imageDataUrl.ts`
+  (tested in `tests/imageDataUrl.test.ts`); the free route, its image-to-image edit, relay, ⭐ star,
+  daily caps and triage are unchanged.
+- **What this does NOT remove:** git history, and the dated entries above in this file — PROGRESS.md is
+  append-only by the standing rule, so the earlier record stays as history.
+- ⚠️ **ADMIN ACTION:** the Cloud Run keys that fed the removed tier are now read by nothing and can be
+  deleted: `IMAGE_PRO_KEY`, `IMAGE_PRO_ENDPOINT`, `IMAGE_PRO_AUTH_SCHEME`, `POLLINATIONS_API_KEY` (and
+  any optional `IMAGE_PRO_*` values, if set). Existing API keys that held the image permission keep
+  working — an unknown permission is simply ignored when a key is read.
+- ✅ **Same day, the name says it (admin: *"jo image generator ai bach jaye uske aage free likh dena
+  (jaise navbharatai free)"*):** the tool is now **"Image Generator AI FREE"** — the Mode list row, the
+  header chip (both read `IMAGE_MODE_NAME`), the screen's own title, the Mode button's tooltip and every
+  knowledge-base mention. The Other AI tile keeps its short label "AI Image Gen".
+
+## 2026-09-23 — Autopsy 3ab93068 + f15a9bcc: a "Hello World" page was delivered, verified and billed as the app
+
+**Build 3ab93068 (Weak, free, fast lane, complexity 68).** The prompt asked for a street-vendor
+open/closed status app. The lane planned 7 files, lost its shared-contract call to its own preamble cap
+(56 s), and wrote 4 files in one wave. With too little budget left for the remaining tiers, it **broke
+out of the tier loop because "4 files ≥ minFiles"**. The shell tier, which holds `src/App.tsx`, never
+ran. Three repair rounds (419 s, 63% of the build) fixed the compile errors that the missing contract
+caused. Then:
+- the preview served our seeded starter (`<h1>Hello World</h1>`);
+- "✅ Preview verified — it renders correctly";
+- IN_BUILD_GREEN saved the starter as the **last known good**;
+- Green Stop turned the reviewer's own CRITICAL finding (*"App.tsx still renders a static Hello World
+  page… the app is non-functional"*) into a polite offer;
+- the user was billed **₹85.29 with markup** under *"✅ Your app is built and working"*.
+
+The next turn (f15a9bcc, ₹385.17) mounted the app. So the user paid a second build partly to repair
+the first.
+
+- 🔑 **The class is the sibling this repo already named once.** `stillTheStarterApp.ts` (31dc61fd,
+  2026-09-20) taught the READINESS gate that an untouched scaffold is not an app. The render proof,
+  the in-build snapshot and the fast lane never learned it. That is the a38c6fef shape again: the
+  instance was fixed and the class was not.
+- **Layer A: prevent (`SimpleBuilder.ts`).** The lane may stop early only once the app's root
+  component is written (`unwrittenEntries`). Otherwise it throws a "stopped early" reason, which routes
+  to the existing salvage, so the finished files reach the full builder. A root whose own generation
+  call failed takes the same path. A plan that names no root, on a workspace whose entry is still the
+  starter, gets the root added (`ensureEntryPlanned`). The route reads the entry to supply
+  `starterEntryPath`.
+- **Layer B: never believe it (`stillTheStarterApp.ts`, `routes/agentv3.ts`, `inBuildGreen.ts`).**
+  All three real-browser render verdicts (render rescue, preview verify loop, last-chance proof) pass
+  through `withStarterVerdict`. It needs two factors: the entry is byte-identical to the starter AND
+  the page shows its heading. A starter page then becomes a conclusive not-rendered verdict, so the
+  existing repair pass is handed the exact fix, the reviewer may write, and the markup is not earned.
+  In-build green gains a `starter` outcome and never protects a starter. The report code is
+  `STARTER_STILL_SHOWING` (warning).
+- **Diagnostics gap closed (f15a9bcc).** The runtime auto-fix spent a repair pass on "2 runtime
+  error(s)" that its own model called a transient 502. The report carried only the count, so nobody
+  could say whether `partitionServerDown` should have caught them. `RUNTIME_AUTOFIX_TRIGGERED` now
+  records the texts it handed over.
+- Test-locked and proven by reversion in `tests/theStarterIsNotTheApp.test.ts`.
+- 🔴 **Still open (rule 6).**
+  1. **A complexity-68 app still takes the 240 s fast lane on a reasoning rung.** Its contract call
+     cannot fit the preamble cap, and the missing contract is what bought the 419 s of repair.
+  2. **Build f15a9bcc's "nearby discovery" generates SIMULATED vendors** and presents them as real.
+     The fake-code check reported "No fake/placeholder code". A web app cannot advertise over
+     Bluetooth, and cross-user discovery needs a backend. The honest build says so. No detector exists.
+  3. **The contract timeout is labelled "build budget reached"**, though it was the contract's own cap.
+## 2026-09-23 — Autopsy ac41a924 (Hindi news blog, Weak, 11.8 min, ₹127, app works)
+
+**Ledger.** ✅ self-healed 2 (design page brought to standard; the stopped dev server restarted — by a
+model pass, since #3267 had not merged when this ran) · 🔀 workarounds 1 (fast lane handed to the full
+builder after 90 s) · ⏭️ skipped 3 (page-render check, user-journey check, and the auto-test
+`playwright.config.ts` write refused by Green Freeze) · ❌ shipped imperfect 3 (a broken hero image from a
+guessed Unsplash id; `ArticleDetail` splits content on the literal `"\\n"` so every article renders as one
+paragraph; footer links to `/about`, `/contact`, `/privacy` that do not exist — the last two found by the
+reviewer, which is suggest-only on a green app) · 🥵 struggle 3 (90 s fast-lane plan call for nothing; the
+dev server died between first render at 512 s and the runtime check; ETA 2.9 min vs 11.8 min actual).
+
+**Fixed at the root, this PR:**
+1. **The page and journey checks had never been able to load Playwright** in this sandbox.
+   Both scripts ran `import { chromium } from '…/playwright/index.js'`. That file is CommonJS, re-exporting
+   an object built at run time, so Node refused to link the module. Both scripts died before their
+   first line on every build — the report's own diagnostic tail was Node's advice
+   (`const { chromium } = pkg;`). Now one shared `playwrightImport()` default import, reproduced and
+   locked by running it in a real Node against a package with Playwright's shape. The old tests pinned
+   the broken line as a STRING — the same trap the NODE_PATH bug fell into.
+2. **A broken image was reported as a failing API.** An `ERR_BLOCKED_BY_ORB` on a guessed Unsplash photo
+   hit the generic `net::ERR` rule. That sent the user, at severity error, to the API Tester.
+   - New `broken-image` category, with no API Tester line.
+   - Its repair hint says: draw the picture, don't guess again.
+   - Upstream, the build prompt now forbids inventing image URLs.
+3. **A lane that cannot finish is not started.** The complex-routed build opened on `kimi-k2.7-code`,
+   which always reasons, and the fast lane's single 90 s plan call spent its cap thinking.
+   - `fastLaneRungDecision` now skips the lane on an always-reasoning opener.
+   - Recorded as `FAST_LANE_SKIPPED_REASONING_RUNG`.
+   - Kill switch: `AGENTV3_FASTLANE_REASONING_GATE=off`.
+   - Sibling honesty fix: the runner said "This build's time budget ended" about a step's own cap.
+4. **A stopped dev server is asked why before it is restarted.** Both restart sites now read the tail of
+   `/tmp/nbai-devserver.log` into the admin report (`PREVIEW_SERVER_RESTARTED` detail). This finding has
+   been OPEN twice ("no process log"); the next report carries the evidence.
+
+**OPEN (rule 6):**
+- **Why the dev server died** — the next report will say. Leading lead, unproven: `node_modules` was
+  modified at 14:47, between the render and the 502s. An install or audit-fix swapping modules under a
+  running Vite is the candidate.
+- **The reviewer found two real functional bugs on a green app and could only suggest them.** That is
+  the admin-approved Green Stop / lean-review design. Whether a reviewer `[WARNING]` of the
+  functional kind should get one verified repair on a green app is the admin's call, raised with them.
+- `PREVIEW_SNAPSHOT_STALE`: a post-green write by the runtime-error pass, while the model wrote no file.
+  The report does not name the file.
+
+**Same PR, follow-up (2026-09-23):**
+- **The kit now ships the placeholder the image rule asks for.** `.nb-img` is a tinted gradient panel,
+  16:9. `.nb-img-square` makes it a tile. Both use tokens only.
+- The prompt rule names these classes. The rule also moved below the "WHICH SCAFFOLDS SHIP THE KIT" note:
+  it had been wedged between the kit rules and that note's "the classes above". A test guards the order,
+  and the test is reversion-proven.
+- **Measured, and NOT built: a Devanagari keyword list for the complexity scorer.** The English prompt
+  *"can you make me a professional news blog website"* goes the same way as the Hindi original: `chat`,
+  score 5, "matched nothing", and a second opinion is asked. Both scripts took the same path. The
+  `complex` verdict came from the second opinion, not from a failure to read Hindi, so a Hindi lexicon
+  would not have changed this build. It would also be the fixed-vocabulary list `signalsMatchedNothing`
+  warns against. What this build actually lost to that verdict was the 90 s fast lane, and fix 3 above
+  removes that loss.
+
+## 2026-09-23 — A real bug in a working app gets one verified repair (follow-up to autopsy ac41a924)
+
+Admin: *"koi bacha hai? han to fix karo! aur, pura complete karo"*.
+
+- **The reviewer's functional findings on a green app are now repaired, once.** This covers the two
+  bugs that shipped in ac41a924: articles rendered as one paragraph, and footer links into NotFound.
+  - The classifier missed both, because they describe what the user SEES ("renders as one long
+    paragraph", "no routes or pages exist … dead-end") rather than using a verdict word. Fixed with
+    `FUNCTIONAL_OUTCOME_RE` behind one shared `isFunctionalFinding`.
+  - The repair runs in pass `reviewer-functional-repair`, inside `verifyAfterFix`.
+  - An unproven result or a timed-out repair is undone.
+  - `.env*` writes are refused for this pass.
+  - Its budget comes from the build clock. The advisory cap is re-armed once, to a finite bound.
+- **Sibling bug fixed: a reverted heal was saved again.** Reverts bypassed `writtenFiles`, and the
+  end-of-build save lets `writtenFiles` win. So the feature-heal and runtime-fix reverts re-persisted
+  the broken change to the durable store. Now there is one `revertToGreenSnapshot` with
+  `reconcileCapturedWrites`, and it refuses an empty snapshot, which would have deleted the whole
+  workspace.
+- **Not done, on evidence:** the Hindi complexity keywords. The English prompt takes the identical path;
+  see the ac41a924 follow-up note.
+## 2026-09-23 — Autopsy 0d297b25 (WORKNEX): a Hello World sold as "built and working"
+
+The prompt asked for a signed Android APK of an **existing Expo/React Native project on Replit** ("do NOT
+rebuild it"). That project was never in the workspace — only our seeded Vite starter. The model inspected
+honestly and wrote one file, `INSPECTION_REPORT.md`, saying so. The readiness gate also said so
+(`READINESS_BLOCKER`: the entry is still the starter) and the build ended `ok: false`. Then the platform
+overruled both: `RENDER_RESCUE` saw the preview render (a Hello World renders perfectly) and upgraded it
+to success, `VERDICT_HELD_BY_RUN` held that against a RED gate, `IN_BUILD_GREEN` told the user "this
+working version is now protected", the recap said "✅ Here's what I built: 11 files", and the free user
+was charged **₹47.36** of the welcome balance with the full markup.
+
+**Tally:** ✅ 0 genuine self-heals · 🔀 1 workaround (fast lane → full builder after its 90 s plan cap) ·
+⏭️ 1 skip (typecheck/journeys — nothing to check) · ❌ 3 shipped false (verdict, recap, bill) ·
+🥵 1 struggle (90 s of a 244 s build in a planner call that could never finish).
+
+**Fixed (PR on `claude/vigilant-feynman-9aobjz`, `tests/theStarterRenderedNotTheApp.test.ts`, reversion-proven):**
+- `entryIsStillTheStarter` (`stillTheStarterApp.ts`) — ONE check, asked by the readiness gate and by all
+  four producers of the render proof (in-build green, render rescue, verify loop, last-chance proof). A
+  starter render is recorded as `RENDERED_ONLY_THE_STARTER` and earns nothing: no upgrade, no markup, no
+  "protected" claim, no reviewer run. The build stays honestly not-ok, which bills ₹0.
+- A readiness failure whose blocker is the starter now tells the user *nothing has been built yet* and keeps
+  the model's own finding, instead of "a couple of things still need fixing".
+- `summarizeProject` — a turn that wrote only notes says "No app code was written this time — I only wrote
+  a note (…)"; the project's size is labelled as the project's.
+- `appScopeAnalyzer.namesAsProduct` — "send the APK using WhatsApp/Drive/USB" is a TOOL mention, not a
+  clone request (the Zoom entry's rule, generalised to every famous product).
+- `RequirementGapAnalyzer` — "Expo/React Native" is a toolchain, not an exhibition (was domain=events,
+  handed "QR check-in"); conditional on React Native / EAS evidence, so a real expo keeps its domain.
+- Honesty: the step-deadline error no longer says "this build's time budget ended" (56 min were left);
+  `PROVIDER_TIME_WASTED` no longer says "every model call returned something"; a failed fast-lane plan
+  call is timed as `plan`, not "everything else 90s (100%)".
+
+**🔴 OPEN ROOT CAUSES (rule 6), not fixed here:**
+1. **A request about a project that is NOT in the workspace should be answered, not built.** The prompt
+   said "already developed in this Replit project … DO NOT rebuild"; the workspace was an empty starter.
+   The right reply is one message: "Your WORKNEX project isn't here — import it (GitHub/zip), then use
+   Phone build". Missing subsystem: a **precondition check** — the prompt references existing code, and
+   the workspace provably has none. Belongs with the intent reader (`IntentClassifier.ts`).
+2. **The fast lane ran on a complexity-83, mega-roadmap build** and spent 90 s on a "plan the COMPLETE
+   file list" call that could not finish inside its cap. Routing change, not made here: it needs the
+   fast-lane gate owner's agreement and real numbers on how often a complex build's plan call completes.
+3. **Expo/React Native is not a stack NavBharatAI builds** (it builds web apps and packages them with
+   Capacitor). The honest answer to "build an Expo APK" names that, and offers the Phone build path.
+
+## 2026-09-24 — One line when the footer carries History and Mode (admin screenshot)
+
+Admin, verbatim: *"jab navbharatai free chat ke sabhi ai me footer on hai, (full screen exit hai) to input box
+double line dikhane ki jarurat nahi hai … ab jab history button footer me hai, to input box single line me
+chalega!! sabhi mode ke liye badlo"*.
+
+`ComposerShell` now picks its layout from ONE fact: is the History / Mode column beside it? Both openers are
+`undefined` exactly when the phone's bottom bar is on screen (App derives it once, from `showsGlobalMobileNav`),
+so no column ⇒ one line — text, attach · mic · voice, Send, side by side; column ⇒ the two-row box sketched on
+2026-09-23. Every AI surface renders the shell, so all of them follow. Send's 72px minimum moved from the button
+class into the two-row slot (`SEND_SLOT_CLASS`), which is what makes a one-line box possible at all; the
+placeholder is held to one line so a long hint is clipped rather than half-shown. Rendered at 390px and 1280px
+against the built stylesheet: one-line 54px, two-row 86px. Test-locked in
+`tests/theComposerIsOneLineBesideTheFooter.test.ts`.
+
+**Also corrected:** CLAUDE.md still called the stopped-build "double discount" OPEN; it was decided and shipped
+on 2026-09-21 (real-cost floor, commit `6844b99f`). Noted in place so it is not re-raised again.
+## 2026-09-24 — A big app keeps its shared contract; the report names the contract's own clock (admin-approved)
+
+This follows autopsy 3ab93068. The admin accepted items 1 and 3 of its open list.
+- **Item 1, reversed from my first proposal.** I first proposed sending complex apps straight to the
+  full builder. The code and the same report say otherwise. The fast lane was adopted on 2026-07-06
+  *because* the full builder wandered, and this report's own full-builder turn took 15.9 min and ₹385,
+  with 63% of its reads repeated.
+  - The defect was the budget, not the lane: a complex app opens on a reasoning rung, its plan took
+    40 s, and its contract was cut at 56 s by its share of 240 s.
+  - So a complex lane now gets 480 s (`fastLaneBudgetMs`, env `AGENTV3_FASTLANE_COMPLEX_SECONDS`) and
+    never skips its contract. An ordinary lane is unchanged.
+- **Item 3: the clock is named.** The lane set the clock, so the lane reports which one it was.
+  - `FastLanePhases.contractOutcome` is `written`, `cut`, `failed` or `skipped`, plus the cap it ran
+    under, and `FAST_LANE_PHASES` prints it.
+  - The PROVIDER_FALLBACK line for a clock-ended call no longer claims "moving to the next one".
+- Test-locked and proven by reversion in `tests/aBigAppKeepsItsContract.test.ts`.
+- ⚠️ **Not measured yet.** Whether the repair share really drops is the next complex build's
+  `FAST_LANE_PHASES` line to read.
+
+## 2026-09-24 — Made-up data about other people is caught, disclosed, and not invented upstream (admin-approved)
+
+This is item 2 of autopsy 3ab93068/f15a9bcc. Build f15a9bcc generated four "nearby vendors" around the
+user and listed them as real. The reviewer passed it, and the fake-code check reported "No
+fake/placeholder code", because it knew only `fakeData` / `mockData` / `dummyData`.
+
+- **Detection is precision-first.** `AuthenticityAnalysis` gains `simulated-data`: a made-up word
+  (simulate / mock / fake / dummy) AND a noun for other people's data (vendors, users, drivers,
+  followers, nearby …), run on camelCase-split lines.
+  - An app's own catalogue (`sampleProducts`, a seeded menu) is not flagged, nor is physics `simulate…`.
+  - Tests and mock folders are ignored. The golden templates are a canary and none of them trips it.
+- **The severity is MEDIUM on purpose.** A `high` finding is a readiness blocker that fails the build
+  and orders a heal to "implement it for real". The real version needs a shared database the user has
+  not chosen, so that heal cannot succeed.
+- **Disclosure.** A finding in a file the app loads appends one plain sentence to the user's summary
+  (`simulatedDataNotice`): which file shows demo data, why, and an offer to set up a shared database.
+  It records `SIMULATED_DATA_SHIPPED` (warning).
+- **Prevention.** `NO_INVENTED_PEOPLE_RULE` is added to the architect prompt, with its twin in the
+  fast lane's per-file prompt. It says a browser cannot find strangers over Bluetooth and that other
+  users' data needs a shared online database. Example entries must be labelled on screen as examples.
+- Test-locked in `tests/madeUpPeopleAreDisclosed.test.ts`.
+
+## 2026-09-24 — "Builder bhatakta tha": three ways WE made the full builder wander, fixed (admin-mandated)
+
+The admin asked for the full builder's wandering to be fixed. The evidence is build f15a9bcc's own
+report: 64 reads over 24 files, 40 of them re-reading an unchanged file, and 12 `sed` steps inside
+index.html. All three causes were ours.
+1. **A fresh sub-agent was told it already had a file it had never seen.**
+   - Since f97eb0ec the read ledger has been shared with sub-agents so the report counts their re-reads.
+     That is right, and it stays.
+   - But the same ledger also drove the NOTICE. So a specialist's FIRST read came back with "you have
+     now read X the 6th time… you already have it". The reviewer was even told "STOP — do not read this
+     path again" about a file it had never opened.
+   - Now the notice reads this agent's OWN reads (`_ownReads`, never shared), and the shared ledger
+     still feeds the report.
+2. **The handoff carried a sentence, not the files.** The architect held `src/BusinessContext.tsx` and
+   delegated seven tasks that named it. Each specialist started empty and read it again, usually twice.
+   - The spawn now attaches the files the instruction NAMES, as they are on disk (`taskHandoff.ts`).
+     It is bounded: 6 files, 14k characters each, 36k in total. A file that does not fit is read the
+     ordinary way.
+   - The child counts them as already read, so an unchanged re-read gets the honest nudge.
+3. **A repair pass paged through our own script.** `read_file` strips the preview bridge, but a shell
+   command cannot. So any bash command that names index.html now gets a note giving the exact line
+   range of NavBharatAI's preview script and saying it is not the app (`bridgeShellNote`).
+- Test-locked and proven by reversion in `tests/aFreshAgentIsNotToldItHasAFile.test.ts`.
+- ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
+  hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
+  measurement: its repeat share should fall well below 63%.
+
+## 2026-09-24 — Compression audit, part 3: the built site comes back from the sandbox gzipped
+
+- **Old behaviour.** On publish (and wherever `downloadDistFiles` is used), the sandbox wrote the built site as base64 JSON, which is a third bigger than the files. It then went back over the network uncompressed.
+- **Now.** The same map is written gzipped and read back as bytes. That is the `format: 'bytes'` call the screenshot path has used in production for months. Text assets pack 3–4×.
+- **One builder.** The reader script is now one exported builder, `distReaderScript`. `tests/distReaderScript.test.ts` used to re-type the script by hand; it now RUNS the real one in node against a real directory (Hindi text and binary bytes included) and decodes it the way the actuator does.
+- **Not changed.** The older `src/server/EngineerAI/actuators/E2BActuator.ts` (legacy Engineer AI) was left alone.
+## 2026-09-24 — Compression audit, part 2: the web bundle is compressed once at build time
+
+- **Why.** The admin asked for whatever makes NavBharatAI world class, after the zstd/brotli audit. Part 1 (storage) is PR #3287.
+  - `scripts/precompress.mjs` (Dockerfile only) and `lib/precompressedStatic.ts`.
+  - The JS/CSS bundle is 14% smaller than today's per-request brotli-4, with 0 CPU per request.
+  - The image build takes about 18 s longer.
+  - `/monaco/` and `/vendor/` (not content-hashed) lose their 1-year `immutable` cache.
+  - The static-site ZIP export uses DEFLATE, where JSZip's default is STORE.
+  - Kill switch `STATIC_PRECOMPRESSED=off`.
+  - Tested over real HTTP in server.ts middleware order (`tests/theBundleIsCompressedOnceNotPerRequest.test.ts`).
+## 2026-09-24 — Compression audit → stored data is compressed, not dropped (admin: "world class banaye woh build karo")
+
+The admin asked what zstd and brotli are, and where NavBharatAI should use which. The audit
+corrected my own first answer: the main server ALREADY serves brotli (the `compression` 1.8.1
+package negotiates br, then gzip). The real finding was not speed. It was DATA LOSS at Firestore's
+1 MiB document limit, in three stores:
+- **The Time Machine** kept the first ~900K characters of an app and silently dropped the rest.
+  - The limit was measured in characters, so a Hindi-heavy app could exceed 1 MiB and lose the
+    version entirely.
+  - Now: a shared helper `lib/compactStore.ts` (brotli, tagged, byte-measured) stores the app packed
+    when it does not fit as plain text. Measured on this repo's sources, brotli shrinks them 4.1×.
+  - Whatever still does not fit is counted (`omittedFileCount`) and told to the user on restore.
+  - `list()` now selects metadata only; before, it downloaded up to 50 whole apps to throw them away.
+- **The admin build-report session** used to drop older builds. It is now fitted by its PACKED size.
+  `select('meta')` is used on the list.
+- **Transcript turns** over 600 KB are packed instead of being replaced by "too large to save".
+- Kill switch `AGENTV3_COMPACT_STORAGE=off`.
+- Small payloads are byte-identical to before, so rolling back is safe.
+- Test-locked in `tests/aBigAppsVersionIsKeptWhole.test.ts` and `tests/adminReportParts.test.ts`. The
+  byte-measure fix is proven by reversion.
+- Next, from the same audit:
+  - precompressed static bundle;
+  - the Monaco files' 1-year immutable cache (the files are not content-hashed);
+  - the static-zip export that stores rather than compresses;
+  - the sandbox dist pull-back as tar.gz instead of base64 JSON.
+- **Open, not done here:** `DiagnosticsStore` still caps a report's commands and logs for size. Those
+  caps also serve readability, so they were deliberately not changed in this pass.
+
+## 2026-09-24 — A request about an app that is not here is answered, not built (closes #3277's open root cause 1)
+
+The WORKNEX prompt (autopsy 0d297b25) said *"The WORKNEX app is already developed in this Replit project.
+DO NOT rebuild it from scratch … build the APK"*, and the workspace held only our starter. #3277 stopped
+that build from being called a success or billed; this stops it from STARTING.
+
+- **`projectElsewhere.ts`** (pure): fires only when the message (1) claims an app that already exists,
+  (2) places it elsewhere (a named tool: Replit, Lovable, Bolt, GitHub …) or forbids rebuilding it, and
+  (3) the workspace holds no user code (`userAppExists`, fail-safe) — and nothing is being imported on
+  this turn. The turn then goes to the chat lane with a steer: the app is not here yet, how to bring it
+  in (the exact "Import Repo" and "Import project (.zip)" paths), where the APK is made once it is here,
+  and — when the app is Expo/React Native, Flutter or native — the honest limit that NavBharatAI builds
+  web apps and packages those. It ends by offering to build something new here instead.
+- **A failed reply never becomes a build:** if the chat engine is unreachable, this turn falls back to a
+  fixed-text answer rather than to the build path (every other chat turn keeps its old fallback).
+- 🔎 **SIBLING FIXED IN THE SAME CHANGE — `wantsFreshStart` matched "from scratch" inside "DO NOT rebuild
+  it from scratch".** That predicate feeds the two guards that PROTECT an existing app, so the most
+  emphatic "keep my app" sentence read as an order to wipe it (the rebuild-confirmation gate then asked
+  the user whether to replace their app). Negation is now read on both sides — English before the
+  phrase, Hindi (`mat`/`na`/`nahi`) after it; one un-negated occurrence still counts.
+- `AppKnowledgeBase.ts`: the zip and GitHub import entries name Replit and state the new behaviour.
+- Test-locked in `tests/theAppTheyMeantIsNotHere.test.ts` (33 cases, including a precision corpus of
+  ordinary prompts that must NOT be answered). Reversion-proven: undoing either fix fails 11.
+- ⚠️ **Still open (unchanged):** the fast-lane routing on complex mega-roadmap builds (#3277 item 2).
+
+## 2026-09-24 — Code Studio terminal on a phone: the duplicate command box is gone (admin-asked)
+
+Admin, with a screenshot of the terminal's bottom row: *"terminal ke andar ek extra input box hai … isko
+hide kar do! user direct terminal ko andar hi command de dega"* (and: *"aap ko agar sahi lage to hatana"*).
+
+- **Removed:** the line input and its Run button (`ShellTerminal.tsx`). Typing inside the terminal box has
+  worked on phones since 2026-08-05 through the invisible bridge input, so the box was a second way to do
+  the same thing — and when the shell was down it showed a disabled field reading "Terminal not
+  available", beside the box's own "Try again" button that already said so.
+- **Kept, on purpose (the part of the ask I did not follow literally):** the ^C / Tab / ↑ / ↓ keys. A phone
+  keyboard has none of them, and without ^C a running dev server cannot be stopped from a phone at all.
+  They now disable themselves when the shell is gone, and a short "Tap the terminal to type" hint sits
+  where the box was, because nothing else on screen said the terminal itself takes typing.
+- Two test files re-aimed with reasons (`shellTerminalInput`, `noKeyboardUntilAsked`); the knowledge base's
+  Terminal entry now says how to type on a phone.
+- ⚠️ **Honest risk:** the bridge is now the ONLY typing path on touch. It has been live since 2026-08-05 and
+  the admin types through it, but it has not been verified on every phone keyboard. If a phone cannot type
+  in the box, reverting this change brings the box back with no other effect.
+## 2026-09-24 — One focus ring, not two (admin screenshot, Wellness / Counsellor AI, full screen)
+
+Admin: *"navbharatai free ke sabhi module me, full screen mode me input box me aise 2 box jaise dikh rahe
+hai! isko fix karo!!"* — a tapped composer showed its own indigo `focus-within` border AND a second ring
+around the textarea inside it.
+
+- **Root cause:** the global `:focus-visible { outline: 2px solid #6366f1 }` in `src/index.css` was
+  UNLAYERED. An unlayered rule beats every layered one regardless of specificity, and Tailwind v4's
+  utilities are in `@layer utilities` — so `outline-none` / `focus:outline-none` were overruled on all
+  ~300 elements that use them (almost all of which pair it with their own `focus:border-*` / `focus:ring-*`).
+  A text field is focus-visible on every tap, hence the second box. Its `border-radius: 4px` also
+  overrode `rounded-*` on focused elements.
+- **Fix:** the rule moved into `@layer base`. Keyboard users keep the ring on every element that does not
+  opt out; an opt-out now means what it says. Verified in Chromium against the built CSS: focused
+  `textarea.outline-none` computed `solid 2px` before → `none` after; a Tab-focused plain button still
+  gets the indigo ring; the composer screenshot shows one box.
+- **Siblings:** every other unlayered global rule in `index.css` was listed; none sets a property a
+  utility on the same element opts out of. `tests/oneFocusRingNotTwo.test.ts` fails on any unlayered
+  `:focus*` rule that sets outline or radius (reversion-proven).
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).

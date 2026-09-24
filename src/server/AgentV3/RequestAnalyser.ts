@@ -16,7 +16,7 @@
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
 import { isComplexAppPrompt, namesBusinessDomain, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
-import { userAskedForAnAppToBeBuilt } from './IntentClassifier';
+import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
@@ -83,6 +83,39 @@ export interface AnalyserInput {
    * absent (legacy callers) falls back to 'opus' — the old power semantics.
    */
   pinnedModel?: 'sonnet' | 'opus';
+  /**
+   * The routing decision the platform ALREADY MADE for this turn — the `BuildIntent` the route holds
+   * by the time it calls this module.
+   *
+   * 🔴 WHY IT IS PASSED IN RATHER THAN RE-DERIVED (autopsy `21b431e1`, 2026-09-22).
+   * `anAppWasOrderedButNotRecognised` was written for autopsy 31dc61fd to stop a real app build
+   * being filed as `taskType: 'chat'`, `complexityScore: 5` — the score of the word "hi". It closed
+   * exactly ONE shape: an explicit English imperative that `IntentClassifier` rates HIGH. Measured
+   * on `main` the day this was written, every row below routes to `new_build` and BUILDS, and every
+   * one was still filed as chat/5 with `ambiguous: false` — i.e. *"I am confident"*:
+   *
+   *   | request                                                   | intent · conf   | filed as |
+   *   |-----------------------------------------------------------|-----------------|----------|
+   *   | `Create a upsc preparation aap`                            | new_build HIGH  | app_unsized · 15 |
+   *   | `Can you make me a UPPCS preparation app?`                 | new_build low   | **chat · 5** |
+   *   | `kya tum mere liye ek UPPCS preparation app bana sakte ho?` | new_build low   | **chat · 5** |
+   *   | `mujhe uppcs ki preparation ke liye ek app chahiye`         | new_build low   | **chat · 5** |
+   *
+   * The last is not even a question — it is a plain order in Hindi. A QUESTION is capped below HIGH
+   * on purpose (the "read the mood first" rule, 2026-09-13), so the commonest shapes a real Indian
+   * user types — *"kya aap … bana sakte ho?"*, *"… chahiye"* — are STRUCTURALLY unreachable by a
+   * guard that demands HIGH.
+   *
+   * 🔑 THE CLASS, and this module's own docblock already names it: *"TWO MODULES ANSWER 'IS THIS A
+   * BUILD?' AND ONE IS NEVER TOLD THE OTHER'S ANSWER."* The answer to that cannot be a third
+   * opinion derived from the same prompt — it is being TOLD. This function's name says *"the
+   * platform is about to BUILD AN APP"*; now it can know that instead of guessing it.
+   *
+   * ⚠️ ABSENT ⇒ TODAY'S BEHAVIOUR EXACTLY. Every existing caller and every test that omits it falls
+   * back to `userAskedForAnAppToBeBuilt`, unchanged. And only `new_build` counts: an edit is not an
+   * app being ordered, and its file count already raises the score.
+   */
+  buildIntent?: BuildIntent;
 }
 
 export type FeaturePriority = 'CORE' | 'IMPORTANT' | 'NICE';
@@ -235,9 +268,19 @@ export function signalsFoundNothing(prompt: string): boolean {
  * answer and every other reader was still told the confident version. A fact about this module's
  * signals belongs to this module. (No cycle: `IntentClassifier` does not import this file.)
  */
-export function anAppWasOrderedButNotRecognised(prompt: string): boolean {
+export function anAppWasOrderedButNotRecognised(prompt: string, buildIntent?: BuildIntent): boolean {
   const text = String(prompt ?? '');
   if (!signalsMatchedNothing(text)) return false;
+  // The platform's OWN decision, when the caller has it, beats a second reading of the same prompt.
+  // See `AnalyserInput.buildIntent` for the four measured shapes this rescues.
+  //
+  // ⚠️ THE PRECISION HALF IS KEPT, NOT DROPPED. `userAskedForAnAppToBeBuilt` refuses continuations,
+  // problem reports, our own "Fix error" template and pasted machine errors — *"Continue from where
+  // you left off and finish the build"* is a VERDICT turn, not a new app, and autopsy 697b38ee is
+  // what that refusal costs when it goes missing. The route's `intent` is a ROUTING answer and says
+  // nothing about that, so the refusals still apply: only the HIGH-confidence requirement is
+  // replaced by the platform's own decision, because HIGH is exactly what a question cannot earn.
+  if (buildIntent === 'new_build' && !describesWorkAlreadyStarted(text)) return true;
   return userAskedForAnAppToBeBuilt(text);
 }
 
@@ -540,7 +583,7 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
    * Relabelled BEFORE the pinned-tier return below, because a pinned build records `taskType` too and
    * a report should not file a real app build under "chat" on either path.
    */
-  const unsizedApp = anAppWasOrderedButNotRecognised(prompt);
+  const unsizedApp = anAppWasOrderedButNotRecognised(prompt, input?.buildIntent);
   const taskType: TaskType = unsizedApp ? 'app_unsized' : detected;
 
   // A PAID pinned tier bypasses the ladder entirely: the build runs on the tier's pinned model,

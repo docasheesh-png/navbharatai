@@ -77,11 +77,56 @@ export function spansTwoIndicScripts(token: string): boolean {
   return false;
 }
 
+/**
+ * 🔴 AN ESCAPE IS NOT A LETTER — AND READING IT AS ONE MADE THIS CHECK ACCUSE CORRECT CODE
+ * (autopsy `21b431e1`, 2026-09-22).
+ *
+ * `stringLiterals` returns the literal's BODY exactly as it is written in source, so `"\nमैं"` — a
+ * newline followed by Devanagari, which is right — arrives here as the characters `\`, `n`, `म`… The
+ * backslash is a non-word character, so it splits away and leaves the token **`nमैं`**: a Latin
+ * letter glued to Indic text, reported to the admin as *"a corrupted label … shown to the user
+ * exactly as written"*. Measured before this fix:
+ *
+ *     "\nमैं"        -> ["nमैं"]      ← correct source, reported broken
+ *     "पंक्ति\tदो"    -> ["tदो"]      ← correct source, reported broken
+ *
+ * **That is the exact token the report carried.** This is the third analyzer in three days caught
+ * describing its own blind spot as a defect in the user's app (`AccessibilityAnalysis` 2026-09-20,
+ * `FeaturePresence` 2026-09-21), and the class is the same one: a regex reading a dialect it was not
+ * written for.
+ *
+ * ⚠️ `looksLikePattern` MUST RUN ON THE RAW BODY, BEFORE THIS. It recognises `\b`, `\d`, `\s` — the
+ * very sequences decoding destroys — so decoding first would blind the guard that stops this check
+ * reporting every regex in the project.
+ *
+ * `\n` / `\t` / `\r` and friends become a SPACE rather than their real control character, because
+ * the only question here is "does this word continue?", and a separator answers it without inventing
+ * a character. Pure, total, never throws.
+ */
+export function decodeLiteralEscapes(body: string): string {
+  return String(body ?? '').replace(
+    /\\(u\{[0-9a-fA-F]{1,6}\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])/g,
+    (_m, esc: string) => {
+      const head = esc[0];
+      if (head === 'u' || head === 'x') {
+        const hex = esc.replace(/^u\{?|^x|\}$/g, '');
+        const code = Number.parseInt(hex, 16);
+        return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+      }
+      // A whitespace/control escape is a SEPARATOR; every other escape is the character itself.
+      return 'ntrbfv0'.includes(head) ? ' ' : head;
+    },
+  );
+}
+
 /** Tokens inside ONE literal whose script changes part-way through the word. Pure. */
-export function mixedScriptTokens(literal: string): string[] {
-  if (!literal || !INDIC.test(literal)) return [];
+export function mixedScriptTokens(rawLiteral: string): string[] {
+  if (!rawLiteral || !INDIC.test(rawLiteral)) return [];
+  // The pattern guard reads the escapes themselves, so it goes first — see `decodeLiteralEscapes`.
+  if (looksLikePattern(rawLiteral)) return [];
+  const literal = decodeLiteralEscapes(rawLiteral);
+  if (!INDIC.test(literal)) return [];
   if (!LATIN.test(literal) && !spansTwoIndicScripts(literal)) return [];
-  if (looksLikePattern(literal)) return [];
   const out: string[] = [];
   for (const token of literal.split(NON_WORD)) {
     if (!token || !INDIC.test(token)) continue;
@@ -158,4 +203,96 @@ export function scriptIntegritySummary(findings: readonly ScriptIntegrityFinding
   return `Text integrity: ${findings.length} file(s) contain a word that mixes two scripts — `
     + `almost always a corrupted label rather than a choice: ${parts.join('; ')}${more}. `
     + 'Each one is shown to the user exactly as written.';
+}
+
+/**
+ * THE ONE MIXED-SCRIPT SHAPE THAT CAN BE REPAIRED WITHOUT GUESSING: A LOST BACKSLASH.
+ *
+ * 🔴 AUTOPSY `21b431e1` (2026-09-22). `src/App.tsx` shipped `"nमैं"` — the letter `n` glued to the
+ * front of Devanagari. It was DETECTED (`SCRIPT_INTEGRITY`, warning) and never repaired, so the user
+ * read the corruption on their own screen. `scriptIntegrity.ts` could say what was wrong and had no
+ * way to say what it should be.
+ *
+ * ⚠️ MOST OF THIS CLASS IS GENUINELY UNREPAIRABLE, AND PRETENDING OTHERWISE WOULD BE WORSE. The
+ * founding case, `"জungle"`, needs the intended Bengali word — nothing in the file carries it, and a
+ * guess would rewrite a user's label into something they never wrote. So this repairs ONE shape and
+ * refuses every other: a single Latin `n` / `t` / `r` standing alone against Indic text is a `\n`,
+ * `\t` or `\r` whose backslash was dropped while the model was generating the string.
+ *
+ * 🔒 WHY RESTORING THE BACKSLASH RATHER THAN DELETING THE LETTER, and the asymmetry decides it. Both
+ * remove the visible defect. Deleting destroys a line break the model meant to be there, and if our
+ * reading is wrong it has silently eaten a character out of somebody's label. Restoring turns a
+ * VISIBLE wrong letter into INVISIBLE whitespace: right when we are right, harmless when we are
+ * wrong. Nothing is ever deleted from a user's text.
+ *
+ * 🔒 QUOTED LITERALS ONLY. In JSX body text `\n` is two literal characters on screen, so a repair
+ * there would trade one visible defect for another — `repairLostEscapes` walks the same literal
+ * scanner `findMixedScriptText` uses, so the two can never disagree about what a literal is.
+ *
+ * Pure, deterministic, no model call. Returns the source unchanged when there is nothing to repair.
+ */
+const LOST_ESCAPE_LETTERS = 'ntr';
+
+/** Every repair this pass would make in one literal body, as [before, after]. Pure. */
+export function repairedLiteralBody(body: string): string {
+  if (!body || !INDIC.test(body) || !LATIN.test(body)) return body;
+  if (looksLikePattern(body)) return body;
+  // A lone escape letter pressed against Indic text, at a word boundary on its free side so a real
+  // Latin word ending in `n` ("green", "main") can never be touched. Both directions: a dropped
+  // backslash can land in front of the text or behind it.
+  const leading = new RegExp(`(^|[^\\p{L}\\p{N}\\p{M}\\\\])([${LOST_ESCAPE_LETTERS}])(?=[\\u0900-\\u0d7f])`, 'gu');
+  const trailing = new RegExp(`([\\u0900-\\u0d7f])([${LOST_ESCAPE_LETTERS}])(?=$|[^\\p{L}\\p{N}\\p{M}])`, 'gu');
+  return body.replace(leading, (_m, before, letter) => `${before}\\${letter}`)
+    .replace(trailing, (_m, indic, letter) => `${indic}\\${letter}`);
+}
+
+export interface ScriptRepair {
+  file: string;
+  /** The literal bodies that changed, as they were written. */
+  before: string[];
+}
+
+/**
+ * Repair every lost escape in a project's UI files. Returns ONLY the files that changed, so a caller
+ * writes nothing on a clean build. Pure.
+ */
+export function repairLostEscapes(
+  files: Record<string, string>,
+  opts: { maxFiles?: number } = {},
+): { files: Record<string, string>; repairs: ScriptRepair[] } {
+  const maxFiles = opts.maxFiles ?? 200;
+  const out: Record<string, string> = {};
+  const repairs: ScriptRepair[] = [];
+  let seen = 0;
+  for (const [file, source] of Object.entries(files)) {
+    if (seen >= maxFiles) break;
+    if (!UI_FILE.test(file) || typeof source !== 'string') continue;
+    seen++;
+    if (!INDIC.test(source) || !LATIN.test(source)) continue;
+    const before: string[] = [];
+    // The SAME scanner `findMixedScriptText` reads, so a literal one of them sees is a literal the
+    // other sees. Rewriting through the match keeps the quoting exactly as the model wrote it.
+    const re = /'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g;
+    const next = source.replace(re, (whole, a: string | undefined, b: string | undefined, c: string | undefined) => {
+      const body = a ?? b ?? c;
+      if (!body) return whole;
+      const fixed = repairedLiteralBody(body);
+      if (fixed === body) return whole;
+      before.push(body);
+      const quote = whole[0];
+      return `${quote}${fixed}${quote}`;
+    });
+    if (before.length > 0) { out[file] = next; repairs.push({ file, before }); }
+  }
+  return { files: out, repairs };
+}
+
+/** The admin-facing line for a repair that ran. Names the file and the word as it was. Pure. */
+export function scriptRepairSummary(repairs: readonly ScriptRepair[]): string {
+  const total = repairs.reduce((n, r) => n + r.before.length, 0);
+  const parts = repairs.slice(0, 4).map((r) => `${r.file} (${r.before.slice(0, 3).map((b) => `"${b}"`).join(', ')})`);
+  const more = repairs.length > 4 ? `, and ${repairs.length - 4} more file(s)` : '';
+  return `Text integrity: repaired ${total} dropped escape(s) in ${repairs.length} file(s) — a lone `
+    + `"n"/"t"/"r" against Indic text is a backslash the generator lost, and it was shown to the user `
+    + `as a letter: ${parts.join('; ')}${more}.`;
 }

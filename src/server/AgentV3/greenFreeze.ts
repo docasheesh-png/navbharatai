@@ -15,10 +15,19 @@
 //
 // THE RULE: once a workspace is GREEN-LATCHED, an actuator write that would OVERWRITE a file present at
 // the green moment is REFUSED — UNLESS the current async pass is on a small, explicit allowlist. A pass
-// a future session adds is denied automatically, because it is not on the list. Creating a genuinely NEW
-// file is allowed (a new test/doc file cannot break the app the browser already rendered). Refusing a
+// a future session adds is denied automatically, because it is not on the list. Refusing a
 // write can only ever KEEP the working app as it was — it can never break it — so this is safe by the
 // one absolute rule, by construction.
+//
+// ⚠️ THIS PARAGRAPH USED TO PROMISE A CARVE-OUT THE CODE HAD ALREADY REMOVED (corrected 2026-09-22,
+// autopsy 21b431e1). It read *"Creating a genuinely NEW file is allowed (a new test/doc file cannot
+// break the app the browser already rendered)"* — and `writeRefused`'s own docblock, thirty lines
+// below, records that exact carve-out being deleted after the adversarial review of 2026-08-12,
+// because a coordinated change (a new file plus an edit) would land half of itself. Both statements
+// sat in one file for six weeks. The behaviour is, and stays, FULL DENY for a non-allowlisted pass.
+// The header is the half a reader meets first, which is what made the drift expensive: the same
+// build's report shows nine `GREEN_FREEZE_DEFERRED` writes — tests, a manifest, robots.txt, an icon
+// and a service worker — and this paragraph said they would have been allowed.
 //
 // WHAT STAYS ALLOWED, and why it is not "our opinion": the runtime-error auto-fix (the app renders but
 // throws — the user wants a WORKING app) and the feature-presence heal (a feature the user EXPLICITLY
@@ -70,7 +79,24 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // designHealGuard.ts — and unlike the reviewer it repairs the app's OWN stated design contract, not an
   // opinion about it.
   'design-consistency-heal',
+  // A REAL BUG THE REVIEWER FOUND IN A WORKING APP (admin 2026-09-23, autopsy ac41a924: "han to fix
+  // karo"). A news site rendered, and the reviewer found every article showing as ONE paragraph and
+  // footer links to pages that do not exist — both shipped, because on a green app the reviewer could
+  // only suggest. This pass repairs ONLY the reviewer's FUNCTIONAL findings (`selectAutoFixableWarnings`
+  // plus criticals — never style, naming or a11y polish), runs once, and is wrapped in verifyAfterFix:
+  // a repair that breaks the render is reverted to the green snapshot. It is the one allowlisted pass
+  // with a history of harm — the 2026-08-12 reviewer erased a user's real .env secrets — so it is ALSO
+  // refused every secret file, below, whatever else it is allowed.
+  'reviewer-functional-repair',
 ]);
+
+/** Passes that may write to a green app but NEVER to a secret file. See `writeRefused`. */
+const SECRET_FILE_DENIED_PASSES: ReadonlySet<string> = new Set(['reviewer-functional-repair']);
+
+/** `.env`, `.env.local`, `.env.production` … at any depth — the files that hold the user's real keys. */
+export function isSecretFilePath(path: string): boolean {
+  return /(^|\/)\.env(\.[\w.-]+)?$/i.test(String(path ?? '').replace(/\\/g, '/'));
+}
 
 interface GreenLatch {
   /** Source paths that existed when the app was proven green — the files an "edit" would overwrite. */
@@ -182,6 +208,7 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
   if (!latches.has(workspaceId)) return false;        // not green yet → today's behaviour
   if (isInfraPath(path)) return false;                // node_modules / build output — never app source
   const pass = currentPass();
+  if (pass && SECRET_FILE_DENIED_PASSES.has(pass) && isSecretFilePath(path)) return true; // never the user's keys
   if (pass && ALLOWED_PASSES.has(pass)) return false; // the user's own request, or the restore itself
   return true;
 }

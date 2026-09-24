@@ -452,6 +452,7 @@ jobs:
       # manually — the proven CI path. NOTE: Capacitor 7+ uses SPM (not CocoaPods), so `cap add ios`
       # generates App.xcodeproj (no .xcworkspace); the Fastfile builds the .xcodeproj.
       - name: Build, sign & upload to TestFlight (fastlane)
+        id: fastlane
         env:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
@@ -497,14 +498,34 @@ jobs:
           rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_${IOS_ASC_KEY_ID}.p8" || true
           rm -f "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8" || true
 
+      # `if: always()` for the same reason the Android workflow carries it: without it this step is
+      # SKIPPED the moment anything above fails — and what fails is almost always the LAST thing, the
+      # upload. The one place that says what was produced and where to find it would disappear exactly
+      # when it is needed most.
+      #
+      # Every line below is read back from what actually HAPPENED (`steps.fastlane.outputs.uploaded`,
+      # written by the Fastfile only after upload_to_testflight returns), never from `inputs.upload`.
+      # The step above is named "Build, sign & upload", so it is green whether or not the upload box was
+      # ticked — asserting the upload from the input made a green run indistinguishable from a real
+      # delivery, which is precisely the question "did it reach TestFlight?" that nobody could answer.
       - name: Summary
+        if: always()
         run: |
+          if [ "${{ steps.fastlane.outcome }}" != "success" ]; then
+            echo "## The .ipa was NOT built ❌" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The build/sign step did not succeed, so there is **no \`NavBharatAI.ipa\` to download** and **nothing reached App Store Connect** — the red step above is the real failure." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           echo "## NavBharatAI signed .ipa built ✅" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ inputs.upload }}" = "true" ]; then
-            echo "Uploaded to **App Store Connect** — it will appear under TestFlight in a few minutes (Apple processes the build)." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.fastlane.outputs.uploaded }}" = "true" ]; then
+            echo "🚀 **Uploaded to App Store Connect, and Apple finished processing it** (the run waits for processing, so this is the build genuinely being available — not merely accepted for transfer). Open App Store Connect → TestFlight: internal testers get build **${{ github.run_number }}** automatically." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ inputs.upload }}" = "true" ]; then
+            echo "⚠️ **Nothing was uploaded, although \`upload\` was ticked.** The build succeeded but the upload block never completed, so **do not expect build ${{ github.run_number }} in TestFlight** — download the artifact above and upload it by hand, or re-run." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "Download the **navbharatai-release-ipa** artifact above. To publish, re-run with **upload** checked (sends it to TestFlight/App Store Connect)." >> "$GITHUB_STEP_SUMMARY"
+            echo "📦 **Not uploaded** — \`upload\` was not ticked. Download the **navbharatai-release-ipa** artifact above, or re-run with **upload** checked to send it to TestFlight." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Bundle id \`com.navbharat.ai\` · bundled mode runs from this build (API calls still hit navbharatai.com) — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

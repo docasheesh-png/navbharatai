@@ -34,7 +34,9 @@ export function vstring(opts: { min?: number; max?: number; pattern?: RegExp; op
       if (og) return og;
       if (typeof value !== 'string') return fail(`${at(path)} must be a string`);
       if (opts.min !== undefined && value.length < opts.min) return fail(`${at(path)} must be ≥ ${opts.min} chars`);
-      if (opts.max !== undefined && value.length > opts.max) return fail(`${at(path)} must be ≤ ${opts.max} chars`);
+      // The real length rides on the issue: "must be ≤ 2000 chars" alone left a person who pasted a
+      // long brief with no idea how far over they were (see `humanizeIssue`).
+      if (opts.max !== undefined && value.length > opts.max) return fail(`${at(path)} must be ≤ ${opts.max} chars (got ${value.length})`);
       if (opts.pattern && !opts.pattern.test(value)) return fail(`${at(path)} has an invalid format`);
       return ok(value);
     },
@@ -139,11 +141,53 @@ export function vobject<S extends Record<string, Schema<any>>>(
   };
 }
 
+const FALLBACK_BODY_ERROR = 'That request could not be read. Please try again.';
+
+/** A field path as words: `prompt` → "prompt", `messages[0].content` → "content", `initImage` → "init image". */
+function fieldWords(path: string): string {
+  const last = path.split('.').pop() || path;
+  return last.replace(/\[\d+\]/g, '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase() || 'value';
+}
+
+const num = (n: string) => Number(n).toLocaleString('en-IN');
+
+/**
+ * The FIRST issue as a sentence a person can act on — or null when it is not a shape a person
+ * could have caused by typing.
+ *
+ * 🔴 WHY (admin, with a screenshot, 2026-09-23): a pasted image brief over the 2,000-character limit came back as **"Invalid request body"** — every
+ * surface shows the server's `error` verbatim, so the only thing the user learned was that
+ * something was wrong. The limit, the length and the remedy were all in `issues`, which no screen
+ * reads. This is one helper for all 37 `validateBody` routes rather than a message per route, so a
+ * route added later tells the truth by construction.
+ */
+export function humanizeIssue(issue: string): string | null {
+  let m = /^(\S+) must be ≤ (\d+) chars \(got (\d+)\)$/.exec(issue);
+  if (m) {
+    return `Your ${fieldWords(m[1])} is too long: ${num(m[3])} characters, and the limit is ${num(m[2])}. `
+      + 'Please shorten it and try again — nothing was charged.';
+  }
+  m = /^(\S+) must be ≥ (\d+) chars$/.exec(issue);
+  if (m) return `Your ${fieldWords(m[1])} is too short — it needs at least ${num(m[2])} characters.`;
+  m = /^(\S+) is required$/.exec(issue);
+  if (m) return `Please fill in the ${fieldWords(m[1])} and try again.`;
+  return null;
+}
+
+/** The `error` a 400 carries: the first issue a person can act on, else a plain fallback. */
+export function bodyErrorMessage(issues: string[]): string {
+  for (const i of issues) {
+    const h = humanizeIssue(i);
+    if (h) return h;
+  }
+  return FALLBACK_BODY_ERROR;
+}
+
 /** Express middleware: validate `req.body` against `schema`. 400 on failure; replaces body with the parsed value. */
 export function validateBody<T>(schema: Schema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const r = schema.parse(req.body ?? {});
-    if (!r.ok) { res.status(400).json({ error: 'Invalid request body', issues: r.errors }); return; }
+    if (!r.ok) { res.status(400).json({ error: bodyErrorMessage(r.errors), issues: r.errors }); return; }
     req.body = r.value;
     next();
   };
@@ -153,7 +197,7 @@ export function validateBody<T>(schema: Schema<T>) {
 export function validateQuery<T>(schema: Schema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const r = schema.parse(req.query ?? {});
-    if (!r.ok) { res.status(400).json({ error: 'Invalid query parameters', issues: r.errors }); return; }
+    if (!r.ok) { res.status(400).json({ error: bodyErrorMessage(r.errors), issues: r.errors }); return; }
     next();
   };
 }

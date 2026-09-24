@@ -95,6 +95,55 @@ export function platformFeeNoticeAtPct(paidInr: number, pct: number): string {
   return `₹${s.creditInr.toFixed(2)} will be added to your wallet (₹${s.feeInr.toFixed(2)} platform fee).`;
 }
 
+/** What a GIFT code costs: the face value the friend receives, plus our fee on top. */
+export interface GiftPrice {
+  /** The credit the RECIPIENT will receive — the product, and what the code is worth. */
+  faceInr: number;
+  /** Our platform fee, added on top. */
+  feeInr: number;
+  /** What the BUYER pays. */
+  payInr: number;
+}
+
+/**
+ * Price a gift code: `pay = face + fee`.
+ *
+ * 🔴 THE FEE IS ADDED HERE AND DEDUCTED IN `splitPaymentAtPct`, AND THAT IS NOT AN INCONSISTENCY —
+ * it is the same fee on two different products. On a RECHARGE the user names the amount they are
+ * willing to pay, so the fee comes out of it (pay ₹500 → ₹490 of credit). On a GIFT the FACE VALUE
+ * IS THE PRODUCT: a ₹500 code has to be worth ₹500 when the friend redeems it, or the thing being
+ * sold is not the thing being bought. So the fee goes on top — pay ₹510, the friend gets ₹500.
+ *
+ * Admin, confirming the single rate for this: *"2% hi kaafi hai!!"*.
+ *
+ * ⚠️ AND ONE FEE LINE, NEVER TWO. The first request was "2% platform fee + cashfree charges". The
+ * gateway's real charge is unknowable in advance — UPI is ZERO by regulation, cards ~2%+GST, and the
+ * method is chosen on a later screen — so a "gateway charges" line would be a number no statement
+ * will ever match. THE ONE-WALLET LAW forbids showing a cost we have not measured even when it
+ * flatters us. The flat rate already exists to cover it; charging it twice would be charging twice.
+ *
+ * 🔑 The FEE is what rounds, and `payInr` is derived by addition — so `face + fee === pay` exactly,
+ * the same identity `splitPaymentAtPct` maintains in the other direction. A recipient must never be
+ * credited a paisa less than the code says.
+ *
+ * PURE. A non-finite or non-positive face value yields zeroes rather than a negative price.
+ */
+export function giftPriceAtPct(faceInr: number, pct: number): GiftPrice {
+  const face = Number(faceInr);
+  if (!Number.isFinite(face) || face <= 0) return { faceInr: 0, feeInr: 0, payInr: 0 };
+  const rate = normalizeFeePct(pct);
+  const fee = Math.round(face * (rate / 100) * 100) / 100;
+  return { faceInr: face, feeInr: fee, payInr: Math.round((face + fee) * 100) / 100 };
+}
+
+/** The line shown to the buyer BEFORE they pay. Never says "gateway" and never names a provider. */
+export function giftPriceNoticeAtPct(faceInr: number, pct: number): string {
+  const g = giftPriceAtPct(faceInr, pct);
+  if (g.faceInr <= 0) return '';
+  if (g.feeInr <= 0) return `You pay ₹${g.payInr.toFixed(2)}. They receive ₹${g.faceInr.toFixed(2)} of credit.`;
+  return `You pay ₹${g.payInr.toFixed(2)} (₹${g.faceInr.toFixed(2)} + ₹${g.feeInr.toFixed(2)} platform fee). They receive the full ₹${g.faceInr.toFixed(2)}.`;
+}
+
 /**
  * The rate this server is charging, read from GET /api/public-config.
  *

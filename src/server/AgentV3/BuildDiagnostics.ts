@@ -50,6 +50,17 @@ const PROCESS_ONLY_CODES = new Set([
   // app (autopsy 53d43c18). It is recorded as a warning so it is legible in the report and so a rising
   // rate is visible, but it must never count against the app or colour the release gate.
   'HTML_ENTRY_REPAIRED',
+  // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
+  // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
+  'SCRIPT_INTEGRITY_REPAIRED',
+  // How long OUR OWN fast lane spent in each of its phases is a fact about this engine's routing,
+  // never a defect in the user's app (autopsy 21b431e1).
+  'FAST_LANE_PHASES',
+  // …and the decision NOT to start that lane on a rung that always reasons (fastLaneRung.ts,
+  // autopsy ac41a924): a fact about OUR routing, never about the user's app.
+  'FAST_LANE_SKIPPED_REASONING_RUNG',
+  // …and its sibling: what OUR calls that returned nothing cost in wall clock (providerWaste.ts).
+  'PROVIDER_TIME_WASTED',
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
   'JOURNEY_NOT_DERIVED', 'RELEASE_GATE',
   // What we chose not to charge for is an accounting fact about OUR engine (unbilledTurns.ts).

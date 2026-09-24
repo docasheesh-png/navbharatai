@@ -25,10 +25,9 @@ import crypto from 'crypto';
  *   read:builds       → GET  /api/v1/builds
  *   ai:chat           → POST /api/v1/chat/completions — NavBharatAI's AI, on the holder's wallet
  *   ai:professionals  → POST /api/v1/professionals/:id/chat — the ~80 expert AIs, by id
- *   ai:images         → POST /api/v1/images/generations — NavBharatAI Pro images, ₹1 each
  */
 export const API_SCOPES = [
-  'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals', 'ai:images',
+  'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals',
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
@@ -70,7 +69,6 @@ export const API_SCOPE_DESCRIPTIONS: Readonly<Record<ApiScope, { title: string; 
   'read:builds': { title: 'Your apps', detail: 'The list of apps you have built, with their live links.' },
   'ai:chat': { title: "NavBharatAI's AI", detail: 'Ask NavBharatAI questions from your own program or app. Costs come from your wallet, up to the daily limit you set on the key.' },
   'ai:professionals': { title: 'Expert AIs', detail: 'Ask any NavBharatAI expert by name — Teacher, Lawyer, Doctor-side health helpers, Kisan, Accountant and the rest. Same wallet, same daily limit.' },
-  'ai:images': { title: 'Image generation', detail: 'Make images from your own program, on the Pro engine. Each image costs ₹1 from your wallet and counts towards this key\u2019s daily limit.' },
 };
 
 export const KEY_PREFIX = 'nbai_';

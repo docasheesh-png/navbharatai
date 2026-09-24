@@ -138,7 +138,7 @@ const RoleBadge: React.FC<{ role: Role }> = ({ role }) => {
 
 const Toast: React.FC<{ msg: string; type: 'success' | 'error' }> = ({ msg, type }) => (
   <div
-    className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 transition-all
+    className={`nb-float-bottom fixed right-6 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-2 transition-all
       ${type === 'success' ? 'bg-green-500/20 border border-green-500/40 text-success' : 'bg-red-500/20 border border-red-500/40 text-danger'}`}
   >
     {type === 'success' ? <Check size={14} /> : <X size={14} />}

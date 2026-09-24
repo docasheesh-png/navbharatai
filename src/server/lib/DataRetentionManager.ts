@@ -73,6 +73,16 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'user_vault_pin', key: 'docId' },
   { collection: 'agentv3_mcp_library', key: 'docId' },
   /**
+   * The per-buyer daily gift-code tally (`giftCodeStore.ts`). Its doc id is `<uid>_<day>`, so it is
+   * reached by the `uid` FIELD rather than the id — the same shape `user_costs` uses.
+   *
+   * ⚠️ `gift_codes` itself is deliberately NOT here, and the reason matters: a code the buyer has
+   * already given away is value in somebody else's hands. Deleting the buyer's account must not
+   * cancel a gift the recipient has not redeemed yet, and a payment record is the first of §9's
+   * four stated exceptions to erasure anyway.
+   */
+  { collection: 'gift_code_daily', key: { field: 'uid' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the
@@ -189,6 +199,24 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   // images the FREE tier got from a PAID engine. It enforces that day's cap and is read afterwards
   // only to judge whether the cap is right, which 90 days of history answers.
   { collection: 'image_free_paid_daily', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  /**
+   * Why a user's phone build failed — ONE document per UTC day (`day` is the doc id AND a field, and an
+   * ISO date sorts lexicographically, so it is its own timestamp, exactly like `build_failures` above).
+   * A long window is cheap at one document a day and is what lets "is the repair loop getting better?"
+   * be answered by comparison rather than by impression.
+   */
+  { collection: 'mobile_build_outcomes', ttlDays: 400, timestampField: 'day', timestampKind: 'iso' },
+  /**
+   * The per-run marker behind that counter — the ONE collection in this pair that really grows, at one
+   * small document per finished build.
+   *
+   * It exists solely so a POLLED status endpoint cannot count the same run twice, so it is needed only
+   * while a client could still be asking about that run — minutes, not weeks. 30 days is far past any
+   * real poll and is the window rather than the shorter honest one because the cost of being wrong is
+   * asymmetric: purge too early and a run still being watched is counted a second time, which would
+   * inflate the exact rate this whole feature was built to measure. `countedAt: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'mobile_build_counted', ttlDays: 30, timestampField: 'countedAt', timestampKind: 'epochMs' },
 
   /**
    * Visitor counts for published apps — the ONE window this registry promised in PUBLIC and did not keep.

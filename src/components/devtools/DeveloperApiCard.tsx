@@ -223,13 +223,7 @@ curl ${base}/chat/completions \\
 curl ${base}/professionals/teacher_ai/chat \\
   -H "Authorization: Bearer nbai_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"messages":[{"role":"user","content":"Explain photosynthesis to a class 8 student"}]}'
-
-# Make an image (ai:images) — Pro engine, ₹1 per image from your wallet
-curl ${base}/images/generations \\
-  -H "Authorization: Bearer nbai_YOUR_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{"prompt":"a chai stall at sunrise, warm light","n":1,"response_format":"data_url"}'`,
+  -d '{"messages":[{"role":"user","content":"Explain photosynthesis to a class 8 student"}]}'`,
     node:
 `import OpenAI from "openai";
 
@@ -247,11 +241,7 @@ const teacher = await client.chat.completions.create({
   model: "navbharatai/teacher_ai",
   messages: [{ role: "user", content: "Explain photosynthesis to a class 8 student" }],
 });
-console.log(teacher.choices[0].message.content);
-
-// Images (needs ai:images). Each one costs ₹1 from your wallet.
-const pic = await client.images.generate({ prompt: "a chai stall at sunrise, warm light" });
-console.log(pic.data[0].b64_json.slice(0, 40) + "...");`,
+console.log(teacher.choices[0].message.content);`,
     python:
 `from openai import OpenAI
 
@@ -268,11 +258,7 @@ teacher = client.chat.completions.create(
     model="navbharatai/teacher_ai",
     messages=[{"role": "user", "content": "Explain photosynthesis to a class 8 student"}],
 )
-print(teacher.choices[0].message.content)
-
-# Images (needs ai:images). Each one costs \u20b91 from your wallet.
-pic = client.images.generate(prompt="a chai stall at sunrise, warm light")
-print(pic.data[0].b64_json[:40], "...")`,
+print(teacher.choices[0].message.content)`,
   }), [base]);
 
   return (
@@ -286,7 +272,7 @@ print(pic.data[0].b64_json[:40], "...")`,
           <h2 className="text-sm font-black text-ink uppercase tracking-widest">NavBharatAI API</h2>
           <p className="text-[11px] text-muted mt-0.5 leading-relaxed">
             Use NavBharatAI from your own program or app — read your account, list your apps, ask
-            NavBharatAI's AI or any of its expert AIs, and generate images. It speaks the standard
+            NavBharatAI's AI or any of its expert AIs. It speaks the standard
             chat-completions format, so an SDK you already have works by changing two lines. You choose
             exactly what each key may do, and how much it may spend per day.
           </p>
@@ -468,6 +454,9 @@ print(pic.data[0].b64_json[:40], "...")`,
         <ul className="text-[10px] text-muted space-y-1 leading-relaxed">
           <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> Base URL <code className="font-mono text-ink">{base}</code>. Send the key as <code className="font-mono">X-API-Key</code> or <code className="font-mono">Authorization: Bearer</code>.</li>
           <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> AI answers cost the same as in the app and come from your wallet — never more than the key's daily limit.</li>
+          {/* Said plainly because the protocol alone cannot say it: a developer who chose streaming for
+              speed deserves to know the answer arrives in one piece, and why that keeps their bill real. */}
+          <li className="flex gap-2"><ShieldCheck className="w-3 h-3 text-success shrink-0 mt-0.5" /> <span><code className="font-mono">stream: true</code> works with any standard SDK. Today the answer arrives in one piece rather than word by word, so every answer is measured and billed at exactly the same price as a normal one.</span></li>
           <li className="flex gap-2"><AlertTriangle className="w-3 h-3 text-warn shrink-0 mt-0.5" /> Keep the key on your server. Never put it inside a website's front-end code — anyone could read it there. An app you publish with NavBharatAI gets its AI assistant built in automatically, with no key at all.</li>
         </ul>
       </div>

@@ -252,26 +252,107 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
       <ReportCard
         title="Engine usage and margin" source={ENDPOINTS.usage} icon={Activity} window="last 30 days"
         state={s('usage')} onRefresh={() => void load('usage')} onStatus={onStatus}
-        note="Tokens per engine against what was billed. The baseline OVER-states cheap-engine cost, so the real margin is at least what is shown."
+        note="What the engines really cost against what was billed, priced per model from the rate card."
       >
         {(d) => {
           // FIELD NAMES READ OUT OF `UsageReport` IN `AgentV3CostTelemetry.ts`, NOT GUESSED. The first
           // version of this card looked for `providers`/`rows` and `realCostUsd`; the route returns
           // `perProvider` and `baselineCostUsd`, so every row was missing and every cost was a dash —
           // a card that looked built and showed nothing, which the second absolute rule forbids.
-          const rows: any[] = Array.isArray(d?.perProvider) ? d.perProvider : [];
+          //
+          // 🔴 AND THE SECOND VERSION SHOWED A NUMBER THAT WAS NOT WHAT IT SAID (admin report,
+          // 2026-09-23). It led with `marginUsd`, labelled "Margin (at least)", painted RED below
+          // zero — and `marginUsd` is `billed − SONNET-equivalent baseline`, i.e. every engine priced
+          // at $3.00/$15.00 per MTok whatever it really charged. A 30-day window that charged 18% of
+          // Sonnet's price therefore read as a **$1,257 loss**, and the admin sent the report to ask
+          // about the loss. The statement was not false — real margin genuinely is ≥ that figure —
+          // but a bound that loose carries no information: +$150 and −$1,200 both satisfy it, and
+          // `text-danger` asserted a verdict the number could not support. **A vacuous bound must
+          // never be displayed as a verdict.** The measured spend now leads; the baseline stays as
+          // what it always was, a "vs Sonnet" comparison, and is labelled as one.
+          const rows: any[] = Array.isArray(d?.perModel) ? d.perModel : [];
+          const provRows: any[] = Array.isArray(d?.perProvider) ? d.perProvider : [];
+          const depth: Record<string, unknown> = (d?.byLadderDepth && typeof d.byLadderDepth === 'object')
+            ? d.byLadderDepth as Record<string, unknown> : {};
+          const depthKeys = Object.keys(depth).sort((a, b) => (a === 'unknown' ? 1 : b === 'unknown' ? -1 : Number(a) - Number(b)));
+          const measured = typeof d?.totalRealSpendUsd === 'number';
+          const coverage = typeof d?.realCostCoverage === 'number' ? d.realCostCoverage : 0;
           return (
             <div className="space-y-3">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <Stat label="Builds" value={num(d?.totalBuilds)} />
                 <Stat label="Billed" value={usd(d?.totalBilledUsd)} />
-                <Stat label="Baseline cost" value={usd(d?.totalBaselineCostUsd)} />
+                <Stat label="Real spend" value={usd(d?.totalRealSpendUsd)} />
                 <Stat
-                  label="Margin (at least)" value={usd(d?.marginUsd)}
-                  tone={typeof d?.marginUsd === 'number' && d.marginUsd < 0 ? 'text-danger' : 'text-success'}
+                  label="Margin"
+                  value={usd(d?.realMarginUsd)}
+                  // Coloured ONLY on a measured figure. An unmeasured window shows a dash in the
+                  // default ink rather than a reassuring green or an alarming red.
+                  tone={typeof d?.realMarginUsd === 'number'
+                    ? (d.realMarginUsd < 0 ? 'text-danger' : 'text-success')
+                    : undefined}
                 />
               </div>
+              {!measured ? (
+                <p className={NOTE}>
+                  No build in this window recorded what it really cost, so spend and margin cannot be
+                  shown. Builds have recorded it since 2026-09-23 — this fills in as those days enter
+                  the window.
+                </p>
+              ) : coverage < 0.999 ? (
+                <p className={NOTE}>
+                  Measured on {num(d?.realCostBuilds)} of {num(d?.totalBuilds)} builds ({pct(coverage)}).
+                  The rest are days recorded before the real cost was kept, so the spend above is a
+                  PART of the window, not all of it.
+                </p>
+              ) : null}
+              <p className={NOTE}>
+                Reference: at the top engine's rate the same tokens would have cost{' '}
+                {usd(d?.totalBaselineCostUsd)}, so this window was billed at {pct(d?.marginRatio)} of
+                that price ({usd(d?.marginUsd)} against it). A comparison, never our cost.
+              </p>
               {rows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="text-left text-muted">
+                        <th className="py-1 pr-2 font-black">Engine</th>
+                        <th className="py-1 pr-2 font-black">Model</th>
+                        <th className="py-1 pr-2 font-black">Builds</th>
+                        <th className="py-1 pr-2 font-black">In</th>
+                        <th className="py-1 pr-2 font-black">Cached</th>
+                        <th className="py-1 font-black">Out</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.slice(0, 20).map((row, i) => (
+                        <tr key={`${row?.provider ?? i}-${row?.model ?? i}`} className="border-t border-line">
+                          <td className="py-1 pr-2 text-body font-bold">{String(row?.provider ?? DASH)}</td>
+                          <td className="py-1 pr-2 text-muted">{String(row?.model ?? DASH)}</td>
+                          <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.builds)}</td>
+                          <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.inputTokens)}</td>
+                          <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.cacheReadInputTokens)}</td>
+                          <td className="py-1 text-muted tabular-nums">{num(row?.outputTokens)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className={NOTE}>
+                  No build in this window recorded which model answered. The engine column alone
+                  cannot price a build — one engine holds rungs 20x apart.
+                </p>
+              )}
+              {/*
+                The per-ENGINE rollup, kept beside the per-model table rather than replaced by it.
+                ⚠️ MEASURED, not assumed: `theReportsThatWereNeverShown` does NOT prove this section
+                renders — it asserts the STRING `perProvider` appears in the file, so renaming the
+                variable that holds it leaves the guard green with the table gone. Verified by
+                reverting exactly that. The guard's real job is catching a server-side rename, which
+                it does; do not cite it as proof that a card still shows something.
+              */}
+              {provRows.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-[11px]">
                     <thead>
@@ -280,28 +361,35 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
                         <th className="py-1 pr-2 font-black">Builds</th>
                         <th className="py-1 pr-2 font-black">In</th>
                         <th className="py-1 pr-2 font-black">Out</th>
-                        <th className="py-1 font-black">Baseline</th>
+                        <th className="py-1 font-black">vs top engine</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.slice(0, 20).map((row, i) => (
-                        <tr key={`${row?.provider ?? i}`} className="border-t border-line">
+                      {provRows.slice(0, 20).map((row, i) => (
+                        <tr key={`p-${row?.provider ?? i}`} className="border-t border-line">
                           <td className="py-1 pr-2 text-body font-bold">{String(row?.provider ?? DASH)}</td>
                           <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.builds)}</td>
                           <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.inputTokens)}</td>
                           <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.outputTokens)}</td>
+                          {/* The reference price, NOT what this engine charged — see the note above. */}
                           <td className="py-1 text-muted tabular-nums">{usd(row?.baselineCostUsd)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              ) : (
-                <p className={NOTE}>No engine recorded a build in this window.</p>
-              )}
+              ) : null}
+              {depthKeys.length > 0 ? (
+                <p className={NOTE}>
+                  Ladder: {depthKeys.map(k => `${k === 'unknown' ? 'unattributed' : `rung ${k}`} ${num(depth[k])}`).join(' · ')}.
+                  Rung 1 is the cheapest opener; a build below it fell there or was routed there.
+                </p>
+              ) : null}
               <p className={NOTE}>
                 {d?.fromDate && d?.toDate ? `${d.fromDate} to ${d.toDate} · ` : ''}
-                {num(d?.lossBuilds)} build(s) went out free after spending tokens, costing {usd(d?.lossRealCostUsd)}.
+                {num(d?.lossBuilds)} build(s) went out free after spending tokens, costing{' '}
+                {usd(d?.lossSpendUsd)}. Free-tier and admin builds are counted here too — they are
+                free by design, not failures.
               </p>
             </div>
           );

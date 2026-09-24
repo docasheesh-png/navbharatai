@@ -219,6 +219,73 @@ button, [role='button'], nav, header, footer {
   user-select: none;
 }
 
+/* ── LONG-PRESS IN THE APP IS NOT LONG-PRESS ON A WEB PAGE (admin 2026-09-23, with a phone screenshot
+   of the home screen: the tagline highlighted in blue with selection handles, and iOS's
+   "Copy · Look Up · Translate" bubble sitting over the cards) —
+   "navbharatai app (mobile app) me kisi text par long press karo to woh copy hone lagta hai —
+    'website behaviour'. isko hatao, aur app jaisa banao. website me abhi jaisa rahne dena."
+
+   🔴 THE RULE DIRECTLY ABOVE WAS ALREADY TRYING TO DO THIS AND STRUCTURALLY COULD NOT — which is why
+   this is a different fix and not a second patch on the same symptom. It names four things (button,
+   [role='button'], nav, header, footer) and the text in the screenshot is a plain <p> (HomeView's
+   "Made with ❤️ for Bharat …", which sits in no <footer> and no <nav>). So is every heading, every
+   card title and every line of body copy in the app. An ALLOWLIST OF CHROME CAN NEVER BE COMPLETE
+   against an open-ended set of tags: chrome is most of a screen, and the exceptions are the few
+   places that hold real content. So inside the shell the question is INVERTED — nothing is
+   selectable unless it is named in the allow list below.
+
+   That inversion is what a native app actually is, not an approximation of one: React Native's <Text>
+   is not selectable unless it is explicitly asked to be, and neither an Android nor an iOS label
+   raises selection handles under a resting finger.
+
+   🔒 GATED IN CSS, SO THERE IS NOTHING TO KEEP IN SYNC, AND THE WEBSITE IS UNTOUCHED BY CONSTRUCTION.
+   `html.nb-native-shell` is added to <html> by index.html's pre-paint script and ONLY when the
+   Capacitor bridge is present, so on the plain website every declaration here is inert and behaviour
+   is byte-identical to today — which is exactly what was asked. Because the class is set before first
+   paint there is also no frame of web behaviour to catch on a cold start.
+
+   📐 WHY THE DENY IS ON <html> AND NOT ON `html.nb-native-shell *`. Both `user-select` and
+   `-webkit-touch-callout` INHERIT, so one declaration at (0,1,1) reaches the whole document, and each
+   allow rule below is (0,1,2) and wins on its own subtree with no specificity contest at all. A
+   universal selector would be (0,1,1) on EVERY descendant and would beat the allow rules everywhere
+   they matter — the chat reply, the generated code, the terminal, the legal page would all become
+   uncopyable and nothing would fail to reveal it. Do not "tidy" it into one. */
+html.nb-native-shell {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The exceptions — every place where selecting text is a FEATURE rather than an accident.
+
+   ⚠️ THE FIRST FOUR ARE NOT OPTIONAL. A field whose text cannot be selected is a field a user cannot
+   correct, and in a WKWebView an inherited `-webkit-user-select: none` takes the caret handles with
+   it — so an input inside a shell without this line is worse than a web page, not more native.
+
+   The rest are the app's CONTENT, addressed through hooks the app already renders rather than through
+   new markup: `.prose` and `.markdown-body` are the wrappers every chat surface already puts an answer
+   into (free chat, Pro, the mini chat, the security report), `pre`/`code` cover generated code, diffs
+   and logs, `.xterm` and `.monaco-editor` are the terminal and the editor, and `.nb-selectable` is the
+   opt-in for a content block that uses none of those — today the legal documents and the Professional
+   chat bubble. A new content surface adds that one class; it must never be answered by weakening the
+   deny above. */
+html.nb-native-shell input,
+html.nb-native-shell textarea,
+html.nb-native-shell select,
+html.nb-native-shell [contenteditable]:not([contenteditable='false']),
+html.nb-native-shell pre,
+html.nb-native-shell code,
+html.nb-native-shell .prose,
+html.nb-native-shell .markdown-body,
+html.nb-native-shell .xterm,
+html.nb-native-shell .monaco-editor,
+html.nb-native-shell .nb-selectable {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+
 @layer base {
   /* ── DNA-level theme palette (admin 2026-07-14) ──────────────────────────────────────────────
      ONE semantic palette per theme, keyed on `html[data-theme]`. The compat layer (theme-compat.css)
@@ -558,6 +625,28 @@ button, [role='button'], nav, header, footer {
     min-height: 0;
   }
 
+  /* ── FLOATING TOASTS AND BANNERS: the sheet contract's sibling (added 2026-09-22) ───────────────
+     A `fixed` toast anchored to an edge has the same problem a sheet has, one element smaller: it
+     knows nothing about the notch, the home indicator or our own tab bar. Measured before this
+     existed — "Copied" confirmations in the admin console and in the component library sat 32px
+     (plain phone) to 66px (notched) BEHIND the tab bar, invisible; the admin's save toast sat 32px
+     under the header even with no notch at all.
+
+     Each element keeps its own gap as `--nb-float-gap`, and the chrome is ADDED to it — so on a
+     desktop, where every chrome variable is 0, the element sits exactly where it always did, and
+     only a phone moves. `max()` because `--nb-bottom-nav` already includes the home-indicator inset
+     whenever the bar is on screen, and must never be counted twice.
+
+     ⚠️ Do not put a `bottom-*` / `top-*` utility on the same element: Tailwind emits utilities after
+     this layer, so the utility would win and silently cancel the whole rule — the exact failure a
+     `p-0` caused on two sheets. tests/everyPopupClearsTheChrome.test.ts refuses the pair. */
+  .nb-float-bottom {
+    bottom: calc(var(--nb-float-gap, 1.5rem) + max(var(--nb-safe-bottom), var(--nb-bottom-nav)));
+  }
+  .nb-float-top {
+    top: calc(var(--nb-float-gap, 1.5rem) + var(--nb-safe-top));
+  }
+
 
 }
 
@@ -607,11 +696,26 @@ button, [role='button'], nav, header, footer {
   scroll-behavior: auto !important;
 }
 
-/* L18: Visible focus outline for keyboard navigation */
-:focus-visible {
-  outline: 2px solid #6366f1;
-  outline-offset: 2px;
-  border-radius: 4px;
+/* L18: Visible focus outline for keyboard navigation.
+
+   🔴 IT MUST LIVE IN `@layer base` — admin 2026-09-24, with a phone screenshot of a professional's
+   message box drawing a SECOND box inside itself ("input box me aise 2 box jaise dikh rahe hai").
+   It used to be unlayered, and in the cascade an UNLAYERED rule beats every LAYERED one whatever its
+   specificity — so it overrode Tailwind's `outline-none` / `focus:outline-none` utilities (which live
+   in `@layer utilities`) on all ~300 elements that use them. A text field counts as focus-visible on
+   every tap, so each tapped textarea drew this 2px indigo ring (radius 4px, 2px out) INSIDE the
+   composer's own rounded `focus-within` border: two boxes. Nearly every `outline-none` in the app is
+   paired with its own indicator (`focus:border-*`, `focus:ring-*`), which is the author saying "not
+   the outline, this instead" — that choice was being silently overruled everywhere.
+   In the base layer it is still the default ring for every element that does not opt out (a plain
+   button reached by Tab keeps it), and an opt-out finally means what it says.
+   Locked by `tests/oneFocusRingNotTwo.test.ts`. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 /* E12: Prevent iOS modal scroll from propagating to body (body lock) */

@@ -26,8 +26,48 @@ export interface EnhanceInput {
   prompt: string;
   /** The picker's settings, so the rewrite agrees with them instead of arguing. */
   type?: string;
+  /** The style chip's LABEL ("Realistic") — the words the model is shown. */
   style?: string;
+  /**
+   * The style chip's ID ("photo") — what `resolveImageBrief` reads. The label is for the model, the
+   * id is for the rule; both travel because the rule must not guess an id from a label.
+   */
+  styleId?: string;
   colorHint?: string;
+}
+
+/**
+ * 🔴 THE ⭐ MUST NOT CHANGE WHAT THE PICTURE IS (2026-09-22, the clinic-logo screenshot).
+ *
+ * The style chip DEFAULTS to Realistic and most people never touch it. The enhancer was handed
+ * "Style: Realistic" for the brief *"clinic logo"* and, following its own instruction that a
+ * photographic style "gets real camera language", rewrote a logo into *"a minimalist photograph of a
+ * clinic logo, shot with a shallow depth of field…"*. The craft layer then read those words, saw a
+ * photo request, and built a photo of nothing in particular. **A chip nobody chose turned a logo into
+ * a photograph, and the user pressed send on words the ⭐ wrote.**
+ *
+ * The craft layer already knew the rule — *"the user's typed intent is the stronger signal; a chip
+ * they never touched yields"* — and applied it to the picture it BUILT. The ⭐ had a rule of its own.
+ * Now there is ONE: `resolveImageBrief` decides what the picture is, and this module (1) forwards
+ * the style chip to the model only when that resolution says the style applies, saying in words what
+ * the picture must stay when it does not, and (2) REFUSES a rewrite that turned a flat mark into a
+ * photograph — the same shape as `keepsTheFacts`, for the kind of picture rather than its facts.
+ */
+import { resolveImageBrief, realismInWords, type ResolvedBrief } from './imagePromptCraft';
+
+/** The chips as the rule reads them. `styleId` is the id; `style` alone is a label and is not guessed at. */
+export function resolveEnhanceBrief(input: EnhanceInput): ResolvedBrief {
+  return resolveImageBrief({ prompt: input.prompt, type: input.type, style: input.styleId });
+}
+
+/** The kind of picture the rewrite must keep, in the model's own terms. Empty when nothing is at stake. */
+export function keepTheKindLine(brief: ResolvedBrief): string {
+  if (brief.realismLoses) {
+    const what = brief.purpose === 'icon' ? 'an APP ICON' : brief.purpose === 'screenshot' ? 'a UI MOCKUP' : brief.purpose === 'illustration' ? 'an ILLUSTRATION' : 'a LOGO';
+    return `Keep it what it is: ${what} — a flat, simple mark on a clean background. Do NOT describe it as a photograph and do NOT add camera, lens, lighting or depth-of-field language.`;
+  }
+  if (brief.styleDropped) return 'The user\'s own wording contradicts the selected style — follow the wording, not the style.';
+  return '';
 }
 
 export const ENHANCE_MAX_INPUT = 2_000;
@@ -47,10 +87,16 @@ export function enhancerSystemPrompt(): string {
 }
 
 export function enhancerUserMessage(input: EnhanceInput): string {
+  const brief = resolveEnhanceBrief(input);
+  // The style chip reaches the model ONLY when the one owner of precedence says it applies. With no
+  // `styleId` there is nothing to resolve against and the label is forwarded as before.
+  const styleForwarded = input.style && (input.styleId === undefined || brief.styleApplies);
+  const keep = keepTheKindLine(brief);
   const settings = [
     input.type ? `Image type: ${input.type}` : '',
-    input.style ? `Style: ${input.style}` : '',
+    styleForwarded ? `Style: ${input.style}` : '',
     input.colorHint && !/^no/i.test(input.colorHint) ? `Colour: ${input.colorHint}` : '',
+    keep,
   ].filter(Boolean).join('\n');
   return `${settings ? settings + '\n\n' : ''}Brief: ${String(input.prompt || '').slice(0, ENHANCE_MAX_INPUT).trim()}`;
 }
@@ -98,12 +144,26 @@ export function keepsTheFacts(original: string, enhanced: string): boolean {
 
 export type EnhanceOutcome =
   | { ok: true; prompt: string }
-  | { ok: false; reason: 'empty' | 'unchanged' | 'lost-facts' | 'busy'; message: string };
+  | { ok: false; reason: 'empty' | 'unchanged' | 'lost-facts' | 'changed-kind' | 'busy'; message: string };
+
+/**
+ * Did the rewrite turn a flat mark into a photograph? Pure.
+ *
+ * Only the direction that was measured: the ORIGINAL resolved to a flat mark (a photo-hostile
+ * purpose that won), and the rewrite now asks for a photograph in words. The reverse — a rewrite
+ * that quietly dropped "a photo of" — is not judged here: dropping a phrase is not the same as
+ * changing the kind, and a guard that is too eager rejects every good rewrite.
+ */
+export function changedTheKind(brief: ResolvedBrief | undefined, enhanced: string): boolean {
+  if (!brief || !brief.realismLoses) return false;
+  return realismInWords(String(enhanced ?? ''));
+}
 
 /** The branded words for each failure. Names no vendor; says what the user still has. */
 export function enhanceFailureMessage(reason: Exclude<EnhanceOutcome, { ok: true }>['reason']): string {
   if (reason === 'busy') return 'NavBharatAI could not improve the prompt just now — your words are kept. Try the star again in a moment.';
   if (reason === 'lost-facts') return 'The improved version dropped one of your details, so your own words are kept. Add more detail and try the star again.';
+  if (reason === 'changed-kind') return 'The improved version turned your brief into a different kind of picture, so your own words are kept. If you did want a photograph of it, say so in the brief ("a photo of …").';
   if (reason === 'unchanged') return 'Your prompt is already specific — nothing to add. Press send.';
   return 'NavBharatAI could not improve the prompt just now — your words are kept.';
 }
@@ -111,7 +171,7 @@ export function enhanceFailureMessage(reason: Exclude<EnhanceOutcome, { ok: true
 /**
  * Decide from a model's raw answer. PURE, so the whole rule is testable without a provider.
  */
-export function decideEnhanced(original: string, raw: string | null | undefined, modelOk: boolean): EnhanceOutcome {
+export function decideEnhanced(original: string, raw: string | null | undefined, modelOk: boolean, brief?: ResolvedBrief): EnhanceOutcome {
   if (!modelOk) return { ok: false, reason: 'busy', message: enhanceFailureMessage('busy') };
   const cleaned = cleanEnhancedPrompt(raw);
   if (!cleaned || cleaned.length < 12) return { ok: false, reason: 'empty', message: enhanceFailureMessage('empty') };
@@ -119,6 +179,7 @@ export function decideEnhanced(original: string, raw: string | null | undefined,
     return { ok: false, reason: 'unchanged', message: enhanceFailureMessage('unchanged') };
   }
   if (!keepsTheFacts(original, cleaned)) return { ok: false, reason: 'lost-facts', message: enhanceFailureMessage('lost-facts') };
+  if (changedTheKind(brief, cleaned)) return { ok: false, reason: 'changed-kind', message: enhanceFailureMessage('changed-kind') };
   return { ok: true, prompt: cleaned };
 }
 
@@ -136,7 +197,7 @@ export async function enhanceImagePrompt(input: EnhanceInput, call: EnhancerCall
         timer = setTimeout(() => resolve({ content: '', ok: false }), timeoutMs);
       }),
     ]);
-    return decideEnhanced(original, answer.content, answer.ok);
+    return decideEnhanced(original, answer.content, answer.ok, resolveEnhanceBrief(input));
   } catch {
     return { ok: false, reason: 'busy', message: enhanceFailureMessage('busy') };
   } finally {

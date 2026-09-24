@@ -8,39 +8,33 @@ import {
 import {
   SCOPE_ROUTES, PUBLIC_MODEL_NAME, PROFESSIONAL_MODEL_PREFIX,
   professionalIdFromModel, professionalModelName,
-  readImageRequest, imageGenerationResponse, MAX_IMAGES_PER_REQUEST, MAX_IMAGE_PROMPT_CHARS,
 } from '../src/server/lib/developerApi';
 import { listProfessionals, getProfessional } from '../src/server/professionals/registry';
 
 /**
- * 🔌 THE NAVBHARATAI API GREW FOUR DOORS (admin 2026-09-22).
+ * 🔌 THE NAVBHARATAI API GREW NEW DOORS (admin 2026-09-22).
  *
  * > *"NAVBHARATAI API, jisko thoda aur modify karo! isme kuch cheeze aur add karo, jaise full access,
- * > professionals, images generator, aur aap jo bhi chaho."*
+ * > professionals, aur aap jo bhi chaho."*
  *
- * What went in: **full access**, the **~80 expert AIs**, an **image generator**, and — Claude's own
- * two — `GET /api/v1/key` (what this key may do and what it spent today) and `GET /api/v1/models`
+ * What went in: **full access**, the **~80 expert AIs**, and — Claude's own two — `GET /api/v1/key` (what this key may do and what it spent today) and `GET /api/v1/models`
  * (so a standard SDK's `models.list()` works).
  *
- * ## The four things this file exists to stop, each of which fails silently
+ * ## The things this file exists to stop, each of which fails silently
  *
  * 1. **A scope that is a label.** The original API's whole root cause: two of three scopes opened
  *    nothing. `all` is the shape most likely to repeat it, because it has no single route to point
  *    at — so it is proven against `hasScope` itself, the one function every guard calls.
- * 2. **A second copy of the paid image engine.** The rungs moved into `lib/imageProEngine.ts` so both
- *    doors share them; a copy would be the drifted-copy class this repo has paid for five times.
- * 3. **A door that bills without a triage, a cap or a wallet check.** Three money doors now, one gate.
- * 4. **A vendor name reaching a developer.** `navbharatai/teacher_ai` is our brand; the engine under
+ * 2. **A door that bills without a triage, a cap or a wallet check.** Every money door, one gate.
+ * 3. **A vendor name reaching a developer.** `navbharatai/teacher_ai` is our brand; the engine under
  *    it is admin-only (White-Label Law), and a developer is a user.
  *
- * Every SOURCE case below was proven by reversion — `tsc` and `vitest` cannot see a missing gate, a
- * duplicated engine or a scope check that was never wired.
+ * Every SOURCE case below was proven by reversion — `tsc` and `vitest` cannot see a missing gate or a
+ * scope check that was never wired.
  */
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 const DEV_ROUTE = 'src/server/routes/developerApi.ts';
-const IMG_ROUTE = 'src/server/routes/imageGen.ts';
-const ENGINE = 'src/server/lib/imageProEngine.ts';
 const UI = 'src/components/devtools/DeveloperApiCard.tsx';
 const VENDOR = /\b(GLM|Z\.ai|Kimi|Moonshot|Claude|Anthropic|Gemini|Vertex|Grok|xAI|Bedrock|OpenAI|Pollinations|NVIDIA|Nemotron)\b/i;
 
@@ -78,7 +72,7 @@ describe('🔑 FULL ACCESS — one scope that really is every scope', () => {
 
   it('it is a real, grantable scope and junk beside it is still dropped', () => {
     expect(normalizeScopes(['all', 'bogus'])).toEqual(['all']);
-    expect(normalizeScopes(['ai:images', 'ai:professionals'])).toEqual(['ai:images', 'ai:professionals']);
+    expect(normalizeScopes(['ai:chat', 'ai:professionals'])).toEqual(['ai:chat', 'ai:professionals']);
   });
 
   it('🔒 its description WARNS that it auto-grants what does not exist yet — the one thing a tick cannot show', () => {
@@ -169,104 +163,15 @@ describe('🧑‍🏫 THE EXPERT AIs, reachable by name', () => {
   });
 });
 
-// ── 3 · images ─────────────────────────────────────────────────────────────────────────────────
-
-describe('🖼️ THE IMAGE GENERATOR', () => {
-  it('a request needs a prompt, and the shape is the standard one', () => {
-    expect(readImageRequest({ prompt: 'a cat' })).toEqual({ ok: true, prompt: 'a cat', n: 1, size: undefined, format: 'b64_json' });
-    expect(readImageRequest({})).toEqual({ ok: false, reason: 'no-prompt' });
-    expect(readImageRequest({ prompt: '   ' })).toEqual({ ok: false, reason: 'no-prompt' });
-    expect(readImageRequest(null)).toEqual({ ok: false, reason: 'no-prompt' });
-    expect(readImageRequest({ prompt: 'x'.repeat(MAX_IMAGE_PROMPT_CHARS + 1) })).toEqual({ ok: false, reason: 'too-long' });
-  });
-
-  it('🔒 an out-of-range `n` is REFUSED, never clamped — when money is the unit, say no rather than guess', () => {
-    for (const bad of [0, -1, 5, 50, 1.5, 'lots']) {
-      expect(readImageRequest({ prompt: 'a cat', n: bad }), String(bad)).toEqual({ ok: false, reason: 'bad-n' });
-    }
-    expect(readImageRequest({ prompt: 'a cat', n: MAX_IMAGES_PER_REQUEST }).ok).toBe(true);
-  });
-
-  it('🔒 `response_format: "url"` is refused — we never hand out a third-party origin', () => {
-    expect(readImageRequest({ prompt: 'a cat', response_format: 'url' })).toEqual({ ok: false, reason: 'bad-format' });
-    expect(readImageRequest({ prompt: 'a cat', response_format: 'data_url' }).ok).toBe(true);
-    // Absent or blank means the standard default, not a refusal.
-    expect(readImageRequest({ prompt: 'a cat', response_format: '' }).ok).toBe(true);
-  });
-
-  it('b64_json is BARE base64 (the standard); data_url keeps the prefix', () => {
-    const img = [{ image: 'data:image/png;base64,AAAB', mimeType: 'image/png' }];
-    const std = imageGenerationResponse(img, { createdMs: 1_700_000_000_000, format: 'b64_json', chargedInr: 1 });
-    expect((std.data as Array<{ b64_json: string }>)[0].b64_json).toBe('AAAB');
-    const dataUrl = imageGenerationResponse(img, { createdMs: 1_700_000_000_000, format: 'data_url', chargedInr: 1 });
-    expect((dataUrl.data as Array<{ data_url: string }>)[0].data_url).toBe('data:image/png;base64,AAAB');
-    expect(std.model).toBe(PUBLIC_MODEL_NAME);
-    expect(std.chargedInr).toBe(1);
-  });
-
-  it('🔒 the price is the platform’s existing ₹1, never a number invented here', () => {
-    const src = code(DEV_ROUTE);
-    expect(src).toContain('IMAGE_PRO_PRICE_INR');
-    // No literal rupee price anywhere in the image door — the constant is the only source.
-    expect(src).not.toMatch(/n \* 1\b/);
-  });
-
-  it('🔒 the cap is checked against the KNOWN price, so a request that would cross it is refused first', () => {
-    const src = code(DEV_ROUTE);
-    expect(src).toMatch(/const quotedInr = request\.n \* IMAGE_PRO_PRICE_INR;/);
-    expect(src).toMatch(/spendGate\(res, auth, now, request\.prompt, 'image', quotedInr\)/);
-    expect(src).toMatch(/spentTodayInr: spent\.spentInr \+ Math\.max\(0, quotedInr\)/);
-  });
-
-  it('🔒 charged on what was DELIVERED, never on what was asked for', () => {
-    expect(code(DEV_ROUTE)).toMatch(/const chargedInr = gate\.freeListed \? 0 : images\.length \* IMAGE_PRO_PRICE_INR;/);
-  });
-
-  it('🔒 an unconfigured Pro engine is an honest 503 — never a silent fall back to the free provider', () => {
-    const src = code(DEV_ROUTE);
-    expect(src).toMatch(/if \(!imageProAvailable\(\)\) \{/);
-    expect(src.indexOf('if (!imageProAvailable()) {')).toBeLessThan(src.indexOf('generateProImages('));
-  });
-});
-
-// ── 4 · one engine, not two ────────────────────────────────────────────────────────────────────
-
-describe('🔒 THE PAID IMAGE ENGINE LIVES IN ONE FILE', () => {
-  it('both doors call it, and NEITHER carries a copy of the rungs', () => {
-    for (const p of [DEV_ROUTE, IMG_ROUTE]) {
-      expect(code(p), `${p} must call the shared engine`).toContain('generateProImages(');
-      // The two rung calls are the engine's alone. A route holding either has a copy.
-      expect(code(p), `${p} must not call rung 1 itself`).not.toContain('fetchPollinationsPaidImage(');
-      expect(code(p), `${p} must not call rung 2 itself`).not.toContain('await fetch(imageProEndpoint()');
-    }
-    const engine = code(ENGINE);
-    expect(engine).toContain('fetchPollinationsPaidImage(');
-    expect(engine).toContain('await fetch(imageProEndpoint()');
-  });
-
-  it('🔒 the engine charges nobody and reads no wallet — each door pays differently, so that stayed with the door', () => {
-    const engine = code(ENGINE);
-    for (const forbidden of ['debitWalletRolledUp', 'readWalletBalanceInr', 'chargeForAiTurn', 'IMAGE_PRO_PRICE_INR', 'res.json', 'res.status']) {
-      expect(engine, forbidden).not.toContain(forbidden);
-    }
-  });
-
-  it('🔒 the engine runs no triage — the triage belongs to the DOOR, and BOTH doors run one', () => {
-    expect(code(ENGINE)).not.toMatch(/triage/i);
-    expect(code(IMG_ROUTE)).toContain('await triageImageRequest(');
-    expect(code(DEV_ROUTE)).toContain('decideImageSafety(');
-  });
-});
-
-// ── 5 · one gate for every door that spends ────────────────────────────────────────────────────
+// ── 3 · one gate for every door that spends ────────────────────────────────────────────────────
 
 describe('🔒 EVERY MONEY DOOR PASSES THROUGH ONE GATE', () => {
   const src = code(DEV_ROUTE);
 
-  it('there is exactly one gate, and all three spending doors use it', () => {
+  it('there is exactly one gate, and every spending door uses it', () => {
     expect((src.match(/async function spendGate\(/g) || []).length).toBe(1);
-    // chat, the expert handler, and images.
-    expect((src.match(/await spendGate\(/g) || []).length).toBe(3);
+    // chat and the expert handler.
+    expect((src.match(/await spendGate\(/g) || []).length).toBe(2);
   });
 
   it('🔒 it refuses in cheap-first order: rate slot, triage, cap, wallet — before any provider is called', () => {
@@ -282,7 +187,7 @@ describe('🔒 EVERY MONEY DOOR PASSES THROUGH ONE GATE', () => {
   });
 
   it('🔒 no door calls a provider before its gate', () => {
-    for (const call of ['callProfessionalAIWithUsage(', 'runProfessionalChatWithUsage(', 'generateProImages(']) {
+    for (const call of ['callProfessionalAIWithUsage(', 'runProfessionalChatWithUsage(']) {
       const i = src.indexOf(call);
       expect(i, `${call} not found`).toBeGreaterThan(-1);
       const before = src.slice(0, i);
@@ -293,9 +198,19 @@ describe('🔒 EVERY MONEY DOOR PASSES THROUGH ONE GATE', () => {
   it('🔒 the money lands AFTER the answer, through one settlement both AI doors share', () => {
     expect((src.match(/function settleKeyTurn\(/g) || []).length).toBe(1);
     expect((src.match(/settleKeyTurn\(auth, now, gate\.freeListed, run\.spend\)/g) || []).length).toBe(2);
-    // The response is sent first in both — a money-path failure must never cost the caller the answer.
-    for (const marker of ['res.status(200).json(chatCompletionResponse(', 'res.status(200).json({']) {
-      expect(src.indexOf(marker)).toBeGreaterThan(-1);
+    // The answer is written first in both — a money-path failure must never cost the caller the answer.
+    // ⚠️ RE-AIMED 2026-09-23: this read `res.status(200).json(...)` markers until both doors moved onto
+    // `sendCompletion` (so a streaming client can read its answer too). The old check only proved the
+    // markers EXISTED; this one proves the ORDER, per door, which is what the rule actually says.
+    const doors = [
+      src.slice(src.indexOf("app.post('/api/chat/completions'"), src.indexOf("app.post('/api/professionals/:id/chat'")),
+      src.slice(src.indexOf('async function answerAsExpert(')),
+    ];
+    for (const door of doors) {
+      const answer = door.indexOf('sendCompletion(res,');
+      const money = door.indexOf('settleKeyTurn(auth, now, gate.freeListed, run.spend)');
+      expect(answer, 'the door writes no answer').toBeGreaterThan(-1);
+      expect(money, 'the answer must be written BEFORE the money moves').toBeGreaterThan(answer);
     }
   });
 
@@ -303,14 +218,9 @@ describe('🔒 EVERY MONEY DOOR PASSES THROUGH ONE GATE', () => {
     expect(src).toMatch(/\{ userId: auth\.userId, feature: 'api', isFreeListed: freeListed \}/);
     expect(src).not.toContain('hasActivePass');
   });
-
-  it('an image flag is recorded against the REAL uid, not `anon`', () => {
-    const gate = src.slice(src.indexOf('async function spendGate('), src.indexOf('function settleKeyTurn('));
-    expect(gate).toMatch(/uid: auth\.userId, triage: safety\.triage, surface: 'image'/);
-  });
 });
 
-// ── 6 · the two free endpoints, and white-label ────────────────────────────────────────────────
+// ── 4 · the two free endpoints, and white-label ────────────────────────────────────────────────
 
 describe('the two doors that need no scope, and the law that binds all of them', () => {
   it('`/key` and `/models` take a valid key and no scope — the 403 debugging endpoint cannot itself 403', () => {
@@ -342,7 +252,7 @@ describe('the two doors that need no scope, and the law that binds all of them',
 
   it('every new endpoint is documented where the key is made', () => {
     const ui = read(UI);
-    for (const path of ['/professionals/teacher_ai/chat', '/images/generations', '/key']) {
+    for (const path of ['/professionals/teacher_ai/chat', '/key']) {
       expect(ui, `${path} is undocumented`).toContain(path);
     }
     expect(ui).toContain('navbharatai/teacher_ai');
@@ -351,7 +261,7 @@ describe('the two doors that need no scope, and the law that binds all of them',
   it('…and in the knowledge base every NavBharatAI AI reads', () => {
     const kb = read('src/server/AppContext/AppKnowledgeBase.ts');
     const entry = kb.slice(kb.indexOf("id: 'api_keys'"), kb.indexOf("id: 'api_keys'") + 9000);
-    for (const must of ['ai:professionals', 'ai:images', 'GET /api/v1/key', 'GET /api/v1/models', 'FULL ACCESS']) {
+    for (const must of ['ai:professionals', 'GET /api/v1/key', 'GET /api/v1/models', 'FULL ACCESS']) {
       expect(entry, must).toContain(must);
     }
   });

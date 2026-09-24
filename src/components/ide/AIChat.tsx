@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ModeButton } from '../chat/ModeButton';
+import { ImageLightbox } from '../chat/ImageLightbox';
+import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
@@ -289,6 +290,12 @@ interface AIChatProps {
    * only asks for it to open, so desktop and mobile can never hold two different "current modes".
    */
   onOpenModePicker?: () => void;
+  /**
+   * Present ⇒ a "History" button renders at the LEFT of the Mode button (admin 2026-09-23: "mode
+   * selecter se pahle (left me) … only in desktop"). Absent ⇒ nothing renders; App.tsx passes it only
+   * when the bottom bar, which already carries History, is not on screen. See chat/HistoryButton.tsx.
+   */
+  onOpenHistory?: () => void;
   pendingGHEdit?: any;
   onConfirmPush?: () => void;
   isPushing?: boolean;
@@ -344,6 +351,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   mode = 'planning',
   onModeChange,
   onOpenModePicker,
+  onOpenHistory,
   pendingGHEdit,
   onConfirmPush,
   isPushing,
@@ -382,6 +390,8 @@ export const AIChat: React.FC<AIChatProps> = ({
    * both render.
    */
   const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');
+  /** Same carve-out as Mode: the composer's left slot belongs to the free chat's controls only. */
+  const showFreeHistoryButton = Boolean(onOpenHistory) && !(onModeChange && activeAgent === 'navbharatai-pro');
   const { buildSteps } = useBuild();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
@@ -943,27 +953,8 @@ export const AIChat: React.FC<AIChatProps> = ({
         </div>
       )}
       {/* In-chat image lightbox */}
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-[200] bg-scrim flex items-center justify-center p-4 animate-in fade-in duration-150"
-          onClick={() => setLightbox(null)}
-        >
-          <div className="relative max-w-[95vw] max-h-[92vh] supports-[height:100dvh]:max-h-[92dvh] flex flex-col items-center gap-2" onClick={e => e.stopPropagation()}>
-            <img
-              src={lightbox.src}
-              alt={lightbox.name}
-              className="max-w-full max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] rounded-2xl shadow-2xl object-contain"
-            />
-            <p className="text-[10px] text-muted font-mono truncate max-w-full">{lightbox.name}</p>
-            <button
-              onClick={() => setLightbox(null)}
-              className="absolute -top-3 -right-3 w-8 h-8 bg-raised hover:bg-raised-hover rounded-full flex items-center justify-center text-ink transition-colors border border-line"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      {/* The one shared lightbox — this file used to carry its own copy (see ImageLightbox.tsx). */}
+      <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
       {isExpanded && (
         <div className="fixed inset-0 z-[100] bg-[var(--theme-bg)] flex flex-col p-4 md:p-6 animate-in fade-in zoom-in-95 duration-200">
           <div className="flex justify-between items-center mb-4">
@@ -1139,61 +1130,17 @@ export const AIChat: React.FC<AIChatProps> = ({
               <div className="w-10 h-10 bg-indigo-600/10 rounded-2xl flex items-center justify-center mb-2">
                 <Sparkles className="w-5 h-5 text-accent-text" />
               </div>
-              <p className={cn("text-[10px] font-black uppercase tracking-widest text-muted")}>Ready to architect and build.</p>
+              <p className={cn("text-[10px] font-black uppercase tracking-widest text-muted")}>Ask me anything.</p>
             </div>
 
-            {/* B6/G9 — Quick-Start Gallery: example prompts, adapts per agent */}
-            {(() => {
-              const isPro = activeAgent === 'navbharatai-pro';
-              const isIde = activeAgent === 'navbharatai' || !activeAgent?.includes('pro');
-              const proStarters = [
-                { icon: '📊', title: 'Analytics Dashboard', prompt: 'Build a modern analytics dashboard with sales charts, user metrics, revenue trends, and KPI cards. Use dark theme with gradient accents.' },
-                { icon: '🛒', title: 'E-commerce Page', prompt: 'Create a product landing page with hero section, features grid, pricing table, customer reviews, and a buy-now button.' },
-                { icon: '✅', title: 'Todo App', prompt: 'Build a todo app with categories, due dates, priority levels, drag-to-reorder, and localStorage persistence. Dark, minimal design.' },
-                { icon: '🎨', title: 'Portfolio Site', prompt: 'Create a developer portfolio with animated hero section, projects grid with tech tags, skills section, and contact form.' },
-                { icon: '🧠', title: 'Quiz App', prompt: 'Build an interactive quiz with 5 trivia questions, countdown timer, progress bar, score tracking, and a celebratory results screen.' },
-                { icon: '☁️', title: 'Weather App', prompt: 'Create a weather dashboard with current conditions, hourly forecast, 5-day outlook, and animated weather icons. Use a glassmorphism card layout.' },
-                { icon: '💬', title: 'Chat Interface', prompt: 'Build a real-time-style chat UI with message bubbles, timestamp, emoji reactions, typing indicator, and a message input with file attach.' },
-                { icon: '📝', title: 'Note-taking App', prompt: 'Create a Notion-inspired note-taking app with rich text editor, tags, search, sidebar navigation, and localStorage sync.' },
-              ];
-              const ideStarters = [
-                { icon: '🔍', title: 'Explain this file', prompt: 'Explain what this file does and how it works.' },
-                { icon: '🐛', title: 'Find bugs', prompt: 'Review this code for bugs, edge cases, and potential issues. List each problem with a fix.' },
-                { icon: '⚡', title: 'Improve performance', prompt: 'Identify and fix performance bottlenecks in this code.' },
-                { icon: '🛡️', title: 'Security review', prompt: 'Do a security audit of this code. Identify vulnerabilities and suggest fixes.' },
-                { icon: '🧪', title: 'Write tests', prompt: 'Write comprehensive unit tests for the functions in this file.' },
-                { icon: '📚', title: 'Generate README', prompt: 'Generate a comprehensive README.md for this project based on the code.' },
-              ];
-              const starters = isPro ? proStarters : (isIde ? ideStarters : proStarters);
-              return (
-                <div className="px-3 pb-3 space-y-2">
-                  <p className="text-[9px] font-black uppercase tracking-[0.2em] text-faint text-center">Try one of these</p>
-                  <div className={`grid gap-2 ${isPro ? 'grid-cols-2' : 'grid-cols-2'}`}>
-                    {starters.map(({ icon, title, prompt }) => (
-                      <button
-                        key={title}
-                        onClick={() => onInputChange(prompt)}
-                        className="text-left p-2.5 bg-card hover:bg-raised border border-line hover:border-indigo-500/30 rounded-2xl transition-all group active:scale-95"
-                      >
-                        <span className="text-base leading-none">{icon}</span>
-                        <p className="text-[10px] font-black text-ink mt-1.5 group-hover:text-accent-text transition-colors">{title}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-
-            <div className="flex items-center justify-center py-4 border-t border-line mt-4">
-               <button
-                 onClick={() => document.querySelector<HTMLButtonElement>('[title="Security Scan"]')?.click()}
-                 className="p-2 px-4 bg-red-500/10 hover:bg-red-500/20 text-danger border border-red-500/20 rounded-xl flex items-center gap-2 transition-all shadow-lg"
-                 title="Open Security Scan Hub"
-               >
-                 <ShieldAlert className="w-4 h-4" />
-                 <span className="text-[10px] font-black uppercase tracking-widest">Start Security Scan</span>
-               </button>
-            </div>
+            {/* NO CODE-TOOL TILES HERE (admin 2026-09-23: "navbharatai free me jab koi chat nahi hoti hai
+                to yeh tiles dikhti hai … yeh function free me hai hi nahi"). This component has ONE caller,
+                the NavBharatAI FREE chat, which has no open file and no code tools — yet its empty state
+                offered "Explain this file", "Find bugs", "Write tests", "Generate README" (prompts about a
+                file that does not exist) and a "Start Security Scan" button that clicked
+                `[title="Security Scan"]`, an element that exists nowhere in the app, so it did nothing.
+                Starter cards for building apps live in Pro v5.0 (agentv3/starterTemplates.ts), where
+                the builder is. */}
           </>
         )}
 
@@ -1635,7 +1582,14 @@ export const AIChat: React.FC<AIChatProps> = ({
 
       <div
         className="px-3 pt-2 border-t border-line bg-[var(--theme-card)] backdrop-blur-xl select-none shadow-[0_-12px_40px_rgba(0,0,0,0.5)]"
-        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, env(safe-area-inset-bottom, 8px))' }}
+        // `--nb-safe-below`, not the raw inset (admin 2026-09-23: "footer ka border input box ke saath
+        // chipka do"). When the bottom bar is on screen it has ALREADY reserved the home indicator, so
+        // adding `env(safe-area-inset-bottom)` again left one whole inset (~34px on an iPhone) of empty
+        // strip between the message box and the bar. The variable is 0 while the bar is shown and the
+        // device inset while it is not (lib/mobileNav.ts) — the same fix NavBharatAI Pro's composer got
+        // on 2026-09-14; this was the sibling it did not reach. The 8px floor is the panel's own
+        // breathing room, matching its `pt-2` above.
+        style={{ paddingBottom: kbHeight > 0 ? `${kbHeight + 8}px` : 'max(8px, var(--nb-safe-below, env(safe-area-inset-bottom, 0px)))' }}
       >
         <div className="max-w-4xl mx-auto space-y-1.5">
             {uploadError && (
@@ -1683,110 +1637,16 @@ export const AIChat: React.FC<AIChatProps> = ({
               ) : null}
             />
 
-            {/* THE FREE CHAT'S MODE BUTTON, ON DESKTOP (admin 2026-09-20: "sirf desktop 'Mode' button add
-                karna hai … na inputbox, na search button, kuch nahi"). It sits OUTSIDE the message box, to
-                its left — [ Mode ▾ ] [ message box ] — and the box itself is untouched: when the button is
-                hidden (mobile, where the bottom bar carries Mode) this wrapper is `contents`, i.e. it has
-                no box of its own and the layout is byte-for-byte what it was. It holds no mode; it asks
-                App.tsx to open the ONE picker sheet the bottom bar opens. */}
-            <div className={showFreeModeButton ? 'grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2' : 'contents'}>
-            {/* THE SHARED BUTTON (2026-09-21). This markup used to live here inline, and when the
-                admin asked for the same control on every other surface it would have become five
-                copies — the drifted-copy class this repo has paid for repeatedly. `showFreeModeButton`
-                still decides WHETHER, because only this surface has the Pro-mode carve-out below. */}
-            {showFreeModeButton && <ModeButton onOpen={onOpenModePicker} />}
-            <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
-                  <div className="relative flex items-center">
-                  {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}
-                  <textarea
-                    ref={textareaRef}
-                    value={input}
-                    onChange={(e) => {
-                      onInputChange(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
-                    }}
-                    onKeyDown={(e) => {
-                      // Shared rule (lib/chatToolbar): it also honours the toggle being OFF — where
-                      // Shift+Enter becomes the send key — and never fires mid-IME-composition, where
-                      // Enter is committing a candidate rather than sending. The old inline condition
-                      // did neither, so a Hindi or CJK typist sent half a word.
-                      if (enterShouldSend({
-                        key: e.key,
-                        shiftKey: e.shiftKey,
-                        sendOnEnter,
-                        hasContent: !!input.trim() || attachments.length > 0,
-                        isBusy: isLoading,
-                        isComposing: (e.nativeEvent as any)?.isComposing,
-                      })) {
-                        e.preventDefault();
-                        onSend(attachments);
-                        setAttachments([]);
-                        setEditingMsgId(null);
-                        dismissKeyboardOnMobile(textareaRef.current);
-                      }
-                    }}
-                    onPaste={handlePaste}
-                    placeholder="Ask NavBharatAI..."
-                    rows={1}
-                    className={cn(
-                      // Admin 2026-07-12: composer was py-3.5 + min-h-48px (~2 lines) and felt oversized on
-                      // phones — trim to a single comfortable line; it still auto-grows up to 240px as you type.
-                      //
-                      // ⚠️ min-h is 48px and that does NOT undo that trim (admin 2026-08-31). The box was
-                      // ALREADY rendering at 46px — py-2.5 (20px) plus one 16px line at leading-relaxed
-                      // (26px) — because the content exceeded the old min-h-40, which never bound. So this
-                      // is +2px of real height, and the padding stays py-2.5, not the py-3.5 that was
-                      // trimmed away. What the 48px buys is room for the control row: 36px of buttons plus
-                      // a symmetric 6px above and below. At 46px that row had ZERO gap at the top and sat
-                      // flush against the container's border, which is what made the send button look like
-                      // it was breaking out of the box.
-                      //
-                      // pr-44 reserves the right edge for that row so typed text never runs underneath it.
-                      // The row is 4 buttons wide in the common signed-in case (4x36 + 3x4 gaps + 8px inset
-                      // = 164px); pr-24 (96px) did not even cover the three-button case, so text slid under
-                      // the paperclip. With all five present the expand button can still overlap long text,
-                      // and that is the accepted edge: expand only appears once the text is long enough to
-                      // have wrapped anyway.
-                      "w-full bg-transparent text-[var(--theme-text)] pr-44 py-2.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
-                      onModeChange && activeAgent === 'navbharatai-pro' ? "pl-32" : "pl-5"
-                    )}
-                    style={{ maxHeight: '240px', overflowY: 'auto' }}
-                  />
-                  {pasteLineCount > 20 && (
-                    <div className="absolute left-2 top-2 bg-amber-500/20 border border-amber-500/40 rounded-lg px-2 py-0.5 text-[9px] font-black text-warn pointer-events-none z-10">
-                      {pasteLineCount} lines pasted
-                    </div>
-                  )}
-                  {onModeChange && activeAgent === 'navbharatai-pro' && (
-                    <div className="absolute left-2 top-3 z-50 pointer-events-auto">
-                      <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
-                    </div>
-                  )}
-                  {/* THE ONE CONTROL ROW (admin 2026-08-31: "send, mic aur attachment ke buttons
-                      unaligned hai").
- 
-                      Two real defects, both visible on a phone:
-
-                      1. THE ROW DID NOT FIT THE BOX. It is absolutely positioned at `bottom-2` inside a
-                         container that renders 46px tall, and its tallest child — the send button at
-                         p-3 + a 3.5 icon = 38px — left the row's top edge at 46-8-38 = ZERO. The filled
-                         red/indigo button therefore sat flush against the container's rounded border and
-                         read as broken out of it. Fixed at both ends: every control is now the SAME 36px
-                         box, and the textarea's min-height carries the row with a symmetric 6px gap.
-
-                      2. THE EXPAND BUTTON SAT ON TOP OF THE MIC. It was positioned separately at
-                         `right-20` (80px), a number that was correct when the row was narrower — the row
-                         now spans 8px to ~126px (three buttons) or ~166px (four), so 80px lands INSIDE
-                         it. That is the root cause worth naming: controls in this corner were placed by
-                         hand-tuned absolute offsets, so adding the voice button in 2026-08-10 silently
-                         invalidated a magic number nobody re-derived. It lives in this flex row now, and
-                         a sixth control cannot reintroduce the overlap.
-
-                      ⚠️ Keep every child of this row at 36px (p-2.5 with a w-4 h-4 icon). A control with
-                      different padding makes the row taller than the space reserved for it and brings
-                      defect 1 straight back. */}
-                  <div className="absolute right-2 bottom-1.5 flex gap-1 items-center">
+            {/* THE ONE COMPOSER (admin 2026-09-23, with a sketch): [ 🕘 / ☰ ] beside a TWO-ROW box —
+                the text on top at full width, attach · mic · voice underneath, and Send as tall as the
+                box on its right. The same shell every AI in NavBharatAI FREE renders (ComposerShell), so
+                none of them can look different from this one again. History and Mode still show only
+                where the phone's bottom bar is absent, and never beside Pro's own mode dropdown. */}
+            <ComposerShell
+              onOpenHistory={showFreeHistoryButton ? onOpenHistory : undefined}
+              onOpenMode={showFreeModeButton ? onOpenModePicker : undefined}
+              controls={(
+                <>
                     {( (input || '').length > 300 || (((input || '').match(/\n/g) || []).length > 4)) && (
                       <button
                         type="button"
@@ -1834,6 +1694,10 @@ export const AIChat: React.FC<AIChatProps> = ({
                           content: String(m.text || ''),
                         }))}
                     />
+                </>
+              )}
+              send={(
+                <>
                     {/* UNSEND moved out of the composer (admin 2026-08-14): it now lives ON the last sent
                         message bubble and appears only while the reply is still coming — see the message
                         footer above. The composer keeps just Stop (while loading) and Send. */}
@@ -1843,7 +1707,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       <button
                         onClick={() => onStop?.()}
                         title="Stop"
-                        className="p-2.5 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                        className={COMPOSER_STOP_CLASS}
                       >
                         <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
                       </button>
@@ -1858,15 +1722,69 @@ export const AIChat: React.FC<AIChatProps> = ({
                           dismissKeyboardOnMobile(textareaRef.current);
                         }}
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
-                        className="p-2.5 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95"
+                        className={COMPOSER_SEND_CLASS}
                       >
                         <Send className="w-4 h-4" />
                       </button>
                     )}
-                  </div>
-                  </div>{/* end inner flex row */}
-            </div>{/* end rounded input container */}
-            </div>{/* end mode-button + input row (contents when the button is hidden) */}
+                </>
+              )}
+            >
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => {
+                      onInputChange(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
+                    }}
+                    onKeyDown={(e) => {
+                      // Shared rule (lib/chatToolbar): it also honours the toggle being OFF — where
+                      // Shift+Enter becomes the send key — and never fires mid-IME-composition, where
+                      // Enter is committing a candidate rather than sending. The old inline condition
+                      // did neither, so a Hindi or CJK typist sent half a word.
+                      if (enterShouldSend({
+                        key: e.key,
+                        shiftKey: e.shiftKey,
+                        sendOnEnter,
+                        hasContent: !!input.trim() || attachments.length > 0,
+                        isBusy: isLoading,
+                        isComposing: (e.nativeEvent as any)?.isComposing,
+                      })) {
+                        e.preventDefault();
+                        onSend(attachments);
+                        setAttachments([]);
+                        setEditingMsgId(null);
+                        dismissKeyboardOnMobile(textareaRef.current);
+                      }
+                    }}
+                    onPaste={handlePaste}
+                    placeholder="Ask NavBharatAI..."
+                    rows={1}
+                    className={cn(
+                      // HISTORY OF THIS BOX, kept short: 2026-07-12 trimmed it to one line; 2026-08-31 sized
+                      // it to fit a control row laid OVER the text and reserved a fixed ~176px right edge
+                      // for that row. Both are superseded below — see chatComposerAlignment.test.ts.
+                      // The shared two-row box (ComposerShell): the text owns the WHOLE top row, so there is
+                      // no right-hand reserve for the controls any more — they have their own row below.
+                      // That reserve (a fixed ~176px) is what squeezed the box to a sliver on a phone
+                      // once History and Mode sat beside it (admin screenshot 2026-09-23).
+                      COMPOSER_TEXTAREA_CLASS,
+                      onModeChange && activeAgent === 'navbharatai-pro' && "pl-32"
+                    )}
+                    style={{ maxHeight: '240px', overflowY: 'auto' }}
+                  />
+                  {pasteLineCount > 20 && (
+                    <div className="absolute left-2 top-2 bg-amber-500/20 border border-amber-500/40 rounded-lg px-2 py-0.5 text-[9px] font-black text-warn pointer-events-none z-10">
+                      {pasteLineCount} lines pasted
+                    </div>
+                  )}
+                  {onModeChange && activeAgent === 'navbharatai-pro' && (
+                    <div className="absolute left-2 top-3 z-50 pointer-events-auto">
+                      <ModeSelector mode={mode || 'chat'} setMode={onModeChange} />
+                    </div>
+                  )}
+            </ComposerShell>
         </div>
       </div>
     </div>

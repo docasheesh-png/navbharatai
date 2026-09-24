@@ -278,6 +278,12 @@ const PROBLEM_SIGNALS: readonly string[] = [
   'nahi aa raha', 'nhi aa raha', 'nahi aaya', 'nahi dikh raha', 'nhi dikh raha',
   'nahi dikha', 'nahi khul raha', 'nhi khul raha', 'nahi khula', 'band ho gaya',
   'kharab ho gaya', 'chal nhi raha',
+  // ⚠️ THE OTHER WORD ORDER, WHICH IS AT LEAST AS COMMON (2026-09-22). Hindi puts the negation
+  // either side of the verb — `chal nahi raha` was here and `nahi chal raha` was not, so *"preview
+  // nahi chal raha"* (the exact phrase this file's own comment at `userAskedForAnAppToBeBuilt`
+  // quotes as a problem report) matched nothing. Only the mirrored spellings of an entry that is
+  // already here — not a widening of what counts as a problem.
+  'nahi chal raha', 'nhi chal raha', 'nahi chal rha', 'nahi ho raha tha',
 ];
 
 /**
@@ -326,7 +332,40 @@ const FRESH_START_SIGNALS: readonly string[] = [
  */
 export function wantsFreshStart(message: string): boolean {
   if (typeof message !== 'string' || !message.trim()) return false;
-  return matchesSignal(message.toLowerCase(), FRESH_START_SIGNALS);
+  const haystack = normalizeApostrophes(message.toLowerCase());
+  return FRESH_START_SIGNALS.some((signal) => containsUnnegatedSignal(haystack, signal));
+}
+
+/**
+ * 🔴 "DO NOT REBUILD IT FROM SCRATCH" IS NOT A REQUEST TO START FRESH (autopsy 0d297b25, 2026-09-23).
+ *
+ * `wantsFreshStart` matched its signals as bare words, so the WORKNEX prompt — *"The app is already
+ * developed … DO NOT rebuild it from scratch and DO NOT delete or break any existing feature"* — read
+ * as an explicit order to wipe the project. It feeds the two guards that PROTECT an existing app (the
+ * build→edit downgrade and `rebuildGuardFlipsToEdit`), so a user who wrote the most emphatic
+ * "keep my app" sentence possible had it read as its opposite, and the rebuild-confirmation gate then
+ * asked them whether to replace their app. A negated occurrence is skipped; one un-negated occurrence
+ * elsewhere in the message still counts ("don't keep this — start over from scratch").
+ *
+ * English negation comes BEFORE the phrase ("do not … from scratch"), Hindi negation AFTER it
+ * ("scratch se shuru mat karo"), so both windows are read. Precision-first in the SAFE direction:
+ * missing a genuine fresh start costs one confirmation-free edit the user can repeat; reading a
+ * "keep it" as "wipe it" is the harm.
+ */
+const NEGATION_BEFORE = /\b(?:do\s+not|don't|dont|never|must\s+not|should\s+not|shouldn't|without|no\s+need\s+to|avoid|mat|na|nahi|nahin)\b(?:[\s,]+[a-z'-]+){0,4}[\s,]*$/;
+const NEGATION_AFTER = /^[\s,]*(?:[a-z'-]+[\s,]+){0,1}(?:mat|na|nahi|nahin|not)\b/;
+
+function containsUnnegatedSignal(haystack: string, signal: string): boolean {
+  for (let idx = haystack.indexOf(signal); idx !== -1; idx = haystack.indexOf(signal, idx + 1)) {
+    const before = idx === 0 ? '' : haystack[idx - 1];
+    const after = idx + signal.length >= haystack.length ? '' : haystack[idx + signal.length];
+    if (before !== '' && /[a-z0-9]/.test(before)) continue;
+    if (after !== '' && /[a-z0-9]/.test(after)) continue;
+    if (NEGATION_BEFORE.test(haystack.slice(Math.max(0, idx - 48), idx))) continue;
+    if (NEGATION_AFTER.test(haystack.slice(idx + signal.length, idx + signal.length + 24))) continue;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -431,9 +470,34 @@ function containsSignalWord(lower: string, signal: string): boolean {
 }
 
 /** The FIRST signal in `signals` that appears as a whole word in `lower`, or undefined. Pure. */
+/**
+ * EVERY SIGNAL IN THIS FILE IS WRITTEN WITH A STRAIGHT APOSTROPHE, AND EVERY PHONE TYPES A CURLY ONE.
+ *
+ * 🔴 Found while locking autopsy `21b431e1` (2026-09-22). Measured on `main`:
+ *
+ *     "it isn't working"  ->  problem report, recognised
+ *     "it isn’t working"  ->  **nothing matched**
+ *
+ * iOS smart punctuation and Gboard both produce U+2019 by default, and NavBharatAI's primary surface
+ * is a phone. So `doesn’t work`, `won’t load`, `isn’t showing`, `don’t build` — the whole negated-
+ * contraction family, including the ANSWER-ONLY override that exists to stop an unwanted build —
+ * were invisible to exactly the users who type them. Same shape as the trailing space that made
+ * `BRAVE_API_KEY` look configured while every call was rejected: a value that is right in substance
+ * and one character wrong in form, failing silently.
+ *
+ * Fixed at the ONE reader both `matchesSignal` and the classifier go through, rather than by
+ * doubling every entry in six arrays — a second spelling per signal is the drift this repo has paid
+ * for four times. U+02BC (the modifier letter apostrophe, produced by some Indic keyboards) is
+ * folded too. Pure.
+ */
+export function normalizeApostrophes(text: string): string {
+  return String(text ?? '').replace(/[‘’ʼ´`]/g, "'");
+}
+
 function firstSignalWord(lower: string, signals: readonly string[]): string | undefined {
+  const haystack = normalizeApostrophes(lower);
   for (const signal of signals) {
-    if (containsSignalWord(lower, signal)) return signal;
+    if (containsSignalWord(haystack, signal)) return signal;
   }
   return undefined;
 }
@@ -1053,23 +1117,42 @@ export function classifyIntent(message: string): BuildIntent {
  *
  * Pure.
  */
-export function userAskedForAnAppToBeBuilt(message: string): boolean {
+/**
+ * The four families that describe work ALREADY STARTED — a continuation, a problem report, our own
+ * "Fix error" template, or pasted toolchain output.
+ *
+ * 🔒 EXTRACTED, NOT COPIED (autopsy `21b431e1`, 2026-09-22). `userAskedForAnAppToBeBuilt` is TWO
+ * questions welded together: *"is this about work already started?"* (precision, and every caller
+ * wants it) and *"is the classifier HIGH-confident that a NEW app was ordered?"* (a guard against
+ * spending a second build on a guess, which only the retry decision wants). `RequestAnalyser` needs
+ * the first and is actively harmed by the second — a question-shaped order like *"kya aap ek app
+ * bana sakte ho?"* is capped below HIGH on purpose, so it files a real 18-minute build under
+ * "chat". A second copy of these four refusals is exactly the drift this repo has paid for four
+ * times; one definition, two readers. Pure.
+ */
+export function describesWorkAlreadyStarted(message: string): boolean {
   if (typeof message !== 'string' || !message.trim()) return false;
   const lower = message.toLowerCase();
   // "continue", "finish it", "retry", "dobara karo" — and "preview nahi chala", "it isn't working".
   // Both families describe work ALREADY STARTED. Neither is a request for a new app, whatever nouns
   // they happen to contain.
-  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return false;
-  if (matchesSignal(lower, PROBLEM_SIGNALS)) return false;
+  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return true;
+  if (matchesSignal(lower, PROBLEM_SIGNALS)) return true;
   // 🔴 NavBharatAI composed this message ITSELF — the preview "Fix error" button. A request we wrote
   // is never a request for a new app, and it must not be guessed at: the template and this test share
   // one string (lib/platformFixRequest.ts), so they cannot drift. Autopsy f5351721 — our own wording
   // ("failed to BUILD … so the app BUILDS and runs") matched no PROBLEM_SIGNAL and read as new_build
   // at HIGH confidence, so a correct zero-file answer was called a failure and the whole build re-ran:
   // 23 wasted minutes on top of the 12 it had already finished in.
-  if (isPlatformFixRequest(message)) return false;
+  if (isPlatformFixRequest(message)) return true;
   // The same class typed by hand — pasted toolchain output. PROBLEM_SIGNALS is human prose only.
-  if (looksLikeMachineError(message)) return false;
+  if (looksLikeMachineError(message)) return true;
+  return false;
+}
+
+export function userAskedForAnAppToBeBuilt(message: string): boolean {
+  if (typeof message !== 'string' || !message.trim()) return false;
+  if (describesWorkAlreadyStarted(message)) return false;
   // 🔴 HIGH IS REQUIRED, NOT JUST THE INTENT (report cc8c9075, 2026-09-17). This used to read
   // `.intent === 'new_build'` and discard the confidence — so a LOW-confidence GUESS that a message
   // might be a build request was enough to cancel `shouldRetryEmptyBuild`'s edit-mode exemption and

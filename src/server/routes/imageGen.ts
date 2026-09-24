@@ -20,22 +20,7 @@ import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImag
 import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
-import {
-  IMAGE_PRO_PRICE_INR, imageProConfigured,
-  imageProMode, imageProCount, imageProQuotedInr,
-  imageProFailureMessage, initImageTooLarge, parseDataUrl, imageProMargin, imageProMarginWarning,
-} from '../lib/imageProGen';
-import { generateProImages } from '../lib/imageProEngine';
-import { imageProAvailable } from '../lib/pollinationsPaid';
-import { usdInrRate } from '../lib/UsdInrRate';
-import { imagePixelsFor } from '../lib/imageGen';
-import { getServerDb } from '../lib/serverDb';
-import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
-import { walletTooEmptyForTurn } from '../professionals/passGate';
-import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
-import { isProfessionalFreeUser } from '../professionals/professionalPaid';
-import { debitWalletRolledUp } from '../lib/walletDebit';
-import { featureRollupRef, featureLabel } from '../lib/walletFeature';
+import { initImageTooLarge, parseDataUrl } from '../lib/imageDataUrl';
 
 /**
  * AI Image Gen — the REAL /api/image/generate route (admin autopsy 2026-07-20).
@@ -65,10 +50,10 @@ const schema = vobject({
   // ("App Icon — coffee shop"), which left the server unable to tell the selected type from the
   // user's own words — and therefore unable to apply the per-purpose art direction.
   type: vstring({ optional: true, max: 60 }),
-  // The user's OWN picture, as a data URL — what makes image→image real on the free tier too
-  // (admin 2026-09-21: "free/paid dono image generator me image to image ka option bhi add karo").
-  // Same generous max and same by-BYTES rejection as the Pro schema; ⚠️ `vobject` drops a key it does
-  // not declare, so leaving this out would make the attach button a no-op with nothing failing.
+  // The user's OWN picture, as a data URL — what makes image→image real. A generous string max
+  // because a phone photo base64s large; the route rejects anything over 8 MB by BYTES
+  // (initImageTooLarge) rather than by string length. ⚠️ `vobject` drops a key it does not declare,
+  // so leaving this out would make the attach button a no-op with nothing failing.
   initImage: vstring({ optional: true, max: 14_000_000 }),
 });
 
@@ -81,32 +66,6 @@ const imageGenLimiter = () => rateLimiter({
 });
 
 
-// ── PRO (paid) image generation ────────────────────────────────────────────────────────────────
-// Admin 2026-09-18: "paid walo ko inhance karna hai … 2₹/image fee rakhni hai."
-const proSchema = vobject({
-  prompt: vstring({ optional: true, max: 2_000 }),
-  size: vstring({ optional: true, max: 40 }),
-  // ⚠️ `vobject` DROPS a key it does not declare, so a width sent by the client and missing from
-  // this schema would vanish silently between the picker and the generator — the exact shape of the
-  // "the picker advertised a size we do not generate" bug `IMAGE_SIZE_PIXELS` already warns about.
-  width: vnumber({ optional: true, int: true, min: MIN_CUSTOM_PX, max: MAX_CUSTOM_PX }),
-  height: vnumber({ optional: true, int: true, min: MIN_CUSTOM_PX, max: MAX_CUSTOM_PX }),
-  // A reference image as a data URL — this is what makes image→image and image+text→image real
-  // rather than a label. Generous max because a phone photo base64s large; the route rejects
-  // anything over 8 MB by BYTES (initImageTooLarge) rather than by string length.
-  initImage: vstring({ optional: true, max: 14_000_000 }),
-  strength: vstring({ optional: true, max: 10 }),
-  count: vstring({ optional: true, max: 3 }),
-});
-
-// Once per process: the margin line is a CONFIGURATION fact, not a per-request one, and repeating it
-// on every image would make the inverted-price warning invisible in the noise it created.
-let marginWarned = false;
-
-const proLimiter = () => rateLimiter({
-  name: 'imagegenpro', authed: 30, anon: 0, anonGlobalPerHour: 0, noun: 'Pro image generations',
-});
-
 // ── THE ⭐ PROMPT ENHANCER ──────────────────────────────────────────────────────────────────────
 // One short text call on the FREE chat ladder per press. Bounded like every other AI call here:
 // an account (the fallback rungs cost the platform), and its own bucket, generous because a user
@@ -115,6 +74,9 @@ const enhanceSchema = vobject({
   prompt: vstring({ max: ENHANCE_MAX_INPUT }),
   type: vstring({ optional: true, max: 60 }),
   style: vstring({ optional: true, max: 40 }),
+  // The chip's ID beside its label: the label is what the model is shown, the id is what the
+  // precedence rule reads (`resolveImageBrief`). An id is never guessed from a label.
+  styleId: vstring({ optional: true, max: 40 }),
   colorHint: vstring({ optional: true, max: 60 }),
 });
 const enhanceLimiter = () => rateLimiter({
@@ -424,22 +386,6 @@ export function registerImageGenRoutes(app: Express): void {
   });
 
   /**
-   * POST /api/image/pro/generate — the PAID tier (admin 2026-09-18).
-   *
-   * Handles all three jobs the admin asked for, with the mode DERIVED from the payload rather than
-   * from a fourth control the user has to get right: words alone → text-to-image; a reference alone
-   * → image-to-image; both → a directed edit.
-   *
-   * 🔴 THE MONEY ORDER IS THE POINT, and it is the one thing not to rearrange:
-   *   1. refuse an empty wallet BEFORE any provider is called (THE ONE-WALLET LAW — a chat turn has
-   *      no later pre-flight gate to catch an overdraft, and neither does this);
-   *   2. generate;
-   *   3. charge ONLY for images genuinely delivered, and never for a failure or a timeout
-   *      ("working result or free", the same law a failed build obeys).
-   * Charging first would risk billing a request that then failed; charging for a batch that
-   * half-delivered would bill for pictures nobody got.
-   */
-  /**
    * POST /api/image/relay — fetch back a picture the BROWSER could not read.
    *
    * 🔑 WHY IT EXISTS. A free picture is fetched by the user's own browser, from their own address,
@@ -548,6 +494,7 @@ export function registerImageGenRoutes(app: Express): void {
         prompt,
         type: typeof body.type === 'string' ? body.type : undefined,
         style: typeof body.style === 'string' ? body.style : undefined,
+        styleId: typeof body.styleId === 'string' ? body.styleId : undefined,
         colorHint: typeof body.colorHint === 'string' ? body.colorHint : undefined,
       },
       async (system, user) => {
@@ -562,158 +509,5 @@ export function registerImageGenRoutes(app: Express): void {
       return;
     }
     res.json({ ok: true, prompt: out.prompt });
-  });
-
-  app.post('/api/image/pro/generate', proLimiter(), validateBody(proSchema), async (req: Request, res: Response) => {
-    const body = (req.body || {}) as Record<string, unknown>;
-    const proReq = {
-      prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
-      size: typeof body.size === 'string' ? body.size : undefined,
-      initImage: typeof body.initImage === 'string' ? body.initImage : undefined,
-      width: typeof body.width === 'number' ? body.width : undefined,
-      height: typeof body.height === 'number' ? body.height : undefined,
-      strength: body.strength !== undefined ? Number(body.strength) : undefined,
-      count: body.count !== undefined ? Number(body.count) : undefined,
-    };
-
-    const mode = imageProMode(proReq);
-    if (!mode) {
-      res.status(400).json({ error: 'Add a prompt, or attach an image to work from.' });
-      return;
-    }
-    // The same triage the free route runs (see there) — a paid door is not a way round the ban.
-    {
-      const safety = await triageImageRequest(req, proReq.prompt ?? '');
-      if (safety.blocked) {
-        res.status(422).json({ error: safety.message, code: 'blocked' });
-        return;
-      }
-    }
-    if (proReq.initImage && !parseDataUrl(proReq.initImage)) {
-      res.status(400).json({ error: 'That attachment is not an image we can read. Please attach a PNG or JPEG.' });
-      return;
-    }
-    if (proReq.initImage && initImageTooLarge(proReq.initImage)) {
-      res.status(413).json({ error: 'That image is too large — please attach one under 8 MB.' });
-      return;
-    }
-    // 🔑 TWO ENGINES SERVE PRO (admin 2026-09-21: "paid pahle pollination use ho, fallback me
-    // IMAGE_PRO_KEY"), and ONE function says whether either can — the same owner `/api/public-config`
-    // asks, so the chip and this 503 can never disagree about whether Pro is on.
-    if (!imageProAvailable()) {
-      // Honest not-available (rule 2). Never a silent fall back to the FREE provider: that would
-      // charge the Pro price for a picture the user could have had for nothing, on the tier they chose
-      // precisely because they wanted something better.
-      res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
-      return;
-    }
-    // An EDIT needs the Pro host: the first engine takes words only, and the user's own photograph is
-    // never turned into a link (the free tier's rule, kept here). Without the host, editing on Pro is
-    // honestly "not switched on" — never a fresh picture that quietly ignores the attachment.
-    if (mode !== 'text-to-image' && !imageProConfigured()) {
-      res.status(503).json({ error: imageProFailureMessage('unconfigured'), code: 'pro_unconfigured' });
-      return;
-    }
-
-    const account = await requireAccountForCostlyAi(req, 'Pro image generation');
-    if (!account.ok) {
-      res.status(account.status).json(account.body);
-      return;
-    }
-
-    const count = imageProCount(proReq);
-    const quotedInr = imageProQuotedInr(proReq);
-    const freeListed = isProfessionalFreeUser(account.uid, account.email);
-
-    // STEP 1 — the wallet, before a single provider call.
-    if (!freeListed) {
-      const balanceInr = await readWalletBalanceInr(
-        firestoreWalletReader(getServerDb() as never), account.uid,
-      ).catch(() => null);
-      // `null` (unreadable) is allowed through on purpose — fail-open, exactly as the build gate and
-      // the chat gate do. Refusing a paying user over a Firestore blip costs more than one image.
-      if (walletTooEmptyForTurn(balanceInr)) {
-        // ADMIN 2026-09-22: one shared notice, so the three routes that refuse for an empty wallet
-        // cannot drift again — and so a wallet in DEBT is told what it owes rather than "empty".
-        // The free toggle stays named here: it is the one way out this route has and no other has.
-        res.status(WALLET_EMPTY_STATUS).json(walletEmptyBody(
-          {
-            balanceInr,
-            what: 'this image',
-            priceInr: quotedInr,
-            alternative: 'Or switch the toggle to Free.',
-          },
-          { priceInr: IMAGE_PRO_PRICE_INR, quotedInr },
-        ));
-        return;
-      }
-    }
-
-    // STEP 2 — generate.
-    const px = imagePixelsFor(proReq.size, proReq.width, proReq.height);
-    // The same art direction the free tier gets. A paid image is a better MODEL, not a worse brief —
-    // dropping the craft layer here would have made Pro sharper and less well composed at once.
-    const crafted = craftImagePrompt({
-      prompt: String(proReq.prompt || ''),
-      size: proReq.size,
-    });
-    const finalPrompt = proReq.prompt ? withInlineNegative(crafted) : '';
-
-    // 🔑 THE TWO RUNGS LIVE IN `lib/imageProEngine.ts` SINCE 2026-09-22, because the NavBharatAI API's
-    // `POST /api/v1/images/generations` needs exactly them and a second copy is the drifted-copy class
-    // this repo has paid for five times. Nothing about this route's behaviour changed: the engine is
-    // the same code, and everything that differs between the two doors — who is asking, whether their
-    // wallet may be spent, and how the debit is recorded — stayed here.
-    const produced = await generateProImages(proReq, mode, finalPrompt, px);
-    if (!produced.ok) {
-      res.status(produced.status).json({ error: produced.message, code: produced.code });
-      return;
-    }
-    const delivered = produced.images;
-
-    // STEP 3 — charge for what was actually delivered, never for what was asked for.
-    // ⚠️ `delivered.length`, not `count`: a host that honours num_images partially must not bill for
-    // the pictures it did not return. Today it returns one image per call, so this is one charge —
-    // written against the delivered array anyway, so a future batching change cannot quietly overbill.
-    const chargedInr = freeListed ? 0 : delivered.length * IMAGE_PRO_PRICE_INR;
-    res.json({
-      images: delivered.map((d) => d.image),
-      image: delivered[0].image,
-      mimeType: delivered[0].mimeType,
-      mode,
-      count: delivered.length,
-      chargedInr,
-      // The engine is always NavBharatAI to a user — the model that ran is admin-only, in the log.
-      engine: 'NavBharatAI Pro',
-    });
-
-    if (chargedInr > 0) {
-      // ADMIN-ONLY cost visibility. The user was quoted the Pro price and charged it; this is the other half
-      // of that honesty — what it actually cost US — so the admin's own picture of this feature is
-      // never an assumption. Throttled to once per process because a per-image line would bury it.
-      if (!marginWarned) {
-        marginWarned = true;
-        const warning = imageProMarginWarning(usdInrRate());
-        if (warning) {
-          // Loud, because this is the E2B_USD_PER_HOUR failure mode: an env value always beats the
-          // code, so a warning is the only thing the code can do about a price that has inverted.
-          console.error(warning);
-        } else {
-          const m = imageProMargin(usdInrRate());
-          console.log(`[IMAGE PRO] margin OK — ₹${m.priceInr.toFixed(2)} charged vs ₹${m.costInr.toFixed(2)} cost `
-            + `(${m.ratio.toFixed(2)}x; break-even at ₹${m.breakEvenUsdInr.toFixed(0)}/$).`);
-        }
-      }
-      // After the answer and never awaited into it: a money-path failure must not cost the user the
-      // image they already have. The same rule the professional turn obeys.
-      void debitWalletRolledUp(getServerDb() as never, account.uid, {
-        billedInr: chargedInr,
-        rollupRef: featureRollupRef('image-pro', Date.now()),
-        description: featureLabel('image-pro'),
-        feature: 'image-pro',
-      }).then((r) => {
-        if (!r.ok) console.error(`[IMAGE PRO] wallet debit FAILED for ${account.uid}: ${r.error} — image served, not charged.`);
-      }).catch(() => { /* logged above; never throws into the request */ });
-    }
   });
 }

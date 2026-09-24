@@ -47,6 +47,22 @@ export interface AiChargeContext {
   isFreeListed?: boolean;
   /** True when the user holds an active Professional Pass, which already paid for this. */
   hasActivePass?: boolean;
+  /**
+   * The share of this request's real cost the user is charged, 0…1 (admin 2026-09-23). Omitted means
+   * 1 — the whole cost, exactly as before. `0` is a turn the daily free allowance covers (one of the
+   * 10 free professional messages), which must never move the wallet. A fraction is an exam paper
+   * that is partly free: 2 free questions of a 10-question paper is `0.8`. An unreadable value means
+   * 1, because a bug in the arithmetic must not quietly make paid work free — and it cannot overcharge
+   * either, since nothing above 1 is honoured.
+   */
+  billableFraction?: number;
+}
+
+/** The charged share, clamped to 0…1; anything unreadable is the whole cost (today's behaviour). */
+export function billableFractionOf(ctx: AiChargeContext): number {
+  const f = ctx.billableFraction;
+  if (typeof f !== 'number' || !Number.isFinite(f)) return 1;
+  return Math.min(1, Math.max(0, f));
 }
 
 export type AiChargeReason =
@@ -54,6 +70,7 @@ export type AiChargeReason =
   | 'anonymous'     // no verified user to charge
   | 'free-list'     // admin/test account
   | 'pass'          // already paid for by the Professional Pass
+  | 'free-allowance' // inside the day's free allowance — the free messages are free
   | 'unmeasured'    // the provider reported no usage; we refuse to invent one
   | 'free-model'    // measured, and genuinely cost nothing
   | 'charge';       // a real, measured cost to draw from the wallet
@@ -87,10 +104,14 @@ export function decideAiCharge(
   if (!ctx.userId) return no('anonymous');
   if (ctx.isFreeListed) return no('free-list');
   if (ctx.hasActivePass) return no('pass');
+  const fraction = billableFractionOf(ctx);
+  if (fraction <= 0) return no('free-allowance');
   if (!cost.measured) return no('unmeasured');
   if (cost.billedInr <= 0) return no('free-model');
 
-  return { charge: true, reason: 'charge', billedInr: cost.billedInr, cost };
+  // Not rounded: the debit carries the sub-token remainder, so a small share of a small cost is
+  // deferred, never inflated to the next paisa.
+  return { charge: true, reason: 'charge', billedInr: cost.billedInr * fraction, cost };
 }
 
 /**
@@ -130,10 +151,14 @@ export function decideAiChargeForTurns(
   if (!ctx.userId) return no('anonymous');
   if (ctx.isFreeListed) return no('free-list');
   if (ctx.hasActivePass) return no('pass');
+  const fraction = billableFractionOf(ctx);
+  if (fraction <= 0) return no('free-allowance');
   if (!cost.measured) return no('unmeasured');
   if (cost.billedInr <= 0) return no('free-model');
 
-  return { charge: true, reason: 'charge', billedInr: cost.billedInr, cost };
+  // Not rounded: the debit carries the sub-token remainder, so a small share of a small cost is
+  // deferred, never inflated to the next paisa.
+  return { charge: true, reason: 'charge', billedInr: cost.billedInr * fraction, cost };
 }
 
 export interface AiChargeResult extends AiChargeDecision {

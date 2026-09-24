@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap } from 'lucide-react';
+import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import { ModeButton } from '../chat/ModeButton';
+import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
@@ -93,7 +93,7 @@ async function fileToAttachment(file: File): Promise<{ name: string; type: strin
   return { name: file.name, type: file.type || 'application/octet-stream', base64: await readRaw() };
 }
 
-export function ProfessionalChat({ config, userId, conversationId, onScreen = true, onOpenModePicker }: {
+export function ProfessionalChat({ config, userId, conversationId, onScreen = true, onOpenModePicker, onOpenHistory }: {
   config: ProfessionalChatConfig;
   userId?: string;
   /**
@@ -117,6 +117,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
    * carries Mode — App.tsx decides that once for every surface rather than each one guessing.
    */
   onOpenModePicker?: (() => void) | undefined;
+  /** Opens chat history from the composer's left column. Absent ⇒ no History button (the phone's bottom bar has it). */
+  onOpenHistory?: (() => void) | undefined;
 }) {
   // ONE definition of where a professional's conversation lives (professionalChatStore) — the key used
   // to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close has to agree with both.
@@ -137,6 +139,10 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
   // same wallet as a build). Telling an empty-balance user they "used their free messages" would be
   // simply untrue, and would offer them the wrong action.
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login' | 'wallet'>(null);
+  // Whether the empty-wallet refusal came AFTER today's free messages (admin 2026-09-23: "10 free,
+  // then paid"). Then the card says both true things — the free ones are used, and the paid ones need
+  // a balance — instead of implying the user never had any free messages at all.
+  const [walletFreeUsedUp, setWalletFreeUsedUp] = useState(false);
   // Shared composer toolbar state (admin 2026-08-10) — the Enter preference comes from the ONE key
   // every AI reads, so the setting follows the user between screens instead of resetting per chat.
   const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => readSendOnEnter((k) => localStorage.getItem(k)));
@@ -235,7 +241,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       });
       const data = await res.json().catch(() => ({}));
       // Professional Pass gate: show the paywall / login prompt instead of a raw error bubble.
-      if (data?.code === 'wallet_empty') { setPaywall('wallet'); return; }
+      if (data?.code === 'wallet_empty') { setWalletFreeUsedUp(data?.freeUsedUp === true); setPaywall('wallet'); refreshPass(); return; }
       if (res.status === 402 || data?.code === 'professional_paywall') { setPaywall('paywall'); refreshPass(); return; }
       if (res.status === 401 || data?.code === 'login_required') { setPaywall('login'); return; }
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
@@ -274,6 +280,9 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         professionalId={config.id}
         onAskTeacher={(m) => { setExamOpen(false); void send(m); }}
         onClose={() => setExamOpen(false)}
+        freeQuestionsLeft={pass?.enabled && pass.signedIn && !pass.unlimited ? (pass.examRemainingFree ?? null) : null}
+        paidAfterFree={pass?.paidAfterFree === true}
+        onPaperSet={refreshPass}
       />
     );
   }
@@ -300,7 +309,9 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         )}
         {pass?.enabled && pass?.signedIn && !pass.unlimited && (
           <span className={`${config.skills?.exam ? '' : 'ml-auto'} text-[11px] font-semibold px-2.5 py-1 rounded-full bg-raised border border-line text-body`}>
-            <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+            {pass.remainingFree > 0 || !pass.paidAfterFree
+              ? <span className={pass.remainingFree <= 3 ? 'text-warn' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+              : <span className="text-warn">Free used · paid from balance</span>}
           </span>
         )}
       </div>
@@ -312,7 +323,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         })()}
         {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
           <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
-            <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-on-accent' : 'bg-card border border-line text-body'}`}>
+            <div className={`nb-selectable max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-on-accent' : 'bg-card border border-line text-body'}`}>
               {/* Real, tappable source links (admin 2026-08-25). The bubble stays plain text —
                   LinkedText emits only strings and anchors, so wrapping is unchanged. */}
               <LinkedText text={String(m.content ?? '')} />
@@ -392,65 +403,87 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         />
       </div>
 
-      <div className="px-3 py-2 border-t border-line flex items-end gap-2 shrink-0">
-        {/* BEFORE the input box, so an expert is never a one-way door (admin 2026-09-21). Same shared
-            button and same sheet the free chat opens — this surface holds no list of its own. */}
-        <ModeButton onOpen={onOpenModePicker} />
-        <AttachMenu
-          onFiles={(fl) => addFiles(fl)}
-          fileAccept={ACCEPTED_TYPES}
-          disabled={loading || files.length >= MAX_FILES}
-          badge={files.length}
-          title="Attach (photo, gallery, or file)"
-          buttonClassName="w-9 h-9 rounded-xl bg-raised hover:bg-raised-hover disabled:opacity-40 border border-line text-body flex items-center justify-center"
-        />
-        <textarea
-          ref={composerRef}
-          value={input}
-          onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 128); }}
-          onKeyDown={(e) => {
-            // Was unconditional: Enter ALWAYS sent, the toggle did not exist here, and it fired mid-IME
-            // composition — so a Hindi or CJK typist sent a half-finished word. One shared rule now.
-            if (enterShouldSend({
-              key: e.key,
-              shiftKey: e.shiftKey,
-              sendOnEnter,
-              hasContent: !!input.trim() || files.length > 0,
-              isBusy: loading,
-              isComposing: (e.nativeEvent as any)?.isComposing,
-            })) {
-              e.preventDefault();
-              void send();
-              dismissKeyboardOnMobile(composerRef.current);
-            }
-          }}
-          onPaste={(e) => {
-            const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
-            const pasted = items.map((it) => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean) as File[];
-            if (pasted.length > 0) { e.preventDefault(); addFiles(pasted); }
-          }}
-          placeholder={`Ask ${config.name}…`}
-          rows={1}
-          className="flex-1 resize-none bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/40 max-h-32"
-        />
-        <ProfessionalVoiceButton
-          professionalId={config.id}
-          conversationId={serverConversationId(conversationId)}
-          getHistory={() => messages
-            .filter((m) => m.content !== config.welcome)
-            .slice(-12)
-            .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
-        />
-        {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
-        {loading ? (
-          <button onClick={stop} title="Stop" className="w-9 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-on-accent flex items-center justify-center shrink-0">
-            <span className="w-3.5 h-3.5 flex items-center justify-center font-black text-[12px]">■</span>
-          </button>
-        ) : (
-          <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-on-accent flex items-center justify-center shrink-0">
-            <Send className="w-4 h-4" />
-          </button>
-        )}
+      {/* THE FREE CHAT'S COMPOSER (admin 2026-09-23: "sabhi professionals navbharatai free jaise hi lagne
+          chahiye"). Mode stays OUTSIDE the box on its left (admin 2026-09-21: an expert is never a
+          one-way door); the paperclip, the voice button and Send move INSIDE it, on the right, exactly
+          where the free chat keeps them. The look comes from the one shared shell — see ComposerShell. */}
+      <div className={COMPOSER_PANEL_CLASS}>
+        <div className="max-w-4xl mx-auto">
+          <ComposerShell
+            onOpenHistory={onOpenHistory}
+            onOpenMode={onOpenModePicker}
+            controls={(
+              <>
+                <AttachMenu
+                  onFiles={(fl) => addFiles(fl)}
+                  fileAccept={ACCEPTED_TYPES}
+                  disabled={loading || files.length >= MAX_FILES}
+                  badge={files.length}
+                  title="Attach (photo, gallery, or file)"
+                  buttonClassName={COMPOSER_ICON_CLASS}
+                />
+                <ProfessionalVoiceButton
+                  professionalId={config.id}
+                  conversationId={serverConversationId(conversationId)}
+                  title={`Talk to ${config.name} by voice`}
+                  // The speaker glyph, as in the free chat's row: there a mic means dictation and the
+                  // speaker means a spoken conversation, and this button is the conversation.
+                  icon={<Volume2 className="w-4 h-4" />}
+                  className={COMPOSER_ICON_CLASS}
+                  getHistory={() => messages
+                    .filter((m) => m.content !== config.welcome)
+                    .slice(-12)
+                    .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
+                />
+              </>
+            )}
+            send={(
+              <>
+                {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
+                {loading ? (
+                  <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
+                    <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                  </button>
+                ) : (
+                  <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} aria-label="Send" className={COMPOSER_SEND_CLASS}>
+                    <Send className="w-4 h-4" />
+                  </button>
+                )}
+              </>
+            )}
+          >
+            <textarea
+              ref={composerRef}
+              value={input}
+              onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 240); }}
+              onKeyDown={(e) => {
+                // Was unconditional: Enter ALWAYS sent, the toggle did not exist here, and it fired mid-IME
+                // composition — so a Hindi or CJK typist sent a half-finished word. One shared rule now.
+                if (enterShouldSend({
+                  key: e.key,
+                  shiftKey: e.shiftKey,
+                  sendOnEnter,
+                  hasContent: !!input.trim() || files.length > 0,
+                  isBusy: loading,
+                  isComposing: (e.nativeEvent as any)?.isComposing,
+                })) {
+                  e.preventDefault();
+                  void send();
+                  dismissKeyboardOnMobile(composerRef.current);
+                }
+              }}
+              onPaste={(e) => {
+                const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];
+                const pasted = items.map((it) => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean) as File[];
+                if (pasted.length > 0) { e.preventDefault(); addFiles(pasted); }
+              }}
+              placeholder={`Ask ${config.name}…`}
+              rows={1}
+              className={COMPOSER_TEXTAREA_CLASS}
+              style={{ maxHeight: '240px', overflowY: 'auto' }}
+            />
+          </ComposerShell>
+        </div>
       </div>
 
       {/* Paywall / login card — shown when the gate blocks a turn (or the user taps the quota chip). */}
@@ -461,10 +494,11 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
             {paywall === 'wallet' ? (
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-warn flex items-center justify-center"><Wallet className="w-6 h-6" /></div>
-                <h3 className="font-bold text-ink mb-1">Your balance is empty</h3>
+                <h3 className="font-bold text-ink mb-1">{walletFreeUsedUp ? "That's today's free messages" : 'Your balance is empty'}</h3>
                 <p className="text-sm text-muted mb-4">
-                  The assistants use the same balance as your builds — you only pay for what you actually use.
-                  Add credit to carry on.
+                  {walletFreeUsedUp
+                    ? `You've used all ${pass?.freeDailyLimit ?? 10} free messages for today, and answers after that are paid from your balance — which is empty. The free ones come back tomorrow, or add credit and carry on now, paying only for what you use.`
+                    : 'The assistants use the same balance as your builds — you only pay for what you actually use. Add credit to carry on.'}
                 </p>
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
@@ -477,7 +511,17 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
               <>
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-accent-text flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
                 <h3 className="font-bold text-ink mb-1">Sign in to continue</h3>
-                <p className="text-sm text-muted">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 50} free messages every day.</p>
+                <p className="text-sm text-muted mb-4">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 10} free messages every day.</p>
+                {/* A card that says "sign in" must be able to open sign-in (admin 2026-09-23 — until the
+                    daily allowance was counted, a guest never reached this card at all). It rides the
+                    existing `signIn` navigate event, the one App listens to for opening the sign-in
+                    screen from deep inside a surface; the sign-in screen offers every method. */}
+                <button
+                  onClick={() => { setPaywall(null); window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } })); }}
+                  className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-on-accent font-bold flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" /> Sign in
+                </button>
               </>
             ) : (
               <>
@@ -486,15 +530,12 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                     when it returns, and offers the one action that genuinely helps today. */}
                 <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-warn flex items-center justify-center"><Clock className="w-6 h-6" /></div>
                 <h3 className="font-bold text-ink mb-1">That's today's free messages</h3>
-                <p className="text-sm text-muted mb-4">
-                  You've used all {pass?.freeDailyLimit ?? 50} of them. They come back tomorrow — or add credit and carry on now, paying only for what you use.
+                {/* Reachable only when the server cannot charge past the allowance (wallet spending off);
+                    with it on, an answer after the free ones is paid instead of refused. So credit would
+                    not unblock this — the card says the one true thing, and offers nothing to buy. */}
+                <p className="text-sm text-muted">
+                  You've used all {pass?.freeDailyLimit ?? 10} of them. They come back tomorrow.
                 </p>
-                <button
-                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
-                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold flex items-center justify-center gap-2"
-                >
-                  <Wallet className="w-4 h-4" /> Add credit
-                </button>
               </>
             )}
           </div>

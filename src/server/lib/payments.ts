@@ -1,9 +1,11 @@
+import { randomBytes } from 'crypto';
 import axios from 'axios';
 import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from './walletStatement';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
+import { mintCodeForOrder } from './giftCodeStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { parseEnvNumber } from './envNumber';
@@ -367,6 +369,45 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           });
         } catch { /* the pass is granted; the audit note is best-effort */ }
         return { success: true, data: { professionalPass: true, expiresAt, plan, days: entitlement.days } };
+      }
+
+      /**
+       * A GIFT CODE product: mint the code, credit NOBODY's wallet, and return.
+       *
+       * 🔴 THE BUYER IS NOT CREDITED, and that is the product rather than an omission. They bought a
+       * code for somebody else; crediting their own balance as well would hand out the money twice.
+       * `balanceAdded` was written as 0 at order creation for the same reason, so even if this branch
+       * were somehow bypassed the wallet path below would add nothing.
+       *
+       * Exactly-once is inherited from the PENDING→SUCCESS claim above, and `mintCodeForOrder` is
+       * idempotent on the order id as well — belt and braces, because the webhook, the redirect
+       * return and the sign-in reconcile sweep can all arrive for one order.
+       *
+       * ⚠️ THE FACE VALUE COMES FROM THE TX DOC, which the SERVER wrote from its own arithmetic at
+       * order creation — never from a client field. Same rule as the Pass entitlement one block up,
+       * and for the same reason: the amount paid and the thing delivered are two different numbers.
+       */
+      if (String(txData.productType || '') === 'gift_code') {
+        const face = Number((txData as { giftFaceInr?: unknown }).giftFaceInr);
+        if (!Number.isFinite(face) || face <= 0) {
+          console.error(
+            `[GIFT] Order ${orderId} paid ₹${txData.amountPaid} but carries no face value — NOTHING minted; ` +
+            `this payment needs a manual refund.`,
+          );
+          try { await updateDoc(txRef, { fulfilmentError: 'gift_face_missing', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
+          return { success: false, error: 'That gift purchase could not be completed. Please contact support for a refund.' };
+        }
+        const code = await mintCodeForOrder(db, {
+          orderId,
+          buyerUid: txData.userId,
+          faceInr: face,
+          paidInr: Number(txData.amountPaid) || 0,
+          feeInr: recordedPlatformFee(txData),
+          nowMs: Date.now(),
+          randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
+        });
+        try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
+        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0 } };
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);

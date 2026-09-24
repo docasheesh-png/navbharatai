@@ -74,7 +74,7 @@ describe('pageCheckScript — cheap by construction', () => {
     // This assertion USED to require NODE_PATH — which is what locked the bug in place: NODE_PATH does
     // nothing for an ESM import, so the check silently verified nothing. It now requires the mechanism
     // that actually works. (See the ESM describe block below.)
-    expect(script).toContain(`import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js'`);
+    expect(script).toContain(`import playwright from '${TOOLS_DIR}/node_modules/playwright/index.js'`);
     expect(script).toContain(`PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers`);
     expect(script).not.toContain('npm install');
     expect(script).not.toContain('playwright install');
@@ -303,7 +303,7 @@ describe('the browser is imported by ABSOLUTE PATH, because NODE_PATH does not a
   const script = pageCheckScript('https://x.e2b.app', ['/a']);
 
   it('imports playwright by its real path', () => {
-    expect(script).toContain(`import { chromium } from '${TOOLS_DIR}/node_modules/playwright/index.js'`);
+    expect(script).toContain(`import playwright from '${TOOLS_DIR}/node_modules/playwright/index.js'`);
   });
 
   it('does not SET NODE_PATH for the run — it would do nothing and imply it works', () => {

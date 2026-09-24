@@ -3,8 +3,8 @@
 // Admin, verbatim: *"agar user ke pas balance khatam hai, to proper likh kar ana chahiye. this is paid
 // service!!"* — and two things were wrong when that was said.
 //
-// 🔴 1. THE SENTENCE WAS A DRIFTED COPY, THREE TIMES. `professionals/passGate.ts`, `tools/toolGate.ts`
-// and the Pro image route each carried their own wording of the same refusal, and they had already
+// 🔴 1. THE SENTENCE WAS A DRIFTED COPY. `professionals/passGate.ts`, `tools/toolGate.ts` and a
+// third route each carried their own wording of the same refusal, and they had already
 // drifted ("Add credit" / "Add credits", "balance is empty" / "credits are used up"). This repo has
 // paid for that class four times over (`safeRelPath` ×4, `tagsOnLine` ×2, the HTML boot guard ×2,
 // `PLAYWRIGHT_BROWSERS_PATH` ×2). One builder, every caller.
@@ -18,7 +18,7 @@
 //
 // So the notice now states the REAL number and, when the caller knows it, what the refused thing
 // costs — the same honesty the build's own `Affordability` notice has always had, applied to the
-// assistants, the tools and the image tiers that never got it.
+// assistants and the tools that never got it.
 //
 // ⚠️ IT IS A MESSAGE BUILDER, NOT A GATE. The decision to refuse stays exactly where it was
 // (`walletTooEmptyForTurn`), unchanged and still fail-open on an unreadable balance. Nothing here can
@@ -41,11 +41,11 @@ function inr(n: number): string {
 export interface WalletEmptyNoticeInput {
   /** The balance the gate actually read. `null`/undefined means it could not be read — see below. */
   balanceInr?: number | null;
-  /** What this one request would have cost, when the caller knows it (the Pro image tier does). */
+  /** What this one request would have cost, when the caller knows it. */
   priceInr?: number | null;
   /** What was refused, in the user's words: "this image", "this answer". Defaults to "this". */
   what?: string;
-  /** An extra, caller-specific way out — e.g. the Pro image tier's free toggle. Appended verbatim. */
+  /** An extra, caller-specific way out — e.g. the exam's free questions. Appended verbatim. */
   alternative?: string;
 }
 

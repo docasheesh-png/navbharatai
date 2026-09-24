@@ -17,7 +17,7 @@ import {
   extractResponseText, geminiImageConfigured, imageGenModels, isImageRefusal,
   parseImagePartsResponse, type GeneratedImage,
 } from './imageGen';
-import { initImageTooLarge, parseDataUrl } from './imageProGen';
+import { initImageTooLarge, parseDataUrl } from './imageDataUrl';
 
 export interface ImageEditOutcome {
   /** The edited picture. Present only on success. */

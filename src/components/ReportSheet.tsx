@@ -272,7 +272,13 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      // THE SHEET CONTRACT (index.css), added 2026-09-22 after measuring this dialog at nine
+      // viewport/notch combinations. `-flush` because this is an edge-to-edge phone bottom sheet;
+      // `-over-nav` because SHEET_Z (400) paints ABOVE the tab bar's z-150, so it covers the bar
+      // rather than being covered by it and must NOT hold a strip for a bar nobody can see.
+      // ⚠️ `p-0` is gone on purpose: a `p-*` utility beats the overlay class on source order and
+      // silently zeroes all four reserves — that exact bug was live in NavAppStore's two sheets.
+      className="nb-sheet-overlay-flush nb-sheet-over-nav fixed inset-0 flex items-end sm:items-center justify-center sm:p-4"
       style={{ zIndex: SHEET_Z, background: 'rgba(2,6,12,0.72)' }}
       role="dialog"
       aria-modal="true"
@@ -280,8 +286,12 @@ export function ReportSheet({ open, onClose, target, view, initialMode }: Report
       onClick={() => { if (!busy) onClose(); }}
     >
       <div
-        className="w-full sm:max-w-md bg-surface border border-line rounded-t-3xl sm:rounded-3xl p-5"
-        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}
+        // `nb-sheet` is the other half of the pair: it caps the card at the room the overlay really
+        // has, so the Old-reports list cannot grow past the screen. Without it this sheet had NO
+        // height limit at all — a long conversation simply ran off the bottom.
+        // ⚠️ The card's own `env(safe-area-inset-bottom)` padding is GONE because the overlay now
+        // reserves that inset; keeping both would leave a double gap under the buttons.
+        className="nb-sheet w-full sm:max-w-md bg-surface border border-line rounded-t-3xl sm:rounded-3xl p-5 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-3">

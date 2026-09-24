@@ -17,6 +17,8 @@ import { getAllPublishGuides, getPublishGuide, renderPublishGuideText, type Stor
 // header, which carries the FIREBASE token, so every call here reached GitHub with the wrong credential
 // and came back 401. See lib/mobileShipAuth.ts for the full autopsy.
 import { githubTokenFromRequest } from '../lib/mobileShipAuth';
+// The two counters that finally make the pipeline's own failure rate readable (2026-09-22).
+import { recordBuildOutcome, recordBuildFailureCode } from '../lib/mobileBuildOutcomeStore';
 // ONE declaration of which workflows exist — this module used to hold its own hand-written list, which
 // never learned about the APK workflow, so "Build my APK now" was rejected with 400 before it could run.
 import {
@@ -37,11 +39,24 @@ import { classifyBuildFailure, failedStepSection, normalizeLog, repairFiles } fr
 // Code runs, which is exactly what the admin asked for ("jo claude code karta hai, woh navbharatai
 // nahi kar sakta kya?", 2026-08-03). See mobileBuildAiRepair.ts for the full safety model.
 import {
-  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepair, normalizeRepairTier,
+  aiRepairAllowedPaths, aiRepairEnabled, aiRepairModelChain, runAiRepairLoop, normalizeRepairTier,
+  isAppSourcePath,
 } from '../lib/mobileBuildAiRepair';
 import { callRepairModel } from '../lib/mobileBuildAiRepairClient';
-import { commitFiles, githubApiHeaders, readRepoFiles } from '../lib/githubRepoWrite';
-import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles } from '../lib/mobileProjectAssembler';
+import { commitFiles, githubApiHeaders, readRepoFiles, listRepoTree, repoFileExists } from '../lib/githubRepoWrite';
+// The repair loop's verifier: the app's own sandbox runs the build a candidate change would face on
+// GitHub, so only a change that compiles is ever committed (2026-09-22, "the loop, not the model").
+import { makeRepairVerifier, sandboxCanJudge } from '../lib/mobileShipRealBuild';
+// Cross-run memory (2026-09-22): the client carries what happened on earlier attempts, and the server
+// asks one pure question of it — new failure, or the same one back after a rules refresh, an AI change,
+// or nothing at all — so an attempt is only ever spent on something new.
+import { parseAttemptHistory, judgeRepeat, historyForModel, repeatStopMessage, failureSignature } from '../lib/mobileRepairHistory';
+import { buildActuator } from './actuatorFactory';
+import { sessionWorkspaceId } from '../lib/workspaceEdit';
+import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { failedStage } from '../lib/mobileBuildRepair';
+import { cureFamily, recordRepairOutcome } from '../lib/mobileBuildOutcomeStore';
+import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles, detectRepoLayout, workspacePathForRepoPath, PREBUILT_STAMP_PATH } from '../lib/mobileProjectAssembler';
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
 import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
@@ -263,6 +278,14 @@ export function registerMobileShipRoutes(app: Express): void {
         if (concl === 'success' || concl === 'failure' || concl === 'cancelled') {
           const identity = await verifyFirebaseIdentity(req);
           if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), concl);
+          // THE DENOMINATOR (2026-09-22). `setOutcome` above records how THIS app's LAST build ended and
+          // a success CLEARS the previous failure's code — so no scan of those rows can ever answer "how
+          // often does a build fail?", which is the number the admin's "80%" is a guess at. This counts
+          // every finished run once, keyed by its run id, into a per-day counter. Best-effort and
+          // deliberately NOT awaited: the status the user is watching must never wait on telemetry.
+          if (done?.id != null) {
+            void recordBuildOutcome(String(owner), String(repo), String(done.id), String(workflow), concl);
+          }
           // AUTOMATIC ADMIN FAILURE REPORT (admin 2026-09-14: "apk bane nahi, fail ho jaye, to puri
           // detailed build report admin panel me automatically send ho jaye"). No user action needed —
           // this is the FIRST point the server itself learns a run failed. `saveApkFailureReport` is
@@ -704,7 +727,7 @@ export function registerMobileShipRoutes(app: Express): void {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
 
-    const { owner, repo, workflow, runId, ref = 'main', powerLevel } = (req.body || {}) as Record<string, unknown>;
+    const { owner, repo, workflow, runId, ref = 'main', powerLevel, sessionId, history: rawHistory } = (req.body || {}) as Record<string, unknown>;
     // The user's selected NavBharatAI Pro tier decides which models the AI repair may use — weak stays
     // GLM/Kimi (never Claude), paid tiers escalate to Sonnet/Opus, exactly like the main build.
     const repairTier = normalizeRepairTier(typeof powerLevel === 'string' ? powerLevel : undefined);
@@ -727,12 +750,41 @@ export function registerMobileShipRoutes(app: Express): void {
     }
 
     const diag = classifyBuildFailure(log, wfPath);
+    // The tool's own last words, so the client can carry them to the next attempt and this route can
+    // tell a failure that CAME BACK from one that is new. Returned on every answer as `failureLine`.
+    const failureLine = failureSignature(failedStepSection(normalizeLog(log)));
+    const repeat = judgeRepeat(parseAttemptHistory(rawHistory), { code: diag.code, error: failureLine });
+    // How this repository lays the app out decides two things: where a repository path lives in the
+    // workspace (a static repo keeps its source under `www/`, a prebuilt one keeps its BUILD there), and
+    // whether the app's own sandbox build can judge a repair of THIS failure at all. It can only where
+    // the runner BUILDS — on a prebuilt or static repository the runner compiles nothing, so a sandbox
+    // build answers a question the runner never asked. And then only for an install or web-build stage,
+    // never a Gradle or Xcode one. The panel says which, instead of "fixed".
+    //
+    // The stamp is read only when the sentinel says static. A read that could NOT be made (a 5xx, a
+    // rate limit) is not "no stamp": the layout then falls to PREBUILT, the side on which `www/` maps
+    // nowhere — a bundle file must never be written into the workspace on a guess.
+    const repoPkg = await readRepoFiles(headers, String(owner), String(repo), ref, ['package.json']).catch(() => ({} as Record<string, string>));
+    const staticSentinel = detectRepoLayout({ 'package.json': repoPkg['package.json'] }) === 'static';
+    const stamp = staticSentinel ? await repoFileExists(headers, String(owner), String(repo), ref, PREBUILT_STAMP_PATH) : false;
+    const layout = detectRepoLayout({ ...repoPkg, ...(stamp === false ? {} : { [PREBUILT_STAMP_PATH]: 'present-or-unknown' }) });
+    const toWorkspace = (repoPath: string): string | null => workspacePathForRepoPath(repoPath, layout);
+    const judgeable = layout === 'built' && sandboxCanJudge({ stage: failedStage(normalizeLog(log)), code: diag.code });
     // The classified code is the highest-signal telemetry this pipeline produces: it names WHICH class
     // actually fired on a real user build. Written before any repair is attempted, so an unfixable
     // failure is counted exactly like a fixable one.
+    //
+    // The same verified identity names the app's WORKSPACE (uid + the session the panel is open on),
+    // which is where the app's own sandbox lives — the machine that can run the build a repair would
+    // face on GitHub. Derived from the verified uid, never taken from the body, exactly as the setup
+    // route does. An old client that sends no sessionId gets the unverified path, honestly labelled.
+    let workspaceId: string | null = null;
     try {
       const identity = await verifyFirebaseIdentity(req);
-      if (identity?.uid) void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), 'failure', diag.code);
+      if (identity?.uid) {
+        void appBuildStore.setOutcome(identity.uid, String(owner), String(repo), 'failure', diag.code);
+        workspaceId = sessionWorkspaceId(identity.uid, typeof sessionId === 'string' ? sessionId : '');
+      }
     } catch { /* best-effort */ }
 
     // The ONE failure that is genuinely the user's to resolve. Their signing key is their permanent
@@ -781,18 +833,32 @@ export function registerMobileShipRoutes(app: Express): void {
       ].join('\n');
     };
 
-    if (diag.code === 'MISSING_SIGNING_SECRET') {
-      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail });
+    // 🔒 A CLASS NO REPAIR CAN EVER FIX ENDS HERE, before a model or an attempt is spent on it. These
+    // are the user's own credentials — a signing key, a Firebase services file, a registry token — not
+    // a file with a mistake in it. Only the signing key used to stop here; the other three reached the
+    // AI pass, which spent a round to conclude the obvious and then the client spent a five-minute run
+    // on the same certainty. The family is `cureFamily`'s, the ONE list the admin's card also reads.
+    if (cureFamily(diag.code) === 'user-credentials') {
+      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, failureLine });
+    }
+    // The same failure is back and NOTHING was changed after it last time — so nothing will change
+    // this time either. The cycle ends here, before a model or a five-minute run is spent on it.
+    if (repeat.kind === 'repeat-after-nothing') {
+      return res.json({ fixed: false, code: diag.code, summary: repeatStopMessage(repeat), detail: diag.detail, report: failureReport(), failureLine });
     }
 
-    /** Apply a fix: one named commit in the user's repository, then start the build again. */
-    const commitAndRerun = async (files: Record<string, string>, message: string): Promise<void> => {
+    /**
+     * Apply a fix: one named commit in the user's repository. The CLIENT starts the next build.
+     *
+     * 🔴 THIS USED TO DISPATCH THE WORKFLOW TOO, and so did the client on its next attempt — so every
+     * repair started TWO GitHub runs, both billed against the user's Actions minutes, with the panel
+     * watching whichever appeared first. The panel has owned the dispatch since the loop was written
+     * (it must: an old bundled Android client will keep dispatching whatever this route does), so the
+     * one honest fix is for the server to stop. `fixed: true` now means exactly "committed — build
+     * again", and every client, old or new, produces one run per repair.
+     */
+    const commitFix = async (files: Record<string, string>, message: string): Promise<void> => {
       await commitFiles(headers, String(owner), String(repo), ref, files, {}, message);
-      await axios.post(
-        `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`,
-        { ref },
-        { headers },
-      );
     };
 
     /**
@@ -803,6 +869,15 @@ export function registerMobileShipRoutes(app: Express): void {
      * mobileBuildAiRepair.ts. Model chain follows the user's selected tier (weak = GLM/Kimi only;
      * paid tiers add Sonnet/Opus) — the same Model Routing Policy the main build uses.
      */
+    /**
+     * The loop (2026-09-22): the model may ASK for a file from the repository's own listing, every
+     * candidate change is RUN through the app's sandbox build before it is committed, and a verified
+     * failure is fed back so the next round corrects the previous change. A change the build rejected
+     * is never committed; a change nothing could verify (no workspace on this request, or a Gradle /
+     * Xcode stage the sandbox cannot judge) is committed as before and LABELLED `verified: false`.
+     *
+     * Returns true when a response has been sent — a commit, or an honest gave-up that names why.
+     */
     const tryAiRepair = async (): Promise<boolean> => {
       if (!aiRepairEnabled()) return false;
       const chain = aiRepairModelChain(process.env, repairTier);
@@ -811,28 +886,75 @@ export function registerMobileShipRoutes(app: Express): void {
       const allowed = aiRepairAllowedPaths(wfPath, failingStep);
       const aiFiles = await readRepoFiles(headers, String(owner), String(repo), ref, allowed);
       if (Object.keys(aiFiles).length === 0) return false;
-      const result = await runAiRepair(callRepairModel, chain, {
+      const tree = await listRepoTree(headers, String(owner), String(repo), ref);
+      const stage = failedStage(normalizeLog(log));
+      // No verifier where the sandbox cannot judge (see `judgeable` above): the loop then commits as it
+      // did before verification existed, LABELLED unverified.
+      const verify = judgeable
+        ? makeRepairVerifier(buildActuator(), workspaceId ?? '', { stage, code: diag.code }, isAppSourcePath, toWorkspace)
+        : undefined;
+      const loop = await runAiRepairLoop(callRepairModel, chain, {
         log: failingStep,
         files: aiFiles,
         ruleSummary: diag.summary,
+        tree,
+        history: historyForModel(repeat),
+      }, {
+        fetchFiles: (paths) => readRepoFiles(headers, String(owner), String(repo), ref, paths),
+        verify,
       });
-      if (!result || !('files' in result)) return false;
-      await commitAndRerun(result.files, 'NavBharatAI: repair the build failure and run it again');
+      void recordRepairOutcome(String(workflow), loop.outcome);
+
+      if (loop.outcome === 'gave-up') {
+        // Every change the model made was proven not to compile. Nothing is committed, and the user is
+        // told that rather than watching one more five-minute run fail the same way.
+        res.json({ fixed: false, code: diag.code, summary: loop.reason, detail: diag.detail, report: failureReport(), rounds: loop.rounds, judgeable, failureLine });
+        return true;
+      }
+      if (!loop.fix) return false;
+
+      await commitFix(
+        loop.fix.files,
+        loop.verified
+          ? 'NavBharatAI: repair the build failure (verified by building the app first)'
+          : 'NavBharatAI: repair the build failure and run it again',
+      );
+      // A VERIFIED fix to the app's own source heals the user's app inside NavBharatAI too — the
+      // compile pre-flight's rule, applied from the other end. Never an unverified one: the workspace
+      // is the app the user works on, and a guess does not belong in it. Best-effort.
+      if (loop.verified && workspaceId) {
+        const source: Record<string, string> = {};
+        for (const [repoPath, content] of Object.entries(loop.fix.files)) {
+          const local = toWorkspace(repoPath);
+          if (local && isAppSourcePath(local)) source[local] = content;
+        }
+        if (Object.keys(source).length > 0) await mergeWorkspaceFiles(workspaceId, source).catch(() => undefined);
+      }
       res.json({
         fixed: true,
         fixedBy: 'ai',
+        verified: loop.verified,
+        judgeable,
+        failureLine,
+        rounds: loop.rounds,
+        asked: loop.asked,
         code: diag.code,
-        summary: result.explanation,
-        changed: Object.keys(result.files),
+        detail: diag.detail,
+        summary: loop.verified
+          ? `${loop.fix.explanation} NavBharatAI built your app with this change first, and it compiled.`
+          : loop.fix.explanation,
+        changed: Object.keys(loop.fix.files),
       });
       return true;
     };
 
     try {
-      if (!diag.autoFixable) {
-        // The rules cannot fix this class — the AI pass is exactly for this case.
+      // The rules cannot fix this class — the AI pass is exactly for this case. And when the rules
+      // ALREADY refreshed the files for this exact failure and it came back, running them again would
+      // write the same bytes and reach the AI anyway, one wasted comparison later.
+      if (!diag.autoFixable || repeat.kind === 'repeat-after-rules') {
         if (await tryAiRepair()) return;
-        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport() });
+        return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, report: failureReport(), judgeable, failureLine });
       }
 
       const current = await readRepoFiles(headers, String(owner), String(repo), ref, diag.needs);
@@ -863,14 +985,20 @@ export function registerMobileShipRoutes(app: Express): void {
           code: diag.code,
           summary: `${diag.summary} NavBharatAI could not correct it automatically.`,
           report: failureReport(),
+          judgeable,
+          failureLine,
         });
       }
-      await commitAndRerun(repair.files, repair.message);
+      await commitFix(repair.files, repair.message);
       return res.json({
         fixed: true,
         fixedBy: 'rules',
+        verified: false,
+        judgeable,
+        failureLine,
         code: diag.code,
         summary: diag.summary,
+        detail: diag.detail,
         changed: Object.keys(repair.files),
         commitMessage: repair.message,
       });
@@ -952,7 +1080,17 @@ async function recordApkFailureReport(
     const preflight = isSigningSecretFailure(full.failure.detail)
       ? await describeSigningPreflight(headers, owner, repo)
       : null;
-    void saveApkFailureReport({
+    // THE NUMERATOR (2026-09-22) — WHICH class failed, counted once per run.
+    //
+    // 🔑 IT RIDES THE REPORT'S OWN CLAIM RATHER THAN INVENTING A SECOND ONE. `saveApkFailureReport`
+    // writes with `create()` on a doc id keyed to owner/repo/runId, so it returns true EXACTLY ONCE per
+    // run however many times this poll endpoint is hit. Counting inside that `true` is idempotent by
+    // construction; a second guard here would be a second thing to keep in step with the first.
+    //
+    // ⚠️ This is a SUBSET of the failures the denominator counts, and `summariseBuildOutcomes` reports
+    // the gap rather than hiding it: a diagnosis needs a client still polling when the run goes red, so
+    // a user who closes the tab is in the failure count and in no code.
+    const claimed = await saveApkFailureReport({
       userId: uid, email,
       owner, repo, workflow, building: full.app.building,
       runId: String(full.build.runId), runUrl: full.build.link,
@@ -960,6 +1098,7 @@ async function recordApkFailureReport(
       durationSeconds: full.build.durationSeconds,
       steps: full.steps, failure: full.failure, preflight,
     });
+    if (claimed) void recordBuildFailureCode(workflow, full.failure.code);
   } catch { /* best-effort — the user's own build status must never wait on this */ }
 }
 

@@ -45,6 +45,10 @@ on:
         description: 'After building, upload the .aab straight to Google Play (internal testing track). Requires the PLAY_SERVICE_ACCOUNT_JSON secret (see the header for the one-time setup). Leave OFF to just build the downloadable artifact.'
         type: boolean
         default: false
+      changes_not_sent_for_review:
+        description: 'Google flips this requirement with the app review state, and BOTH values fail loudly when wrong. Leave OFF normally. Tick it ONLY if the upload fails with "Changes cannot be sent for review automatically. Please set the query parameter changesNotSentForReview to true" — which happens while the app is under an enforcement or its last release was rejected. If it instead fails with "Changes are sent for review automatically. The query parameter changesNotSentForReview must not be set", untick it.'
+        type: boolean
+        default: false
 
 jobs:
   build-aab:
@@ -111,6 +115,7 @@ jobs:
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
 
       - name: Build the SIGNED release bundle (.aab) + universal APK
+        id: bundle
         working-directory: android
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/upload-keystore.jks
@@ -188,6 +193,7 @@ jobs:
       # `uses:` up front regardless of the `if:` guard — so even artifact-only builds (upload_to_play=false)
       # died before starting. Pinned to v1.1.5.
       - name: Upload to Google Play (internal track)
+        id: play_upload
         if: ${{ inputs.upload_to_play }}
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
@@ -196,20 +202,84 @@ jobs:
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
           track: internal
           status: completed
+          # 🔴 GOOGLE FLIPS THIS REQUIREMENT, AND BOTH VALUES HAVE ALREADY BROKEN A BUILD.
+          #
+          # It is NOT a setting we choose — it is a fact about the app's review state on the day, and
+          # Google rejects the upload whenever our value disagrees with it. Two real runs, two days
+          # apart, failing in EXACTLY opposite directions:
+          #
+          #   run #127 (2026-09-22), without it:
+          #     "Changes cannot be sent for review automatically.
+          #      Please set the query parameter changesNotSentForReview to true."
+          #   run #131 (2026-09-24), with it hardcoded true:
+          #     "Changes are sent for review automatically.
+          #      The query parameter changesNotSentForReview must not be set."
+          #
+          # On 09-22 the app was under a Broken Functionality enforcement and its previous release had
+          # been rejected, so Google would not auto-submit; by 09-24 that had cleared and it would.
+          # Neither hardcoded value survives that flip, which is why this is an INPUT with a default of
+          # false (today's answer) rather than a constant somebody has to remember to edit.
+          #
+          # ⚠️ Both failures are LOUD — the step fails and the message names the parameter — so a wrong
+          # value costs a re-run, never a silent non-upload. That matters because run #127's real
+          # damage was the opposite shape: the bundle uploaded, the log said "Successfully uploaded",
+          # and only the edit COMMIT failed, rolling the whole edit back. A "successful" upload that
+          # landed nothing.
+          #
+          # ⚠️ Setting it true is not a workaround for a rejection and makes one no less likely. It only
+          # stops the upload from failing; the edit is then committed but NOT sent for review, and the
+          # admin presses "Send for review" (or promotes it) in the Console. The INTERNAL track needs no
+          # review to be installable, which is the whole point of uploading there.
+          changesNotSentForReview: ${{ inputs.changes_not_sent_for_review }}
 
+      # 🔴 `always()`, AND THE REASON IS THE WHOLE POINT OF THIS STEP (2026-09-22).
+      #
+      # Without it this step is SKIPPED the moment anything above fails — and what fails is almost
+      # always the LAST step, the Play upload. Run #127 is the case: the bundle built, was signed,
+      # and both artifacts uploaded (15 MB each, downloadable for 14 days) — and then the Play
+      # upload failed, this summary never ran, the run went red, and the admin's reading of it was
+      # "aab bana hi nahi". The bundle existed the whole time. **The one place that tells the admin
+      # what was produced and where to find it disappeared exactly when it was needed most.**
+      #
+      # It also used to assert the upload had happened from the INPUT (`upload_to_play == true`)
+      # rather than from the step's real OUTCOME — so on a run like #127 it would have printed
+      # "🚀 Uploaded to Google Play" about an edit Google rolled back. An intention stated as a
+      # fact: the same class this repo names in RELEASE_GATE, CLAIM_UNSUPPORTED and the
+      # verifiedNoChangeSummary work. Every line below is now read back from `steps.*.outcome`.
       - name: Summary
+        if: always()
         run: |
+          if [ "${{ steps.bundle.outcome }}" != "success" ]; then
+            echo "## The bundle was NOT built ❌" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The signing/build step did not succeed, so there is **no \`app-release.aab\` to download** — the red step above is the real failure. Nothing was uploaded anywhere." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           echo "## NavBharatAI signed .aab built ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**The bundle exists even if this run is marked red** — it is the \`navbharatai-release-aab\` artifact on this run's page (\`app-release.apk\` is beside it for sideloading). Artifacts are kept 14 days." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "${{ secrets.FACEBOOK_APP_ID }}" ] && [ -n "${{ secrets.FACEBOOK_CLIENT_TOKEN }}" ]; then
             echo "- Meta app events: **ON** — this bundle reports installs/app-opens to Meta. Confirm Play Console → App content → Data safety is up to date before rolling it out." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Meta app events: **off** (FACEBOOK_APP_ID / FACEBOOK_CLIENT_TOKEN not set) — no Facebook SDK is in this bundle." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ inputs.upload_to_play }}" = "true" ]; then
-            echo "🚀 **Auto-uploaded to Google Play** (internal testing track) via the service account. Open Play Console → Testing → Internal testing to see the new release, then promote it when ready." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Download the **navbharatai-release-aab** artifact above and upload \`app-release.aab\` to Google Play Console. (Tip: re-run with **upload_to_play** checked to publish automatically once \`PLAY_SERVICE_ACCOUNT_JSON\` is set.)" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          case "${{ steps.play_upload.outcome }}" in
+            success)
+              if [ "${{ inputs.changes_not_sent_for_review }}" = "true" ]; then
+                echo "🚀 **Uploaded to Google Play** (internal testing track). The edit is committed but deliberately **not sent for review**, because Google would not do that automatically for this app today. Open Play Console → Testing → Internal testing: the build is installable there straight away, and **you must press Send for review** before it can go further." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "🚀 **Uploaded to Google Play** (internal testing track), and Google sent the edit for review itself. Open Play Console → Testing → Internal testing: the build is installable there straight away, and promoting it to production is a separate, manual decision." >> "$GITHUB_STEP_SUMMARY"
+              fi
+              ;;
+            skipped)
+              echo "📦 **Not uploaded** — \`upload_to_play\` was not ticked. Download the artifact above and upload \`app-release.aab\` in Play Console → Testing → Internal testing → Create new release." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "⚠️ **The upload to Google Play FAILED** (outcome: \`${{ steps.play_upload.outcome }}\`) — read the red step above for Google's own reason. **Nothing reached Play**, so upload the artifact above by hand: Play Console → Testing → Internal testing → Create new release. The bundle itself is fine; only the upload failed." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "versionCode = ${{ github.run_number }} (auto-increments each run, as Play requires). Bundled mode: the app runs from the bundle built in this workflow (API calls still hit navbharatai.com) — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

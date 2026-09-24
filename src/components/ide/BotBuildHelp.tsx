@@ -104,8 +104,8 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       <button
         onClick={() => onModeChange('open')}
         aria-label="Open NavBharatAI help"
-        className="fixed bottom-4 right-4 z-[200] w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-500 shadow-2xl flex items-center justify-center text-on-accent transition-all active:scale-90"
-        style={{ boxShadow: '0 8px 30px rgba(79,70,229,0.5)' }}
+        className="nb-float-bottom fixed right-4 z-[200] w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-500 shadow-2xl flex items-center justify-center text-on-accent transition-all active:scale-90"
+        style={{ boxShadow: '0 8px 30px rgba(79,70,229,0.5)', ['--nb-float-gap' as string]: '1rem' }}
       >
         <Bot size={26} />
         <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-[#0d1117]" />
@@ -114,8 +114,8 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-[200] flex flex-col rounded-2xl border border-line shadow-2xl overflow-hidden"
-      style={{ width: 'min(92vw, 384px)', height: 'min(72vh, 560px)', background: 'var(--surface-card)' }}>
+    <div className="nb-float-bottom fixed right-4 z-[200] flex flex-col rounded-2xl border border-line shadow-2xl overflow-hidden"
+      style={{ width: 'min(92vw, 384px)', height: 'min(72vh, 560px)', background: 'var(--surface-card)', ['--nb-float-gap' as string]: '1rem' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-line flex-shrink-0" style={{ background: '#1c2230' }}>
         <div className="flex items-center gap-2">

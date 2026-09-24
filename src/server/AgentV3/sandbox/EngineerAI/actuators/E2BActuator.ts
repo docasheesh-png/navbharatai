@@ -74,6 +74,7 @@ import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
 import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from '../../../previewBridge';
+import { gunzipSync } from 'zlib';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -620,6 +621,32 @@ function extractDevPort(command: string): number {
  */
 export type SandboxOrigin = 'warm' | 'resumed' | 'created-after-failed-resume' | 'created-fresh';
 
+/**
+ * The script that collects a built site inside the sandbox. PURE — exported so a test can RUN it.
+ *
+ * It walks the first candidate directory that has files, maps each relative path to its base64 bytes,
+ * and writes that map as GZIPPED JSON to `resultPath`. Exit 2 means "no build output here" — the
+ * caller turns that into its own honest sentence. Uses only Node built-ins, so it resolves anywhere.
+ */
+export function distReaderScript(dirs: string[], resultPath: string): string {
+  return [
+    "const fs=require('fs'),path=require('path'),zlib=require('zlib');",
+    "function walk(d,b,o){",
+    "  try{for(const f of fs.readdirSync(d)){",
+    "    const a=path.join(d,f),r=(b?b+'/':'')+f;",
+    "    if(fs.statSync(a).isDirectory()) walk(a,r,o);",
+    "    else o[r]=fs.readFileSync(a).toString('base64');",
+    "  }}catch(e){}",
+    "  return o;",
+    "}",
+    "let out={};",
+    `const dirs=${JSON.stringify(dirs)};`,
+    "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
+    "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
+    `fs.writeFileSync(${JSON.stringify(resultPath)}, zlib.gzipSync(Buffer.from(JSON.stringify(out)),{level:6}));`,
+  ].join('\n');
+}
+
 export class E2BActuator implements IEngineerActuator {
   private sandboxes = new Map<string, Sandbox>();
   private templateRegistry = new TemplateRegistry();
@@ -837,9 +864,34 @@ export class E2BActuator implements IEngineerActuator {
    * for a real user, which no amount of saved compute is worth.
    */
   private _activeBuilds = new Map<string, number>();
+  /**
+   * Who holds the flag through `holdBuildActive`. A v5 build calls `setBuildActive` directly and takes
+   * the flag over (the owner token is dropped), so a holder's release then leaves the flag alone — a
+   * build that started DURING the phone-ship's prebuild keeps its idle-sweep protection.
+   */
+  private _activeBuildOwners = new Map<string, object>();
+
+  /** @see IEngineerActuator.isBuildActive */
+  isBuildActive(workspaceId: string): boolean {
+    return this._activeBuilds.has(workspaceId);
+  }
+
+  /** @see IEngineerActuator.holdBuildActive */
+  holdBuildActive(workspaceId: string): () => void {
+    const token = {};
+    this.setBuildActive(workspaceId, true);
+    this._activeBuildOwners.set(workspaceId, token);
+    return () => {
+      if (this._activeBuildOwners.get(workspaceId) !== token) return; // somebody else owns it now
+      this._activeBuildOwners.delete(workspaceId);
+      this._activeBuilds.delete(workspaceId);
+    };
+  }
 
   /** @see IEngineerActuator.setBuildActive */
   setBuildActive(workspaceId: string, active: boolean): void {
+    // A direct set or clear is the build engine's own: it owns the flag from here on.
+    this._activeBuildOwners.delete(workspaceId);
     if (active) {
       this._activeBuilds.set(workspaceId, Date.now());
       // A build is about to write. Whatever copy exists will not describe the app it produces.
@@ -1785,6 +1837,16 @@ export class E2BActuator implements IEngineerActuator {
    * no call site can run a command on a sandbox without the hold, and no two callers can install into
    * the same node_modules at the same time.
    */
+  /**
+   * A sandbox for this workspace is already in THIS process's map — see IEngineerActuator for why this
+   * must never reach the provider. `sandboxes` is populated by `getSandbox`, so a true here means a
+   * machine this process created or resumed is still held; a paused or reclaimed one is dropped from
+   * the map by the same paths that notice it is dead.
+   */
+  hasLiveSandbox(workspaceId: string): boolean {
+    return this.sandboxes.has(workspaceId);
+  }
+
   async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const release = this._holdSandboxOp(workspaceId);
     try {
@@ -2958,23 +3020,8 @@ ${paintWaitJs('p')}
     // sandbox does not slowly fill /tmp with them.
     const runId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     const readerPath = `/tmp/nb_read_dist_${runId}.cjs`;
-    const resultPath = `/tmp/nb_dist_${runId}.json`;
-    const readerScript = [
-      "const fs=require('fs'),path=require('path');",
-      "function walk(d,b,o){",
-      "  try{for(const f of fs.readdirSync(d)){",
-      "    const a=path.join(d,f),r=(b?b+'/':'')+f;",
-      "    if(fs.statSync(a).isDirectory()) walk(a,r,o);",
-      "    else o[r]=fs.readFileSync(a).toString('base64');",
-      "  }}catch(e){}",
-      "  return o;",
-      "}",
-      "let out={};",
-      `const dirs=${JSON.stringify(searchPaths)};`,
-      "for(const d of dirs){const r=walk(d,'',{});if(Object.keys(r).length){out=r;break;}}",
-      "if(!Object.keys(out).length){console.error('dist/ and out/ are empty or do not exist');process.exit(2);}",
-      `fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify(out));`,
-    ].join('\n');
+    const resultPath = `/tmp/nb_dist_${runId}.json.gz`;
+    const readerScript = distReaderScript(searchPaths, resultPath);
 
     await sandbox.files.write(readerPath, readerScript);
 
@@ -3007,7 +3054,13 @@ ${paintWaitJs('p')}
       );
     }
 
-    const raw = await sandbox.files.read(resultPath).catch(() => '');
+    // The result is GZIPPED JSON read back as BYTES (compression audit, 2026-09-24). It used to be plain
+    // base64 JSON read as text — a built site inflated by a third, then sent uncompressed. Text assets
+    // (the bulk of a dist/) pack 3–4× before they cross the network, and `format: 'bytes'` is the same
+    // SDK call the screenshot path has used in production for months.
+    const packed = await sandbox.files.read(resultPath, { format: 'bytes' }).catch(() => null);
+    let raw = '';
+    try { raw = packed && packed.length ? gunzipSync(Buffer.from(packed)).toString('utf8') : ''; } catch { raw = ''; }
     // Best-effort tidy-up: a resumed sandbox lives for days, and one of these per publish adds up.
     // Deliberately AFTER the read and never awaited into the result — a cleanup that could fail the
     // publish would be a worse bug than the litter it prevents.

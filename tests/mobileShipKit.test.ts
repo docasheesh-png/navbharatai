@@ -301,8 +301,10 @@ describe('generateShipKit — pre-solved future build failures, batch 2 (audit 2
       // G17b (admin report 2026-08-22): both capacitor.config and the app are ours, so a mismatch
       // between the configured webDir and where the build really writes is OUR bug. Find the folder
       // the build actually produced and point the wrapper at it, rather than failing the user's build.
-      expect(wf).toContain('for d in dist build out www dist/spa .output/public; do');
-      expect(wf).toMatch(/pointing the Android wrapper at the folder your build really produced/);
+      expect(wf).toContain('for d in dist build out www dist/spa build/client .output/public dist/*/browser build/*/browser; do');
+      // ⚠️ "app wrapper", not "Android wrapper" (2026-09-22): this guard is now ONE shared constant
+      // used by the iOS lane too, where the Android wording would have been a false statement.
+      expect(wf).toMatch(/pointing the app wrapper at the folder your build really produced/);
 
       // 🔒 "public" must never be a candidate ON ITS OWN: in Create React App it is the SOURCE folder
       // holding the un-built index.html template, so accepting it would package a broken shell and

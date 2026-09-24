@@ -36,7 +36,7 @@ import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepE
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite } from '../AgentV3/writeTimeTypecheck';
-import { findMixedScriptText, scriptIntegritySummary } from '../AgentV3/scriptIntegrity';
+import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
@@ -45,7 +45,7 @@ import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemot
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
-import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -161,10 +161,11 @@ import {
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
-import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan } from '../AgentV3/greenReviewPolicy';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
+import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
@@ -194,7 +195,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -299,6 +300,8 @@ import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
+import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
+import { readDevServerLastWords } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -338,6 +341,7 @@ import {
   reconcileWithSink,
   perTierBilledUsd,
   providerBaselineCostUsd,
+  modelUsageFromEntries,
   type ProviderModelEntry,
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
@@ -379,7 +383,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
@@ -461,6 +465,8 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
+import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
+import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { looksLikeRefusal } from '../lib/promptSafety';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -474,7 +480,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemoryFor,
@@ -529,6 +535,8 @@ import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
 import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
+import { entryIsStillTheStarter, starterRenderNote } from '../AgentV3/stillTheStarterApp';
+import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
@@ -3344,7 +3352,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3389,6 +3397,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     },
     ...(opts.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
     ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
+    ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
   });
 }
@@ -10265,6 +10274,25 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';
     }
+    /**
+     * 🔴 THE APP THEY ASKED ABOUT IS NOT HERE (autopsy 0d297b25). "The WORKNEX app is already developed
+     * in this Replit project … build the APK" reached a workspace holding only our starter, and a
+     * four-minute build discovered what these three facts already said. Answered instead — one message
+     * that names how to bring the project in. See projectElsewhere.ts for the precision rules; the
+     * workspace half is `userAppExists`, which is fail-safe (an unreadable listing counts as an app).
+     */
+    const projectElsewhere = readProjectElsewhere(prompt);
+    const answerProjectElsewhere = shouldAnswerProjectElsewhere({
+      prompt,
+      userAppExists,
+      importing: zipImports.length > 0
+        || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+        || rawAttachments.length > 0,
+    });
+    if (answerProjectElsewhere) {
+      console.log(`[AGENTV3] the prompt is about an existing app${projectElsewhere.host ? ` in ${projectElsewhere.host}` : ''} that this workspace does not hold — answering instead of building`);
+      intent = 'chat';
+    }
 
     /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
@@ -10455,7 +10483,7 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -10466,7 +10494,10 @@ async function noteBuildOutcome(
           // Bounded (30s) — the plain-chat reply runs on an early-exit path BEFORE the deadline timer
           // is armed; without this a stalled provider hangs the whole request forever. On timeout the
           // catch below falls through to the normal build path so the user still gets an answer.
-          const { response } = await raceTimeout(
+          // A reply that could not be generated must NOT fall through to a build when the whole point of
+          // this turn is that there is nothing here to build (projectElsewhere.ts) — that fallback is the
+          // exact outcome being prevented, so it degrades to the deterministic answer instead.
+          const routed = await raceTimeout(
             chatRouter.route(
               chatPrompt,
               LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n' + CODE_LITERACY_RULE + '\n\n' +
@@ -10485,7 +10516,8 @@ async function noteBuildOutcome(
                     + "brief example of the kind of answer that helps (for instance a shop billing app "
                     + "with GST). Be warm and brief — they are one sentence away from starting."
                   : '')
-                + (ambiguousBuildAsk && !clarifyWhatToBuild
+                + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
+                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
@@ -10495,10 +10527,18 @@ async function noteBuildOutcome(
             ),
             30_000,
             'chatRouter.route',
-          );
-          reply = response.content + providerDebugTag(response.provider);
+          ).catch((err: unknown) => {
+            if (answerProjectElsewhere) return null;
+            throw err;
+          });
+          const response = routed?.response;
+          reply = response && response.content && response.content.trim()
+            ? response.content + providerDebugTag(response.provider)
+            : answerProjectElsewhere
+              ? projectElsewhereFallback(projectElsewhere)
+              : (response?.content ?? '') + (response ? providerDebugTag(response.provider) : '');
           // Cache only a real, non-empty reply (never cache an empty/failed generation).
-          if (cacheable && response.content && response.content.trim()) {
+          if (cacheable && response && response.content && response.content.trim()) {
             chatResponseCache.set(cacheKey, reply);
           }
         }
@@ -11940,10 +11980,13 @@ async function noteBuildOutcome(
      * half-finished look cut off mid-flight.
      */
     const LAST_CHANCE_PROOF_MS = 45_000;
-    const armAdvisoryCap = () => {
+    // `ms` is for the ONE caller that needs a longer bound (the green functional repair, which computes
+    // it from the build's own wall clock in `greenRepairPlan`); it is always a finite number, so the
+    // cap's promise — a finished build is never held open indefinitely — holds for every caller.
+    const armAdvisoryCap = (ms: number = ADVISORY_CAP_MS) => {
       if (deadlineMs <= 0) return;
       if (deadlineTimer) clearTimeout(deadlineTimer);
-      deadlineTimer = setTimeout(finalizeOnDeadline, ADVISORY_CAP_MS);
+      deadlineTimer = setTimeout(finalizeOnDeadline, Number.isFinite(ms) && ms > 0 ? ms : ADVISORY_CAP_MS);
     };
     // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
@@ -11981,6 +12024,26 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    /**
+     * Put the workspace back to a green snapshot — sandbox, durable store AND the captured-writes map.
+     * The ONE revert every `verifyAfterFix` site uses. Before 2026-09-23 each site carried its own copy,
+     * and none of them touched `writtenFiles`, so the end-of-build save re-persisted the very change the
+     * sandbox had just undone (see `reconcileCapturedWrites`).
+     */
+    const revertToGreenSnapshot = async (snap: Record<string, string>): Promise<void> => {
+      // An EMPTY snapshot is a failed read, never a green app — and `restorePlan({}, cur)` would remove
+      // every file in the workspace. Refuse; verifyAfterFix reports a revert that did not complete.
+      if (!snap || Object.keys(snap).length === 0) throw new Error('refusing to restore from an empty snapshot');
+      const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+      const plan = restorePlan(snap, cur);
+      await runInPass('green-guard-restore', async () => {
+        for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
+        const rm = buildRemoveCommand(plan.remove);
+        if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
+      });
+      reconcileCapturedWrites(writtenFiles, plan);
+      await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
+    };
     /**
      * The copy this build took, if any, and the hash of the source it was built from — compared with
      * what the FINAL durable save persists, so the copy is declared current only when it provably is
@@ -12219,7 +12282,7 @@ async function noteBuildOutcome(
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel })
+        ? analyzeRequest({ prompt, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
         : undefined;
       if (analysis) {
         console.log(
@@ -12629,6 +12692,15 @@ async function noteBuildOutcome(
       } catch { /* diagnostics are best-effort — never blocks a build */ }
       // The bench is a FACT ABOUT THE ENGINE and must appear in the timeline as one — otherwise the only
       // trace of "KIMI was reached" is the absence of further GLM lines, which nobody can read.
+      /**
+       * WHAT THE FAILED CALLS COST (autopsy 21b431e1). A build-scoped ledger, reported once, read by
+       * nothing. See `providerWaste.ts` for why the number had to exist before the bench's trigger
+       * can honestly be re-chosen.
+       */
+      const providerWaste = emptyWasteLedger();
+      const recordAttemptWasted = (family: string, kind: WasteKind, ms: number): void => {
+        try { recordWaste(providerWaste, family, kind, ms); } catch { /* telemetry only */ }
+      };
       const recordProviderBenched = (family: string, reason: string): void => {
         buildDiag.record({
           phase: 'provider', severity: 'info', code: 'PROVIDER_BENCHED',
@@ -12650,7 +12722,7 @@ async function noteBuildOutcome(
         if (isBudgetEndedError(err)) {
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
-            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — moving to the next one`,
+            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
             autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
           });
           return;
@@ -12717,6 +12789,7 @@ async function noteBuildOutcome(
         onTurnComplete: captureShadowUsage,
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
+        onAttemptWasted: recordAttemptWasted,
       });
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
@@ -12726,6 +12799,7 @@ async function noteBuildOutcome(
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
+        onAttemptWasted: recordAttemptWasted,
         // Autopsy f04421ef — see runnerChainSummary.ts. Recorded once (record() collapses an identical
         // repeat), admin-only like every other provider name.
         onChain: (chain) => {
@@ -13989,6 +14063,20 @@ async function noteBuildOutcome(
       // 🔒 Runs BESIDE the loop, never in it: fire-and-forget on a preview/tool event, one browser open
       // per attempt, zero model calls, every failure swallowed. It does not freeze writes and does not
       // stop the build — the model keeps finishing the app; only the worst case changes.
+      /**
+       * 🔴 IS WHAT RENDERS STILL THE STARTER PAGE WE SEEDED? (autopsy 0d297b25) — asked by EVERY producer
+       * of the render proof below: the in-build green, the render rescue, the verify loop and the last-
+       * chance proof. A Hello World renders perfectly, so without this each of them turned "the preview
+       * renders" into "the app works" for an app nobody wrote — upgraded a build the readiness gate had
+       * failed, earned the markup on it, and told the user it was protected. Read fresh at each call (a
+       * later write may genuinely build the app), and it is the SAME exact-match rule the readiness
+       * blocker uses, so the gate and the proofs cannot disagree about one file. An unreadable entry
+       * answers `false` — our own trouble must never veto a real app's proof.
+       */
+      const renderIsOnlyTheStarter = (): Promise<boolean> => entryIsStillTheStarter(
+        (path) => withTimeout(actuator.readFile(workspaceId, path), 5_000, 'starter-entry-read'),
+      ).catch(() => false);
+      let inBuildStarterNoted = false;
       let inBuildGreenAt = 0;
       let inBuildGreenInFlight = false;
       let inBuildGreenLastAttempt = 0;
@@ -14004,6 +14092,17 @@ async function noteBuildOutcome(
         }, Date.now())) return;
         inBuildGreenInFlight = true;
         inBuildGreenLastAttempt = Date.now();
+        // The starter page is not a working version to protect, and saying "Your app rendered — this
+        // working version is now protected" about it is the false claim 0d297b25 showed the user. A file
+        // read, not a browser open, so a still-empty build pays almost nothing per trigger.
+        if (await renderIsOnlyTheStarter()) {
+          if (!inBuildStarterNoted) {
+            inBuildStarterNoted = true;
+            try { buildDiag.record({ phase: 'preview', ...starterRenderNote('in-build green') }); } catch { /* best-effort */ }
+          }
+          inBuildGreenInFlight = false;
+          return;
+        }
         const inBuildGreenStartedAt = Date.now();
         try {
           const writesBefore = inBuildWriteTick;
@@ -14025,9 +14124,13 @@ async function noteBuildOutcome(
           // for a proven render with an empty file set — a third way for this check to disappear from
           // its own report, on top of the swallowed throw below. Naming it removes the asymmetry: the
           // record call is now unconditional and every attempt leaves exactly one line.
-          const outcome: AttemptOutcome = judged.kind === 'proven' && Object.keys(files).length === 0
-            ? { kind: 'nothing-to-save' }
-            : judged;
+          // 🔴 A STARTER IS NOT A LAST KNOWN GOOD (autopsy 3ab93068): that build saved "Hello World" here as
+          // the version to restore. `files` holds the tree that rendered, so both factors are read from it.
+          const outcome: AttemptOutcome = judged.kind === 'proven' && starterIsWhatRendered(starterEntryIn(files), shot.html)
+            ? { kind: 'starter' }
+            : judged.kind === 'proven' && Object.keys(files).length === 0
+              ? { kind: 'nothing-to-save' }
+              : judged;
           const elapsedMs = Date.now() - buildStartedAt;
           if (outcome.kind === 'proven') {
             // The same key the end-of-build GreenGuard reads — no second store, no second rule.
@@ -15602,7 +15705,25 @@ async function noteBuildOutcome(
       // explicit.)
       // `!goldenPreseeded`: a pre-seeded golden app skips the fast lane — regenerating from scratch would
       // discard the verified template; the agentic loop verifies & customizes the seeded files instead.
-      if (!goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // A LANE THAT CANNOT FINISH IS NOT STARTED (autopsy ac41a924). When the rung this build opens on
+      // always reasons, the lane's single 90 s plan call spends its cap thinking and hands over with
+      // nothing — 90 s the user watched for no file. See fastLaneRung.ts.
+      const fastLaneWouldRun = !goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      const fastLaneRung = fastLaneWouldRun
+        ? (() => {
+          try {
+            return fastLaneRungDecision(tierLadder(powerLevelReqEffective).rungs, {
+              complex: buildIsComplex,
+              isKeyed: (r) => { const v = process.env[keyEnvFor(r.provider)]; return !!(v && String(v).trim()); },
+              enabled: fastLaneReasoningGateEnabled(),
+            });
+          } catch { return { rung: null, skip: false, reason: '' }; }
+        })()
+        : { rung: null, skip: false, reason: '' };
+      if (fastLaneRung.skip) {
+        buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_REASONING_RUNG', message: 'Skipped the fast lane: the engine this build opens on always reasons first, so the lane could not finish its plan step in time. Building directly with the full builder.', autoResolved: true, detail: fastLaneRung.reason });
+      }
+      if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -15998,8 +16119,25 @@ async function noteBuildOutcome(
           merge: mergeWorkspaceFiles,
           emit: (e) => events.emit(e),
         });
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        // The workspace entry, when it is still our starter — the lane must not finish without replacing
+        // it (autopsy 3ab93068). Read, never guessed: an unreadable file leaves it undefined.
+        let starterEntryPath: string | undefined;
+        for (const p of STARTER_ENTRY_PATHS) {
+          if (!scaffold.includes(p)) continue;
+          const c = await actuator.readFile(workspaceId, p).catch(() => null);
+          if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
+        }
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
+        // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
+        // needs explaining, and a check only ever visible when it complains cannot be told apart from
+        // one that never ran.
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'FAST_LANE_PHASES',
+          message: fastLanePhaseSummary(sb.phases), autoResolved: true,
+          detail: dominantFastLanePhase(sb.phases),
+        });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause
         // (the tip-calc report showed only "TYPECHECK_FAILED" with no error → the plan↔contract mismatch
@@ -17508,6 +17646,32 @@ async function noteBuildOutcome(
             // `label: 'জungle'` shipped past a 100/100 accessibility score and a PASS review.
             // Deterministic and free — no model call — and advisory: it can never affect a build.
             if (hasUserApp) {
+              /**
+               * 🔧 REPAIR THE ONE SHAPE THAT NEEDS NO GUESS — A DROPPED BACKSLASH (autopsy 21b431e1).
+               *
+               * That build shipped `"n` + Devanagari in `src/App.tsx`. The check SAW it, said so, and
+               * had nothing to do about it — so the user read the corruption on their own screen.
+               * Deterministic, free (no model call), and conservative by construction: a lone
+               * `n`/`t`/`r` standing against Indic text inside a QUOTED literal is a `\n`/`\t`/`\r`
+               * whose backslash the generator lost. Nothing is ever deleted from a user's text, and
+               * the unrepairable shape (`জungle`, which needs the word nobody wrote down) is refused.
+               *
+               * It runs BEFORE the finding is recorded, so the warning describes what actually
+               * shipped rather than what we had already fixed. Same idiom and same place as the CSS
+               * and dotenv guards above; both write the store copy and the sandbox, and both sit
+               * before the green latch. Kill: AGENTV3_SCRIPT_REPAIR=off.
+               */
+              if (process.env.AGENTV3_SCRIPT_REPAIR !== 'off' && !isImportTurn) {
+                const repaired = repairLostEscapes(integrityFiles);
+                if (repaired.repairs.length > 0) {
+                  for (const [path, content] of Object.entries(repaired.files)) {
+                    integrityFiles[path] = content;
+                    writtenFiles.set(path, content);
+                    try { await actuator.writeFile(workspaceId, path, content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+                  }
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY_REPAIRED', message: scriptRepairSummary(repaired.repairs), autoResolved: true });
+                }
+              }
               const mixed = findMixedScriptText(integrityFiles);
               if (mixed.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'warning', code: 'SCRIPT_INTEGRITY', ...obs(scriptIntegritySummary(mixed)) });
@@ -18118,6 +18282,34 @@ async function noteBuildOutcome(
         } catch { /* the ledger write is best-effort — it must never affect a build */ }
       };
       /**
+       * 🔴 IS THE PAGE WE JUST RENDERED THE USER'S APP, OR OUR STARTER? (autopsy 3ab93068, 2026-09-23)
+       *
+       * The entry path when both factors hold (entry untouched AND the page shows the starter heading —
+       * see `starterIsWhatRendered`), else null. Every verdict below that can call a build "rendered"
+       * passes through `withStarterVerdict` with this answer, so a Hello World page becomes a conclusive
+       * NOT-rendered verdict and flows down the paths that already exist for one: the repair pass is
+       * handed the exact fix, the reviewer may write, and the markup is not earned. Cheap when it does
+       * not apply: the heading test runs first and only a page carrying it costs a file read.
+       */
+      let starterNoted = false;
+      const starterShownOn = async (html: string): Promise<string | null> => {
+        if (!pageShowsStarter(html)) return null;
+        try {
+          for (const p of STARTER_ENTRY_PATHS) {
+            const c = writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
+            if (!isUntouchedStarterEntry(c)) continue;
+            if (!starterNoted) {
+              starterNoted = true;
+              buildDiag.record({ phase: 'preview', severity: 'warning', code: 'STARTER_STILL_SHOWING', autoResolved: false,
+                message: `The preview rendered, but what it showed was the starter template (${p} still says "Hello World") — not the app that was built. Not counted as a render.`,
+                detail: 'Entry file byte-identical to the seeded starter AND the page carries its heading. Treated as a conclusive not-rendered verdict so the existing repair, reviewer and billing rules apply.' });
+            }
+            return p;
+          }
+        } catch { /* an unreadable entry is "could not tell", never a finding */ }
+        return null;
+      };
+      /**
        * 🔴 DID A REAL BROWSER SEE THIS APP RENDER? — THE ONE ANSWER, FOR EVERY VERDICT BELOW
        * (autopsy 697b38ee, EIGHTH appearance, 2026-09-21).
        *
@@ -18235,11 +18427,11 @@ async function noteBuildOutcome(
           // has spent the week removing, and it would produce the WRONG sentence — telling someone
           // with a real web app that their API returned an error. Unknown falls back to today's
           // wording, which is correct for an API and merely unhelpful for a site.
-          const verdict = analyzePreviewHtml(shot.html, {
+          const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, {
             painted: shot.painted,
             source: shot.source,
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
-          });
+          }), await starterShownOn(shot.html));
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
@@ -18251,7 +18443,12 @@ async function noteBuildOutcome(
           // We looked, the answer was conclusive, and the app did not render. That — and only that — is
           // evidence a repair has something real to aim at.
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
-          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker })) {
+          // The rescue's premise is that the build WROTE the app. A rendering starter page is not that.
+          const stillTheStarter = verdict.rendered ? await renderIsOnlyTheStarter() : false;
+          if (stillTheStarter) {
+            try { buildDiag.record({ phase: 'preview', ...starterRenderNote('render rescue') }); } catch { /* best-effort */ }
+          }
+          if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker, stillTheStarter })) {
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
@@ -18299,12 +18496,18 @@ async function noteBuildOutcome(
             shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
           const html = shot.html;
-          const verdict = analyzePreviewHtml(html, { painted: shot.painted, source: shot.source });
+          const verdict = withStarterVerdict(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), await starterShownOn(html));
           let consoleErrs: string[] = [];
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
+          if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
+            // Rendered — but the starter page, not an app. Not a proof, and not a defect a repair pass
+            // could fix either (there is nothing to repair), so the loop ends here without spending one.
+            try { buildDiag.record({ phase: 'preview', ...starterRenderNote('preview verify loop') }); } catch { /* best-effort */ }
+            break;
+          }
           if (verdict.rendered && consoleErrs.length === 0) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
             // Honesty upgrade (autopsy 2026-07-11): the real-browser check just CONFIRMED the app renders,
@@ -18403,16 +18606,7 @@ async function noteBuildOutcome(
                         afterHtml = shot.html;
                         return v.rendered;
                       },
-                      revert: async (snap) => {
-                        const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
-                        const plan = restorePlan(snap, cur);
-                        await runInPass('green-guard-restore', async () => {
-                          for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
-                          const rm = buildRemoveCommand(plan.remove);
-                          if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
-                        });
-                        await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
-                      },
+                      revert: revertToGreenSnapshot,
                     });
                     try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('feature-presence heal', vr) }); } catch { /* best-effort */ }
                     // Only a KEPT heal updates result + coverage; a reverted heal leaves the app exactly as
@@ -18480,6 +18674,8 @@ async function noteBuildOutcome(
               break;
             }
             serverRevivals += 1;
+            // Its last words BEFORE the restart overwrites them — the only evidence of WHY it stopped.
+            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
@@ -18492,6 +18688,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
+              detail: lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)',
               autoResolved: true,
             });
             attempt -= 1; // a process restart is not a repair attempt
@@ -19275,13 +19472,17 @@ async function noteBuildOutcome(
           try {
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 Nothing proved your app runs yet — opening it once more to check…', ts: Date.now() });
             const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'last-chance-proof');
-            const verdict = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+            const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), await starterShownOn(shot.html));
             let consoleErrs: string[] = [];
             try {
               if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
-            const proven = verdict.rendered && consoleErrs.length === 0;
+            const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();
+            if (starterOnly) {
+              try { buildDiag.record({ phase: 'preview', ...starterRenderNote('last-chance proof') }); } catch { /* best-effort */ }
+            }
+            const proven = verdict.rendered && consoleErrs.length === 0 && !starterOnly;
             const broken = !verdict.rendered && !verdict.inconclusive && !verdict.serverDown;
             if (proven) gateEvidence.preview = 'passed';
             else if (broken) gateEvidence.preview = 'failed';
@@ -19527,6 +19728,8 @@ async function noteBuildOutcome(
         // Honesty tracking (rule 5): did we EVER actually capture the browser console? An empty capture
         // only means "runtime clean" if a real session was read; otherwise it's "runtime UNCHECKED".
         let captureAvailable = false;
+        // At most ONE deterministic restart per build from this loop — a second stop is reported, never retried.
+        let runtimeServerRestarted = false;
         for (let attempt = 1; attempt <= maxAttempts && !abort.signal.aborted; attempt++) {
           let captured: RuntimeError[] = [];
           try {
@@ -19535,6 +19738,56 @@ async function noteBuildOutcome(
             captured = filterActionableErrors(cap.errors);
           } catch { break; /* console capture needs a real sandbox — availability stays unproven */ }
           if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
+          // A STOPPED SERVER IS RESTARTED, NOT REPAIRED — the verify loop's rule (2026-08-12), applied to
+          // its sibling at last (autopsy 3a0a8f7f). See partitionServerDown for what counts and why.
+          const split = partitionServerDown(captured, internalPreviewUrl(lastPreviewUrl)); // the host the browser actually opened
+          if (split.serverDown.length > 0) {
+            const signals = split.serverDown.map((e) => e.text).slice(0, 4).join(' · ');
+            if (runtimeServerRestarted) {
+              // It stopped again after our own restart. That is an infrastructure finding, never a
+              // licence to rewrite the app — no model call, and the loop ends here.
+              buildDiag.record({
+                phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
+                message: `The dev server stopped again after it was restarted. The app's code was never the problem here — the preview port stopped answering. ${split.serverDown[0].text}`,
+                autoResolved: false,
+              });
+              break;
+            }
+            runtimeServerRestarted = true;
+            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
+            const restartedAt = Date.now();
+            try {
+              await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'runtime-server-revive');
+            } catch { /* the next capture is the real verdict */ }
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
+              message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)'}`,
+              autoResolved: true,
+            });
+            if (split.app.length === 0) {
+              // Open the app again so the next capture is a real post-restart console, not an old one.
+              if (lastPreviewUrl && actuator.browseUrl) {
+                try { await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'runtime-server-recheck'); } catch { /* unproven, not failed */ }
+              }
+              sinceMs = restartedAt;
+              attempt -= 1; // a process restart is not a repair attempt
+              continue;
+            }
+            captured = split.app;
+          }
+          // WHAT THE REPAIR WAS HANDED, IN THE REPORT (autopsy f15a9bcc, 2026-09-23). That build spent a
+          // repair pass on "2 runtime error(s)" that its own model then called a transient 502, and the
+          // report carried only the COUNT — so whether `partitionServerDown` should have caught them could
+          // not be answered from the evidence. The texts ride on the line now, bounded; admin-only.
+          try {
+            buildDiag.record({
+              phase: 'autofix', severity: 'info', code: 'RUNTIME_AUTOFIX_TRIGGERED', autoResolved: true,
+              message: `${captured.length} runtime error(s) sent to a repair pass (attempt ${attempt}/${maxAttempts}).`,
+              detail: `preview=${internalPreviewUrl(lastPreviewUrl) ?? 'none'} · ${captured.slice(0, 4).map((e) => `[${e.kind}] ${e.text.slice(0, 240)}`).join(' · ')}`,
+            });
+          } catch { /* the report line is best-effort — never affects the repair */ }
           events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
@@ -19585,16 +19838,7 @@ async function noteBuildOutcome(
                 snapshot: async () => (await collectWorkspaceFiles(actuator, workspaceId)).files,
                 apply: async () => { fixResult = await applyFix(); },
                 reverify: reRenderOk,
-                revert: async (snap) => {
-                  const cur = (await collectWorkspaceFiles(actuator, workspaceId)).files;
-                  const plan = restorePlan(snap, cur);
-                  await runInPass('green-guard-restore', async () => {
-                    for (const [p, c] of Object.entries(plan.write)) { try { await actuator.writeFile(workspaceId, p, c); } catch { /* per-file */ } }
-                    const rm = buildRemoveCommand(plan.remove);
-                    if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'vaf-remove'); } catch { /* best-effort */ } }
-                  });
-                  await mergeWorkspaceFiles(workspaceId, snap).catch(() => {}); // durable revert too
-                },
+                revert: revertToGreenSnapshot,
               });
               try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('runtime-error fix', vr) }); } catch { /* best-effort */ }
               // Promote the repaired result ONLY when it was kept — a reverted fix leaves the app exactly
@@ -19618,8 +19862,15 @@ async function noteBuildOutcome(
         let remaining: RuntimeError[] = [];
         try {
           const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
-          if (fin.captured !== false) { captureAvailable = true; runtimeCaptureAvailable = true; }
-          remaining = filterActionableErrors(fin.errors);
+          // A stopped SERVER is not an error IN THE APP. It must neither accuse the app ("errors remain")
+          // nor vouch for it ("runtime verified") — the app did not run, so the honest verdict is unchecked.
+          const finSplit = partitionServerDown(filterActionableErrors(fin.errors), internalPreviewUrl(lastPreviewUrl));
+          if (fin.captured !== false && !(finSplit.serverDown.length > 0 && finSplit.app.length === 0)) {
+            captureAvailable = true; runtimeCaptureAvailable = true;
+          } else if (finSplit.serverDown.length > 0 && finSplit.app.length === 0) {
+            captureAvailable = false;
+          }
+          remaining = finSplit.app;
           runtimeErrorsRemaining = remaining.length;
         } catch { /* best-effort — availability stays whatever the loop proved */ }
         try {
@@ -19700,6 +19951,26 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
+
+      // 🔴 MADE-UP PEOPLE ARE DISCLOSED, NOT SHIPPED AS REAL (autopsy f15a9bcc, 2026-09-23). That build
+      // listed four generated "nearby vendors" as real and the user was told the feature was done. The
+      // files THIS turn wrote are scanned (only the ones the app actually loads), and a finding adds one
+      // plain sentence to the summary: what is demo data, why, and the real path. Never a failed build —
+      // the real version needs a database the user has not chosen yet; saying so is the honest outcome.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const invented = simulatedDataIssues(Object.fromEntries(writtenFiles))
+            .filter((i) => !isUnreachable(dispatcher.lastReachability, i.file));
+          if (invented.length > 0) {
+            result = { ...result, summary: `${result.summary}${simulatedDataNotice(invented)}` };
+            buildDiag.record({
+              phase: 'readiness', severity: 'warning', code: 'SIMULATED_DATA_SHIPPED', autoResolved: false,
+              message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
+              detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
+            });
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the
@@ -19909,9 +20180,22 @@ async function noteBuildOutcome(
           // the review can only suggest, it is also lean (a hard step cap, a 45 s budget, and an
           // instruction that says so). Not-green / proven-broken / failed build: byte-identical.
           const reviewPlan = greenReviewPlan({ previewGreen, previewProvenBroken, buildOk: result.ok });
-          const reviewSpawn = reviewPlan.maxSteps !== undefined
-            ? makeSubAgentSpawn({ ...subAgentDeps, maxSteps: reviewPlan.maxSteps })
-            : spawnSubAgent;
+          // 🔴 A REVIEWER WE WALKED AWAY FROM MUST STOP, NOT MERELY STOP BEING WAITED FOR (autopsy
+          // 3a0a8f7f). `raceTimeout` below only ends OUR wait: that build conceded REVIEW_INCOMPLETE and
+          // the reviewer went on making model calls for five more seconds, on the user's bill, for an
+          // answer nothing would read. The review gets its OWN signal — tied to the build's, so a user's
+          // Stop still reaches it — and it is aborted the moment its verdict is conceded, after the grace
+          // and the salvage have had their chance. `makeSubAgentSpawn` holds no state of its own, so a
+          // per-review spawn over the same deps is the shared one with a different signal.
+          const reviewAbort = new AbortController();
+          const stopReviewWithBuild = (): void => reviewAbort.abort();
+          if (abort.signal.aborted) reviewAbort.abort();
+          else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
+          const reviewSpawn = makeSubAgentSpawn({
+            ...subAgentDeps,
+            signal: reviewAbort.signal,
+            ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
+          });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
             try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: at most ${reviewPlan.maxSteps} steps, ${Math.round(reviewBudget / 1000)}s budget. Its findings are an offer, never a repair.`, autoResolved: true }); } catch { /* best-effort */ }
@@ -20000,7 +20284,7 @@ async function noteBuildOutcome(
               review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
-                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
+                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish in the time it had — send "review it" and I\'ll run it on its own.'
                 : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
               // HONESTY (rule 5): this used to be recorded `autoResolved: true` — a literal claim that
               // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
@@ -20023,6 +20307,10 @@ async function noteBuildOutcome(
             // Always detach: the stream outlives this block, and a listener left attached would keep
             // appending a later turn's reviewer output to this turn's buffer.
             stopListening();
+            // Whatever the outcome, nothing reads this reviewer after here — end it (a no-op if it
+            // already finished) and drop the build-abort link so it cannot outlive the build.
+            reviewAbort.abort();
+            abort.signal.removeEventListener('abort', stopReviewWithBuild);
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {
@@ -20057,7 +20345,14 @@ async function noteBuildOutcome(
           // and the working app ships untouched. The user's actual requests (a missing requested feature,
           // a real runtime error) are handled by their own passes and keep fixing automatically — this
           // governs only the reviewer's opinions. Kill switch: AGENTV3_GREEN_STOP=off. See greenReviewPolicy.
-          const greenStopReview = !reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok }) && autoFixItems.length > 0 && !isImportTurn;
+          const reviewerMaySilentlyWrite = reviewerShouldWrite({ previewGreen, previewProvenBroken, buildOk: result.ok });
+          // What a WORKING app's one verified repair may take on — the findings that name broken
+          // behaviour, whatever their severity tag (see `selectGreenRepairable`). Its own list, not
+          // `autoFixItems`: that one carries warnings only when the C9 warning canary is on.
+          const greenRepairable = !reviewerMaySilentlyWrite && !isImportTurn && greenFunctionalRepairEnabled()
+            ? selectGreenRepairable(review?.issues ?? []).map((i) => i.message.trim()).filter(Boolean)
+            : [];
+          const greenStopReview = !reviewerMaySilentlyWrite && (autoFixItems.length > 0 || greenRepairable.length > 0) && !isImportTurn;
           // FALSE-SUCCESS GUARD: a real build turn (never an import/survey turn, where findings stay
           // advisory by design) whose reviewer found [CRITICAL]s is NOT-ok until they are verifiably
           // fixed. Set the holder NOW (before the bounded fix pass) so the verdict is honest even if
@@ -20068,19 +20363,118 @@ async function noteBuildOutcome(
           // opinions — those are now suggestions the user can accept, not blockers.
           if (criticals.length > 0 && !isImportTurn && !greenStopReview) reviewCriticalsUnresolved = criticals.slice();
           if (greenStopReview) {
-            // The app is verified working. Surface the findings as an offer instead of silently editing.
+            // A REAL BUG IN A WORKING APP GETS ONE VERIFIED REPAIR (admin 2026-09-23, autopsy ac41a924).
+            // Only the functional findings, one pass, its own abort, and verifyAfterFix around it: a
+            // repair that does not finish, or after which the app no longer PROVABLY renders, is undone —
+            // on a working app an unproven edit is not kept (the reverse of the runtime fix's rule, and
+            // deliberately so: this pass exists to act on the reviewer's reading, not on a crash the user
+            // can see). The pass may never write a .env file (greenFreeze.ts). Everything it did not fix
+            // is still OFFERED below, exactly as before.
+            let greenRepaired: string[] = [];
+            if (greenRepairable.length > 0) {
+              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+              const plan = greenRepairPlan(headroomMs);
+              const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!lastPreviewUrl && !!actuator.browseUrl;
+              if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
+                armAdvisoryCap(plan.capMs);
+                events.emit({ type: 'narration', agent: 'architect', text: `🔧 Your app works — fixing ${greenRepairable.length} real problem(s) the review found, then checking it still works…`, ts: Date.now() });
+                const repairAbort = new AbortController();
+                const stopRepairWithBuild = () => repairAbort.abort();
+                abort.signal.addEventListener('abort', stopRepairWithBuild);
+                let repairOk = false;
+                let repairTimedOut = false;
+                try {
+                  // The snapshot is taken HERE, not inside verifyAfterFix: when its own snapshot fails it
+                  // runs the change without a net and keeps it — right for a crash fix, never for an edit
+                  // to a working app. No usable snapshot ⇒ no repair.
+                  const greenSnap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                  if (Object.keys(greenSnap).length === 0) throw new Error('no snapshot of the working app — repair not attempted');
+                  const repairRunner = new AgentRunner({
+                    ...baseRunnerOpts,
+                    signal: repairAbort.signal,
+                    client: buildTurnRunner(healRunnerOpts()),
+                    model: resolveModel(powerLevelReqEffective),
+                    persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                  });
+                  const vr = await verifyAfterFix<Record<string, string>>({
+                    snapshot: async () => greenSnap,
+                    apply: async () => {
+                      const run = runInPass('reviewer-functional-repair', () => repairRunner.run(judgeRepairPrompt(prompt, greenRepairable)));
+                      let timer: ReturnType<typeof setTimeout> | undefined;
+                      const outcome = await Promise.race([
+                        run.then((r) => ({ ok: !!r?.ok }), () => ({ ok: false })),
+                        new Promise<'timeout'>((res) => { timer = setTimeout(() => res('timeout'), plan.repairMs); }),
+                      ]);
+                      if (timer) clearTimeout(timer);
+                      if (outcome === 'timeout') {
+                        // Stop it, and let it settle before anything is reverted — a runner still writing
+                        // while the snapshot goes back would leave a hybrid.
+                        repairTimedOut = true;
+                        repairAbort.abort();
+                        await Promise.race([run.catch(() => undefined), new Promise((res) => setTimeout(res, 15_000))]);
+                        return;
+                      }
+                      repairOk = outcome.ok;
+                    },
+                    reverify: async () => {
+                      if (!repairOk) return false; // unfinished or failed ⇒ undo
+                      const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'green-repair-verify');
+                      const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                      return v.rendered && !v.inconclusive && !v.serverDown; // unproven ⇒ undo
+                    },
+                    revert: revertToGreenSnapshot,
+                  });
+                  if (vr.kept && repairOk) {
+                    greenRepaired = greenRepairable.slice();
+                    result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length)}` };
+                    if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                  }
+                  try {
+                    buildDiag.record({
+                      phase: 'build',
+                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: greenRepairable.length, budgetMs: plan.repairMs }),
+                    });
+                  } catch { /* best-effort */ }
+                } catch (e) {
+                  const why = e instanceof Error ? e.message : String(e);
+                  console.log(`[AGENTV3] green functional repair failed: ${why}`);
+                  try {
+                    buildDiag.record({
+                      phase: 'build', severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIR_SKIPPED',
+                      message: `${greenRepairable.length} functional reviewer finding(s) on the working app were offered, not repaired: ${why}.`,
+                      autoResolved: true,
+                    });
+                  } catch { /* best-effort */ }
+                } finally {
+                  abort.signal.removeEventListener('abort', stopRepairWithBuild);
+                  repairAbort.abort();
+                }
+              } else {
+                try {
+                  buildDiag.record({
+                    phase: 'build', severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIR_SKIPPED',
+                    message: `${greenRepairable.length} functional reviewer finding(s) on the working app were offered, not repaired: ${plan.repairMs <= 0 ? 'not enough build time left for a repair and its check' : !canVerify ? 'the result of a repair could not have been checked in a real browser' : 'the build was stopped'}.`,
+                    autoResolved: true,
+                  });
+                } catch { /* best-effort */ }
+              }
+            }
+            // The app is verified working. Surface what was NOT repaired as an offer, never a silent edit.
+            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t));
             const suggestions = toReviewSuggestions(
-              autoFixItems.map((t) => ({ text: t, functional: criticals.includes(t) })),
+              offered.map((t) => ({ text: t, functional: criticals.includes(t) || greenRepairable.includes(t) })),
             );
             const suggestSummary = reviewSuggestionSummary(suggestions);
             if (suggestSummary) result = { ...result, summary: `${result.summary || ''}${suggestSummary}` };
-            try {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'REVIEW_SUGGESTED_NOT_APPLIED',
-                message: `The app was verified rendering, so ${suggestions.length} reviewer finding(s) were OFFERED to the user rather than applied silently (the working app was left untouched): ${suggestions.map((s) => s.title).join('; ')}`,
-                autoResolved: true,
-              });
-            } catch { /* best-effort */ }
+            if (suggestions.length > 0) {
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'REVIEW_SUGGESTED_NOT_APPLIED',
+                  message: `The app was verified rendering, so ${suggestions.length} reviewer finding(s) were OFFERED to the user rather than applied silently (the working app was left untouched): ${suggestions.map((s) => s.title).join('; ')}`,
+                  autoResolved: true,
+                });
+              } catch { /* best-effort */ }
+            }
             const card = reviewSuggestionCard(suggestions);
             // A richer client can render per-item "fix" buttons; the summary above already carries the
             // whole feature end-to-end for a plain client, so this emit is purely additive.
@@ -21184,6 +21578,29 @@ async function noteBuildOutcome(
         });
       } catch { /* an observation must never affect a finished build */ }
 
+      /**
+       * ITS SIBLING: WHAT THE CALLS THAT RETURNED NOTHING COST (autopsy 21b431e1).
+       *
+       * `LADDER_DEPTH` says how far down the ladder a build went; this says what the falling cost in
+       * wall clock. Read together they answer the question five timeouts raised and nothing could:
+       * was the bench slow, or were the timeouts cheap? Neither line decides anything.
+       *
+       * ⚠️ Placed HERE, beside its sibling and outside every feature's conditional, for the reason
+       * `READY_BEFORE_END` already states in this file: an instrument about our own engine that lives
+       * inside another feature's `if` reports on a biased sample, and a biased sample reads as an
+       * ABSENCE of the problem.
+       */
+      try {
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'PROVIDER_TIME_WASTED',
+          message: wasteSummary(providerWaste, Date.now() - buildStartedAt),
+          detail: `calls=${totalWasteCalls(providerWaste)}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
@@ -21219,6 +21636,17 @@ async function noteBuildOutcome(
           providerUsage: reconciledProviderUsage,
           wasLoss: effectiveBilledUsd === 0 && buildUsage.total().outputTokens > 0,
           lossRealCostUsd: effectiveBilledUsd === 0 ? sonnetEquivalentUsd(buildUsage.total()) : 0,
+          // 🔴 WHAT IT REALLY COST — the figure `decideBuildBilledUsd` already priced with the
+          // per-model rate card, recorded instead of thrown away. Until 2026-09-23 every cost in the
+          // admin usage report was `sonnetEquivalentUsd` above: an honest upper bound, displayed
+          // under a field called `marginUsd` and painted red, so a window that charged 18% of
+          // Sonnet's price read as a $1,257 loss. These two lines are the whole fix for that, and
+          // they cost nothing — both numbers were already in scope, one variable away.
+          realCostUsd: decidedRealCostUsd,
+          sandboxUsd: decidedSandboxUsd,
+          // Per-RUNG tokens. `reconciledProviderUsage` above names only the vendor, and one vendor
+          // holds rungs 20x apart in price, so no downstream reader could price it.
+          modelUsage: modelUsageFromEntries(providerLedger.entries()),
         })
         .catch(() => {});
 

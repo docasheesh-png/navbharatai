@@ -1,126 +1,112 @@
 /**
- * One composer, everywhere — admin 2026-09-20, with two phone screenshots side by side.
+ * One composer, everywhere — and since 2026-09-23 it is the FREE CHAT's composer.
  *
- * *"yeh 2 chat ui hai … mujhe SDA ka input box bhi baki ai ke jaisa karna hai. isko badal ke, other
- * professionals ke jaise hi karo!!"*
+ * History, because this file has held two standards and the second one supersedes the first:
  *
- * Mentor / Career Coach and Senior Doctor Assistant are the same product on the same phone, and
- * their message rows already look alike. The row a doctor actually types into did not:
+ *   • 2026-09-20 — *"SDA ka input box bhi baki ai ke jaisa karna hai … other professionals ke jaise hi
+ *     karo!!"*. Doctor AI was aligned to the professionals: every control its own `w-9 h-9 rounded-xl`
+ *     box beside a square input. The complaint then was a paperclip and mic INSIDE the box on the LEFT,
+ *     which pushed the writing area a third of the way across.
+ *   • 2026-09-23 — *"navbharatai free ke andar, sabhi ai aur professionals ke inputbox ko navbharatai
+ *     free ke jaisa karo. sabhi professionals, navbharatai free jaise hi lagne chahiye."* The target
+ *     is now the free chat's box: rounded, controls INSIDE on the RIGHT, text starting at the left
+ *     edge. That keeps what the 09-20 fix was actually for (the writing area is not pushed across)
+ *     and gives every AI the one look the admin pointed at.
  *
- *   • the paperclip and the dictation mic sat INSIDE the text box, so the writing area started a
- *     third of the way across and a two-word placeholder wrapped onto two lines;
- *   • the text was `text-[12px]` against every other composer's `text-sm`;
- *   • the box was pinned to a 44px minimum while the buttons beside it were 40px, so the row's
- *     baseline did not line up with itself.
- *
- * 🔑 THE CLASS, not the instance: every chat screen in this repo hand-rolls its composer, and
- * nothing has ever held them to one shape — the same reason `lib/autoGrowTextarea.ts` had to be
- * written after two composers shipped `rows={1}` with no grow logic at all. So this suite does not
- * assert a list of classes it was handed; it DERIVES the professionals' composer from their own
- * source and requires the doctor's to match it. Restyle `ProfessionalChat` and this test asks for
- * `SDAChat` in the same breath.
- *
- * ⚠️ What is deliberately NOT required to match, each for a stated reason:
- *   • the ACCENT colour (emerald here, indigo there) — the persona's identity, which the admin did
- *     not ask to remove and which the rest of this screen carries;
- *   • the DICTATION mic — speech → text, a control the professionals do not have. It moves out of
- *     the box like everything else, but its existence is not a deviation from the shape;
- *   • the `Volume2` icon on the voice button — two mic glyphs side by side would be two different
- *     features wearing one icon. The distinction predates this change.
+ * 🔑 THE CLASS, not the instance: every chat screen used to hand-roll its composer, so a restyle of
+ * one never reached the others. The FREE-mode surfaces now render ONE shell
+ * (`components/chat/ComposerShell.tsx`), and the shell's classes are read back against the free
+ * chat's own source (`AIChat.tsx`) — so neither side can drift from the other.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  COMPOSER_BOX_CLASS, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS,
+} from '../src/components/chat/ComposerShell';
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
-const SDA = read('src/components/sda/SDAChat.tsx');
-const PRO = read('src/components/professionals/ProfessionalChat.tsx');
-
 /** Comments quote the OLD wording as evidence; only live code may answer these questions. */
 const code = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 
-const SDA_CODE = code(SDA);
-const PRO_CODE = code(PRO);
+const FREE_CHAT = code(read('src/components/ide/AIChat.tsx'));
+const SURFACES = {
+  professionals: code(read('src/components/professionals/ProfessionalChat.tsx')),
+  doctorAi: code(read('src/components/sda/SDAChat.tsx')),
+  imageGenerator: code(read('src/components/ide/AIImageGenerator.tsx')),
+};
 
-/** The class list of the first `<textarea>` in a file — the composer's own box. */
-function composerClasses(src: string): string[] {
-  const ta = src.slice(src.indexOf('<textarea'));
-  const m = /className="([^"]+)"/.exec(ta);
-  expect(m, 'a composer textarea with a className').toBeTruthy();
-  return m![1].split(/\s+/).filter(Boolean);
-}
+describe('the free chat IS the shell (2026-09-23: the two-row box)', () => {
+  it('the free chat renders ComposerShell with the shared text, send and stop', () => {
+    expect(FREE_CHAT).toContain('<ComposerShell');
+    expect(FREE_CHAT).toContain('COMPOSER_TEXTAREA_CLASS');
+    expect(FREE_CHAT).toContain('className={COMPOSER_SEND_CLASS}');
+    expect(FREE_CHAT).toContain('className={COMPOSER_STOP_CLASS}');
+  });
 
-describe('the doctor types into the same box as everyone else', () => {
-  const sdaClasses = composerClasses(SDA_CODE);
-  const proClasses = composerClasses(PRO_CODE);
+  it('the box keeps the free chat\'s look: rounded, themed, indigo on focus', () => {
+    expect(COMPOSER_BOX_CLASS).toContain('rounded-2xl');
+    expect(COMPOSER_BOX_CLASS).toContain('focus-within:border-indigo-500');
+  });
 
-  it('carries every shape class the professionals composer carries', () => {
-    // Derived, not transcribed: the accent-coloured focus ring is the one permitted difference.
-    const shape = proClasses.filter((c) => !c.startsWith('focus:border-'));
-    expect(shape.length, 'the professionals composer still has classes to compare against')
-      .toBeGreaterThan(6);
-    for (const cls of shape) {
-      expect(sdaClasses, `SDAChat composer is missing "${cls}"`).toContain(cls);
+  it('the text keeps its 16px size (no iOS zoom) and needs no right-hand reserve', () => {
+    for (const cls of ['bg-transparent', 'text-[16px]', 'resize-none', 'leading-relaxed']) {
+      expect(COMPOSER_TEXTAREA_CLASS.split(/\s+/)).toContain(cls);
     }
+    expect(COMPOSER_TEXTAREA_CLASS).not.toMatch(/\bpr-(?:[3-9]\d|\d{3})\b/);
   });
 
-  it('is the row\'s own bordered box, not a transparent slot inside one', () => {
-    // The old shape: a wrapper div owned the border and the textarea was `bg-transparent`.
-    expect(sdaClasses).not.toContain('bg-transparent');
-    expect(SDA_CODE).not.toContain('focus-within:border-emerald-600/60');
-    expect(sdaClasses).toContain('flex-1');
+  it('Send and Stop span the box\'s height (admin: "send button ko bhi 2 line me banao")', () => {
+    for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) expect(cls).toContain('h-full');
+  });
+});
+
+describe('every AI in NavBharatAI FREE renders that one shell', () => {
+  for (const [name, src] of Object.entries(SURFACES)) {
+    it(`${name}: the box, the textarea and the send button all come from ComposerShell`, () => {
+      expect(src).toContain("from '../chat/ComposerShell'");
+      expect(src).toContain('<ComposerShell');
+      expect(src).toContain('className={COMPOSER_TEXTAREA_CLASS}');
+      expect(src).toContain('COMPOSER_SEND_CLASS');
+      // History and Mode stay OUTSIDE the box, in the shell's left column (admin 2026-09-21 / 09-23).
+      expect(src).toContain('onOpenMode={onOpenModePicker}');
+      expect(src).toContain('onOpenHistory={onOpenHistory}');
+      // Send has its own slot, spanning both rows — never squeezed into the control row.
+      expect(src).toMatch(/send=\{\(/);
+    });
+
+    it(`${name}: no private square input left behind`, () => {
+      expect(src).not.toContain('flex-1 resize-none bg-card border border-line rounded-xl');
+    });
+  }
+});
+
+describe('what Doctor AI keeps (the 2026-09-20 guards that still hold)', () => {
+  const SDA = SURFACES.doctorAi;
+
+  it('uses the SHARED attach menu — so the camera is offered for an X-ray or an ECG strip', () => {
+    expect(SDA).toContain('<AttachMenu');
+    expect(SDA).not.toContain('fileInputRef');
+    expect(SDA).not.toContain('type="file"');
   });
 
-  it('is sized in the shared vocabulary, not a private pixel minimum', () => {
-    expect(sdaClasses).toContain('text-sm');
-    expect(sdaClasses).not.toContain('text-[12px]');
-    // `BASE_HEIGHT` was the 44px floor that made this box taller than the controls beside it.
-    expect(SDA_CODE).not.toContain('BASE_HEIGHT');
-    expect(SDA_CODE).not.toContain('minHeight');
+  it('keeps the dictation mic AND the voice button as two different glyphs', () => {
+    expect(SDA).toMatch(/<Mic className="w-4 h-4" \/>/);
+    expect(SDA).toContain('icon={<Volume2 className="w-4 h-4" />}');
   });
 
   it('keeps the placeholder to one line on a phone', () => {
-    // "Type your answer or clinical finding..." wrapped onto two lines in the admin's screenshot.
-    // The attribute is a ternary here, so every string literal inside it is a placeholder the
-    // user can actually be shown — check them all, not just the first.
-    const attrs = [...SDA_CODE.matchAll(/placeholder=(\{[^}]*\}|"[^"]*")/g)].map((m) => m[1]);
+    const attrs = [...SDA.matchAll(/placeholder=(\{[^}]*\}|"[^"]*")/g)].map((m) => m[1]);
     const placeholders = attrs.flatMap((a) => [...a.matchAll(/['"]([^'"]{2,})['"]/g)].map((m) => m[1]));
     expect(placeholders.length).toBeGreaterThan(0);
-    for (const p of placeholders) {
-      expect(p.length, `placeholder too long for one line: "${p}"`).toBeLessThanOrEqual(34);
-    }
-  });
-});
-
-describe('every control on the row is its own button, the same size as the others', () => {
-  /** The composer row: from the attach control to the end of the send button. */
-  const row = SDA_CODE.slice(SDA_CODE.indexOf('<AttachMenu'));
-
-  it('uses the SHARED attach menu — so the camera is finally offered here', () => {
-    // The paperclip opened the file browser directly, which is exactly the miss AttachMenu exists
-    // for: photographing an X-ray or an ECG strip is the likeliest attachment on this screen.
-    expect(SDA_CODE).toContain('<AttachMenu');
-    expect(SDA_CODE).not.toContain('fileInputRef');
-    expect(SDA_CODE).not.toContain('type="file"');
+    for (const p of placeholders) expect(p.length, `placeholder too long for one line: "${p}"`).toBeLessThanOrEqual(34);
   });
 
-  it('gives the attach, dictation, voice and send controls one size', () => {
-    const buttons = row.slice(0, row.indexOf('</div>') + 6);
-    const sized = [...buttons.matchAll(/w-9 h-9 rounded-xl/g)].length;
-    // attach + dictation + voice + send (the send/stop pair counts once per branch).
-    expect(sized, 'every control on the composer row is w-9 h-9 rounded-xl').toBeGreaterThanOrEqual(5);
-    expect(buttons).not.toContain('w-10 h-10');
-  });
-});
-
-describe('🔒 the sizing rule is shared, not copied', () => {
-  it('SDAChat grows and resets through lib/autoGrowTextarea', () => {
-    // It carried its own three-line `autoResize`, byte-for-byte the body of `autoGrow`. Two copies
-    // of a sizing rule is how one composer ends up behaving differently from every other.
-    expect(SDA_CODE).toContain("from '../../lib/autoGrowTextarea'");
-    expect(SDA_CODE).toContain('autoGrow(el, MAX_HEIGHT)');
-    expect(SDA_CODE).toContain('resetGrow(inputRef.current)');
-    expect(SDA_CODE).not.toMatch(/el\.style\.height = `\$\{Math\.min\(el\.scrollHeight/);
+  it('grows and resets through lib/autoGrowTextarea, not a private copy', () => {
+    expect(SDA).toContain("from '../../lib/autoGrowTextarea'");
+    expect(SDA).toContain('autoGrow(el, MAX_HEIGHT)');
+    expect(SDA).toContain('resetGrow(inputRef.current)');
+    expect(SDA).not.toContain('BASE_HEIGHT');
   });
 });

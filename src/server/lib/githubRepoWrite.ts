@@ -54,13 +54,26 @@ export async function commitFiles(
   files: Record<string, string>,
   binaryFiles: Record<string, string>,
   message: string,
+  /**
+   * Paths to DELETE in the same commit (a tree entry with `sha: null`). The tree is built on
+   * `base_tree`, so a file this push does not mention survives from the previous commit — which is
+   * right for everything except a folder this push OWNS outright: `www/` on a prebuilt ship is exactly
+   * this build's output, and a hashed bundle left over from the previous one would otherwise be
+   * packaged into the phone app for ever. Only paths the caller has SEEN in the repository belong here.
+   */
+  removePaths: readonly string[] = [],
 ): Promise<string> {
   const refRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${branch}`, { headers });
   const parentSha = refRes.data.object.sha;
 
-  const tree: Array<Record<string, string>> = Object.entries(files).map(([path, content]) => ({
+  const tree: Array<Record<string, string | null>> = Object.entries(files).map(([path, content]) => ({
     path, mode: '100644', type: 'blob', content,
   }));
+  const present = new Set([...Object.keys(files), ...Object.keys(binaryFiles)]);
+  for (const path of removePaths) {
+    if (!path || present.has(path)) continue;
+    tree.push({ path, mode: '100644', type: 'blob', sha: null });
+  }
 
   for (const [path, base64] of Object.entries(binaryFiles)) {
     const blob = await axios.post(
@@ -87,6 +100,30 @@ export async function commitFiles(
     { headers },
   );
   return commitRes.data.sha;
+}
+
+/**
+ * Does ONE path exist in the repository? `true` / `false` (a real 404) / `null` when GitHub could not
+ * say (a 5xx, a rate limit, the network) — because "I could not check" and "it is not there" lead to
+ * different decisions, and `readRepoFiles` folds both into an absent key.
+ */
+export async function repoFileExists(
+  headers: GhHeaders,
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+): Promise<boolean | null> {
+  try {
+    await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
+      { headers },
+    );
+    return true;
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    return status === 404 ? false : null;
+  }
 }
 
 /**
@@ -117,4 +154,40 @@ export async function readRepoFiles(
     }
   }
   return out;
+}
+
+/**
+ * The repository's file paths on a branch — what the repair loop shows the model so it can ASK for a
+ * file it needs, the way a developer opens the import target next to the file that failed.
+ *
+ * Bounded and text-only by construction: the tree API is one request, blobs only (no directories or
+ * submodules), and anything that could never be a source file a repair would read is dropped here so
+ * it is never even listed. A tree the API truncates is still returned — a partial list means a partial
+ * menu, which is safe, because a path the model asks for is checked against THIS list before any read.
+ */
+export async function listRepoTree(
+  headers: GhHeaders,
+  owner: string,
+  repo: string,
+  branch: string,
+  cap = 400,
+): Promise<string[]> {
+  try {
+    const r = await axios.get(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      { headers },
+    );
+    const tree = Array.isArray(r.data?.tree) ? (r.data.tree as Array<{ path?: unknown; type?: unknown; size?: unknown }>) : [];
+    const out: string[] = [];
+    for (const t of tree) {
+      if (t.type !== 'blob' || typeof t.path !== 'string') continue;
+      if (/(^|\/)(node_modules|dist|build|\.git|android|ios|www|\.gradle)\//.test(t.path)) continue;
+      if (typeof t.size === 'number' && t.size > 400_000) continue;
+      out.push(t.path);
+      if (out.length >= cap) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }

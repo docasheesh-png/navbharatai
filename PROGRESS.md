@@ -79171,3 +79171,71 @@ den!!! kyu? kaisa idea hai?"* — and it is the better design, so #3244 was rebu
 - Locked in `modePicker.test.ts` (`recentRowClosable`, `lastChatClosed`, the FREE-above case) and
   `theModeListIsTheWindowSwitcher.test.ts` (App refuses a close for a non-closable id through the same rule
   the sheet renders by; `freeChatClosed` absent from App). KB `professionals` howToUse updated.
+
+## 2026-09-24 — "sahi source laga do": the Builder scorecard was scoring COMPLAINTS
+
+**Admin sent the Builder scorecard** (41 builds, 90.2% success, 6.49 heals per build, worst 86) — a
+report, so the fifth absolute rule applies. The autopsy's headline finding was not in the numbers.
+
+**🔴 `/api/admin/builder-scorecard` read `listAdminBuildReports()` — the admin REPORT INBOX.** A build
+enters that collection by exactly two routes, and every writer in the repo was counted before the
+claim was made: `shouldAutoReport`, which fires only on `verdict === 'bad'`, and a user pressing
+**Report**. **Neither admits a build that worked.** So a card headed *"Build success: 90.2% of 41"*
+was reporting the success rate of the complaints, and nothing on it said so.
+
+**🔑 THE REPO ALREADY KNEW, IN WRITING.** `/api/admin/failure-categories` (2026-09-16) was moved to
+the comprehensive source, and its docblock names the trap verbatim: *"rather than the user-submitted
+inbox (`listAdminBuildReports`), which is only the builds someone bothered to click Report on and
+would answer a different, biased question."* The instance was fixed; the sibling was never hunted —
+this repo's headline class (autopsy `a38c6fef`), now the seventh recorded instance.
+
+**⚠️ Which direction the bias ran, because it is not the obvious one:** a complaint sample makes the
+engine look **worse** than it is. That is still a defect — it is the number the admin would act on,
+and an honest number can be bad news while a number whose population is unknown is not a number.
+
+**🔴 A NAIVE SWAP WOULD HAVE TRADED ONE PROBLEM FOR ANOTHER.** `listAllDiagnostics` returns ONE row
+per workspace (each workspace's LATEST build). Edit survival groups builds BY workspace, so on that
+source every project would hold exactly one build, `edits` would be 0, and the metric would read
+"unknown" for ever while looking like it had simply found nothing. `scorecardPopulation.ts` therefore
+reads the workspace INDEX from `listAllDiagnostics` and the BUILDS from each workspace's own
+`history` subcollection, bounded at 60 workspaces, 10 queries in flight.
+
+**🔀 AND THE 🔀 BUCKET WAS FREE ALL ALONG.** `counts.workarounds` has been on every report since the
+bucket was written — its own comment explains why it is kept OUT of `autoResolved`: *"a tally that
+counts them as heals hides exactly the debt the tally exists to surface."* The scorecard then showed
+the heal tally and not this one, so the debt was hidden by the scorecard instead. `workaroundPressure`
+now states it as debt, never summed into the heal line.
+
+**The card names its own population**, inside the headline rather than beside it (a note a card could
+forget to render is a note that goes missing): how many builds, from how many workspaces, EVERY
+workspace and not only the reported ones, plus the history bound and any workspace whose history
+could not be read — counted and disclosed, **never folded into "no builds"**, because a failed read
+counted as zero is a metric quietly improving itself on an outage.
+
+**🔒 `tests/theScorecardWasScoringComplaints.test.ts` (27 cases), five reversion proofs:** the source
+pointed back at the inbox; an absent heal count scored as a clean pass; a failed history read dropped
+silently; the history bound removed; an unrecorded build counted as a clean zero workaround.
+
+**⚠️ THE THIRD PROOF DID NOT BITE, AND THE TEST WAS WRONG, NOT THE CODE.** It checked that
+`populationNote` RENDERS `historyUnreadable` and never that the collector INCREMENTS it — so deleting
+both the counter and the fallback passed every case, and the workspace simply vanished from the
+numbers. The suite now drives `collectScorecardBuilds` itself against mocked stores. **That is three
+days running that a guard tested the display instead of the behaviour** (#3248's banner guard, its
+predecessor's file-wide `toContain`, and this).
+
+**⚠️ AND TWO PRE-EXISTING ASSERTIONS HAD PINNED THE BUG.** `builderMetrics.test.ts` asserted
+`toContain('listAdminBuildReports(limit)')` — the fix could not land without deleting an assertion.
+Its own comment states the property it meant (§53: *"no hardcoded benchmark projects. Real builds or
+nothing"*), which is untouched; it is now asserted in its stronger form. **A test that pins an
+implementation pins its bugs too.**
+
+**Also corrected:** the card's window label said *"last 200 builds"* and the window is 200
+**workspaces**.
+
+**Still open (rule 6):** the heal tally is one number with no breakdown — 6.49 per build, worst 86,
+and nothing says WHICH repairs fire. Turning that into a work list needs the issue codes projected
+into the listing, which is a separate change and is not guessed at here.
+
+**Gate, on the final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ · typecheck:server ✅
+· **vitest 29,033 passed | 1 skipped | 0 FAIL** ✅ · build ✅ · test:bundle ✅ · boot:check ✅ ·
+deps:server-gate ✅.

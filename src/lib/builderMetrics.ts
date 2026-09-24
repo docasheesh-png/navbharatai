@@ -40,6 +40,13 @@ export interface BuildMetricInput {
   billedInr?: number | null;
   /** How many defects the build FIXED ITSELF. See healPressure — this is a red flag, not a credit. */
   healCount?: number | null;
+  /**
+   * How many times the build ROUTED AROUND a problem instead of fixing it (a fallback to another
+   * provider or another lane). Already on every report as `counts.workarounds`, and shown on no
+   * scorecard until 2026-09-24 — so the 🔀 bucket the fifth absolute rule demands a tally of was the
+   * one bucket the tally could not see.
+   */
+  workaroundCount?: number | null;
 }
 
 /** Builds that can actually be judged: finished, with a real verdict. */
@@ -242,6 +249,47 @@ export function healPressure(builds: readonly BuildMetricInput[]): HealPressure 
   };
 }
 
+export interface WorkaroundPressure {
+  /** Finished builds carrying a workaround count — the only ones this can be computed from. */
+  builds: number;
+  /** Builds that routed around a problem at least once. */
+  buildsWithWorkaround: number;
+  rate: number;
+  perBuild: number;
+  worst: number;
+}
+
+/**
+ * HOW OFTEN THE BUILDER WENT ROUND A PROBLEM INSTEAD OF THROUGH IT.
+ *
+ * The fifth absolute rule's 🔀 bucket: *"Every workaround is a DEFERRED root cause — flag it as debt,
+ * never as a win"*, and the 50/50 law goes further: *"a workaround must be ARCHITECTURALLY
+ * IMPOSSIBLE"*. `BuildDiagnostics` has recorded the number since the bucket was written, and its own
+ * comment explains why it is kept OUT of `autoResolved`: *"a tally that counts them as heals hides
+ * exactly the debt the tally exists to surface."* The scorecard then showed the heal tally and not
+ * this one — so the debt was hidden by the scorecard instead.
+ *
+ * Same exclusion rule as healPressure and for the same reason: a build with no recorded count is
+ * EXCLUDED, never scored as a clean zero, or the rate improves as the window fills with old records.
+ *
+ * PURE.
+ */
+export function workaroundPressure(builds: readonly BuildMetricInput[]): WorkaroundPressure {
+  const rows = judgeable(builds).filter((b) => typeof b.workaroundCount === 'number' && (b.workaroundCount as number) >= 0);
+  const n = rows.length;
+  if (n === 0) return { builds: 0, buildsWithWorkaround: 0, rate: 0, perBuild: 0, worst: 0 };
+  const counts = rows.map((b) => Math.floor(b.workaroundCount as number));
+  const with_ = counts.filter((c) => c > 0).length;
+  const total = counts.reduce((a, c) => a + c, 0);
+  return {
+    builds: n,
+    buildsWithWorkaround: with_,
+    rate: with_ / n,
+    perBuild: Math.round((total / n) * 100) / 100,
+    worst: Math.max(...counts),
+  };
+}
+
 export interface BuilderScorecard {
   success: BuildSuccess;
   survival: EditSurvival;
@@ -249,6 +297,8 @@ export interface BuilderScorecard {
   cost: Distribution;
   /** How often the builder had to repair its own output — the 50/50 law as a number. */
   heal: HealPressure;
+  /** How often it routed AROUND a problem instead — the deferred-debt half of the same law. */
+  workaround: WorkaroundPressure;
 }
 
 export function builderScorecard(builds: readonly BuildMetricInput[]): BuilderScorecard {
@@ -258,6 +308,7 @@ export function builderScorecard(builds: readonly BuildMetricInput[]): BuilderSc
     time: timeToWorkingApp(builds),
     cost: costPerWorkingApp(builds),
     heal: healPressure(builds),
+    workaround: workaroundPressure(builds),
   };
 }
 
@@ -318,6 +369,17 @@ export function scorecardHeadline(card: BuilderScorecard): string {
       + `${card.heal.buildsNeedingHeal} had to fix themselves (${card.heal.perBuild} repairs per build on `
       + `average, worst ${card.heal.worst}). A heal is a defect that was generated and then papered over — `
       + `the target is zero${note}.`,
+    );
+  }
+
+  // 🔀 THE DEFERRED-DEBT HALF. Stated separately from the heal line, never summed into it: a heal
+  // fixed something, a workaround did not, and the fifth rule calls the second one debt. Silent when
+  // nothing recorded a count, so "none happened" and "nothing was measured" stay distinguishable.
+  if (card.workaround.builds > 0) {
+    lines.push(
+      `Workarounds: ${pct(card.workaround.rate)} of ${card.workaround.builds} build(s) routed AROUND a `
+      + `problem instead of fixing it (${card.workaround.perBuild} per build on average, worst `
+      + `${card.workaround.worst}). A workaround is a deferred root cause, never a win.`,
     );
   }
 

@@ -208,9 +208,9 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
       <h3 className={LABEL}>Is the engine getting better?</h3>
 
       <ReportCard
-        title="Builder scorecard" source={ENDPOINTS.scorecard} icon={Wrench} window="last 200 builds"
+        title="Builder scorecard" source={ENDPOINTS.scorecard} icon={Wrench} window="last 200 workspaces"
         state={s('scorecard')} onRefresh={() => void load('scorecard')} onStatus={onStatus}
-        note="Heal pressure is the 50/50 law as a number: how often the builder had to repair its OWN output. A heal is a red flag, not a credit."
+        note="Every workspace on the platform, not only the builds someone reported — the card names its own population. Heal pressure is the 50/50 law as a number: how often the builder had to repair its OWN output, and a heal is a red flag, not a credit. A workaround is counted separately, because it fixed nothing."
       >
         {(d) => (
           <div className="space-y-3">

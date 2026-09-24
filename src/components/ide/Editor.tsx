@@ -176,11 +176,22 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     return () => { active = false; clearTimeout(timer); };
   }, [useTextarea]);
 
+  // 🔴 REPORT `null` ON UNMOUNT ONLY — never on a re-render (shortcut audit 2026-09-24). This effect
+  // used to depend on `[onMount]`, and CodeStudio passes `onMount` as an inline arrow, so its identity
+  // changed on EVERY render of this component — which is every keystroke, since `content` is a memo
+  // key. React ran the cleanup each time: `onMount(null)` → CodeStudio's `editorInstance` became null
+  // after the first character typed, and stayed null until the editor was clicked again (only the
+  // focus listener restored it). Every `editorInstance?.…` command — Undo from the menu, Format
+  // Document, every popup shortcut that reaches the editor — silently did nothing in that window.
+  // Verified in a real browser: Undo through the popup worked on an untouched file and did nothing
+  // after one edit. A ref carries the latest callback; the effect itself has no dependencies.
+  const onMountRef = useRef(onMount);
+  onMountRef.current = onMount;
   useEffect(() => {
     return () => {
-      if (onMount) onMount(null);
+      onMountRef.current?.(null);
     };
-  }, [onMount]);
+  }, []);
 
   // P-DEV.9 — register the custom themes before the editor mounts so they're available to set.
   const handleEditorWillMount = (monaco: any) => {
@@ -205,7 +216,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   const handleEditorDidMount = (editor: any, monaco?: any) => {
     editorRef.current = editor;
     if (monaco) monacoRef.current = monaco;
-    if (onMount) onMount(editor);
+    onMountRef.current?.(editor);
     // P-DEV.3 — toggle a breakpoint when the user clicks the line's gutter glyph margin. Registered
     // once; reads the fresh file + callback from bpRef. Best-effort — never disrupts editing.
     if (monaco) {
@@ -532,11 +543,24 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     </div>
   );
 }, (prev, next) => {
-  // `liteEditor` MUST be compared: this memo swallows every other prop change, so without it the
-  // Settings toggle would write localStorage and change nothing on screen until the next reload.
+  // 🔴 THIS COMPARATOR MUST NAME EVERY PROP THAT CHANGES WHAT IS PAINTED. It used to compare four
+  // props, so any other change was swallowed until an unrelated re-render came along: a gutter click
+  // stored its breakpoint and drew NO glyph until the next keystroke (verified in a real browser,
+  // shortcut audit 2026-09-24 — the same defect made F9 look dead); the Lite-editor toggle would have
+  // changed nothing until a reload; a cleared dirty dot, a font-size change and a theme change all
+  // waited for the next edit. Callbacks are deliberately not compared (they are new every render).
+  const sameOptions = JSON.stringify(prev.editorOptions ?? {}) === JSON.stringify(next.editorOptions ?? {});
+  const sameBreakpoints = (prev.activeBreakpoints ?? []).join(',') === (next.activeBreakpoints ?? []).join(',');
+  const dirtyKey = (d?: Set<string>) => (d ? [...d].sort().join('\u0000') : '');
   return prev.content === next.content &&
          prev.fileName === next.fileName &&
          prev.activeTab === next.activeTab &&
          prev.openTabs.length === next.openTabs.length &&
-         prev.liteEditor === next.liteEditor;
+         prev.openTabs.every((t, i) => t.path === next.openTabs[i]?.path) &&
+         prev.liteEditor === next.liteEditor &&
+         prev.editorTheme === next.editorTheme &&
+         prev.hideHeaderDebug === next.hideHeaderDebug &&
+         sameOptions &&
+         sameBreakpoints &&
+         dirtyKey(prev.dirtyTabs) === dirtyKey(next.dirtyTabs);
 });

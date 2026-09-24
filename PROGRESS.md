@@ -80522,3 +80522,39 @@ around the textarea inside it.
   utility on the same element opts out of. `tests/oneFocusRingNotTwo.test.ts` fails on any unlayered
   `:focus*` rule that sets outline or radius (reversion-proven).
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+
+## 2026-09-24 — Code Studio: the editor is the SAME on a phone — the width gate is gone (admin: "mobile me woh sab kaam hone chahiye jo desktop me ho sakte hai")
+
+**Series:** PR A of four (A: engine · B: resizable shortcut popup · C: every shortcut verified in a real
+browser · D: the CUSTOM keyboard face). Admin's brief, verbatim: *"pura editor desktop jaisa kaam kare,
+aap isko kuch aur add / upgrade karna chahoge to kar dena!!"*
+
+- **What was found first, and why it is PR A:** `Editor.tsx` swapped Monaco for a plain `<textarea>`
+  on `window.innerWidth < 768`, on a comment reading "to avoid Monaco memory issues" that nothing in
+  this repo ever measured. The textarea never calls `onMount`, so on every phone `editorInstance` was
+  `null` — and `CodeStudio.tsx`'s `handleShortcut` dispatches ~55 of the 82 Shortcuts-panel entries
+  through that instance (undo/redo, select all, comment, move line, find/replace, go to line, format,
+  fold, rename, quick fix, multi-cursor…). Every one was a tap that did nothing, with no error to
+  find. The Cursor popup is gated on the same instance and never opened on a phone. And CodeStudio
+  had carried a PHONE-TUNED Monaco option set since 2026-07-31 (no minimap, no sticky scroll, 14px
+  touch scrollbars) that this gate threw away before it could apply — two months of tuning for an
+  editor that never ran there. Fixing shortcuts one by one on top of that would have been surface work.
+- **Measured before the default moved** (Playwright, Chromium, 390×844 mobile viewport, the real
+  built `dist/monaco`, an 8,000-line TypeScript file): load 0.4–1.9 s; JS heap **28–30 MB** after
+  load, **37–42 MB** typing and scrolling; **2.03 MB** on the wire at brotli-11 (22 files; the
+  TypeScript worker is 1.06 MB of it and is cached a day since #3288). Not a reason for a gate.
+- **Fix:** `src/components/ide/editorEngine.ts` — ONE pure rule, `decideEditorEngine({ liteEditor,
+  monacoFailed })`, with no viewport input at all. The textarea is reached two ways only: a real
+  load failure (unchanged — a file must always open) and **Settings → Editor engine → Lite editor**,
+  a persisted USER choice (`ide_liteEditor`) for a device that genuinely cannot run the full editor.
+  `Editor.tsx` reads the rule; `CodeStudio` owns the state and passes it to BOTH panes. The
+  `React.memo` comparator now compares `liteEditor` — it swallowed every prop change, so without that
+  the toggle would have written localStorage and changed nothing until a reload.
+- **Tests:** `tests/theEditorIsTheSameOnAPhone.test.ts` — the rule, the preference (including a
+  throwing store), and source guards: no `innerWidth <` in `Editor.tsx`, the fallback still present,
+  the comparator, both panes wired, the phone tuning still present so the two facts stay tied.
+- **Knowledge base:** the IDE entry says the editor is the same on a phone and where the Lite switch is.
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+- **Next (PR B–D):** corner-handle resize + pinch on the shortcut popup and the ENTER button inside it;
+  every shortcut pressed in a real browser on a phone viewport with its effect asserted; the CUSTOM
+  face (flip, combo input + Go, full desktop key grid, cursor tool merged, `CursorPopup.tsx` retired).

@@ -140,7 +140,7 @@ describe('REVERSION GUARDS — the route asks, and a failed reply never becomes 
 
   it('the steer reaches the reply, and the reply is never cached', () => {
     expect(route).toContain('(answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : \'\')');
-    expect(route).toMatch(/!clarifyWhatToBuild && !answerProjectElsewhere && chatCacheEnabled\(\)/);
+    expect(route).toMatch(/!answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled\(\)/);
   });
 
   it('an unreachable engine degrades to the fixed answer, not to the build path', () => {

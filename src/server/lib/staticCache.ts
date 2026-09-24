@@ -16,10 +16,22 @@ import { basename } from 'path';
  * .js/.json but must NEVER be cached long — they are not content-hashed, so a long cache
  * (or a CDN pin) would stop service-worker / PWA updates from ever shipping.
  */
+/**
+ * Files that are NOT content-hashed, yet end in .js/.css/.ttf and so used to fall into the 1-year
+ * `immutable` rule (found by the 2026-09-24 compression audit): the Monaco editor copied from
+ * node_modules (`/monaco/vs/...`, 24 MB) and the preview runtime (`/vendor/...` — React and Babel).
+ * `immutable` tells a browser never to ask again for a year, so after a Monaco or React upgrade a
+ * returning user would run old files beside new ones. One day, then an ETag revalidation (a 304 costs
+ * a few hundred bytes), keeps them fast AND lets an upgrade reach everyone within a day.
+ */
+export const UNHASHED_ASSET_CACHE = 'public, max-age=86400';
+const UNHASHED_DIR = /(^|[\\/])(monaco|vendor)[\\/]/;
+
 export function cacheControlFor(filePath: string): string | null {
   const base = basename(filePath);
   if (base === 'sw.js' || base === 'manifest.json') return 'no-cache, no-store, must-revalidate';
   if (filePath.endsWith('.html')) return 'no-cache, no-store, must-revalidate';
+  if (UNHASHED_DIR.test(filePath)) return UNHASHED_ASSET_CACHE;
   if (/\.(js|mjs|css|woff2|woff|ttf|otf|wasm)$/.test(filePath)) return 'public, max-age=31536000, immutable';
   if (/\.(png|jpg|jpeg|svg|ico|webp|gif|avif)$/.test(filePath)) return 'public, max-age=604800';
   return null;

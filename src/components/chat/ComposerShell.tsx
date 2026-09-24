@@ -121,16 +121,68 @@ export interface ComposerShellProps {
  * width, now that nothing stands beside the box — and the controls and Send stay on the bottom edge as
  * a message grows. Everything is `items-stretch`, so the text column is always the box's full height.
  */
+/**
+ * THE WHOLE BOX IS THE INPUT (admin 2026-09-24, with two phone screenshots: *"input box ka pura area
+ * hi input box hona chahiye. abhi yeh 2 part me divide ho raha hai — 1 jaha text type hoga, 2 jaha text
+ * nahi hoga … pura box hi 1 simple input box jaisa hona chahiye"*).
+ *
+ * The text area is only part of the box — the top row of the two-row box, the left of the one-line
+ * one — so a tap on the empty part beside the icons used to do nothing. A tap anywhere in the box that
+ * is not on one of its controls now puts the cursor in the text, at the end, like one plain input.
+ * `mousedown` is held back on those taps so the text never loses focus (and the phone keyboard never
+ * closes and reopens) on the way; the focus itself happens on `click`, which iOS treats as the user's
+ * own gesture and so lets open the keyboard.
+ */
+const COMPOSER_CONTROL_SELECTOR = 'button, a, input, textarea, select, label, [role="button"], [contenteditable="true"]';
+
+/** True when a tap on `target` inside the box should be handed to the text rather than to a control. */
+export function tapFocusesComposerText(
+  target: EventTarget | null,
+  box: Pick<Element, 'contains'> | null,
+): boolean {
+  // Duck-typed rather than `instanceof Element`: a text node or an SVG child is still a tap inside the
+  // box, and the check stays runnable where there is no DOM global at all.
+  const el = target as Partial<Pick<Element, 'closest'>> | null;
+  if (!box || !el || typeof el.closest !== 'function') return false;
+  if (!box.contains(target as Node)) return false;
+  const control = el.closest(COMPOSER_CONTROL_SELECTOR);
+  return !control || !box.contains(control);
+}
+
+function focusComposerText(box: HTMLElement | null): void {
+  const text = box?.querySelector('textarea');
+  if (!text || text.disabled) return;
+  text.focus();
+  const end = text.value.length;
+  try { text.setSelectionRange(end, end); } catch { /* a textarea that refuses a selection still has focus */ }
+}
+
+function useWholeBoxInput() {
+  const boxRef = React.useRef<HTMLDivElement>(null);
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (tapFocusesComposerText(e.target, boxRef.current)) e.preventDefault();
+  };
+  const onClick = (e: React.MouseEvent) => {
+    if (tapFocusesComposerText(e.target, boxRef.current)) focusComposerText(boxRef.current);
+  };
+  return { ref: boxRef, onMouseDown, onClick };
+}
+
 export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, send }: ComposerShellProps) {
+  const wholeBox = useWholeBoxInput();
+  // The column sits at the BOTTOM of the row and never stretches (admin 2026-09-24: *"jab text jyada
+  // bada ho, aur input box ka size badhe, to history/mode button ka size na bade, bas input box ka size
+  // badhe"*). Its buttons have their own fixed height (`RAIL_BUTTON_CLASS`), so a growing message moves
+  // nothing but the box.
   const rail = onOpenHistory || onOpenMode ? (
-    <div className="flex flex-col gap-1.5 shrink-0">
+    <div className="flex flex-col gap-1.5 shrink-0 self-end" data-composer-rail="">
       <HistoryButton onOpen={onOpenHistory} size="rail" />
       <ModeButton onOpen={onOpenMode} size="rail" />
     </div>
   ) : null;
   if (!rail) {
     return (
-      <div className={`${COMPOSER_BOX_CLASS} flex items-stretch`} data-composer-layout="one-line">
+      <div ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} className={`${COMPOSER_BOX_CLASS} flex items-stretch cursor-text`} data-composer-layout="one-line">
         {/* `[&>textarea]:pb-2.5` evens the textarea's padding out: its shared class keeps a small bottom
             pad for the two-row box, where the control row sits right under it. Alone on a line it
             would sit visibly high.
@@ -147,7 +199,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
   return (
     <div className="flex items-stretch gap-2" data-composer-layout="two-rows">
       {rail}
-      <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch`}>
+      <div ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch cursor-text`}>
         <div className="relative flex-1 min-w-0 flex flex-col">
           {children}
           <div className="flex items-center justify-end gap-1 px-1.5 pb-1">{controls}</div>

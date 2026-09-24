@@ -10,7 +10,7 @@
  * Locked here: (1) a COMPLEX lane gets a budget its contract fits in and is never talked out of the
  * contract; (2) an ordinary lane is unchanged; (3) the report names the contract's own clock.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fastLaneBudgetMs, FAST_LANE_BUDGET_MS, FAST_LANE_COMPLEX_BUDGET_MS, runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
@@ -36,18 +36,31 @@ describe('the lane budget follows the request', () => {
 describe('a complex lane is never talked out of its contract', () => {
   const pathOf = (user: string) => (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'x';
   // A slow plan call: on a 2 s budget with three tiers the projection says a contract cannot be afforded.
+  //
+  // 🔴 THE CLOCK IS MOVED, NOT WAITED ON (2026-09-24). These cases used to sleep for real, and the
+  // lane's preamble share of a 2 s budget is 800 ms — so after a 500 ms plan the contract had ~300 ms
+  // of slack, and any runner busier than that (CI under full-suite load, a 4-core laptop) spent it
+  // before the contract was reached, got a 0 ms cap, and failed "the contract is asked for" on a code
+  // path nothing had changed. Only `Date` is faked: the lane reads elapsed time from `Date.now()`, so
+  // advancing it by an exact amount makes every figure the lane decides on deterministic, while real
+  // timers still drive the promises. What each case asserts is unchanged.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  const spend = (ms: number) => vi.setSystemTime(Date.now() + ms);
   const run = (complex: boolean, contractMs = 0) => {
     let contractAsked = false;
     return runSimpleBuild({
       prompt: 'vendor app', framework: 'vite-react', scaffoldPaths: [], overallTimeoutMs: 2_000, complex,
       generate: async (system, user) => {
         if (user.includes('Plan the file list')) {
-          await new Promise((r) => setTimeout(r, 500));
+          spend(500);
           return 'src/types.ts :: types\nsrc/Widget.tsx :: widget\nsrc/App.tsx :: root';
         }
         if (system.includes('SHARED CONTRACT')) {
           contractAsked = true;
-          if (contractMs > 0) await new Promise((r) => setTimeout(r, contractMs));
+          // A contract that runs past its cap: the time passes and nothing usable comes back, which is
+          // exactly what the lane's own cut records (an empty result after the full cap).
+          if (contractMs > 0) { spend(contractMs); return ''; }
           return 'export interface Vendor { id: string }';
         }
         const p = pathOf(user);

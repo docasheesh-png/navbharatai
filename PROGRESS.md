@@ -80372,3 +80372,21 @@ was charged **₹47.36** of the welcome balance with the full markup.
    fast-lane gate owner's agreement and real numbers on how often a complex build's plan call completes.
 3. **Expo/React Native is not a stack NavBharatAI builds** (it builds web apps and packages them with
    Capacitor). The honest answer to "build an Expo APK" names that, and offers the Phone build path.
+
+## 2026-09-24 — One line when the footer carries History and Mode (admin screenshot)
+
+Admin, verbatim: *"jab navbharatai free chat ke sabhi ai me footer on hai, (full screen exit hai) to input box
+double line dikhane ki jarurat nahi hai … ab jab history button footer me hai, to input box single line me
+chalega!! sabhi mode ke liye badlo"*.
+
+`ComposerShell` now picks its layout from ONE fact: is the History / Mode column beside it? Both openers are
+`undefined` exactly when the phone's bottom bar is on screen (App derives it once, from `showsGlobalMobileNav`),
+so no column ⇒ one line — text, attach · mic · voice, Send, side by side; column ⇒ the two-row box sketched on
+2026-09-23. Every AI surface renders the shell, so all of them follow. Send's 72px minimum moved from the button
+class into the two-row slot (`SEND_SLOT_CLASS`), which is what makes a one-line box possible at all; the
+placeholder is held to one line so a long hint is clipped rather than half-shown. Rendered at 390px and 1280px
+against the built stylesheet: one-line 54px, two-row 86px. Test-locked in
+`tests/theComposerIsOneLineBesideTheFooter.test.ts`.
+
+**Also corrected:** CLAUDE.md still called the stopped-build "double discount" OPEN; it was decided and shipped
+on 2026-09-21 (real-cost floor, commit `6844b99f`). Noted in place so it is not re-raised again.

@@ -11,6 +11,9 @@
 //     [ 🕘 / ☰ ]  [ message box, full width           | ➤ ]
 //                 [                     📎  🎤  🔊    |   ]
 //
+// …and, when the phone's bottom bar already carries History and Mode, ONE line with no column
+// (admin 2026-09-24) — see `ComposerShell` below for why the column decides it.
+//
 // The free chat (`AIChat.tsx`) renders this same shell, so "like the free chat" is true by
 // construction rather than by copying its classes. `tests/oneComposerEverywhere.test.ts` fails if any
 // of the five surfaces builds its own box again.
@@ -46,16 +49,32 @@ export const COMPOSER_ICON_CLASS =
   'p-2.5 text-faint hover:text-accent-text transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
 
 /**
- * Send — as TALL AS THE BOX, spanning both rows on its right (admin 2026-09-23: "send button ko bhi 2
- * line me banao"). The biggest target in the composer, at the edge the thumb reaches, and set apart
- * from the voice button by the box's own gap so a reach for Send cannot land on a paid control.
+ * Send — as TALL AS THE BOX on its right (admin 2026-09-23: "send button ko bhi 2 line me banao"). The
+ * biggest target in the composer, at the edge the thumb reaches, and set apart from the voice button
+ * by the box's own gap so a reach for Send cannot land on a paid control.
+ *
+ * ⚠️ Its HEIGHT is not decided here. It fills whatever slot the shell gives it (`h-full`), and the shell
+ * decides that slot: 72px beside a two-row box, one control's height beside a one-line box (see
+ * `SEND_SLOT_CLASS`). It used to carry `min-h-[72px]` itself, which made a one-line box impossible —
+ * the button would have forced every box back to two rows' height.
  */
 export const COMPOSER_SEND_CLASS =
-  'h-full min-h-[72px] w-11 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95';
+  'h-full min-h-10 w-11 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95';
 
-/** The one-tap Stop that replaces Send while a reply loads — the same tall shape. */
+/** The one-tap Stop that replaces Send while a reply loads — the same shape. */
 export const COMPOSER_STOP_CLASS =
-  'h-full min-h-[72px] w-11 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95';
+  'h-full min-h-10 w-11 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95';
+
+/**
+ * The slot Send sits in, per layout. In the two-row box it is at least 84px tall, so Send (inside its
+ * 6px padding) is at least 72px — the tall button the admin sketched. In the one-line box it is the
+ * button's own height and sits at the bottom edge, so a message that grows to several lines keeps
+ * Send where the thumb already is.
+ */
+export const SEND_SLOT_CLASS = {
+  twoRows: 'flex p-1.5 pl-0.5 min-h-[84px]',
+  oneLine: 'flex p-1.5 pl-0.5 self-end',
+} as const;
 
 export interface ComposerShellProps {
   /** Opens chat history. Absent ⇒ no History half in the left column. */
@@ -71,15 +90,36 @@ export interface ComposerShellProps {
 }
 
 /**
+ * The composer's layout is decided by ONE fact: is the History / Mode column beside it?
+ *
+ * TWO ROWS, beside the column — the admin's own sketch (2026-09-23):
+ *
  *     ┌──┐ ┌──────────────────────────┬──┐
  *     │🕘│ │ Ask NavBharatAI…         │  │
  *     ├──┤ │                          │➤ │
  *     │☰ │ │           📎   🎤   🔊   │  │
  *     └──┘ └──────────────────────────┴──┘
  *
- * The admin's own sketch (2026-09-23). The left column is icon-only on a phone and labelled from `md`
- * up; it stretches to the box's height and its two buttons split it. Everything is `items-stretch`, so
- * as the text grows the column and the Send button grow with it.
+ * ONE LINE, with no column (admin 2026-09-24: *"jab footer on hai … input box double line dikhane ki
+ * jarurat nahi hai … input box ko 2 line me is liye dikhaya ja raha tha, kyu ki history button gayab
+ * tha. ab jab history button footer me hai, to input box single line me chalega"*):
+ *
+ *     ┌────────────────────────────────────────┐
+ *     │ Ask NavBharatAI…        📎  🎤  🔊  ➤  │
+ *     └────────────────────────────────────────┘
+ *
+ * 🔑 WHY THE COLUMN IS THE RIGHT SIGNAL, and not a second "is the footer on?" check. The two rows only
+ * ever existed to stand beside History and Mode: the box was squeezed to a sliver once they sat next to
+ * it, so the text got a row of its own. Both openers are `undefined` EXACTLY when the phone's bottom
+ * bar is on screen — App derives that once (`modePickerOpener` / `historyOpener`, from
+ * `showsGlobalMobileNav`), and the bar carries History and Mode itself. So "no column" already MEANS
+ * "the footer has these", and asking the device question again here would be a second answer that
+ * could disagree with the first. In full screen the bar is gone, the column comes back, and so do the
+ * two rows.
+ *
+ * In the one-line box the text still takes all the width the controls leave it — the whole box's
+ * width, now that nothing stands beside the box — and the controls and Send stay on the bottom edge as
+ * a message grows. Everything is `items-stretch`, so the text column is always the box's full height.
  */
 export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, send }: ComposerShellProps) {
   const rail = onOpenHistory || onOpenMode ? (
@@ -88,15 +128,31 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
       <ModeButton onOpen={onOpenMode} size="rail" />
     </div>
   ) : null;
+  if (!rail) {
+    return (
+      <div className={`${COMPOSER_BOX_CLASS} flex items-stretch`} data-composer-layout="one-line">
+        {/* `[&>textarea]:pb-2.5` evens the textarea's padding out: its shared class keeps a small bottom
+            pad for the two-row box, where the control row sits right under it. Alone on a line it
+            would sit visibly high.
+            The placeholder is held to ONE line: on a 390px phone the text gets ~190px beside three
+            controls and Send, and a longer hint ("Describe your image…", "Ask Chartered Accountant AI…")
+            wrapped into a second line the one-row box then cut in half. Clipped at the edge reads as a
+            hint; half a second line reads as a bug. What the user TYPES still wraps and grows. */}
+        <div className="relative flex-1 min-w-0 flex flex-col justify-center [&>textarea]:pb-2.5 [&>textarea]:placeholder:whitespace-nowrap [&>textarea]:placeholder:overflow-hidden">{children}</div>
+        <div className="flex items-center gap-1 pl-1 pb-1.5 self-end">{controls}</div>
+        <div className={SEND_SLOT_CLASS.oneLine}>{send}</div>
+      </div>
+    );
+  }
   return (
-    <div className="flex items-stretch gap-2">
+    <div className="flex items-stretch gap-2" data-composer-layout="two-rows">
       {rail}
       <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch`}>
         <div className="relative flex-1 min-w-0 flex flex-col">
           {children}
           <div className="flex items-center justify-end gap-1 px-1.5 pb-1">{controls}</div>
         </div>
-        <div className="flex p-1.5 pl-0.5">{send}</div>
+        <div className={SEND_SLOT_CLASS.twoRows}>{send}</div>
       </div>
     </div>
   );

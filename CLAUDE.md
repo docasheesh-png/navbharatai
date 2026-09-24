@@ -3078,6 +3078,11 @@ the flag entries above promise.
   can cost NavBharatAI money rather than merely earning nothing. Both rules are individually correct
   and admin-mandated; their composition was never decided. Raised to the admin — billing is not a
   session's call.
+  ✅ **DECIDED AND SHIPPED 2026-09-21 — this paragraph stayed "OPEN" after it closed, and a session
+  (mine, 2026-09-23) re-asked the admin from it.** The admin chose *"floor + naya message"*:
+  `cancelledBuildBilling.ts` now bills `min(decided, max(realCost + sandbox, decided / 2))`, so a
+  cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
+  `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates

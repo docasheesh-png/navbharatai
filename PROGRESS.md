@@ -80457,3 +80457,10 @@ index.html. All three causes were ours.
 - ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
   hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
   measurement: its repeat share should fall well below 63%.
+
+## 2026-09-24 — Compression audit, part 3: the built site comes back from the sandbox gzipped
+
+- **Old behaviour.** On publish (and wherever `downloadDistFiles` is used), the sandbox wrote the built site as base64 JSON, which is a third bigger than the files. It then went back over the network uncompressed.
+- **Now.** The same map is written gzipped and read back as bytes. That is the `format: 'bytes'` call the screenshot path has used in production for months. Text assets pack 3–4×.
+- **One builder.** The reader script is now one exported builder, `distReaderScript`. `tests/distReaderScript.test.ts` used to re-type the script by hand; it now RUNS the real one in node against a real directory (Hindi text and binary bytes included) and decodes it the way the actuator does.
+- **Not changed.** The older `src/server/EngineerAI/actuators/E2BActuator.ts` (legacy Engineer AI) was left alone.

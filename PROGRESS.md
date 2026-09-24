@@ -80632,3 +80632,21 @@ around the textarea inside it.
   utility on the same element opts out of. `tests/oneFocusRingNotTwo.test.ts` fails on any unlayered
   `:focus*` rule that sets outline or radius (reversion-proven).
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+
+## 2026-09-24 — An empty Preview opens instead of doing nothing (admin: "khali preview open ho jaye")
+
+**Reported:** on the home page, with nothing built, tapping Preview did nothing at all.
+
+**Cause:** two doors, two different gates, both `disabled`. The mobile footer disabled Preview until a
+v3 workspace or generated code existed; the desktop sidebar disabled it until generated code existed —
+stricter than the footer, so a user with a real v3 workspace could still find it greyed out there.
+
+**Fix:** neither door is ever disabled now (Files keeps its own gate — not asked, not changed). The
+screen they open already existed: with no workspace PreviewSurface never starts a load, nothing sets an
+error, and `previewEmptyKind` returns `no-app-yet` — the "Your app will appear here" welcome.
+Verified in a real phone-sized browser against the dev server: before the change the button was
+disabled; after it, one tap lands on Preview with the welcome visible and the tab marked current.
+Same shape as the Studio change of 2026-09-23, whose test pinned the old Preview gate and now points here.
+
+- Test: `tests/emptyPreviewOpens.test.ts` (reversion-proven: fails 2/6 against the old code).
+- `AppKnowledgeBase.ts` `agentv3_preview` now says the button opens even with no app.

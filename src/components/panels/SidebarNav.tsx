@@ -95,7 +95,9 @@ function NavItem({
 }) {
   const isPreview = item.id === 'preview';
   const isLoginGated = (item.id === 'nbi_pro_chat' || item.id === 'sda_chat') && !user;
-  const isDisabled = (isPreview || item.id === 'files') && !hasGeneratedCode;
+  // Preview is never disabled (admin 2026-09-24): with nothing built it opens its own empty screen,
+  // the same one the mobile footer's Preview button now opens — one screen, one rule on every door.
+  const isDisabled = item.id === 'files' && !hasGeneratedCode;
   const isActive = activeView === item.id;
 
   return (

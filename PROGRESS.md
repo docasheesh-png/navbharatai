@@ -80897,3 +80897,44 @@ boot:check ✅ · deps:server-gate ✅.
 **What to watch on the first real read:** the `Most-repaired:` line. A large `unattributed` means the
 500-entry cap is hiding the biggest builds' repairs and the cap is the next thing to look at; a small
 one means the ranking is real and its top code is the upstream fix to go and build.
+
+## 2026-09-24 — The CUSTOM face: any key combination the user builds, and the cursor tool's new home (PR D of four)
+
+Admin: *"'switch to cursor tool' wala text hai, usko button banao, 'custom' naam ka! yaha wahi cursor
+wale function chahiye! jaise hi user custom par click kare, to popup flip back ho jaye (180) — waha user
+ko upar ek input box mile, jahan user kuch bhi type kar sake! niche 'go' button ho! aur uske niche,
+desktop me use hone wale sabhi button ho … user koi bhi combination bana ke command de, woh ho jaye!"*
+
+- **One card, two faces.** The Shortcuts popup flips (a turn through its edge, so faces of different
+  heights never share a box) to the CUSTOM face: a box you type into or fill by tapping keys, GO, a
+  status line, a full desktop keyboard (Esc/F1–F12/PrtSc · numbers with their shifted symbols ·
+  three letter rows · Shift/Ctrl/Win/Alt/Space/Fn · Ins/Home/PgUp/Del/End/PgDn/arrows — **84 keys**,
+  each row scrolling sideways on a phone rather than shrinking below a finger), and the cursor tool.
+  The last face is remembered (`ide_shortcutsPopupFace`).
+- **The engine, pure (`keyCombo.ts`).** Text → one honest outcome, in this order: (1) OUR OWN table
+  first, so a typed `ctrl+a` runs exactly what the dropdown's "Select All" runs; (2) a bare character is
+  TYPED; (3) everything else becomes a REAL `KeyboardEvent` on Monaco's own input element — carrying
+  the legacy `keyCode` Monaco's resolver actually reads — so the editor's whole binding table (~300)
+  applies without a hand-written case per combo; (4) a short, explicit list of what no web page can do
+  (Fn, Print Screen, Num/Scroll Lock, Alt+Tab, Alt+F4, Ctrl+Alt+Del, the Windows key alone) is REFUSED
+  with the reason. Spellings people use (Control/Cmd/Win/Option/Esc/Del/PgUp/↑/CapsLk/Return) and
+  spaces around `+` are all read; `ctrl+k ctrl+f` chords are two presses. Fn is a laptop-style layer
+  (the number row becomes F1–F12); CapsLk capitalises the next letters. `dispatchCombo.ts` is the ONE
+  place a decision touches the editor.
+- **The cursor tool** moved out of `CursorPopup.tsx` (deleted — one home, not two) into `cursorTool.ts`
+  as pure arithmetic: Select extends with the arrows, Deselect shrinks from the end (tested across line
+  boundaries, never inverting), Chord turns ← → into Backspace/Delete and ALL into clear-all, Undo.
+- **Every door reaches it:** the CUSTOM button, the desktop rail's Cursor button (opens straight onto
+  the face, closes it from there), and a new phone MORE → **Custom keys** entry.
+- **Verified in a real browser** (`scripts/ideShortcutAudit/customFace.mjs`, 390×844 and 1280×800,
+  **20 of 20**): the flip; typed `ctrl+a` selects all; tapping Ctrl then A writes `Ctrl+a` and GO runs it;
+  a bare `q` is typed; **`ctrl+]` indents and `shift+alt+→` expands the selection — neither is in our
+  table, both are Monaco's own bindings reached through the synthetic key event**; `alt+tab` and a bare
+  `ctrl` are refused with reasons; CapsLk and Fn layers; Select/Deselect/ALL; the face is remembered;
+  no page errors.
+- **Tests:** `tests/anyCombinationTheUserBuildsRuns.test.ts` (the engine, 17 cases),
+  `tests/theCursorToolAndTheComboDispatcher.test.ts` (the arithmetic and the dispatcher against a fake
+  editor, 16), `tests/theCustomFaceIsTheCursorToolsNewHome.test.ts` (the wiring: CursorPopup gone,
+  every door, the full key list, the status line).
+- **Knowledge base:** a CUSTOM KEYS bullet under the IDE entry.
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).

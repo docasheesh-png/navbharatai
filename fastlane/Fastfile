@@ -162,6 +162,16 @@ platform :ios do
       end
 
       upload_to_testflight(opts)
+
+      # RECORD THAT THE UPLOAD REALLY RAN, so the workflow's summary can state it as a FACT rather than
+      # as an intention. The Android workflow already learned this the hard way (run #127: the summary
+      # asserted "Uploaded to Google Play" from the INPUT, about an edit Google had rolled back) and was
+      # fixed to read `steps.*.outcome`. This is that fix's SIBLING, and it was never hunted: the iOS
+      # step is "Build, sign & upload", so it is GREEN whether or not DO_UPLOAD was true, and the
+      # summary read `inputs.upload` — an intention stated as a fact. Only this line, reached solely
+      # after upload_to_testflight returns, proves the binary actually left the runner.
+      out = ENV["GITHUB_OUTPUT"]
+      File.write(out, "uploaded=true\n", mode: "a") if out && !out.empty?
     end
   end
 end

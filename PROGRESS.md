@@ -80522,3 +80522,36 @@ around the textarea inside it.
   utility on the same element opts out of. `tests/oneFocusRingNotTwo.test.ts` fails on any unlayered
   `:focus*` rule that sets outline or radius (reversion-proven).
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+
+## 2026-09-24 — Code Studio shortcuts popup: resize by its corners or a pinch; ENTER stays inside (PR B of four)
+
+Admin: *"0.5x, 1x, 2x hata kar bas resize button dedo, jis par click karne se charo kono par dot aa jaye,
+jisse user finger se aage peeche kar ke zoom in / zoom out kar sake"* and *"enter button popup se bahar
+ja raha hai, usko chota kar do"*.
+
+- **One continuous scale replaces the three fixed sizes.** `src/components/ide/popupResize.ts` (pure):
+  both gestures share ONE rule — the scale changes by the ratio of the pointer's distance from the
+  popup's centre now to that distance when the gesture began (a finger on a corner dot, or the gap
+  between two fingers). Because the popup scales about its centre, a dot dragged outward stays under
+  the finger by construction. Bounded: `[0.5, 3]` AND never larger than the viewport minus an 8px
+  margin per side, so a phone can never push the close button off its own screen. Remembered in
+  `ide_shortcutsPopupScale`; an unreadable or out-of-range value opens at 1.
+- **Resize is a mode.** The header's Resize button shows four 16px dots (32px hit areas — a finger is
+  not a mouse pointer) and turns the panel's `touchAction` to `none` so a two-finger pinch reaches the
+  panel; off, the shortcut list scrolls exactly as before. The scale is a MotionValue, not React
+  state — a value per frame must not re-render the whole popup on the phones it is for.
+- **The popup is moved from its HEADER only** (`dragListener={false}` + `dragControls.start`); drag on
+  the whole panel would have claimed the same pointer as a corner drag. A press on a header button
+  is still a click.
+- **ENTER is a fixed 56px square** beside a selector that can shrink (`min-w-0`): at `px-8` next to a
+  `flex-1` that could not give, it overflowed the popup at 360px. The hint text hides under 640px
+  where it only truncated.
+- **Verified in a real browser** (Playwright, harness page mounting the popup alone, 360×740 phone
+  and 1280×800 desktop): ENTER inside the panel; 4 dots; SE-corner drag out → scale 1.049 on the
+  phone (= the viewport cap, exactly) and 1.264 on desktop; NW-corner drag in → 0.5 / 0.866; pinch
+  out on the phone → 1.015; the scale persisted; a chosen shortcut fired exactly once; a header drag
+  moved the popup 60px; no page errors.
+- **Tests:** `tests/theShortcutPopupResizesByItsCorners.test.ts` — the geometry (both gestures agree,
+  the viewport cap, zero-length start, NaN), the remembered scale, and source guards (no `[0.5, 1,
+  2]`, `CORNERS.map`, header-only drag, the fixed ENTER square, pinch captured only while resizing).
+- ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).

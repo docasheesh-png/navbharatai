@@ -1,8 +1,12 @@
-import React, { useState, useRef } from 'react';
-import { Keyboard, X, Search, Move, ChevronDown } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useRef, useCallback } from 'react';
+import { Keyboard, X, Search, Move, ChevronDown, Maximize2, CornerDownLeft } from 'lucide-react';
+import { motion, AnimatePresence, useDragControls, useMotionValue } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { availableItems, type EditorCapability } from './editorCapabilities';
+import {
+  CORNERS, type Corner, type GestureStart,
+  cornerGestureStart, pinchGestureStart, scaleFromGesture, readPopupScale, writePopupScale,
+} from './popupResize';
 
 interface ShortcutEntry {
   key: string;
@@ -145,25 +149,99 @@ interface VirtualKeyboardProps {
   onToggleCursor?: () => void;
 }
 
-export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ 
-  onShortcutTrigger, 
+/** Where each corner handle sits, and the cursor a mouse shows over it. */
+const CORNER_STYLE: Record<Corner, string> = {
+  nw: '-top-2 -left-2 cursor-nwse-resize',
+  ne: '-top-2 -right-2 cursor-nesw-resize',
+  sw: '-bottom-2 -left-2 cursor-nesw-resize',
+  se: '-bottom-2 -right-2 cursor-nwse-resize',
+};
+
+export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
+  onShortcutTrigger,
   onClose,
-  onToggleCursor 
+  onToggleCursor
 }) => {
   const [search, setSearch] = useState('');
-  const [scale, setScale] = useState(1);
   const [selectedShortcut, setSelectedShortcut] = useState<ShortcutEntry | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // ── Size and position (admin 2026-09-24) ─────────────────────────────────────────────────────
+  // ONE continuous scale replaces the 0.5× / 1× / 2× buttons. It is a MotionValue, not React state:
+  // a finger dragging a corner produces a value per frame, and re-rendering the whole popup on each
+  // one would make the resize stutter on exactly the phones it is for. The value is read where a
+  // gesture begins and written on every move; React re-renders only for the resize-mode toggle.
+  const scale = useMotionValue(readPopupScale(typeof localStorage === 'undefined' ? null : localStorage));
+  const [resizing, setResizing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const gestureRef = useRef<GestureStart | null>(null);
+  // The popup is MOVED from its header only (`dragListener={false}` + manual `dragControls.start`).
+  // With drag on the whole panel, a corner drag and a move both claimed the same pointer.
+  const dragControls = useDragControls();
+
+  /** The panel's natural (unscaled) box and the viewport — the two numbers the geometry needs. */
+  const measure = useCallback(() => {
+    const rect = panelRef.current?.getBoundingClientRect();
+    const s = scale.get() || 1;
+    return {
+      centre: { x: (rect?.left ?? 0) + (rect?.width ?? 0) / 2, y: (rect?.top ?? 0) + (rect?.height ?? 0) / 2 },
+      natural: { width: (rect?.width ?? 0) / s, height: (rect?.height ?? 0) / s },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    };
+  }, [scale]);
+
+  const persistScale = () => writePopupScale(typeof localStorage === 'undefined' ? null : localStorage, scale.get());
+
+  const onCornerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const { centre } = measure();
+    gestureRef.current = cornerGestureStart(scale.get(), { x: e.clientX, y: e.clientY }, centre);
+  };
+  const onCornerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = gestureRef.current;
+    if (!start) return;
+    const { centre, natural, viewport } = measure();
+    scale.set(scaleFromGesture(start, Math.hypot(e.clientX - centre.x, e.clientY - centre.y), natural, viewport));
+  };
+  const onCornerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!gestureRef.current) return;
+    gestureRef.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    persistScale();
+  };
+
+  // A two-finger pinch anywhere on the panel, but ONLY in resize mode — otherwise `touchAction`
+  // stays 'auto' and the shortcut list scrolls exactly as before.
+  const onPinchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!resizing || e.touches.length !== 2) return;
+    const [a, b] = [e.touches[0], e.touches[1]];
+    gestureRef.current = pinchGestureStart(scale.get(), { x: a.clientX, y: a.clientY }, { x: b.clientX, y: b.clientY });
+  };
+  const onPinchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = gestureRef.current;
+    if (!resizing || !start || e.touches.length !== 2) return;
+    // No preventDefault here: React registers touchmove as PASSIVE, so the call would only log a
+    // warning. The panel's `touchAction: 'none'` while resizing is what stops the page from scrolling.
+    const [a, b] = [e.touches[0], e.touches[1]];
+    const { natural, viewport } = measure();
+    scale.set(scaleFromGesture(start, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), natural, viewport));
+  };
+  const onPinchEnd = () => {
+    if (!gestureRef.current) return;
+    gestureRef.current = null;
+    persistScale();
+  };
 
   // Capability gate FIRST, search second. Filtering here — at the one place the list is read — means
   // a gated shortcut cannot reach the dropdown, the keyboard-navigation index, or `handleRun`; a gate
   // applied only at render time would still let Enter fire a command with nothing behind it.
   const offered = availableItems(VS_CODE_SHORTCUTS);
-  const filtered = offered.filter(s => 
-     s.label.toLowerCase().includes(search.toLowerCase()) || 
+  const filtered = offered.filter(s =>
+     s.label.toLowerCase().includes(search.toLowerCase()) ||
      s.category.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -203,46 +281,80 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
 
   return (
     <motion.div
-      ref={containerRef}
       drag
+      dragListener={false}
+      dragControls={dragControls}
       dragMomentum={false}
-      initial={{ opacity: 0, y: 40, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: scale }}
-      exit={{ opacity: 0, y: 40, scale: 0.95 }}
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 40 }}
+      style={{ pointerEvents: 'none', scale }}
       className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
-      style={{ pointerEvents: 'none' }}
     >
-      <div className="w-full max-w-xl bg-surface border border-line rounded-3xl shadow-3xl overflow-visible backdrop-blur-2xl flex flex-col pointer-events-auto cursor-default active:cursor-grabbing">
-        
-        {/* Row 1: Context Header - Acts as Drag Handle */}
-        <div className="flex items-center justify-between p-4 bg-raised border-b border-line rounded-t-3xl">
-           <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-500/20 rounded-xl">
+      <div
+        ref={panelRef}
+        onTouchStart={onPinchStart}
+        onTouchMove={onPinchMove}
+        onTouchEnd={onPinchEnd}
+        onTouchCancel={onPinchEnd}
+        style={{ touchAction: resizing ? 'none' : 'auto' }}
+        className={cn(
+          'relative w-full max-w-xl bg-surface border rounded-3xl shadow-3xl overflow-visible backdrop-blur-2xl flex flex-col pointer-events-auto cursor-default',
+          resizing ? 'border-indigo-500/60 ring-2 ring-indigo-500/30' : 'border-line',
+        )}
+      >
+        {/* Corner handles — only while resizing. Each is a 16px dot with a 32px hit area, because a
+            finger is not a mouse pointer. */}
+        {resizing && CORNERS.map((corner) => (
+          <div
+            key={corner}
+            role="slider"
+            aria-label={`Resize from ${corner} corner`}
+            aria-valuenow={Math.round(scale.get() * 100)}
+            onPointerDown={onCornerDown}
+            onPointerMove={onCornerMove}
+            onPointerUp={onCornerUp}
+            onPointerCancel={onCornerUp}
+            style={{ touchAction: 'none' }}
+            className={cn('absolute z-[10006] w-8 h-8 flex items-center justify-center', CORNER_STYLE[corner])}
+          >
+            <div className="w-4 h-4 rounded-full bg-accent border-2 border-on-accent shadow-lg" />
+          </div>
+        ))}
+
+        {/* Row 1: Context Header — the ONLY drag handle (a press on a button inside it is a click, not a move) */}
+        <div
+          onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('button')) dragControls.start(e); }}
+          className="flex items-center justify-between gap-2 p-4 bg-raised border-b border-line rounded-t-3xl touch-none cursor-grab active:cursor-grabbing"
+        >
+           <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2 bg-indigo-500/20 rounded-xl shrink-0">
                  <Keyboard className="w-5 h-5 text-accent-text" />
               </div>
-              <div>
-                 <h2 className="text-xs font-black text-ink uppercase tracking-[0.2em]">NavBharat AI Code Studio</h2>
-                 <p className="text-[9px] font-bold text-faint uppercase">VS Code – Master Keyboard Shortcuts</p>
+              <div className="min-w-0">
+                 <h2 className="text-xs font-black text-ink uppercase tracking-[0.2em] truncate">NavBharat AI Code Studio</h2>
+                 <p className="text-[9px] font-bold text-faint uppercase truncate">VS Code – Master Keyboard Shortcuts</p>
               </div>
            </div>
-           
-           <div className="flex items-center gap-3">
-              <div className="flex items-center bg-well rounded-xl border border-line p-1">
-                {[0.5, 1, 2].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setScale(s)}
-                    className={cn(
-                      "px-3 py-1 text-[10px] font-black rounded-lg transition-all",
-                      scale === s ? "bg-accent text-on-accent" : "text-faint hover:text-muted"
-                    )}
-                  >
-                    {s}x
-                  </button>
-                ))}
-              </div>
-              <button 
+
+           <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setResizing((v) => !v)}
+                aria-label="Resize"
+                aria-pressed={resizing}
+                title={resizing ? 'Done resizing' : 'Resize — drag a corner dot, or pinch'}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border',
+                  resizing ? 'bg-accent text-on-accent border-transparent' : 'bg-well text-muted border-line hover:text-ink',
+                )}
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{resizing ? 'Done' : 'Resize'}</span>
+              </button>
+              <button
                 onClick={onClose}
+                aria-label="Close"
                 className="p-2 hover:bg-red-500/20 rounded-xl text-danger transition-all"
               >
                 <X className="w-5 h-5" />
@@ -251,19 +363,20 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
         </div>
 
         {/* Row 2: The Selector (Dropdown + Enter) */}
-        <div className="p-6 bg-well flex flex-col gap-6 relative">
+        <div className="p-4 sm:p-6 bg-well flex flex-col gap-5 relative">
            <div className="flex gap-3 h-14">
-              {/* Dropdown Selector Box */}
-              <div className="relative flex-1" ref={dropdownRef}>
-                 <button 
+              {/* Dropdown Selector Box — `min-w-0` lets it shrink so the ENTER button beside it never
+                  overflows the popup on a narrow phone (it did, at px-8 beside a flex-1 that could not give). */}
+              <div className="relative flex-1 min-w-0" ref={dropdownRef}>
+                 <button
                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                    className={cn(
-                     "w-full h-full bg-raised border rounded-2xl px-5 flex items-center justify-between transition-all group",
+                     "w-full h-full bg-raised border rounded-2xl px-4 flex items-center justify-between transition-all group",
                      isDropdownOpen ? "border-indigo-500/50 bg-raised" : "border-line hover:border-line"
                    )}
                  >
                     <div className="flex items-center gap-3 overflow-hidden">
-                       <Search className="w-4 h-4 text-faint" />
+                       <Search className="w-4 h-4 text-faint shrink-0" />
                        <span className={cn(
                          "text-sm font-bold truncate",
                          selectedShortcut ? "text-accent-text" : "text-faint"
@@ -271,7 +384,7 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                          {selectedShortcut ? `${selectedShortcut.label} (${selectedShortcut.key.toUpperCase()})` : "Select a shortcut function..."}
                        </span>
                     </div>
-                    <ChevronDown className={cn("w-4 h-4 text-faint transition-transform", isDropdownOpen && "rotate-180")} />
+                    <ChevronDown className={cn("w-4 h-4 text-faint transition-transform shrink-0", isDropdownOpen && "rotate-180")} />
                  </button>
 
                  {/* Dropdown Options - Floating & Overflowing for better visibility */}
@@ -281,10 +394,10 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
                        animate={{ opacity: 1, y: 0, scale: 1 }}
                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                       className="absolute left-[-20px] right-[-20px] top-[calc(100%+10px)] bg-surface border border-line rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.8)] overflow-hidden z-[10005] flex flex-col max-h-[450px]"
+                       className="absolute left-[-12px] right-[-12px] sm:left-[-20px] sm:right-[-20px] top-[calc(100%+10px)] bg-surface border border-line rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.8)] overflow-hidden z-[10005] flex flex-col max-h-[450px]"
                      >
                         <div className="p-4 border-b border-line bg-raised backdrop-blur-3xl">
-                           <input 
+                           <input
                               autoFocus
                               type="text"
                               placeholder="Search 100+ shortcuts..."
@@ -332,38 +445,41 @@ export const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({
                  </AnimatePresence>
               </div>
 
-              {/* Enter Button */}
-              <button 
+              {/* Enter Button — a fixed 56px square that can never push past the popup's edge */}
+              <button
                 onClick={handleRun}
                 disabled={!selectedShortcut}
+                aria-label="Run the selected shortcut"
                 className={cn(
-                  "px-8 h-full rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl",
-                  selectedShortcut 
-                    ? "bg-indigo-500 hover:bg-indigo-400 text-on-accent shadow-indigo-500/20" 
+                  "shrink-0 w-14 h-full rounded-2xl flex flex-col items-center justify-center gap-0.5 font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 shadow-xl",
+                  selectedShortcut
+                    ? "bg-indigo-500 hover:bg-indigo-400 text-on-accent shadow-indigo-500/20"
                     : "bg-raised text-faint cursor-not-allowed border border-line"
                 )}
               >
-                ENTER
+                <CornerDownLeft className="w-4 h-4" />
+                Enter
               </button>
            </div>
 
            {/* Secondary Actions */}
-           <div className="flex items-center justify-between px-2">
-              <button 
+           <div className="flex items-center justify-between gap-3 px-1">
+              <button
                 onClick={onToggleCursor}
-                className="flex items-center gap-2 text-faint hover:text-accent-text transition-colors font-black text-[10px] uppercase tracking-widest"
+                className="flex items-center gap-2 text-faint hover:text-accent-text transition-colors font-black text-[10px] uppercase tracking-widest shrink-0"
               >
                 <Move className="w-3 h-3" />
                 Switch to Cursor Tool
               </button>
-              <div className="text-[9px] font-bold text-faint uppercase tracking-[0.2em]">
+              {/* A hint, hidden where it would only truncate (under 640px it read "SELECT FU…"). */}
+              <div className="hidden sm:block text-[9px] font-bold text-faint uppercase tracking-[0.2em] text-right truncate">
                  Select Function & Press Enter to Execute
               </div>
            </div>
         </div>
 
         {/* Footer Branding */}
-        <div className="bg-well py-3 text-center border-t border-line flex items-center justify-center gap-6">
+        <div className="bg-well py-3 text-center border-t border-line rounded-b-3xl flex items-center justify-center gap-6">
            <span className="text-[8px] font-black uppercase tracking-[0.6em] text-faint italic">NavBharat AI Master Studio</span>
            <div className="h-3 w-px bg-raised" />
            <div className="flex items-center gap-2">

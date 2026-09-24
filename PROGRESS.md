@@ -80390,3 +80390,70 @@ against the built stylesheet: one-line 54px, two-row 86px. Test-locked in
 
 **Also corrected:** CLAUDE.md still called the stopped-build "double discount" OPEN; it was decided and shipped
 on 2026-09-21 (real-cost floor, commit `6844b99f`). Noted in place so it is not re-raised again.
+## 2026-09-24 — A big app keeps its shared contract; the report names the contract's own clock (admin-approved)
+
+This follows autopsy 3ab93068. The admin accepted items 1 and 3 of its open list.
+- **Item 1, reversed from my first proposal.** I first proposed sending complex apps straight to the
+  full builder. The code and the same report say otherwise. The fast lane was adopted on 2026-07-06
+  *because* the full builder wandered, and this report's own full-builder turn took 15.9 min and ₹385,
+  with 63% of its reads repeated.
+  - The defect was the budget, not the lane: a complex app opens on a reasoning rung, its plan took
+    40 s, and its contract was cut at 56 s by its share of 240 s.
+  - So a complex lane now gets 480 s (`fastLaneBudgetMs`, env `AGENTV3_FASTLANE_COMPLEX_SECONDS`) and
+    never skips its contract. An ordinary lane is unchanged.
+- **Item 3: the clock is named.** The lane set the clock, so the lane reports which one it was.
+  - `FastLanePhases.contractOutcome` is `written`, `cut`, `failed` or `skipped`, plus the cap it ran
+    under, and `FAST_LANE_PHASES` prints it.
+  - The PROVIDER_FALLBACK line for a clock-ended call no longer claims "moving to the next one".
+- Test-locked and proven by reversion in `tests/aBigAppKeepsItsContract.test.ts`.
+- ⚠️ **Not measured yet.** Whether the repair share really drops is the next complex build's
+  `FAST_LANE_PHASES` line to read.
+
+## 2026-09-24 — Made-up data about other people is caught, disclosed, and not invented upstream (admin-approved)
+
+This is item 2 of autopsy 3ab93068/f15a9bcc. Build f15a9bcc generated four "nearby vendors" around the
+user and listed them as real. The reviewer passed it, and the fake-code check reported "No
+fake/placeholder code", because it knew only `fakeData` / `mockData` / `dummyData`.
+
+- **Detection is precision-first.** `AuthenticityAnalysis` gains `simulated-data`: a made-up word
+  (simulate / mock / fake / dummy) AND a noun for other people's data (vendors, users, drivers,
+  followers, nearby …), run on camelCase-split lines.
+  - An app's own catalogue (`sampleProducts`, a seeded menu) is not flagged, nor is physics `simulate…`.
+  - Tests and mock folders are ignored. The golden templates are a canary and none of them trips it.
+- **The severity is MEDIUM on purpose.** A `high` finding is a readiness blocker that fails the build
+  and orders a heal to "implement it for real". The real version needs a shared database the user has
+  not chosen, so that heal cannot succeed.
+- **Disclosure.** A finding in a file the app loads appends one plain sentence to the user's summary
+  (`simulatedDataNotice`): which file shows demo data, why, and an offer to set up a shared database.
+  It records `SIMULATED_DATA_SHIPPED` (warning).
+- **Prevention.** `NO_INVENTED_PEOPLE_RULE` is added to the architect prompt, with its twin in the
+  fast lane's per-file prompt. It says a browser cannot find strangers over Bluetooth and that other
+  users' data needs a shared online database. Example entries must be labelled on screen as examples.
+- Test-locked in `tests/madeUpPeopleAreDisclosed.test.ts`.
+
+## 2026-09-24 — "Builder bhatakta tha": three ways WE made the full builder wander, fixed (admin-mandated)
+
+The admin asked for the full builder's wandering to be fixed. The evidence is build f15a9bcc's own
+report: 64 reads over 24 files, 40 of them re-reading an unchanged file, and 12 `sed` steps inside
+index.html. All three causes were ours.
+1. **A fresh sub-agent was told it already had a file it had never seen.**
+   - Since f97eb0ec the read ledger has been shared with sub-agents so the report counts their re-reads.
+     That is right, and it stays.
+   - But the same ledger also drove the NOTICE. So a specialist's FIRST read came back with "you have
+     now read X the 6th time… you already have it". The reviewer was even told "STOP — do not read this
+     path again" about a file it had never opened.
+   - Now the notice reads this agent's OWN reads (`_ownReads`, never shared), and the shared ledger
+     still feeds the report.
+2. **The handoff carried a sentence, not the files.** The architect held `src/BusinessContext.tsx` and
+   delegated seven tasks that named it. Each specialist started empty and read it again, usually twice.
+   - The spawn now attaches the files the instruction NAMES, as they are on disk (`taskHandoff.ts`).
+     It is bounded: 6 files, 14k characters each, 36k in total. A file that does not fit is read the
+     ordinary way.
+   - The child counts them as already read, so an unchanged re-read gets the honest nudge.
+3. **A repair pass paged through our own script.** `read_file` strips the preview bridge, but a shell
+   command cannot. So any bash command that names index.html now gets a note giving the exact line
+   range of NavBharatAI's preview script and saying it is not the app (`bridgeShellNote`).
+- Test-locked and proven by reversion in `tests/aFreshAgentIsNotToldItHasAFile.test.ts`.
+- ⚠️ **Open, and not guessed.** The July wandering (98 steps in 10 min, 148 in 29 min) has no report in
+  hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
+  measurement: its repeat share should fall well below 63%.

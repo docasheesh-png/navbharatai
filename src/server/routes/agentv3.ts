@@ -45,7 +45,7 @@ import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemot
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
-import { highSeverityAuthenticityIssues, authenticityRepairInstruction } from '../AgentV3/AuthenticityAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -12690,7 +12690,7 @@ async function noteBuildOutcome(
         if (isBudgetEndedError(err)) {
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
-            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — moving to the next one`,
+            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
             autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
           });
           return;
@@ -16095,7 +16095,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
@@ -19919,6 +19919,26 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
+
+      // 🔴 MADE-UP PEOPLE ARE DISCLOSED, NOT SHIPPED AS REAL (autopsy f15a9bcc, 2026-09-23). That build
+      // listed four generated "nearby vendors" as real and the user was told the feature was done. The
+      // files THIS turn wrote are scanned (only the ones the app actually loads), and a finding adds one
+      // plain sentence to the summary: what is demo data, why, and the real path. Never a failed build —
+      // the real version needs a database the user has not chosen yet; saying so is the honest outcome.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const invented = simulatedDataIssues(Object.fromEntries(writtenFiles))
+            .filter((i) => !isUnreachable(dispatcher.lastReachability, i.file));
+          if (invented.length > 0) {
+            result = { ...result, summary: `${result.summary}${simulatedDataNotice(invented)}` };
+            buildDiag.record({
+              phase: 'readiness', severity: 'warning', code: 'SIMULATED_DATA_SHIPPED', autoResolved: false,
+              message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
+              detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
+            });
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the

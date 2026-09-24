@@ -24,10 +24,37 @@ interface Rule {
   ignore?: (matchText: string, fullLine: string) => boolean;
 }
 
+// ── medium: OTHER PEOPLE'S data, made up and shown as real (autopsy f15a9bcc, 2026-09-23) ──────
+// A vendor-status app was asked to show "nearby shops that are open". A browser cannot see other
+// people's devices and there was no shared database, so the build GENERATED four "nearby vendors"
+// around the user and listed them as real — and this scan reported "No fake/placeholder code",
+// because it knew only the literal words fakeData / mockData / dummyData.
+//
+// PRECISION-FIRST, on purpose: a made-up word AND a noun for data that must come from other people,
+// other devices or the outside world (vendors, users, drivers, followers, "nearby" …). An app's OWN
+// catalogue — sample products, a seeded menu — is not flagged: that is its data. A physics or game
+// `simulate…` without such a noun is not flagged either.
+//
+// MEDIUM, not high: `high` is a readiness BLOCKER that fails the build and triggers a completion heal
+// told to "implement it for real" — and the real version of this feature usually needs a shared
+// database the user has not chosen yet, so a heal cannot finish it. The honest outcome is disclosure
+// (see `simulatedDataNotice`) plus the offer of the real path, never a failed build.
+/**
+ * A made-up word followed (within a few characters of the same identifier or phrase) by a noun for data
+ * that belongs to other people or the outside world. Matches `generateSimulatedVendors`,
+ * `SIMULATED_NEARBY_SHOPS`, `mockUsers`, `fakeDrivers`, `// simulate nearby vendors`. It is run on a
+ * line whose camelCase humps have been split into words (`splitHumps`), so the leading boundary can be
+ * a plain "no letter before" without missing `generateSimulatedVendors`.
+ */
+const SIMULATED_DATA_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fake|dummy)[\s_-]*(?:[a-z]{0,12}[\s_-]*)?(nearby|vendors?|shops|stores|users|businesses|customers|drivers|riders|merchants|sellers|followers|friends|devices|peers)(?![a-z])/i;
+
 /** Paths we never scan — generated, vendored, or test code. */
 const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)|(^|[\\/])specs?([\\/]|$)/i;
 
 const SNIPPET_MAX = 120;
+
+/** `generateSimulatedVendors` → `generate Simulated Vendors`; `SIMULATED_SHOPS` is left as it is. */
+const splitHumps = (line: string): string => line.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 
 const RULES: Rule[] = [
   // ── high: explicit "not implemented" / placeholder throws ────────────────
@@ -240,6 +267,13 @@ export function scanAuthenticity(file: string, content: string): AuthenticityIss
       }
     }
   }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length > 4000) continue;
+    if (SIMULATED_DATA_RE.test(splitHumps(line))) {
+      issues.push({ file, line: i + 1, kind: 'simulated-data', severity: 'medium', snippet: trimSnippet(line) });
+    }
+  }
   const emptyLine = emptyHandlerLine(lines);
   if (emptyLine > 0) {
     issues.push({
@@ -325,4 +359,32 @@ export function authenticitySummary(issues: AuthenticityIssue[]): string {
   const body = shown.map((x) => `  - [${x.severity}] ${x.file}:${x.line} — ${x.kind}: ${x.snippet}`);
   const more = issues.length > shown.length ? [`  …and ${issues.length - shown.length} more.`] : [];
   return [head, ...body, ...more].join('\n');
+}
+
+/** The simulated-data findings among `files`, mock folders excluded. PURE. */
+export function simulatedDataIssues(files: Record<string, string>): AuthenticityIssue[] {
+  const out: AuthenticityIssue[] = [];
+  for (const [path, content] of Object.entries(files ?? {})) {
+    if (typeof content !== 'string' || !content || /(^|[\\/])__mocks__([\\/]|$)|(^|[\\/])mocks?[\\/]/i.test(path)) continue;
+    for (const issue of scanAuthenticity(path, content)) if (issue.kind === 'simulated-data') out.push(issue);
+  }
+  return out;
+}
+
+/**
+ * The line appended to the user's summary when the delivered app shows made-up data about other people.
+ * Says what is not real, why, and the real path — in plain words, and without any engine name. '' when
+ * there is nothing to disclose. PURE.
+ */
+export function simulatedDataNotice(issues: AuthenticityIssue[]): string {
+  if (!issues || issues.length === 0) return '';
+  const files = [...new Set(issues.map((i) => i.file))].slice(0, 3);
+  return [
+    '',
+    '',
+    `⚠️ Heads-up: part of this app shows demo data, not real data (${files.join(', ')}). It makes up people or places — `
+      + 'for example nearby shops or other users — instead of reading them from real users.',
+    'Showing other people\'s data, such as their shops, followers or locations, needs a shared online database. '
+      + 'Reply if you want this made real, and I will set one up for it.',
+  ].join('\n');
 }

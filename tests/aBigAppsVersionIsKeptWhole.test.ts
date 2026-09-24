@@ -122,3 +122,33 @@ describe('restore points hand the store the WHOLE app', () => {
     expect(Object.keys(got!.files)).toHaveLength(300);
   });
 });
+
+describe('a big build step is saved in the transcript, not replaced by "too large to save"', async () => {
+  const { turnDocFor, turnMessagesOf, TURN_PLAIN_MAX_BYTES } = await import('../src/server/AgentV3/FirestoreConversationStore');
+  const step = (n: number) => ({ role: 'user', content: [{ type: 'tool_result', content: 'npm run build output line\n'.repeat(n) }] });
+
+  it('an ordinary turn is stored exactly as before', () => {
+    const msgs = [step(10)];
+    expect(turnDocFor(3, msgs, 99)).toEqual({ seq: 3, messages: msgs, ts: 99 });
+  });
+
+  it('a ~1.3 MB turn is packed well under the document limit and reads back exactly', () => {
+    const msgs = [step(50_000)];
+    expect(Buffer.byteLength(JSON.stringify(msgs))).toBeGreaterThan(TURN_PLAIN_MAX_BYTES);
+    const doc = turnDocFor(4, msgs, 99) as { messagesPacked: Buffer; messages?: unknown };
+    expect(doc.messages).toBeUndefined();
+    expect(doc.messagesPacked.length).toBeLessThan(900_000);
+    expect(turnMessagesOf(doc as never)).toEqual(msgs);
+  });
+
+  it('an unreadable packed turn becomes one honest marker, never a silent gap', () => {
+    const out = turnMessagesOf({ messagesEnc: 'br1', messagesPacked: Buffer.from('junk') });
+    expect(out).toHaveLength(1);
+    expect(JSON.stringify(out)).toMatch(/could not be read/);
+  });
+
+  it('off: never packs', () => {
+    const msgs = [step(50_000)];
+    expect(turnDocFor(4, msgs, 1, { AGENTV3_COMPACT_STORAGE: 'off' } as NodeJS.ProcessEnv)).toHaveProperty('messages');
+  });
+});

@@ -17,7 +17,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { MAX_SAVED_VERSIONS } from '../../lib/versionRetention';
-import { fitFilesPacked, unpackJson, utf8Bytes, MAX_PACKED_BYTES, type PackedEncoding } from '../lib/compactStore';
+import { fitFilesPacked, unpackJson, utf8Bytes, compactStorageEnabled, MAX_PACKED_BYTES, type PackedEncoding } from '../lib/compactStore';
 
 export interface VersionEntry {
   id: string;
@@ -90,7 +90,7 @@ export function planVersionFiles(
     }
   }
   if (omitted.length === 0) return { mode: 'plain', files: plain, omitted };
-  if (String(env.AGENTV3_COMPACT_STORAGE ?? '').trim().toLowerCase() === 'off') {
+  if (!compactStorageEnabled(env)) {
     return { mode: 'plain', files: plain, omitted };
   }
   const fitted = fitFilesPacked(Object.fromEntries(entries), MAX_PACKED_BYTES);

@@ -135,3 +135,36 @@ export function fitFilesPacked(
     packed: best,
   };
 }
+
+export interface FittedList<T> {
+  /** The NEWEST items that fit, oldest → newest (the caller's order). */
+  kept: T[];
+  /** How many of the oldest were left out. */
+  omitted: number;
+  packed: Packed;
+}
+
+/**
+ * Pack the NEWEST items of a list into at most `maxPackedBytes`, dropping OLDEST first — the rule a
+ * session of builds needs (the newest build is the one being reported). Same shape as
+ * `fitFilesPacked`: the whole list first, then a binary search for the largest newest-suffix.
+ */
+export function fitNewestPacked<T>(items: readonly T[], maxPackedBytes: number = MAX_PACKED_BYTES): FittedList<T> {
+  const all = [...items];
+  const suffix = (k: number): T[] => (k <= 0 ? [] : all.slice(all.length - k));
+  const whole = packJson(all);
+  if (whole.data.length <= maxPackedBytes) return { kept: all, omitted: 0, packed: whole };
+  let lo = 0;
+  let hi = all.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (packJson(suffix(mid)).data.length <= maxPackedBytes) lo = mid; else hi = mid - 1;
+  }
+  const kept = suffix(lo);
+  return { kept, omitted: all.length - kept.length, packed: packJson(kept) };
+}
+
+/** `AGENTV3_COMPACT_STORAGE=off` — the one no-deploy revert every store using this helper honours. */
+export function compactStorageEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_COMPACT_STORAGE ?? '').trim().toLowerCase() !== 'off';
+}

@@ -45,6 +45,10 @@ on:
         description: 'After building, upload the .aab straight to Google Play (internal testing track). Requires the PLAY_SERVICE_ACCOUNT_JSON secret (see the header for the one-time setup). Leave OFF to just build the downloadable artifact.'
         type: boolean
         default: false
+      changes_not_sent_for_review:
+        description: 'Google flips this requirement with the app review state, and BOTH values fail loudly when wrong. Leave OFF normally. Tick it ONLY if the upload fails with "Changes cannot be sent for review automatically. Please set the query parameter changesNotSentForReview to true" — which happens while the app is under an enforcement or its last release was rejected. If it instead fails with "Changes are sent for review automatically. The query parameter changesNotSentForReview must not be set", untick it.'
+        type: boolean
+        default: false
 
 jobs:
   build-aab:
@@ -198,28 +202,35 @@ jobs:
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
           track: internal
           status: completed
-          # 🔴 REQUIRED, AND THE UPLOAD FAILS WITHOUT IT ONCE AN APP IS UNDER ENFORCEMENT (2026-09-22).
+          # 🔴 GOOGLE FLIPS THIS REQUIREMENT, AND BOTH VALUES HAVE ALREADY BROKEN A BUILD.
           #
-          # Run #127 uploaded the bundle successfully — the log reads "Successfully uploaded 1
-          # artifacts" — and then failed on the very next line, COMMITTING the edit:
+          # It is NOT a setting we choose — it is a fact about the app's review state on the day, and
+          # Google rejects the upload whenever our value disagrees with it. Two real runs, two days
+          # apart, failing in EXACTLY opposite directions:
           #
-          #     Changes cannot be sent for review automatically. Please set the query parameter
-          #     changesNotSentForReview to true.
+          #   run #127 (2026-09-22), without it:
+          #     "Changes cannot be sent for review automatically.
+          #      Please set the query parameter changesNotSentForReview to true."
+          #   run #131 (2026-09-24), with it hardcoded true:
+          #     "Changes are sent for review automatically.
+          #      The query parameter changesNotSentForReview must not be set."
           #
-          # Google refuses to auto-submit an edit for review while the app has a change it will not
-          # take automatically; on that day the app was under a Broken Functionality enforcement, and
-          # the release before it had been rejected. The edit is then rolled back, so the "successful"
-          # upload lands NOTHING — a failure that reads like a success right up to the last line.
+          # On 09-22 the app was under a Broken Functionality enforcement and its previous release had
+          # been rejected, so Google would not auto-submit; by 09-24 that had cleared and it would.
+          # Neither hardcoded value survives that flip, which is why this is an INPUT with a default of
+          # false (today's answer) rather than a constant somebody has to remember to edit.
           #
-          # With this true the bundle is committed to the track as an edit that is NOT sent for
-          # review, and the admin presses "Send for review" (or promotes it) in the Play Console. The
-          # INTERNAL testing track does not need a review to be installable, which is the whole point
-          # of uploading there: a build can be tested on a real phone without touching production.
+          # ⚠️ Both failures are LOUD — the step fails and the message names the parameter — so a wrong
+          # value costs a re-run, never a silent non-upload. That matters because run #127's real
+          # damage was the opposite shape: the bundle uploaded, the log said "Successfully uploaded",
+          # and only the edit COMMIT failed, rolling the whole edit back. A "successful" upload that
+          # landed nothing.
           #
-          # ⚠️ It is not a workaround for the rejection and does not make one less likely — it only
-          # stops the upload itself from failing. What reaches users is still the admin's decision,
-          # taken in the Console, which is the order this repo already requires for a store release.
-          changesNotSentForReview: true
+          # ⚠️ Setting it true is not a workaround for a rejection and makes one no less likely. It only
+          # stops the upload from failing; the edit is then committed but NOT sent for review, and the
+          # admin presses "Send for review" (or promotes it) in the Console. The INTERNAL track needs no
+          # review to be installable, which is the whole point of uploading there.
+          changesNotSentForReview: ${{ inputs.changes_not_sent_for_review }}
 
       # 🔴 `always()`, AND THE REASON IS THE WHOLE POINT OF THIS STEP (2026-09-22).
       #
@@ -257,7 +268,11 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           case "${{ steps.play_upload.outcome }}" in
             success)
-              echo "🚀 **Uploaded to Google Play** (internal testing track). The edit is committed but deliberately **not sent for review** — Google refuses to do that automatically. Open Play Console → Testing → Internal testing: the build is installable there straight away, and promoting it to production is a separate, manual decision." >> "$GITHUB_STEP_SUMMARY"
+              if [ "${{ inputs.changes_not_sent_for_review }}" = "true" ]; then
+                echo "🚀 **Uploaded to Google Play** (internal testing track). The edit is committed but deliberately **not sent for review**, because Google would not do that automatically for this app today. Open Play Console → Testing → Internal testing: the build is installable there straight away, and **you must press Send for review** before it can go further." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "🚀 **Uploaded to Google Play** (internal testing track), and Google sent the edit for review itself. Open Play Console → Testing → Internal testing: the build is installable there straight away, and promoting it to production is a separate, manual decision." >> "$GITHUB_STEP_SUMMARY"
+              fi
               ;;
             skipped)
               echo "📦 **Not uploaded** — \`upload_to_play\` was not ticked. Download the artifact above and upload \`app-release.aab\` in Play Console → Testing → Internal testing → Create new release." >> "$GITHUB_STEP_SUMMARY"

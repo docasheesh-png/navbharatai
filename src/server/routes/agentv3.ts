@@ -12690,7 +12690,7 @@ async function noteBuildOutcome(
         if (isBudgetEndedError(err)) {
           buildDiag.record({
             phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
-            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — moving to the next one`,
+            message: `A call to the ${name} engine was stopped by one of our own clocks, not by anything the engine did — the step it belonged to had run out of its time`,
             autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
           });
           return;
@@ -16095,7 +16095,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time

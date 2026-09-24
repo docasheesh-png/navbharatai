@@ -25,6 +25,16 @@ export interface FastLanePhases {
   verifyRuns: number;
   repairRuns: number;
   totalMs: number;
+  /**
+   * What happened to the shared-contract step, and the cap it ran under (autopsy 3ab93068). That build's
+   * report said *"build budget reached"* about a call its OWN 56-second contract cap had ended, 100 s
+   * into a 58-minute build — the one clock nothing in the stack could name. The lane set that clock, so
+   * the lane says which one it was. `cut` = ran to its cap and was stopped; `failed` = ended early with
+   * nothing usable; `skipped` = never started (no share left, or not affordable). Optional so an older
+   * caller's ledger still prints.
+   */
+  contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped';
+  contractCapMs?: number;
 }
 
 const sec = (ms: number): string => `${Math.round(Math.max(0, ms) / 100) / 10}s`;
@@ -34,6 +44,14 @@ function share(ms: number, totalMs: number): string {
   if (!(totalMs > 0)) return '';
   const pct = Math.round((Math.max(0, ms) / totalMs) * 100);
   return ` (${pct}%)`;
+}
+
+/** The contract's own clock, named — never "the build budget" (autopsy 3ab93068). Pure. */
+function contractNote(p: FastLanePhases): string {
+  const cap = p.contractCapMs && p.contractCapMs > 0 ? ` at its own ${sec(p.contractCapMs)} cap` : '';
+  if (p.contractOutcome === 'cut') return ` — stopped${cap}, so the files were written without a shared contract`;
+  if (p.contractOutcome === 'failed') return ' — came back with nothing usable, so the files were written without a shared contract';
+  return '';
 }
 
 /**
@@ -50,7 +68,7 @@ export function fastLanePhaseSummary(p: FastLanePhases | undefined): string {
   const other = Math.max(0, p.totalMs - measured);
   const parts = [
     `plan ${sec(p.planMs)}${share(p.planMs, p.totalMs)}`,
-    p.contractMs > 0 ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}` : '',
+    p.contractMs > 0 ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}${contractNote(p)}` : (p.contractOutcome === 'skipped' ? 'contract skipped — no time left for it, so files were written without a shared contract' : ''),
     `generate ${sec(p.generateMs)}${share(p.generateMs, p.totalMs)}`,
     `verify ${sec(p.verifyMs)}${share(p.verifyMs, p.totalMs)} over ${p.verifyRuns} run(s)`,
     `repair ${sec(p.repairMs)}${share(p.repairMs, p.totalMs)} over ${p.repairRuns} round(s)`,

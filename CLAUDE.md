@@ -4020,6 +4020,15 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
   today — and a test asserts the two produce identical ladders so they cannot drift.
+- ⏱️ **A COMPLEX build's fast lane gets room for its contract (admin-approved 2026-09-24, autopsy
+  3ab93068). `AGENTV3_FASTLANE_COMPLEX_SECONDS` is NOT set; the code default of 480 s governs, clamped
+  to 240–900, and an unreadable value falls back to 480, never to "no limit".** Opening a complex app on
+  a reasoning rung made its plan call take 40 s. Its shared contract was then cut at 56 s by its share of
+  the 240 s budget, and the missing contract cost 419 s of repair. So a complex lane gets the larger budget
+  and is never talked out of its contract (`fastLaneBudgetMs`). An ordinary lane keeps 240 s, unchanged.
+  The `FAST_LANE_PHASES` line now names the contract's own clock (`stopped at its own Ns cap`) instead of
+  leaving *"build budget reached"* to be read as the whole build. **Watch: the repair share of complex
+  builds in that line.**
 
 🏗️ **`AGENTV3_PROJECT_MODE` — SOFTWARE PROJECT MODE. BUILT, WIRED, TESTED, AND ASLEEP SINCE
 2026-07-04. ⚠️ Recorded here on 2026-09-17 because it was MISSING FROM THIS REGISTRY ENTIRELY** —

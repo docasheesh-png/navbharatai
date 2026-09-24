@@ -80390,3 +80390,21 @@ against the built stylesheet: one-line 54px, two-row 86px. Test-locked in
 
 **Also corrected:** CLAUDE.md still called the stopped-build "double discount" OPEN; it was decided and shipped
 on 2026-09-21 (real-cost floor, commit `6844b99f`). Noted in place so it is not re-raised again.
+## 2026-09-24 — A big app keeps its shared contract; the report names the contract's own clock (admin-approved)
+
+This follows autopsy 3ab93068. The admin accepted items 1 and 3 of its open list.
+- **Item 1, reversed from my first proposal.** I first proposed sending complex apps straight to the
+  full builder. The code and the same report say otherwise. The fast lane was adopted on 2026-07-06
+  *because* the full builder wandered, and this report's own full-builder turn took 15.9 min and ₹385,
+  with 63% of its reads repeated.
+  - The defect was the budget, not the lane: a complex app opens on a reasoning rung, its plan took
+    40 s, and its contract was cut at 56 s by its share of 240 s.
+  - So a complex lane now gets 480 s (`fastLaneBudgetMs`, env `AGENTV3_FASTLANE_COMPLEX_SECONDS`) and
+    never skips its contract. An ordinary lane is unchanged.
+- **Item 3: the clock is named.** The lane set the clock, so the lane reports which one it was.
+  - `FastLanePhases.contractOutcome` is `written`, `cut`, `failed` or `skipped`, plus the cap it ran
+    under, and `FAST_LANE_PHASES` prints it.
+  - The PROVIDER_FALLBACK line for a clock-ended call no longer claims "moving to the next one".
+- Test-locked and proven by reversion in `tests/aBigAppKeepsItsContract.test.ts`.
+- ⚠️ **Not measured yet.** Whether the repair share really drops is the next complex build's
+  `FAST_LANE_PHASES` line to read.

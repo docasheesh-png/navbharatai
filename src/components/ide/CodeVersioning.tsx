@@ -26,6 +26,8 @@ interface RestorePoint {
   createdAt: string;
   fileCount: number;
   tier?: string;
+  /** Files this version could not keep (too large even compressed). Absent on older versions. */
+  omittedFileCount?: number;
 }
 interface AppOption { sessionId: string; label: string; fileCount: number; savedAt: number; }
 
@@ -125,7 +127,10 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
       const data = await res.json().catch(() => null);
       if (res.ok && data && data.files && typeof data.files === 'object') {
         onRestoreFiles(data.files as Record<string, string>);
-        setNote(`Restored "${v.commitMessage}" ✓`);
+        const left = typeof data.omittedFileCount === 'number' ? data.omittedFileCount : 0;
+        setNote(left > 0
+          ? `Restored "${v.commitMessage}" — ${left} file${left === 1 ? ' was' : 's were'} too large to keep in this version and ${left === 1 ? 'was' : 'were'} not restored.`
+          : `Restored "${v.commitMessage}" ✓`);
       } else {
         setNote('Could not load that version — please try again.');
       }

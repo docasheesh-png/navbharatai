@@ -17,6 +17,7 @@
 // injectable so a future integration test (or the emulator) can drive it without globals.
 
 import * as admin from 'firebase-admin';
+import { packJson, unpackJson, utf8Bytes, compactStorageEnabled } from '../lib/compactStore';
 import type {
   ConversationStore,
   ConversationRecord,
@@ -71,6 +72,47 @@ interface ConversationMeta {
   deployBranch?: string;
   /** See ConversationRecord.backendDomain. */
   backendDomain?: string;
+}
+
+/**
+ * A turn's messages above this many UTF-8 bytes are stored COMPRESSED (2026-09-24).
+ *
+ * 🔴 WHY: a turn is one Firestore document, and a build step with big tool output could pass 1 MiB.
+ * The runner then retried with aggressive compaction, and when THAT failed it replaced the whole slice
+ * with "[N build step(s) were too large to save and were omitted from the saved transcript]" — so a
+ * reopened build, and the next "continue", lost exactly the steps that did the most work. Transcript
+ * JSON packs 5–10×. Below the line a turn is stored exactly as before, so a rollback still reads it.
+ */
+export const TURN_PLAIN_MAX_BYTES = 600_000;
+
+/** The turn document as written. PURE — exported for tests. */
+export function turnDocFor(seq: number, messages: unknown[], ts: number, env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
+  if (compactStorageEnabled(env)) {
+    let bytes = 0;
+    try { bytes = utf8Bytes(JSON.stringify(messages) ?? ''); } catch { bytes = 0; }
+    if (bytes > TURN_PLAIN_MAX_BYTES) {
+      const packed = packJson(messages);
+      return { seq, messagesEnc: packed.enc, messagesPacked: packed.data, messageCount: messages.length, ts };
+    }
+  }
+  return { seq, messages, ts };
+}
+
+/**
+ * A stored turn's messages, whichever form they were written in. PURE — exported for tests.
+ * A packed turn that cannot be decoded becomes ONE honest marker, never silence: a transcript that
+ * quietly skips a step reads as if the step never happened.
+ */
+export function turnMessagesOf(data: { messages?: unknown[]; messagesEnc?: unknown; messagesPacked?: unknown }): unknown[] {
+  if (data.messagesEnc) {
+    try {
+      const msgs = unpackJson<unknown[]>(data.messagesEnc, data.messagesPacked);
+      return Array.isArray(msgs) ? msgs : [];
+    } catch {
+      return [{ role: 'assistant', content: '[This part of the saved transcript could not be read]' }];
+    }
+  }
+  return data.messages ?? [];
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -139,9 +181,9 @@ export class FirestoreConversationStore implements ConversationStore {
     // Attach each turn's wall-clock `ts` to its messages (never overwriting an explicit one) —
     // the client needs real timestamps to interleave restored prose with the durable timeline.
     const messages = turns.docs.flatMap((d) => {
-      const data = d.data() as { messages?: unknown[]; ts?: number };
+      const data = d.data() as { messages?: unknown[]; messagesEnc?: unknown; messagesPacked?: unknown; ts?: number };
       const ts = typeof data.ts === 'number' ? data.ts : undefined;
-      return (data.messages ?? []).map((m) =>
+      return turnMessagesOf(data).map((m) =>
         ts !== undefined && m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined
           ? { ...m, ts }
           : m,
@@ -168,7 +210,7 @@ export class FirestoreConversationStore implements ConversationStore {
       if (!snap.exists) throw new Error(`ConversationStore: unknown conversation id "${id}"`);
       const meta = snap.data() as ConversationMeta;
       const seq = meta.nextSeq ?? 0;
-      tx.set(this.turnsCol(id).doc(String(seq)), { seq, messages, ts: patch.updatedAt });
+      tx.set(this.turnsCol(id).doc(String(seq)), turnDocFor(seq, messages, patch.updatedAt));
       // A patch may also carry timeline events (eternal sessions) — written as an append-only
       // chunk in the same transaction so evidence and transcript can never drift apart.
       const timelineSeq = meta.nextTimelineSeq ?? 0;
@@ -224,8 +266,8 @@ export class FirestoreConversationStore implements ConversationStore {
       let acc = 0; // flattened messages surviving so far
       let lastSurvivingSeq = -1;
       for (const d of turnsSnap.docs) {
-        const data = d.data() as { seq: number; messages?: unknown[]; ts?: number };
-        const msgs = data.messages ?? [];
+        const data = d.data() as { seq: number; messages?: unknown[]; messagesEnc?: unknown; messagesPacked?: unknown; ts?: number };
+        const msgs = turnMessagesOf(data);
         if (acc >= keep) {
           tx.delete(d.ref); // this whole turn-doc is past the boundary → drop it
           continue;
@@ -236,7 +278,7 @@ export class FirestoreConversationStore implements ConversationStore {
           continue;
         }
         // Boundary falls INSIDE this doc — keep only its head slice.
-        tx.set(d.ref, { seq: data.seq, messages: msgs.slice(0, keep - acc), ts: data.ts ?? patch.updatedAt });
+        tx.set(d.ref, turnDocFor(data.seq, msgs.slice(0, keep - acc), data.ts ?? patch.updatedAt));
         acc = keep;
         lastSurvivingSeq = data.seq;
       }

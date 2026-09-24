@@ -122,6 +122,7 @@ import { errorTracker, installGlobalErrorHandlers } from './src/server/observabi
 import { registerHealthRoutes, markServerReady } from './src/server/routes/health';
 import { registerWarmRoute } from './src/server/routes/warm';
 import { cacheControlFor } from './src/server/lib/staticCache';
+import { precompressedStatic } from './src/server/lib/precompressedStatic';
 
 
 // Traceability Infrastructure
@@ -534,6 +535,9 @@ setInterval(() => {
       // Robust production path resolution
       const distPath = path.join(process.cwd(), 'dist');
       console.log(`[PRODUCTION] Serving static files from: ${distPath}`);
+      // The build's ready-made brotli-11 / gzip-9 copies of JS/CSS (written by scripts/precompress.mjs in
+      // the Dockerfile). Falls through to express.static below whenever there is no copy.
+      app.use(precompressedStatic(distPath));
       // 12.7 — CDN-friendly Cache-Control headers for static assets
       app.use(express.static(distPath, {
         maxAge: '1y',          // JS/CSS hashed by Vite → safe to cache 1 year

@@ -80458,6 +80458,16 @@ index.html. All three causes were ours.
   hand, so it cannot be tied to a cause here. The next full-builder report's `REPEATED_READS` line is the
   measurement: its repeat share should fall well below 63%.
 
+## 2026-09-24 — Compression audit, part 2: the web bundle is compressed once at build time
+
+- **Why.** The admin asked for whatever makes NavBharatAI world class, after the zstd/brotli audit. Part 1 (storage) is PR #3287.
+  - `scripts/precompress.mjs` (Dockerfile only) and `lib/precompressedStatic.ts`.
+  - The JS/CSS bundle is 14% smaller than today's per-request brotli-4, with 0 CPU per request.
+  - The image build takes about 18 s longer.
+  - `/monaco/` and `/vendor/` (not content-hashed) lose their 1-year `immutable` cache.
+  - The static-site ZIP export uses DEFLATE, where JSZip's default is STORE.
+  - Kill switch `STATIC_PRECOMPRESSED=off`.
+  - Tested over real HTTP in server.ts middleware order (`tests/theBundleIsCompressedOnceNotPerRequest.test.ts`).
 ## 2026-09-24 — Compression audit → stored data is compressed, not dropped (admin: "world class banaye woh build karo")
 
 The admin asked what zstd and brotli are, and where NavBharatAI should use which. The audit

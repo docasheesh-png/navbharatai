@@ -80650,3 +80650,52 @@ Same shape as the Studio change of 2026-09-23, whose test pinned the old Preview
 
 - Test: `tests/emptyPreviewOpens.test.ts` (reversion-proven: fails 2/6 against the old code).
 - `AppKnowledgeBase.ts` `agentv3_preview` now says the button opens even with no app.
+
+## 2026-09-24 (2) — "jo rah gaya hai karo": WHICH repairs fire
+
+PR #3298 closed by naming the one thing it did not do: *"the heal tally is one number with no
+breakdown — 6.49 per build, worst 86, and nothing says WHICH repairs fire."* The 50/50 law asks for
+the class to be traced and prevented upstream; **a rate names no class.**
+
+`summarizeHealCodes` (`healBreakdown.ts`, pure) counts the `autoResolved` entries by code and is
+projected into **BOTH** readers of a stored report — the all-workspaces listing AND the per-workspace
+history, which is where the scorecard now gets its builds. **Zero extra I/O**, the same argument
+`modelPerformance` makes: both already hold the whole report in memory.
+
+**🔴 THE HARD PART IS COMPLETENESS, NOT COUNTING.** `trimReportForStorage` caps `issues` at **500**
+while `counts` keeps the build's REAL numbers — so the **86-heal build**, the biggest contributor to
+the rate and the one the ranking most needs, is the likeliest to have been trimmed. Presenting the
+visible codes as the whole list would be `reportTruncation.ts`'s own bug in a new place, and that
+module records this repo paying for that confusion **three times** (40 of 312 model calls reported as
+forty; `liveTokens` printing `0 in · 0 out`; `JOURNEY_PASSED` on a run that launched no browser).
+
+So the tally is cross-checked against `counts.autoResolved` and the difference is reported as
+`unattributed` — carried through the aggregate and stated **inside the headline sentence**, never as
+a footnote a card could drop. That check is stronger than reading `truncation.channels.issues`: it
+compares what can be SEEN against the real total directly, and still works on a legacy report written
+before that field existed.
+
+**Three honesty properties, each reversion-proven:**
+- A build with **no breakdown is EXCLUDED**, never scored as having healed nothing — a legacy row
+  counted as clean would make the list look better as the window ages.
+- `unattributed` is **never folded into** `attributed`.
+- The per-code **BUILD count rides beside the heal count**, because 86 heals in ONE build and 86
+  across 43 are different problems whose fixes are different.
+
+**⚠️ Said plainly in the module rather than assumed:** `counts.autoResolved` is the scorecard's
+EXISTING definition of a heal, inherited rather than invented — and that flag marks more than
+repairs (`importTurnObservation` sets it to keep a sub-agent's finding out of OUR unresolved tally).
+So the breakdown may well show that part of the 6.49 was never a repair at all. **That is the first
+thing it is FOR**; pre-filtering to the codes that look like repairs would hide exactly that answer.
+
+**🔒 `tests/whichRepairsFire.test.ts` (25 cases), four reversion proofs:** a trimmed timeline
+presented as complete; an unmeasured build counted as clean; the shortfall hidden from the headline;
+the history projection dropped (the scorecard's own source of builds).
+
+**Gate, on the merged final state:** typecheck ✅ · noUnusedImports ✅ · native:guard ✅ ·
+typecheck:server ✅ · **vitest 29,600 passed | 1 skipped | 0 FAIL** ✅ · build ✅ · test:bundle ✅ ·
+boot:check ✅ · deps:server-gate ✅.
+
+**What to watch on the first real read:** the `Most-repaired:` line. A large `unattributed` means the
+500-entry cap is hiding the biggest builds' repairs and the cap is the next thing to look at; a small
+one means the ranking is real and its top code is the upstream fix to go and build.

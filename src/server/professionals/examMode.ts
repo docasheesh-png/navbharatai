@@ -628,6 +628,11 @@ export interface ExamScore {
   unseen: number;
   marks: number;
   maxMarks: number;
+  /**
+   * THE percentage: marks ÷ maximum marks × 100, two decimals, the way every board and entrance exam
+   * reports it. Negative when negative marking took the total below zero — reported as it is.
+   */
+  percentage: number;
   /** Of the questions ATTEMPTED. A paper of one right answer and 29 skips is not 100% — see below. */
   accuracyPct: number;
   perTopic: ExamTopicScore[];
@@ -638,10 +643,14 @@ export interface ExamScore {
 /**
  * The scoreboard. Arithmetic over the paper, never over anything the client asserted.
  *
- * 🔒 **`accuracyPct` is over ATTEMPTED, and `marks` is over the whole paper.** Those are two honest
- * numbers that answer two different questions ("how good were my answers?" and "what would this exam
- * have scored?"), and collapsing them into one is how a student who skipped 29 of 30 sees "100%".
- * The surface shows both, and the result screen says which is which.
+ * 🔒 **`percentage` is over the WHOLE PAPER; `accuracyPct` is over ATTEMPTED.** Those are two honest
+ * numbers that answer two different questions ("what did this exam score?" and "how good were my
+ * answers?"), and collapsing them into one is how a student who skipped 29 of 30 sees "100%".
+ *
+ * 🔴 **THE RESULT SCREEN USED TO HAVE ONLY THE SECOND, and printed it as THE percentage (admin
+ * 2026-09-25, phone screenshot: 16 / 20 marks, "100%").** No board or entrance exam reports a
+ * percentage over attempted questions: `percentage = marks / maxMarks × 100`, full stop. Accuracy is
+ * a useful side number and is shown as one — small, and labelled "accuracy", never "%" alone.
  */
 export function scoreExam(
   questions: readonly ExamQuestion[],
@@ -677,6 +686,7 @@ export function scoreExam(
     unseen,
     marks,
     maxMarks: questions.length * EXAM_MARK_CORRECT,
+    percentage: examPercentage(marks, questions.length * EXAM_MARK_CORRECT),
     accuracyPct: attempted > 0 ? Math.round((correct / attempted) * 100) : 0,
     perTopic,
     weakTopics: perTopic
@@ -687,10 +697,26 @@ export function scoreExam(
 }
 
 /**
+ * marks ÷ maximum × 100, rounded to two decimals (16/20 → 80, 7/30 → 23.33). A paper with no maximum
+ * has no percentage, so it is 0 rather than NaN or Infinity.
+ */
+export function examPercentage(marks: number, maxMarks: number): number {
+  if (!Number.isFinite(marks) || !Number.isFinite(maxMarks) || maxMarks <= 0) return 0;
+  return Math.round((marks / maxMarks) * 10000) / 100;
+}
+
+/** "80%", "23.33%", "-5%" — two decimals only when they carry something. */
+export function formatExamPercentage(pct: number): string {
+  const n = Number.isFinite(pct) ? pct : 0;
+  return `${Number.isInteger(n) ? n : n.toFixed(2).replace(/0$/, '')}%`;
+}
+
+/**
  * The honest closing line. Encouraging without lying about the number — a student who scored 20% is
  * not told "great work", and a student who scored 90% is not given a lecture.
  *
- * ⚠️ It reads MARKS against the maximum, not accuracy, because that is the number an exam gives you.
+ * ⚠️ It reads the PERCENTAGE (marks against the maximum), not accuracy, because that is the number an
+ * exam gives you — and it is the number the sentence leads with.
  * A paper with nothing attempted gets its own sentence rather than "0%" — those are different days.
  */
 export function examVerdict(score: ExamScore): string {
@@ -698,8 +724,8 @@ export function examVerdict(score: ExamScore): string {
   if (score.attempted === 0) {
     return `You did not attempt any of the ${score.total}. Nothing is lost — skipping costs no marks. Try a few at an easier level to get started.`;
   }
-  const pct = Math.round((score.marks / Math.max(1, score.maxMarks)) * 100);
-  const head = `${score.marks} out of ${score.maxMarks} marks · ${score.accuracyPct}% of what you attempted was right.`;
+  const pct = score.percentage;
+  const head = `${score.marks} out of ${score.maxMarks} marks · ${formatExamPercentage(pct)}.`;
   if (pct >= 85) return `${head} This is exam-ready. Keep the pace and move to a harder level.`;
   if (pct >= 65) return `${head} A solid paper. The marks you lost are worth one careful revision, not a re-read of everything.`;
   if (pct >= 40) return `${head} The base is there and the gaps are specific — work through the explanations below before the next paper.`;

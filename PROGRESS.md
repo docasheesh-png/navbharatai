@@ -80938,3 +80938,15 @@ desktop me use hone wale sabhi button ho … user koi bhi combination bana ke co
   every door, the full key list, the status line).
 - **Knowledge base:** a CUSTOM KEYS bullet under the IDE entry.
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
+
+## 2026-09-25 — Exam mode: the percentage is marks ÷ maximum, not over attempted
+
+Admin screenshot (Teacher AI → Exam mode): 16 / 20 marks, 4 right, 1 not answered — and the only
+percentage on the result card was "100%". That number was ACCURACY (right ÷ attempted); no board or
+entrance exam reports a percentage that way. Root cause: `scoreExam` had no percentage field — the
+verdict computed marks ÷ maximum as a private local and never printed it, so accuracy was the only
+"%" the student ever saw. Fix: `percentage` is now a field of `ExamScore` (`examPercentage`, two
+decimals, negative when negative marking takes the total below zero, 0 for an empty paper), shown
+beside the marks as the headline; the verdict leads with it; accuracy stays, labelled "Accuracy …
+(N right of M attempted)" and hidden when nothing was attempted. Locked in
+`tests/theExamPercentageIsOverTheWholePaper.test.ts` with the screenshot's exact paper (→ 80%).

@@ -53,7 +53,7 @@ import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
 import { analyzeToolchain } from './toolchainPins';
-import { planAppDefaults } from './appDefaults';
+import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
@@ -4489,13 +4489,22 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).indexFile(htmlPath, plan.indexHtml);
           written.push(htmlPath);
         }
-        // Write standalone files only when absent (never clobber a real manifest/robots the app already has).
+        // A Vite app ships only public/, so the standalone files go there or the production build drops
+        // them — the rule the post-build pass has followed since 2026-08-03 and this tool never did.
+        let viteApp = false;
+        for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']) {
+          if (await this.actuator.readFile(this.workspaceId, cfg).then(() => true).catch(() => false)) { viteApp = true; break; }
+        }
+        // Write standalone files only when absent (never clobber a real manifest/robots the app already has),
+        // except our own old cache-first service worker, which is replaced (see appDefaults.ts).
         for (const [rel, content] of Object.entries(plan.files)) {
-          const exists = await this.actuator.readFile(this.workspaceId, rel).then(() => true).catch(() => false);
-          if (exists) continue;
-          await this.actuator.writeFile(this.workspaceId, rel, content);
-          this.state?.recordFileChange({ path: rel, kind: 'create' }, agent);
-          written.push(rel);
+          const target = defaultAssetPath(rel, viteApp ? 'vite' : null);
+          const existing = await this.actuator.readFile(this.workspaceId, target).catch(() => null);
+          const replacement = existing != null && rel === SERVICE_WORKER_FILE ? upgradeGeneratedServiceWorker(existing) : null;
+          if (existing != null && replacement == null) continue;
+          await this.actuator.writeFile(this.workspaceId, target, replacement ?? content);
+          this.state?.recordFileChange({ path: target, kind: existing != null ? 'modify' : 'create' }, agent);
+          written.push(target);
         }
         if (!written.length) return 'generate_app_defaults: the app already has SEO meta, lang, manifest and robots — nothing to add.';
         this.scheduleCheckpoint('generate app defaults');

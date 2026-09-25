@@ -326,7 +326,24 @@ export class E2BActuator implements IEngineerActuator {
     return sandbox;
   }
 
+  /**
+   * One setup per workspace at a time — the same race autopsy 2a7fa4b0 found in the AgentV3 actuator:
+   * the directory is made BEFORE the template is written, and "the directory exists" was read as
+   * "ready", so a concurrent caller returned while `src/` was still empty. Callers now share the
+   * in-flight setup; a finished one is forgotten so the next call re-checks as before.
+   */
+  private readonly _ensuring = new Map<string, Promise<void>>();
+
   async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+    const inFlight = this._ensuring.get(workspaceId);
+    if (inFlight) return inFlight;
+    const run = this._ensureWorkspaceOnce(workspaceId, projectType, resumeSandboxId)
+      .finally(() => { if (this._ensuring.get(workspaceId) === run) this._ensuring.delete(workspaceId); });
+    this._ensuring.set(workspaceId, run);
+    return run;
+  }
+
+  private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
     const sandbox = await this.getSandbox(workspaceId, resumeSandboxId);
     const exists = await sandbox.files.exists(WORKSPACE_ROOT);
     if (exists) {

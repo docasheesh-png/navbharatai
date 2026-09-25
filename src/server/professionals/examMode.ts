@@ -225,6 +225,72 @@ export function examTarget(id: unknown): ExamTarget | null {
   return NAMED_TARGETS.find((t) => t.id === key) ?? null;
 }
 
+/**
+ * 🌐 THE LANGUAGE THE PAPER IS WRITTEN IN (admin 2026-09-25: *"user language select kar sakta hai,
+ * india ki sabhi language available honi chahiye"*).
+ *
+ * All 22 languages of the Eighth Schedule of the Constitution, plus English (the language of most
+ * entrance exams) and Hinglish (Hindi typed in English letters, which is how a large share of students
+ * actually write). The labels are English on purpose: this list is UI text, and the UI is English
+ * everywhere; the PAPER is what comes back in the chosen language.
+ *
+ * 🔒 **`auto` is the default and it changes nothing.** It keeps the instruction the paper prompt has
+ * always carried ("the language the student has been using with you"), so a student who never opens
+ * Settings gets exactly today's paper.
+ *
+ * An id this list does not know reads as `auto` — never as a language we then describe to the model.
+ */
+export interface ExamLanguage {
+  id: string;
+  /** What the picker shows. */
+  label: string;
+  /** How the prompt names it to the generator. Only Hinglish differs from the label. */
+  promptName: string;
+}
+
+export const EXAM_LANGUAGE_AUTO = 'auto';
+
+const SCHEDULED_LANGUAGES_EXCEPT_HINDI: readonly string[] = [
+  'Assamese', 'Bengali', 'Bodo', 'Dogri', 'Gujarati', 'Kannada', 'Kashmiri', 'Konkani', 'Maithili',
+  'Malayalam', 'Manipuri', 'Marathi', 'Nepali', 'Odia', 'Punjabi', 'Sanskrit', 'Santali', 'Sindhi',
+  'Tamil', 'Telugu', 'Urdu',
+];
+
+export const EXAM_LANGUAGES: readonly ExamLanguage[] = [
+  { id: EXAM_LANGUAGE_AUTO, label: 'Automatic — the language you chat in', promptName: '' },
+  { id: 'english', label: 'English', promptName: 'English' },
+  { id: 'hindi', label: 'Hindi', promptName: 'Hindi' },
+  { id: 'hinglish', label: 'Hinglish — Hindi in English letters', promptName: 'Hinglish (Hindi written in the Latin alphabet)' },
+  ...SCHEDULED_LANGUAGES_EXCEPT_HINDI.map((name) => ({ id: name.toLowerCase(), label: name, promptName: name })),
+];
+
+/** The language for an id, or `null` for `auto` and for an id this list does not carry. */
+export function examLanguage(id: unknown): ExamLanguage | null {
+  const key = String(id ?? '').trim().toLowerCase();
+  if (!key || key === EXAM_LANGUAGE_AUTO) return null;
+  return EXAM_LANGUAGES.find((l) => l.id === key) ?? null;
+}
+
+/**
+ * Rule 10 of the paper prompt: which language to write in.
+ *
+ * ⚠️ **Formulae, units and symbols stay as they are.** A Physics paper in Tamil still writes
+ * `F = ma` and `m/s²`; translating a symbol makes the question wrong, not local. A technical term with
+ * no common word in the chosen language keeps the English term in brackets, which is how Indian
+ * textbooks in those languages actually print it.
+ */
+export function examLanguageRule(spec: Pick<ExamSpec, 'language'>): string {
+  const lang = examLanguage(spec.language);
+  if (!lang) return 'Write in the language the student has been using with you.';
+  if (lang.id === 'english') {
+    return 'Write EVERY question, option, explanation and "topic" in English.';
+  }
+  if (lang.id === 'hinglish') {
+    return 'Write EVERY question, option, explanation and "topic" in Hinglish — Hindi written in the Latin (English) alphabet, the way students type it on a phone. Do not use Devanagari. Keep formulae, units and symbols exactly as they are.';
+  }
+  return `Write EVERY question, option, explanation and "topic" in ${lang.promptName}, in its standard script. Keep formulae, units, chemical symbols and numbers exactly as they are. Where a technical term has no common ${lang.promptName} word, write the ${lang.promptName} phrase with the English term in brackets after it. Keep the "read" fields in the language the student typed the SCOPE in.`;
+}
+
 export interface ExamSpec {
   subject: string;
   /** '' is legitimate — a whole-subject paper. Never invented to fill the field. */
@@ -235,6 +301,11 @@ export interface ExamSpec {
   targetExam: string;
   /** What the student typed when they chose `other`. '' otherwise, and ignored otherwise. */
   targetExamOther: string;
+  /**
+   * An id from `EXAM_LANGUAGES`. Optional so a spec written before the field existed still type-checks;
+   * absent reads exactly like `auto`.
+   */
+  language?: string;
 }
 
 function text(v: unknown, max: number): string {
@@ -250,7 +321,7 @@ function text(v: unknown, max: number): string {
  */
 export function normalizeExamSpec(raw: {
   subject?: unknown; topic?: unknown; level?: unknown; count?: unknown;
-  targetExam?: unknown; targetExamOther?: unknown;
+  targetExam?: unknown; targetExamOther?: unknown; language?: unknown;
 } | null | undefined): ExamSpec {
   const r = raw || {};
   const level = EXAM_LEVELS.includes(r.level as ExamLevel) ? (r.level as ExamLevel) : 'mix';
@@ -268,6 +339,7 @@ export function normalizeExamSpec(raw: {
     count,
     targetExam,
     targetExamOther: targetExam === EXAM_TARGET_OTHER ? text(r.targetExamOther, 80) : '',
+    language: examLanguage(r.language)?.id ?? EXAM_LANGUAGE_AUTO,
   };
 }
 
@@ -520,7 +592,7 @@ export function examPaperInstruction(spec: ExamSpec): string {
     `7. Each option is a standalone answer, under about 120 characters. Do not number or letter them — the surface does that.`,
     `8. Factually correct, at the stated standard, and answerable without a diagram unless the question text itself contains everything needed.`,
     `9. No duplicate or near-duplicate questions.`,
-    `10. Write in the language the student has been using with you.`,
+    `10. ${examLanguageRule(spec)}`,
     `11. SPELLING — the SCOPE above was typed by a student and may be MISSPELLED, run together or written phonetically ("trignometry", "bayology", "mugal empire", "thermodynmics"). Work out what they meant and set the paper on THAT. Correct only what is plainly a typo or a phonetic spelling of a real subject; if a word is genuinely unfamiliar, keep it exactly as written rather than turning it into a different subject that happens to look similar.`,
     `12. "read" reports the subject and topic BACK, spelled correctly, as you understood them. Put "" for the topic if none was given, and "" for the subject if you set the paper from the exam rather than from a subject. The student is shown this, so it must be what you actually set the paper on — never a tidied-up echo of something you ignored.`,
   ].join('\n');
@@ -593,7 +665,9 @@ export function parseExamPaper(raw: string, cap = EXAM_MAX_QUESTIONS): ExamPaper
     if (out.length >= Math.max(1, cap)) { dropped += 1; continue; }
     const q = validQuestion(item, out.length + 1);
     if (!q) { dropped += 1; continue; }
-    const key = q.question.toLowerCase().replace(/[^a-z0-9ऀ-ॿ]+/g, '');
+    // Letters and digits of ANY script: the old key kept only Latin and Devanagari, so a paper in
+    // Tamil, Bengali or Urdu reduced every question to '' and its duplicates were never caught.
+    const key = q.question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
     if (key && seen.has(key)) { dropped += 1; continue; }
     if (key) seen.add(key);
     out.push(q);
@@ -769,5 +843,7 @@ export function teachMyMistakesPrompt(
     missed.length > 10 ? `…and ${missed.length - 10} more.` : '',
     '',
     'Teach me these properly — the concept behind each one, why the option I picked is wrong, and a memory hook so I do not make the same mistake again.',
+    // The paper was set in this language, so the lesson that follows it is too.
+    examLanguage(spec.language) ? `Please teach me in ${examLanguage(spec.language)!.promptName}.` : '',
   ].filter((l) => l !== '').join('\n');
 }

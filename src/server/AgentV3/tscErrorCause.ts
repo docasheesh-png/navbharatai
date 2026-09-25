@@ -29,7 +29,9 @@
  * reports the symptom where the symbol is USED, so the remedy (install a package, declare a type) is
  * nowhere in the message and the code under the cursor looks broken. A genuine code error needs no
  * translation — the model reads it and fixes it, which is the ordinary path and must stay untouched.
- * **Do not add a signature here whose remedy is "change the code".**
+ * **Do not add a signature here whose remedy is "change the code" IN THE FILE THE ERROR NAMES.**
+ * (Clarified 2026-09-25, autopsy 2a7fa4b0: a missing export and a missing relative file ARE here —
+ * their remedy is a change in ANOTHER file, which is exactly the "points at the wrong file" class.)
  *
  * 🔒 PRECISION FIRST, because advice is a steer and a wrong steer costs a round. The React-member case
  * is genuinely AMBIGUOUS — this repo has both causes on record: the types are missing (baa0b3c7), or
@@ -88,6 +90,118 @@ const NO_EXPORTED_MEMBER_RE = /^Module '"([^"]+)"' has no exported member '([^']
 
 /** File extensions TypeScript resolves, in the order it tries them. */
 const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'] as const;
+
+/** At most this many distinct import targets are looked up for one set of errors (bounded I/O for the caller). */
+export const MAX_EXPORT_TARGETS = 2;
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Does this source EXPORT `name` — `true`, `false`, or `null` when it cannot be told?
+ *
+ * `export * from …` re-exports names we cannot see, so a file carrying one never gets a verdict: the
+ * advice below is claimed only when the answer is certain. Pure.
+ */
+export function exportsName(source: string, name: string): boolean | null {
+  const src = String(source ?? '');
+  if (!src.trim() || !name) return null;
+  if (/\bexport\s*\*/.test(src)) return null;
+  const n = escapeRe(name);
+  const direct = new RegExp(
+    `\\bexport\\s+(?:declare\\s+)?(?:default\\s+)?(?:abstract\\s+)?(?:async\\s+)?`
+    + `(?:type|interface|enum|class|function\\*?|const|let|var|namespace)\\s+${n}\\b`,
+  );
+  if (direct.test(src)) return true;
+  // `export { A, B as Name }` — the exported name is the one after `as`, or the bare one.
+  for (const m of src.matchAll(/\bexport\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const part of (m[1] ?? '').split(',')) {
+      const bits = part.trim().replace(/^type\s+/, '').split(/\s+as\s+/);
+      if ((bits[1] ?? bits[0] ?? '').trim() === name) return true;
+    }
+  }
+  return false;
+}
+
+/** Does this source DECLARE `name` at all (exported or not)? Pure. */
+export function declaresName(source: string, name: string): boolean {
+  const n = escapeRe(name);
+  return new RegExp(`\\b(?:type|interface|enum|class|function\\*?|const|let|var)\\s+${n}\\b`).test(String(source ?? ''));
+}
+
+/**
+ * The project files a "has no exported member" error could have been read from — so a caller that holds
+ * only the file just written can fetch the ONE other file the remedy lives in. `X.ts`, `X.tsx`, …, and the
+ * `X/index.*` forms (which the shadow check needs as well). Relative specifiers only, bounded to
+ * `MAX_EXPORT_TARGETS` distinct targets. Pure.
+ */
+export function exportTargetCandidates(errors: readonly TscError[] | null | undefined): string[] {
+  const bases: string[] = [];
+  for (const e of errors || []) {
+    const m = NO_EXPORTED_MEMBER_RE.exec(String(e?.message ?? ''));
+    if (!m) continue;
+    const base = resolveRelativeSpecifier(e?.file ?? '', m[1] ?? '');
+    if (!base || bases.includes(base)) continue;
+    bases.push(base);
+    if (bases.length >= MAX_EXPORT_TARGETS) break;
+  }
+  return bases.flatMap((b) => [...TS_EXTENSIONS.map((x) => `${b}${x}`), ...TS_EXTENSIONS.map((x) => `${b}/index${x}`)]);
+}
+
+/**
+ * The OTHER file an error's remedy lives in — or null when the fix belongs in the file that errored.
+ *
+ * 🔴 WHY THIS EXISTS (autopsy 2a7fa4b0, 2026-09-25). `src/components/BottomNav.tsx` imported `Screen`
+ * from `../App` before `App.tsx` had been rewritten to export it. The error names BottomNav, the
+ * write-time note said *"fix them NOW, in this turn, before writing the next file"* — and the next file
+ * was the one that would have fixed it. BottomNav was rewritten three times; the error never moved.
+ *
+ * Claimed only on evidence: a relative module that is not there (`Cannot find module './x'`), or a
+ * relative module the caller really holds that certainly does not export the name. A shadowed index is
+ * NOT this — its remedy is in the importer's own path. Pure.
+ */
+export function remedyFileFor(e: TscError, sources: Readonly<Record<string, string>> = {}): string | null {
+  const message = String(e?.message ?? '');
+  const missing = CANNOT_FIND_MODULE_RE.exec(message);
+  if (missing) {
+    const target = resolveRelativeSpecifier(e?.file ?? '', missing[1] ?? '');
+    return target || null;
+  }
+  const hit = exportMissingIn(e, sources);
+  return hit ? hit.target : null;
+}
+
+/** The resolved target of a "no exported member" error that certainly does not export the name. */
+function exportMissingIn(
+  e: TscError,
+  sources: Readonly<Record<string, string>>,
+): { target: string; name: string; declared: boolean; spec: string; defaultHint: boolean } | null {
+  const message = String(e?.message ?? '');
+  const m = NO_EXPORTED_MEMBER_RE.exec(message);
+  if (!m) return null;
+  const spec = m[1] ?? '';
+  const name = m[2] ?? '';
+  const base = resolveRelativeSpecifier(e?.file ?? '', spec);
+  if (!base || !name) return null;
+  const read = (p: string) => {
+    for (const [k, v] of Object.entries(sources || {})) {
+      if (String(k).replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '') === p) return String(v ?? '');
+    }
+    return '';
+  };
+  const file = TS_EXTENSIONS.map((x) => `${base}${x}`).find((c) => read(c) !== '');
+  const index = TS_EXTENSIONS.map((x) => `${base}/index${x}`).find((c) => read(c) !== '');
+  // Both present is the SHADOW case — not this one, and it has its own advice.
+  if (file && index) return null;
+  const target = file ?? index;
+  if (!target) return null;
+  const importer = String(e?.file ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+  if (target === importer) return null;
+  const src = read(target);
+  if (exportsName(src, name) !== false) return null;
+  return { target, name, declared: declaresName(src, name), spec, defaultHint: /Did you mean to use 'import /.test(message) };
+}
 
 /**
  * Resolve a RELATIVE specifier against the importing file — `src/hooks/x.ts` + `../data` → `src/data`.
@@ -289,6 +403,25 @@ export function tscErrorCauses(
             + `Do not keep re-reading the index: it is not the file being read.`);
           continue;
         }
+      }
+      // 🔴 THE EXPORT IS MISSING FROM THE OTHER FILE (autopsy 2a7fa4b0) — the error names the importer,
+      // so the importer is what gets rewritten, three times, while the file that must change waits.
+      const gap = exportMissingIn(e, sources);
+      if (gap) {
+        const importer = String(e?.file ?? '');
+        const fix = gap.declared
+          ? `\`${gap.target}\` declares \`${gap.name}\` but does not export it — add \`export\` to that declaration in \`${gap.target}\`.`
+          : `\`${gap.target}\` does not define \`${gap.name}\` at all — define and export it there (if you are about to `
+            + `write \`${gap.target}\`, include it in that write). For a TYPE several files share, put it in one shared `
+            + `module (e.g. \`src/types.ts\`) and import it from there in every file, the root component included.`;
+        add(`export-missing:${gap.target}:${gap.name}`,
+          `\`${importer}\` is correct — it imports \`${gap.name}\` from \`${gap.spec}\`, and the fix is in \`${gap.target}\`, `
+          + `not here. Do NOT rewrite \`${importer}\` for this error; it will fail again identically. ${fix}`
+          + (gap.defaultHint
+            ? ` Ignore the compiler's "import ${gap.name} from …" suggestion: that default export is a different thing `
+              + `(for a component file it is the component itself).`
+            : ''));
+        continue;
       }
     }
   }

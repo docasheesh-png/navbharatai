@@ -1560,7 +1560,34 @@ export class E2BActuator implements IEngineerActuator {
     m.set(relPath, content);
   }
 
+  /**
+   * ONE workspace setup at a time per workspace (autopsy 2a7fa4b0, 2026-09-25).
+   *
+   * 🔴 THE RACE. `ensureWorkspace` treats "the workspace directory exists" as "the workspace is ready",
+   * and it creates that directory BEFORE it writes the template into it. So a second caller arriving
+   * while the first is still writing — a build started while the Files view or a wake was setting up
+   * the same sandbox — saw the directory, returned in 221 ms, and the architect's first reads of
+   * `src/App.tsx`, `src/main.tsx` and `src/index.css` failed "does not exist" while `package.json`
+   * (already landed) read fine. Eight seconds later every file was there. The report said
+   * `sandbox=warm`: the machine was in THIS process's cache, so the other caller was in this process.
+   *
+   * Every caller now shares the one in-flight setup and returns only when it has finished. A finished
+   * setup is dropped from the map, so the next call re-checks the machine exactly as before.
+   * ⚠️ Scope, stated plainly: this closes the race inside one server instance, which is where a warm
+   * sandbox lives. Two instances setting up one brand-new machine in the same seconds is not covered.
+   */
+  private readonly _ensuring = new Map<string, Promise<void>>();
+
   async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+    const inFlight = this._ensuring.get(workspaceId);
+    if (inFlight) return inFlight;
+    const run = this._ensureWorkspaceOnce(workspaceId, projectType, resumeSandboxId)
+      .finally(() => { if (this._ensuring.get(workspaceId) === run) this._ensuring.delete(workspaceId); });
+    this._ensuring.set(workspaceId, run);
+    return run;
+  }
+
+  private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
     // AB-1: pass the framework so the FIRST sandbox create for this workspace can route a polyglot
     // backend (spring-boot/go) onto the fullstack E2B image. Follow-up getSandbox() calls reuse the
     // cached sandbox, so the framework only needs to be known here at creation time.

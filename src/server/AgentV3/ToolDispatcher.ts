@@ -73,7 +73,7 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
-import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
@@ -2388,6 +2388,19 @@ export class ToolDispatcher {
    * Never blocks a write, never throws, never fakes a pass: a check that could not run returns ''.
    * Coalesced per build so a burst of parallel writes costs at most two compiles.
    */
+  /** The imported files a "has no exported member" error points at — read only when such an error exists. */
+  private async exportTargetSources(own: import('./EndgameRepair').TscError[], held: Record<string, string>): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    const wanted = exportTargetCandidates(own).filter((p) => !(p in held));
+    await Promise.all(wanted.map(async (p) => {
+      try {
+        const content = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'write-typecheck-target');
+        if (typeof content === 'string' && content) out[p] = content;
+      } catch { /* absent or unreadable — not evidence either way */ }
+    }));
+    return out;
+  }
+
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -2467,6 +2480,11 @@ export class ToolDispatcher {
       // The content just written is passed on: it is the ONLY thing that can tell the two causes of
       // "Property 'props' does not exist on type 'X'" apart (does X extend React.Component?), and it is
       // already in hand — no file is read for this. See tscErrorCause.ts.
+      // ONE exception, and it is bounded: a "has no exported member" error in the file just written has
+      // its remedy in the IMPORTED file, which only that file's text can confirm (autopsy 2a7fa4b0 —
+      // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
+      // are read, only when such an error exists, and a read that fails is simply not evidence.
+      sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       return writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence

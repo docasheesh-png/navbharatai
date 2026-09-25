@@ -51,6 +51,7 @@ import { registerTeamLibraryRoutes } from './src/server/routes/teamLibrary';
 import { registerTraceabilityRoutes } from './src/server/routes/traceability';
 import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
 import { registerDebugRoutes } from './src/server/routes/debug';
+import { registerWebsiteCheckupRoutes } from './src/server/routes/websiteCheckup';
 import { registerAppDebugRoutes } from './src/server/routes/appDebug';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
@@ -763,6 +764,7 @@ setInterval(() => {
   registerTraceabilityRoutes(app); // P-PME.12 — requirement→file→test traceability matrix (POST/GET /api/workspace/traceability)
   registerExplainCodeRoutes(app); // P-DEV.10 — deterministic code explanation (POST /api/workspace/explain)
   registerDebugRoutes(app); // AI Debugger — real free-tier AI error analysis (POST /api/debug)
+  registerWebsiteCheckupRoutes(app); // Website Checkup — passive health check of the USER'S OWN published site (GET /api/website-checkup/sites, POST /api/website-checkup)
   registerAppDebugRoutes(app); // Full-App Debugger — whole-codebase scan (GET /api/app-debug/sources, POST /api/app-debug/run)
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)

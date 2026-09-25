@@ -14,7 +14,7 @@
 // stays the catalogue of what exists; that file says what is switched on.
 
 import type { ComponentType } from 'react';
-import { Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2, Palette, Layout, Puzzle, LayoutTemplate, Moon, Rocket, Smartphone, Search, Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical, Key } from 'lucide-react';
+import { Bot, MessageSquare, Wand2, Bug, Code, TestTube, Globe, GitBranch, Gauge, Minimize2, Palette, Layout, Puzzle, LayoutTemplate, Moon, Rocket, Smartphone, Search, Package, IndianRupee, Users2, TrendingUp, Share2, Database, Languages, FlaskConical, Key, ShieldCheck } from 'lucide-react';
 import { Figma } from '../ui/BrandIcons';
 
 /** A lucide icon component (version-independent — the package's type export name has changed across releases). */
@@ -112,6 +112,9 @@ export const HOME_TOOL_GROUPS: HomeToolGroup[] = [
     icon: Rocket,
     items: [
       { id: 'cicd', label: 'CI/CD Pipeline', icon: Rocket },
+      // Website Checkup — a passive health check the user runs on their OWN published site (never
+      // anyone else's). Opens the 'checkup' workspace tab.
+      { id: 'checkup', label: 'Website Checkup', icon: ShieldCheck },
       // 'Multi-Cloud' moved to Settings in 2026-07-29 and was REMOVED entirely 2026-08-20 — the v5.0
       // Publish sheet already deploys to the user's own provider, so there is no second surface.
       // 'APK Builder' MOVED to AI Tools (admin 2026-08-14).

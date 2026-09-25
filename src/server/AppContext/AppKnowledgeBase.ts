@@ -37,6 +37,25 @@ export interface AppFeature {
 }
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
+  // ─── WEBSITE CHECKUP (health check of the user's OWN published site) ──────
+  {
+    id: 'website_checkup',
+    name: 'Website Checkup (check your own site’s health & safety)',
+    path: 'Home → Other → Publish & Deploy → Website Checkup',
+    description:
+      "Website Checkup is a free, one-tap health check you run on a website you PUBLISHED with NavBharatAI — never anyone else’s. It only reads what your site already shows every visitor (its HTTPS, its security headers, its page), changes nothing, and does no hacking or scanning of hidden pages, so it is completely safe and lawful to use. In plain language it tells you: whether your site uses HTTPS (the padlock); whether it has the standard browser protections (HSTS, clickjacking/frame protection, a Content-Security-Policy, no-sniff, referrer policy); whether any page loads insecure http:// content that breaks the padlock; whether a real secret key looks accidentally exposed on the page (it deliberately does NOT flag the public Firebase key, which is meant to be there); whether cookies carry the safety flags; and basic quality — a page title, a mobile viewport, and text encoding for Hindi and other scripts. You get a friendly grade (Excellent / Good / Needs attention / Action needed), a one-line summary, and each finding with a plain ‘what it means’ and ‘how to fix’. Your own sites appear in a dropdown — you cannot type or check any other address. It costs nothing (no AI credits) and can be run as often as you like.",
+    howToUse:
+      'Sign in, then open Home → Other → Publish & Deploy → Website Checkup. Pick one of your published sites from the dropdown and tap “Run checkup”. In a few seconds you get a grade and a simple list of what is healthy and what to improve, each with a fix. Tap “Check again” after you re-publish to confirm an issue is resolved. If you have not published a site yet, publish an app first and it will appear here.',
+    relatedFeatures: ['agentv3_builder', 'connect_domain', 'settings_secrets'],
+    keywords: [
+      'website checkup', 'checkup', 'website test', 'site check', 'website security', 'is my site safe',
+      'security scan', 'check my website', 'apni website check', 'website sahi hai', 'https check',
+      'ssl check', 'padlock', 'headers', 'website health', 'site health', 'test my site', 'scan my site',
+      'meri website', 'website safe hai kya', 'website ki jaanch', 'website scanner',
+    ],
+    aiSurface: 'nbi_chat',
+    nav: { view: 'checkup' },
+  },
   // ─── DOWNLOAD APP (mobile web → Android app) ─────────────────────────────
   {
     id: 'sonic_voice_chat',

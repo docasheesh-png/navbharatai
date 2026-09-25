@@ -468,6 +468,7 @@ import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshSt
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { looksLikeRefusal } from '../lib/promptSafety';
+import { turnAskedTheUser } from '../AgentV3/nudgeToBuild';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -1116,9 +1117,35 @@ export function shouldRetryEmptyBuild(opts: {
    * A refusal is a FINAL answer. Never retried, never escalated, never upsold.
    */
   modelRefused?: boolean;
+  /**
+   * Did the model ASK THE USER A QUESTION and hand the decision back, rather than fail to build?
+   *
+   * 🔴 THE SIBLING THAT WAS NEVER HUNTED (autopsy e628efd4, 2026-09-25). A user asked, in a
+   * question: *"if we don't have a chat in next 2 hours can you send a message to initiate the chat
+   * again"*. The first model answered it correctly in 7 seconds — that it cannot message anyone on
+   * its own, and *"would you like me to build a small messaging app with a 'remind me to chat again'
+   * feature?"* — zero tool calls, `finish_reason: end_turn`. **That was the right answer.**
+   *
+   * `decideBuildNudge` saw it, recognised it, and stood down: `BUILD_NUDGE_STOOD_DOWN`,
+   * detail `asked-the-user`. **156 milliseconds later this function read the same turn, counted
+   * `filesWritten === 0`, and retried the whole build one rung higher.** Nine minutes, 53 model
+   * calls, and a six-feature "Friend Chat" app — auth, profiles, realtime, notifications,
+   * moderation, media upload — none of which the user asked for, and **₹196.28 charged to a
+   * free-tier account** for answering a question the engine had asked itself.
+   *
+   * 🔑 The class is the one `nudgeToBuild.ts` already names in its own docblock: *"`toolUses.length
+   * === 0` is not evidence of a stall… ask what the turn WAS, not merely count what it did."*
+   * `filesWritten === 0` is the identical mistake with a different counter. Half the guard was
+   * already carried across — `modelRefused` IS `nudgeToBuild`'s `turnDeclined`, the same
+   * `looksLikeRefusal` — and the other half, `turnAskedTheUser`, was left behind.
+   *
+   * A question is a FINAL answer for this turn, exactly as a refusal is. Never retried.
+   */
+  modelAskedTheUser?: boolean;
 }): boolean {
   if (!opts.expectsArtifacts || opts.filesWritten > 0 || opts.aborted || !opts.withinCostCap) return false;
   if (opts.modelRefused) return false;
+  if (opts.modelAskedTheUser) return false;
   // An edit on a project that already exists may legitimately change nothing…
   // …UNLESS the user asked for an APP TO BE BUILT and only the workspace's existing contents turned
   // that request into an "edit" (build 5b4f9b63). "Build a to-do list app" that writes zero files has
@@ -1171,6 +1198,25 @@ export function emptyBuildFailureSummary(
    * must equally refuse a failure verdict against proof.
    */
   appRenders = false,
+  /**
+   * Did the model ASK THE USER A QUESTION instead of building?
+   *
+   * 🔴 THE HALF THAT MAKES THE RETRY FIX SAFE (autopsy e628efd4, 2026-09-25). Suppressing the retry
+   * alone would have replaced a good answer with a false one: the turn ends with zero files, and
+   * this function would tell the user *"The build produced no files. Please try again"* over the
+   * very question the model had just asked them. That is 697b38ee's sin in a new place.
+   *
+   * 🔒 AND IT IS WHAT KEEPS THE UPSELL QUIET, WITHOUT A SECOND ANSWER ANYWHERE. The "add credits"
+   * block downstream is gated on `!result.ok`; standing down here leaves `ok` true, so that gate
+   * never opens — exactly the architecture the comment beside it demands ("Writing it a second time
+   * here would leave two answers to one question"). The bill is ₹0 either way: a turn that wrote no
+   * files is zeroed unconditionally, whatever its verdict.
+   *
+   * ⚠️ It claims NOTHING about an app, which is why it needs no browser evidence (unlike
+   * `verifiedNoChangeSummary`, which asserts "your app works" and therefore must prove it). It only
+   * declines to call an ANSWER an empty build.
+   */
+  askedTheUser = false,
 ): string | null {
   if (!expectsArtifacts) return null;
   // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
@@ -1184,6 +1230,9 @@ export function emptyBuildFailureSummary(
     return 'The build could not run — the sandbox was unavailable (no files could be created, installed, or verified). Please try again in a moment; you have not been charged.';
   }
   if (fileCount > 0) return null;
+  // AN ANSWER IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` for the same reason as
+  // `appRenders`: a dead sandbox is an infrastructure fact that must still win.
+  if (askedTheUser) return null;
   // A WORKING APP IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` on purpose: a dead sandbox
   // can never have rendered anything, so that verdict must still win if the two ever disagree.
   if (appRenders) return null;
@@ -16642,6 +16691,21 @@ async function noteBuildOutcome(
       // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
       // model actually gave, so it holds for any refusal rather than only the pornography one.
       const firstAttemptRefused = looksLikeRefusal(result.summary);
+      // …and its SIBLING, read from the same answer by the same module that already decided this
+      // exact question for the nudge, 156ms earlier in this turn (autopsy e628efd4). Never a second
+      // copy of the test: `turnAskedTheUser` is `nudgeToBuild`'s own, so the two cannot drift apart
+      // into disagreeing about whether the model asked the user something.
+      const firstAttemptAskedTheUser = turnAskedTheUser(result.summary);
+      if (firstAttemptAskedTheUser) {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'TURN_ANSWERED_A_QUESTION', autoResolved: true,
+            message: 'The model ended its turn by asking the user a question, so the turn was left as the answer it is — '
+              + 'not retried on a higher rung, and not reported as an empty build. Before 2026-09-25 this was rebuilt '
+              + 'from scratch on a stronger engine and the user was charged for an app they had not agreed to.',
+          });
+        } catch { /* a note must never fail a build */ }
+      }
       if (shouldRetryEmptyBuild({
         expectsArtifacts,
         filesWritten: writtenFiles.size,
@@ -16651,6 +16715,7 @@ async function noteBuildOutcome(
         withinCostCap: costAfterFirstAttempt <= capUsd,
         userAskedToBuildAnApp,
         modelRefused: firstAttemptRefused,
+        modelAskedTheUser: firstAttemptAskedTheUser,
       })) {
         // 🔴 THE CLAIM IS DERIVED, NEVER TEMPLATED (autopsy f5351721 — see `retryLeadsHigher`). Both
         // sentences below used to assert "a stronger model" unconditionally, and on STRONG that was
@@ -20656,7 +20721,13 @@ async function noteBuildOutcome(
           // user's own 25-file app — restored, served, and watched rendering — was told it produced
           // nothing. The app keeps whatever summary the turn actually produced, and a zero-file build is
           // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
-          const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered);
+          const emptyFail = emptyBuildFailureSummary(
+            expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered,
+            // The same question, the same module, read from the summary as it stands at the flip —
+            // never cached earlier, for the reason `runProof` is a closure: the summary can be
+            // rewritten between the retry decision and here.
+            turnAskedTheUser(result.summary),
+          );
           if (emptyFail) {
             // THE FLIP RECORDS ITS OWN OUTCOME (2026-09-17) — see `emptyBuildOutcomeIssue`. Without it
             // the report named whatever warning happened to be loudest as this build's root cause.

@@ -215,6 +215,130 @@ export function rendersList(source: string): boolean {
 }
 
 /**
+ * Does submitting THIS form add anything to a list?
+ *
+ * 🔴 AUTOPSY b9287f85 (2026-09-25): a working e-commerce site was declared RED, *"Not shippable — a
+ * real user journey failed"*. The journey had typed an email into the Home page's NEWSLETTER box,
+ * pressed Subscribe, and then looked for that email among the FEATURED PRODUCTS. A form and a list in
+ * the same file had been taken to be one feature. `rendersList` answers "is there a list here?", and
+ * nothing asked "does this form put anything into it?" — and a store's home page has both, unrelated,
+ * on every site on the internet: newsletter, contact, login, search.
+ *
+ * So the form's OWN submit handler is read, and it is the only evidence used:
+ *
+ *   - `yes`     — it builds a new array (`[...items, x]`, `prev => [`), or pushes / concats.
+ *   - `no`      — its body was found, and it does nothing but harmless bookkeeping: preventDefault,
+ *                 plain setters (`setSubscribed(true)`, `setEmail('')`), a toast, a timeout, a log.
+ *   - `unknown` — no handler could be found, or it calls something we cannot see into (`addTask(t)`,
+ *                 `onAdd(t)`, `dispatch(...)`, `fetch(...)`). Today's behaviour stands.
+ *
+ * 🔒 ONLY `no` CHANGES ANYTHING, and it only makes the journey SMALLER: a create-persists journey
+ * becomes a form-submit journey, which still fills and submits the form and still fails on a crash.
+ * An unreadable handler never loses the persistence check — the module's first rule is that a failing
+ * test handed over beside a working app is worse than none, and this is that rule applied to which
+ * test we write, not only to whether we write one. Pure.
+ */
+export type FormFeedsList = 'yes' | 'no' | 'unknown';
+
+/** A body shape that builds or grows an array — the only positive proof a submit adds an item. */
+const APPENDS_RE = /\[\s*\.\.\.|\.\.\.[\w$.]+\s*\]|\.(?:concat|push|unshift|splice)\s*\(|\bset[A-Z][\w$]*\s*\(\s*\(?\s*[\w$]*\s*\)?\s*=>\s*\[/;
+
+/** Calls a handler may make without adding anything anywhere. Matched on the LAST name segment. */
+const HARMLESS_CALLS = new Set([
+  'preventDefault', 'stopPropagation', 'trim', 'toLowerCase', 'toUpperCase', 'includes', 'test', 'match',
+  'replace', 'alert', 'confirm', 'setTimeout', 'clearTimeout', 'log', 'warn', 'error', 'info', 'debug',
+  'String', 'Number', 'Boolean', 'focus', 'blur', 'reset', 'success', 'showToast', 'notify', 'toast',
+]);
+const NOT_A_CALL = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await']);
+
+/** The `{ … }` block that opens at `open` (which must be a `{`), braces balanced; null if unbalanced. */
+function balancedBlock(src: string, open: number): string | null {
+  if (src[open] !== '{') return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i += 1) {
+    if (src[i] === '{') depth += 1;
+    else if (src[i] === '}') { depth -= 1; if (depth === 0) return src.slice(open + 1, i); }
+  }
+  return null;
+}
+
+/** The body of an arrow whose `=>` ends just before `at`: a block, or the expression up to the line end. */
+function arrowBody(src: string, at: number): string | null {
+  const rest = src.slice(at);
+  const lead = rest.length - rest.trimStart().length;
+  if (rest[lead] === '{') return balancedBlock(src, at + lead);
+  const line = rest.split('\n')[0];
+  return line.replace(/[;,]?\s*$/, '').trim() || null;
+}
+
+/** The body of a handler named in this file, or null when it is not defined here. */
+function namedHandlerBody(src: string, name: string): string | null {
+  const n = name.replace(/[$]/g, '\\$');
+  const arrow = new RegExp(`\\b(?:const|let|var)\\s+${n}\\s*(?::[^=]+)?=\\s*(?:useCallback\\(\\s*)?(?:async\\s*)?(?:\\([^)]*\\)|[\\w$]+)\\s*(?::[^=]+)?=>`).exec(src);
+  if (arrow) return arrowBody(src, arrow.index + arrow[0].length);
+  const fn = new RegExp(`\\bfunction\\s+${n}\\s*\\([^)]*\\)\\s*(?::[^{]+)?\\{`).exec(src);
+  if (fn) return balancedBlock(src, fn.index + fn[0].length - 1);
+  return null;
+}
+
+/** Every handler body this form's submit can run — `onSubmit` on a form, else `onClick` on the submit button. */
+function submitHandlerBodies(src: string, submit: Target | null): string[] | null {
+  const attrs: Array<{ index: number; len: number }> = [];
+  const onSubmit = /\bonSubmit\s*=\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = onSubmit.exec(src)) !== null) attrs.push({ index: m.index, len: m[0].length });
+  if (attrs.length === 0 && submit?.kind === 'text') {
+    const text = submit.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const btn = new RegExp(`<button\\b[^>]*?\\bonClick\\s*=\\s*\\{(?=[\\s\\S]{0,200}?>\\s*${text}\\s*<)`).exec(src);
+    if (btn) attrs.push({ index: btn.index, len: btn[0].length });
+  }
+  if (attrs.length === 0) return null;
+  const bodies: string[] = [];
+  for (const a of attrs) {
+    const open = a.index + a.len - 1;
+    const expr = balancedBlock(src, open);
+    if (expr === null) return null;
+    const trimmed = expr.trim();
+    const bare = /^[A-Za-z_$][\w$]*$/.exec(trimmed);
+    if (bare) {
+      const body = namedHandlerBody(src, bare[0]);
+      if (body === null) return null; // a prop, an import, a hook's function — we cannot see into it
+      bodies.push(body);
+      continue;
+    }
+    const inline = /^(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>/.exec(trimmed);
+    if (inline) {
+      const body = arrowBody(trimmed, inline[0].length);
+      if (body === null) return null;
+      // `(e) => handleSubscribe(e)` only forwards: judge the handler it forwards to, when it is here.
+      const forwards = /^([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*;?$/.exec(body.trim());
+      const target = forwards ? namedHandlerBody(src, forwards[1]) : null;
+      bodies.push(target ?? body);
+      continue;
+    }
+    return null;
+  }
+  return bodies;
+}
+
+export function formFeedsList(source: string, submit: Target | null): FormFeedsList {
+  const bodies = submitHandlerBodies(String(source ?? ''), submit);
+  if (!bodies) return 'unknown';
+  let opaque = false;
+  for (const body of bodies) {
+    if (APPENDS_RE.test(body)) return 'yes';
+    const calls = body.match(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\(/g) || [];
+    for (const raw of calls) {
+      const name = raw.replace(/\s*\($/, '');
+      const last = name.split('.').pop() || '';
+      if (NOT_A_CALL.has(name) || HARMLESS_CALLS.has(last) || /^set[A-Z]/.test(name) || /^toast\b/.test(name)) continue;
+      opaque = true;
+    }
+  }
+  return opaque ? 'unknown' : 'no';
+}
+
+/**
  * Does this app talk to a database the USER owns?
  *
  * A create journey writes a real row. Against the app's own local state or a sandbox database that is
@@ -362,6 +486,10 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   const noWrites = writesToUserDatabase(files);
 
   const candidates = journeyCandidates(files);
+  // One form, one journey. `App.tsx` imports `Home.tsx` (formSourcesFor looks one level deep), so the
+  // same newsletter box was derived twice and failed twice — autopsy b9287f85 reported "2 user
+  // journey(s) failed" about ONE form. The form's own file is the identity, not the page that reached it.
+  const usedForms = new Set<string>();
 
   for (const path of candidates) {
     if (out.length >= MAX_JOURNEYS) break;
@@ -371,7 +499,9 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     let source = '';
     let fields: JourneyField[] = [];
     let submit: Target | null = null;
+    let formPath = '';
     for (const candidate of formSourcesFor(path, files)) {
+      if (usedForms.has(candidate.path)) continue;
       const tags = inputTags(candidate.source).filter((t) => !skippableInput(t));
       if (tags.length === 0) continue;
 
@@ -389,18 +519,24 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
       const btn = submitTargetIn(candidate.source);
       if (!btn) continue;
       source = candidate.source;
+      formPath = candidate.path;
       fields = got;
       submit = btn;
       break;
     }
     if (!submit || fields.length === 0) continue;
+    usedForms.add(formPath);
 
     const route = routeForFile(path, routes);
     const listed = rendersList(source);
     // The marker has to actually be typed somewhere, or "did it appear" is unanswerable.
     const markerTyped = fields.some((f) => f.value.includes(marker));
 
-    if (listed && markerTyped && !noWrites) {
+    // A list on the page is not enough: the form must be one that ADDS to a list (see formFeedsList).
+    // Only a handler we could read, and that plainly adds nothing, downgrades the journey.
+    const feeds = formFeedsList(source, submit) !== 'no';
+
+    if (listed && markerTyped && feeds && !noWrites) {
       out.push({
         id: `create-persists:${path}`,
         kind: 'create-persists',

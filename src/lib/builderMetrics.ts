@@ -52,6 +52,21 @@ export interface BuildMetricInput {
    * breakdown EXCLUDES it rather than scoring it as a build that healed nothing.
    */
   healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null } | null;
+  /**
+   * THE THREE FACTS THAT LET A STUCK PROJECT BE NAMED (admin 2026-09-25: "7 projects currently
+   * sitting on a failed build" — and the card could not say which seven). All optional and all
+   * already on the stored report; the metric never reads them for a rate, only to describe a row.
+   */
+  /** The engine's own one-line diagnosis of why this build failed. Admin-only text. */
+  rootCause?: string | null;
+  /** What the user asked for, truncated upstream. */
+  prompt?: string | null;
+  /**
+   * Did GreenGuard put the LAST WORKING VERSION back after this build failed? `true` means the user
+   * still has a working app and the edit was rejected; `false` means the failed attempt is what they
+   * are looking at; `null`/undefined means the report cannot say.
+   */
+  restoredToGreen?: boolean | null;
 }
 
 /** Builds that can actually be judged: finished, with a real verdict. */
@@ -71,9 +86,39 @@ export interface EditSurvival {
   longestStreak: number;
   /** Projects whose most recent build FAILED — the ones a user is currently stuck on. */
   currentlyBroken: number;
+  /**
+   * Of those, how many had their last WORKING version put back by GreenGuard — the user's app still
+   * runs, the edit was refused. "Sitting on a failed build" is true of both; only this number says
+   * whether a real person is looking at a broken screen.
+   */
+  restoredToGreen: number;
+  /** Of those, how many the reports cannot say either way about (a legacy row with no timeline). */
+  restoredUnknown: number;
+  /**
+   * THE SEVEN, NAMED. Newest failure first, capped at STUCK_PROJECTS_SHOWN; `currentlyBroken` is
+   * still the full count. A number with no names is a number nobody can act on.
+   */
+  broken: StuckProject[];
   /** Builds excluded because they were in flight or had no verdict. */
   skipped: number;
 }
+
+/** One project whose latest build failed, with everything the stored report can say about it. */
+export interface StuckProject {
+  workspaceId: string;
+  /** When the failing build started (its own clock). */
+  lastBuildAt: number;
+  /** How many builds in a row have now failed on this project, counting the latest. */
+  failedInARow: number;
+  /** How many builds this project has in the window at all. */
+  builds: number;
+  restoredToGreen: boolean | null;
+  rootCause: string | null;
+  prompt: string | null;
+}
+
+/** At most this many stuck projects are named on the card; the count above the list is the full one. */
+export const STUCK_PROJECTS_SHOWN = 50;
 
 /**
  * EDIT SURVIVAL — the directive's §9/§78 benchmark, measured honestly.
@@ -103,8 +148,11 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
   let survived = 0;
   let longestStreak = 0;
   let currentlyBroken = 0;
+  let restoredToGreen = 0;
+  let restoredUnknown = 0;
+  const broken: StuckProject[] = [];
 
-  for (const list of byProject.values()) {
+  for (const [workspaceId, list] of byProject.entries()) {
     // Oldest first. reportedAt is the only ordering we have, and a stable tie-break keeps the result
     // deterministic when two builds share a millisecond.
     const ordered = [...list].sort((a, b) => a.reportedAt - b.reportedAt);
@@ -122,8 +170,28 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
         streak = 0;
       }
     }
-    if (ordered[ordered.length - 1].ok === false) currentlyBroken += 1;
+    const last = ordered[ordered.length - 1];
+    if (last.ok === false) {
+      currentlyBroken += 1;
+      const restored = typeof last.restoredToGreen === 'boolean' ? last.restoredToGreen : null;
+      if (restored === true) restoredToGreen += 1;
+      if (restored === null) restoredUnknown += 1;
+      let failedInARow = 0;
+      for (let i = ordered.length - 1; i >= 0 && ordered[i].ok === false; i--) failedInARow += 1;
+      broken.push({
+        workspaceId,
+        lastBuildAt: last.reportedAt,
+        failedInARow,
+        builds: ordered.length,
+        restoredToGreen: restored,
+        rootCause: typeof last.rootCause === 'string' && last.rootCause.trim() ? last.rootCause.trim() : null,
+        prompt: typeof last.prompt === 'string' && last.prompt.trim() ? last.prompt.trim() : null,
+      });
+    }
   }
+
+  // Newest failure first — the person most likely to still be sitting in front of it.
+  broken.sort((a, b) => (b.lastBuildAt - a.lastBuildAt) || a.workspaceId.localeCompare(b.workspaceId));
 
   return {
     projects,
@@ -132,6 +200,9 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
     rate: edits > 0 ? survived / edits : null,
     longestStreak,
     currentlyBroken,
+    restoredToGreen,
+    restoredUnknown,
+    broken: broken.slice(0, STUCK_PROJECTS_SHOWN),
     skipped: all.length - usable.length,
   };
 }
@@ -424,10 +495,20 @@ export function scorecardHeadline(card: BuilderScorecard): string {
     lines.push('Edit survival: no project has been edited more than once yet — unknown.');
   } else {
     const note = card.survival.edits < MIN_SAMPLES_FOR_RATE ? ' (too few edits to read a trend into)' : '';
+    // "Sitting on a failed build" is two different situations, and the card must say which: the last
+    // working version put back (the edit was refused, the app still runs) or the failed attempt left
+    // standing (a real person is looking at a broken screen). An unknown is named as unknown.
+    const s = card.survival;
+    const restoredNote = s.currentlyBroken > 0
+      ? ` — ${s.restoredToGreen} restored to the last working version, `
+        + `${s.currentlyBroken - s.restoredToGreen - s.restoredUnknown} left on the failed attempt`
+        + (s.restoredUnknown > 0 ? `, ${s.restoredUnknown} unknown` : '')
+        + (s.broken.length > 0 ? `; named below` : '')
+      : '';
     lines.push(
-      `Edit survival: ${pct(card.survival.rate)} of ${card.survival.edits} edit(s) across `
-      + `${card.survival.projects} project(s); longest clean run ${card.survival.longestStreak}; `
-      + `${card.survival.currentlyBroken} project(s) currently sitting on a failed build${note}.`,
+      `Edit survival: ${pct(card.survival.rate)} of ${s.edits} edit(s) across `
+      + `${s.projects} project(s); longest clean run ${s.longestStreak}; `
+      + `${s.currentlyBroken} project(s) currently sitting on a failed build${restoredNote}${note}.`,
     );
   }
 

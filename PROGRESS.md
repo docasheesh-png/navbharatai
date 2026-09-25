@@ -80983,3 +80983,25 @@ to a working app, **17.0% of builds needed no self-repair** (3.36 per build; wor
 ₹62.83 / worst ₹290.64 per working app. Those come from `ok`, timestamps, billing and
 `counts.autoResolved`, none of which this bug touched. The corrected breakdown on the NEXT scorecard
 is what names the classes behind the 3.36 — that list, not this fix, is the 50/50 work list.
+
+### Same day, same card — the seven stuck projects are NAMED (admin: "han, karo")
+
+"7 project(s) currently sitting on a failed build" could not say which seven, when, why, or whether
+the person in front of each still had a working app. And the sentence covers two different situations:
+GreenGuard put the LAST WORKING version back (the edit was refused, the app runs) or the failed attempt
+was left standing (a real person is looking at a broken screen). Only the second is a user in trouble
+right now, and the card could not tell them apart.
+
+`editSurvival` now returns `broken: StuckProject[]` (newest failure first, capped at 50 with the full
+count kept) carrying `workspaceId`, `lastBuildAt`, `failedInARow`, `builds`, `restoredToGreen`,
+`rootCause`, `prompt` — every one already on the stored report, so it is a projection at no extra
+read: both store readers add `restoredToGreen` (the `GREEN_GUARD_RESTORED` timeline row;
+`null` when the report has no timeline), the collector carries the three facts (adding NO key when
+absent, so a legacy row still reads "unknown" and the exact-shape tests hold), and the headline splits
+the count: *"7 project(s) currently sitting on a failed build — N restored to the last working version,
+M left on the failed attempt, U unknown; named below"*. The Diagnostics card lists them with the
+restore state in words. Test-locked in `tests/theStuckProjectsHaveNames.test.ts`.
+
+**Why this ships before the autopsy of the seven, not after:** a Claude session cannot read Firestore.
+The card is the one door to those reports, and until it named them there was nothing to paste. The
+next scorecard the admin sends carries the seven root causes; that paste is the autopsy's input.

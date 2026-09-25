@@ -316,7 +316,8 @@ describe('🔒 THE WIRING — the dropdown is real, and it is the list', () => {
   });
 
   it('🔒 the choice is SENT — a dropdown that changes no request is decoration', () => {
-    expect(code(EXAM_UI)).toContain('JSON.stringify({ subject, topic, level, count, targetExam, targetExamOther })');
+    // The language chosen in Settings rides in the same body (2026-09-25); the exam choice is still sent.
+    expect(code(EXAM_UI)).toContain('JSON.stringify({ subject, topic, level, count, targetExam, targetExamOther, language: settings.language })');
   });
 
   it('🔒 an exam’s own subjects are offered as one tap — which is what stops the commonest misspelling being typed at all', () => {

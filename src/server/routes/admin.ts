@@ -25,6 +25,7 @@ import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { audit } from '../lib/audit';
+import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
 import {
@@ -2346,6 +2347,39 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     return { tally: t, candidates };
   };
+
+  // THE BUILD DISCOUNT (admin 2026-09-25) — the percentage taken off every charged build, set from
+  // the admin panel. The rules (0% = today, never below our real cost, the % shown is the % applied)
+  // live in `buildDiscount.ts`; these two routes only read and write the one number.
+  app.get('/api/admin/build-discount', verifyAdminToken, async (_req: Request, res: Response) => {
+    try {
+      buildDiscountStore.reset(); // the admin reads what is STORED, not this instance's minute-old copy
+      const setting = await buildDiscountStore.read();
+      res.json({ ok: true, ...setting, maxPct: BUILD_DISCOUNT_MAX_PCT, cacheSeconds: BUILD_DISCOUNT_CACHE_MS / 1000 });
+    } catch (e: any) {
+      console.error('[ADMIN] build-discount read failed:', e?.message);
+      res.status(500).json({ error: 'Could not read the discount just now. Please try again.' });
+    }
+  });
+
+  app.post('/api/admin/build-discount', verifyAdminToken, async (req: Request, res: Response) => {
+    const raw = req.body?.pct;
+    // A value that does not read as a number is refused rather than quietly stored as 0: an admin who
+    // typed "twenty" must be told, not shown a saved setting that does nothing.
+    const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim().replace(/%$/, '').trim() : '';
+    const n = Number(text);
+    if (!text || !Number.isFinite(n) || n < 0 || n > BUILD_DISCOUNT_MAX_PCT) {
+      return res.status(400).json({ error: `Enter a whole number from 0 to ${BUILD_DISCOUNT_MAX_PCT}.` });
+    }
+    try {
+      const saved = await buildDiscountStore.write(n, 'admin');
+      audit('ADMIN_BUILD_DISCOUNT_SET', { pct: saved.pct, ip: req.ip });
+      res.json({ ok: true, ...saved, maxPct: BUILD_DISCOUNT_MAX_PCT, cacheSeconds: BUILD_DISCOUNT_CACHE_MS / 1000 });
+    } catch (e: any) {
+      console.error('[ADMIN] build-discount write failed:', e?.message);
+      res.status(500).json({ error: 'The discount could not be saved. Nothing changed — please try again.' });
+    }
+  });
 
   app.get('/api/admin/welcome-backfill', verifyAdminToken, async (_req: Request, res: Response) => {
     const db = getDb() as any;

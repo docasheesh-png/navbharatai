@@ -50,6 +50,7 @@ const ScreenshotToCode  = _lz(() => import('../ide/ScreenshotToCode'),   'Screen
 const MultiPageBuilder  = _lz(() => import('../ide/MultiPageBuilder'),   'MultiPageBuilder');
 const AppAnalytics      = _lz(() => import('../ide/AppAnalytics'),       'AppAnalytics');
 const AIDebugger        = _lz(() => import('../ide/AIDebugger'),         'AIDebugger');
+const WebsiteCheckup    = _lz(() => import('../ide/WebsiteCheckup'),     'WebsiteCheckup');
 const PerformanceAnalyzer = _lz(() => import('../ide/PerformanceAnalyzer'), 'PerformanceAnalyzer');
 const ComponentLibrary  = _lz(() => import('../ide/ComponentLibrary'),   'ComponentLibrary');
 const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOptimizer');
@@ -527,6 +528,13 @@ export function ViewPanels({
       {activeView === 'debugger' && (
         <div className="flex-1 h-full overflow-hidden">
           <AIDebugger files={files} onAutoFixInV5={onAutoFixInV5} />
+        </div>
+      )}
+
+      {/* Website Checkup — passive health check of the user's OWN published site */}
+      {activeView === 'checkup' && (
+        <div className="flex-1 h-full overflow-hidden">
+          <WebsiteCheckup />
         </div>
       )}
 

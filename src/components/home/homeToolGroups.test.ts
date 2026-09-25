@@ -23,9 +23,11 @@ describe('HOME_TOOL_GROUPS — the builder tools moved from Settings to the Home
   it('🔒 the regrouping MOVED tools — it never dropped one', () => {
     // The real risk in a reshuffle is a tool silently disappearing from every group. This pins the
     // exact set that must still be reachable, whatever the grouping becomes.
+    // 'checkup' (Website Checkup) is a genuinely NEW tool added 2026-09-25 — not moved from Settings —
+    // pinned here so it too can never silently disappear from every group.
     const ids = HOME_TOOL_GROUPS.flatMap((g) => g.items.map((i) => i.id)).sort();
     expect(ids).toEqual([
-      'aitesting', 'analytics', 'api', 'apimarket', 'apk', 'botbuilder', 'cicd', 'codereview', 'collab',
+      'aitesting', 'analytics', 'api', 'apimarket', 'apk', 'botbuilder', 'checkup', 'cicd', 'codereview', 'collab',
       'components', 'darkmode', 'dbstudio', 'debugger', 'designsys', 'devapi', 'domain', 'figma', 'gallery', 'imagegen',
       'insights', 'localization', 'minifier', 'monetize', 'multipages', 'performance', 'plugins', 'seo', 'sharereview', 'team', 'testing',
       'versioning', 'whitelabel',

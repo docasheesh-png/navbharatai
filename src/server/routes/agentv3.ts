@@ -301,7 +301,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
-import { readDevServerLastWords } from '../AgentV3/devServerDeathEvidence';
+import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -16725,25 +16725,6 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
-      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
-      // write time and how many errors were caught while the model still held the file. Reported
-      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
-      try {
-        const wt = dispatcher.writeTypecheckStats();
-        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
-        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
-        // its stats untouched — and the line then read "no TypeScript source was written this build"
-        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
-        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
-        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
-        // only inherited our template is not credited with having written it.
-        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
-          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
-        });
-      } catch { /* an advisory line must never affect a build */ }
-
       if (result.timedOut === true) {
         try {
           buildDiag.record({
@@ -16875,6 +16856,34 @@ async function noteBuildOutcome(
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+      // write time and how many errors were caught while the model still held the file. Reported
+      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+      //
+      // 🔴 IT IS RECORDED AFTER THE RETRY, AND THAT POSITION IS THE FIX (autopsy e628efd4,
+      // 2026-09-25). It used to sit above the empty-build retry, so on any build that retried, the
+      // line described the ABANDONED first attempt and not the build that shipped — the FOURTH time
+      // this one sentence has been wrong about a build, from a THIRD distinct cause (the first two:
+      // a sub-agent with its own stats object, autopsy 3ce8459b; a fast lane that never touches
+      // them at all, autopsy 2026-09-22). `dispatcher` is a single instance shared with the retry
+      // runner through `baseRunnerOpts`, so its counters are CUMULATIVE across both attempts —
+      // which is precisely why reading them later is not merely a better sample but the only
+      // reading that describes the build the user was given.
+      try {
+        const wt = dispatcher.writeTypecheckStats();
+        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
+        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
+        // its stats untouched — and the line then read "no TypeScript source was written this build"
+        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
+        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
+        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
+        // only inherited our template is not credited with having written it.
+        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
 
       // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
       // model's "no console errors" against whether anyone actually looked.
@@ -18822,9 +18831,15 @@ async function noteBuildOutcome(
           // not an accusation against the user's code.
           if (verdict.serverDown) {
             if (serverRevivals >= MAX_SERVER_REVIVALS) {
+              // 🔴 WHY IT WOULD NOT STAY UP — read HERE too, not only before a restart (autopsy
+              // e628efd4). This branch used to record the restart COUNT and nothing about the cause,
+              // so the one death a human has to act on was the one death the report could not explain.
+              // The log now holds the LAST restart's output, which is the death that ended the loop.
+              const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
               buildDiag.record({
                 phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
                 message: `The dev server would not stay running (${serverRevivals} restarts). The app's code was never the problem here — nothing was listening on the preview port. ${verdict.problems[0] ?? ''}`.trim(),
+                detail: devServerLastWordsDetail(lastWords),
                 autoResolved: false,
               });
               previewVerifiedFailed = true;
@@ -18832,7 +18847,7 @@ async function noteBuildOutcome(
             }
             serverRevivals += 1;
             // Its last words BEFORE the restart overwrites them — the only evidence of WHY it stopped.
-            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
@@ -18845,7 +18860,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
-              detail: lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)',
+              detail: devServerLastWordsDetail(lastWords),
               autoResolved: true,
             });
             attempt -= 1; // a process restart is not a repair attempt
@@ -19907,15 +19922,19 @@ async function noteBuildOutcome(
             if (runtimeServerRestarted) {
               // It stopped again after our own restart. That is an infrastructure finding, never a
               // licence to rewrite the app — no model call, and the loop ends here.
+              // The sibling of the verify loop's give-up, and it had the same hole (autopsy e628efd4):
+              // it reported THAT the server died again and never what it said on its way out.
+              const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
               buildDiag.record({
                 phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
                 message: `The dev server stopped again after it was restarted. The app's code was never the problem here — the preview port stopped answering. ${split.serverDown[0].text}`,
+                detail: `signals: ${signals} · ${devServerLastWordsDetail(lastWords)}`,
                 autoResolved: false,
               });
               break;
             }
             runtimeServerRestarted = true;
-            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             const restartedAt = Date.now();
             try {
@@ -19924,7 +19943,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
-              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)'}`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${devServerLastWordsDetail(lastWords)}`,
               autoResolved: true,
             });
             if (split.app.length === 0) {
@@ -22013,14 +22032,23 @@ async function noteBuildOutcome(
           const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
           const plan = planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 });
           const scaffolded: string[] = [];
-          for (const item of plan) {
-            try {
-              await actuator.writeFile(workspaceId, item.testPath, item.content);
-              writtenFiles.set(item.testPath, item.content);
-              try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
-              scaffolded.push(item.testPath);
-            } catch { /* one test file failing must not block the rest */ }
-          }
+          // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (traced 2026-09-25, autopsy e628efd4).
+          // This runs AFTER the green latch, and without `runInPass` its `currentPass()` was `null`,
+          // so Green Freeze refused every write and each refusal was swallowed by the catch below —
+          // on every build whose preview was verified in a real browser. That report carries three
+          // deferred `*.test.ts` writes AND a `READINESS_WARNING: No tests at all`: one defect, seen
+          // from both ends. `starter-tests` is CREATE-ONLY, so an overwrite is still refused; a test
+          // file the app cannot import cannot change the render the browser already confirmed.
+          await runInPass('starter-tests', async () => {
+            for (const item of plan) {
+              try {
+                await actuator.writeFile(workspaceId, item.testPath, item.content);
+                writtenFiles.set(item.testPath, item.content);
+                try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
+                scaffolded.push(item.testPath);
+              } catch { /* one test file failing must not block the rest */ }
+            }
+          });
           if (scaffolded.length > 0) {
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
             events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
@@ -22124,8 +22152,13 @@ async function noteBuildOutcome(
       // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
       // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
       // and best-effort — never blocks or fails the build.
+      // 🔴 NAMED, FOR THE REASON THE STARTER-TEST PASS ABOVE IS (traced 2026-09-25, autopsy e628efd4):
+      // this runs after the green latch, and an unnamed pass is a refused one. Everything this block
+      // does was being thrown away on every browser-verified build, silently, so the launch basics
+      // `AppKnowledgeBase.ts` promises "BY DEFAULT after each build" did not happen at all.
       try {
         if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          await runInPass('production-defaults', async () => {
           const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
           let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
           if (indexHtml == null) {
@@ -22148,6 +22181,11 @@ async function noteBuildOutcome(
           const appName = deriveTitle(prompt) || 'App';
           const defaults = planAppDefaults(indexHtml, appName);
           const savedDefaults: Record<string, string> = {};
+          // 🔴 WHETHER THE index.html PATCH REALLY LANDED, because on a green app it does not — and
+          // the narration below used to claim it either way (traced 2026-09-25, autopsy e628efd4).
+          // `production-defaults` is CREATE-ONLY: the standalone files are created, this overwrite of
+          // a file that existed at green is still refused, and the two facts are now reported apart.
+          let indexPatched = false;
           // Patch index.html only when the generator actually changed it.
           if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
             try {
@@ -22155,6 +22193,7 @@ async function noteBuildOutcome(
               writtenFiles.set(idxPath, defaults.indexHtml);
               try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
               savedDefaults[idxPath] = defaults.indexHtml;
+              indexPatched = true;
             } catch { /* one write failing must not block the rest */ }
           }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
@@ -22178,10 +22217,19 @@ async function noteBuildOutcome(
           }
           if (Object.keys(savedDefaults).length > 0) {
             await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
-            if (defaults.added.length > 0) {
-              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${defaults.added.join(', ')} + a web manifest, icon, robots.txt and an offline service worker.`, ts: Date.now() });
+            // 🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED. `defaults.added` is the list of index.html
+            // TAGS the generator intended; the files are a separate set, and on a green app exactly
+            // one of the two happens. Announcing the tags when the patch was refused is the "fake
+            // success" the second absolute rule forbids, and it is what this line used to do.
+            const savedFiles = Object.keys(savedDefaults).filter((k) => k !== idxPath);
+            const parts: string[] = [];
+            if (indexPatched && defaults.added.length > 0) parts.push(defaults.added.join(', '));
+            if (savedFiles.length > 0) parts.push(savedFiles.join(', '));
+            if (parts.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${parts.join(' + ')}.`, ts: Date.now() });
             }
           }
+          });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
       // ENTRY-FILE DUPLICATE-IMPORT SWEEP (build-report + IMG autopsy 2026-08-02, RECURRING): the entry file

@@ -3169,9 +3169,55 @@ the flag entries above promise.
   (`built` / `declined` / `asked` / `stalled` / `stopped`) that the retry, the settle flip, the
   upsell, `runProvenApp` and the release gate all read is the real fix; it is an **OPEN root cause**
   in `PROGRESS.md`, deliberately not guessed at here. **The next autopsy that finds a third reader of
-  this question should build it.** Four more open items are recorded with it — including that
-  `WRITE_TIME_TYPECHECK` is written BEFORE the retry decision, so on a retried build it describes the
-  abandoned attempt (the fourth time that sentence has been wrong, third distinct cause).
+  this question should build it.** Four more open items are recorded with it; **two were closed the
+  same day** and are recorded here because each is a rule in its own right:
+  ✅ **`WRITE_TIME_TYPECHECK` now sits AFTER the retry block.** It was above it, so on any retried
+  build the line described the ABANDONED attempt — the fourth time that one sentence has been wrong,
+  from a third distinct cause. The trace that unblocked it: there is exactly ONE build
+  `ToolDispatcher`, it rides in `baseRunnerOpts`, and the retry runner spreads that object without
+  overriding it, so the counters are **cumulative across both attempts**.
+  ✅ **THE QUESTION WAS NEVER SEEN, AND THE DOUBT WAS THEN THROWN AWAY — two defects, either fatal
+  alone** (`IntentClassifier.ts`). A comma is deliberately NOT a `CLAUSE_BOUNDARY` (splitting on
+  commas would cut ordinary build orders in half), so that whole run-on sentence was ONE clause,
+  `AUX_ASKS_US` was `^`-anchored to it, and the "can you" in the middle was invisible —
+  **the THIRD time this exact anchor has cost a build**, after the Hindi particle (2026-09-16) and
+  the English WH-openers (2026-09-17). It is unanchored now, and subsumes the opener test. Separately,
+  the `long-message` and `code-or-url` branches returned HIGH **unconditionally**, discarding the
+  `doubt` computed three lines above — so the message hard-locked to `new_build` on nothing but its
+  character count, the intention reader never ran, and `userAskedForAnAppToBeBuilt` (which requires
+  HIGH) then admitted five social-domain features into an app nobody ordered.
+  ⚠️ **Not a reversal of "length is deliberately NOT a doubt signal"** — length still creates no
+  doubt; it may merely no longer CANCEL doubt the grammar already raised. The INTENT is unchanged on
+  every branch, so nothing regresses when the reader is down and a plain long build prompt keeps its
+  HIGH. Reversion-proven in both halves in `tests/questionReadsEveryClause.test.ts`.
+  🔴 **AND ONE OPEN ITEM GOT WORSE ON INSPECTION, traced from code rather than the report: BOTH
+  deterministic post-build passes run AFTER the green latch and outside `runInPass`** — the
+  starter-test scaffold and the U-2 production defaults (manifest, icon, robots.txt, service worker,
+  the index.html meta patch). `currentPass()` is `null`, so Green Freeze refuses every write and each
+  refusal is swallowed by its own `catch`. **On every build whose preview is verified in a real
+  browser, the launch basics `AppKnowledgeBase.ts` promises "BY DEFAULT after each build" do not
+  happen at all** — and the same report's "No tests at all" warning is that defect seen from the other
+  end.
+  ✅ **CLOSED the same day, with a THIRD TIER in the freeze rather than an allowlist entry.** Both
+  passes name themselves now, and `CREATE_ONLY_PASSES` lets a pass write a path **only if that path
+  was absent from the green snapshot** — the one question the latch answers exactly. `ALLOWED_PASSES`
+  asserts *"this pass writes to a working app on purpose"*, which is true of a user's own repair and
+  false of a deterministic sweep; create-only is **strictly narrower than the blanket "new files are
+  always allowed" carve-out** the 2026-08-12 adversarial review removed, and both passes are refused
+  every `.env` by construction. ⚠️ **The index.html patch stays refused**, so on a green app the
+  manifest and service worker land un-linked and inert — and the narration now says what LANDED
+  instead of announcing them regardless. Reversion-proven three ways in
+  `tests/theLaunchBasicsNeverHappened.test.ts`.
+  ✅ **AND THE DEV SERVER'S LAST WORDS WERE READ ON THE WRONG BRANCH.** This autopsy first recorded
+  that *"nothing captures the dev server's own last output"* — **wrong, and re-grepping caught it**:
+  `devServerDeathEvidence.ts` has read the log tail since 2026-09-23. It was wired one line before
+  each RESTART, and the `PREVIEW_SERVER_DOWN` GIVE-UP recorded the restart COUNT and no cause — so
+  the platform could explain a death it recovered from and not the one it gave up on, which is the
+  only one a human has to act on. Both give-ups read it now, the 8 s bound moved INTO the module so
+  the four sites cannot drift, and ONE sentence serves all four. ⚠️ The log at give-up is not stale:
+  it holds the LAST restart's output, the death that ended the loop. ⚠️ **WHY the server dies is
+  still OPEN** — it is now *recordable*, not known, and the next report carrying that code is the
+  first that can answer it.
 
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates

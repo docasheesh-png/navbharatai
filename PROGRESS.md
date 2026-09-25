@@ -81205,22 +81205,93 @@ and that is the same defect in two subsystems written four months apart.
    each subsystem re-deriving it. Deliberately not built in this change: it touches the retry, the
    settle flip, the upsell, `runProvenApp` and the release gate at once, and the reported harm is
    fixed without it. **The next autopsy that finds a third reader of this question should build it.**
-2. **`WRITE_TIME_TYPECHECK` is recorded BEFORE the retry decision** (`routes/agentv3.ts` ~16601, the
-   retry at ~16645), so on any retried build the line describes the abandoned first attempt. **The
-   fourth time that one sentence has been wrong, and the third distinct cause** — the 2026-09-22 fix
-   made its *evidence* right and left its *timing* wrong. Not moved here because whether the retry
-   runner shares the first dispatcher (and therefore its stats) is untraced; moving it blind would
-   produce a different false line. Trace that first.
+2. ✅ **CLOSED the same day — `WRITE_TIME_TYPECHECK` is recorded AFTER the retry.** This item said the
+   trace was missing ("whether the retry runner shares the first dispatcher is untraced; moving it
+   blind would produce a different false line"). The trace was then done: there is exactly ONE build
+   `ToolDispatcher` (`routes/agentv3.ts`), it is carried in `baseRunnerOpts`, and the retry runner
+   spreads that object without overriding it — so the counters are **cumulative across both
+   attempts** and reading them after the retry is the only reading that describes the build the user
+   was given. The record moved below the retry block. Test-locked and reversion-proven in
+   `tests/theCounterWatchedOneLaneOfTwo.test.ts` (the premise is pinned too: a retry that ever gains
+   its own dispatcher fails CI rather than silently making the position wrong again).
 3. **Green Freeze refuses test files, then the release gate marks the build down for having no
    tests.** Nine deferrals in this build, three of them the engine's own `*.test.ts`. A test file
    cannot break a rendering app, but widening a safety system needs its own evidence and sign-off.
+   🔴 **AND THE EVIDENCE IS NOW IN, AND IT IS WORSE THAN THIS ITEM SAYS** — traced from code the same
+   day, not from the report: the green latch is set at `routes/agentv3.ts` ~18538/~18601 (the moment a
+   real browser confirms the render), and BOTH deterministic post-build passes — the starter-test
+   scaffold (~21870) and the U-2 production defaults: manifest, icon, robots.txt, service worker and
+   the index.html meta patch (~22010) — run AFTER it, outside any `runInPass`. So `currentPass()` is
+   `null`, every write is refused, and each refusal is swallowed by its own `catch`. **On every build
+   whose preview is verified in a real browser, the launch basics `AppKnowledgeBase.ts` promises
+   "BY DEFAULT after each build" do not happen at all.** The report's nine deferrals and its
+   "No tests at all" warning are one defect seen from two ends.
+   ✅ **CLOSED the same day.** Both passes now NAME themselves (`runInPass('starter-tests', …)`,
+   `runInPass('production-defaults', …)`) and Green Freeze gains a third tier between "allowlisted"
+   and "denied": `CREATE_ONLY_PASSES` — a pass that may write a path **only if that path was absent
+   from the green snapshot**, which the latch already records exactly. A file that did not exist when
+   the browser rendered the app cannot have been part of what rendered, so creating it cannot change
+   the render; overwriting one that DID exist is precisely what the freeze is for.
+   🔒 **Strictly narrower than the carve-out removed by the 2026-08-12 adversarial review**, which let
+   ANY pass — including a model-driven one — create files, so a coordinated change half-applied. These
+   two are deterministic and idempotent, already skip any path that exists, and are additionally
+   refused every `.env` by construction.
+   ⚠️ **The honest consequence, stated rather than hidden:** the U-2 index.html patch is still refused
+   on a green app, so the manifest and the service worker land but are not linked and are inert. The
+   narration used to announce them regardless (*"+ a web manifest, icon, robots.txt and an offline
+   service worker"*) — it now reports only what actually landed, which is the second absolute rule
+   applied to a sentence. Test-locked and **reversion-proven three ways** in
+   `tests/theLaunchBasicsNeverHappened.test.ts` (11 cases): drop the create-only branch, unname either
+   pass, or promote either to the full allowlist, and it fails.
 4. **`PREVIEW_SERVER_DOWN`** — the dev server died, was restarted, and died again (502). Its last
    output before stopping was the journey script's own `NBAI_JOURNEY` line. Whether the journey run
    is implicated is unproven; recorded rather than asserted.
-5. **The requirement-gap analyzer fired on a question.** `REQUIREMENT_GAPS` detected domain=social
-   and injected auth, realtime, notifications, moderation and media upload — five features into an
-   app the user never ordered. Its own rule says it fires on "a new build"; a question is not one.
-   Fixing it belongs with item 1, since it needs the same answer.
+   ⚠️ **HALF-CLOSED the same day, and the half that closed is the one that was actionable.** The
+   first draft of this item said *"nothing in the platform captures the dev server's own last output"*
+   — **that was wrong, and re-grepping is what caught it**: `devServerDeathEvidence.ts` has read the
+   log's tail since 2026-09-23 (autopsy ac41a924). 🔴 **It was wired on the WRONG BRANCH.** Both
+   preview loops read it one line before a RESTART, and when the server would not stay up and the
+   loop finally recorded `PREVIEW_SERVER_DOWN` they recorded the restart COUNT and nothing about the
+   cause. So the platform could explain a death it recovered from and **not the one it gave up on** —
+   exactly backwards, since the give-up is the only one a human has to act on, and this report's
+   unexplained line is precisely that. Both give-ups now read it too (siblings hunted, rule 3), the
+   8 s bound moved INTO the module so the four sites cannot drift, and ONE sentence
+   (`devServerLastWordsDetail`) serves all four. ⚠️ The log at give-up is **not** stale — it holds the
+   LAST restart's output, i.e. the death that ended the loop, which is why it reads again rather than
+   reusing the earlier string. Reversion-proven in `tests/theDevServerIsAskedWhyItStopped.test.ts`.
+   🔴 **STILL OPEN, and not guessed at:** WHY the server died is now recordable but still unknown —
+   the next report carrying `PREVIEW_SERVER_DOWN` is the first one that can answer it. A fix aimed at
+   the `NBAI_JOURNEY` correlation before that evidence exists would be a guess.
+5. ✅ **CLOSED the same day — and it was TWO independent defects, either of which alone still produced
+   the wrong verdict.** The prompt was *"As in if we do have done a chat now, and if we don't have a
+   chat in next 2 hours can you send a message to initiate the chat again"*.
+   - **The question was never SEEN.** `CLAUSE_BOUNDARY` is `[.!?;।\n]+` — a comma is deliberately not
+     a boundary, because splitting on commas would cut ordinary build orders in half — so the whole
+     run-on sentence was ONE clause, `AUX_ASKS_US` was `^`-anchored to it, and the "can you" sitting
+     in the middle was invisible. `readsAsQuestion` returned **false**. 🔑 **The third time this exact
+     anchor has cost a build**: `MIDSENTENCE_KYA_QUESTION` was unanchored on 2026-09-16 because
+     *"Hindi places its question particle anywhere in the sentence"*, and the English WH-openers were
+     made per-CLAUSE on 2026-09-17 after the identical failure in production the next day. **English
+     places a polite question anywhere too.** `AUX_ASKS_US` is now unanchored, which subsumes the
+     opener test entirely; the auxiliary-plus-SUBJECT distinction is untouched, so "do it again" is
+     still an order.
+   - **Doubt was raised and then thrown away.** The `long-message` and `code-or-url` branches sit
+     BELOW the keyword ladder — reached only when no build verb matched at all, the weakest evidence
+     in the whole function — and both returned HIGH **unconditionally**, ignoring the `doubt` computed
+     three lines above. So a question about whether NavBharatAI can send a message hard-locked to
+     `new_build` on nothing but 128 characters, the intention reader never ran, and
+     `userAskedForAnAppToBeBuilt` (which requires HIGH) then said TRUE and let the domain guidance
+     through. ⚠️ This is **not** a reversal of that function's standing rule that length is not a
+     doubt signal: length still creates no doubt, it merely may no longer CANCEL doubt the sentence's
+     own grammar already raised.
+   - **The INTENT is unchanged on every branch** — only the hard lock goes — so nothing regresses when
+     the intention reader is slow or down, and an ordinary long build prompt with no question and no
+     negation keeps its HIGH and pays nothing. Measured on the real prompt: `new_build/high` →
+     `new_build/low`, `userAskedForAnAppToBeBuilt` true → false, and the five-feature social-domain
+     guidance block → empty string.
+   - Test-locked and **reversion-proven in both halves** in `tests/questionReadsEveryClause.test.ts`
+     (24 cases), including a source-level guard on the anchor itself — re-anchoring the regex or
+     dropping either `doubt` fails CI.
 
 ## 2026-09-25 — Autopsy 2a7fa4b0 + ea07382a: an expense tracker was treated as a mega-app, and our own journey check stopped the dev server
 

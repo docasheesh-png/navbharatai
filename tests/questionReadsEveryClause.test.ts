@@ -135,6 +135,98 @@ describe('🔒 the fix is structural, not another special case', () => {
   it('🔴 the early return that made later tests unreachable is gone', () => {
     // Proven by reversion: restoring this line fails the AUX and second-clause cases above.
     expect(src).not.toContain('if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);');
-    expect(src).toContain('if (AUX_OPENERS.test(text) && AUX_ASKS_US.test(text)) return true;');
+    // ⚠️ WIDENED 2026-09-25 (autopsy e628efd4). This used to pin the replacement as one exact line,
+    // `if (AUX_OPENERS.test(text) && AUX_ASKS_US.test(text)) return true;`. That line was itself
+    // still `^`-anchored and had to go — see the block below. What this guard has always been FOR is
+    // that the auxiliary test may not SHORT-CIRCUIT the rules under it, so that is what is asserted:
+    // it returns `true` and nothing else, and `MIDSENTENCE_KYA_QUESTION` is still reachable after it.
+    expect(src).toMatch(/if \(AUX_ASKS_US\.test\(text\)\) return true;/);
+    const aux = src.indexOf('AUX_ASKS_US.test(text)');
+    const kya = src.indexOf('MIDSENTENCE_KYA_QUESTION.test(text)');
+    expect(aux).toBeGreaterThan(-1);
+    expect(kya).toBeGreaterThan(aux);
+  });
+});
+
+/**
+ * 🔴 THE THIRD ANCHOR, AND THE THIRD BUILD IT COST (autopsy e628efd4, 2026-09-25).
+ *
+ * A free-tier user typed, in one comma-joined run-on sentence with no question mark:
+ *   *"As in if we do have done a chat now, and if we don't have a chat in next 2 hours can you send
+ *   a message to initiate the chat again"*
+ *
+ * `CLAUSE_BOUNDARY` is `[.!?;।\n]+` — a comma is deliberately NOT a boundary, because splitting on
+ * commas would cut ordinary build orders in half. So the whole message was ONE clause, `AUX_ASKS_US`
+ * was `^`-anchored to it, and the question in the middle was invisible. `readsAsQuestion` returned
+ * false, `doubt` was false, and the message hard-locked to `new_build` at HIGH on nothing but its
+ * character count — the intention reader never ran, and a six-feature chat app nobody ordered was
+ * built for ₹196.28.
+ *
+ * Two independent defects, and each alone still produced the wrong verdict, so both are locked here:
+ * the question was not SEEN, and the two structural branches below the keyword ladder ignored
+ * `doubt` even when it was raised.
+ */
+describe('a polite question in the middle of a sentence is still a question', () => {
+  // Comments stripped, so a sentence in a docblock can never satisfy a source-level guard.
+  const src = readFileSync('src/server/AgentV3/IntentClassifier.ts', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const REAL = 'As in if we do have done a chat now, and if we don\'t have a chat in next 2 hours '
+    + 'can you send a message to initiate the chat again';
+
+  it('🔴 the exact message from the report reads as a question', () => {
+    expect(readsAsQuestion(REAL.toLowerCase())).toBe(true);
+  });
+
+  it('…and therefore never hard-locks to a build', () => {
+    const c = classifyIntentWithConfidence(REAL);
+    // The INTENT is deliberately unchanged — only the lock goes, so nothing regresses when the
+    // intention reader is slow or down. LOW is what finally sends the sentence to that reader.
+    expect(c.confidence).toBe('low');
+  });
+
+  it('a second-person auxiliary is a question wherever it sits', () => {
+    expect(readsAsQuestion('sure, and can you also add dark mode')).toBe(true);
+    expect(readsAsQuestion('i have the app already, could you check it')).toBe(true);
+    expect(readsAsQuestion('theek hai, kya aap ise dekh sakte ho')).toBe(true);
+  });
+
+  it('🔒 …but a bare auxiliary is still not one — "do it again" stays an order', () => {
+    // The auxiliary-plus-SUBJECT distinction is what protects continuations, and it is untouched.
+    // Losing this is the "please continue" amnesia this repo has already fixed once.
+    expect(readsAsQuestion('do it again')).toBe(false);
+    expect(classifyIntent('do it again')).toBe('edit_existing');
+    expect(readsAsQuestion('build a notes app and make the header sticky')).toBe(false);
+    expect(classifyIntentWithConfidence('build a notes app and make the header sticky').confidence).toBe('high');
+  });
+
+  it('🔴 a long message with no build verb no longer buys a HARD LOCK through length alone', () => {
+    // The two structural branches sit BELOW the keyword ladder, so they are reached only when no
+    // build verb matched at all — the weakest evidence in the function, and the only branches left
+    // that could cancel doubt the sentence's own grammar had raised.
+    const longQuestion = 'i was wondering about the thing we discussed earlier, and whether in a '
+      + 'couple of hours can you ping me about it once more, since i may forget all of this';
+    expect(longQuestion.length).toBeGreaterThan(120);
+    expect(classifyIntentWithConfidence(longQuestion).confidence).toBe('low');
+  });
+
+  it('🔒 an ordinary long build prompt with no question keeps its HIGH and pays nothing', () => {
+    const longOrder = 'a dashboard for my kirana shop with daily sales totals, a customer ledger, '
+      + 'GST-ready invoices in rupees, and a simple stock list that warns me when something runs low';
+    expect(longOrder.length).toBeGreaterThan(120);
+    const c = classifyIntentWithConfidence(longOrder);
+    expect(c.intent).toBe('new_build');
+    expect(c.confidence).toBe('high');
+  });
+
+  it('🔒 the anchor is gone from the pattern itself, not worked around at one call site', () => {
+    // Reversion guard. Re-anchoring `AUX_ASKS_US` restores the exact defect, and every behavioural
+    // case above would go with it — but a later reader "tidying" the regex would see no reason not to.
+    expect(src).toMatch(/const AUX_ASKS_US =\s*\/\\b/);
+    expect(src).not.toMatch(/const AUX_ASKS_US =\s*\/\^/);
+  });
+
+  it('🔒 both structural branches honour doubt, in the source', () => {
+    expect(src).toContain("confidence: doubt ? 'low' : 'high', signal: 'long-message'");
+    expect(src).toContain("confidence: doubt ? 'low' : 'high', signal: 'code-or-url'");
   });
 });

@@ -80951,6 +80951,17 @@ ring charts (Donut, Monitor grid lines, Monitor cost donut). All 12 now read the
 (`--text-faint`, `--text-muted`, `--text-primary`, `--border-soft`), and the selected node's
 `ring-white/40` became `ring-accent/60`. Locked by `tests/svgNeutralsFollowTheTheme.test.ts`: no
 client SVG may draw a white/black neutral as a fixed attribute (brand colours untouched).
+## 2026-09-25 — Exam mode: the percentage is marks ÷ maximum, not over attempted
+
+Admin screenshot (Teacher AI → Exam mode): 16 / 20 marks, 4 right, 1 not answered — and the only
+percentage on the result card was "100%". That number was ACCURACY (right ÷ attempted); no board or
+entrance exam reports a percentage that way. Root cause: `scoreExam` had no percentage field — the
+verdict computed marks ÷ maximum as a private local and never printed it, so accuracy was the only
+"%" the student ever saw. Fix: `percentage` is now a field of `ExamScore` (`examPercentage`, two
+decimals, negative when negative marking takes the total below zero, 0 for an empty paper), shown
+beside the marks as the headline; the verdict leads with it; accuracy stays, labelled "Accuracy …
+(N right of M attempted)" and hidden when nothing was attempted. Locked in
+`tests/theExamPercentageIsOverTheWholePaper.test.ts` with the screenshot's exact paper (→ 80%).
 ## 2026-09-25 — The scorecard's "Most-repaired" list was TOOL_DONE ×10313: a tool call is not a repair
 
 The admin sent the Builder scorecard (03:01 UTC, 264 builds / 200 workspaces). Its "Most-repaired"

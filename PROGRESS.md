@@ -81041,6 +81041,80 @@ queueing the update. Sibling hunt (every `setX(prev => …)` updater in client c
 one. Locked by `tests/aStateUpdaterNeverReadsARef.test.ts` (reversion-proven against the old line).
 ---
 
+## 2026-09-25 — Autopsy: the Study-Racer session (two GREEN builds that did not look effortless)
+
+Admin pasted the full session report for workspace `agentv3-QsNg…` (prompt: *"study-type game … mai
+isme notes, youtube video ka link dalunga or tum isse car game, racing game, quiz game ke form me
+mujhe yaad karaoge"*). Build 1: fresh, weak tier, `ok: true`, **13.5 min** (estimator midpoint 3.1
+min, no figure ever shown), billed **₹174.80** (real $0.42). Build 2: edit ("no arrows, make it
+realistic and colourful"), `ok: true`, 6.7 min, ₹159.42.
+
+**The five buckets, honestly:** ✅ self-healed 5 (three TS errors quoted back at write time and fixed
+in place; two of them `React` used as a UMD global because the fast-lane GLM file never imported it) ·
+🔀 workarounds 3 (two GLM crawl fall-backs, one fast-lane → full-builder hand-off after 3 of 13
+files) · ⏭️ skipped 1 (the fast lane on a rung that had just fallen to a reasoning model — see open
+item) · ❌ still wrong in the delivered result 3 (the user's core ask — their own notes and YouTube
+links — was cut to roadmap steps 2–3 on a false "clone of YouTube" signal; a false medium security
+finding on two correctly-guarded links, on both builds; ~₹18 of the bill priced at Sonnet for a
+glm-4.7-flashx planner call) · 🥵 struggle 6 (152 s architect thinking call to decide to delegate;
+`REPEATED_READS` 47% / 63% with a STOP notice; a `timeout 8` dev server started and killed by the
+sub-agent then restarted by the architect; the model re-running tsc/build/screenshot the platform
+gates run again; 56 s of GLM crawl on a rung "benched for the rest of this build" twice;
+`FAST_LANE_PHASES` unable to say where 93% of the lane went).
+
+**Fixed at the class, six root causes, one PR (`tests/theStudyRacerAutopsy.test.ts`):**
+
+1. **"clone of YouTube" (`appScopeAnalyzer`).** `namesAsProduct` knew a channel preposition BEFORE a
+   product name marks a tool mention; it did not know a CONTENT noun after it does ("youtube video",
+   "youtube ka link", "instagram ki post"). The exact prompt now builds direct; real clone requests
+   still escalate (test-locked both ways). The complexity router had scored the same prompt 15 —
+   two classifiers disagreed and the dearer one won.
+2. **Planner calls priced at Sonnet.** The mega-roadmap, blueprint and project planners added their
+   tokens to `blueprintUsage`/`buildUsage` but never to the provider ledger, so they reached the bill
+   as the "unattributed remainder" — priced at Sonnet as a "margin-safe upper bound", which is
+   margin-safe for us and ×37 for the user. `healRunnerOpts` was fixed for this exact shape on
+   2026-08-10; these were the siblings never hunted. All three now `captureTurnUsage(provider, …,
+   model)`; a source guard asserts no `blueprintUsage +=` exists without one.
+3. **The bench was per RUNNER, announced as per BUILD.** `benchedFamilies`, `timeoutStreak`,
+   `slowRungs`, `slowBenched`, `slowKeptAnyway` and `abandonedSlowRung` were locals inside
+   `makeMultiProviderTurnRunner`; a build constructs several runners (fast-lane text runner, architect
+   chain, heal runners). `BuildBenchRegistry` is caller-owned like `deadRungs`: one per build in the
+   route, handed to all three factories. Proven with two runners: without it the second calls the
+   benched family again; with it, KIMI answers and the bench is announced once.
+4. **`unsafe-target-blank` read `rel` off the same line.** The JSX-multiline class, third analyzer
+   (after 8a92e5ed and c847b523). `Rule.contextual: 'tag' | 'call'` hands the guard the enclosing tag
+   (`enclosingTag`, jsxTags.ts) or the balanced call (`callSpanAt`); `window-open-no-opener` fixed as
+   the sibling in the same change. The exact NoteCard shape is no longer a finding; the unguarded
+   form still is.
+5. **`PREVIEW_SNAPSHOT_STALE` with nothing written after the copy.** The copy's hash was read from
+   the SANDBOX tree (whose `index.html` carries our preview bridge the moment a dev server has run),
+   the confirmation's from the DURABLE tree (which never does). `identitySource` strips the bridge on
+   both sides before hashing — `withoutPreviewBridge`'s own docblock says to apply it wherever sandbox
+   content is read; the identity hash was the reader that had not.
+6. **`FAST_LANE_PHASES: generate 0s`.** `clock.generateMs` was written only when the loop
+   COMPLETED, so a lane that handed off mid-generation (the lane this ledger exists for) reported
+   its generation as "everything else". The running phase is read off its start instant.
+
+**Named as open, not guessed at (rule 6):**
+- **The fast lane keeps running on a reasoning rung it fell to.** `fastLaneRungDecision` is taken once
+  at the opening rung (flashx, fine); flashx crawled INSIDE the lane and the lane's next per-file call
+  ran on kimi-k2.7-code — 123 s for a 2.3 KB hook (3,427 output tokens for 2,340 chars: reasoning).
+  The gate that skips the lane for an always-reasoning OPENER needs a sibling that hands off the
+  moment the lane's chain falls to one. Not built here: it changes the lane's control flow and needs a
+  measured before/after.
+- **The estimator showed no figure for 13.5 minutes** ("I'll show a time as soon as I can measure
+  it"). Honest, and the user watched a spinner with no number. Whether to show the heuristic band with
+  its confidence is a product decision.
+- **The model re-verifies what the gates verify** (tsc, `npm run build`, dev server, screenshot,
+  console) — ~60–90 s per build, twice. A shared evidence ledger (already an OPEN root cause) is the
+  real fix; until then the architect prompt could be told which checks the platform runs after it.
+- **`REQUIREMENT_GAPS` fired on the edit turn** (build 2) although the requirement-aware build is a
+  fresh-build feature; recorded as info, cost nothing, but its six "questions to confirm" are noise on
+  an edit.
+- **`GREEN_FREEZE_DEFERRED` ×6 on build 2** for the platform's own default files (manifest, robots,
+  icon, sw.js, a test file, index.html) — by design (FULL DENY), but each line says "Reply if you want
+  this change made" about a file the user never asked for. Whether the defaults pass should run before
+  the freeze arms, or stop offering, is a separate decision.
 ## 2026-09-25 — 🙋 AUTOPSY e628efd4: A QUESTION WAS ANSWERED CORRECTLY, THEN OVERRIDDEN, AND THE USER WAS CHARGED ₹196.28 FOR IT
 
 **The prompt was a question:** *"As in if we do have done a chat now, and if we don't have a chat in
@@ -81190,6 +81264,62 @@ and that is the same defect in two subsystems written four months apart.
      (24 cases), including a source-level guard on the anchor itself — re-anchoring the regex or
      dropping either `doubt` fails CI.
 
+## 2026-09-25 — Autopsy 2a7fa4b0 + ea07382a: an expense tracker was treated as a mega-app, and our own journey check stopped the dev server
+
+**The run:** "App to add expenses with date, category, amount, payment method like cash card UPI, search and
+sort, total amount and report generation. Backup and restore option too" (Weak, free tier). Build 1 split it
+into a six-step roadmap and shipped step 1 — a form, a list and a total — for ₹81. The user then asked "Ui
+preview of every screen" (₹210, 12.7 min). After both builds, search, sort, report download, backup and
+restore were STILL missing. ₹291 for a one-screen app that any builder does in one pass.
+
+**Six root causes, all ours, all fixed and locked in `tests/theExpenseTrackerWasNotAMegaApp.test.ts`
+(19 cases; 17 fail against the old code):**
+1. **Scope gate.** `countEnumeratedFeatures` counted the COLUMNS of an expense (date, category, amount,
+   payment method) as features → 8 = the mega line. And `CLEARLY_SMALL` matched only singulars, so
+   "expenses" was not a small app while "expense" was. Now record attributes are not counted, plurals are
+   read, and the small-app hint is held back wherever big software is named (`BIG_SOFTWARE_NOUN`, now the
+   one definition ProjectPlan and the scope analyzer share).
+2. **Roadmap infra badge.** A bare `real-?time` in `INFRA_RE` badged "a real-time search input" as needing a
+   server, on the user's 💡 roadmap. Now only real-time BETWEEN people/devices counts; the planner prompt
+   also says `needsInfra` is only for a step that cannot run in the browser at all.
+3. **Design check.** `LIST_WITHOUT_EMPTY_STATE` fired on ANY `.map(` — including a form's
+   `PAYMENT_METHODS.map(… <option>)`. The design heal spent 120 s and ADDED a "Recent expenses" list to the
+   form page to satisfy it (the model itself said "this component only renders a form"). `rendersDataList`
+   ignores constants, array literals and select options; the journey's `rendersList` reads the same definition.
+4. **Read loop.** Three reads of three DIFFERENT line ranges of index.css were each told "STOP … byte-for-byte
+   what you already have". Ranged reads are now keyed by their lines. The report's `REPEATED_READS` counts
+   only unchanged re-reads (it had printed "55% re-read a file that had not changed" beside a detail saying
+   every re-read followed a change), and a sub-agent's STOP count now reaches the parent's number (the
+   report said "No read reached the no-progress limit" while a sub-agent had been stopped three times).
+5. **Sub-agent claim.** A frontend sub-agent returned "Done. I built … New files created: …" having written
+   NOTHING; the parent spent ~90 s and a browser to find out. The task result now carries the platform's own
+   list of files the child wrote (`taskResultWithWrites`), and says plainly when it wrote none.
+6. **🔴 The journey check stopped the dev server.** The journey script contains `'vite-error-overlay'`, so
+   `isLongRunningCommand` classified the whole command as a Vite dev-server START: its output went into the
+   dev server's log (the report quoted `NBAI_JOURNEY {…}` as the dev server's "last words"), the preview port
+   was stopped, and every journey came back "none of the form fields were present". **This is the "dev server
+   died between the first render and the runtime check" recorded OPEN twice before.** Heredoc bodies are now
+   removed before any command is classified (`withoutHeredocBodies`) — which also covers an agent writing a
+   README that says "npm run dev".
+Plus: a UPI **payment method** no longer makes an expense tracker "fintech" (its build prompt had been told to
+include KYC, 2FA and fraud checks).
+
+**Still OPEN (recorded, not fixed here):**
+- **First-read race:** the architect's first reads of src/App.tsx, src/index.css, src/main.tsx failed "does not
+  exist" at +35 s and the files were there at +43 s (warm sandbox, 0 durable files). Something writes the
+  scaffold after the build's first tool call. ~8 s and 3 TOOL_ERRORs; cause not yet traced.
+- **Post-build passes refused by Green Freeze:** after settle, writes to `playwright.config.ts`, test files,
+  `docs/decisions/ADR-001.md`, `index.html`, `public/manifest.webmanifest`, `robots.txt`, `icon.svg`, `sw.js`
+  were all refused (no pass name). Tests and the PWA shell never land, so "No tests at all" is permanent. Needs a
+  decision: run those passes BEFORE the latch, or allow them on the freeze list with verify-after-fix.
+- **My own #3285 complex fast-lane budget is inert by default:** a complex build opens on a reasoning rung
+  (Weak/Normal → kimi-k2.7-code via COMPLEX_TO_KIMI; Strong → glm-5.3), and FASTLANE_REASONING_GATE then skips
+  the fast lane — so the 480 s complex budget never runs. Not harmful (build 1 finished in 4.8 min on the full
+  builder), but it is dead code until one of the two rules changes.
+- **BottomNav rewritten 3×** chasing `Screen` not exported from App.tsx — a type only the later App.tsx
+  rewrite could provide. The full builder has no contract file (the fast lane does since 2026-09-17).
+- **Build 1 `PREVIEW_SNAPSHOT_STALE` while `POST_GREEN_WRITES` saw no writer** — something changed a file after
+  the copy without passing the freeze observer. Unknown.
 ## 2026-09-25 — Exam mode Settings: the paper's language and an optional timer
 
 Admin asked (Teacher AI → Exam mode) for a Settings button at the right of the Exam mode header with:

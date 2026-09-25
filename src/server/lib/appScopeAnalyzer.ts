@@ -16,7 +16,7 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
-import { countEnumeratedFeatures } from '../AgentV3/enumeratedFeatures';
+import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from '../AgentV3/enumeratedFeatures';
 
 export type AppSize = 'small' | 'large';
 
@@ -84,7 +84,14 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
  * and hands the build a roadmap for the wrong app.
  */
 const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+)?$/i;
-const TOOL_AFTER = /^[\s/]*(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|channel|bot|webhook|ads)\b/i;
+// 🔴 CONTENT FROM A PRODUCT IS NOT THE PRODUCT (autopsy Study-Racer, 2026-09-25). "mai isme notes,
+// youtube video ka link dalunga" — I will paste YouTube video links into it — was classed
+// *"LARGE — clone of YouTube"* while the complexity router scored the same prompt 15 ("simple"). The
+// planner then cut the user's own core ask (their notes, their YouTube links) into roadmap steps 2 and
+// 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
+// playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
+// link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
+const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages)\b/i;
 
 export function namesAsProduct(text: string, re: RegExp): boolean {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
@@ -110,7 +117,13 @@ const HEAVY_INFRA: Array<{ label: string; re: RegExp }> = [
 ];
 
 /** Single-purpose things that are almost always small, buildable one-shot — used only to KEEP the default. */
-const CLEARLY_SMALL = /\b(calculator|to-?do|todo|task list|timer|stopwatch|counter|quiz|flash ?card|converter|unit convert|weather|clock|notepad|notes app|landing page|portfolio|resume|cv\b|one-?page|business card|invoice|form|survey|poll|tracker|habit|budget|expense|dictionary|recipe|menu card|qr code|password|pomodoro)\b/i;
+//
+// 🔴 PLURALS (autopsy 2a7fa4b0, 2026-09-25): every word here matched only in the SINGULAR, so "app to
+// add expenses" was not a small app while "app to add expense" was — and people name what an app
+// holds in the plural. The plural only widens the hint, which only SUPPRESSES escalation, so it is
+// held back wherever big software is named (`BIG_SOFTWARE_NOUN`): "an ERP with invoices and forms"
+// is still an ERP.
+const CLEARLY_SMALL = /\b(?:calculator|to-?do|todo|task list|timer|stopwatch|counter|quiz(?:zes)?|flash ?card|converter|unit convert|weather|clock|notepad|notes app|landing page|portfolio|resume|cv|one-?page|business card|invoice|form|survey|poll|tracker|habit|budget|expense|dictionar(?:y|ies)|recipe|menu card|qr code|password|pomodoro)s?\b/i;
 
 /**
  * Count roughly how many DISTINCT features a prompt asks for — a huge multi-feature spec (often an
@@ -148,7 +161,7 @@ export function analyzeAppScope(prompt: string): AppScope {
   const famous = FAMOUS_APPS.find((f) => namesAsProduct(text, f.re));
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(text));
   const feats = featureCount(text);
-  const smallHint = CLEARLY_SMALL.test(text);
+  const smallHint = CLEARLY_SMALL.test(text) && !BIG_SOFTWARE_NOUN.test(text);
 
   if (famous) signals.push(`asks to clone ${famous.name}`);
   for (const h of heavy) signals.push(`needs ${h.label}`);

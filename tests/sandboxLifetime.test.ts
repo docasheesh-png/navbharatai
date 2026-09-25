@@ -215,7 +215,7 @@ describe('wiring — the saved copy is raised by the route, cleared by every wri
     const call = block.slice(block.indexOf('snapshotConfirmation({'));
     const args = call.slice(0, call.indexOf('});'));
     expect(args).toContain('taken: snapshotTaken');
-    expect(args).toContain('persistedHash: workspaceContentHash(persisted)');
+    expect(args).toContain('persistedHash: workspaceContentHash(identitySource(persisted))');
     // The durable stamp and the event carry the SAME instant, so the door and the frame agree.
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, snapshotTaken.url, at, snapshotTaken.filesHash)');
     expect(block).toContain("events.emit({ type: 'snapshot', url: snapshotTaken.url, at, note: SNAPSHOT_IDLE_NOTE, ts: at })");

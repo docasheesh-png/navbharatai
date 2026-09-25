@@ -64,6 +64,18 @@ export interface MultiProviderOptions {
    */
   onProviderBenched?: (family: string, reason: string) => void;
   /**
+   * THE BENCH MEMORY, owned by the CALLER so it spans every runner of one build (autopsy Study-Racer,
+   * 2026-09-25). `PROVIDER_BENCHED` says "benched for the rest of this build" — and the state behind
+   * it was a set of locals inside THIS function, i.e. per RUNNER INSTANCE. A build constructs several:
+   * the fast lane's text runner, the architect's chain, every heal runner. So GLM was benched in the
+   * fast lane at 41 s of crawl, and two minutes later the architect's own runner — which had never
+   * heard of it — called the same rung and crawled another 15 s before benching it again. Both lines
+   * said "for the rest of this build", and 56 s of provider time was wasted on a verdict the build had
+   * already reached. Same class as `deadRungs` above, same cure: the caller hands one registry to
+   * every runner it builds. Omitted ⇒ a private registry, exactly today's behaviour.
+   */
+  bench?: BuildBenchRegistry;
+  /**
    * One attempt produced NOTHING, and this is what it cost in wall clock.
    *
    * Measurement only (autopsy 21b431e1): the bench's trigger is a COUNT of consecutive timeouts and
@@ -540,6 +552,37 @@ export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCoold
  * succeeds. The final entry is the guaranteed backstop — keep Claude last. Throws only if
  * EVERY runner (including the backstop) fails.
  */
+/**
+ * Everything a build has learned about which engines to stop calling — see `MultiProviderOptions.bench`.
+ * One per BUILD, shared by every runner the build constructs, so a verdict reached in one lane holds in
+ * the next. A fresh one is exactly the memory a lone runner used to keep for itself.
+ */
+export interface BuildBenchRegistry {
+  /** provider FAMILY (reportAs ?? name) → consecutive timeout count */
+  timeoutStreak: Map<string, number>;
+  /** Families announced as benched after consecutive timeouts (announced once). */
+  benchedFamilies: Set<string>;
+  /** family::model → throughput samples (slowRungBench.ts) */
+  slowRungs: Map<string, SlowRungState>;
+  /** family::model rungs retired for being too slow. */
+  slowBenched: Set<string>;
+  /** Rungs judged slow but KEPT (the last engine) — remembered only so the report says it once. */
+  slowKeptAnyway: Set<string>;
+  /** One slow-stream abandon per BUILD — see `canAbandonSlowStream` for why it is capped. */
+  abandonedSlowRung: boolean;
+}
+
+export function createBuildBenchRegistry(): BuildBenchRegistry {
+  return {
+    timeoutStreak: new Map(),
+    benchedFamilies: new Set(),
+    slowRungs: new Map(),
+    slowBenched: new Set(),
+    slowKeptAnyway: new Set(),
+    abandonedSlowRung: false,
+  };
+}
+
 export function makeMultiProviderTurnRunner(
   chain: NamedRunner[],
   opts: MultiProviderOptions = {},
@@ -606,8 +649,11 @@ export function makeMultiProviderTurnRunner(
    *
    * The 429 streak stays per KEY on purpose — a per-key quota genuinely differs between keys.
    */
-  const timeoutStreak = new Map<string, number>(); // provider FAMILY (reportAs ?? name) → consecutive timeout count
-  const benchedFamilies = new Set<string>();
+  // Caller-owned when the bench must outlive this instance (one registry per BUILD — see
+  // MultiProviderOptions.bench); otherwise private to this runner, exactly as before.
+  const bench = opts.bench ?? createBuildBenchRegistry();
+  const timeoutStreak = bench.timeoutStreak; // provider FAMILY (reportAs ?? name) → consecutive timeout count
+  const benchedFamilies = bench.benchedFamilies;
   const rateLimitStreak = new Map<string, number>(); // name → consecutive 429 count
   const TIMEOUT_BENCH_AFTER = 2;
   const RATE_LIMIT_BENCH_AFTER = 2; // 2 consecutive 429s → stop hammering a throttled provider this run
@@ -644,12 +690,11 @@ export function makeMultiProviderTurnRunner(
    *     weak ladder. Keying on family alone would retire a healthy rung the build may still need.
    */
   const slowKeyFor = (entry: NamedRunner): string => `${entry.reportAs ?? entry.name}::${entry.modelId ?? ''}`;
-  const slowRungs = new Map<string, SlowRungState>();
-  const slowBenched = new Set<string>();
-  // One slow-stream abandon per build — see `canAbandonSlowStream` for why it is capped.
-  let abandonedSlowRung = false;
+  const slowRungs = bench.slowRungs;
+  const slowBenched = bench.slowBenched;
+  // One slow-stream abandon per BUILD (on the shared registry) — see `canAbandonSlowStream`.
   /** Rungs judged slow but KEPT (the last engine). Remembered only so the report says it once. */
-  const slowKeptAnyway = new Set<string>();
+  const slowKeptAnyway = bench.slowKeptAnyway;
   const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
@@ -714,7 +759,7 @@ export function makeMultiProviderTurnRunner(
            *    whole ladder and failing. That caps the total cost of this guard at ONE abandoned
            *    call, however bad the weather is at every vendor.
            */
-          const canAbandonSlowStream = () => !abandonedSlowRung && i + 1 < chain.length;
+          const canAbandonSlowStream = () => !bench.abandonedSlowRung && i + 1 < chain.length;
           // A rung measured to reason before every answer is never asked for less than it needs to
           // BEGIN one — see reasoningAsk.ts. The retirement above stops a starved model being re-proved
           // on fifty keys; this stops it starving in the first place, when the ask came from a call site
@@ -845,7 +890,7 @@ export function makeMultiProviderTurnRunner(
             if (kind) opts.onAttemptWasted?.(reportName, kind, Math.max(0, now() - attemptStartedAt));
           } catch { /* telemetry only — it must never replace the error below */ }
           if (isSlowStreamAbandon(err)) {
-            abandonedSlowRung = true;
+            bench.abandonedSlowRung = true;
             try {
               const slowKey = slowKeyFor(chain[i]);
               if (!slowBenched.has(slowKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {

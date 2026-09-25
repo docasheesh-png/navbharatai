@@ -4959,6 +4959,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   : `$${(state.billedUsd as number).toFixed(4)}`}
               </div>
             )}
+            {/* THE BUILD DISCOUNT (admin 2026-09-25: "green colour me likh kar aye, discount!!") — shown
+                OUTSIDE the fold, because a discount the user has to open a panel to find is not one
+                they will ever see. Rendered only when something was really taken off. */}
+            {state.done && (state.costBreakdown?.discountInr ?? 0) > 0 && (state.costBreakdown?.discountPct ?? 0) > 0 && (
+              <div className="basis-full text-[11px] font-semibold text-success" data-testid="build-discount-line">
+                Build price ₹{(state.costBreakdown?.listInr ?? 0).toFixed(2)} · Discount {state.costBreakdown?.discountPct}% (−₹{(state.costBreakdown?.discountInr ?? 0).toFixed(2)}) · You pay ₹{(state.costBreakdown?.billedInr ?? 0).toFixed(2)}
+              </div>
+            )}
             {/* T1-cost-transparency — expandable "why this build cost ₹X" breakdown. */}
             {state.done && state.costBreakdown && (
               <details className="text-[11px] text-faint">
@@ -4978,6 +4986,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         : `${state.costBreakdown.livePreviewSeconds ?? 0} sec`} · ₹{state.costBreakdown.livePreviewInr.toFixed(2)}
                       <span className="text-faint"> · in-browser preview is free</span>
                     </span>
+                  )}
+                  {(state.costBreakdown.discountInr ?? 0) > 0 && (state.costBreakdown.discountPct ?? 0) > 0 && (
+                    <>
+                      <span>Build price: ₹{(state.costBreakdown.listInr ?? 0).toFixed(2)}</span>
+                      <span className="text-success">Discount {state.costBreakdown.discountPct}%: −₹{(state.costBreakdown.discountInr ?? 0).toFixed(2)}</span>
+                    </>
                   )}
                   <span>Total: ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
                 </div>

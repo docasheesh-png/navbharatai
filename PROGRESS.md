@@ -81375,6 +81375,37 @@ either for the whole paper (default) or per question, with the two behaviours sp
 - Verified in Chromium with a mocked paper and a fake clock (both timer shapes, reload persistence,
   timer off). Tests: `tests/examSettingsTimerAndLanguage.test.ts`.
 
+## 2026-09-25 — Build discount: one % the admin sets, taken off every charged build
+
+Admin asked for a discount to attract users: *"agar admin discount = 0% (default) set kar to abhi jaise
+chal raha hai … agar yy% fix kar de to, har build me likh kar aye … green colour me"*, set from the admin
+panel (option b).
+
+- **`src/server/lib/buildDiscount.ts`** holds the pure rule (`normalizeDiscountPct`, `applyBuildDiscount`)
+  and the stored setting (`platform_settings/build_discount`, cached for 60 s, bounded read).
+- **The three rules:**
+  - 0% (and anything unreadable, or a read that fails or hangs) is today's bill exactly.
+  - The bill never goes below our real cost (tokens + VM). A bill already at cost (the preview waiver, a
+    stopped build on its floor) gets nothing.
+  - The % shown is the % applied, rounded down. The configured one is 0–50.
+- **Applied last, on BOTH settle paths** (normal settle + the Fix-67 deadline finalizer), after every zeroing
+  rule and before the cost record and the wallet debit.
+- **Report line:** admin-only `BUILD_DISCOUNT`.
+- **Admin side:** `GET/POST /api/admin/build-discount`, and the "Build discount" card on Build Reports.
+- **What the user sees:**
+  - A green line under the result: "Build price ₹X · Discount Y% (−₹Z) · You pay ₹W".
+  - The same line in the closing message. It is in the message because the bundled phone app only shows
+    the new panel line after its next release, while the message text reaches it now.
+  - The breakdown's allowlist gained `listInr` / `discountInr` / `discountPct`, all 0 when there is no
+    discount.
+- **Not discounted:** chat, Professionals, Doctor AI and the tools.
+- **Tests:** `tests/aBuildDiscountIsRealAndNeverBelowCost.test.ts`, reversion-proven (floor removed in the pure
+  rule ⇒ 3 fail; floor removed at the settle ⇒ 1 fails). Pinned call-site strings in `livePreviewCharge` /
+  `sandboxBilling` / `userCostBreakdown` were extended, not weakened.
+- **Found while answering "are we overcharging?":** plan-step tokens are priced at the Sonnet rate as the
+  unattributed remainder. This is already owned by open PR #3308 (item 2), so it is not duplicated here.
+- **Still open:** the judge's (reviewer's) tokens do not appear to reach the billing sink at all, so
+  NavBharatAI absorbs them. Unverified, and a billing decision for the admin.
 ## 2026-09-25 — Autopsy 2a7fa4b0 follow-up: the open items, closed at the root (admin: "sabhi problem root cause se fix huye? agar nahi to karo")
 
 Honest status first: #3306 fixed six root causes and left five OPEN. This entry closes three, hands one to

@@ -320,6 +320,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
+import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION } from '../AgentV3/projectPlannerBudget';
 import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
@@ -1613,6 +1614,15 @@ export interface UserCostBreakdown {
    */
   livePreviewSeconds: number;
   livePreviewInr: number;
+  /**
+   * THE BUILD DISCOUNT (admin 2026-09-25) — the admin-set percentage taken off this build, shown in
+   * green under a discounted build (`buildDiscount.ts`). All three are 0 when nothing was taken off,
+   * so a 0% build carries exactly the numbers it always did. `listInr` is the price BEFORE the
+   * discount — the bill every other rule decided — never our cost, which stays admin-only.
+   */
+  listInr: number;
+  discountInr: number;
+  discountPct: number;
 }
 
 const POWER_TIER_DISPLAY: Record<string, string> = {
@@ -1631,6 +1641,11 @@ export function userCostBreakdown(
    * the truthful outcome when the charge is off, unrated, or the build never held a live server.
    */
   livePreview?: { seconds: number; usd: number } | null,
+  /**
+   * The discount decided for this build (`applyBuildDiscount`) — `billedUsd` above is already the
+   * amount AFTER it. Omitted or with nothing taken off ⇒ the three discount fields are 0.
+   */
+  discount?: Pick<BuildDiscount, 'listUsd' | 'discountUsd' | 'pctApplied'> | null,
 ): UserCostBreakdown {
   const key = powerLevel === true ? 'medium' : powerLevel === false ? 'off' : String(powerLevel);
   const lpSeconds = Math.max(0, Math.round(Number(livePreview?.seconds) || 0));
@@ -1647,6 +1662,23 @@ export function userCostBreakdown(
     // teaches the user to stop reading the breakdown, and the whole point of it is to be read.
     livePreviewSeconds: lpUsd > 0 ? lpSeconds : 0,
     livePreviewInr: lpUsd > 0 ? Math.round(lpUsd * Math.max(0, rate) * 100) / 100 : 0,
+    ...discountFields(discount, rate),
+  };
+}
+
+/** The three user-facing discount numbers, in ₹, or zeros when nothing was taken off. PURE. */
+function discountFields(
+  discount: Pick<BuildDiscount, 'listUsd' | 'discountUsd' | 'pctApplied'> | null | undefined,
+  rate: number,
+): Pick<UserCostBreakdown, 'listInr' | 'discountInr' | 'discountPct'> {
+  const r = Math.max(0, rate);
+  if (!discount || !(discount.discountUsd > 0) || !(discount.pctApplied > 0)) {
+    return { listInr: 0, discountInr: 0, discountPct: 0 };
+  }
+  return {
+    listInr: Math.round(discount.listUsd * r * 100) / 100,
+    discountInr: Math.round(discount.discountUsd * r * 100) / 100,
+    discountPct: discount.pctApplied,
   };
 }
 
@@ -11825,6 +11857,8 @@ async function noteBuildOutcome(
       // Measured OUTSIDE the try, because the user-facing breakdown below needs the same pair the bill
       // used — a second measurement taken later would count different seconds.
       let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
+      // The discount this path decided, carried to the user-facing breakdown below.
+      let watchdogDiscount: BuildDiscount | null = null;
       if (ok && billingCtx.providerLedger) {
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
@@ -11850,6 +11884,29 @@ async function noteBuildOutcome(
               phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
               message: wdMarkup.reason, autoResolved: true,
             });
+          }
+          // THE BUILD DISCOUNT — on this path too, for the reason Fix 67 exists: a rule on only one of
+          // the two paths that settle a build is a rule a long build escapes. Same floor, same order.
+          if (watchdogBilledUsd > 0) {
+            const setting = await buildDiscountStore.readWithin();
+            if (setting.pct > 0) {
+              const d = applyBuildDiscount({
+                billedUsd: watchdogBilledUsd,
+                floorUsd: decided.realCostUsd + decided.sandboxUsd,
+                pct: setting.pct,
+              });
+              if (d.discountUsd > 0) {
+                watchdogDiscount = d;
+                watchdogBilledUsd = d.payUsd;
+              }
+              buildDiagRef?.record({
+                phase: 'build', severity: 'info', code: 'BUILD_DISCOUNT', autoResolved: true,
+                message: d.discountUsd > 0
+                  ? `Build discount ${d.pctApplied}% applied: ₹${(d.listUsd * usdInrRate()).toFixed(2)} → ₹${(d.payUsd * usdInrRate()).toFixed(2)}`
+                    + (d.flooredAtCost ? ` (configured ${d.pctConfigured}%, stopped at our real cost)` : '')
+                  : `Build discount ${d.pctConfigured}% not applied — this bill was already at our real cost`,
+              });
+            }
           }
           recordBuildTelemetryOnce({
             ok,
@@ -11981,10 +12038,18 @@ async function noteBuildOutcome(
         }
         const billedInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
         const watchdogCostBreakdown = watchdogBilledUsd > 0
-          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview)
+          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview, watchdogDiscount)
           : null;
         const watchdogLine = watchdogCostBreakdown ? livePreviewChargeLine(watchdogCostBreakdown) : '';
-        const watchdogSummary = [buildResultRef.summary || 'Built your app — your files are saved.', watchdogLine].filter(Boolean).join('\n\n');
+        const watchdogDiscountLine = watchdogCostBreakdown ? buildDiscountLine({
+          listInr: watchdogCostBreakdown.listInr, discountInr: watchdogCostBreakdown.discountInr,
+          payInr: watchdogCostBreakdown.billedInr, pct: watchdogCostBreakdown.discountPct,
+        }) : '';
+        const watchdogSummary = [
+          buildResultRef.summary || 'Built your app — your files are saved.',
+          watchdogLine,
+          watchdogDiscountLine ? `🟢 ${watchdogDiscountLine}` : '',
+        ].filter(Boolean).join('\n\n');
         emit({ type: 'result', ok: true, summary: watchdogSummary, steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
         void notifyBuildComplete(userId, true);
       } else {
@@ -21607,6 +21672,36 @@ async function noteBuildOutcome(
         }
       }
 
+      // THE BUILD DISCOUNT (admin 2026-09-25, `buildDiscount.ts`) — applied LAST, to the bill every
+      // rule above decided, so a zeroed build stays zero and nothing below it is ever discounted twice.
+      // 🔒 Never below what the build really cost us: a bill already at cost (the preview waiver, a
+      // stopped build on its floor) carries no margin to give away and is left exactly as it is. A
+      // setting that cannot be read in time is 0% — the ordinary price, never a guess.
+      let buildDiscount: BuildDiscount | null = null;
+      if (effectiveBilledUsd > 0) {
+        try {
+          const setting = await buildDiscountStore.readWithin();
+          if (setting.pct > 0) {
+            const d = applyBuildDiscount({
+              billedUsd: effectiveBilledUsd,
+              floorUsd: decidedRealCostUsd + decidedSandboxUsd,
+              pct: setting.pct,
+            });
+            if (d.discountUsd > 0) {
+              buildDiscount = d;
+              effectiveBilledUsd = d.payUsd;
+            }
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'BUILD_DISCOUNT', autoResolved: true,
+              message: d.discountUsd > 0
+                ? `Build discount ${d.pctApplied}% applied: ₹${(d.listUsd * usdInrRate()).toFixed(2)} → ₹${(d.payUsd * usdInrRate()).toFixed(2)}`
+                  + (d.flooredAtCost ? ` (configured ${d.pctConfigured}%, stopped at our real cost)` : '')
+                : `Build discount ${d.pctConfigured}% not applied — this bill was already at our real cost`,
+            });
+          }
+        } catch { /* a discount that cannot be decided is no discount — the ordinary price stands */ }
+      }
+
       // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
       // waiver's explanation be true, and only if the waived amount is still what the user pays:
       // a later rule that zeroed the bill has already said why in its own words.
@@ -22195,7 +22290,7 @@ async function noteBuildOutcome(
       // consistent shape for every tier, so the client render can never crash on a per-tier mismatch.
       const costBreakdown = effectiveBilledUsd <= 0
         ? null
-        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge);
+        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge, buildDiscount);
       // THE CHARGE, IN THE MESSAGE THAT SAYS THE APP IS READY (admin 2026-08-22). It rides on the
       // summary rather than only the breakdown panel because a charge the user finds afterwards, folded
       // into one total, reads as a deduction no matter how correct it is. Only on a SUCCESSFUL build —
@@ -22229,6 +22324,15 @@ async function noteBuildOutcome(
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };
+      }
+      // The discount rides in the message as well as the green panel line: the installed phone app is
+      // BUNDLED, so a panel change reaches it only with a new release, while this text reaches it now.
+      const discountLine = costBreakdown && result.ok ? buildDiscountLine({
+        listInr: costBreakdown.listInr, discountInr: costBreakdown.discountInr,
+        payInr: costBreakdown.billedInr, pct: costBreakdown.discountPct,
+      }) : '';
+      if (discountLine && typeof result.summary === 'string') {
+        result = { ...result, summary: `${result.summary}\n\n🟢 ${discountLine}` };
       }
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
       // tier (the free engine, or a paid user who picked Weak) for a reason that is genuinely about the

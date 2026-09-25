@@ -38,7 +38,7 @@
  */
 import { robustTscCommand } from './tscCommand';
 import type { TscError } from './EndgameRepair';
-import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
 /** The ONE cache every in-build typecheck shares (endgame, `typecheck` tool, this). Ephemeral, never durable. */
 export const WRITE_TYPECHECK_TSBUILDINFO = '/tmp/agentv3.tsbuildinfo';
@@ -98,12 +98,28 @@ export function writeTypecheckNote(
   if (own.length === 0 && others.length === 0) return '';
   const files = written.map(normalizePath).join(', ');
   const parts: string[] = [];
-  if (own.length > 0) {
-    const quoted = own.slice(0, MAX_OWN_ERRORS_QUOTED).map(fmt);
-    const more = own.length > MAX_OWN_ERRORS_QUOTED ? `\n…and ${own.length - MAX_OWN_ERRORS_QUOTED} more in the same file(s).` : '';
+  // 🔴 AN ERROR IN THIS FILE IS NOT ALWAYS AN ERROR OF THIS FILE (autopsy 2a7fa4b0). `BottomNav.tsx`
+  // imported `Screen` from `../App` before App.tsx was rewritten to export it, and this note told the
+  // model to fix it "before writing the next file" — when the next file WAS the fix. It rewrote BottomNav
+  // three times. An error whose remedy lives in another file is now said to wait on that file, by name.
+  const waiting = own.filter((e) => remedyFileFor(e, sources) !== null);
+  const fixHere = own.filter((e) => remedyFileFor(e, sources) === null);
+  if (fixHere.length > 0) {
+    const quoted = fixHere.slice(0, MAX_OWN_ERRORS_QUOTED).map(fmt);
+    const more = fixHere.length > MAX_OWN_ERRORS_QUOTED ? `\n…and ${fixHere.length - MAX_OWN_ERRORS_QUOTED} more in the same file(s).` : '';
     parts.push(
-      `⛔ TYPECHECK after this write: ${own.length} error(s) in ${files} — fix them NOW, in this turn, before writing the next file `
+      `⛔ TYPECHECK after this write: ${fixHere.length} error(s) in ${files} — fix them NOW, in this turn, before writing the next file `
       + `(the production build fails until they are gone):\n${quoted.join('\n')}${more}`,
+    );
+  }
+  if (waiting.length > 0) {
+    const targets = [...new Set(waiting.map((e) => remedyFileFor(e, sources) as string))];
+    const quoted = waiting.slice(0, MAX_OWN_ERRORS_QUOTED).map(fmt);
+    const more = waiting.length > MAX_OWN_ERRORS_QUOTED ? `\n…and ${waiting.length - MAX_OWN_ERRORS_QUOTED} more.` : '';
+    parts.push(
+      `⏳ TYPECHECK after this write: ${waiting.length} error(s) in ${files} are fixed in ANOTHER file — ${targets.join(', ')} — `
+      + `not in ${files}. Do NOT rewrite ${files} for them; write or update ${targets.join(', ')} next `
+      + `(the production build fails until you do):\n${quoted.join('\n')}${more}`,
     );
   }
   if (others.length > 0) {

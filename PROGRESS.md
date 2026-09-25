@@ -81205,22 +81205,93 @@ and that is the same defect in two subsystems written four months apart.
    each subsystem re-deriving it. Deliberately not built in this change: it touches the retry, the
    settle flip, the upsell, `runProvenApp` and the release gate at once, and the reported harm is
    fixed without it. **The next autopsy that finds a third reader of this question should build it.**
-2. **`WRITE_TIME_TYPECHECK` is recorded BEFORE the retry decision** (`routes/agentv3.ts` ~16601, the
-   retry at ~16645), so on any retried build the line describes the abandoned first attempt. **The
-   fourth time that one sentence has been wrong, and the third distinct cause** — the 2026-09-22 fix
-   made its *evidence* right and left its *timing* wrong. Not moved here because whether the retry
-   runner shares the first dispatcher (and therefore its stats) is untraced; moving it blind would
-   produce a different false line. Trace that first.
+2. ✅ **CLOSED the same day — `WRITE_TIME_TYPECHECK` is recorded AFTER the retry.** This item said the
+   trace was missing ("whether the retry runner shares the first dispatcher is untraced; moving it
+   blind would produce a different false line"). The trace was then done: there is exactly ONE build
+   `ToolDispatcher` (`routes/agentv3.ts`), it is carried in `baseRunnerOpts`, and the retry runner
+   spreads that object without overriding it — so the counters are **cumulative across both
+   attempts** and reading them after the retry is the only reading that describes the build the user
+   was given. The record moved below the retry block. Test-locked and reversion-proven in
+   `tests/theCounterWatchedOneLaneOfTwo.test.ts` (the premise is pinned too: a retry that ever gains
+   its own dispatcher fails CI rather than silently making the position wrong again).
 3. **Green Freeze refuses test files, then the release gate marks the build down for having no
    tests.** Nine deferrals in this build, three of them the engine's own `*.test.ts`. A test file
    cannot break a rendering app, but widening a safety system needs its own evidence and sign-off.
+   🔴 **AND THE EVIDENCE IS NOW IN, AND IT IS WORSE THAN THIS ITEM SAYS** — traced from code the same
+   day, not from the report: the green latch is set at `routes/agentv3.ts` ~18538/~18601 (the moment a
+   real browser confirms the render), and BOTH deterministic post-build passes — the starter-test
+   scaffold (~21870) and the U-2 production defaults: manifest, icon, robots.txt, service worker and
+   the index.html meta patch (~22010) — run AFTER it, outside any `runInPass`. So `currentPass()` is
+   `null`, every write is refused, and each refusal is swallowed by its own `catch`. **On every build
+   whose preview is verified in a real browser, the launch basics `AppKnowledgeBase.ts` promises
+   "BY DEFAULT after each build" do not happen at all.** The report's nine deferrals and its
+   "No tests at all" warning are one defect seen from two ends.
+   ✅ **CLOSED the same day.** Both passes now NAME themselves (`runInPass('starter-tests', …)`,
+   `runInPass('production-defaults', …)`) and Green Freeze gains a third tier between "allowlisted"
+   and "denied": `CREATE_ONLY_PASSES` — a pass that may write a path **only if that path was absent
+   from the green snapshot**, which the latch already records exactly. A file that did not exist when
+   the browser rendered the app cannot have been part of what rendered, so creating it cannot change
+   the render; overwriting one that DID exist is precisely what the freeze is for.
+   🔒 **Strictly narrower than the carve-out removed by the 2026-08-12 adversarial review**, which let
+   ANY pass — including a model-driven one — create files, so a coordinated change half-applied. These
+   two are deterministic and idempotent, already skip any path that exists, and are additionally
+   refused every `.env` by construction.
+   ⚠️ **The honest consequence, stated rather than hidden:** the U-2 index.html patch is still refused
+   on a green app, so the manifest and the service worker land but are not linked and are inert. The
+   narration used to announce them regardless (*"+ a web manifest, icon, robots.txt and an offline
+   service worker"*) — it now reports only what actually landed, which is the second absolute rule
+   applied to a sentence. Test-locked and **reversion-proven three ways** in
+   `tests/theLaunchBasicsNeverHappened.test.ts` (11 cases): drop the create-only branch, unname either
+   pass, or promote either to the full allowlist, and it fails.
 4. **`PREVIEW_SERVER_DOWN`** — the dev server died, was restarted, and died again (502). Its last
    output before stopping was the journey script's own `NBAI_JOURNEY` line. Whether the journey run
    is implicated is unproven; recorded rather than asserted.
-5. **The requirement-gap analyzer fired on a question.** `REQUIREMENT_GAPS` detected domain=social
-   and injected auth, realtime, notifications, moderation and media upload — five features into an
-   app the user never ordered. Its own rule says it fires on "a new build"; a question is not one.
-   Fixing it belongs with item 1, since it needs the same answer.
+   ⚠️ **HALF-CLOSED the same day, and the half that closed is the one that was actionable.** The
+   first draft of this item said *"nothing in the platform captures the dev server's own last output"*
+   — **that was wrong, and re-grepping is what caught it**: `devServerDeathEvidence.ts` has read the
+   log's tail since 2026-09-23 (autopsy ac41a924). 🔴 **It was wired on the WRONG BRANCH.** Both
+   preview loops read it one line before a RESTART, and when the server would not stay up and the
+   loop finally recorded `PREVIEW_SERVER_DOWN` they recorded the restart COUNT and nothing about the
+   cause. So the platform could explain a death it recovered from and **not the one it gave up on** —
+   exactly backwards, since the give-up is the only one a human has to act on, and this report's
+   unexplained line is precisely that. Both give-ups now read it too (siblings hunted, rule 3), the
+   8 s bound moved INTO the module so the four sites cannot drift, and ONE sentence
+   (`devServerLastWordsDetail`) serves all four. ⚠️ The log at give-up is **not** stale — it holds the
+   LAST restart's output, i.e. the death that ended the loop, which is why it reads again rather than
+   reusing the earlier string. Reversion-proven in `tests/theDevServerIsAskedWhyItStopped.test.ts`.
+   🔴 **STILL OPEN, and not guessed at:** WHY the server died is now recordable but still unknown —
+   the next report carrying `PREVIEW_SERVER_DOWN` is the first one that can answer it. A fix aimed at
+   the `NBAI_JOURNEY` correlation before that evidence exists would be a guess.
+5. ✅ **CLOSED the same day — and it was TWO independent defects, either of which alone still produced
+   the wrong verdict.** The prompt was *"As in if we do have done a chat now, and if we don't have a
+   chat in next 2 hours can you send a message to initiate the chat again"*.
+   - **The question was never SEEN.** `CLAUSE_BOUNDARY` is `[.!?;।\n]+` — a comma is deliberately not
+     a boundary, because splitting on commas would cut ordinary build orders in half — so the whole
+     run-on sentence was ONE clause, `AUX_ASKS_US` was `^`-anchored to it, and the "can you" sitting
+     in the middle was invisible. `readsAsQuestion` returned **false**. 🔑 **The third time this exact
+     anchor has cost a build**: `MIDSENTENCE_KYA_QUESTION` was unanchored on 2026-09-16 because
+     *"Hindi places its question particle anywhere in the sentence"*, and the English WH-openers were
+     made per-CLAUSE on 2026-09-17 after the identical failure in production the next day. **English
+     places a polite question anywhere too.** `AUX_ASKS_US` is now unanchored, which subsumes the
+     opener test entirely; the auxiliary-plus-SUBJECT distinction is untouched, so "do it again" is
+     still an order.
+   - **Doubt was raised and then thrown away.** The `long-message` and `code-or-url` branches sit
+     BELOW the keyword ladder — reached only when no build verb matched at all, the weakest evidence
+     in the whole function — and both returned HIGH **unconditionally**, ignoring the `doubt` computed
+     three lines above. So a question about whether NavBharatAI can send a message hard-locked to
+     `new_build` on nothing but 128 characters, the intention reader never ran, and
+     `userAskedForAnAppToBeBuilt` (which requires HIGH) then said TRUE and let the domain guidance
+     through. ⚠️ This is **not** a reversal of that function's standing rule that length is not a
+     doubt signal: length still creates no doubt, it merely may no longer CANCEL doubt the sentence's
+     own grammar already raised.
+   - **The INTENT is unchanged on every branch** — only the hard lock goes — so nothing regresses when
+     the intention reader is slow or down, and an ordinary long build prompt with no question and no
+     negation keeps its HIGH and pays nothing. Measured on the real prompt: `new_build/high` →
+     `new_build/low`, `userAskedForAnAppToBeBuilt` true → false, and the five-feature social-domain
+     guidance block → empty string.
+   - Test-locked and **reversion-proven in both halves** in `tests/questionReadsEveryClause.test.ts`
+     (24 cases), including a source-level guard on the anchor itself — re-anchoring the regex or
+     dropping either `doubt` fails CI.
 
 ## 2026-09-25 — Autopsy 2a7fa4b0 + ea07382a: an expense tracker was treated as a mega-app, and our own journey check stopped the dev server
 
@@ -81304,6 +81375,37 @@ either for the whole paper (default) or per question, with the two behaviours sp
 - Verified in Chromium with a mocked paper and a fake clock (both timer shapes, reload persistence,
   timer off). Tests: `tests/examSettingsTimerAndLanguage.test.ts`.
 
+## 2026-09-25 — Build discount: one % the admin sets, taken off every charged build
+
+Admin asked for a discount to attract users: *"agar admin discount = 0% (default) set kar to abhi jaise
+chal raha hai … agar yy% fix kar de to, har build me likh kar aye … green colour me"*, set from the admin
+panel (option b).
+
+- **`src/server/lib/buildDiscount.ts`** holds the pure rule (`normalizeDiscountPct`, `applyBuildDiscount`)
+  and the stored setting (`platform_settings/build_discount`, cached for 60 s, bounded read).
+- **The three rules:**
+  - 0% (and anything unreadable, or a read that fails or hangs) is today's bill exactly.
+  - The bill never goes below our real cost (tokens + VM). A bill already at cost (the preview waiver, a
+    stopped build on its floor) gets nothing.
+  - The % shown is the % applied, rounded down. The configured one is 0–50.
+- **Applied last, on BOTH settle paths** (normal settle + the Fix-67 deadline finalizer), after every zeroing
+  rule and before the cost record and the wallet debit.
+- **Report line:** admin-only `BUILD_DISCOUNT`.
+- **Admin side:** `GET/POST /api/admin/build-discount`, and the "Build discount" card on Build Reports.
+- **What the user sees:**
+  - A green line under the result: "Build price ₹X · Discount Y% (−₹Z) · You pay ₹W".
+  - The same line in the closing message. It is in the message because the bundled phone app only shows
+    the new panel line after its next release, while the message text reaches it now.
+  - The breakdown's allowlist gained `listInr` / `discountInr` / `discountPct`, all 0 when there is no
+    discount.
+- **Not discounted:** chat, Professionals, Doctor AI and the tools.
+- **Tests:** `tests/aBuildDiscountIsRealAndNeverBelowCost.test.ts`, reversion-proven (floor removed in the pure
+  rule ⇒ 3 fail; floor removed at the settle ⇒ 1 fails). Pinned call-site strings in `livePreviewCharge` /
+  `sandboxBilling` / `userCostBreakdown` were extended, not weakened.
+- **Found while answering "are we overcharging?":** plan-step tokens are priced at the Sonnet rate as the
+  unattributed remainder. This is already owned by open PR #3308 (item 2), so it is not duplicated here.
+- **Still open:** the judge's (reviewer's) tokens do not appear to reach the billing sink at all, so
+  NavBharatAI absorbs them. Unverified, and a billing decision for the admin.
 ## 2026-09-25 — Autopsy 2a7fa4b0 follow-up: the open items, closed at the root (admin: "sabhi problem root cause se fix huye? agar nahi to karo")
 
 Honest status first: #3306 fixed six root causes and left five OPEN. This entry closes three, hands one to
@@ -81387,3 +81489,38 @@ green latch** (option 1 of the 2026-09-25 entry above, which closes that ⏳ ite
   finishing passes (they are gated on `result.ok` at their new position) — before this change the freeze
   refused them on those builds anyway, so nothing regressed; (8) the claim audit's `filesWritten` now
   counts the platform's own files — it only ever raises a count that was already non-zero.
+## 2026-09-25 — Autopsy b9287f85 ("ek desi boyz naam ki ecom website"): a newsletter box is not a cart
+
+Weak tier, 8.7 min, ok, rendered in a real browser at 314 s, typecheck clean, production build OK, all
+6 routes rendered — and `RELEASE_GATE: RED — Not shippable — a real user journey failed`, twice.
+
+- ❌→✅ **JOURNEY_FAILED was OUR false finding.** `deriveJourneys` built a create-and-find-it journey
+  whenever a file had a form AND a `.map` list. Home had a NEWSLETTER form and a FEATURED PRODUCTS grid,
+  so the check typed an email, pressed Subscribe, and looked for the email among the products. Nothing
+  asked whether the form adds to that list. Now `formFeedsList` reads the form's own submit handler:
+  `yes` (builds/grows an array), `no` (only preventDefault / plain setters / toast / timeout), or
+  `unknown` (no handler found, or it calls something we cannot see into). Only a readable `no`
+  downgrades the journey to `form-submit`, which still fills, submits and fails on a crash. `unknown`
+  keeps today's create-persists, so no real persistence check is lost.
+- ❌→✅ **One form counted as two failures.** `App.tsx` imports `Home.tsx` and `formSourcesFor` looks one
+  level deep, so both pages derived the same newsletter journey. Journeys are now deduped by the FORM's
+  file.
+- Tests: `tests/theNewsletterIsNotACart.test.ts` (14), reversion-proven for both halves (removing the
+  `feeds` gate → 1 failure; removing the dedupe → 2).
+- ✔️ **Not a defect, recorded so nobody re-derives it:** `COMPLEXITY_ROUTING: COMPLEX (score 15, model)`.
+  "ecom" matches no scorer signal (`signalsMatchedNothing`), so a second opinion was bought as designed
+  (autopsy c6e4c6ff: "E commerce website" on the flash rung ran 26.7 min). It read complex, the build
+  opened on KIMI and never fell (`LADDER_DEPTH` rung 2). The fast lane was skipped because that rung
+  always reasons (#3278), also as designed. Keyword-widening was deliberately NOT done (RequestAnalyser's
+  own note).
+- ✔️ **Not a defect:** write-time typecheck `SANDBOX_CMD` lines read `exit ?`. `exitCode: null` is
+  deliberate (the output is piped through `head`, so the shell's code is not tsc's; the parser reads the
+  output).
+- ⏳ **Open, recorded rather than guessed at:** (1) Home's `LIST_WITHOUT_EMPTY_STATE` was flagged on a
+  featured-products grid derived from a static catalogue (`PRODUCTS.filter(...)`); `rendersDataList`
+  treats only an UPPER_CASE receiver as static, so a derived constant reads as user data, and the design
+  heal spent 83 s on it. Deciding "derived from a constant = cannot be empty" needs a data-flow rule;
+  not done here. (2) The lean suggest-only review timed out (45 s + grace, `REVIEW_INCOMPLETE`). (3)
+  `CartDrawer.tsx` was created and never mounted — a builder-output defect, reported by READINESS, not
+  healed. (4) ETA (basis heuristic, confidence 0.4) said ~2.9 min; the build took 8.7 min (3.0×). Not
+  investigated in this change.

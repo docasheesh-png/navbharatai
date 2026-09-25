@@ -156,3 +156,61 @@ describe('the wiring, and the premise it rests on', () => {
     expect(simple).not.toContain('writeTypecheckNote');
   });
 });
+
+/**
+ * 🔴 THE THIRD CAUSE OF THE SAME WRONG SENTENCE (autopsy e628efd4, 2026-09-25).
+ *
+ * Two lanes had already been hunted — a sub-agent with its own stats object (3ce8459b) and a fast
+ * lane that never touches them (above). This one is neither: the counters were right, and the line
+ * was recorded in the wrong PLACE. It sat above the empty-build retry, so on every build that
+ * retried, the admin report's `WRITE_TIME_TYPECHECK` described the ABANDONED first attempt while
+ * every other line in the same report described the build that shipped.
+ *
+ * `dispatcher` is a single instance, shared with the retry runner through `baseRunnerOpts`, so its
+ * counters accumulate across BOTH attempts. Reading them after the retry is therefore not a better
+ * sample of the same thing — it is the only reading that is about the build the user was given.
+ */
+describe('the line is about the build that shipped, not the one that was abandoned', () => {
+  const route = read('src/server/routes/agentv3.ts');
+
+  it('🔒 the record comes AFTER the empty-build retry has run', () => {
+    // Reversion guard, and it is the entire fix: move this record back above the retry and the
+    // sentence silently starts describing a discarded attempt again. No behavioural test can see
+    // that, because both positions produce a perfectly well-formed line.
+    const decision = route.indexOf('shouldRetryEmptyBuild({');
+    const retryRan = route.indexOf('[AGENTV3] empty-build Claude retry failed');
+    const record = route.indexOf("code: 'WRITE_TIME_TYPECHECK'");
+    expect(decision).toBeGreaterThan(-1);
+    expect(retryRan).toBeGreaterThan(decision);
+    expect(record).toBeGreaterThan(retryRan);
+  });
+
+  it('…and still inside the same post-build block, before the release gate collects its evidence', () => {
+    // Bounded on the other side too: pushed past the gate it would be describing the build after
+    // the advisory passes have had their say, which is a different claim again.
+    const record = route.indexOf("code: 'WRITE_TIME_TYPECHECK'");
+    const gate = route.indexOf('const gateEvidence: RuntimeEvidence = {');
+    expect(gate).toBeGreaterThan(record);
+  });
+
+  it('the premise is real: the retry SHARES the build dispatcher, so the counters accumulate', () => {
+    // If the retry ever gets a ToolDispatcher of its own, the counters stop being cumulative and
+    // this whole position becomes wrong — so the premise is pinned rather than remembered.
+    //
+    // ⚠️ Pinned as "the BUILD's dispatcher", not as "the only one in the file". There are three in
+    // this route and the other two are correctly separate: the publish handler's (a different
+    // request entirely) and the plan runner's (`update_todo` only, so it writes nothing to count).
+    // A global count would have failed for two reasons that have nothing to do with this fix.
+    const built = route.match(/const dispatcher = new ToolDispatcher\(actuator, workspaceId, state, events, spawnSubAgent,/g) ?? [];
+    expect(built).toHaveLength(1);
+    expect(route).toContain('const baseRunnerOpts = {');
+    expect(route).toMatch(/const retryRunner = new AgentRunner\(\{\s*\n\s*\.\.\.baseRunnerOpts,/);
+
+    // …and the retry does not override it back out again.
+    const from = route.indexOf('const retryRunner = new AgentRunner({');
+    const to = route.indexOf('const retry = await retryRunner.run(');
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    expect(route.slice(from, to)).not.toContain('dispatcher');
+  });
+});

@@ -301,7 +301,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
-import { readDevServerLastWords } from '../AgentV3/devServerDeathEvidence';
+import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -320,6 +320,7 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
+import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION } from '../AgentV3/projectPlannerBudget';
 import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
@@ -1613,6 +1614,15 @@ export interface UserCostBreakdown {
    */
   livePreviewSeconds: number;
   livePreviewInr: number;
+  /**
+   * THE BUILD DISCOUNT (admin 2026-09-25) — the admin-set percentage taken off this build, shown in
+   * green under a discounted build (`buildDiscount.ts`). All three are 0 when nothing was taken off,
+   * so a 0% build carries exactly the numbers it always did. `listInr` is the price BEFORE the
+   * discount — the bill every other rule decided — never our cost, which stays admin-only.
+   */
+  listInr: number;
+  discountInr: number;
+  discountPct: number;
 }
 
 const POWER_TIER_DISPLAY: Record<string, string> = {
@@ -1631,6 +1641,11 @@ export function userCostBreakdown(
    * the truthful outcome when the charge is off, unrated, or the build never held a live server.
    */
   livePreview?: { seconds: number; usd: number } | null,
+  /**
+   * The discount decided for this build (`applyBuildDiscount`) — `billedUsd` above is already the
+   * amount AFTER it. Omitted or with nothing taken off ⇒ the three discount fields are 0.
+   */
+  discount?: Pick<BuildDiscount, 'listUsd' | 'discountUsd' | 'pctApplied'> | null,
 ): UserCostBreakdown {
   const key = powerLevel === true ? 'medium' : powerLevel === false ? 'off' : String(powerLevel);
   const lpSeconds = Math.max(0, Math.round(Number(livePreview?.seconds) || 0));
@@ -1647,6 +1662,23 @@ export function userCostBreakdown(
     // teaches the user to stop reading the breakdown, and the whole point of it is to be read.
     livePreviewSeconds: lpUsd > 0 ? lpSeconds : 0,
     livePreviewInr: lpUsd > 0 ? Math.round(lpUsd * Math.max(0, rate) * 100) / 100 : 0,
+    ...discountFields(discount, rate),
+  };
+}
+
+/** The three user-facing discount numbers, in ₹, or zeros when nothing was taken off. PURE. */
+function discountFields(
+  discount: Pick<BuildDiscount, 'listUsd' | 'discountUsd' | 'pctApplied'> | null | undefined,
+  rate: number,
+): Pick<UserCostBreakdown, 'listInr' | 'discountInr' | 'discountPct'> {
+  const r = Math.max(0, rate);
+  if (!discount || !(discount.discountUsd > 0) || !(discount.pctApplied > 0)) {
+    return { listInr: 0, discountInr: 0, discountPct: 0 };
+  }
+  return {
+    listInr: Math.round(discount.listUsd * r * 100) / 100,
+    discountInr: Math.round(discount.discountUsd * r * 100) / 100,
+    discountPct: discount.pctApplied,
   };
 }
 
@@ -11825,6 +11857,8 @@ async function noteBuildOutcome(
       // Measured OUTSIDE the try, because the user-facing breakdown below needs the same pair the bill
       // used — a second measurement taken later would count different seconds.
       let watchdogLivePreview = { seconds: 0, usd: 0, measuredSeconds: 0 };
+      // The discount this path decided, carried to the user-facing breakdown below.
+      let watchdogDiscount: BuildDiscount | null = null;
       if (ok && billingCtx.providerLedger) {
         try {
           watchdogLivePreview = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt);
@@ -11850,6 +11884,29 @@ async function noteBuildOutcome(
               phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
               message: wdMarkup.reason, autoResolved: true,
             });
+          }
+          // THE BUILD DISCOUNT — on this path too, for the reason Fix 67 exists: a rule on only one of
+          // the two paths that settle a build is a rule a long build escapes. Same floor, same order.
+          if (watchdogBilledUsd > 0) {
+            const setting = await buildDiscountStore.readWithin();
+            if (setting.pct > 0) {
+              const d = applyBuildDiscount({
+                billedUsd: watchdogBilledUsd,
+                floorUsd: decided.realCostUsd + decided.sandboxUsd,
+                pct: setting.pct,
+              });
+              if (d.discountUsd > 0) {
+                watchdogDiscount = d;
+                watchdogBilledUsd = d.payUsd;
+              }
+              buildDiagRef?.record({
+                phase: 'build', severity: 'info', code: 'BUILD_DISCOUNT', autoResolved: true,
+                message: d.discountUsd > 0
+                  ? `Build discount ${d.pctApplied}% applied: ₹${(d.listUsd * usdInrRate()).toFixed(2)} → ₹${(d.payUsd * usdInrRate()).toFixed(2)}`
+                    + (d.flooredAtCost ? ` (configured ${d.pctConfigured}%, stopped at our real cost)` : '')
+                  : `Build discount ${d.pctConfigured}% not applied — this bill was already at our real cost`,
+              });
+            }
           }
           recordBuildTelemetryOnce({
             ok,
@@ -11981,10 +12038,18 @@ async function noteBuildOutcome(
         }
         const billedInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
         const watchdogCostBreakdown = watchdogBilledUsd > 0
-          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview)
+          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate(), watchdogLivePreview, watchdogDiscount)
           : null;
         const watchdogLine = watchdogCostBreakdown ? livePreviewChargeLine(watchdogCostBreakdown) : '';
-        const watchdogSummary = [buildResultRef.summary || 'Built your app — your files are saved.', watchdogLine].filter(Boolean).join('\n\n');
+        const watchdogDiscountLine = watchdogCostBreakdown ? buildDiscountLine({
+          listInr: watchdogCostBreakdown.listInr, discountInr: watchdogCostBreakdown.discountInr,
+          payInr: watchdogCostBreakdown.billedInr, pct: watchdogCostBreakdown.discountPct,
+        }) : '';
+        const watchdogSummary = [
+          buildResultRef.summary || 'Built your app — your files are saved.',
+          watchdogLine,
+          watchdogDiscountLine ? `🟢 ${watchdogDiscountLine}` : '',
+        ].filter(Boolean).join('\n\n');
         emit({ type: 'result', ok: true, summary: watchdogSummary, steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
         void notifyBuildComplete(userId, true);
       } else {
@@ -16660,25 +16725,6 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
-      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
-      // write time and how many errors were caught while the model still held the file. Reported
-      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
-      try {
-        const wt = dispatcher.writeTypecheckStats();
-        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
-        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
-        // its stats untouched — and the line then read "no TypeScript source was written this build"
-        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
-        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
-        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
-        // only inherited our template is not credited with having written it.
-        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
-          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
-        });
-      } catch { /* an advisory line must never affect a build */ }
-
       if (result.timedOut === true) {
         try {
           buildDiag.record({
@@ -16810,6 +16856,34 @@ async function noteBuildOutcome(
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+      // write time and how many errors were caught while the model still held the file. Reported
+      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+      //
+      // 🔴 IT IS RECORDED AFTER THE RETRY, AND THAT POSITION IS THE FIX (autopsy e628efd4,
+      // 2026-09-25). It used to sit above the empty-build retry, so on any build that retried, the
+      // line described the ABANDONED first attempt and not the build that shipped — the FOURTH time
+      // this one sentence has been wrong about a build, from a THIRD distinct cause (the first two:
+      // a sub-agent with its own stats object, autopsy 3ce8459b; a fast lane that never touches
+      // them at all, autopsy 2026-09-22). `dispatcher` is a single instance shared with the retry
+      // runner through `baseRunnerOpts`, so its counters are CUMULATIVE across both attempts —
+      // which is precisely why reading them later is not merely a better sample but the only
+      // reading that describes the build the user was given.
+      try {
+        const wt = dispatcher.writeTypecheckStats();
+        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
+        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
+        // its stats untouched — and the line then read "no TypeScript source was written this build"
+        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
+        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
+        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
+        // only inherited our template is not credited with having written it.
+        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
 
       // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
       // model's "no console errors" against whether anyone actually looked.
@@ -18725,15 +18799,23 @@ async function noteBuildOutcome(
           const skeletonsSafe = testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
           const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
           const scaffolded: string[] = [];
-          for (const item of plan) {
-            try {
-              await actuator.writeFile(workspaceId, item.testPath, item.content);
-              writtenFiles.set(item.testPath, item.content);
-              noteFinishingWrite(item.testPath);
-              try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
-              scaffolded.push(item.testPath);
-            } catch { /* one test file failing must not block the rest */ }
-          }
+          // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`
+          // this pass's `currentPass()` is `null`, so Green Freeze refuses every write and each refusal
+          // is swallowed by the catch below. Moving the finishing passes ahead of the green latch (this
+          // PR) means the freeze is usually not armed yet — but a name costs nothing and is what makes
+          // the guarantee hold on ANY path that still reaches here latched (a resumed already-green
+          // session). `starter-tests` is CREATE-ONLY, so an overwrite is still refused.
+          await runInPass('starter-tests', async () => {
+            for (const item of plan) {
+              try {
+                await actuator.writeFile(workspaceId, item.testPath, item.content);
+                writtenFiles.set(item.testPath, item.content);
+                noteFinishingWrite(item.testPath);
+                try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
+                scaffolded.push(item.testPath);
+              } catch { /* one test file failing must not block the rest */ }
+            }
+          });
           if (scaffolded.length > 0) {
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
             events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
@@ -18746,8 +18828,15 @@ async function noteBuildOutcome(
       // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
       // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
       // and best-effort — never blocks or fails the build.
+      // 🔴 NAMED, FOR THE REASON THE STARTER-TEST PASS ABOVE IS (autopsy e628efd4): an unnamed pass is
+      // a refused one. Everything this block does was being thrown away on every browser-verified
+      // build, silently, so the launch basics `AppKnowledgeBase.ts` promises "BY DEFAULT after each
+      // build" did not happen at all. Moving the finishing passes ahead of the green latch (this PR)
+      // means the freeze is usually not armed yet; the name is what makes the guarantee hold on any
+      // path that still reaches here latched.
       try {
         if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          await runInPass('production-defaults', async () => {
           const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
           let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
           if (indexHtml == null) {
@@ -18770,6 +18859,9 @@ async function noteBuildOutcome(
           const appName = deriveTitle(prompt) || 'App';
           const defaults = planAppDefaults(indexHtml, appName);
           const savedDefaults: Record<string, string> = {};
+          // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
+          // intended, and the files are a separate set — so the two must be reported separately.
+          let indexPatched = false;
           // Patch index.html only when the generator actually changed it.
           if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
             try {
@@ -18785,6 +18877,7 @@ async function noteBuildOutcome(
               noteFinishingWrite(idxPath);
               try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
               savedDefaults[idxPath] = defaults.indexHtml;
+              indexPatched = true;
             } catch { /* one write failing must not block the rest */ }
           }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
@@ -18828,10 +18921,19 @@ async function noteBuildOutcome(
           }
           if (Object.keys(savedDefaults).length > 0) {
             await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
-            if (defaults.added.length > 0) {
-              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${defaults.added.join(', ')} + a web manifest, icon, robots.txt and an offline service worker.`, ts: Date.now() });
+            // 🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED. `defaults.added` is the list of index.html
+            // TAGS the generator intended; the files are a separate set, and on a green app exactly
+            // one of the two happens. Announcing the tags when the patch was refused is the "fake
+            // success" the second absolute rule forbids, and it is what this line used to do.
+            const savedFiles = Object.keys(savedDefaults).filter((k) => k !== idxPath);
+            const parts: string[] = [];
+            if (indexPatched && defaults.added.length > 0) parts.push(defaults.added.join(', '));
+            if (savedFiles.length > 0) parts.push(savedFiles.join(', '));
+            if (parts.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${parts.join(' + ')}.`, ts: Date.now() });
             }
           }
+          });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
 
@@ -19089,9 +19191,15 @@ async function noteBuildOutcome(
           // not an accusation against the user's code.
           if (verdict.serverDown) {
             if (serverRevivals >= MAX_SERVER_REVIVALS) {
+              // 🔴 WHY IT WOULD NOT STAY UP — read HERE too, not only before a restart (autopsy
+              // e628efd4). This branch used to record the restart COUNT and nothing about the cause,
+              // so the one death a human has to act on was the one death the report could not explain.
+              // The log now holds the LAST restart's output, which is the death that ended the loop.
+              const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
               buildDiag.record({
                 phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
                 message: `The dev server would not stay running (${serverRevivals} restarts). The app's code was never the problem here — nothing was listening on the preview port. ${verdict.problems[0] ?? ''}`.trim(),
+                detail: devServerLastWordsDetail(lastWords),
                 autoResolved: false,
               });
               previewVerifiedFailed = true;
@@ -19099,7 +19207,7 @@ async function noteBuildOutcome(
             }
             serverRevivals += 1;
             // Its last words BEFORE the restart overwrites them — the only evidence of WHY it stopped.
-            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
@@ -19112,7 +19220,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
-              detail: lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)',
+              detail: devServerLastWordsDetail(lastWords),
               autoResolved: true,
             });
             attempt -= 1; // a process restart is not a repair attempt
@@ -20029,15 +20137,19 @@ async function noteBuildOutcome(
             if (runtimeServerRestarted) {
               // It stopped again after our own restart. That is an infrastructure finding, never a
               // licence to rewrite the app — no model call, and the loop ends here.
+              // The sibling of the verify loop's give-up, and it had the same hole (autopsy e628efd4):
+              // it reported THAT the server died again and never what it said on its way out.
+              const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
               buildDiag.record({
                 phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
                 message: `The dev server stopped again after it was restarted. The app's code was never the problem here — the preview port stopped answering. ${split.serverDown[0].text}`,
+                detail: `signals: ${signals} · ${devServerLastWordsDetail(lastWords)}`,
                 autoResolved: false,
               });
               break;
             }
             runtimeServerRestarted = true;
-            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             const restartedAt = Date.now();
             try {
@@ -20046,7 +20158,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
-              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)'}`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${devServerLastWordsDetail(lastWords)}`,
               autoResolved: true,
             });
             if (split.app.length === 0) {
@@ -21753,6 +21865,36 @@ async function noteBuildOutcome(
         }
       }
 
+      // THE BUILD DISCOUNT (admin 2026-09-25, `buildDiscount.ts`) — applied LAST, to the bill every
+      // rule above decided, so a zeroed build stays zero and nothing below it is ever discounted twice.
+      // 🔒 Never below what the build really cost us: a bill already at cost (the preview waiver, a
+      // stopped build on its floor) carries no margin to give away and is left exactly as it is. A
+      // setting that cannot be read in time is 0% — the ordinary price, never a guess.
+      let buildDiscount: BuildDiscount | null = null;
+      if (effectiveBilledUsd > 0) {
+        try {
+          const setting = await buildDiscountStore.readWithin();
+          if (setting.pct > 0) {
+            const d = applyBuildDiscount({
+              billedUsd: effectiveBilledUsd,
+              floorUsd: decidedRealCostUsd + decidedSandboxUsd,
+              pct: setting.pct,
+            });
+            if (d.discountUsd > 0) {
+              buildDiscount = d;
+              effectiveBilledUsd = d.payUsd;
+            }
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'BUILD_DISCOUNT', autoResolved: true,
+              message: d.discountUsd > 0
+                ? `Build discount ${d.pctApplied}% applied: ₹${(d.listUsd * usdInrRate()).toFixed(2)} → ₹${(d.payUsd * usdInrRate()).toFixed(2)}`
+                  + (d.flooredAtCost ? ` (configured ${d.pctConfigured}%, stopped at our real cost)` : '')
+                : `Build discount ${d.pctConfigured}% not applied — this bill was already at our real cost`,
+            });
+          }
+        } catch { /* a discount that cannot be decided is no discount — the ordinary price stands */ }
+      }
+
       // THE BILL IS NOW SETTLED — every zeroing rule above has had its say. Only here can the
       // waiver's explanation be true, and only if the waived amount is still what the user pays:
       // a later rule that zeroed the bill has already said why in its own words.
@@ -22222,7 +22364,7 @@ async function noteBuildOutcome(
       // consistent shape for every tier, so the client render can never crash on a per-tier mismatch.
       const costBreakdown = effectiveBilledUsd <= 0
         ? null
-        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge);
+        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate(), livePreviewCharge, buildDiscount);
       // THE CHARGE, IN THE MESSAGE THAT SAYS THE APP IS READY (admin 2026-08-22). It rides on the
       // summary rather than only the breakdown panel because a charge the user finds afterwards, folded
       // into one total, reads as a deduction no matter how correct it is. Only on a SUCCESSFUL build —
@@ -22256,6 +22398,15 @@ async function noteBuildOutcome(
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };
+      }
+      // The discount rides in the message as well as the green panel line: the installed phone app is
+      // BUNDLED, so a panel change reaches it only with a new release, while this text reaches it now.
+      const discountLine = costBreakdown && result.ok ? buildDiscountLine({
+        listInr: costBreakdown.listInr, discountInr: costBreakdown.discountInr,
+        payInr: costBreakdown.billedInr, pct: costBreakdown.discountPct,
+      }) : '';
+      if (discountLine && typeof result.summary === 'string') {
+        result = { ...result, summary: `${result.summary}\n\n🟢 ${discountLine}` };
       }
       // WEAK-TIER FAILURE GUIDANCE (admin spec 2026-08-02): when a real build attempt FAILS on the weak
       // tier (the free engine, or a paid user who picked Weak) for a reason that is genuinely about the

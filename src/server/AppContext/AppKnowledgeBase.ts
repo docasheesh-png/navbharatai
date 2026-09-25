@@ -3034,6 +3034,15 @@ WHAT IT DELIBERATELY CANNOT TELL YOU, and says so on the card:
     keywords: ['copy page', 'copy button', 'floating button', 'screenshot', 'page copy', 'share page', 'admin copy', 'copy karo', 'page bhejo', 'screenshot le', 'floting button', 'drag button'],
   },
   {
+    id: 'build-discount',
+    name: 'Build discount',
+    path: 'Admin: Admin Dashboard → Build Reports tab → "Build discount" card. Users: shown under every discounted build result in NavBharatAI Pro, in green',
+    description: 'A percentage the admin sets (0–50%) that is taken off every charged NavBharatAI Pro build. At 0% (the default) every bill is exactly what it was before. With a discount set, a charged build shows one green line under its result, e.g. "Build price ₹150.00 · Discount 20% (−₹30.00) · You pay ₹120.00", the same line is added to the build\'s closing message, and the "Why this cost?" breakdown lists the price and the discount. Only the lower amount is taken from the wallet. RULES: the discount never takes a bill below what the build really cost NavBharatAI, so a build already charged at cost (for example one whose preview could not be confirmed) gets no discount, and one close to cost gets a smaller one — the percentage shown to the user is always the one they actually received, never the one configured. A failed or free build stays free. The discount covers app builds only; chat, Professionals, Doctor AI and the AI tools are not discounted. A change reaches every server within a minute.',
+    howToUse: 'Admin: open the Admin Dashboard → Build Reports tab, find the "Build discount" card, type a whole number from 0 to 50 and press Save; the card shows an example of what a ₹100 build would cost. Set it back to 0 to end the offer. IF A USER ASKS why their discount was smaller than advertised, or why a build had none: explain plainly that the discount never takes a bill below what the build cost to run, so a build that was already charged at cost gets no discount, and the percentage shown is the one they actually received.',
+    relatedFeatures: ['billing', 'admin', 'wallet_statement'],
+    keywords: ['discount', 'build discount', 'offer', 'sale', 'discount kitna hai', 'discount kaise set kare', 'discount kyu nahi mila', 'kam discount mila', 'you pay', 'build price', 'chhoot', 'chhut', 'offer chal raha hai', 'admin discount', 'percent off', '% off'],
+  },
+  {
     id: 'admin-cost-ladder',
     name: 'Build Cost-Ladder Dashboard',
     path: 'Admin Dashboard → Revenue tab → "Build Cost-Ladder (last 30 days)" (admin only)',

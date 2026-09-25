@@ -45,8 +45,11 @@ describe('userCostBreakdown — provider-anonymous by construction', () => {
     // the words the Preview tab already shows), not vendor detail. §1 of the White-Label Law allows an
     // itemised breakdown in our own terms and forbids one by vendor/model, and a separate test asserts
     // no vendor name can appear in this object.
+    // 2026-09-25 added `listInr` / `discountInr` / `discountPct` — the admin-set build discount, in
+    // the user's own terms (the price before it, what was taken off, the % applied). `listInr` is the
+    // DECIDED bill before the discount, never our cost: that stays admin-only (buildDiscount.ts).
     expect(Object.keys(bd).sort()).toEqual(
-      ['billedInr', 'billedUsd', 'engine', 'inputTokens', 'livePreviewInr', 'livePreviewSeconds', 'outputTokens', 'tier', 'usdInrRate'].sort(),
+      ['billedInr', 'billedUsd', 'discountInr', 'discountPct', 'engine', 'inputTokens', 'listInr', 'livePreviewInr', 'livePreviewSeconds', 'outputTokens', 'tier', 'usdInrRate'].sort(),
     );
     expect(bd).not.toHaveProperty('perProvider');
     expect(bd).not.toHaveProperty('baseModel');

@@ -155,3 +155,53 @@ export function planAutoTests(
     };
   });
 }
+
+/**
+ * CAN A TEST SKELETON BREAK THIS APP'S PRODUCTION BUILD? (review of the 2026-09-25 pass move)
+ *
+ * Every skeleton imports `vitest`, and nothing installs it. That is harmless only where the release
+ * build never type-checks test files. The golden Vite scaffold is safe (`tsc -p tsconfig.build.json`,
+ * which excludes `*.test.*` — the 2026-08-11 APK incident), and so is a bare `vite build`, which
+ * bundles only what the app imports. `next build`, `vue-tsc`, `svelte-check`, `ng build`, a plain
+ * `tsc` / `tsc -b`, or a `-p` config that does not exclude tests all compile every test file: there a
+ * skeleton is `TS2307 Cannot find module 'vitest'`, a failed production build, a failed publish and a
+ * failed APK — for a file the user never asked for.
+ *
+ * Returns the tsconfig path the build names (so the caller can read it), and the answer given that
+ * config's text. PRECISION-FIRST in the safe direction: anything not recognised as safe is unsafe,
+ * because a missing skeleton costs nothing and a broken release build costs the user the app. Pure.
+ */
+export function buildTsconfigPath(packageJson: string | null | undefined): string | null {
+  const script = buildScriptOf(packageJson);
+  const m = script ? /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(script) : null;
+  return m ? m[1].replace(/^\.\//, '') : null;
+}
+
+export function testSkeletonsCannotBreakTheBuild(
+  packageJson: string | null | undefined,
+  buildTsconfig: string | null | undefined,
+): boolean {
+  if (packageJson == null) return true; // no package.json: nothing compiles a .ts file at all
+  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  try { pkg = JSON.parse(packageJson); } catch { return false; }
+  if (pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest) return true; // the import resolves
+  const script = buildScriptOf(packageJson);
+  if (!script) return true;
+  if (/\b(next\s+build|nuxt|vue-tsc|svelte-check|ng\s+build|remix|astro\s+check)\b/.test(script)) return false;
+  if (!/\btsc\b/.test(script)) return true; // e.g. `vite build`: only what the app imports is compiled
+  if (!buildTsconfigPath(packageJson) || typeof buildTsconfig !== 'string') return false;
+  return /["'][^"']*\*\.test\.[^"']*["']/.test(excludeBlock(buildTsconfig));
+}
+
+function buildScriptOf(packageJson: string | null | undefined): string {
+  try {
+    const s = (JSON.parse(String(packageJson)) as { scripts?: Record<string, unknown> })?.scripts?.build;
+    return typeof s === 'string' ? s : '';
+  } catch { return ''; }
+}
+
+/** The text of a tsconfig's `"exclude": [...]` array, or '' — read as text so comments do not matter. */
+function excludeBlock(tsconfig: string): string {
+  const m = /"exclude"\s*:\s*\[([\s\S]*?)\]/.exec(tsconfig);
+  return m ? m[1] : '';
+}

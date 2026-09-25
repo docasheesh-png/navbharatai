@@ -81440,6 +81440,55 @@ the session that owns it, and one waits on the admin.
   Also named open by #3307 and #3308. Options put: (1) generate them BEFORE the green latch
   (recommended), (2) allow after green with verify-and-revert, (3) leave as is.
 
+## 2026-09-25 — Green Freeze decision: the finishing passes run BEFORE the proof; the service worker it was hiding
+
+The admin was given the three options for the refused post-settle writes and asked *"aap batao, kon sa
+best hai — user ko working app jaldi mile, aur app acche se acchi bane"*. Chosen: **run them before the
+green latch** (option 1 of the 2026-09-25 entry above, which closes that ⏳ item).
+
+- ✅ **The four finishing passes moved, not the freeze widened.** E2E net, ADR note, unit-test
+  skeletons and production defaults now run in one block after the platform starts the preview and
+  before the render rescue — so the browser check, `npm run build`, the vaccine's suite detection and
+  GreenGuard all see them. No model call; seconds. The ADR write is now awaited (8 s bound) so it
+  cannot race the latch. `ALLOWED_PASSES` is unchanged. Test-locked (source order, before the first
+  `latchGreen`, and "moved, not copied") in `tests/theFinishingPassesRunBeforeTheProof.test.ts`,
+  reversion-proven.
+- 🔴 **What the freeze had been hiding — and why "just move it" would have shipped a bug to every app.**
+  The generated `sw.js` served EVERY GET cache-first under the fixed name `app-shell-v1`, `/` and
+  `/index.html` included. So a republished app never reached a returning visitor, and a live preview
+  could serve `/src/*.tsx` from before an edit. It reached real apps only on builds nobody verified and
+  through the `generate_app_defaults` tool; on every green build the freeze refused it, which is how it
+  survived. **v2 is network-first**, skips dev-server paths (`/@…`, `/src/`, `/node_modules/`) and
+  other origins, uses the cache only offline, and deletes older caches on activate. Our exact v1 file
+  is upgraded in place (`upgradeGeneratedServiceWorker`); a user's or a framework's worker is never
+  touched. Executed in a fake worker environment in the test (network-first, offline fallback, dev
+  paths, v1 cache purge), with v1 run beside it to reproduce the stale page.
+  ⚠️ Residual, stated: a published app already carrying v1 is fixed only when it is rebuilt and
+  republished — nothing reaches into sites already out there.
+- ✅ **Siblings, same change.** `generate_app_defaults` wrote the PWA files at the project root for a
+  Vite app, where the production build drops them (the 2026-08-03 rule the post-build pass followed and
+  the tool never did) — now `public/`. The app name from the prompt is HTML-escaped in the head and the
+  icon. The in-browser preview runs the app's inline scripts on OUR origin, so it now drops the app's
+  worker registration (`buildSourceAppPreview`).
+- 🔎 **Adversarial review of the move, before push — seven real findings, all fixed in the same PR:**
+  (1) 🔴 the unit-test skeletons import `vitest`, which nothing installs; before the production-build
+  gate they would fail `npm run build` (publish, APK) for any app whose build type-checks tests
+  (`next build`, `tsc -b`, `vue-tsc`, a `-p` config that keeps tests). Now written only where
+  `testSkeletonsCannotBreakTheBuild` says the release build cannot see them (our Vite scaffold's
+  `tsconfig.build.json` excludes tests, so it still gets them); (2) patching `index.html` in the sandbox
+  dropped the live-console / Visual-Edit bridge until the next dev-server start — the sandbox copy is now
+  written with the bridge it was served with, the saved source stays clean; (3) the finishing writes did
+  not move `inBuildWriteTick`, so a concurrent in-build proof could save a half-finished tree — every one
+  now does; (4) the reviewer was sent our own skeletons/PWA files — filtered out; (6) the worker deleted
+  EVERY cache on the origin and cached API responses unbounded — now only `app-shell-*` caches, only
+  pages and static files, at most 80 entries, and a cached redirect is re-wrapped so an offline page
+  still opens; (7) the preview strip judged each script separately so a stray `<script` cannot drag
+  markup away; (9) the tool recognises `vite.config.mts/cjs` and `vite` in package.json, and a v1 worker
+  left at the root of a Vite app is upgraded too (tool and route).
+  ⚠️ Stated, not fixed: (5) a build that is not-ok until the render rescue flips it does not get the
+  finishing passes (they are gated on `result.ok` at their new position) — before this change the freeze
+  refused them on those builds anyway, so nothing regressed; (8) the claim audit's `filesWritten` now
+  counts the platform's own files — it only ever raises a count that was already non-zero.
 ## 2026-09-25 — Autopsy b9287f85 ("ek desi boyz naam ki ecom website"): a newsletter box is not a cart
 
 Weak tier, 8.7 min, ok, rendered in a real browser at 314 s, typecheck clean, production build OK, all

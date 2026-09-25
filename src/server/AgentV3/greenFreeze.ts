@@ -126,6 +126,10 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
  * index.html patch, which stays REFUSED. The honest consequence is stated rather than hidden: on a
  * green app the manifest and service worker land but are not linked from index.html, so they are
  * inert — the narration says what actually happened instead of claiming them.
+ *
+ * 🔁 SINCE #3313 BOTH PASSES RUN BEFORE THE LATCH (with the E2E net and the ADR note), so on a normal
+ * build none of this applies: the index.html patch lands and the browser check verifies it. This tier
+ * remains the net for a latch that already exists when they run — a resumed, already-green session.
  */
 const CREATE_ONLY_PASSES: ReadonlySet<string> = new Set([
   'starter-tests',        // additive Vitest skeletons — nothing in the app can import a test file

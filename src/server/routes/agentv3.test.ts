@@ -2456,7 +2456,11 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      wrong. The unrepairable shape (`জungle`, which needs a word nobody wrote down) is refused,
     //      as is any token whose Latin side is a real word. It deliberately does NOT require result.ok:
     //      a corrupted label is shown to the user either way. Considered ✓.
-    expect(count).toBe(22);
+    //   1× the ROOT service-worker upgrade (2026-09-25) — inside the production-defaults pass, so
+    //      gated on `result.ok && expectsArtifacts && writtenFiles.size > 0` like the artifact passes
+    //      above; it rewrites only NavBharatAI's own exact v1 `sw.js` (upgradeGeneratedServiceWorker
+    //      returns null for any other content), never a file the user wrote. Considered ✓.
+    expect(count).toBe(23);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

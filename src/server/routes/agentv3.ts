@@ -18700,7 +18700,8 @@ async function noteBuildOutcome(
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
               try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
-              if (adrWritten) { onFileWrite?.(path, content); finishingPaths.add(path); }
+              if (adrWritten) onFileWrite?.(path, content);
+              if (adrWritten) finishingPaths.add(path);
             }
           } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
         })(), 8_000, 'adr-capture').catch(() => {});

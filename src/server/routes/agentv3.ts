@@ -301,7 +301,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
-import { readDevServerLastWords } from '../AgentV3/devServerDeathEvidence';
+import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
@@ -18766,9 +18766,15 @@ async function noteBuildOutcome(
           // not an accusation against the user's code.
           if (verdict.serverDown) {
             if (serverRevivals >= MAX_SERVER_REVIVALS) {
+              // 🔴 WHY IT WOULD NOT STAY UP — read HERE too, not only before a restart (autopsy
+              // e628efd4). This branch used to record the restart COUNT and nothing about the cause,
+              // so the one death a human has to act on was the one death the report could not explain.
+              // The log now holds the LAST restart's output, which is the death that ended the loop.
+              const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
               buildDiag.record({
                 phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
                 message: `The dev server would not stay running (${serverRevivals} restarts). The app's code was never the problem here — nothing was listening on the preview port. ${verdict.problems[0] ?? ''}`.trim(),
+                detail: devServerLastWordsDetail(lastWords),
                 autoResolved: false,
               });
               previewVerifiedFailed = true;
@@ -18776,7 +18782,7 @@ async function noteBuildOutcome(
             }
             serverRevivals += 1;
             // Its last words BEFORE the restart overwrites them — the only evidence of WHY it stopped.
-            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             try {
               // The health-check wrapper in devServerHost recognises this command, installs stale deps
@@ -18789,7 +18795,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The dev server had stopped and was restarted deterministically (attempt ${serverRevivals}) — no code was changed and no model call was made.`,
-              detail: lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)',
+              detail: devServerLastWordsDetail(lastWords),
               autoResolved: true,
             });
             attempt -= 1; // a process restart is not a repair attempt
@@ -19851,15 +19857,19 @@ async function noteBuildOutcome(
             if (runtimeServerRestarted) {
               // It stopped again after our own restart. That is an infrastructure finding, never a
               // licence to rewrite the app — no model call, and the loop ends here.
+              // The sibling of the verify loop's give-up, and it had the same hole (autopsy e628efd4):
+              // it reported THAT the server died again and never what it said on its way out.
+              const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
               buildDiag.record({
                 phase: 'preview', severity: 'warning', code: 'PREVIEW_SERVER_DOWN',
                 message: `The dev server stopped again after it was restarted. The app's code was never the problem here — the preview port stopped answering. ${split.serverDown[0].text}`,
+                detail: `signals: ${signals} · ${devServerLastWordsDetail(lastWords)}`,
                 autoResolved: false,
               });
               break;
             }
             runtimeServerRestarted = true;
-            const lastWords = await withTimeout(readDevServerLastWords((c) => actuator.runCommand(workspaceId, c)), 8_000, 'devserver-last-words').catch(() => null);
+            const lastWords = await devServerDeathEvidence((c) => actuator.runCommand(workspaceId, c));
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             const restartedAt = Date.now();
             try {
@@ -19868,7 +19878,7 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'PREVIEW_SERVER_RESTARTED',
               message: `The runtime check found the preview server stopped and it was restarted deterministically — no code was changed and no model call was made.`,
-              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${lastWords ? `its last output before it stopped: ${lastWords}` : 'its log said nothing before it stopped (or could not be read)'}`,
+              detail: `signals: ${signals}${split.app.length ? ` · ${split.app.length} other error(s) still go to the repair pass` : ''} · ${devServerLastWordsDetail(lastWords)}`,
               autoResolved: true,
             });
             if (split.app.length === 0) {

@@ -10,6 +10,17 @@
 // admin report beside the restart.
 //
 // Evidence only: it never decides anything, and a failed read yields null, never an error.
+//
+// 🔴 AND IT WAS READ ON THE WRONG BRANCH — the RESTART, never the GIVE-UP (autopsy e628efd4,
+// 2026-09-25). Both preview loops in `routes/agentv3.ts` read these last words one line before they
+// restart the server, and then, when the server would not stay up and the loop finally recorded
+// `PREVIEW_SERVER_DOWN`, recorded the restart COUNT and nothing about the cause. So the report could
+// explain a death it recovered from and not the one it gave up on — exactly backwards, since the
+// give-up is the only one a human has to act on.
+//
+// ⚠️ THE LOG AT GIVE-UP IS NOT STALE, AND THAT IS THE POINT. By then it holds the output of the LAST
+// restart — the death that ENDED the loop — not the first one. Two different deaths, both worth
+// having, which is why the give-up reads again instead of reusing the earlier string.
 
 import { DEV_SERVER_LOG_PATH } from './sandbox/EngineerAI/actuators/devServerHost';
 
@@ -47,4 +58,43 @@ export async function readDevServerLastWords(
   } catch {
     return null;
   }
+}
+
+/** How long one tail read may take. Bounded here, not at the call site — see `devServerDeathEvidence`. */
+const READ_TIMEOUT_MS = 8_000;
+
+/**
+ * The read, bounded, for every caller.
+ *
+ * 🔒 THE TIMEOUT LIVES HERE so the four call sites cannot drift into four different bounds — the
+ * drifted-copy class this repo has paid for repeatedly. A read that times out yields null, exactly
+ * like a read that fails: this is evidence, and an absent line must never become a thrown error in a
+ * loop that is already reporting a dead server.
+ */
+export async function devServerDeathEvidence(
+  run: (command: string) => Promise<{ stdout?: string | null }>,
+  timeoutMs: number = READ_TIMEOUT_MS,
+): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      readDevServerLastWords(run),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), Math.max(1, timeoutMs)); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * The ONE sentence every report line uses for this evidence, so a reader meets the same words on a
+ * restart and on a give-up. Never user-facing (the White-Label Law does not apply — it names no
+ * vendor), and honest about the difference between "the log was empty" and "we could not read it".
+ */
+export function devServerLastWordsDetail(lastWords: string | null | undefined): string {
+  return lastWords
+    ? `its last output before it stopped: ${lastWords}`
+    : 'its log said nothing before it stopped (or could not be read)';
 }

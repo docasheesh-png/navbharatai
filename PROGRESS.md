@@ -81245,10 +81245,23 @@ and that is the same defect in two subsystems written four months apart.
    pass, or promote either to the full allowlist, and it fails.
 4. **`PREVIEW_SERVER_DOWN`** — the dev server died, was restarted, and died again (502). Its last
    output before stopping was the journey script's own `NBAI_JOURNEY` line. Whether the journey run
-   is implicated is unproven; recorded rather than asserted. **Still open, and deliberately not
-   guessed at**: nothing in the platform captures the dev server's own last output or exit status
-   when a 502 is observed, so the report cannot say WHY it stopped — the honest first step is that
-   capture, not a fix aimed at a correlation.
+   is implicated is unproven; recorded rather than asserted.
+   ⚠️ **HALF-CLOSED the same day, and the half that closed is the one that was actionable.** The
+   first draft of this item said *"nothing in the platform captures the dev server's own last output"*
+   — **that was wrong, and re-grepping is what caught it**: `devServerDeathEvidence.ts` has read the
+   log's tail since 2026-09-23 (autopsy ac41a924). 🔴 **It was wired on the WRONG BRANCH.** Both
+   preview loops read it one line before a RESTART, and when the server would not stay up and the
+   loop finally recorded `PREVIEW_SERVER_DOWN` they recorded the restart COUNT and nothing about the
+   cause. So the platform could explain a death it recovered from and **not the one it gave up on** —
+   exactly backwards, since the give-up is the only one a human has to act on, and this report's
+   unexplained line is precisely that. Both give-ups now read it too (siblings hunted, rule 3), the
+   8 s bound moved INTO the module so the four sites cannot drift, and ONE sentence
+   (`devServerLastWordsDetail`) serves all four. ⚠️ The log at give-up is **not** stale — it holds the
+   LAST restart's output, i.e. the death that ended the loop, which is why it reads again rather than
+   reusing the earlier string. Reversion-proven in `tests/theDevServerIsAskedWhyItStopped.test.ts`.
+   🔴 **STILL OPEN, and not guessed at:** WHY the server died is now recordable but still unknown —
+   the next report carrying `PREVIEW_SERVER_DOWN` is the first one that can answer it. A fix aimed at
+   the `NBAI_JOURNEY` correlation before that evidence exists would be a guess.
 5. ✅ **CLOSED the same day — and it was TWO independent defects, either of which alone still produced
    the wrong verdict.** The prompt was *"As in if we do have done a chat now, and if we don't have a
    chat in next 2 hours can you send a message to initiate the chat again"*.

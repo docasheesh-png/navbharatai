@@ -3208,6 +3208,16 @@ the flag entries above promise.
   manifest and service worker land un-linked and inert — and the narration now says what LANDED
   instead of announcing them regardless. Reversion-proven three ways in
   `tests/theLaunchBasicsNeverHappened.test.ts`.
+  ✅ **AND THE DEV SERVER'S LAST WORDS WERE READ ON THE WRONG BRANCH.** This autopsy first recorded
+  that *"nothing captures the dev server's own last output"* — **wrong, and re-grepping caught it**:
+  `devServerDeathEvidence.ts` has read the log tail since 2026-09-23. It was wired one line before
+  each RESTART, and the `PREVIEW_SERVER_DOWN` GIVE-UP recorded the restart COUNT and no cause — so
+  the platform could explain a death it recovered from and not the one it gave up on, which is the
+  only one a human has to act on. Both give-ups read it now, the 8 s bound moved INTO the module so
+  the four sites cannot drift, and ONE sentence serves all four. ⚠️ The log at give-up is not stale:
+  it holds the LAST restart's output, the death that ended the loop. ⚠️ **WHY the server dies is
+  still OPEN** — it is now *recordable*, not known, and the next report carrying that code is the
+  first that can answer it.
 
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates

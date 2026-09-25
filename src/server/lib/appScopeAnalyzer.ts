@@ -84,7 +84,14 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
  * and hands the build a roadmap for the wrong app.
  */
 const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+)?$/i;
-const TOOL_AFTER = /^[\s/]*(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|channel|bot|webhook|ads)\b/i;
+// 🔴 CONTENT FROM A PRODUCT IS NOT THE PRODUCT (autopsy Study-Racer, 2026-09-25). "mai isme notes,
+// youtube video ka link dalunga" — I will paste YouTube video links into it — was classed
+// *"LARGE — clone of YouTube"* while the complexity router scored the same prompt 15 ("simple"). The
+// planner then cut the user's own core ask (their notes, their YouTube links) into roadmap steps 2 and
+// 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
+// playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
+// link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
+const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages)\b/i;
 
 export function namesAsProduct(text: string, re: RegExp): boolean {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);

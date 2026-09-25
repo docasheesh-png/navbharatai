@@ -20,6 +20,7 @@
 // PURE — no I/O, no clock.
 
 import crypto from 'crypto';
+import { withoutPreviewBridge } from './previewBridge';
 
 /**
  * One deterministic hash for a path→content map.
@@ -28,6 +29,29 @@ import crypto from 'crypto';
  * mid-build, the durable store on a cold reopen, a union of the two) whose insertion orders differ.
  * Length-prefixed, so a path containing a space or a newline can never be confused with content.
  */
+/**
+ * THE SOURCE AN IDENTITY IS TAKEN OVER — the app's files with OUR preview bridge removed.
+ *
+ * 🔴 WHY (autopsy Study-Racer, 2026-09-25): the copy's hash is read from the SANDBOX tree right after
+ * `npm run build`, the confirmation's from the DURABLE set that was persisted. Between the two sits a
+ * fact that has nothing to do with the app: every dev-server start injects our console mirror into the
+ * sandbox's `index.html` (E2BActuator), and the durable copy never carries it. So on a build whose
+ * model wrote `index.html`, the two `index.html`s differed by 18 KB of NavBharatAI code — and the
+ * copy was declared STALE ("both sides hold the same 19 file(s), so a file's CONTENT changed") on a
+ * build whose own `POST_GREEN_WRITES` line said nothing wrote after the render. The user then paid
+ * for a live machine on every preview because the free copy was distrusted. `withoutPreviewBridge`
+ * already exists for exactly this ("apply it wherever sandbox content enters the analysis corpus");
+ * the identity hash was the reader that had not applied it. Idempotent on a clean tree. PURE.
+ */
+export function identitySource(files: Record<string, string> | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!files) return out;
+  for (const [path, content] of Object.entries(files)) {
+    out[path] = typeof content === 'string' ? withoutPreviewBridge(path, content) : content;
+  }
+  return out;
+}
+
 export function workspaceContentHash(files: Record<string, string> | null | undefined): string {
   const h = crypto.createHash('sha256');
   const paths = Object.keys(files ?? {}).sort();

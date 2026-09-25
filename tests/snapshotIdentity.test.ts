@@ -100,7 +100,9 @@ describe('wiring — the build records the identity, the final save confirms it,
     // with the copy as well (see filePaths). The fact asserted is unchanged: the thing hashed is what
     // was just collected, and nothing else.
     expect(block).toMatch(/const source = await withTimeout\(collectWorkspaceFiles/);
-    expect(block).toMatch(/workspaceContentHash\(source\)/);
+    // Read through identitySource since 2026-09-25: the sandbox tree carries our preview bridge in
+    // index.html and the durable tree does not — the identity is the app's bytes, not our mirror.
+    expect(block).toMatch(/workspaceContentHash\(identitySource\(source\)\)/);
     expect(block).toContain('sandboxStore.saveSnapshot(workspaceId, url, at, filesHash)');
   });
 
@@ -118,7 +120,7 @@ describe('wiring — the build records the identity, the final save confirms it,
     const call = route.slice(route.indexOf('snapshotConfirmation({'));
     const args = call.slice(0, call.indexOf('});'));
     expect(args).toContain('taken: snapshotTaken');
-    expect(args).toContain('persistedHash: workspaceContentHash(persisted)');
+    expect(args).toContain('persistedHash: workspaceContentHash(identitySource(persisted))');
   });
 
   it('the restamp waits for the save it must outdate', () => {

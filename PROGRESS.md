@@ -81337,3 +81337,34 @@ the session that owns it, and one waits on the admin.
 - ⏳ **Green Freeze refuses post-settle tests/PWA — ASKED the admin (in Hindi), awaiting a decision.**
   Also named open by #3307 and #3308. Options put: (1) generate them BEFORE the green latch
   (recommended), (2) allow after green with verify-and-revert, (3) leave as is.
+
+## 2026-09-25 — Green Freeze decision: the finishing passes run BEFORE the proof; the service worker it was hiding
+
+The admin was given the three options for the refused post-settle writes and asked *"aap batao, kon sa
+best hai — user ko working app jaldi mile, aur app acche se acchi bane"*. Chosen: **run them before the
+green latch** (option 1 of the 2026-09-25 entry above, which closes that ⏳ item).
+
+- ✅ **The four finishing passes moved, not the freeze widened.** E2E net, ADR note, unit-test
+  skeletons and production defaults now run in one block after the platform starts the preview and
+  before the render rescue — so the browser check, `npm run build`, the vaccine's suite detection and
+  GreenGuard all see them. No model call; seconds. The ADR write is now awaited (8 s bound) so it
+  cannot race the latch. `ALLOWED_PASSES` is unchanged. Test-locked (source order, before the first
+  `latchGreen`, and "moved, not copied") in `tests/theFinishingPassesRunBeforeTheProof.test.ts`,
+  reversion-proven.
+- 🔴 **What the freeze had been hiding — and why "just move it" would have shipped a bug to every app.**
+  The generated `sw.js` served EVERY GET cache-first under the fixed name `app-shell-v1`, `/` and
+  `/index.html` included. So a republished app never reached a returning visitor, and a live preview
+  could serve `/src/*.tsx` from before an edit. It reached real apps only on builds nobody verified and
+  through the `generate_app_defaults` tool; on every green build the freeze refused it, which is how it
+  survived. **v2 is network-first**, skips dev-server paths (`/@…`, `/src/`, `/node_modules/`) and
+  other origins, uses the cache only offline, and deletes older caches on activate. Our exact v1 file
+  is upgraded in place (`upgradeGeneratedServiceWorker`); a user's or a framework's worker is never
+  touched. Executed in a fake worker environment in the test (network-first, offline fallback, dev
+  paths, v1 cache purge), with v1 run beside it to reproduce the stale page.
+  ⚠️ Residual, stated: a published app already carrying v1 is fixed only when it is rebuilt and
+  republished — nothing reaches into sites already out there.
+- ✅ **Siblings, same change.** `generate_app_defaults` wrote the PWA files at the project root for a
+  Vite app, where the production build drops them (the 2026-08-03 rule the post-build pass followed and
+  the tool never did) — now `public/`. The app name from the prompt is HTML-escaped in the head and the
+  icon. The in-browser preview runs the app's inline scripts on OUR origin, so it now drops the app's
+  worker registration (`buildSourceAppPreview`).

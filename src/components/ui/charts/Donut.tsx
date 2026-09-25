@@ -31,7 +31,7 @@ export function Donut({ slices, size = 96, thickness = 12, center, className }: 
   return (
     <div className={className} style={{ position: 'relative', width: size, height: size }}>
       <svg viewBox={`0 0 ${view} ${view}`} width={size} height={size} role="img" aria-label="Donut chart">
-        <circle cx={c} cy={c} r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={thickness} />
+        <circle cx={c} cy={c} r={radius} fill="none" style={{ stroke: 'var(--border-soft)' }} strokeWidth={thickness} />
         {segs.map((seg, i) => (
           seg.length > 0 ? (
             <circle

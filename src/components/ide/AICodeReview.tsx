@@ -344,12 +344,12 @@ function ScoreRing({ score }: { score: number }) {
   return (
     <div className="flex flex-col items-center gap-1">
       <svg width="100" height="100" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r={r} fill="none" stroke="#ffffff08" strokeWidth="10" />
+        <circle cx="50" cy="50" r={r} fill="none" style={{ stroke: 'var(--border-soft)' }} strokeWidth="10" />
         <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="10"
           strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" strokeDashoffset={circ / 4}
           style={{ transition: 'all 0.6s ease' }} />
-        <text x="50" y="46" textAnchor="middle" fill="white" fontSize="20" fontWeight="bold">{score}</text>
-        <text x="50" y="60" textAnchor="middle" fill="#ffffff60" fontSize="9">{label}</text>
+        <text x="50" y="46" textAnchor="middle" style={{ fill: 'var(--text-primary)' }} fontSize="20" fontWeight="bold">{score}</text>
+        <text x="50" y="60" textAnchor="middle" style={{ fill: 'var(--text-muted)' }} fontSize="9">{label}</text>
       </svg>
     </div>
   );

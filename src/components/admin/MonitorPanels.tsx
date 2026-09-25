@@ -147,7 +147,7 @@ function ChartFrame({ points, windowHours, height = 120, children }: {
     <div>
       <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }} role="img" aria-label="Time series">
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1={0} x2={w} y1={height * f} y2={height * f} stroke="#ffffff" strokeOpacity={0.06} strokeWidth={1} />
+          <line key={f} x1={0} x2={w} y1={height * f} y2={height * f} style={{ stroke: 'var(--border-soft)' }} strokeWidth={1} />
         ))}
         {children({ w, h: height })}
       </svg>
@@ -636,7 +636,7 @@ export function MonitorPanels({ adminToken }: { adminToken: string }) {
           ) : (
             <div className="flex items-center gap-5">
               <svg viewBox="0 0 42 42" className="w-28 h-28 shrink-0" role="img" aria-label="Cost split by engine">
-                <circle cx="21" cy="21" r="15.9155" fill="transparent" stroke="#ffffff" strokeOpacity={0.06} strokeWidth="5" />
+                <circle cx="21" cy="21" r="15.9155" fill="transparent" style={{ stroke: 'var(--border-soft)' }} strokeWidth="5" />
                 {donutSegments(providers.map((p) => p.share)).map((seg, i) => (
                   <circle
                     key={providers[i].name}

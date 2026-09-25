@@ -20,7 +20,7 @@
 
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
-import { countEnumeratedFeatures } from './enumeratedFeatures';
+import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from './enumeratedFeatures';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -167,7 +167,7 @@ export function megaProjectSignals(prompt: string): MegaProjectSignals {
   const scaleMatch = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
   const scale = scaleMatch ? Number(scaleMatch[1]) : 0;
   const features = countEnumeratedFeatures(prompt || '');
-  const bigNoun = /\b(?:erp|crm|lms|hms|hrms|pos)\b|management system|management software|enterprise|saas platform|multi[- ]tenant|marketplace|social network|super ?app|full[- ](?:fledged|scale)/i.test(text);
+  const bigNoun = BIG_SOFTWARE_NOUN.test(text);
   const fires = scale >= MEGA_SCALE_MIN
     || (bigNoun && features >= MEGA_BULLETS_WITH_NOUN)
     || features >= MEGA_BULLETS_ALONE;

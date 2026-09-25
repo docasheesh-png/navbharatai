@@ -3135,6 +3135,44 @@ the flag entries above promise.
   cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
   `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
+- **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
+  ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
+  asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat
+  again"*. The first model answered it correctly in 7 seconds and asked whether they wanted a small
+  reminder app built — zero tool calls, `end_turn`. **That was the right answer.**
+  🔴 **`decideBuildNudge` SAW IT AND STOOD DOWN** (`BUILD_NUDGE_STOOD_DOWN`, detail `asked-the-user`).
+  **156 milliseconds later `shouldRetryEmptyBuild` read the same turn, counted `filesWritten === 0`,
+  and re-ran the whole build one rung higher:** 53 calls, 9 minutes, a six-feature chat app with auth,
+  profiles, realtime, notifications, moderation and media upload that nobody ordered.
+  🔑 **`nudgeToBuild.ts` had already named the class in its own docblock** — *"`toolUses.length === 0`
+  is not evidence of a stall … ask what the turn WAS, not merely count what it did."* `filesWritten
+  === 0` is that mistake with a different counter. And **half the guard was already carried across**:
+  `modelRefused` IS `turnDeclined`, the same `looksLikeRefusal`. The sibling, `turnAskedTheUser`, was
+  left behind — this repo's headline class, one of two lanes fixed.
+  ⚠️ **`looksLikeRefusal` was RIGHT to stay silent**: it needs "I can't" near build/make/create/help,
+  and the answer says *"I can't **send**"*. The guard that had to speak did not exist.
+  🔒 **BOTH HALVES SHIP TOGETHER, or the fix trades one problem for another.** Suppressing only the
+  retry leaves zero files reaching `emptyBuildFailureSummary`, which would answer the user's question
+  with *"The build produced no files. Please try again"* — 697b38ee's sin in a new place. So
+  `emptyBuildFailureSummary` gains `askedTheUser` too, and standing down there leaves `result.ok`
+  true — **which is also what keeps the "add credits" upsell quiet**, since that block is gated on
+  `!result.ok` and the comment beside it explicitly forbids writing a second answer there. One fix,
+  three harms, no second answer anywhere.
+  💸 **The bill goes to ₹0**, not by a new rule: a turn that writes no files is zeroed
+  *unconditionally*, whatever its verdict. Report code `TURN_ANSWERED_A_QUESTION`, in
+  `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — our retry policy is never a finding against the app.
+  Test-locked and **reversion-proven four ways** in `tests/aQuestionIsAnAnswerNotAnEmptyBuild.test.ts`
+  (19 cases), against that report's verbatim answer.
+  🔴 **THE MISSING SUBSYSTEM, named so it is not re-discovered: nothing answers "what KIND of turn was
+  this?" in one place.** `looksLikeRefusal` has four readers, `turnAskedTheUser` had one, and every
+  other verdict infers the turn's kind by COUNTING its outputs. A single derived `turnKind`
+  (`built` / `declined` / `asked` / `stalled` / `stopped`) that the retry, the settle flip, the
+  upsell, `runProvenApp` and the release gate all read is the real fix; it is an **OPEN root cause**
+  in `PROGRESS.md`, deliberately not guessed at here. **The next autopsy that finds a third reader of
+  this question should build it.** Four more open items are recorded with it — including that
+  `WRITE_TIME_TYPECHECK` is written BEFORE the retry decision, so on a retried build it describes the
+  abandoned attempt (the fourth time that sentence has been wrong, third distinct cause).
+
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates
   failing our own gate, the very next report told a free user their working password generator had

@@ -111,13 +111,19 @@ function ordinalSuffix(n: number): string {
  * fix nobody measures is a hope, and this file exists because the previous version of that hope could
  * not be checked against anything.
  */
-export function repeatedReadSummary(reads: Map<string, number>): string {
+export function repeatedReadSummary(reads: Map<string, number>, unchangedRereads?: Map<string, number>): string {
   const total = [...reads.values()].reduce((a, b) => a + b, 0);
   const distinct = reads.size;
-  const wasted = total - distinct;
+  // 🔴 THE SENTENCE SAYS "had not changed", SO ONLY THOSE MAY BE COUNTED (autopsy ea07382a). Without the
+  // second map, `total - distinct` counted every re-read — after an edit, or of a part of the file not
+  // yet seen — as waste, and the report printed "17 of them (55%) re-read a file that had not changed"
+  // beside a detail line saying every re-read had followed a real change. Callers that can say which
+  // reads repeated an unchanged view pass it; the old arithmetic stays only for callers that cannot.
+  const wastedBy = unchangedRereads ?? new Map([...reads].map(([p, n]) => [p, Math.max(0, n - 1)]));
+  const wasted = [...wastedBy.values()].reduce((a, b) => a + b, 0);
   if (distinct === 0 || wasted < 5) return '';   // a couple of re-reads is ordinary work, not a finding
   const worst = [...reads.entries()]
-    .filter(([, n]) => n > 1)
+    .filter(([p, n]) => n > 1 && (wastedBy.get(p) ?? 0) > 0)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .map(([p, n]) => `${n}× ${p}`)

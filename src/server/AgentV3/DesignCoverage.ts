@@ -117,6 +117,39 @@ export function hasStylingSignal(content: string): boolean {
 }
 
 /**
+ * Does this page render a list of DATA — something that can be empty on a user's first day?
+ *
+ * 🔴 A DROPDOWN IS NOT A LIST THAT CAN BE EMPTY (autopsy ea07382a, 2026-09-25). The old test was any
+ * `.map(` at all, so an Add Expense FORM was reported as "a list with no empty state" for
+ * `PAYMENT_METHODS.map((m) => <option …>)` — three fixed choices that are never empty. The design heal
+ * then spent 120 s and changed the product to satisfy it: the model said in its own words *"this
+ * component only renders a form"*, and added a "Recent expenses" list to the form page so the
+ * finding would clear. A false finding that a repair pass is told to fix does not stay false; it
+ * becomes a feature nobody asked for.
+ *
+ * A `.map` does NOT count when what it maps can never be empty on a first day:
+ *   - an ALL_CAPS constant or an inline array literal (`PAYMENT_METHODS.map`, `['a','b'].map`), or the
+ *     keys/values/entries of one;
+ *   - a map whose body renders `<option>` — a select's choices, whatever they come from.
+ * Anything else — `expenses.map`, `items.map`, `props.rows.map` — is data and still counts. PURE.
+ */
+export function rendersDataList(content: string): boolean {
+  const re = /\.map\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const before = content.slice(Math.max(0, m.index - 80), m.index);
+    const after = content.slice(m.index, m.index + 240);
+    const staticReceiver =
+      /\b[A-Z][A-Z0-9_]{1,}\s*$/.test(before)
+      || /\]\s*$/.test(before)
+      || /\bObject\.(?:keys|values|entries)\(\s*[A-Z][A-Z0-9_]{1,}\s*\)\s*$/.test(before);
+    const rendersOptions = /^\.map\s*\([^]*?<option\b/.test(after) && !/<(?:li|tr|article|section|div)\b/.test(after.slice(0, after.search(/<option\b/)));
+    if (!staticReceiver && !rendersOptions) return true;
+  }
+  return false;
+}
+
+/**
  * Judge ONE page. Returns null when the file is out of scope or too small to judge honestly.
  *
  * The thresholds are deliberately forgiving: this must fire on "a wall of bare divs", not on a page
@@ -149,7 +182,7 @@ export function analyzePage(path: string, content: string): PageFinding | null {
 
   // 4. A list with no empty state. A blank panel reads as BROKEN to a first-time user, who sees the
   //    app on its emptiest day — the day they sign up.
-  const rendersList = /\.map\s*\(/.test(content);
+  const rendersList = rendersDataList(content);
   const hasEmptyState = /nb-empty|length\s*===\s*0|length\s*<\s*1|!\w+(\.\w+)*\.length|\blength\s*\?/.test(content);
   if (rendersList && !hasEmptyState) defects.push('LIST_WITHOUT_EMPTY_STATE');
 

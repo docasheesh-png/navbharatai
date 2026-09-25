@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { StaticProvider } from '../src/server/AppMakerLab/generator/templates/StaticProvider';
-import { NodeExpressProvider } from '../src/server/AppMakerLab/generator/templates/NodeExpressProvider';
-import { NextjsProvider } from '../src/server/AppMakerLab/generator/templates/NextjsProvider';
-import { SvelteProvider } from '../src/server/AppMakerLab/generator/templates/SvelteProvider';
-import { VueProvider } from '../src/server/AppMakerLab/generator/templates/VueProvider';
-import { PythonFastapiProvider } from '../src/server/AppMakerLab/generator/templates/PythonFastapiProvider';
-import { TemplateRegistry } from '../src/server/AppMakerLab/generator/templates/TemplateRegistry';
+import { StaticProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
+import { NodeExpressProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NodeExpressProvider';
+import { NextjsProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider';
+import { SvelteProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/SvelteProvider';
+import { VueProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/VueProvider';
+import { PythonFastapiProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/PythonFastapiProvider';
+import { TemplateRegistry } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { NextjsProvider as LiveNextjsProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider';
 import { NuxtProvider as LiveNuxtProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NuxtProvider';
 import { SvelteKitProvider as LiveSvelteKitProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/SvelteKitProvider';

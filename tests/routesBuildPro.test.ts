@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 /**
  * Build + Pro route handler validation tests — Phase 5.3 (real route logic, no server boot).
  *
@@ -104,32 +105,24 @@ describe('Build routes — /api/guider/grade', () => {
   });
 });
 
-describe('Build routes — /api/build', () => {
-  it('returns 400 when prompt is missing', async () => {
+describe('Build routes — the legacy /api/build engine is RETIRED (2026-09-25)', () => {
+  it.each(['POST /api/build', 'POST /api/build-stream'])('%s answers 410 without running anything', async (route) => {
     const register = await importBuildRoutes();
     const routes = captureRoutes(register);
-    const handler = routes.get('POST /api/build');
+    const handler = routes.get(route);
     expect(handler).toBeDefined();
-
-    const req = mockReq({ body: {} });
+    const req = mockReq({ body: { prompt: 'build a todo app' } });
     const res = mockRes();
     await handler!(req, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body?.error).toMatch(/prompt/i);
+    expect(res.statusCode).toBe(410);
+    expect(res.body?.error).toMatch(/retired/i);
   });
-});
 
-describe('Build routes — cost/history attribution identity (security)', () => {
-  it('attributes ONLY to a verified uid, never a client-supplied body userId', async () => {
-    const { resolveAttributionUserId } = await import('../src/server/routes/build');
-    // A verified Firebase uid is used verbatim.
-    expect(resolveAttributionUserId('uid_verified')).toBe('uid_verified');
-    // No verified identity → no attribution, REGARDLESS of what a body.userId claimed.
-    // (The route derives this arg from verifyFirebaseToken(req), not req.body.userId, so a
-    //  spoofed body userId can never reach cost/history recording.)
-    expect(resolveAttributionUserId(null)).toBeUndefined();
-    expect(resolveAttributionUserId(undefined)).toBeUndefined();
-    expect(resolveAttributionUserId('')).toBeUndefined();
+  it('no model client, engine or paid fallback chain is imported by the route file any more', () => {
+    const src = readFileSync('src/server/routes/build.ts', 'utf8');
+    for (const gone of ['runProEngine', 'runUnifiedBuild', 'callOpenAI', 'callGrok', 'aiRouter', 'consumeEngineerQuota']) {
+      expect(src).not.toContain(gone);
+    }
   });
 });
 

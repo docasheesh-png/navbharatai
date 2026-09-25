@@ -83,12 +83,3 @@ describe('ensureWorkspace is one setup per workspace', () => {
     expect(body).toContain('this._ensureWorkspaceOnce(');
   });
 });
-
-describe('the sibling: the Engineer AI actuator carries the same single-flight', () => {
-  it('WIRING', () => {
-    const src = readFileSync('src/server/EngineerAI/actuators/E2BActuator.ts', 'utf8');
-    const body = src.slice(src.indexOf('  async ensureWorkspace('), src.indexOf('  private async _ensureWorkspaceOnce('));
-    expect(body).toContain('this._ensuring.get(workspaceId)');
-    expect(body).toContain('this._ensureWorkspaceOnce(');
-  });
-});

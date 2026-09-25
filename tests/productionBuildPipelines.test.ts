@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { NodeExpressProvider } from '../src/server/AppMakerLab/generator/templates/NodeExpressProvider';
-import { NextjsProvider } from '../src/server/AppMakerLab/generator/templates/NextjsProvider';
-import { TemplateRegistry } from '../src/server/AppMakerLab/generator/templates/TemplateRegistry';
+import { NodeExpressProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NodeExpressProvider';
+import { NextjsProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider';
+import { TemplateRegistry } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 
 describe('Phase 16 — Production Build Pipelines', () => {
   describe('NodeExpressProvider', () => {

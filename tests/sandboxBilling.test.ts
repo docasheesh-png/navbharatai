@@ -159,8 +159,8 @@ describe('WIRING — the cost is read at BILLING time, not after it', () => {
     expect(route).toContain('const billable = Math.min(seconds, buildSeconds);');
     expect(route).toContain('sandboxBillableUsd(sandboxCost(billable))');
     // And the number the USER is shown is that same one — not a second measurement taken later.
-    expect(route).toContain('usdInrRate(), livePreviewCharge)');
-    expect(route).toContain('usdInrRate(), watchdogLivePreview)');
+    expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount)');
+    expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount)');
   });
 
   it('an UNKNOWN build start bills nothing rather than guessing', () => {

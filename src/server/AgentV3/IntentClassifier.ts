@@ -578,16 +578,40 @@ const WH_OPENERS =
   /^(?:what|whats|what's|how|why|which|who|whom|whose|when|where|kya|kaise|kaisa|kaisi|kyun|kyu|kyon|kaun|kab|kahan|kahaan|kitna|kitne|kitni|konsa|konsi)\b/;
 
 /**
- * Auxiliaries that open a question OR an order, and cannot be told apart on their own.
+ * An auxiliary followed by a SECOND-PERSON subject — "can you …", "could you …", "do you …",
+ * "kya aap …". The one shape that is never an order.
  *
- * 🔴 THIS DISTINCTION IS NOT PEDANTRY — it was a real regression, caught by the existing suite before
- * this shipped. **"do it again"** is a retry, and treating `do` as interrogative turned a continuation
- * into small talk — re-opening the "please continue" amnesia this repo has already fixed once. So an
- * auxiliary counts as a question only with a question mark, or when a SECOND-PERSON subject follows it
- * ("can you …", "kya aap …"), which is the one shape that is never an order.
+ * 🔴 THE SUBJECT IS NOT PEDANTRY — it was a real regression, caught by the existing suite before the
+ * per-clause rewrite shipped. **"do it again"** is a retry, and treating `do` as interrogative turned
+ * a continuation into small talk, re-opening the "please continue" amnesia this repo has already
+ * fixed once. So a bare auxiliary decides nothing; only the auxiliary WITH a second-person subject
+ * does. That half is unchanged.
+ *
+ * 🔴 UNANCHORED — THE THIRD TIME THIS EXACT ANCHOR HAS COST A BUILD (autopsy e628efd4, 2026-09-25).
+ * A free-tier user typed, in one comma-joined run-on sentence with no question mark:
+ *
+ *   > *"As in if we do have done a chat now, and if we don't have a chat in next 2 hours can you
+ *   > send a message to initiate the chat again"*
+ *
+ * The question is in the middle. `CLAUSE_BOUNDARY` is `[.!?;।\n]+` — a comma is not a boundary,
+ * because splitting on commas would cut ordinary build orders in half — so the whole message was ONE
+ * clause, this pattern was `^`-anchored to it, and `readsAsQuestion` returned **false**. The message
+ * then hard-locked to `new_build` at HIGH on nothing but its character count, the intention reader
+ * was never consulted, and the engine built a six-feature chat app nobody ordered.
+ *
+ * 🔑 THE CLASS, and this file has now paid for it three times: `MIDSENTENCE_KYA_QUESTION` was
+ * unanchored on 2026-09-16 because *"Hindi places its question particle anywhere in the sentence"*;
+ * the English WH-openers were made per-CLAUSE on 2026-09-17 after the same failure in production the
+ * next day. **English places a polite question anywhere too, and a comma is not a full stop.** Each
+ * fix hunted one sibling and stopped; this is the one that was left.
+ *
+ * 🔒 WHY IT CANNOT SWALLOW AN ORDER, which is the whole safety argument. A question NEVER flips the
+ * verdict — it only costs the HARD LOCK (see `doubt` below), so "can you build me a todo app" stays
+ * `new_build` and is merely READ before being obeyed. The worst case of a false positive is therefore
+ * one intention-reader call; the worst case of the false negative is the nine minutes and ₹196.28
+ * this autopsy measured.
  */
-const AUX_OPENERS = /^(?:can|could|would|will|shall|should|do|does|did|is|are|am|may|might)\b/;
-const AUX_ASKS_US = /^(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tum)\b/;
+const AUX_ASKS_US = /\b(?:can|could|would|will|do|does|did|are)\s+(?:you|u|aap|tum)\b/;
 
 /**
  * "kya main/mai/aap/tum/hum/hume …" — the Hindi/Hinglish "should I…?" / "may I…?" construction.
@@ -660,13 +684,16 @@ function clauseReadsAsQuestion(raw: string): boolean {
   const text = raw.trim().replace(LEADING_CONNECTIVE, '').trim();
   if (!text) return false;
   if (WH_OPENERS.test(text)) return true;
-  // 🔴 `&&`, NOT AN EARLY `return`. This line used to read
+  // 🔴 NO EARLY `return`, AND NO ANCHOR. This line has been wrong twice. It first read
   //     `if (AUX_OPENERS.test(text)) return AUX_ASKS_US.test(text);`
   // so a clause opening with ANY auxiliary that was not followed by a second-person subject returned
   // FALSE **without ever reaching `MIDSENTENCE_KYA_QUESTION` below** — the Hindi mid-sentence rule was
-  // unreachable for every message beginning "can i …", "should i …", "do i …". The auxiliary
-  // distinction itself is unchanged, so "do it again" is still an order, not a question.
-  if (AUX_OPENERS.test(text) && AUX_ASKS_US.test(text)) return true;
+  // unreachable for every message beginning "can i …", "should i …", "do i …". It then read
+  // `AUX_OPENERS.test(text) && AUX_ASKS_US.test(text)`, which fixed that and kept the `^` anchor —
+  // so a "can you …" sitting after a comma, mid-sentence, was still invisible (autopsy e628efd4).
+  // `AUX_ASKS_US` is now unanchored and subsumes the opener test entirely; the auxiliary distinction
+  // itself is unchanged, so "do it again" is still an order, not a question.
+  if (AUX_ASKS_US.test(text)) return true;
   if (MIDSENTENCE_KYA_QUESTION.test(text)) return true;
   // The verb-final Hindi question: a question word anywhere, and a FIRST-PERSON verb to go with it.
   // Both are required — the wh-word alone appears in plenty of statements ("kya baat hai"), and the
@@ -863,11 +890,27 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) {
     return { intent: 'chat', confidence: 'high', signal: 'informational' };
   }
+  // 🔴 THE TWO STRUCTURAL BRANCHES HONOUR `doubt` TOO (autopsy e628efd4, 2026-09-25) — and this is
+  // NOT a reversal of the line above that says length is deliberately not a doubt signal. Length
+  // still CREATES no doubt; it simply may no longer CANCEL doubt that the sentence's own grammar
+  // already raised. These two sit BELOW the keyword ladder, so they are reached only when no build
+  // verb matched at all — the weakest evidence in the whole function — and they were the only
+  // branches left that could hand back a HARD LOCK on evidence weaker than a keyword.
+  //
+  // What that cost: the e628efd4 message contained no build verb, so `nbSignal` was null and the
+  // `doubt` computed three lines above was discarded. A question about whether NavBharatAI can send
+  // a message became a HIGH-confidence order to build an app, on nothing but 128 characters, and the
+  // intention reader — the thing the 2026-09-17 rule exists to reach — was never called.
+  //
+  // ⚠️ The INTENT is unchanged on both branches, exactly as on the keyword branches: a long prompt is
+  // still a build, a pasted URL is still a build. Only the lock goes, so nothing regresses when the
+  // reader is slow or down, and an ordinary long build prompt with no question and no negation keeps
+  // its HIGH and pays nothing.
   if (text.length > LONG_MESSAGE_THRESHOLD) {
-    return { intent: 'new_build', confidence: 'high', signal: 'long-message' };
+    return { intent: 'new_build', confidence: doubt ? 'low' : 'high', signal: 'long-message' };
   }
   if (hasCodeOrPathOrUrl(text)) {
-    return { intent: 'new_build', confidence: 'high', signal: 'code-or-url' };
+    return { intent: 'new_build', confidence: doubt ? 'low' : 'high', signal: 'code-or-url' };
   }
   if (matchesSignal(lower, BUILD_SIGNALS)) {
     // AMBIGUOUS tech-noun / weak-verb signals ('app', 'react', 'button', 'add', 'install', …):

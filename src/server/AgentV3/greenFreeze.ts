@@ -29,6 +29,13 @@
 // build's report shows nine `GREEN_FREEZE_DEFERRED` writes — tests, a manifest, robots.txt, an icon
 // and a service worker — and this paragraph said they would have been allowed.
 //
+// ✅ AND THOSE NINE WERE THE REAL DEFECT, NOT THE DOCUMENTATION (traced from code 2026-09-25). They
+// came from the two DETERMINISTIC post-build passes — the starter-test scaffold and the U-2 launch
+// basics — which run after the latch and named no pass at all, so every write was refused and
+// swallowed. See `CREATE_ONLY_PASSES` below: they are named now, and may CREATE a file that was not
+// present at green (which cannot change a render) while still being refused every overwrite. Full
+// deny is unchanged for everything else, and for those two passes on any path that already existed.
+//
 // WHAT STAYS ALLOWED, and why it is not "our opinion": the runtime-error auto-fix (the app renders but
 // throws — the user wants a WORKING app) and the feature-presence heal (a feature the user EXPLICITLY
 // asked for is missing — rendering ≠ complete). Those are the user's own requests, the job itself. Plus
@@ -90,8 +97,55 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   'reviewer-functional-repair',
 ]);
 
-/** Passes that may write to a green app but NEVER to a secret file. See `writeRefused`. */
-const SECRET_FILE_DENIED_PASSES: ReadonlySet<string> = new Set(['reviewer-functional-repair']);
+/**
+ * 🔴 THE DETERMINISTIC POST-BUILD PASSES, WHICH HAD BEEN REFUSED IN SILENCE SINCE THIS FILE SHIPPED
+ * (traced from code 2026-09-25, from autopsy e628efd4's nine deferrals).
+ *
+ * The green latch is set the moment a real browser confirms the render (`routes/agentv3.ts`), and
+ * BOTH deterministic post-build passes run after it: the starter-test scaffold, and the U-2 launch
+ * basics (a web manifest, an installable icon, robots.txt, an offline service worker, and the
+ * SEO/OG/viewport patch to index.html). Neither wrapped itself in `runInPass`, so `currentPass()`
+ * was `null`, every write was refused, and each refusal was swallowed by the pass's own `catch`.
+ *
+ * **So on every build whose preview was verified in a real browser, the launch basics
+ * `AppKnowledgeBase.ts` promises "BY DEFAULT after each build" did not happen at all** — and the
+ * same report's `READINESS_WARNING: No tests at all`, beside three deferred `*.test.ts` writes the
+ * engine had itself produced, is that one defect seen from the other end.
+ *
+ * 🔒 WHY THEY ARE "CREATE-ONLY" AND NOT SIMPLY ALLOWLISTED. `ALLOWED_PASSES` asserts *"this pass
+ * writes to a working app on purpose"* — true of a user's own repair, and NOT true of these. A file
+ * that did not exist when the browser rendered the app cannot have been part of what rendered, so
+ * creating it cannot change the render; overwriting one that DID exist is exactly what this file is
+ * for. The latch already holds the set of paths present at green, so that question is answered
+ * exactly rather than guessed.
+ *
+ * ⚠️ THIS IS NARROWER THAN THE CARVE-OUT THAT WAS REMOVED, deliberately. That one let ANY
+ * non-allowlisted pass — including a model-driven one — create files, so a coordinated change (a new
+ * file plus an edit) landed half of itself. These two passes are deterministic, idempotent, and
+ * already skip any path that exists; the only write either makes to an existing file is the U-2
+ * index.html patch, which stays REFUSED. The honest consequence is stated rather than hidden: on a
+ * green app the manifest and service worker land but are not linked from index.html, so they are
+ * inert — the narration says what actually happened instead of claiming them.
+ *
+ * 🔁 SINCE #3313 BOTH PASSES RUN BEFORE THE LATCH (with the E2E net and the ADR note), so on a normal
+ * build none of this applies: the index.html patch lands and the browser check verifies it. This tier
+ * remains the net for a latch that already exists when they run — a resumed, already-green session.
+ */
+const CREATE_ONLY_PASSES: ReadonlySet<string> = new Set([
+  'starter-tests',        // additive Vitest skeletons — nothing in the app can import a test file
+  'production-defaults',  // U-2 launch basics: manifest, icon, robots.txt, service worker
+]);
+
+/**
+ * Passes that may write to a green app but NEVER to a secret file. See `writeRefused`.
+ *
+ * Every create-only pass is here too, by construction rather than by listing it twice: none of them
+ * has any business writing a `.env`, and a future entry to that set must not have to remember this.
+ */
+const SECRET_FILE_DENIED_PASSES: ReadonlySet<string> = new Set([
+  'reviewer-functional-repair',
+  ...CREATE_ONLY_PASSES,
+]);
 
 /** `.env`, `.env.local`, `.env.production` … at any depth — the files that hold the user's real keys. */
 export function isSecretFilePath(path: string): boolean {
@@ -210,6 +264,9 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
   const pass = currentPass();
   if (pass && SECRET_FILE_DENIED_PASSES.has(pass) && isSecretFilePath(path)) return true; // never the user's keys
   if (pass && ALLOWED_PASSES.has(pass)) return false; // the user's own request, or the restore itself
+  // A create-only pass may add a file that was NOT there when the browser rendered, and nothing else.
+  // Refused iff the path was present at green — which is the one question the latch can answer exactly.
+  if (pass && CREATE_ONLY_PASSES.has(pass)) return latches.get(workspaceId)?.paths.has(norm(path)) ?? true;
   return true;
 }
 

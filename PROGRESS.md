@@ -81028,3 +81028,14 @@ restore state in words. Test-locked in `tests/theStuckProjectsHaveNames.test.ts`
 **Why this ships before the autopsy of the seven, not after:** a Claude session cannot read Firestore.
 The card is the one door to those reports, and until it named them there was nothing to paste. The
 next scorecard the admin sends carries the seven root causes; that paste is the autopsy's input.
+
+## 2026-09-25 — Bot Builder crash on drag: a state updater never reads a ref
+
+Admin screenshot (Other → Bot Builder): "Something went wrong — null is not an object (evaluating
+'k.current.id')", every time. Root cause: `handleCanvasPointerMove` queued
+`setNodes(prev => prev.map(n => n.id === dragging.current!.id ? … : n))`. React runs an updater later,
+during render; a finger lift in between fires pointer-up (`dragging.current = null`), so the updater
+dereferenced null inside a render and the error boundary replaced the whole screen. Common on phones,
+where the last touch-move and the lift arrive together. Fix: read the ref once into locals before
+queueing the update. Sibling hunt (every `setX(prev => …)` updater in client code): this was the only
+one. Locked by `tests/aStateUpdaterNeverReadsARef.test.ts` (reversion-proven against the old line).

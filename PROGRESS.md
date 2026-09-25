@@ -81225,8 +81225,24 @@ and that is the same defect in two subsystems written four months apart.
    `null`, every write is refused, and each refusal is swallowed by its own `catch`. **On every build
    whose preview is verified in a real browser, the launch basics `AppKnowledgeBase.ts` promises
    "BY DEFAULT after each build" do not happen at all.** The report's nine deferrals and its
-   "No tests at all" warning are one defect seen from two ends. Carried to its OWN change rather than
-   this autopsy's PR: it is a change to the safety mechanism itself and must be reviewable alone.
+   "No tests at all" warning are one defect seen from two ends.
+   ✅ **CLOSED the same day.** Both passes now NAME themselves (`runInPass('starter-tests', …)`,
+   `runInPass('production-defaults', …)`) and Green Freeze gains a third tier between "allowlisted"
+   and "denied": `CREATE_ONLY_PASSES` — a pass that may write a path **only if that path was absent
+   from the green snapshot**, which the latch already records exactly. A file that did not exist when
+   the browser rendered the app cannot have been part of what rendered, so creating it cannot change
+   the render; overwriting one that DID exist is precisely what the freeze is for.
+   🔒 **Strictly narrower than the carve-out removed by the 2026-08-12 adversarial review**, which let
+   ANY pass — including a model-driven one — create files, so a coordinated change half-applied. These
+   two are deterministic and idempotent, already skip any path that exists, and are additionally
+   refused every `.env` by construction.
+   ⚠️ **The honest consequence, stated rather than hidden:** the U-2 index.html patch is still refused
+   on a green app, so the manifest and the service worker land but are not linked and are inert. The
+   narration used to announce them regardless (*"+ a web manifest, icon, robots.txt and an offline
+   service worker"*) — it now reports only what actually landed, which is the second absolute rule
+   applied to a sentence. Test-locked and **reversion-proven three ways** in
+   `tests/theLaunchBasicsNeverHappened.test.ts` (11 cases): drop the create-only branch, unname either
+   pass, or promote either to the full allowlist, and it fails.
 4. **`PREVIEW_SERVER_DOWN`** — the dev server died, was restarted, and died again (502). Its last
    output before stopping was the journey script's own `NBAI_JOURNEY` line. Whether the journey run
    is implicated is unproven; recorded rather than asserted. **Still open, and deliberately not

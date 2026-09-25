@@ -3197,7 +3197,17 @@ the flag entries above promise.
   refusal is swallowed by its own `catch`. **On every build whose preview is verified in a real
   browser, the launch basics `AppKnowledgeBase.ts` promises "BY DEFAULT after each build" do not
   happen at all** — and the same report's "No tests at all" warning is that defect seen from the other
-  end. It is a change to the safety mechanism itself, so it ships in its own reviewable change.
+  end.
+  ✅ **CLOSED the same day, with a THIRD TIER in the freeze rather than an allowlist entry.** Both
+  passes name themselves now, and `CREATE_ONLY_PASSES` lets a pass write a path **only if that path
+  was absent from the green snapshot** — the one question the latch answers exactly. `ALLOWED_PASSES`
+  asserts *"this pass writes to a working app on purpose"*, which is true of a user's own repair and
+  false of a deterministic sweep; create-only is **strictly narrower than the blanket "new files are
+  always allowed" carve-out** the 2026-08-12 adversarial review removed, and both passes are refused
+  every `.env` by construction. ⚠️ **The index.html patch stays refused**, so on a green app the
+  manifest and service worker land un-linked and inert — and the narration now says what LANDED
+  instead of announcing them regardless. Reversion-proven three ways in
+  `tests/theLaunchBasicsNeverHappened.test.ts`.
 
 - **🪞 TWO ACCESSIBILITY ANALYZERS, AND THE LOCK WAS POINTED AT THE WRONG ONE (autopsy `8a92e5ed`,
   2026-09-20; no flag, on by construction).** The day after `c847b523` root-caused our own templates

@@ -21927,14 +21927,23 @@ async function noteBuildOutcome(
           const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
           const plan = planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 });
           const scaffolded: string[] = [];
-          for (const item of plan) {
-            try {
-              await actuator.writeFile(workspaceId, item.testPath, item.content);
-              writtenFiles.set(item.testPath, item.content);
-              try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
-              scaffolded.push(item.testPath);
-            } catch { /* one test file failing must not block the rest */ }
-          }
+          // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (traced 2026-09-25, autopsy e628efd4).
+          // This runs AFTER the green latch, and without `runInPass` its `currentPass()` was `null`,
+          // so Green Freeze refused every write and each refusal was swallowed by the catch below —
+          // on every build whose preview was verified in a real browser. That report carries three
+          // deferred `*.test.ts` writes AND a `READINESS_WARNING: No tests at all`: one defect, seen
+          // from both ends. `starter-tests` is CREATE-ONLY, so an overwrite is still refused; a test
+          // file the app cannot import cannot change the render the browser already confirmed.
+          await runInPass('starter-tests', async () => {
+            for (const item of plan) {
+              try {
+                await actuator.writeFile(workspaceId, item.testPath, item.content);
+                writtenFiles.set(item.testPath, item.content);
+                try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
+                scaffolded.push(item.testPath);
+              } catch { /* one test file failing must not block the rest */ }
+            }
+          });
           if (scaffolded.length > 0) {
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
             events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
@@ -22038,8 +22047,13 @@ async function noteBuildOutcome(
       // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
       // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
       // and best-effort — never blocks or fails the build.
+      // 🔴 NAMED, FOR THE REASON THE STARTER-TEST PASS ABOVE IS (traced 2026-09-25, autopsy e628efd4):
+      // this runs after the green latch, and an unnamed pass is a refused one. Everything this block
+      // does was being thrown away on every browser-verified build, silently, so the launch basics
+      // `AppKnowledgeBase.ts` promises "BY DEFAULT after each build" did not happen at all.
       try {
         if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          await runInPass('production-defaults', async () => {
           const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
           let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
           if (indexHtml == null) {
@@ -22062,6 +22076,11 @@ async function noteBuildOutcome(
           const appName = deriveTitle(prompt) || 'App';
           const defaults = planAppDefaults(indexHtml, appName);
           const savedDefaults: Record<string, string> = {};
+          // 🔴 WHETHER THE index.html PATCH REALLY LANDED, because on a green app it does not — and
+          // the narration below used to claim it either way (traced 2026-09-25, autopsy e628efd4).
+          // `production-defaults` is CREATE-ONLY: the standalone files are created, this overwrite of
+          // a file that existed at green is still refused, and the two facts are now reported apart.
+          let indexPatched = false;
           // Patch index.html only when the generator actually changed it.
           if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
             try {
@@ -22069,6 +22088,7 @@ async function noteBuildOutcome(
               writtenFiles.set(idxPath, defaults.indexHtml);
               try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
               savedDefaults[idxPath] = defaults.indexHtml;
+              indexPatched = true;
             } catch { /* one write failing must not block the rest */ }
           }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
@@ -22092,10 +22112,19 @@ async function noteBuildOutcome(
           }
           if (Object.keys(savedDefaults).length > 0) {
             await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
-            if (defaults.added.length > 0) {
-              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${defaults.added.join(', ')} + a web manifest, icon, robots.txt and an offline service worker.`, ts: Date.now() });
+            // 🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED. `defaults.added` is the list of index.html
+            // TAGS the generator intended; the files are a separate set, and on a green app exactly
+            // one of the two happens. Announcing the tags when the patch was refused is the "fake
+            // success" the second absolute rule forbids, and it is what this line used to do.
+            const savedFiles = Object.keys(savedDefaults).filter((k) => k !== idxPath);
+            const parts: string[] = [];
+            if (indexPatched && defaults.added.length > 0) parts.push(defaults.added.join(', '));
+            if (savedFiles.length > 0) parts.push(savedFiles.join(', '));
+            if (parts.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${parts.join(' + ')}.`, ts: Date.now() });
             }
           }
+          });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
       // ENTRY-FILE DUPLICATE-IMPORT SWEEP (build-report + IMG autopsy 2026-08-02, RECURRING): the entry file

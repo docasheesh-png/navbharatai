@@ -81147,3 +81147,29 @@ and that is the same defect in two subsystems written four months apart.
    and injected auth, realtime, notifications, moderation and media upload — five features into an
    app the user never ordered. Its own rule says it fires on "a new build"; a question is not one.
    Fixing it belongs with item 1, since it needs the same answer.
+
+## 2026-09-25 — Exam mode Settings: the paper's language and an optional timer
+
+Admin asked (Teacher AI → Exam mode) for a Settings button at the right of the Exam mode header with:
+language (all Indian languages) and a timer — 30 s / 1 min / 2 min per question, default OFF — running
+either for the whole paper (default) or per question, with the two behaviours spelled out.
+
+- **Language:** `EXAM_LANGUAGES` (server/professionals/examMode.ts) = automatic + English + Hindi +
+  Hinglish + the other 21 languages of the Eighth Schedule. Travels as `language` in the exam request,
+  validated by `normalizeExamSpec` (unknown ⇒ `auto`), and becomes rule 10 of the paper prompt
+  (`examLanguageRule`: formulae/units untouched, technical terms bracketed in English). `auto` keeps the
+  old rule text byte-for-byte. "Teach me the ones I got wrong" asks for the lesson in the same language.
+- **Timer:** pure rules in `src/components/professionals/examTimer.ts` (`clockDecision`,
+  `skipUnanswered`, `formatClock`/`formatElapsed`, `clockTone`, `timerExplainer`, `timeUpNote`).
+  Whole paper: `questions × pace`; at 0:00 the paper ends and every unanswered question is recorded as a
+  SKIP (0, never −1). Each question: fresh clock per question, expiry ⇒ skip + next question with a
+  note; answering stops that question's clock. Deadlines are timestamps, so a sleeping phone catches up.
+  The running paper keeps the settings it started with (`run` snapshot). Settings persist in
+  localStorage (per-viewer convenience only).
+- **Bug found in the screenshot and fixed:** four labels rendered literally `—` / `…` — JSX text
+  and JSX attribute strings do not process escapes. AST-based lock added for all client TSX (only these
+  four existed).
+- **Sibling:** `parseExamPaper`'s duplicate key kept only Latin + Devanagari letters, so a paper in Tamil,
+  Bengali, Urdu… never caught duplicates; now `\p{L}\p{N}`.
+- Verified in Chromium with a mocked paper and a fake clock (both timer shapes, reload persistence,
+  timer off). Tests: `tests/examSettingsTimerAndLanguage.test.ts`.

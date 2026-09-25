@@ -25,18 +25,24 @@
 // `truncation.channels.issues`, because it compares what we can see against the real total directly
 // and still works on a legacy report written before that field existed.
 //
-// ⚠️ WHAT `autoResolved` REALLY MEANS, said plainly rather than assumed. The scorecard's heal count
-// IS `counts.autoResolved`, a definition this module inherits rather than invents — and that flag
-// marks more than repairs: `importTurnObservation` sets it to keep a sub-agent's finding out of OUR
-// unresolved tally. So the breakdown may well show that part of the 6.49 was never a repair at all.
-// That is not a defect in this module; it is the first thing the breakdown is FOR, and pre-filtering
-// the codes to the ones that look like repairs would hide exactly that answer.
+// 🔴 CORRECTED 2026-09-25 — THE PARAGRAPH THAT STOOD HERE WAS THE BUG, IN WRITING. It said the
+// module "inherits rather than invents" the recorder's definition of a heal, and then counted
+// `autoResolved === true` — which is NOT the recorder's definition. `counts.autoResolved` also requires
+// `severity !== 'info'`, no observation, no narration and no workaround code, because every heartbeat,
+// tool call and narration line is recorded `info, autoResolved: true` so that it never counts as an
+// UNRESOLVED defect. The first scorecard this shipped on printed "TOOL_DONE ×10313, TOOL_CALL ×10171,
+// AGENT_STEP ×6903 … 44324 repair(s) named" beside "3.36 repairs per build" — a factor of fifty, and
+// the `unattributed` check below clamped to zero on every build, so the truncation it exists to
+// declare was invisible. The definition is now `isSelfHeal` in `src/lib/healIssue.ts`, the ONE
+// predicate the recorder, this breakdown and `firstPassQuality.topHealCodes` all call.
 
 /** A stored report, read structurally — this module never imports the recorder. */
 interface ReportLike {
-  issues?: Array<{ code?: unknown; autoResolved?: unknown }> | null;
+  issues?: Array<{ code?: unknown; severity?: unknown; autoResolved?: unknown; observation?: unknown }> | null;
   counts?: { autoResolved?: unknown } | null;
 }
+
+import { isSelfHeal } from '../../lib/healIssue';
 
 /** At most this many distinct codes per build, so one odd build cannot bloat a listing row. */
 export const MAX_CODES_PER_BUILD = 25;
@@ -72,7 +78,9 @@ export function summarizeHealCodes(report: ReportLike | null | undefined): HealC
   const codes: Record<string, number> = {};
   let seen = 0;
   for (const issue of issues ?? []) {
-    if (!issue || issue.autoResolved !== true) continue;
+    // The recorder's own definition, not the flag: an info row marked autoResolved is the build
+    // happening (a tool call, a heartbeat), never a repair.
+    if (!isSelfHeal(issue)) continue;
     seen += 1;
     const code = typeof issue.code === 'string' && issue.code.trim() ? issue.code.trim() : 'UNCODED';
     // Past the cap, keep COUNTING (so `unattributed` stays honest) and stop naming.

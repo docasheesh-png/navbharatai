@@ -72,6 +72,7 @@ export function toMetricInput(e: {
   billedInr?: number | null;
   counts?: { autoResolved?: number | null; workarounds?: number | null } | null;
   healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null } | null;
+  workaroundCount?: number | null;
 }): BuildMetricInput {
   const started = typeof e.startedAt === 'number' ? e.startedAt : null;
   const ended = typeof e.endedAt === 'number' ? e.endedAt : null;
@@ -86,7 +87,10 @@ export function toMetricInput(e: {
     // `undefined`, not 0, when the field is absent: healPressure EXCLUDES an unrecorded build and
     // would otherwise score a legacy row as a clean first pass.
     healCount: typeof e.counts?.autoResolved === 'number' ? e.counts.autoResolved : undefined,
-    workaroundCount: typeof e.counts?.workarounds === 'number' ? e.counts.workarounds : undefined,
+    // The store's derived count first (it recovers a legacy zero from a complete timeline), then the
+    // recorder's own field; `undefined` when neither can say, so the row is EXCLUDED, never scored.
+    workaroundCount: typeof e.workaroundCount === 'number' ? e.workaroundCount
+      : typeof e.counts?.workarounds === 'number' ? e.counts.workarounds : undefined,
     // `undefined`, never `{}`: an unmeasured row must be EXCLUDED from the breakdown, not
     // counted as a build that healed nothing.
     healCodes: e.healCodes ?? undefined,

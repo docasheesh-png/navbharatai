@@ -115,12 +115,17 @@ describe('a workaround is never counted as a self-heal (rule 5, in the data)', (
     expect(snap.counts.autoResolved).toBe(1);   // the real heal only
   });
 
-  it('a build with no fallbacks does not grow a workarounds field', async () => {
+  // 🔴 REVERSED 2026-09-25 (admin scorecard "Workarounds: 100.0% of 165 build(s)"). This case used to
+  // assert the field was ABSENT on a build with no fallbacks. The scorecard excludes a build with no
+  // recorded count — correctly, an unmeasured row must not score as clean — so with the zero never
+  // written every counted build had at least one, and the rate could only ever print 100%. A zero is
+  // a measurement; an absent field is "nobody measured". The recorder now writes the zero.
+  it('a build with no fallbacks records workarounds: 0 — a zero is a measurement, absence is not', async () => {
     const { BuildDiagnostics } = await import('../src/server/AgentV3/BuildDiagnostics');
     const d = new BuildDiagnostics('ws', 'sess');
     d.record({ phase: 'build', severity: 'warning', code: 'REAL_HEAL', message: 'fixed', autoResolved: true });
     const snap = d.report();
-    expect(snap.counts.workarounds).toBeUndefined();
+    expect(snap.counts.workarounds).toBe(0);
     expect(snap.counts.autoResolved).toBe(1);
   });
 });

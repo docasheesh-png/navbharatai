@@ -16,6 +16,7 @@ import { trimChannel, dropChannel, mergeTruncation } from './reportTruncation';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
+import { workaroundCountOf } from '../../lib/healIssue';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -486,6 +487,13 @@ export interface DiagnosticsHistoryEntry {
    * `healBreakdown.ts` for why the tally carries its own completeness.
    */
   healCodes?: HealCodeTally | null;
+  /**
+   * How many times this build routed AROUND a problem: the recorder's `counts.workarounds` when it
+   * wrote one, else a count over a COMPLETE stored timeline (so a legacy zero is a zero), else `null`
+   * — "nobody can say", which the scorecard EXCLUDES rather than scores (admin scorecard 2026-09-25:
+   * the recorder used to omit the zero, so the workaround rate could only ever read 100%).
+   */
+  workaroundCount?: number | null;
 }
 
 /** Enough to tell two edits apart in a list; far short of shipping the whole prompt in a listing. */
@@ -710,6 +718,7 @@ async function listDiagnosticsHistoryInner(
         // Read-only aggregation over a report this query already holds. Wrapped for the same reason
         // `modelPerformance` is: an observability field must never fail the listing that carries it.
         healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
+        workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
       }];
     });
   }
@@ -870,6 +879,7 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
           try { return summarizeModelPerformance(r); } catch { return null; }
         })(),
         healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
+        workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
       };
     });
   } catch {

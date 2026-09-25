@@ -18799,8 +18799,12 @@ async function noteBuildOutcome(
           const skeletonsSafe = testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
           const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
           const scaffolded: string[] = [];
-          // Named (#3310), so that if a latch ever exists by now — a resumed, already-green session —
-          // Green Freeze treats it as CREATE-ONLY rather than refusing it outright.
+          // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`
+          // this pass's `currentPass()` is `null`, so Green Freeze refuses every write and each refusal
+          // is swallowed by the catch below. Moving the finishing passes ahead of the green latch (this
+          // PR) means the freeze is usually not armed yet — but a name costs nothing and is what makes
+          // the guarantee hold on ANY path that still reaches here latched (a resumed already-green
+          // session). `starter-tests` is CREATE-ONLY, so an overwrite is still refused.
           await runInPass('starter-tests', async () => {
             for (const item of plan) {
               try {
@@ -18824,7 +18828,12 @@ async function noteBuildOutcome(
       // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
       // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
       // and best-effort — never blocks or fails the build.
-      // Named `production-defaults` (#3310) for the same reason as the starter tests above.
+      // 🔴 NAMED, FOR THE REASON THE STARTER-TEST PASS ABOVE IS (autopsy e628efd4): an unnamed pass is
+      // a refused one. Everything this block does was being thrown away on every browser-verified
+      // build, silently, so the launch basics `AppKnowledgeBase.ts` promises "BY DEFAULT after each
+      // build" did not happen at all. Moving the finishing passes ahead of the green latch (this PR)
+      // means the freeze is usually not armed yet; the name is what makes the guarantee hold on any
+      // path that still reaches here latched.
       try {
         if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
           await runInPass('production-defaults', async () => {
@@ -18850,8 +18859,8 @@ async function noteBuildOutcome(
           const appName = deriveTitle(prompt) || 'App';
           const defaults = planAppDefaults(indexHtml, appName);
           const savedDefaults: Record<string, string> = {};
-          // Whether the index.html patch really landed (#3310): the narration reports it apart from the
-          // files, so a refused patch is never announced as done.
+          // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
+          // intended, and the files are a separate set — so the two must be reported separately.
           let indexPatched = false;
           // Patch index.html only when the generator actually changed it.
           if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
@@ -18866,9 +18875,9 @@ async function noteBuildOutcome(
               );
               writtenFiles.set(idxPath, defaults.indexHtml);
               noteFinishingWrite(idxPath);
-              indexPatched = true;
               try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
               savedDefaults[idxPath] = defaults.indexHtml;
+              indexPatched = true;
             } catch { /* one write failing must not block the rest */ }
           }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
@@ -18912,7 +18921,10 @@ async function noteBuildOutcome(
           }
           if (Object.keys(savedDefaults).length > 0) {
             await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
-            // Say what landed, not what was planned (#3310).
+            // 🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED. `defaults.added` is the list of index.html
+            // TAGS the generator intended; the files are a separate set, and on a green app exactly
+            // one of the two happens. Announcing the tags when the patch was refused is the "fake
+            // success" the second absolute rule forbids, and it is what this line used to do.
             const savedFiles = Object.keys(savedDefaults).filter((k) => k !== idxPath);
             const parts: string[] = [];
             if (indexPatched && defaults.added.length > 0) parts.push(defaults.added.join(', '));

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, X, GraduationCap, ArrowRight, SkipForward, RotateCcw, Sparkles, ListChecks, ChevronLeft } from 'lucide-react';
+import { Check, X, GraduationCap, ArrowRight, SkipForward, RotateCcw, Sparkles, ListChecks, ChevronLeft, Settings, Timer } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { auth } from '../../lib/firebase';
 import {
   EXAM_COUNT_PRESETS, EXAM_LEVELS, EXAM_MAX_QUESTIONS, EXAM_MIN_QUESTIONS, EXAM_DEFAULT_QUESTIONS,
-  EXAM_TARGETS, EXAM_TARGET_OTHER, examTarget, examTargetLabel,
+  EXAM_TARGETS, EXAM_TARGET_OTHER, EXAM_LANGUAGES, examTarget, examTargetLabel,
   scoreExam, examVerdict, teachMyMistakesPrompt, formatExamPercentage,
   type ExamAnswer, type ExamLevel, type ExamQuestion, type ExamReading, type ExamSpec,
 } from '../../server/professionals/examMode';
@@ -12,6 +12,12 @@ import {
   LEVEL_HINTS, LEVEL_LABELS, deltaLabel, deltaWhy, keyToOptionIndex, optionLetter, optionView,
   outcomeOf, progressLabel, progressPct, readingNote, setupReady, shortPaperNote, examCostLine,
 } from './examView';
+import {
+  DEFAULT_EXAM_SETTINGS, EXAM_SETTINGS_STORAGE_KEY, EXAM_TIMER_PACES, EXAM_TIMER_SCOPES,
+  clockDecision, clockTone, formatClock, formatElapsed, normalizeExamSettings, paceMs, settingsSummary, skipUnanswered,
+  timeUpNote, timerExplainer, unansweredCount,
+  type ExamSettings,
+} from './examTimer';
 
 /**
  * 🎓 EXAM MODE — Teacher AI sets a real objective paper (admin 2026-09-22).
@@ -35,6 +41,10 @@ import {
  * - **Wrong spelling is understood, and SAID OUT LOUD** — the paper call itself reads "trignometry"
  *   as Trigonometry (costing nothing extra), and the first question carries "I read that as …" with
  *   one press back to the form if it read wrong.
+ *
+ * - **Settings (admin 2026-09-25)**: the language the paper is written in (all 22 scheduled Indian
+ *   languages, English and Hinglish) and an optional clock — 30 s, 1 min or 2 min per question, for
+ *   the whole paper or for each question. The rules live in `examTimer.ts`; this file only ticks.
  *
  * All state lives here and in `examView.ts`; the marking arithmetic is `examMode.ts`, shared with the
  * server that set the paper. Nothing about the score is re-derived in this file.
@@ -79,6 +89,23 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
   const [answers, setAnswers] = useState<ExamAnswer[]>([]);
   const nextRef = useRef<HTMLButtonElement | null>(null);
 
+  // ⏱ Settings are remembered in this browser; the paper in progress keeps the settings it STARTED
+  // with (`run`), so changing them mid-paper can never move a clock that is already running.
+  const [settings, setSettings] = useState<ExamSettings>(loadExamSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [run, setRun] = useState<ExamRun | null>(null);
+  const [shownAt, setShownAt] = useState(0);
+  const [answeredAt, setAnsweredAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [clockSkips, setClockSkips] = useState(0);
+  const [paperTimedOut, setPaperTimedOut] = useState(false);
+  const [finishedAt, setFinishedAt] = useState<number | null>(null);
+  const [justTimedOut, setJustTimedOut] = useState<number | null>(null);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(EXAM_SETTINGS_STORAGE_KEY, JSON.stringify(settings)); } catch { /* storage unavailable: settings last for this visit only */ }
+  }, [settings]);
+
   const q = questions[at];
   const score = useMemo(() => scoreExam(questions, answers), [questions, answers]);
   const shortNote = shortPaperNote(asked, questions.length);
@@ -101,7 +128,7 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
       const res = await fetch(`/api/professional/${professionalId}/exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ subject, topic, level, count, targetExam, targetExamOther }),
+        body: JSON.stringify({ subject, topic, level, count, targetExam, targetExamOther, language: settings.language }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !Array.isArray(data?.questions) || data.questions.length === 0) {
@@ -110,40 +137,109 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
         return;
       }
       setQuestions(data.questions as ExamQuestion[]);
-      setSpec((data.spec ?? { subject, topic, level, count, targetExam, targetExamOther }) as ExamSpec);
+      setSpec((data.spec ?? { subject, topic, level, count, targetExam, targetExamOther, language: settings.language }) as ExamSpec);
       setRead((data.read ?? null) as ExamReading | null);
       setAsked(Number(data.asked) || (data.questions as unknown[]).length);
       setAt(0); setChosen(null); setRevealed(false); setAnswers([]);
+      // The clock starts when the paper is on screen, never while it was being set.
+      const t = Date.now();
+      const per = paceMs(settings.pace);
+      const n = (data.questions as unknown[]).length;
+      setRun({ settings, startedAt: t, perQMs: per, paperDeadline: per !== null && settings.scope === 'paper' ? t + per * n : null });
+      setShownAt(t); setAnsweredAt(null); setNow(t);
+      setClockSkips(0); setPaperTimedOut(false); setFinishedAt(null); setJustTimedOut(null);
       setPhase('running');
       onPaperSet?.();
     } catch {
       setError('Could not reach the teacher. Check your connection and try again.');
       setPhase('setup');
     }
-  }, [professionalId, subject, topic, level, count, targetExam, targetExamOther, ready, onPaperSet]);
+  }, [professionalId, subject, topic, level, count, targetExam, targetExamOther, ready, onPaperSet, settings]);
 
   const answer = useCallback((index: number | null) => {
     if (!q || revealed) return;
+    const n = q.n;
     setChosen(index);
     setRevealed(true);
-    setAnswers((prev) => [...prev.filter((a) => a.n !== q.n), { n: q.n, chosen: index }]);
+    setAnsweredAt(Date.now());
+    setAnswers((prev) => [...prev.filter((a) => a.n !== n), { n, chosen: index }]);
   }, [q, revealed]);
+
+  const finish = useCallback((at?: number) => {
+    setFinishedAt(at ?? Date.now());
+    setPhase('result');
+  }, []);
+
+  /** Show the next question with its own fresh clock. */
+  const goTo = useCallback((index: number) => {
+    setAt(index);
+    setChosen(null);
+    setRevealed(false);
+    // The tick's `now` moves with the new question, so its clock opens at the full time, never above it.
+    const t = Date.now();
+    setShownAt(t);
+    setNow(t);
+    setAnsweredAt(null);
+  }, []);
 
   const next = useCallback(() => {
     if (!revealed) return;
-    if (at + 1 >= questions.length) { setPhase('result'); return; }
-    setAt((i) => i + 1);
-    setChosen(null);
-    setRevealed(false);
-  }, [at, questions.length, revealed]);
+    setJustTimedOut(null);
+    if (at + 1 >= questions.length) { finish(); return; }
+    goTo(at + 1);
+  }, [at, questions.length, revealed, finish, goTo]);
+
+  // ⏱ EACH-QUESTION clock ran out: that question is a skip (0, never −1) and the next one appears.
+  const timeOutQuestion = useCallback(() => {
+    if (!q) return;
+    const n = q.n;
+    setAnswers((prev) => [...prev.filter((a) => a.n !== n), { n, chosen: null }]);
+    setClockSkips((c) => c + 1);
+    if (at + 1 >= questions.length) { finish(); return; }
+    setJustTimedOut(n);
+    goTo(at + 1);
+  }, [q, at, questions.length, finish, goTo]);
+
+  // ⏱ WHOLE-PAPER clock ran out: the paper ends and every unanswered question counts as skipped.
+  const endPaperOnTime = useCallback(() => {
+    setClockSkips(unansweredCount(questions, answers));
+    setAnswers((prev) => skipUnanswered(questions, prev));
+    setPaperTimedOut(true);
+    // A paper that ran out took exactly its budget, however late the tick noticed (a sleeping phone).
+    finish(run?.paperDeadline ?? undefined);
+  }, [questions, answers, finish, run]);
+
+  // The tick. Deadlines are timestamps, so a phone that sleeps or a backgrounded tab catches up the
+  // moment it wakes instead of drifting. It runs only while a timed paper is on screen.
+  const timed = phase === 'running' && run !== null && run.perQMs !== null;
+  useEffect(() => {
+    if (!timed) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    const onVisible = () => setNow(Date.now());
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
+  }, [timed]);
+
+  useEffect(() => {
+    if (phase !== 'running' || !run) return;
+    // An answered question's clock has stopped: the student moves on when they press Next.
+    const decision = clockDecision({
+      scope: run.settings.scope, perQMs: run.perQMs, paperDeadline: run.paperDeadline, shownAt, answered: revealed, now,
+    });
+    if (decision === 'end-paper') endPaperOnTime();
+    else if (decision === 'skip-question') timeOutQuestion();
+  }, [now, phase, run, revealed, shownAt, endPaperOnTime, timeOutQuestion]);
 
   // Keyboard: A–D / 1–4 to answer, Enter or → to move on, S to skip. Only while a question is up.
   useEffect(() => {
     if (phase !== 'running') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // With Settings open, a letter typed into the language list must not answer the question.
+      if (settingsOpen) return;
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
       if (!revealed) {
         const idx = keyToOptionIndex(e.key);
         if (idx !== null && q && idx < q.options.length) { e.preventDefault(); answer(idx); return; }
@@ -154,7 +250,7 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, revealed, q, answer, next]);
+  }, [phase, revealed, q, answer, next, settingsOpen]);
 
   // Move the focus to Next the moment an answer is revealed, so Enter works without a click and a
   // screen reader is told the result rather than left on a button that is now inert.
@@ -163,21 +259,63 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
   const restart = () => {
     setPhase('setup'); setQuestions([]); setAnswers([]); setAt(0); setChosen(null); setRevealed(false);
     setRead(null);
+    setRun(null); setClockSkips(0); setPaperTimedOut(false); setFinishedAt(null); setJustTimedOut(null);
   };
 
+  const languageLabel = EXAM_LANGUAGES.find((l) => l.id === settings.language)?.label ?? 'Automatic';
+
+  // What the clock pill shows right now, or nothing when this paper has no clock.
+  let clock: { text: string; tone: 'normal' | 'low' | 'critical'; label: string } | null = null;
+  if (phase === 'running' && run && run.perQMs !== null) {
+    if (run.settings.scope === 'paper' && run.paperDeadline !== null) {
+      const left = run.paperDeadline - now;
+      clock = { text: formatClock(left), tone: clockTone(left, run.perQMs * questions.length), label: 'Time left for the paper' };
+    } else if (revealed && answeredAt !== null) {
+      clock = { text: `Answered in ${formatElapsed(answeredAt - shownAt)}`, tone: 'normal', label: 'Time taken on this question' };
+    } else {
+      const left = Math.min(run.perQMs, shownAt + run.perQMs - now);
+      clock = { text: formatClock(left), tone: clockTone(left, run.perQMs), label: 'Time left for this question' };
+    }
+  }
+  const clockClass = clock?.tone === 'critical' ? 'text-danger border-danger animate-pulse'
+    : clock?.tone === 'low' ? 'text-warn border-line' : 'text-body border-line';
+  const resultTimeNote = run ? timeUpNote(run.settings.scope, paperTimedOut, clockSkips) : '';
+
   return (
-    <div className="flex flex-col h-full bg-surface text-body">
+    <div className="relative flex flex-col h-full bg-surface text-body">
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-line shrink-0">
         <button onClick={onClose} className="w-8 h-8 rounded-lg bg-raised hover:bg-raised-hover border border-line flex items-center justify-center" title="Back to chat" aria-label="Back to chat">
           <ChevronLeft className="w-4 h-4" />
         </button>
         <GraduationCap className="w-4 h-4 text-accent-text" />
         <span className="text-sm font-semibold text-ink">Exam mode</span>
-        {phase === 'running' && (
-          <span className="ml-auto text-[11px] text-muted tabular-nums">
-            {score.marks} {score.marks === 1 || score.marks === -1 ? 'mark' : 'marks'}
-          </span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {clock && (
+            <span
+              role="timer"
+              aria-label={`${clock.label}: ${clock.text}`}
+              data-exam-clock=""
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg bg-raised border text-[12px] font-semibold tabular-nums ${clockClass}`}
+            >
+              <Timer className="w-3.5 h-3.5" aria-hidden /> {clock.text}
+            </span>
+          )}
+          {phase === 'running' && (
+            <span className="text-[11px] text-muted tabular-nums">
+              {score.marks} {score.marks === 1 || score.marks === -1 ? 'mark' : 'marks'}
+            </span>
+          )}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="w-8 h-8 rounded-lg bg-raised hover:bg-raised-hover border border-line flex items-center justify-center"
+            title="Exam settings"
+            aria-label="Exam settings"
+            aria-haspopup="dialog"
+            data-exam-settings=""
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {phase === 'running' && (
@@ -218,13 +356,13 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
             {targetExam === EXAM_TARGET_OTHER && (
               <label className="block">
                 <span className="text-[11px] uppercase tracking-wide text-muted">
-                  Which exam? <span className="text-faint normal-case tracking-normal">\u2014 optional, only if it is not in the list</span>
+                  Which exam? <span className="text-faint normal-case tracking-normal">— optional, only if it is not in the list</span>
                 </span>
                 <input
                   value={targetExamOther}
                   onChange={(e) => setTargetExamOther(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && ready) void start(); }}
-                  placeholder="Your own exam or test\u2026"
+                  placeholder="Your own exam or test…"
                   className="mt-1 w-full bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/40"
                 />
               </label>
@@ -232,13 +370,13 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
             <label className="block">
               <span className="text-[11px] uppercase tracking-wide text-muted">
                 Subject
-                {targetLabel && <span className="text-faint normal-case tracking-normal"> \u2014 optional; leave blank for a full {targetLabel} paper</span>}
+                {targetLabel && <span className="text-faint normal-case tracking-normal"> — optional; leave blank for a full {targetLabel} paper</span>}
               </span>
               <input
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && ready) void start(); }}
-                placeholder="Physics, History, Biology\u2026"
+                placeholder="Physics, History, Biology…"
                 className="mt-1 w-full bg-card border border-line rounded-xl px-3 py-2 text-sm text-ink placeholder:text-faint focus:outline-none focus:border-indigo-500/40"
                 autoFocus
               />
@@ -311,6 +449,10 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
                 return line ? <p className="mt-1.5 text-[12px] text-muted">{line}</p> : null;
               })()}
             </div>
+            <div className="flex items-center gap-2 text-[12px] text-muted" data-exam-settings-summary="">
+              <span className="flex-1">{settingsSummary(settings, languageLabel)}</span>
+              <button onClick={() => setSettingsOpen(true)} className="shrink-0 text-accent-text underline underline-offset-2">Change</button>
+            </div>
             {error && <p className="text-sm text-danger">{error}</p>}
             <button
               onClick={() => void start()}
@@ -340,6 +482,11 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
             )}
             {at === 0 && shortNote && (
               <p className="text-[12px] text-warn bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">{shortNote}</p>
+            )}
+            {justTimedOut !== null && (
+              <p className="text-[12px] text-warn bg-well border border-line rounded-xl px-3 py-2" role="status">
+                Time ran out on question {justTimedOut} — counted as skipped (0 marks).
+              </p>
             )}
             <div className="flex items-start gap-2">
               {q.topic && <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-raised border border-line text-muted shrink-0 mt-0.5">{q.topic}</span>}
@@ -428,6 +575,15 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
                 </p>
               )}
             </div>
+            {(resultTimeNote || (run && run.perQMs !== null && finishedAt !== null)) && (
+              <div className="text-[12px] text-body bg-well border border-line rounded-xl px-3 py-2 flex items-start gap-2" data-exam-time-note="">
+                <Timer className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted" aria-hidden />
+                <span>
+                  {resultTimeNote}{resultTimeNote && run && finishedAt !== null ? ' ' : ''}
+                  {run && run.perQMs !== null && finishedAt !== null ? `Time taken: ${formatElapsed(finishedAt - run.startedAt)}.` : ''}
+                </span>
+              </div>
+            )}
             <p className="text-sm text-body leading-relaxed">{examVerdict(score)}</p>
 
             {score.weakTopics.length > 0 && (
@@ -477,6 +633,141 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
             )}
           </>
         )}
+      </div>
+
+      {settingsOpen && (
+        <ExamSettingsSheet
+          settings={settings}
+          onChange={setSettings}
+          onClose={() => setSettingsOpen(false)}
+          questionCount={phase === 'running' || phase === 'result' || phase === 'review' ? questions.length : count}
+          paperInProgress={phase === 'running' || phase === 'loading'}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The paper in progress: the settings it started with and its clock's fixed points. */
+interface ExamRun {
+  settings: ExamSettings;
+  startedAt: number;
+  /** `null` when this paper has no clock. */
+  perQMs: number | null;
+  /** Whole-paper mode only. */
+  paperDeadline: number | null;
+}
+
+function loadExamSettings(): ExamSettings {
+  try {
+    const raw = window.localStorage.getItem(EXAM_SETTINGS_STORAGE_KEY);
+    return raw ? normalizeExamSettings(JSON.parse(raw)) : DEFAULT_EXAM_SETTINGS;
+  } catch {
+    return DEFAULT_EXAM_SETTINGS;
+  }
+}
+
+/**
+ * ⚙ The Settings sheet: language, timer, and whether the timer is per paper or per question.
+ *
+ * Changes are saved as they are made. During a paper they apply to the NEXT one — the running paper
+ * keeps the clock and language it started with, and the sheet says so rather than silently ignoring
+ * the change.
+ */
+function ExamSettingsSheet({ settings, onChange, onClose, questionCount, paperInProgress }: {
+  settings: ExamSettings;
+  onChange: (next: ExamSettings) => void;
+  onClose: () => void;
+  questionCount: number;
+  paperInProgress: boolean;
+}) {
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const timerOn = settings.pace !== 'off';
+  return (
+    <div className="absolute inset-0 z-30 bg-scrim flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="exam-settings-title"
+        className="w-full sm:max-w-md max-h-[88%] overflow-y-auto bg-card border border-line rounded-t-2xl sm:rounded-2xl p-4 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2">
+          <h2 id="exam-settings-title" ref={headingRef} tabIndex={-1} className="text-base font-semibold text-ink flex-1 outline-none">Exam settings</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-raised hover:bg-raised-hover border border-line flex items-center justify-center" aria-label="Close settings">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {paperInProgress && (
+          <p className="text-[12px] text-muted bg-well border border-line rounded-xl px-3 py-2">
+            This paper keeps the settings it started with. Changes here apply to your next paper.
+          </p>
+        )}
+
+        <label className="block">
+          <span className="text-[11px] uppercase tracking-wide text-muted">Language of the paper</span>
+          <select
+            value={settings.language}
+            onChange={(e) => onChange({ ...settings, language: e.target.value })}
+            className="mt-1 w-full bg-surface border border-line rounded-xl px-3 py-2 text-sm text-ink focus:outline-none focus:border-accent"
+            data-exam-language=""
+          >
+            {EXAM_LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+          </select>
+          <span className="block text-[11px] text-muted mt-1">
+            Questions, options and explanations are written in this language. Formulae and units stay as they are.
+          </span>
+        </label>
+
+        <div>
+          <span className="text-[11px] uppercase tracking-wide text-muted">Timer — per question</span>
+          <div className="mt-1 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Time per question">
+            {EXAM_TIMER_PACES.map((p) => (
+              <button
+                key={p.id}
+                role="radio"
+                aria-checked={settings.pace === p.id}
+                onClick={() => onChange({ ...settings, pace: p.id })}
+                className={`px-2 py-2 rounded-xl border text-sm tabular-nums ${settings.pace === p.id ? 'bg-accent text-on-accent border-transparent' : 'bg-surface border-line text-body hover:bg-raised'}`}
+              >{p.label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className={timerOn ? '' : 'opacity-50'}>
+          <span className="text-[11px] uppercase tracking-wide text-muted">The clock runs for</span>
+          <div className="mt-1 grid grid-cols-2 gap-2" role="radiogroup" aria-label="What the clock runs for">
+            {EXAM_TIMER_SCOPES.map((sc) => (
+              <button
+                key={sc.id}
+                role="radio"
+                aria-checked={settings.scope === sc.id}
+                disabled={!timerOn}
+                onClick={() => onChange({ ...settings, scope: sc.id })}
+                className={`text-left px-3 py-2 rounded-xl border text-sm ${settings.scope === sc.id ? 'bg-accent text-on-accent border-transparent' : 'bg-surface border-line text-body hover:bg-raised'}`}
+              >
+                <span className="font-semibold">{sc.label}</span>
+                <span className={`block text-[11px] mt-0.5 ${settings.scope === sc.id ? 'text-on-accent/80' : 'text-muted'}`}>{sc.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-[12px] text-body bg-well border border-line rounded-xl px-3 py-2" data-exam-timer-explainer="">
+          {timerExplainer(settings, questionCount)}
+        </p>
+
+        <button onClick={onClose} className="w-full px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-on-accent text-sm font-bold">
+          Done
+        </button>
       </div>
     </div>
   );

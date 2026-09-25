@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, BadgePercent, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Percent } from 'lucide-react';
 import { adminGet, adminFailed, adminHeaders } from '../../lib/adminFetch';
 
 /**
@@ -82,7 +82,7 @@ export function BuildDiscountCard({ adminToken }: { adminToken: string }): React
   return (
     <div className="rounded-xl border border-line bg-card p-4 space-y-3">
       <div className="flex items-start gap-2">
-        <BadgePercent className="h-4 w-4 shrink-0 text-success" />
+        <Percent className="h-4 w-4 shrink-0 text-success" />
         <div className="min-w-0">
           <h3 className="text-sm font-bold text-ink">Build discount</h3>
           <p className="text-[11px] leading-snug text-muted">

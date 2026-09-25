@@ -81368,3 +81368,22 @@ green latch** (option 1 of the 2026-09-25 entry above, which closes that ⏳ ite
   the tool never did) — now `public/`. The app name from the prompt is HTML-escaped in the head and the
   icon. The in-browser preview runs the app's inline scripts on OUR origin, so it now drops the app's
   worker registration (`buildSourceAppPreview`).
+- 🔎 **Adversarial review of the move, before push — seven real findings, all fixed in the same PR:**
+  (1) 🔴 the unit-test skeletons import `vitest`, which nothing installs; before the production-build
+  gate they would fail `npm run build` (publish, APK) for any app whose build type-checks tests
+  (`next build`, `tsc -b`, `vue-tsc`, a `-p` config that keeps tests). Now written only where
+  `testSkeletonsCannotBreakTheBuild` says the release build cannot see them (our Vite scaffold's
+  `tsconfig.build.json` excludes tests, so it still gets them); (2) patching `index.html` in the sandbox
+  dropped the live-console / Visual-Edit bridge until the next dev-server start — the sandbox copy is now
+  written with the bridge it was served with, the saved source stays clean; (3) the finishing writes did
+  not move `inBuildWriteTick`, so a concurrent in-build proof could save a half-finished tree — every one
+  now does; (4) the reviewer was sent our own skeletons/PWA files — filtered out; (6) the worker deleted
+  EVERY cache on the origin and cached API responses unbounded — now only `app-shell-*` caches, only
+  pages and static files, at most 80 entries, and a cached redirect is re-wrapped so an offline page
+  still opens; (7) the preview strip judged each script separately so a stray `<script` cannot drag
+  markup away; (9) the tool recognises `vite.config.mts/cjs` and `vite` in package.json, and a v1 worker
+  left at the root of a Vite app is upgraded too (tool and route).
+  ⚠️ Stated, not fixed: (5) a build that is not-ok until the render rescue flips it does not get the
+  finishing passes (they are gated on `result.ok` at their new position) — before this change the freeze
+  refused them on those builds anyway, so nothing regressed; (8) the claim audit's `filesWritten` now
+  counts the platform's own files — it only ever raises a count that was already non-zero.

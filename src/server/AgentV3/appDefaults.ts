@@ -97,23 +97,43 @@ self.addEventListener('fetch', (e) => {
  * request goes to the network, so a republished app is what the next page load shows; the cache is
  * only the fallback for when the network is gone. Dev-server paths (`/@vite/…`, `/src/…`,
  * `/node_modules/…`) and other origins are never touched, so it cannot serve stale modules to a live
- * preview. Activating it deletes every older cache — including v1's — which is what rescues a visitor
- * already stuck on the old worker. Self-contained (no build step). Pure string.
+ * preview. It caches pages and static files only — never `/api/` or data requests, which could hold
+ * one user's data on a shared device — and keeps at most 80 entries, so hashed bundles from old
+ * versions do not pile up. Activating it deletes this worker's older caches (`app-shell-*`, which is
+ * what rescues a visitor already stuck on v1) and nothing else. Self-contained. Pure string.
  */
 function swJs(): string {
   return `// Auto-generated service worker (NavBharatAI app defaults, v2).
 // Network first: online, every request goes to the network, so a new version of the app is seen on
-// the next load. The cache is used only when the network is unavailable.
-const CACHE = 'app-shell-v2';
-const SHELL = ['/', '/index.html'];
+// the next load. The cache is used only when the network is unavailable, and it holds only the app's
+// pages and static files — never API responses.
+const PREFIX = 'app-shell-';
+const CACHE = PREFIX + 'v2';
+const MAX_ENTRIES = 80;
+const STATIC = ['script', 'style', 'image', 'font', 'manifest'];
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.add('/')).catch(() => {}).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
+  // Only this worker's own older caches; a cache the app itself created is not ours to delete.
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith(PREFIX) && k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
   );
 });
+function cacheable(req, url) {
+  if (url.pathname.startsWith('/api/')) return false;
+  return req.mode === 'navigate' || STATIC.includes(req.destination);
+}
+function trim(cache) {
+  return cache.keys().then((keys) => Promise.all(keys.slice(0, Math.max(0, keys.length - MAX_ENTRIES)).map((k) => cache.delete(k))));
+}
+// A cached redirect cannot answer a navigation, so it is re-wrapped as a plain response.
+function plain(res) {
+  if (!res || !res.redirected) return res;
+  return res.blob().then((body) => new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers }));
+}
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -123,15 +143,16 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(req)
       .then((res) => {
-        if (res && res.status === 200 && res.type === 'basic') {
+        if (res && res.status === 200 && res.type === 'basic' && cacheable(req, url)) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          caches.open(CACHE).then((c) => c.put(req, copy).then(() => trim(c))).catch(() => {});
         }
         return res;
       })
       .catch(() =>
         caches.match(req)
-          .then((hit) => hit || (req.mode === 'navigate' ? caches.match('/index.html') : undefined))
+          .then((hit) => hit || (req.mode === 'navigate' ? caches.match('/') : undefined))
+          .then(plain)
           .then((res) => res || Response.error()),
       ),
   );

@@ -373,7 +373,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
@@ -555,7 +555,7 @@ import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportS
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
 import { ensureHtmlEntryScript } from '../AgentV3/HtmlEntryGuard';
-import { withoutPreviewBridge } from '../AgentV3/previewBridge';
+import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
@@ -18524,6 +18524,12 @@ async function noteBuildOutcome(
       // worker served every request cache-first under a name that never changed, so a republished app
       // never reached a returning visitor. It is network-first now (appDefaults.ts). Do not move these
       // passes back behind the latch on the theory that the freeze "protects" the app from them.
+      //
+      // Each write here is recorded twice: in `inBuildWriteTick`, so a concurrent in-build proof that
+      // collected the tree mid-way discards itself instead of saving a half-finished snapshot; and in
+      // `finishingPaths`, so the post-build reviewer is not sent to review NavBharatAI's own files.
+      const finishingPaths = new Set<string>();
+      const noteFinishingWrite = (path: string) => { finishingPaths.add(path); inBuildWriteTick++; };
       // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
       // which in practice meant most apps shipped without one. This makes it a system reflex.
       //
@@ -18559,6 +18565,7 @@ async function noteBuildOutcome(
               if (exists) continue;
               await actuator.writeFile(workspaceId, path, content);
               writtenFiles.set(path, content);
+              noteFinishingWrite(path);
               added.push(path);
             }
             // SIGN-IN FLOW (Phase 4.5). The smoke spec proves the app LOADS; this proves the login
@@ -18577,6 +18584,7 @@ async function noteBuildOutcome(
                 const spec = buildAuthFlowSpec(auth);
                 await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
                 writtenFiles.set(AUTH_SPEC_PATH, spec);
+                noteFinishingWrite(AUTH_SPEC_PATH);
                 added.push(AUTH_SPEC_PATH);
               }
             }
@@ -18640,6 +18648,7 @@ async function noteBuildOutcome(
               if (stripped.source === projectNow[path]) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
+              noteFinishingWrite(path);
               try { await actuator.writeFile(workspaceId, path, stripped.source); } catch { /* store copy is fixed */ }
             }
             if (shims.length > 0) {
@@ -18659,6 +18668,7 @@ async function noteBuildOutcome(
               if (excluded.changed) {
                 await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
                 writtenFiles.set('tsconfig.json', excluded.text);
+                noteFinishingWrite('tsconfig.json');
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'E2E_EXCLUDED_FROM_BUILD',
                   message: e2eExcludeNote(excluded.added), autoResolved: true,
@@ -18690,7 +18700,7 @@ async function noteBuildOutcome(
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
               try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
-              if (adrWritten) onFileWrite?.(path, content);
+              if (adrWritten) { onFileWrite?.(path, content); finishingPaths.add(path); }
             }
           } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
         })(), 8_000, 'adr-capture').catch(() => {});
@@ -18704,12 +18714,21 @@ async function noteBuildOutcome(
       try {
         if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
           const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
-          const plan = planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 });
+          // A skeleton imports `vitest`, which nothing installs. Written only where the release build
+          // cannot type-check it — otherwise it would fail the user's publish and APK for a file they
+          // never asked for (see testSkeletonsCannotBreakTheBuild).
+          const readProject = async (p: string): Promise<string | null> =>
+            writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
+          const pkgForTests = await readProject('package.json');
+          const buildTsconfig = buildTsconfigPath(pkgForTests);
+          const skeletonsSafe = testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
+          const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
           const scaffolded: string[] = [];
           for (const item of plan) {
             try {
               await actuator.writeFile(workspaceId, item.testPath, item.content);
               writtenFiles.set(item.testPath, item.content);
+              noteFinishingWrite(item.testPath);
               try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
               scaffolded.push(item.testPath);
             } catch { /* one test file failing must not block the rest */ }
@@ -18753,8 +18772,16 @@ async function noteBuildOutcome(
           // Patch index.html only when the generator actually changed it.
           if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
             try {
-              await actuator.writeFile(workspaceId, idxPath, defaults.indexHtml);
+              // The SANDBOX copy keeps the preview bridge it was served with (the live console and the
+              // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
+              // it after a write. The user's saved source stays clean — the bridge is never theirs.
+              const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
+              await actuator.writeFile(
+                workspaceId, idxPath,
+                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml,
+              );
               writtenFiles.set(idxPath, defaults.indexHtml);
+              noteFinishingWrite(idxPath);
               try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
               savedDefaults[idxPath] = defaults.indexHtml;
             } catch { /* one write failing must not block the rest */ }
@@ -18779,9 +18806,24 @@ async function noteBuildOutcome(
               await actuator.writeFile(workspaceId, target, replacement ?? content);
               const written = replacement ?? content;
               writtenFiles.set(target, written);
+              noteFinishingWrite(target);
               try { getWorkspaceMemory(workspaceId).indexFile(target, written); } catch { /* index best-effort */ }
               savedDefaults[target] = written;
             } catch { /* best-effort per file */ }
+          }
+          // The old tool wrote the worker at the ROOT of a Vite app, where `public/` now shadows it: our
+          // exact v1 left there is upgraded too, so no copy of the stale-forever worker survives.
+          const rootSw = SERVICE_WORKER_FILE;
+          if (publicAssets && defaultAssetPath(rootSw, framework) !== rootSw && !writtenFiles.has(rootSw)) {
+            const upgraded = upgradeGeneratedServiceWorker(await actuator.readFile(workspaceId, rootSw).catch(() => null));
+            if (upgraded) {
+              try {
+                await actuator.writeFile(workspaceId, rootSw, upgraded);
+                writtenFiles.set(rootSw, upgraded);
+                noteFinishingWrite(rootSw);
+                savedDefaults[rootSw] = upgraded;
+              } catch { /* best-effort */ }
+            }
           }
           if (Object.keys(savedDefaults).length > 0) {
             await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
@@ -20484,7 +20526,10 @@ async function noteBuildOutcome(
               // What THIS turn changed. Without it the reviewer surveys the whole project: the Shiv
               // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
               // spent re-reading code they did not touch.
-              changedFiles: [...writtenFiles.keys()],
+              // …and not the files the platform's own finishing passes wrote (skeletons, PWA files,
+              // the architecture note): reviewing NavBharatAI's scaffolding spends the user's money and
+              // can send a repair pass after our own files.
+              changedFiles: [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p)),
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');

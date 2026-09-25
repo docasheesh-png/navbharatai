@@ -4492,8 +4492,12 @@ export class ToolDispatcher {
         // A Vite app ships only public/, so the standalone files go there or the production build drops
         // them — the rule the post-build pass has followed since 2026-08-03 and this tool never did.
         let viteApp = false;
-        for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']) {
+        for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts', 'vite.config.cjs', 'vite.config.cts']) {
           if (await this.actuator.readFile(this.workspaceId, cfg).then(() => true).catch(() => false)) { viteApp = true; break; }
+        }
+        if (!viteApp) {
+          const pkg = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => '');
+          viteApp = /"vite"\s*:/.test(pkg);
         }
         // Write standalone files only when absent (never clobber a real manifest/robots the app already has),
         // except our own old cache-first service worker, which is replaced (see appDefaults.ts).
@@ -4505,6 +4509,16 @@ export class ToolDispatcher {
           await this.actuator.writeFile(this.workspaceId, target, replacement ?? content);
           this.state?.recordFileChange({ path: target, kind: existing != null ? 'modify' : 'create' }, agent);
           written.push(target);
+        }
+        // A worker this tool once left at the root of a Vite app is shadowed by public/, not replaced:
+        // our exact v1 there is upgraded as well.
+        if (viteApp) {
+          const upgraded = upgradeGeneratedServiceWorker(await this.actuator.readFile(this.workspaceId, SERVICE_WORKER_FILE).catch(() => null));
+          if (upgraded) {
+            await this.actuator.writeFile(this.workspaceId, SERVICE_WORKER_FILE, upgraded);
+            this.state?.recordFileChange({ path: SERVICE_WORKER_FILE, kind: 'modify' }, agent);
+            written.push(SERVICE_WORKER_FILE);
+          }
         }
         if (!written.length) return 'generate_app_defaults: the app already has SEO meta, lang, manifest and robots — nothing to add.';
         this.scheduleCheckpoint('generate app defaults');

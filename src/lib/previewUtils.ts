@@ -496,7 +496,14 @@ export function buildSourceAppPreview(f: FileSystem): string {
   if (bm) {
     bodyInner = bm[1]
       .replace(/<script[^>]*type=["']module["'][^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi, '');
+      .replace(/<script[^>]+src=["'][^"']+["'][^>]*>\s*<\/script>/gi, '')
+      // A service-worker registration never belongs in this frame: it runs on OUR origin, so the app's
+      // `register('/sw.js')` would resolve against NavBharatAI's own site. Every generated app carries
+      // one (appDefaults.ts); the app's real origin — live preview, snapshot, published site — keeps it.
+      // Each script element is judged on its own, and only a plain-code one is dropped — a body that
+      // contains markup means the match started somewhere unintended, so it is left as it was.
+      .replace(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi, (el, code: string) =>
+        /serviceWorker\s*\.\s*register\s*\(/.test(code) && !/<\/?[a-z!]/i.test(code) ? '' : el);
     if (!/id=["'](root|app)["']/.test(bodyInner)) bodyInner += '<div id="root"></div>';
   }
 

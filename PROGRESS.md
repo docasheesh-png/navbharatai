@@ -81485,3 +81485,87 @@ UI reachability, no typed URL). White-label locked: a test asserts no finding te
 ownership proof (a Search-Console-style verification file or meta tag). Deliberately deferred — Phase 1
 covers the common case (a NavBharatAI-published site) with zero friction and zero risk of pointing at
 someone else's site.
+## 2026-09-25 — Green Freeze decision: the finishing passes run BEFORE the proof; the service worker it was hiding
+
+The admin was given the three options for the refused post-settle writes and asked *"aap batao, kon sa
+best hai — user ko working app jaldi mile, aur app acche se acchi bane"*. Chosen: **run them before the
+green latch** (option 1 of the 2026-09-25 entry above, which closes that ⏳ item).
+
+- ✅ **The four finishing passes moved, not the freeze widened.** E2E net, ADR note, unit-test
+  skeletons and production defaults now run in one block after the platform starts the preview and
+  before the render rescue — so the browser check, `npm run build`, the vaccine's suite detection and
+  GreenGuard all see them. No model call; seconds. The ADR write is now awaited (8 s bound) so it
+  cannot race the latch. `ALLOWED_PASSES` is unchanged. Test-locked (source order, before the first
+  `latchGreen`, and "moved, not copied") in `tests/theFinishingPassesRunBeforeTheProof.test.ts`,
+  reversion-proven.
+- 🔴 **What the freeze had been hiding — and why "just move it" would have shipped a bug to every app.**
+  The generated `sw.js` served EVERY GET cache-first under the fixed name `app-shell-v1`, `/` and
+  `/index.html` included. So a republished app never reached a returning visitor, and a live preview
+  could serve `/src/*.tsx` from before an edit. It reached real apps only on builds nobody verified and
+  through the `generate_app_defaults` tool; on every green build the freeze refused it, which is how it
+  survived. **v2 is network-first**, skips dev-server paths (`/@…`, `/src/`, `/node_modules/`) and
+  other origins, uses the cache only offline, and deletes older caches on activate. Our exact v1 file
+  is upgraded in place (`upgradeGeneratedServiceWorker`); a user's or a framework's worker is never
+  touched. Executed in a fake worker environment in the test (network-first, offline fallback, dev
+  paths, v1 cache purge), with v1 run beside it to reproduce the stale page.
+  ⚠️ Residual, stated: a published app already carrying v1 is fixed only when it is rebuilt and
+  republished — nothing reaches into sites already out there.
+- ✅ **Siblings, same change.** `generate_app_defaults` wrote the PWA files at the project root for a
+  Vite app, where the production build drops them (the 2026-08-03 rule the post-build pass followed and
+  the tool never did) — now `public/`. The app name from the prompt is HTML-escaped in the head and the
+  icon. The in-browser preview runs the app's inline scripts on OUR origin, so it now drops the app's
+  worker registration (`buildSourceAppPreview`).
+- 🔎 **Adversarial review of the move, before push — seven real findings, all fixed in the same PR:**
+  (1) 🔴 the unit-test skeletons import `vitest`, which nothing installs; before the production-build
+  gate they would fail `npm run build` (publish, APK) for any app whose build type-checks tests
+  (`next build`, `tsc -b`, `vue-tsc`, a `-p` config that keeps tests). Now written only where
+  `testSkeletonsCannotBreakTheBuild` says the release build cannot see them (our Vite scaffold's
+  `tsconfig.build.json` excludes tests, so it still gets them); (2) patching `index.html` in the sandbox
+  dropped the live-console / Visual-Edit bridge until the next dev-server start — the sandbox copy is now
+  written with the bridge it was served with, the saved source stays clean; (3) the finishing writes did
+  not move `inBuildWriteTick`, so a concurrent in-build proof could save a half-finished tree — every one
+  now does; (4) the reviewer was sent our own skeletons/PWA files — filtered out; (6) the worker deleted
+  EVERY cache on the origin and cached API responses unbounded — now only `app-shell-*` caches, only
+  pages and static files, at most 80 entries, and a cached redirect is re-wrapped so an offline page
+  still opens; (7) the preview strip judged each script separately so a stray `<script` cannot drag
+  markup away; (9) the tool recognises `vite.config.mts/cjs` and `vite` in package.json, and a v1 worker
+  left at the root of a Vite app is upgraded too (tool and route).
+  ⚠️ Stated, not fixed: (5) a build that is not-ok until the render rescue flips it does not get the
+  finishing passes (they are gated on `result.ok` at their new position) — before this change the freeze
+  refused them on those builds anyway, so nothing regressed; (8) the claim audit's `filesWritten` now
+  counts the platform's own files — it only ever raises a count that was already non-zero.
+## 2026-09-25 — Autopsy b9287f85 ("ek desi boyz naam ki ecom website"): a newsletter box is not a cart
+
+Weak tier, 8.7 min, ok, rendered in a real browser at 314 s, typecheck clean, production build OK, all
+6 routes rendered — and `RELEASE_GATE: RED — Not shippable — a real user journey failed`, twice.
+
+- ❌→✅ **JOURNEY_FAILED was OUR false finding.** `deriveJourneys` built a create-and-find-it journey
+  whenever a file had a form AND a `.map` list. Home had a NEWSLETTER form and a FEATURED PRODUCTS grid,
+  so the check typed an email, pressed Subscribe, and looked for the email among the products. Nothing
+  asked whether the form adds to that list. Now `formFeedsList` reads the form's own submit handler:
+  `yes` (builds/grows an array), `no` (only preventDefault / plain setters / toast / timeout), or
+  `unknown` (no handler found, or it calls something we cannot see into). Only a readable `no`
+  downgrades the journey to `form-submit`, which still fills, submits and fails on a crash. `unknown`
+  keeps today's create-persists, so no real persistence check is lost.
+- ❌→✅ **One form counted as two failures.** `App.tsx` imports `Home.tsx` and `formSourcesFor` looks one
+  level deep, so both pages derived the same newsletter journey. Journeys are now deduped by the FORM's
+  file.
+- Tests: `tests/theNewsletterIsNotACart.test.ts` (14), reversion-proven for both halves (removing the
+  `feeds` gate → 1 failure; removing the dedupe → 2).
+- ✔️ **Not a defect, recorded so nobody re-derives it:** `COMPLEXITY_ROUTING: COMPLEX (score 15, model)`.
+  "ecom" matches no scorer signal (`signalsMatchedNothing`), so a second opinion was bought as designed
+  (autopsy c6e4c6ff: "E commerce website" on the flash rung ran 26.7 min). It read complex, the build
+  opened on KIMI and never fell (`LADDER_DEPTH` rung 2). The fast lane was skipped because that rung
+  always reasons (#3278), also as designed. Keyword-widening was deliberately NOT done (RequestAnalyser's
+  own note).
+- ✔️ **Not a defect:** write-time typecheck `SANDBOX_CMD` lines read `exit ?`. `exitCode: null` is
+  deliberate (the output is piped through `head`, so the shell's code is not tsc's; the parser reads the
+  output).
+- ⏳ **Open, recorded rather than guessed at:** (1) Home's `LIST_WITHOUT_EMPTY_STATE` was flagged on a
+  featured-products grid derived from a static catalogue (`PRODUCTS.filter(...)`); `rendersDataList`
+  treats only an UPPER_CASE receiver as static, so a derived constant reads as user data, and the design
+  heal spent 83 s on it. Deciding "derived from a constant = cannot be empty" needs a data-flow rule;
+  not done here. (2) The lean suggest-only review timed out (45 s + grace, `REVIEW_INCOMPLETE`). (3)
+  `CartDrawer.tsx` was created and never mounted — a builder-output defect, reported by READINESS, not
+  healed. (4) ETA (basis heuristic, confidence 0.4) said ~2.9 min; the build took 8.7 min (3.0×). Not
+  investigated in this change.

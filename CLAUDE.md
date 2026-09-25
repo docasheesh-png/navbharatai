@@ -3208,6 +3208,14 @@ the flag entries above promise.
   manifest and service worker land un-linked and inert — and the narration now says what LANDED
   instead of announcing them regardless. Reversion-proven three ways in
   `tests/theLaunchBasicsNeverHappened.test.ts`.
+  🔁 **SUPERSEDED IN PART THE SAME DAY BY #3313 (admin chose it: *"user ko working app jaldi mile, aur
+  app acche se acchi bane"*): both passes, plus the E2E net and the ADR note, now run BEFORE the render
+  rescue — before any latch — so the index.html patch lands too and the whole set is VERIFIED by the
+  browser check and `npm run build`, not merely created.** `CREATE_ONLY_PASSES` stays as the net for a
+  latch that already exists (a resumed, already-green session); the passes keep their names for it.
+  ⚠️ Moving them exposed that the generated `sw.js` was cache-first under a fixed name — a republished
+  app never reached a returning visitor — which the "un-linked and inert" state above had been hiding.
+  It is network-first now (`appDefaults.ts`); **do not move these passes back behind the latch**.
   ✅ **AND THE DEV SERVER'S LAST WORDS WERE READ ON THE WRONG BRANCH.** This autopsy first recorded
   that *"nothing captures the dev server's own last output"* — **wrong, and re-grepping caught it**:
   `devServerDeathEvidence.ts` has read the log tail since 2026-09-23. It was wired one line before

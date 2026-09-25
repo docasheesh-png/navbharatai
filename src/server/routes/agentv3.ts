@@ -374,8 +374,8 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests } from '../AgentV3/TestGenerationAgent';
-import { planAppDefaults, defaultAssetPath } from '../AgentV3/appDefaults';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild } from '../AgentV3/TestGenerationAgent';
+import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -556,7 +556,7 @@ import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportS
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
 import { ensureHtmlEntryScript } from '../AgentV3/HtmlEntryGuard';
-import { withoutPreviewBridge } from '../AgentV3/previewBridge';
+import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
@@ -18577,6 +18577,366 @@ async function noteBuildOutcome(
         }
       } catch { /* proof is best-effort — a failure here leaves the build exactly as unproven as before */ }
 
+      // ── THE FINISHING PASSES RUN BEFORE THE PREVIEW PROOF, SO THEY ARE PART OF WHAT IT PROVES ──
+      // (admin 2026-09-25, asked to choose: "aap batao, kon sa best hai — user ko working app jaldi
+      // mile, aur app acche se acchi bane").
+      //
+      // Four deterministic passes — the E2E net, the architecture note, the unit-test skeletons and the
+      // production defaults (meta tags, manifest, icon, robots.txt, service worker) — used to run AFTER
+      // the render rescue and the verify loop. Those two are where the app is latched green, so on every
+      // build that was PROVEN to work, Green Freeze refused all four: the report showed nine
+      // GREEN_FREEZE_DEFERRED writes, the release gate then said the app had "no tests", and the
+      // "by default" PWA basics reached only the builds nobody had managed to verify (autopsies 8a92e5ed,
+      // 21b431e1, 3ab93068, 2a7fa4b0).
+      //
+      // Here they are part of the app the browser checks, the production build compiles, the vaccine
+      // reads and GreenGuard snapshots — verified like every other file, instead of refused on a good
+      // build and unverified on a doubtful one. None calls a model; together they take seconds. The
+      // freeze itself is NOT widened.
+      //
+      // ⚠️ Moving them in front of the freeze exposed what it had been hiding: the generated service
+      // worker served every request cache-first under a name that never changed, so a republished app
+      // never reached a returning visitor. It is network-first now (appDefaults.ts). Do not move these
+      // passes back behind the latch on the theory that the freeze "protects" the app from them.
+      //
+      // Each write here is recorded twice: in `inBuildWriteTick`, so a concurrent in-build proof that
+      // collected the tree mid-way discards itself instead of saving a half-finished snapshot; and in
+      // `finishingPaths`, so the post-build reviewer is not sent to review NavBharatAI's own files.
+      const finishingPaths = new Set<string>();
+      const noteFinishingWrite = (path: string) => { finishingPaths.add(path); inBuildWriteTick++; };
+      // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
+      // which in practice meant most apps shipped without one. This makes it a system reflex.
+      //
+      // Deliberately NOT executed here. Playwright pulls a browser of roughly 300 MB, and paying that
+      // on every build — for every user, free tier included — would make builds materially slower to
+      // add a signal we now largely have from the render check, the console-error capture and the
+      // route smoke check. Writing the files costs nothing and leaves the user something real they
+      // own: a net that runs in their own repo and their own CI whenever they want it. The report
+      // says WRITTEN, never "passed" — a scaffold reported as a test run is a fake verdict.
+      if (process.env.AGENTV3_AUTO_E2E !== 'off' && !abort.signal.aborted) {
+        try {
+          // THE WHOLE PROJECT, NOT THIS TURN'S WRITES (admin report 2026-08-12). An edit build that
+          // wrote one `.env` was judged on that one file and skipped with the reason "this project has
+          // no user interface for a browser to load" — for a React app with a full page of components.
+          // The decision was arguably right and the REASON was false, which is worse: it tells the user
+          // something untrue about their own app, and it hides the real reason from the next reader.
+          const projectFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
+          const decision = shouldAutoScaffoldE2e({
+            files: e2eFiles,
+            ok: result.ok,
+            isImportTurn,
+            hasPreview: !!lastPreviewUrl,
+          });
+          if (decision.scaffold) {
+            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev' });
+            const added: string[] = [];
+            for (const [path, content] of Object.entries(plan.files) as Array<[string, string]>) {
+              // Create-only: an existing file here belongs to the user, and the decision above already
+              // refused whole projects that have their own E2E setup.
+              let exists = false;
+              try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
+              if (exists) continue;
+              await actuator.writeFile(workspaceId, path, content);
+              writtenFiles.set(path, content);
+              noteFinishingWrite(path);
+              added.push(path);
+            }
+            // SIGN-IN FLOW (Phase 4.5). The smoke spec proves the app LOADS; this proves the login
+            // form exists, accepts input and submits without throwing. An app whose sign-in is broken
+            // is completely unusable no matter how good everything behind it is.
+            //
+            // Every selector is READ from the component this build produced, never guessed. A guessed
+            // selector fails against working code — the exact bug removed from the unit scaffolds one
+            // phase ago — so when the evidence is not in the markup, NO spec is written. A missing
+            // test is honest; a red test against a correct app is not.
+            const auth = findAuthFlow(e2eFiles);
+            if (auth) {
+              let authExists = false;
+              try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
+              if (!authExists) {
+                const spec = buildAuthFlowSpec(auth);
+                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
+                writtenFiles.set(AUTH_SPEC_PATH, spec);
+                noteFinishingWrite(AUTH_SPEC_PATH);
+                added.push(AUTH_SPEC_PATH);
+              }
+            }
+            if (added.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'E2E_SCAFFOLDED',
+                message: e2eAutoScaffoldNote(added)
+                  + (auth ? ` The sign-in test reads its selectors from ${auth.file}, so they keep working as long as that form does.` : ''),
+                autoResolved: true,
+              });
+            }
+          } else if (decision.reason) {
+            // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'E2E_SCAFFOLD_SKIPPED',
+              message: `No end-to-end suite was added — ${decision.reason}.`,
+              autoResolved: true,
+            });
+          }
+          /**
+           * 🔒 AND NOW KEEP THAT NET OUT OF THE APP'S BUILD (admin APK report 2026-08-24).
+           *
+           * The scaffold above writes TypeScript that imports `@playwright/test` and deliberately does
+           * NOT install it. In a Next.js app that is fatal: next build typechecks every root .ts, so a
+           * file we wrote for TESTING stops the user's app from building — and their APK from
+           * existing. The user's run died on `Cannot redeclare block-scoped variable 'devices'`,
+           * which was itself a shim someone pasted in to silence the missing module: the surface patch
+           * was inevitable once the file was there and uncompilable.
+           *
+           * Excluding the E2E paths from the app's typecheck is the fix at the cause. It keeps the
+           * scaffold's promise (we add no packages to your project) AND makes the file harmless.
+           *
+           * 🔑 RUN FOR EVERY PROJECT THAT HAS THE FILES, not only the one we just scaffolded — an app
+           * given the config on an earlier build is exactly the app already broken by it, and the
+           * create-only writer above will never touch that config again. This is the repair for those.
+           *
+           * Conservative by construction: `withE2eExcluded` does nothing to a config it cannot parse,
+           * nothing to one that already builds only `src/` (a Vite scaffold, safe by accident), and
+           * nothing when the entries are already there — so an untouched project stays byte-identical.
+           */
+          const projectNow: Record<string, string> = { ...e2eFiles, ...Object.fromEntries(writtenFiles) };
+          /**
+           * 🔒 AND UNDO THE SHIM THAT MADE IT WORSE.
+           *
+           * The exclude above stops a test file failing the app's BUILD. It does not repair the file,
+           * and the admin's was genuinely broken: someone had answered `Cannot find module
+           * '@playwright/test'` by declaring the module's types at the top of the file that imports
+           * it, which TypeScript rejects outright (`Cannot redeclare block-scoped variable
+           * 'devices'`). Leaving that in place would mean the user's own `npx playwright test` and
+           * their editor stay broken while only our build looks fine — half a fix.
+           *
+           * Removing it is never a judgement call: either the real types exist and the stub was
+           * redundant, or they do not and the HONEST error comes back, naming what is actually wrong.
+           * Wildcard declarations (`declare module '*.css'`) can never match — see the module.
+           */
+          if (!isImportTurn) {
+            const shims = findAmbientShimCollisions(projectNow);
+            const fixedPaths = new Set(shims.map((s) => s.path));
+            for (const path of fixedPaths) {
+              const stripped = stripCollidingAmbientShims(projectNow[path]);
+              if (stripped.source === projectNow[path]) continue;
+              projectNow[path] = stripped.source;
+              writtenFiles.set(path, stripped.source);
+              noteFinishingWrite(path);
+              try { await actuator.writeFile(workspaceId, path, stripped.source); } catch { /* store copy is fixed */ }
+            }
+            if (shims.length > 0) {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'AMBIENT_SHIM_REMOVED',
+                message: ambientShimNote(shims), autoResolved: true,
+              });
+            }
+          }
+          const hasE2eFiles = Object.keys(projectNow)
+            .some((p) => p === 'playwright.config.ts' || p.startsWith('e2e/'));
+          if (hasE2eFiles && !isImportTurn) {
+            let tsconfigRaw = '';
+            try { tsconfigRaw = await actuator.readFile(workspaceId, 'tsconfig.json'); } catch { tsconfigRaw = ''; }
+            if (tsconfigRaw) {
+              const excluded = withE2eExcluded(tsconfigRaw);
+              if (excluded.changed) {
+                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
+                writtenFiles.set('tsconfig.json', excluded.text);
+                noteFinishingWrite('tsconfig.json');
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'E2E_EXCLUDED_FROM_BUILD',
+                  message: e2eExcludeNote(excluded.added), autoResolved: true,
+                });
+              }
+            }
+          }
+        } catch { /* the net is additive — a failure here never touches the build result */ }
+      }
+
+      // GA-6 — Persistent engineering memory: capture THIS successful build's architecture decision as
+      // a numbered/dated ADR, persist it per-project, and drop the markdown into the workspace so the
+      // decision is both durable (read back into the next build above) and visible to the user. A
+      // no-change rebuild appends nothing (stackChanged guard). Best-effort — never affects the outcome.
+      // NEVER on an import/survey turn (mitrify autopsy 2026-07-27): an "architecture decision" for a turn
+      // that decided nothing is meaningless, and writing ADR markdown into a repo the user asked us not to
+      // touch is the same instruction violation the gates above close. Today `writtenFiles` is empty on a
+      // survey turn so this could not fire — the gate makes that safety explicit instead of incidental.
+      if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn) {
+        // Awaited (bounded) so the file lands BEFORE the preview proof latches the app green; left
+        // running past the bound, a late write is refused by the freeze exactly as before.
+        await withTimeout((async () => {
+          try {
+            const rec = await adrStore.record(userId, workspaceId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString());
+            if (rec) {
+              const { path, content } = renderAdrMarkdown(rec);
+              // Only RECORD the write if it actually happened. A `.catch` that swallows a green-freeze
+              // refusal and then calls onFileWrite would record a file the sandbox never received
+              // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
+              let adrWritten = false;
+              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              if (adrWritten) onFileWrite?.(path, content);
+              if (adrWritten) finishingPaths.add(path);
+            }
+          } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
+        })(), 8_000, 'adr-capture').catch(() => {});
+      }
+
+      // P-AI.7 — automatic post-build test scaffolding. After a SUCCESSFUL build/edit, deterministically
+      // generate runnable Vitest skeletons for the top few built source files (ranked by how heavily their
+      // exports are used) that don't already have a test. No extra LLM call/cost; honest skeletons (TODO
+      // markers, no fake assertions); additive test files only, so it can never affect the app's runtime or
+      // the build result. Best-effort — any failure is swallowed.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
+          // A skeleton imports `vitest`, which nothing installs. Written only where the release build
+          // cannot type-check it — otherwise it would fail the user's publish and APK for a file they
+          // never asked for (see testSkeletonsCannotBreakTheBuild).
+          const readProject = async (p: string): Promise<string | null> =>
+            writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
+          const pkgForTests = await readProject('package.json');
+          const buildTsconfig = buildTsconfigPath(pkgForTests);
+          const skeletonsSafe = testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
+          const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
+          const scaffolded: string[] = [];
+          // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`
+          // this pass's `currentPass()` is `null`, so Green Freeze refuses every write and each refusal
+          // is swallowed by the catch below. Moving the finishing passes ahead of the green latch (this
+          // PR) means the freeze is usually not armed yet — but a name costs nothing and is what makes
+          // the guarantee hold on ANY path that still reaches here latched (a resumed already-green
+          // session). `starter-tests` is CREATE-ONLY, so an overwrite is still refused.
+          await runInPass('starter-tests', async () => {
+            for (const item of plan) {
+              try {
+                await actuator.writeFile(workspaceId, item.testPath, item.content);
+                writtenFiles.set(item.testPath, item.content);
+                noteFinishingWrite(item.testPath);
+                try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
+                scaffolded.push(item.testPath);
+              } catch { /* one test file failing must not block the rest */ }
+            }
+          });
+          if (scaffolded.length > 0) {
+            await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
+            events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
+          }
+        }
+      } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
+      // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
+      // deterministically ensure SEO/OG meta, viewport, html lang, theme-color, a web manifest + a real
+      // installable icon, robots.txt, and an offline-first service worker (+ its registration) — the same
+      // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
+      // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
+      // and best-effort — never blocks or fails the build.
+      // 🔴 NAMED, FOR THE REASON THE STARTER-TEST PASS ABOVE IS (autopsy e628efd4): an unnamed pass is
+      // a refused one. Everything this block does was being thrown away on every browser-verified
+      // build, silently, so the launch basics `AppKnowledgeBase.ts` promises "BY DEFAULT after each
+      // build" did not happen at all. Moving the finishing passes ahead of the green latch (this PR)
+      // means the freeze is usually not armed yet; the name is what makes the guarantee hold on any
+      // path that still reaches here latched.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          await runInPass('production-defaults', async () => {
+          const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
+          let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
+          if (indexHtml == null) {
+            // 🔴 `actuator.readFile` IS THE SANDBOX, AND THE SANDBOX'S index.html CARRIES OUR BRIDGE.
+            //
+            // `withoutPreviewBridge`'s own docblock names this class: *"What neither guard covered is
+            // the third consumer of the same files: OUR OWN ANALYSERS. They read the sandbox directly
+            // (`actuator.readFile`), which is not the `read_file` tool and therefore not stripped …
+            // Apply it wherever sandbox content enters the analysis corpus."* Here it is worse than an
+            // analyser: this path READS the document and then WRITES it back, to the sandbox AND to the
+            // durable store — so NavBharatAI's console mirror was being saved into the user's own
+            // source and shipped with their app. Measured on the real document from autopsy 53d43c18:
+            // a 299-byte entry file became **18,546 bytes** bridged, and the defaults pass persisted
+            // 19,224 — which is exactly the `dist/index.html 18.46 kB` that report carries.
+            //
+            // ⚠️ Stripping here does NOT turn the live console off: `E2BActuator` re-injects the bridge
+            // into the sandbox copy every time the dev server starts, which is the one place it belongs.
+            try { indexHtml = withoutPreviewBridge(idxPath, await actuator.readFile(workspaceId, idxPath)); } catch { indexHtml = null; }
+          }
+          const appName = deriveTitle(prompt) || 'App';
+          const defaults = planAppDefaults(indexHtml, appName);
+          const savedDefaults: Record<string, string> = {};
+          // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
+          // intended, and the files are a separate set — so the two must be reported separately.
+          let indexPatched = false;
+          // Patch index.html only when the generator actually changed it.
+          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
+            try {
+              // The SANDBOX copy keeps the preview bridge it was served with (the live console and the
+              // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
+              // it after a write. The user's saved source stays clean — the bridge is never theirs.
+              const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
+              await actuator.writeFile(
+                workspaceId, idxPath,
+                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml,
+              );
+              writtenFiles.set(idxPath, defaults.indexHtml);
+              noteFinishingWrite(idxPath);
+              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
+              savedDefaults[idxPath] = defaults.indexHtml;
+              indexPatched = true;
+            } catch { /* one write failing must not block the rest */ }
+          }
+          // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
+          // FRAMEWORK-AWARE PATH (deploy-report autopsy 2026-08-03): a Vite app ships ONLY what's under
+          // public/, so these must land in public/ or `npm run build` drops them from dist/ and the deploy
+          // 404s them (which made a real build grind 7 rebuilds copying them by hand). defaultAssetPath →
+          // public/<file> for a Vite framework, root otherwise. Kill switch AGENTV3_VITE_PUBLIC_ASSETS=off.
+          const publicAssets = (process.env.AGENTV3_VITE_PUBLIC_ASSETS ?? '').trim().toLowerCase() !== 'off';
+          for (const [rel, content] of Object.entries(defaults.files)) {
+            const target = publicAssets ? defaultAssetPath(rel, framework) : rel;
+            if (writtenFiles.has(target)) continue;
+            let existing: string | null = null;
+            try { existing = await actuator.readFile(workspaceId, target); } catch { existing = null; }
+            // Present ⇒ it is the app's own, EXCEPT our old cache-first service worker, which kept every
+            // republished app stale for its returning visitors (see appDefaults.ts). That one exact file
+            // is ours to replace; anything else — a user's or a framework's worker — is left alone.
+            const replacement = existing != null && rel === SERVICE_WORKER_FILE ? upgradeGeneratedServiceWorker(existing) : null;
+            if (existing != null && replacement == null) continue;
+            try {
+              await actuator.writeFile(workspaceId, target, replacement ?? content);
+              const written = replacement ?? content;
+              writtenFiles.set(target, written);
+              noteFinishingWrite(target);
+              try { getWorkspaceMemory(workspaceId).indexFile(target, written); } catch { /* index best-effort */ }
+              savedDefaults[target] = written;
+            } catch { /* best-effort per file */ }
+          }
+          // The old tool wrote the worker at the ROOT of a Vite app, where `public/` now shadows it: our
+          // exact v1 left there is upgraded too, so no copy of the stale-forever worker survives.
+          const rootSw = SERVICE_WORKER_FILE;
+          if (publicAssets && defaultAssetPath(rootSw, framework) !== rootSw && !writtenFiles.has(rootSw)) {
+            const upgraded = upgradeGeneratedServiceWorker(await actuator.readFile(workspaceId, rootSw).catch(() => null));
+            if (upgraded) {
+              try {
+                await actuator.writeFile(workspaceId, rootSw, upgraded);
+                writtenFiles.set(rootSw, upgraded);
+                noteFinishingWrite(rootSw);
+                savedDefaults[rootSw] = upgraded;
+              } catch { /* best-effort */ }
+            }
+          }
+          if (Object.keys(savedDefaults).length > 0) {
+            await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
+            // 🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED. `defaults.added` is the list of index.html
+            // TAGS the generator intended; the files are a separate set, and on a green app exactly
+            // one of the two happens. Announcing the tags when the patch was refused is the "fake
+            // success" the second absolute rule forbids, and it is what this line used to do.
+            const savedFiles = Object.keys(savedDefaults).filter((k) => k !== idxPath);
+            const parts: string[] = [];
+            if (indexPatched && defaults.added.length > 0) parts.push(defaults.added.join(', '));
+            if (savedFiles.length > 0) parts.push(savedFiles.join(', '));
+            if (parts.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${parts.join(' + ')}.`, ts: Date.now() });
+            }
+          }
+          });
+        }
+      } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
+
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
         && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
@@ -19151,151 +19511,6 @@ async function noteBuildOutcome(
             autoResolved: false,
           });
         } catch { /* diagnostics are best-effort and must never affect the build */ }
-      }
-
-      // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
-      // which in practice meant most apps shipped without one. This makes it a system reflex.
-      //
-      // Deliberately NOT executed here. Playwright pulls a browser of roughly 300 MB, and paying that
-      // on every build — for every user, free tier included — would make builds materially slower to
-      // add a signal we now largely have from the render check, the console-error capture and the
-      // route smoke check. Writing the files costs nothing and leaves the user something real they
-      // own: a net that runs in their own repo and their own CI whenever they want it. The report
-      // says WRITTEN, never "passed" — a scaffold reported as a test run is a fake verdict.
-      if (process.env.AGENTV3_AUTO_E2E !== 'off' && !abort.signal.aborted) {
-        try {
-          // THE WHOLE PROJECT, NOT THIS TURN'S WRITES (admin report 2026-08-12). An edit build that
-          // wrote one `.env` was judged on that one file and skipped with the reason "this project has
-          // no user interface for a browser to load" — for a React app with a full page of components.
-          // The decision was arguably right and the REASON was false, which is worse: it tells the user
-          // something untrue about their own app, and it hides the real reason from the next reader.
-          const projectFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-          const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
-          const decision = shouldAutoScaffoldE2e({
-            files: e2eFiles,
-            ok: result.ok,
-            isImportTurn,
-            hasPreview: !!lastPreviewUrl,
-          });
-          if (decision.scaffold) {
-            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev' });
-            const added: string[] = [];
-            for (const [path, content] of Object.entries(plan.files) as Array<[string, string]>) {
-              // Create-only: an existing file here belongs to the user, and the decision above already
-              // refused whole projects that have their own E2E setup.
-              let exists = false;
-              try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
-              if (exists) continue;
-              await actuator.writeFile(workspaceId, path, content);
-              writtenFiles.set(path, content);
-              added.push(path);
-            }
-            // SIGN-IN FLOW (Phase 4.5). The smoke spec proves the app LOADS; this proves the login
-            // form exists, accepts input and submits without throwing. An app whose sign-in is broken
-            // is completely unusable no matter how good everything behind it is.
-            //
-            // Every selector is READ from the component this build produced, never guessed. A guessed
-            // selector fails against working code — the exact bug removed from the unit scaffolds one
-            // phase ago — so when the evidence is not in the markup, NO spec is written. A missing
-            // test is honest; a red test against a correct app is not.
-            const auth = findAuthFlow(e2eFiles);
-            if (auth) {
-              let authExists = false;
-              try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
-              if (!authExists) {
-                const spec = buildAuthFlowSpec(auth);
-                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
-                writtenFiles.set(AUTH_SPEC_PATH, spec);
-                added.push(AUTH_SPEC_PATH);
-              }
-            }
-            if (added.length > 0) {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'E2E_SCAFFOLDED',
-                message: e2eAutoScaffoldNote(added)
-                  + (auth ? ` The sign-in test reads its selectors from ${auth.file}, so they keep working as long as that form does.` : ''),
-                autoResolved: true,
-              });
-            }
-          } else if (decision.reason) {
-            // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.
-            buildDiag.record({
-              phase: 'build', severity: 'info', code: 'E2E_SCAFFOLD_SKIPPED',
-              message: `No end-to-end suite was added — ${decision.reason}.`,
-              autoResolved: true,
-            });
-          }
-          /**
-           * 🔒 AND NOW KEEP THAT NET OUT OF THE APP'S BUILD (admin APK report 2026-08-24).
-           *
-           * The scaffold above writes TypeScript that imports `@playwright/test` and deliberately does
-           * NOT install it. In a Next.js app that is fatal: next build typechecks every root .ts, so a
-           * file we wrote for TESTING stops the user's app from building — and their APK from
-           * existing. The user's run died on `Cannot redeclare block-scoped variable 'devices'`,
-           * which was itself a shim someone pasted in to silence the missing module: the surface patch
-           * was inevitable once the file was there and uncompilable.
-           *
-           * Excluding the E2E paths from the app's typecheck is the fix at the cause. It keeps the
-           * scaffold's promise (we add no packages to your project) AND makes the file harmless.
-           *
-           * 🔑 RUN FOR EVERY PROJECT THAT HAS THE FILES, not only the one we just scaffolded — an app
-           * given the config on an earlier build is exactly the app already broken by it, and the
-           * create-only writer above will never touch that config again. This is the repair for those.
-           *
-           * Conservative by construction: `withE2eExcluded` does nothing to a config it cannot parse,
-           * nothing to one that already builds only `src/` (a Vite scaffold, safe by accident), and
-           * nothing when the entries are already there — so an untouched project stays byte-identical.
-           */
-          const projectNow: Record<string, string> = { ...e2eFiles, ...Object.fromEntries(writtenFiles) };
-          /**
-           * 🔒 AND UNDO THE SHIM THAT MADE IT WORSE.
-           *
-           * The exclude above stops a test file failing the app's BUILD. It does not repair the file,
-           * and the admin's was genuinely broken: someone had answered `Cannot find module
-           * '@playwright/test'` by declaring the module's types at the top of the file that imports
-           * it, which TypeScript rejects outright (`Cannot redeclare block-scoped variable
-           * 'devices'`). Leaving that in place would mean the user's own `npx playwright test` and
-           * their editor stay broken while only our build looks fine — half a fix.
-           *
-           * Removing it is never a judgement call: either the real types exist and the stub was
-           * redundant, or they do not and the HONEST error comes back, naming what is actually wrong.
-           * Wildcard declarations (`declare module '*.css'`) can never match — see the module.
-           */
-          if (!isImportTurn) {
-            const shims = findAmbientShimCollisions(projectNow);
-            const fixedPaths = new Set(shims.map((s) => s.path));
-            for (const path of fixedPaths) {
-              const stripped = stripCollidingAmbientShims(projectNow[path]);
-              if (stripped.source === projectNow[path]) continue;
-              projectNow[path] = stripped.source;
-              writtenFiles.set(path, stripped.source);
-              try { await actuator.writeFile(workspaceId, path, stripped.source); } catch { /* store copy is fixed */ }
-            }
-            if (shims.length > 0) {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'AMBIENT_SHIM_REMOVED',
-                message: ambientShimNote(shims), autoResolved: true,
-              });
-            }
-          }
-          const hasE2eFiles = Object.keys(projectNow)
-            .some((p) => p === 'playwright.config.ts' || p.startsWith('e2e/'));
-          if (hasE2eFiles && !isImportTurn) {
-            let tsconfigRaw = '';
-            try { tsconfigRaw = await actuator.readFile(workspaceId, 'tsconfig.json'); } catch { tsconfigRaw = ''; }
-            if (tsconfigRaw) {
-              const excluded = withE2eExcluded(tsconfigRaw);
-              if (excluded.changed) {
-                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
-                writtenFiles.set('tsconfig.json', excluded.text);
-                buildDiag.record({
-                  phase: 'build', severity: 'info', code: 'E2E_EXCLUDED_FROM_BUILD',
-                  message: e2eExcludeNote(excluded.added), autoResolved: true,
-                });
-              }
-            }
-          }
-        } catch { /* the net is additive — a failure here never touches the build result */ }
       }
 
       // DOES THIS APP ACTUALLY BUILD? The one command Publish, the APK workflow and every deploy
@@ -20424,7 +20639,10 @@ async function noteBuildOutcome(
               // What THIS turn changed. Without it the reviewer surveys the whole project: the Shiv
               // Medical Store report shows ~25 read_file calls for a 3-file edit — the user's money
               // spent re-reading code they did not touch.
-              changedFiles: [...writtenFiles.keys()],
+              // …and not the files the platform's own finishing passes wrote (skeletons, PWA files,
+              // the architecture note): reviewing NavBharatAI's scaffolding spends the user's money and
+              // can send a repair pass after our own files.
+              changedFiles: [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p)),
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
@@ -20909,31 +21127,6 @@ async function noteBuildOutcome(
         userPreferenceStore
           .recordBuild(userId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString())
           .catch(() => {});
-      }
-
-      // GA-6 — Persistent engineering memory: capture THIS successful build's architecture decision as
-      // a numbered/dated ADR, persist it per-project, and drop the markdown into the workspace so the
-      // decision is both durable (read back into the next build above) and visible to the user. A
-      // no-change rebuild appends nothing (stackChanged guard). Best-effort — never affects the outcome.
-      // NEVER on an import/survey turn (mitrify autopsy 2026-07-27): an "architecture decision" for a turn
-      // that decided nothing is meaningless, and writing ADR markdown into a repo the user asked us not to
-      // touch is the same instruction violation the gates above close. Today `writtenFiles` is empty on a
-      // survey turn so this could not fire — the gate makes that safety explicit instead of incidental.
-      if (result.ok && userId && writtenFiles.size > 0 && !isImportTurn) {
-        (async () => {
-          try {
-            const rec = await adrStore.record(userId, workspaceId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString());
-            if (rec) {
-              const { path, content } = renderAdrMarkdown(rec);
-              // Only RECORD the write if it actually happened. A `.catch` that swallows a green-freeze
-              // refusal and then calls onFileWrite would record a file the sandbox never received
-              // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
-              let adrWritten = false;
-              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
-              if (adrWritten) onFileWrite?.(path, content);
-            }
-          } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
-        })();
       }
 
       // Cross-Project Lesson Brain: promote THIS build's transferable lessons (proven fixes + the
@@ -22022,39 +22215,6 @@ async function noteBuildOutcome(
           events.emit({ type: 'narration', agent: 'architect', text: `🧭 Decision trace:\n${decisionTrace.format()}`, ts: Date.now() });
         }
       } catch { /* decision trace is best-effort — never affects the build */ }
-      // P-AI.7 — automatic post-build test scaffolding. After a SUCCESSFUL build/edit, deterministically
-      // generate runnable Vitest skeletons for the top few built source files (ranked by how heavily their
-      // exports are used) that don't already have a test. No extra LLM call/cost; honest skeletons (TODO
-      // markers, no fake assertions); additive test files only, so it can never affect the app's runtime or
-      // the build result. Best-effort — any failure is swallowed.
-      try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
-          const sourceFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
-          const plan = planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 });
-          const scaffolded: string[] = [];
-          // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (traced 2026-09-25, autopsy e628efd4).
-          // This runs AFTER the green latch, and without `runInPass` its `currentPass()` was `null`,
-          // so Green Freeze refused every write and each refusal was swallowed by the catch below —
-          // on every build whose preview was verified in a real browser. That report carries three
-          // deferred `*.test.ts` writes AND a `READINESS_WARNING: No tests at all`: one defect, seen
-          // from both ends. `starter-tests` is CREATE-ONLY, so an overwrite is still refused; a test
-          // file the app cannot import cannot change the render the browser already confirmed.
-          await runInPass('starter-tests', async () => {
-            for (const item of plan) {
-              try {
-                await actuator.writeFile(workspaceId, item.testPath, item.content);
-                writtenFiles.set(item.testPath, item.content);
-                try { getWorkspaceMemory(workspaceId).indexFile(item.testPath, item.content); } catch { /* index is best-effort */ }
-                scaffolded.push(item.testPath);
-              } catch { /* one test file failing must not block the rest */ }
-            }
-          });
-          if (scaffolded.length > 0) {
-            await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
-            events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
-          }
-        }
-      } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
       // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
       // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
       // whole "fix the error" round removing them and the app ships clean the first time. Safe by
@@ -22146,92 +22306,6 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* the entry guard is best-effort — never affects the build result */ }
-      // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
-      // deterministically ensure SEO/OG meta, viewport, html lang, theme-color, a web manifest + a real
-      // installable icon, robots.txt, and an offline-first service worker (+ its registration) — the same
-      // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
-      // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
-      // and best-effort — never blocks or fails the build.
-      // 🔴 NAMED, FOR THE REASON THE STARTER-TEST PASS ABOVE IS (traced 2026-09-25, autopsy e628efd4):
-      // this runs after the green latch, and an unnamed pass is a refused one. Everything this block
-      // does was being thrown away on every browser-verified build, silently, so the launch basics
-      // `AppKnowledgeBase.ts` promises "BY DEFAULT after each build" did not happen at all.
-      try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
-          await runInPass('production-defaults', async () => {
-          const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
-          let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
-          if (indexHtml == null) {
-            // 🔴 `actuator.readFile` IS THE SANDBOX, AND THE SANDBOX'S index.html CARRIES OUR BRIDGE.
-            //
-            // `withoutPreviewBridge`'s own docblock names this class: *"What neither guard covered is
-            // the third consumer of the same files: OUR OWN ANALYSERS. They read the sandbox directly
-            // (`actuator.readFile`), which is not the `read_file` tool and therefore not stripped …
-            // Apply it wherever sandbox content enters the analysis corpus."* Here it is worse than an
-            // analyser: this path READS the document and then WRITES it back, to the sandbox AND to the
-            // durable store — so NavBharatAI's console mirror was being saved into the user's own
-            // source and shipped with their app. Measured on the real document from autopsy 53d43c18:
-            // a 299-byte entry file became **18,546 bytes** bridged, and the defaults pass persisted
-            // 19,224 — which is exactly the `dist/index.html 18.46 kB` that report carries.
-            //
-            // ⚠️ Stripping here does NOT turn the live console off: `E2BActuator` re-injects the bridge
-            // into the sandbox copy every time the dev server starts, which is the one place it belongs.
-            try { indexHtml = withoutPreviewBridge(idxPath, await actuator.readFile(workspaceId, idxPath)); } catch { indexHtml = null; }
-          }
-          const appName = deriveTitle(prompt) || 'App';
-          const defaults = planAppDefaults(indexHtml, appName);
-          const savedDefaults: Record<string, string> = {};
-          // 🔴 WHETHER THE index.html PATCH REALLY LANDED, because on a green app it does not — and
-          // the narration below used to claim it either way (traced 2026-09-25, autopsy e628efd4).
-          // `production-defaults` is CREATE-ONLY: the standalone files are created, this overwrite of
-          // a file that existed at green is still refused, and the two facts are now reported apart.
-          let indexPatched = false;
-          // Patch index.html only when the generator actually changed it.
-          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
-            try {
-              await actuator.writeFile(workspaceId, idxPath, defaults.indexHtml);
-              writtenFiles.set(idxPath, defaults.indexHtml);
-              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
-              savedDefaults[idxPath] = defaults.indexHtml;
-              indexPatched = true;
-            } catch { /* one write failing must not block the rest */ }
-          }
-          // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
-          // FRAMEWORK-AWARE PATH (deploy-report autopsy 2026-08-03): a Vite app ships ONLY what's under
-          // public/, so these must land in public/ or `npm run build` drops them from dist/ and the deploy
-          // 404s them (which made a real build grind 7 rebuilds copying them by hand). defaultAssetPath →
-          // public/<file> for a Vite framework, root otherwise. Kill switch AGENTV3_VITE_PUBLIC_ASSETS=off.
-          const publicAssets = (process.env.AGENTV3_VITE_PUBLIC_ASSETS ?? '').trim().toLowerCase() !== 'off';
-          for (const [rel, content] of Object.entries(defaults.files)) {
-            const target = publicAssets ? defaultAssetPath(rel, framework) : rel;
-            if (writtenFiles.has(target)) continue;
-            let exists = false;
-            try { await actuator.readFile(workspaceId, target); exists = true; } catch { exists = false; }
-            if (exists) continue;
-            try {
-              await actuator.writeFile(workspaceId, target, content);
-              writtenFiles.set(target, content);
-              try { getWorkspaceMemory(workspaceId).indexFile(target, content); } catch { /* index best-effort */ }
-              savedDefaults[target] = content;
-            } catch { /* best-effort per file */ }
-          }
-          if (Object.keys(savedDefaults).length > 0) {
-            await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
-            // 🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED. `defaults.added` is the list of index.html
-            // TAGS the generator intended; the files are a separate set, and on a green app exactly
-            // one of the two happens. Announcing the tags when the patch was refused is the "fake
-            // success" the second absolute rule forbids, and it is what this line used to do.
-            const savedFiles = Object.keys(savedDefaults).filter((k) => k !== idxPath);
-            const parts: string[] = [];
-            if (indexPatched && defaults.added.length > 0) parts.push(defaults.added.join(', '));
-            if (savedFiles.length > 0) parts.push(savedFiles.join(', '));
-            if (parts.length > 0) {
-              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${parts.join(' + ')}.`, ts: Date.now() });
-            }
-          }
-          });
-        }
-      } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
       // ENTRY-FILE DUPLICATE-IMPORT SWEEP (build-report + IMG autopsy 2026-08-02, RECURRING): the entry file
       // (src/main.tsx) repeatedly shipped BOTH `import ErrorBoundary from './ErrorBoundary'` AND
       // `import { ErrorBoundary } from './ErrorBoundary'` → babel/Vite hard-fail "Duplicate declaration

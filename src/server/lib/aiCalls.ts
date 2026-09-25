@@ -1,24 +1,5 @@
-import OpenAI from 'openai';
-import { getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude, resolveApiKey } from './aiClients';
+import { getGemini, getGroq, getClaude, resolveApiKey } from './aiClients';
 import { getBharatContext } from './prompts';
-
-export async function callGrok(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
-  const apiKey = (key && key.trim()) || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  if (!apiKey) throw new Error('Grok/xAI API key not available');
-  const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: 60_000, maxRetries: 0 });
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
-  if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
-  for (const m of history) messages.push({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text });
-  messages.push({ role: 'user', content: message });
-  const completion = await client.chat.completions.create({ messages, model: 'grok-3', max_tokens: 8000 });
-  return completion.choices[0]?.message?.content ?? 'Grok error';
-}
-
-/**
- * Provider-specific AI call functions, extracted from the server.ts monolith
- * (Phase 1, AI-core step b). Each resolves a client via aiClients and returns
- * the assistant text. Behavior unchanged.
- */
 
 export async function callGemini(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
   const ai = getGemini(key);
@@ -78,43 +59,6 @@ export async function callGroq(message: string, key?: string, history: any[] = [
   return completion.choices[0]?.message?.content ?? 'Groq error';
 }
 
-export async function callDeepSeek(message: string, key?: string, history: any[] = []): Promise<string> {
-  const client = getDeepSeek(key) || getOpenRouter(key);
-  if (!client) throw new Error('DeepSeek/OpenRouter API Key not available');
-
-  const model = client.baseURL.includes('openrouter') ? 'deepseek/deepseek-chat' : 'deepseek-chat';
-  const messages: any[] = [
-    { role: 'system', content: getBharatContext() + " You are an expert programmer." },
-    ...history.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text })),
-    { role: 'user', content: message }
-  ];
-
-  const completion = await client.chat.completions.create({
-    messages,
-    model,
-    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
-  });
-  return completion.choices[0]?.message?.content ?? 'DeepSeek error';
-}
-
-export async function callOpenAI(message: string, key?: string, history: any[] = []): Promise<string> {
-  const client = getOpenAI(key);
-  if (!client) throw new Error('OpenAI API Key not available');
-
-  const messages: any[] = [
-    { role: 'system', content: getBharatContext() },
-    ...history.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text })),
-    { role: 'user', content: message }
-  ];
-
-  const completion = await client.chat.completions.create({
-    messages,
-    model: 'gpt-4o-mini',
-    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
-  });
-  return completion.choices[0]?.message?.content ?? 'OpenAI error';
-}
-
 export async function callClaude(message: string, key?: string, history: any[] = [], systemInstruction?: string): Promise<string> {
   const { key: resolvedKey } = resolveApiKey('claude', key);
   if (!resolvedKey) {
@@ -142,20 +86,3 @@ export async function callClaude(message: string, key?: string, history: any[] =
   return response.content[0].type === 'text' ? response.content[0].text : 'Claude error';
 }
 
-export async function callOpenRouter(message: string, key?: string, history: any[] = []): Promise<string> {
-  const client = getOpenRouter(key);
-  if (!client) throw new Error('OpenRouter API Key not available');
-
-  const messages: any[] = [
-    { role: 'system', content: getBharatContext() },
-    ...history.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text })),
-    { role: 'user', content: message }
-  ];
-
-  const completion = await client.chat.completions.create({
-    messages,
-    model: 'deepseek/deepseek-chat',
-    max_tokens: 8000,   // avoid truncating multi-file code edits mid-JSON
-  });
-  return completion.choices[0]?.message?.content ?? 'OpenRouter error';
-}

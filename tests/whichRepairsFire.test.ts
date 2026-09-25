@@ -20,13 +20,20 @@ import { healBreakdown, builderScorecard, scorecardHeadline, HEAL_CODES_SHOWN, t
 import { toMetricInput } from '../src/server/lib/scorecardPopulation';
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
-const heal = (code: string) => ({ code, autoResolved: true });
-const notHeal = (code: string) => ({ code, autoResolved: false });
+// A heal is an auto-resolved WARNING or ERROR (`isSelfHeal`, src/lib/healIssue.ts). The first version of
+// these fixtures carried no severity at all, which is how a predicate that read the flag alone passed
+// this suite and shipped TOOL_DONE ×10313 as the most-repaired code — see tests/aToolCallIsNotARepair.
+const heal = (code: string) => ({ code, severity: 'warning', autoResolved: true });
+const notHeal = (code: string) => ({ code, severity: 'warning', autoResolved: false });
 
 describe('summarizeHealCodes — one build', () => {
-  it('counts only the AUTO-RESOLVED entries, by code', () => {
+  it('counts only the auto-resolved WARNING/ERROR entries, by code — never an info row', () => {
     expect(summarizeHealCodes({
-      issues: [heal('DESIGN_HEALED'), notHeal('RELEASE_GATE'), heal('DESIGN_HEALED'), heal('RUNTIME_VERIFIED')],
+      issues: [
+        heal('DESIGN_HEALED'), notHeal('RELEASE_GATE'), heal('DESIGN_HEALED'), heal('RUNTIME_VERIFIED'),
+        { code: 'TOOL_DONE', severity: 'info', autoResolved: true },
+        { code: 'HEARTBEAT', severity: 'info', autoResolved: true },
+      ],
       counts: { autoResolved: 3 },
     })).toEqual({
       codes: { DESIGN_HEALED: 2, RUNTIME_VERIFIED: 1 },

@@ -57,6 +57,11 @@ function usd(v: unknown): string {
   return typeof v === 'number' && Number.isFinite(v) ? `$${v.toFixed(4)}` : DASH;
 }
 
+/** A build's own clock as a local date-time; DASH when the row carries none. */
+function when(v: unknown): string {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? new Date(v).toLocaleString() : DASH;
+}
+
 /** How many rows an object/array actually carries, for the ops cards. */
 function countOf(v: unknown): string {
   if (Array.isArray(v)) return String(v.length);
@@ -232,6 +237,34 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
               builds ({num(d.success?.skipped)} in flight or without a verdict, excluded) ·
               heal pressure on {num(d.heal?.builds)} builds that carry the signal.
             </p>
+            {Array.isArray(d.survival?.broken) && d.survival.broken.length > 0 ? (
+              <div data-stuck-projects className="space-y-1.5">
+                <div className={LABEL}>
+                  Stuck projects — newest failure first
+                  {d.survival.currentlyBroken > d.survival.broken.length
+                    ? ` (${num(d.survival.broken.length)} of ${num(d.survival.currentlyBroken)} shown)`
+                    : ''}
+                </div>
+                {d.survival.broken.map((p: any) => (
+                  <div key={p.workspaceId} className="rounded-lg border border-line bg-well p-2 text-[11px] leading-relaxed">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-mono text-ink break-all">{p.workspaceId}</span>
+                      <span className="text-muted">{when(p.lastBuildAt)}</span>
+                      <span className="text-muted">{num(p.failedInARow)} failed in a row · {num(p.builds)} builds</span>
+                      {p.restoredToGreen === true ? (
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-success font-bold">last working version restored</span>
+                      ) : p.restoredToGreen === false ? (
+                        <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-danger font-bold">failed attempt left standing</span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded bg-well text-muted font-bold">restore state unknown</span>
+                      )}
+                    </div>
+                    {p.prompt ? <div className="text-body mt-1">Asked: <span className="text-muted">{p.prompt}</span></div> : null}
+                    {p.rootCause ? <div className="text-body mt-1">Root cause: <span className="text-warn">{p.rootCause}</span></div> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         )}
       </ReportCard>

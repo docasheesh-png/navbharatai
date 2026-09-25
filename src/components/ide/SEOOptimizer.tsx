@@ -139,7 +139,7 @@ const ScoreGauge: React.FC<{ score: number }> = ({ score }) => {
   const color = score >= 80 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444';
   return (
     <svg width="100" height="100" viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="8" />
+      <circle cx="50" cy="50" r={r} fill="none" style={{ stroke: 'var(--border-soft)' }} strokeWidth="8" />
       <circle
         cx="50" cy="50" r={r}
         fill="none"
@@ -150,7 +150,7 @@ const ScoreGauge: React.FC<{ score: number }> = ({ score }) => {
         transform="rotate(-90 50 50)"
         style={{ transition: 'stroke-dasharray 0.5s ease' }}
       />
-      <text x="50" y="50" textAnchor="middle" dominantBaseline="central" fill="white" fontSize="18" fontWeight="700">
+      <text x="50" y="50" textAnchor="middle" dominantBaseline="central" style={{ fill: 'var(--text-primary)' }} fontSize="18" fontWeight="700">
         {score}
       </text>
     </svg>

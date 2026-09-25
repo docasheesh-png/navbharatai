@@ -25,7 +25,7 @@
   "src/components/ide/AppHealthMonitor.tsx": 4,
   "src/components/ide/AppScanPanel.tsx": 7,
   "src/components/ide/BotBuildHelp.tsx": 4,
-  "src/components/ide/BotBuilder.tsx": 5,
+  "src/components/ide/BotBuilder.tsx": 4,
   "src/components/ide/CICDPipeline.tsx": 1,
   "src/components/ide/CodeMinifier.tsx": 1,
   "src/components/ide/CodeStudio.tsx": 2,

@@ -629,10 +629,10 @@ Content-Type: application/json
           <svg style={{ position: 'absolute', top: 0, left: 0, width: canvasW, height: canvasH }}>
             <defs>
               <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                <path d="M 24 0 L 0 0 0 24" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
+                <path d="M 24 0 L 0 0 0 24" fill="none" style={{ stroke: 'var(--border-soft)' }} strokeOpacity={0.5} strokeWidth="1" />
               </pattern>
               <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L8,3 z" fill="rgba(255,255,255,0.3)" />
+                <path d="M0,0 L0,6 L8,3 z" style={{ fill: 'var(--text-muted)' }} />
               </marker>
             </defs>
             <rect width="100%" height="100%" fill="url(#grid)" style={{ pointerEvents: 'none' }} />
@@ -645,7 +645,7 @@ Content-Type: application/json
               const mid = nodeCenter(toNode);
               return (
                 <g key={edge.id}>
-                  <path d={path} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2" markerEnd="url(#arrow)" style={{ pointerEvents: 'none' }} />
+                  <path d={path} fill="none" strokeOpacity={0.7} strokeWidth="2" markerEnd="url(#arrow)" style={{ stroke: 'var(--text-faint)', pointerEvents: 'none' }} />
                   {/* Wide transparent hit-area so an edge can be TAPPED to delete it (touch-friendly). */}
                   <path
                     d={path}
@@ -658,7 +658,7 @@ Content-Type: application/json
                     <title>Tap to delete this connection</title>
                   </path>
                   {edge.label && (
-                    <text x={mid.x} y={toNode.y - 10} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="10" style={{ pointerEvents: 'none' }}>
+                    <text x={mid.x} y={toNode.y - 10} textAnchor="middle" fontSize="10" style={{ fill: 'var(--text-muted)', pointerEvents: 'none' }}>
                       {edge.label}
                     </text>
                   )}
@@ -691,7 +691,7 @@ Content-Type: application/json
                   onDoubleClick={e => { e.stopPropagation(); openEditor(node.id); }}
                 >
                   <div
-                    className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-white/40' : ''} ${isConnectTarget ? 'ring-2 ring-emerald-400/70' : ''}`}
+                    className={`w-full h-full rounded-lg border-2 flex flex-col justify-center px-3 select-none transition-all ${cfg.border} ${isSelected ? 'ring-2 ring-accent/60' : ''} ${isConnectTarget ? 'ring-2 ring-emerald-400/70' : ''}`}
                     style={{ background: 'var(--surface-card)', borderColor: isConnectSource ? '#34d399' : (isSelected ? cfg.color : cfg.color + '66') }}
                   >
                     <div className="flex items-center gap-1.5">

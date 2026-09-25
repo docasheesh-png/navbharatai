@@ -80939,6 +80939,18 @@ desktop me use hone wale sabhi button ho … user koi bhi combination bana ke co
 - **Knowledge base:** a CUSTOM KEYS bullet under the IDE entry.
 - ⚠️ Installed phones get it only through a fresh `.aab`/`.ipa` (built only when the admin asks).
 
+## 2026-09-25 — Bot Builder lines invisible on Light: SVG neutrals now follow the theme
+
+Admin screenshot (Other → Bot Builder, light mode): nodes visible, connecting lines gone; fine on
+dark. Root cause: the canvas drew edges, arrowheads, labels and grid as SVG presentation attributes in
+fixed white (`stroke="rgba(255,255,255,0.2)"`) — visible grey on dark, nothing on #f8fafc. The theme
+ratchet (`themeTokensOnly`) counts colour classes and inline style objects only, so an SVG attribute
+was invisible to it. Sibling hunt found the same shape in 5 more places: the score NUMBER inside the
+SEO and AI-code-review rings (`fill="white"` → an invisible score on Light) and the tracks of three
+ring charts (Donut, Monitor grid lines, Monitor cost donut). All 12 now read theme variables
+(`--text-faint`, `--text-muted`, `--text-primary`, `--border-soft`), and the selected node's
+`ring-white/40` became `ring-accent/60`. Locked by `tests/svgNeutralsFollowTheTheme.test.ts`: no
+client SVG may draw a white/black neutral as a fixed attribute (brand colours untouched).
 ## 2026-09-25 — Exam mode: the percentage is marks ÷ maximum, not over attempted
 
 Admin screenshot (Teacher AI → Exam mode): 16 / 20 marks, 4 right, 1 not answered — and the only

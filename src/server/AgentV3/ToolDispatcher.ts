@@ -387,7 +387,33 @@ import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
  * Injected (not imported) so ToolDispatcher stays decoupled from AgentRunner —
  * the composition root wires the real implementation (see SubAgent.ts).
  */
-export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string }>;
+export type SubAgentSpawn = (role: AgentRole, instruction: string) => Promise<{ ok: boolean; summary: string; written?: string[] }>;
+
+/** How many written paths a task result names before it only counts the rest. */
+const TASK_RESULT_MAX_PATHS = 12;
+
+/**
+ * The task tool's result: the sub-agent's own words, followed by what the PLATFORM saw it write.
+ *
+ * The summary is a claim; the write list is a fact. When the two disagree the parent must be able to
+ * see it in the same result, without spending a browser and a `find` to find out (autopsy ea07382a).
+ * `written` absent means the spawn could not say (an older or test spawn), and nothing is appended —
+ * an unknown is never printed as "wrote nothing". PURE.
+ */
+export function taskResultWithWrites(
+  role: string,
+  result: { ok: boolean; summary: string; written?: string[] },
+): string {
+  const head = result.ok ? `[${role}] ${result.summary}` : `[${role}] FAILED: ${result.summary}`;
+  if (!Array.isArray(result.written)) return head;
+  const w = result.written;
+  if (w.length === 0) {
+    return `${head}\n\n[Platform check — this agent wrote NO files. Anything the text above says it created, changed or wired up does not exist on disk; check before relying on it.]`;
+  }
+  const named = w.slice(0, TASK_RESULT_MAX_PATHS).join(', ');
+  const more = w.length > TASK_RESULT_MAX_PATHS ? ` and ${w.length - TASK_RESULT_MAX_PATHS} more` : '';
+  return `${head}\n\n[Platform check — files this agent actually wrote (${w.length}): ${named}${more}.]`;
+}
 
 /** The browser interactions browser_action supports (mirrors the actuator's union). */
 export const BROWSER_ACTIONS = ['click', 'type', 'navigate', 'scroll', 'press', 'wait', 'hover', 'double_click', 'select_option'] as const;
@@ -493,8 +519,20 @@ export type ReadLedgerEntry = {
   writeSeq: number;
   /** Consecutive reads of this path that were unchanged AND followed no write at all. */
   stalls: number;
+  /**
+   * Re-reads that returned exactly what an earlier read of the same path (and the same line range)
+   * already returned. The honest numerator of `REPEATED_READS` — a re-read after an edit, or a read
+   * of a part of the file not yet seen, is ordinary work and is never counted here.
+   */
+  unchangedRereads?: number;
 };
 export type ReadLedger = Map<string, ReadLedgerEntry>;
+
+/** The file a ledger key belongs to — a ranged read is keyed `path#Lfrom-to` (see read_file). PURE. */
+export function readLedgerPath(key: string): string {
+  const at = key.lastIndexOf('#L');
+  return at > 0 && /^#L\d+-\d+$/.test(key.slice(at)) ? key.slice(0, at) : key;
+}
 
 export class ToolDispatcher {
   /**
@@ -577,7 +615,26 @@ export class ToolDispatcher {
   private readonly onFileWrite = (path: string, content: string): void => {
     this._writeSeq++; // see the docblock — one door, so "did anything change?" is true by construction
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
+    this._writtenPaths.add(path); // what THIS agent really wrote — see `writtenPaths`
   };
+
+  /**
+   * Every path THIS dispatcher wrote — never shared with a child or a parent.
+   *
+   * 🔴 WHY (autopsy ea07382a, 2026-09-25). A frontend sub-agent ended its task with *"Done. I built
+   * the multi-screen Expense Tracker UI … New files created: BottomNav.tsx, DashboardScreen.tsx,
+   * ExpensesListScreen.tsx, ReportsScreen.tsx, SettingsScreen.tsx"* — and had written NOTHING. The
+   * parent was handed that sentence as the task's result and took a browser, a glob and a `find` to
+   * discover it was false, then ran the same task again: about ninety seconds and a sub-agent's worth
+   * of tokens, on a claim the platform could have checked for free. So the task result now carries
+   * the fact beside the claim (`taskResultWithWrites`).
+   */
+  private readonly _writtenPaths = new Set<string>();
+
+  /** The paths this agent wrote, in write order. */
+  writtenPaths(): string[] {
+    return [...this._writtenPaths];
+  }
 
   // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
@@ -2175,16 +2232,42 @@ export class ToolDispatcher {
    */
   private _writeSeq = 0;
 
-  /** How many STOP-level read-loop notices this build has issued. Monotonic; see `readLoopStops`. */
-  private _readLoopStops = 0;
+  /**
+   * How many STOP-level read-loop notices this build has issued. Monotonic; see `readLoopStops`.
+   * A BOX, so a sub-agent can count into its parent's (autopsy ea07382a: a frontend sub-agent was
+   * told STOP three times and the report said "No read reached the no-progress limit").
+   */
+  private _readLoopStops: { n: number } = { n: 0 };
 
   private _readLedger: ReadLedger = new Map();
   /** THIS agent's own reads — never shared, because it answers "what is in MY context?". See read_file. */
   private readonly _ownReads: ReadLedger = new Map();
 
-  /** Read counts for the build report. Exposed so the route can NAME the waste, not only nudge it. */
+  /**
+   * Read counts for the build report, per FILE. Exposed so the route can NAME the waste, not only
+   * nudge it. A ranged read is keyed `path#Lfrom-to` in the ledger (see read_file); it is folded back
+   * into its file here, so the report counts files, not slices.
+   */
   readLedgerCounts(): Map<string, number> {
-    return new Map([...this._readLedger].map(([p, r]) => [p, r.count]));
+    const out = new Map<string, number>();
+    for (const [key, r] of this._readLedger) {
+      const path = readLedgerPath(key);
+      out.set(path, (out.get(path) ?? 0) + r.count);
+    }
+    return out;
+  }
+
+  /**
+   * Per file, how many reads returned exactly what an earlier read of the same path and range had
+   * already returned — the only reads `REPEATED_READS` may honestly call wasted.
+   */
+  readLedgerUnchangedRereads(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const [key, r] of this._readLedger) {
+      const path = readLedgerPath(key);
+      out.set(path, (out.get(path) ?? 0) + (r.unchangedRereads ?? 0));
+    }
+    return out;
   }
 
   /**
@@ -2195,7 +2278,17 @@ export class ToolDispatcher {
    * ignored, which is a different problem from the one it was built for and must be legible as such.
    */
   readLoopStops(): number {
+    return this._readLoopStops.n;
+  }
+
+  /** The LIVE stop counter, for a child dispatcher to count into — the sibling of `sharedReadLedger`. */
+  sharedReadLoopStops(): { n: number } {
     return this._readLoopStops;
+  }
+
+  /** Count this child's STOP notices in the parent's number. Called once at spawn. */
+  shareReadLoopStops(box: { n: number }): void {
+    if (box && typeof box.n === 'number') this._readLoopStops = box;
   }
 
   /**
@@ -2673,6 +2766,18 @@ export class ToolDispatcher {
         // healthy file. start_line/end_line make any slice of a large file genuinely readable.
         const sl = typeof (input as Record<string, unknown>).start_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).start_line as number)) : null;
         const el = typeof (input as Record<string, unknown>).end_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).end_line as number)) : null;
+        // 🔴 A SLICE IS NOT THE FILE (autopsy ea07382a, 2026-09-25). A sub-agent read src/index.css as
+        // lines 1-300, then 300-359, then 40-220 — three DIFFERENT parts of a 359-line file — and was
+        // told on each one "STOP … this file is byte-for-byte what you already have … do not read this
+        // path again". It did not have those lines. It then ended its task with "Done. I built …" having
+        // written nothing at all. So a ranged read is its own entry, keyed by the lines it asked for:
+        // a repeat of the SAME slice is still a repeat, a new slice is new information.
+        const lines = full.split('\n');
+        const from = (sl ?? 1) - 1;
+        const to = el ?? lines.length;
+        const ranged = sl !== null || el !== null;
+        const ledgerKey = ranged ? `${reqPath}#L${from + 1}-${Math.min(to, lines.length)}` : reqPath;
+        const shownPath = ranged ? `${reqPath} (lines ${from + 1}-${Math.min(to, lines.length)})` : reqPath;
         // ⚠️ THE SAME FILE, AGAIN, UNCHANGED — measured at 84% of all reads in a real build (see
         // repeatedReads.ts for the numbers, and for why this is a NUDGE and not a cache: a cache saves
         // a 200ms round-trip and none of what actually costs, because the turn is already spent and the
@@ -2696,24 +2801,22 @@ export class ToolDispatcher {
         // shared ledger told fresh sub-agents, on their FIRST read, "you already have it" and even
         // "STOP — do not read this path again" (the reviewer was told so about a file it had never
         // seen). A model told it holds a file it does not hold works blind — that is wandering we caused.
-        const prior = this._readLedger.get(reqPath);
+        const prior = this._readLedger.get(ledgerKey);
         const readCount = (prior?.count ?? 0) + 1;
         const unchanged = prior !== undefined && prior.content === full;
         const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
         const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
-        this._readLedger.set(reqPath, { count: readCount, content: full, writeSeq: this._writeSeq, stalls });
-        const own = this._ownReads.get(reqPath);
+        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (unchanged ? 1 : 0);
+        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
+        const own = this._ownReads.get(ledgerKey);
         const ownCount = (own?.count ?? 0) + 1;
         const ownUnchanged = own !== undefined && own.content === full;
         const ownStalls = ownUnchanged && own.writeSeq === this._writeSeq ? own.stalls + 1 : 0;
-        this._ownReads.set(reqPath, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
-        const notice = repeatedReadNotice(reqPath, ownCount, ownUnchanged, ownStalls);
-        if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops++;
+        this._ownReads.set(ledgerKey, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
+        const notice = repeatedReadNotice(shownPath, ownCount, ownUnchanged, ownStalls);
+        if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops.n++;
 
-        if (sl === null && el === null) return notice ? `${notice}${full}` : full;
-        const lines = full.split('\n');
-        const from = (sl ?? 1) - 1;
-        const to = el ?? lines.length;
+        if (!ranged) return notice ? `${notice}${full}` : full;
         const slice = lines.slice(from, to).join('\n');
         return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
       }
@@ -8736,7 +8839,7 @@ export class ToolDispatcher {
         }
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction);
-        return result.ok ? `[${role}] ${result.summary}` : `[${role}] FAILED: ${result.summary}`;
+        return taskResultWithWrites(role, result);
       }
 
       case 'second_opinion': {

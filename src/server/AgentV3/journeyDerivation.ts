@@ -26,6 +26,7 @@
 // browser — no I/O, no clock, no model call in this module.
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { rendersDataList } from './DesignCoverage';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -207,7 +208,10 @@ export function submitTargetIn(source: string): Target | null {
  * show it.
  */
 export function rendersList(source: string): boolean {
-  return /\.map\s*\(\s*\(?\s*[A-Za-z_$][\w$]*/.test(source) && /<\/?[A-Za-z]/.test(source);
+  // A select's fixed choices (`PAYMENT_METHODS.map((m) => <option>…`) are not a list anything can
+  // "appear in" — the same false signal DesignCoverage had (autopsy ea07382a). ONE definition of
+  // "renders a data list", read by both.
+  return /\.map\s*\(\s*\(?\s*[A-Za-z_$][\w$]*/.test(source) && rendersDataList(source) && /<\/?[A-Za-z]/.test(source);
 }
 
 /**

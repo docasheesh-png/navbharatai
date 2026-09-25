@@ -332,6 +332,12 @@ const NON_DOMAIN_USES: RegExp[] = [
   // is an instruction to persist, never a shop (build 681bd91b: an AI chat app read as ecommerce, and
   // its build prompt was handed cart, checkout and refunds to include).
   /\bstor(?:e|es|ed|ing)\s*(?::|—|-\s)/gi,
+  // fintech — UPI named as one of the ways somebody PAID for what they are recording is a field value,
+  // not a payments product (autopsy 2a7fa4b0: "an app to add expenses with … payment method like cash
+  // card UPI" was read as FINTECH and its build prompt was told to include KYC, 2FA and fraud checks —
+  // for a personal expense tracker). "UPI payment app", "UPI wallet" keep their domain.
+  /\bpayment\s+(?:method|mode|type|option)s?\b[^.,;\n]{0,40}/gi,
+  /\bcash\b[^.\n]{0,20}\bupi\b|\bupi\b[^.\n]{0,20}\bcash\b/gi,
   // education — "of course" is agreement, not a syllabus.
   /\bof\s+course\b/gi,
   // events — a DOM event is not a conference.

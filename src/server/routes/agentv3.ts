@@ -13894,6 +13894,7 @@ async function noteBuildOutcome(
         // And its file READS — so the repeated-read finding covers the reviewer and every other
         // sub-agent, not just the architect (autopsy f97eb0ec).
         readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
+        readLoopStops: () => dispatcherForSubAgents?.sharedReadLoopStops(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -16569,7 +16570,7 @@ async function noteBuildOutcome(
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.
       try {
-        const line = repeatedReadSummary(dispatcher.readLedgerCounts());
+        const line = repeatedReadSummary(dispatcher.readLedgerCounts(), dispatcher.readLedgerUnchangedRereads());
         const stops = dispatcher.readLoopStops();
         if (line) {
           buildDiag.record({

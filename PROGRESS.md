@@ -81040,6 +81040,62 @@ where the last touch-move and the lift arrive together. Fix: read the ref once i
 queueing the update. Sibling hunt (every `setX(prev => …)` updater in client code): this was the only
 one. Locked by `tests/aStateUpdaterNeverReadsARef.test.ts` (reversion-proven against the old line).
 
+## 2026-09-25 — Autopsy 2a7fa4b0 + ea07382a: an expense tracker was treated as a mega-app, and our own journey check stopped the dev server
+
+**The run:** "App to add expenses with date, category, amount, payment method like cash card UPI, search and
+sort, total amount and report generation. Backup and restore option too" (Weak, free tier). Build 1 split it
+into a six-step roadmap and shipped step 1 — a form, a list and a total — for ₹81. The user then asked "Ui
+preview of every screen" (₹210, 12.7 min). After both builds, search, sort, report download, backup and
+restore were STILL missing. ₹291 for a one-screen app that any builder does in one pass.
+
+**Six root causes, all ours, all fixed and locked in `tests/theExpenseTrackerWasNotAMegaApp.test.ts`
+(19 cases; 17 fail against the old code):**
+1. **Scope gate.** `countEnumeratedFeatures` counted the COLUMNS of an expense (date, category, amount,
+   payment method) as features → 8 = the mega line. And `CLEARLY_SMALL` matched only singulars, so
+   "expenses" was not a small app while "expense" was. Now record attributes are not counted, plurals are
+   read, and the small-app hint is held back wherever big software is named (`BIG_SOFTWARE_NOUN`, now the
+   one definition ProjectPlan and the scope analyzer share).
+2. **Roadmap infra badge.** A bare `real-?time` in `INFRA_RE` badged "a real-time search input" as needing a
+   server, on the user's 💡 roadmap. Now only real-time BETWEEN people/devices counts; the planner prompt
+   also says `needsInfra` is only for a step that cannot run in the browser at all.
+3. **Design check.** `LIST_WITHOUT_EMPTY_STATE` fired on ANY `.map(` — including a form's
+   `PAYMENT_METHODS.map(… <option>)`. The design heal spent 120 s and ADDED a "Recent expenses" list to the
+   form page to satisfy it (the model itself said "this component only renders a form"). `rendersDataList`
+   ignores constants, array literals and select options; the journey's `rendersList` reads the same definition.
+4. **Read loop.** Three reads of three DIFFERENT line ranges of index.css were each told "STOP … byte-for-byte
+   what you already have". Ranged reads are now keyed by their lines. The report's `REPEATED_READS` counts
+   only unchanged re-reads (it had printed "55% re-read a file that had not changed" beside a detail saying
+   every re-read followed a change), and a sub-agent's STOP count now reaches the parent's number (the
+   report said "No read reached the no-progress limit" while a sub-agent had been stopped three times).
+5. **Sub-agent claim.** A frontend sub-agent returned "Done. I built … New files created: …" having written
+   NOTHING; the parent spent ~90 s and a browser to find out. The task result now carries the platform's own
+   list of files the child wrote (`taskResultWithWrites`), and says plainly when it wrote none.
+6. **🔴 The journey check stopped the dev server.** The journey script contains `'vite-error-overlay'`, so
+   `isLongRunningCommand` classified the whole command as a Vite dev-server START: its output went into the
+   dev server's log (the report quoted `NBAI_JOURNEY {…}` as the dev server's "last words"), the preview port
+   was stopped, and every journey came back "none of the form fields were present". **This is the "dev server
+   died between the first render and the runtime check" recorded OPEN twice before.** Heredoc bodies are now
+   removed before any command is classified (`withoutHeredocBodies`) — which also covers an agent writing a
+   README that says "npm run dev".
+Plus: a UPI **payment method** no longer makes an expense tracker "fintech" (its build prompt had been told to
+include KYC, 2FA and fraud checks).
+
+**Still OPEN (recorded, not fixed here):**
+- **First-read race:** the architect's first reads of src/App.tsx, src/index.css, src/main.tsx failed "does not
+  exist" at +35 s and the files were there at +43 s (warm sandbox, 0 durable files). Something writes the
+  scaffold after the build's first tool call. ~8 s and 3 TOOL_ERRORs; cause not yet traced.
+- **Post-build passes refused by Green Freeze:** after settle, writes to `playwright.config.ts`, test files,
+  `docs/decisions/ADR-001.md`, `index.html`, `public/manifest.webmanifest`, `robots.txt`, `icon.svg`, `sw.js`
+  were all refused (no pass name). Tests and the PWA shell never land, so "No tests at all" is permanent. Needs a
+  decision: run those passes BEFORE the latch, or allow them on the freeze list with verify-after-fix.
+- **My own #3285 complex fast-lane budget is inert by default:** a complex build opens on a reasoning rung
+  (Weak/Normal → kimi-k2.7-code via COMPLEX_TO_KIMI; Strong → glm-5.3), and FASTLANE_REASONING_GATE then skips
+  the fast lane — so the 480 s complex budget never runs. Not harmful (build 1 finished in 4.8 min on the full
+  builder), but it is dead code until one of the two rules changes.
+- **BottomNav rewritten 3×** chasing `Screen` not exported from App.tsx — a type only the later App.tsx
+  rewrite could provide. The full builder has no contract file (the fast lane does since 2026-09-17).
+- **Build 1 `PREVIEW_SNAPSHOT_STALE` while `POST_GREEN_WRITES` saw no writer** — something changed a file after
+  the copy without passing the freeze observer. Unknown.
 ## 2026-09-25 — Exam mode Settings: the paper's language and an optional timer
 
 Admin asked (Teacher AI → Exam mode) for a Settings button at the right of the Exam mode header with:

@@ -54,8 +54,14 @@ describe('the render evidence is WIRED, and it is enforced in exactly one place'
   const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('🔒 the route passes the render observation into the guard', () => {
-    expect(route).toContain(
-      'emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered)',
+    // ⚠️ NARROWED 2026-09-25, and the narrowing is the intent rather than a weakening. This pinned the
+    // call site as ONE LINE of source, so autopsy e628efd4's fifth argument (`turnAskedTheUser`) broke
+    // it by wrapping the call across lines while passing every original argument unchanged, in order.
+    // What this guard exists to prove — stated three lines above: *"the whole defect in report
+    // fd021c64 was a call site, not a rule"* — is that `buildObs.previewRendered` REACHES the guard.
+    // That is what is asserted now, whitespace-tolerant. Stop passing it and this still fails.
+    expect(route).toMatch(
+      /emptyBuildFailureSummary\(\s*expectsArtifacts,\s*writtenFiles\.size,\s*sandboxUnavailable,\s*buildObs\.previewRendered\s*[,)]/,
     );
   });
 

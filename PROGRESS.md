@@ -81039,6 +81039,114 @@ dereferenced null inside a render and the error boundary replaced the whole scre
 where the last touch-move and the lift arrive together. Fix: read the ref once into locals before
 queueing the update. Sibling hunt (every `setX(prev => …)` updater in client code): this was the only
 one. Locked by `tests/aStateUpdaterNeverReadsARef.test.ts` (reversion-proven against the old line).
+---
+
+## 2026-09-25 — 🙋 AUTOPSY e628efd4: A QUESTION WAS ANSWERED CORRECTLY, THEN OVERRIDDEN, AND THE USER WAS CHARGED ₹196.28 FOR IT
+
+**The prompt was a question:** *"As in if we do have done a chat now, and if we don't have a chat in
+next 2 hours can you send a message to initiate the chat again"* — a free-tier user asking whether
+NavBharatAI can message them on its own.
+
+**The first model answered it, correctly, in 7 seconds.** That it cannot message anyone unprompted,
+that a phone reminder or a small app could, and *"would you like me to build a small messaging app
+with a 'remind me to chat again' feature?"* Zero tool calls, `finish_reason: end_turn`. That is
+exactly what the READ-THE-MOOD rule asks for, achieved by the model.
+
+**Then the engine answered its own question on the user's behalf.** 53 model calls, 9 minutes, a
+six-feature "Friend Chat" — auth, profiles, realtime, notifications, moderation, media upload — none
+of it asked for, and **₹196.28 taken from a free-tier wallet** (real cost $0.486 + $0.025 sandbox).
+
+### The five buckets, honestly counted
+
+**✅ Self-healed (3)** — `FAST_LANE_SKIPPED_REASONING_RUNG` (the 2026-09-23 gate working: KIMI always
+reasons, so the lane stood down) · `PREVIEW_SERVER_RESTARTED` (dev server found stopped, restarted
+deterministically, no model call) · `IN_BUILD_GREEN` + `GREEN_GUARD_SAVE` (first render at 354s saved;
+9 post-green writes and it still rendered).
+
+**🔀 Worked around (2)** — `EMPTY_BUILD_RETRY`, the headline, below · `GREEN_FREEZE_DEFERRED` **×9**
+(playwright.config.ts, three test files, ADR-001.md, index.html, manifest.webmanifest, robots.txt,
+icon.svg all refused).
+
+**⏭️ Skipped (2)** — the journey was `unreachable` (*"none of the form fields were present on the
+running page"*) · `RUNTIME_UNCHECKED` (console not captured; the server was 502 at that moment).
+
+**❌ Still broken (3)** — `PREVIEW_SERVER_DOWN` (died, restarted, died again) · `RELEASE_GATE: YELLOW`
+· `PREVIEW_SNAPSHOT_STALE` (same 39 files, different content).
+
+**🥵 Struggle (4)** — the entire 9-minute second attempt · `WRITE_TIME_TYPECHECK` saying *"no
+TypeScript source was written this build"* about a build that wrote 25 TypeScript files ·
+**75% of the sandbox session idle** (7.8 of 10.4 min) · `READINESS_WARNING: No tests at all` beside
+the freeze that had just refused three test files the engine itself wrote.
+
+### The root cause, and it is this repo's headline class
+
+`decideBuildNudge` **saw** that the model had asked a question, recognised it, and stood down:
+`BUILD_NUDGE_STOOD_DOWN`, detail `asked-the-user`. **156 milliseconds later** `shouldRetryEmptyBuild`
+read the same turn, counted `filesWritten === 0`, and retried the whole build one rung higher.
+
+`nudgeToBuild.ts` had **already named the class in its own docblock**:
+
+> *"`toolUses.length === 0` is not evidence of a stall. It is equally the shape of a model that
+> declined, asked a question, or reported that the request cannot be built. Before overriding a
+> model's judgement, the engine must ask what the turn WAS, not merely count what it did."*
+
+`filesWritten === 0` is that identical mistake with a different counter. And **half the guard had
+already been carried across**: `modelRefused` IS `nudgeToBuild`'s `turnDeclined`, the same
+`looksLikeRefusal`. The other half, `turnAskedTheUser`, was left behind. One of two siblings hunted.
+
+⚠️ `looksLikeRefusal` was **right** to stay silent — it needs "I can't" near build/make/create/help,
+and this answer says *"I can't **send**"*. The guard that had to speak was the one that did not exist.
+
+### The fix — both halves, because one alone trades a problem for another
+
+- **`shouldRetryEmptyBuild` gains `modelAskedTheUser`.** A question is a final answer for that turn,
+  exactly as a refusal is. Never retried, never escalated.
+- **`emptyBuildFailureSummary` gains `askedTheUser`.** Suppressing only the retry would have replaced
+  a good answer with *"The build produced no files. Please try again"* — 697b38ee's sin in a new
+  place. Standing down here leaves `result.ok` true, which is also what keeps the **"add credits"
+  upsell** quiet: that block is gated on `!result.ok`, and the comment beside it explicitly forbids
+  writing a second answer there. **One fix, three harms, no second answer anywhere.**
+- Both read `turnAskedTheUser` from `nudgeToBuild` — never a second copy of the test, so the two
+  guards cannot drift back apart.
+- 💸 **The bill:** a turn that writes no files is zeroed **unconditionally**, whatever its verdict, so
+  that build now costs **₹0** instead of ₹196.28.
+- 👁️ **Visible:** `TURN_ANSWERED_A_QUESTION`, registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` —
+  our retry policy is never a finding against the user's app.
+
+Test-locked and **reversion-proven four ways** in `tests/aQuestionIsAnAnswerNotAnEmptyBuild.test.ts`
+(19 cases), using the real answer from that report verbatim. Drop either guard, or stop passing the
+fact to either call site, and it fails.
+
+### 🧬 The 50/50 half — the missing subsystem
+
+**Nothing in this engine answers "what KIND of turn was this?" in one place.** `looksLikeRefusal` has
+four readers; `turnAskedTheUser` had one; everything else infers the turn's kind by **counting its
+outputs** — tool calls, files written. Counting outputs cannot distinguish a stall from an answer,
+and that is the same defect in two subsystems written four months apart.
+
+**🔴 OPEN ROOT CAUSES (rule 6) — not guessed at here:**
+
+1. **One `turnKind` the whole route reads.** The real fix is a single derived fact (`built` /
+   `declined` / `asked` / `stalled` / `stopped`) that every downstream verdict consults, instead of
+   each subsystem re-deriving it. Deliberately not built in this change: it touches the retry, the
+   settle flip, the upsell, `runProvenApp` and the release gate at once, and the reported harm is
+   fixed without it. **The next autopsy that finds a third reader of this question should build it.**
+2. **`WRITE_TIME_TYPECHECK` is recorded BEFORE the retry decision** (`routes/agentv3.ts` ~16601, the
+   retry at ~16645), so on any retried build the line describes the abandoned first attempt. **The
+   fourth time that one sentence has been wrong, and the third distinct cause** — the 2026-09-22 fix
+   made its *evidence* right and left its *timing* wrong. Not moved here because whether the retry
+   runner shares the first dispatcher (and therefore its stats) is untraced; moving it blind would
+   produce a different false line. Trace that first.
+3. **Green Freeze refuses test files, then the release gate marks the build down for having no
+   tests.** Nine deferrals in this build, three of them the engine's own `*.test.ts`. A test file
+   cannot break a rendering app, but widening a safety system needs its own evidence and sign-off.
+4. **`PREVIEW_SERVER_DOWN`** — the dev server died, was restarted, and died again (502). Its last
+   output before stopping was the journey script's own `NBAI_JOURNEY` line. Whether the journey run
+   is implicated is unproven; recorded rather than asserted.
+5. **The requirement-gap analyzer fired on a question.** `REQUIREMENT_GAPS` detected domain=social
+   and injected auth, realtime, notifications, moderation and media upload — five features into an
+   app the user never ordered. Its own rule says it fires on "a new build"; a question is not one.
+   Fixing it belongs with item 1, since it needs the same answer.
 
 ## 2026-09-25 — Autopsy 2a7fa4b0 + ea07382a: an expense tracker was treated as a mega-app, and our own journey check stopped the dev server
 

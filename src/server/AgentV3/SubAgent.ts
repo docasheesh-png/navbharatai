@@ -128,6 +128,8 @@ export interface SubAgentDeps {
    * own map — which is exactly the behaviour that hid the reviewer's waste in autopsy f97eb0ec.
    */
   readLedger?: () => ReadLedger | undefined;
+  /** The parent's STOP counter, so a sub-agent's read-loop stops reach the report (autopsy ea07382a). */
+  readLoopStops?: () => { n: number } | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
@@ -220,6 +222,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     try {
       const sharedReads = deps.readLedger?.();
       if (sharedReads) childDispatcher.shareReadLedger(sharedReads);
+      const sharedStops = deps.readLoopStops?.();
+      if (sharedStops) childDispatcher.shareReadLoopStops(sharedStops);
     } catch { /* never block a spawn */ }
     // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
     // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client
@@ -328,7 +332,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     try {
       const result = await runner.run(fullInstruction);
       agentLifecycle.finish(token, result.ok);
-      return { ok: result.ok, summary: result.summary };
+      // What the child REALLY wrote rides beside what it SAYS it did — see `taskResultWithWrites`.
+      let written: string[] | undefined;
+      try { written = childDispatcher.writtenPaths(); } catch { written = undefined; }
+      return { ok: result.ok, summary: result.summary, written };
     } catch (err) {
       agentLifecycle.finish(token, false);
       throw err;

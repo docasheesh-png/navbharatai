@@ -119,6 +119,6 @@ describe('the wiring — the half that rots', () => {
 
   it('and the route reports it', () => {
     expect(route).toContain("code: 'REPEATED_READS'");
-    expect(route).toContain('repeatedReadSummary(dispatcher.readLedgerCounts())');
+    expect(route).toContain('repeatedReadSummary(dispatcher.readLedgerCounts(), dispatcher.readLedgerUnchangedRereads())');
   });
 });

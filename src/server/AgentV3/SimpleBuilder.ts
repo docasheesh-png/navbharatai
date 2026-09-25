@@ -1004,9 +1004,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
    * before the lane started, so a caller never reports an all-zero ledger as a measurement of zero
    * (the `writeTypecheckUntouched` lesson, one module along).
    */
+  // 🔴 A PHASE THAT ENDS BY HAND-OFF IS STILL A PHASE (autopsy Study-Racer, 2026-09-25). `generateMs`
+  // was written only when the generate loop COMPLETED, so a lane that timed out or bailed mid-generation
+  // — the very lane this ledger exists to explain — reported `generate 0s (0%) … everything else 145.4s
+  // (93%)` about 150 s it had spent generating. The running phase is read off its start instant.
+  const generateMsNow = (): number => clock.generateMs || (clock.generateStartedAt ? Date.now() - clock.generateStartedAt : 0);
   const phasesNow = (): SimpleBuildResult['phases'] => (clock.startedAt
     ? {
-      planMs: clock.planMs, contractMs: clock.contractMs, generateMs: clock.generateMs,
+      planMs: clock.planMs, contractMs: clock.contractMs, generateMs: generateMsNow(),
       ...(clock.contractOutcome ? { contractOutcome: clock.contractOutcome, contractCapMs: clock.contractCapMs } : {}),
       verifyMs: clock.verifyMs, repairMs: clock.repairMs,
       verifyRuns: clock.verifyRuns, repairRuns: clock.repairRuns,
@@ -1019,7 +1024,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // are hoisted OUT of the closure for exactly the reason `generatedSoFar` below is: on the failure
   // path — the path this measurement exists for — the closure's locals are gone before the caller can
   // ask. A measurement that only survives success answers the wrong question.
-  const clock: { startedAt: number; planMs: number; contractMs: number; generateMs: number; verifyMs: number; repairMs: number; verifyRuns: number; repairRuns: number; contractOutcome?: FastLanePhases['contractOutcome']; contractCapMs?: number } = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
+  const clock: { startedAt: number; planMs: number; contractMs: number; generateMs: number; generateStartedAt?: number; verifyMs: number; repairMs: number; verifyRuns: number; repairRuns: number; contractOutcome?: FastLanePhases['contractOutcome']; contractCapMs?: number } = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
   // One budget for the whole lane, read ONCE — the race below and the tier arithmetic inside must agree.
   const laneBudgetMs = deps.overallTimeoutMs ?? fastLaneBudgetMs(deps.complex === true);
   const generatedSoFar: OneShotFile[] = [];
@@ -1272,6 +1277,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const written: OneShotFile[] = contractFile ? [contractFile] : [];
       const generatedCount = () => written.length - (contractFile ? 1 : 0);
       const generateStartedAt = Date.now();
+      clock.generateStartedAt = generateStartedAt; // read by phasesNow while this loop is still running
       for (let ti = 0; ti < tiers.length; ti++) {
         const tier = tiers[ti];
         const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;

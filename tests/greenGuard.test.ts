@@ -298,7 +298,8 @@ describe('LAYER 2 WIRING — the guard is on the real save path and can never co
     expect(save).toBeGreaterThan(-1);
     expect(wait).toBeGreaterThan(save);
     // And it compares what was PERSISTED, which is the restored green set when the guard restored.
-    expect(seg).toContain('workspaceContentHash(persisted)');
+    // Read through identitySource since 2026-09-25 — the identity is the app's bytes, not our bridge.
+    expect(seg).toContain('workspaceContentHash(identitySource(persisted))');
   });
 
   it('is flag-gated and records its decision for the admin either way', () => {

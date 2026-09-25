@@ -80950,3 +80950,69 @@ decimals, negative when negative marking takes the total below zero, 0 for an em
 beside the marks as the headline; the verdict leads with it; accuracy stays, labelled "Accuracy …
 (N right of M attempted)" and hidden when nothing was attempted. Locked in
 `tests/theExamPercentageIsOverTheWholePaper.test.ts` with the screenshot's exact paper (→ 80%).
+## 2026-09-25 — The scorecard's "Most-repaired" list was TOOL_DONE ×10313: a tool call is not a repair
+
+The admin sent the Builder scorecard (03:01 UTC, 264 builds / 200 workspaces). Its "Most-repaired"
+line ranked `TOOL_DONE ×10313`, `TOOL_CALL ×10171`, `AGENT_STEP ×6903`, `EVENT ×4724`, `HEARTBEAT
+×3431`, `SANDBOX_CMD ×2300` — "44,324 repair(s) named" — two lines under "3.36 repairs per build"
+(887 in total). Same reports, a factor of fifty apart, both printed with full confidence.
+
+**Root cause (rule 2, the class):** three modules each re-derived "is this a heal?" from the
+`autoResolved` flag, and only the recorder had it right. `counts.autoResolved` counts `autoResolved
+&& severity !== 'info' && !observation && !narration && !workaround`, because every tool call,
+heartbeat and narration line is recorded `info, autoResolved: true` so it never counts as an
+UNRESOLVED defect — the flag means "not a problem left behind", and only the extra clauses make it
+"a problem we fixed". `healBreakdown.ts` (PR #3298, the day before) counted `autoResolved === true`
+while its own header said it "inherits rather than invents" the recorder's definition; and its
+completeness check (`unattributed = total − seen`) clamped to zero on every build because `seen` was
+fifty times `total`, so the truncation it existed to declare was invisible. `firstPassQuality.
+topHealCodes` was a third copy with the observation clause and none of the others.
+
+**Fixed:** ONE predicate, `isSelfHeal` in `src/lib/healIssue.ts`, called by the recorder's tally, the
+breakdown and the first-pass list; `WORKAROUND_CODES` and `NARRATION_CODES` moved beside it so the
+recorder and the scorecard read one list. Proven on a real `BuildDiagnostics` instance (80 tool rows,
+5 heartbeats, a fallback, an observation, two heals ⇒ recorder 2, breakdown `{DESIGN_HEALED:1,
+PREVIEW_COMPILE_HEALED:1}`, unattributed 0 — and 2 again once the timeline is trimmed).
+
+**Second bug, same card: "Workarounds: 100.0% of 165 build(s)" was true by construction.** The
+recorder wrote `counts.workarounds` only when above zero, and `workaroundPressure` excludes a build
+with no recorded count (correctly). Every counted build therefore had one; the rate could never have
+printed anything else. Now the recorder ALWAYS writes the field (zero included — a zero is a
+measurement, an absent field is "nobody measured"), and for stored rows that predate the zero the
+store derives the count from a COMPLETE timeline with the same predicate (`workaroundCountOf`,
+`isTimelineComplete`: the storage trim fact, the recorder's `TIMELINE_TRUNCATED` row and a timeline
+shorter than `counts.total` each make it `null`, never a guessed zero). `tests/laneFailure.test.ts`'s
+"does not grow a workarounds field" case pinned the bug and was reversed, with the reason beside it.
+
+Test-locked and reversion-proven in `tests/aToolCallIsNotARepair.test.ts` (source guards included —
+`tsc` and `vitest` cannot see a predicate re-derived in a second module, which is exactly how this
+shipped and passed its own suite).
+
+**What the card said that IS true, and stays the work:** build success **55.3%** (146/264), edit
+survival **59.1%** with **7 projects sitting on a failed build**, **11.8 min median / 26.3 min p90**
+to a working app, **17.0% of builds needed no self-repair** (3.36 per build; worst 19), median
+₹62.83 / worst ₹290.64 per working app. Those come from `ok`, timestamps, billing and
+`counts.autoResolved`, none of which this bug touched. The corrected breakdown on the NEXT scorecard
+is what names the classes behind the 3.36 — that list, not this fix, is the 50/50 work list.
+
+### Same day, same card — the seven stuck projects are NAMED (admin: "han, karo")
+
+"7 project(s) currently sitting on a failed build" could not say which seven, when, why, or whether
+the person in front of each still had a working app. And the sentence covers two different situations:
+GreenGuard put the LAST WORKING version back (the edit was refused, the app runs) or the failed attempt
+was left standing (a real person is looking at a broken screen). Only the second is a user in trouble
+right now, and the card could not tell them apart.
+
+`editSurvival` now returns `broken: StuckProject[]` (newest failure first, capped at 50 with the full
+count kept) carrying `workspaceId`, `lastBuildAt`, `failedInARow`, `builds`, `restoredToGreen`,
+`rootCause`, `prompt` — every one already on the stored report, so it is a projection at no extra
+read: both store readers add `restoredToGreen` (the `GREEN_GUARD_RESTORED` timeline row;
+`null` when the report has no timeline), the collector carries the three facts (adding NO key when
+absent, so a legacy row still reads "unknown" and the exact-shape tests hold), and the headline splits
+the count: *"7 project(s) currently sitting on a failed build — N restored to the last working version,
+M left on the failed attempt, U unknown; named below"*. The Diagnostics card lists them with the
+restore state in words. Test-locked in `tests/theStuckProjectsHaveNames.test.ts`.
+
+**Why this ships before the autopsy of the seven, not after:** a Claude session cannot read Firestore.
+The card is the one door to those reports, and until it named them there was nothing to paste. The
+next scorecard the admin sends carries the seven root causes; that paste is the autopsy's input.

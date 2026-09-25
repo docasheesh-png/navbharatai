@@ -25,12 +25,14 @@
 //
 // Pure + dependency-free (report objects in → numbers out) so it is fully unit-testable.
 
+import { isSelfHeal } from './healIssue';
+
 /** The slice of a BuildDiagnosticsReport this module needs — structural, so tests need no fixtures. */
 export interface FirstPassInput {
   ok?: boolean;
   startedAt?: number;
   counts?: { autoResolved?: number; unresolved?: number };
-  issues?: Array<{ code?: string; autoResolved?: boolean; observation?: boolean }>;
+  issues?: Array<{ code?: string; severity?: string; autoResolved?: boolean; observation?: boolean }>;
 }
 
 export type FirstPassVerdict = 'clean' | 'healed' | 'failed';
@@ -83,7 +85,9 @@ export function firstPassStats(reports: Array<FirstPassInput | null | undefined>
     const v = classifyFirstPass(r);
     if (v === 'clean') clean++; else if (v === 'healed') healed++; else failed++;
     for (const i of r.issues ?? []) {
-      if (!i || i.autoResolved !== true || i.observation === true) continue;
+      // ONE definition of a heal (`healIssue.ts`, 2026-09-25): this loop had its own — the flag plus
+      // the observation clause — and would have ranked TOOL_CALL as the top repair on any real report.
+      if (!isSelfHeal(i)) continue;
       const code = typeof i.code === 'string' && i.code ? i.code : 'UNKNOWN';
       healCodes.set(code, (healCodes.get(code) ?? 0) + 1);
     }

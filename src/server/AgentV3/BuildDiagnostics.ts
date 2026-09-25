@@ -32,6 +32,7 @@ import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
 import { renderProvenByAnyActor } from './renderProof';
+import { isSelfHeal, isWorkaroundIssue, isNarrationIssue } from '../../lib/healIssue';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -2133,10 +2134,13 @@ export class BuildDiagnostics {
     // as a win". This is that sentence made true of the number the admin actually reads. Counted by
     // CODE rather than by a flag each call site sets, so a new fallback cannot forget to declare
     // itself into the honest bucket.
-    const isWorkaround = (i: { code?: string }) => WORKAROUND_CODES.has(String(i.code ?? ''));
-    const autoResolved = counted.filter((i) =>
-      i.autoResolved && i.observation !== true && i.severity !== 'info' && !isWorkaround(i)).length;
-    const workarounds = this.issues.filter((i) => isWorkaround(i) && i.severity !== 'info').length;
+    // 🔴 ONE DEFINITION OF A HEAL, shared with the scorecard's per-code breakdown and the first-pass
+    // work list (`src/lib/healIssue.ts`, admin scorecard 2026-09-25). The breakdown had re-derived
+    // "heal" from the flag alone and printed TOOL_DONE ×10313 as the most-repaired code — fifty times
+    // the number this line produced for the same builds. `counted` already excludes narration; the
+    // predicate excludes it again so a reader that skips `counted` still gets this exact answer.
+    const autoResolved = counted.filter(isSelfHeal).length;
+    const workarounds = this.issues.filter(isWorkaroundIssue).length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,
@@ -2168,7 +2172,11 @@ export class BuildDiagnostics {
         errors,
         warnings,
         autoResolved,
-        ...(workarounds > 0 ? { workarounds } : {}),
+        // ALWAYS written, zero included (admin scorecard 2026-09-25). It used to be written only when
+        // above zero, and the scorecard excludes a build with no recorded count — so every counted
+        // build had at least one and "Workarounds: 100.0% of 165 builds" was true by construction. A
+        // zero is a measurement; an absent field is "nobody measured".
+        workarounds,
         unresolved: counted.filter((i) => !i.autoResolved && i.observation !== true).length,
         ...(observations > 0 ? { observations } : {}),
       },
@@ -2595,19 +2603,8 @@ export function providerFailuresLookMisconfigured(
     }));
 }
 
-/**
- * Codes that mean "we went around it", not "we fixed it". See the tally in `report()`.
- *
- * ⚠️ Keep this list in sync with any NEW fallback code. The counting reads the code rather than a
- * per-call-site flag precisely so that adding a fallback and forgetting to mark it cannot quietly
- * inflate the self-heal number again.
- */
-const WORKAROUND_CODES = new Set([
-  'PROVIDER_FALLBACK',
-  'SIMPLE_BUILD_FALLBACK',
-  'ONESHOT_FALLBACK',
-  'SIMPLE_BUILD_OUTCOME',
-]);
+// The workaround codes ("we went around it", not "we fixed it") live in `src/lib/healIssue.ts` beside
+// the one definition of a heal, so the recorder's tally and the scorecard's breakdown read one list.
 
 /**
  * 🔴 NARRATION IS NOT A FINDING — it is the engine REPEATING a sentence, never a measurement.
@@ -2640,11 +2637,11 @@ const WORKAROUND_CODES = new Set([
  * (heartbeats; import observations; provider fallbacks; now our own notices), and the third fix of
  * the same shape: counted by CODE, so a new call site cannot forget to declare itself honestly.
  */
-const NARRATION_CODES = new Set(['AGENT_NOTE', 'AGENT_STEP']);
+// NARRATION_CODES lives in `src/lib/healIssue.ts` (one list for the recorder and the scorecard).
 
 /** True when this entry is the engine repeating a sentence rather than reporting a measurement. PURE. */
 export function isNarrationEntry(i: { code?: string }): boolean {
-  return NARRATION_CODES.has(String(i.code ?? ''));
+  return isNarrationIssue(i);
 }
 
 /**

@@ -5,7 +5,7 @@ import { auth } from '../../lib/firebase';
 import {
   EXAM_COUNT_PRESETS, EXAM_LEVELS, EXAM_MAX_QUESTIONS, EXAM_MIN_QUESTIONS, EXAM_DEFAULT_QUESTIONS,
   EXAM_TARGETS, EXAM_TARGET_OTHER, examTarget, examTargetLabel,
-  scoreExam, examVerdict, teachMyMistakesPrompt,
+  scoreExam, examVerdict, teachMyMistakesPrompt, formatExamPercentage,
   type ExamAnswer, type ExamLevel, type ExamQuestion, type ExamReading, type ExamSpec,
 } from '../../server/professionals/examMode';
 import {
@@ -405,17 +405,28 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
         {(phase === 'result' || phase === 'review') && (
           <>
             <div className="rounded-2xl bg-card border border-line p-4 text-center">
-              <p className="text-3xl font-bold tabular-nums text-ink">{score.marks}<span className="text-lg text-muted"> / {score.maxMarks}</span></p>
-              <p className="text-[11px] uppercase tracking-wide text-muted mt-0.5">Marks</p>
+              {/* Marks and the percentage side by side: the percentage is marks ÷ maximum, never over attempted. */}
+              <div className="grid grid-cols-2 divide-x divide-line">
+                <div>
+                  <p className="text-3xl font-bold tabular-nums text-ink">{score.marks}<span className="text-lg text-muted"> / {score.maxMarks}</span></p>
+                  <p className="text-[11px] uppercase tracking-wide text-muted mt-0.5">Marks</p>
+                </div>
+                <div>
+                  <p className="text-3xl font-bold tabular-nums text-accent-text" data-exam-percentage="">{formatExamPercentage(score.percentage)}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-muted mt-0.5">Percentage</p>
+                </div>
+              </div>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                 <div><p className="text-lg font-bold tabular-nums text-success">{score.correct}</p><p className="text-[10px] text-muted">Right</p></div>
                 <div><p className="text-lg font-bold tabular-nums text-danger">{score.wrong}</p><p className="text-[10px] text-muted">Wrong</p></div>
                 <div><p className="text-lg font-bold tabular-nums text-muted">{score.skipped + score.unseen}</p><p className="text-[10px] text-muted">Not answered</p></div>
               </div>
-              <p className="text-[12px] text-muted mt-3">
-                <strong className="text-body tabular-nums">{score.accuracyPct}%</strong> of what you attempted was right
-                {score.attempted < score.total && <> · you attempted {score.attempted} of {score.total}</>}
-              </p>
+              {score.attempted > 0 && (
+                <p className="text-[12px] text-muted mt-3" data-exam-accuracy="">
+                  Accuracy <strong className="text-body tabular-nums">{score.accuracyPct}%</strong>
+                  {' '}({score.correct} right of {score.attempted} attempted{score.attempted < score.total ? `, out of ${score.total}` : ''})
+                </p>
+              )}
             </div>
             <p className="text-sm text-body leading-relaxed">{examVerdict(score)}</p>
 

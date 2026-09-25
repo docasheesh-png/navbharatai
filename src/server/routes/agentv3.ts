@@ -223,7 +223,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
 import {
@@ -409,7 +409,7 @@ import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
-import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
+import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
 import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
@@ -3406,6 +3406,9 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
   deadRungs?: Map<string, string>;
+  /** The BUILD's bench memory, shared by every runner the build constructs — see
+   *  MultiProviderOptions.bench. Omitted ⇒ this runner benches for itself alone, as before. */
+  bench?: BuildBenchRegistry;
 }): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
@@ -3448,6 +3451,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.onProviderBenched ? { onProviderBenched: opts.onProviderBenched } : {}),
     ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
+    ...(opts.bench ? { bench: opts.bench } : {}),
   });
 }
 
@@ -12750,6 +12754,10 @@ async function noteBuildOutcome(
       const recordAttemptWasted = (family: string, kind: WasteKind, ms: number): void => {
         try { recordWaste(providerWaste, family, kind, ms); } catch { /* telemetry only */ }
       };
+      // ONE bench for the whole build (autopsy Study-Racer 2026-09-25): the fast lane's runner, the
+      // architect's chain and every heal runner share it, so "benched for the rest of this build" is
+      // true of the BUILD. It used to be per runner instance — GLM was benched twice, 56 s apart.
+      const buildBench = createBuildBenchRegistry();
       const recordProviderBenched = (family: string, reason: string): void => {
         buildDiag.record({
           phase: 'provider', severity: 'info', code: 'PROVIDER_BENCHED',
@@ -12832,6 +12840,7 @@ async function noteBuildOutcome(
         // generates files CONCURRENTLY (SimpleBuilder's mapWithConcurrency) and one shared callback would
         // attribute the wrong provider to a file. Only the MEMORY is shared; the callbacks stay private.
         deadRungs: fastLaneDeadRungs,
+        bench: buildBench,
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         // OBSERVATION ONLY — captureShadowUsage feeds the shadow ledger, never the billing one. This is
         // what makes the fast-lane billing question answerable without answering it by accident.
@@ -12844,6 +12853,7 @@ async function noteBuildOutcome(
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
+        bench: buildBench,
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
@@ -12900,8 +12910,10 @@ async function noteBuildOutcome(
         tier: powerLevelReqEffective,
         heal: true, // the tier's ladder minus its leading flash rung (admin 2026-08-13)
         noClaude: noClaudeBuild,
+        bench: buildBench, // a rung the build already benched stays benched in its heals
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
+        onProviderBenched: recordProviderBenched,
       });
 
       // MEGA-APP ROADMAP (admin 2026-08-14) — ON by default; ONE emergency kill switch, no staging dials.
@@ -12969,6 +12981,14 @@ async function noteBuildOutcome(
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
             buildUsage.add({ inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens });
+            // 🔴 A CALL WHOSE PROVIDER IS KNOWN IS NEVER PRICED AS "UNKNOWN" (autopsy Study-Racer,
+            // 2026-09-25). This planner ran on glm-4.7-flashx ($0.40/MTok out) and its 3,543 output
+            // tokens reached the bill through the unattributed remainder — priced at Sonnet ($15/MTok)
+            // as a "margin-safe upper bound", i.e. ×37, then ×4 markup: ~₹18 of a free user's ₹174.80
+            // bill for a call we knew the vendor of. `recordLlmCall` two lines up already names it. The
+            // heal runners were fixed for this exact shape in 2026-08-10 (see healRunnerOpts); the three
+            // planner calls were the siblings never hunted. Same ledger the fast lane feeds.
+            captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0);
 
             const { roadmap, rejected } = roadmapGuardrail(parseMegaRoadmap(rmT.text, scope.famousApp), scope.famousApp);
             if (roadmap) {
@@ -14682,6 +14702,9 @@ async function noteBuildOutcome(
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
+            // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
+            captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -15549,6 +15572,9 @@ async function noteBuildOutcome(
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
+            // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
+            captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
             return t.text;
           };
           if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(prompt)) {
@@ -19297,7 +19323,11 @@ async function noteBuildOutcome(
                     // with what it persists; a copy whose source could not be read is never promoted.
                     const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
                       .then((c) => c.files as Record<string, string>).catch(() => null);
-                    const filesHash = source ? workspaceContentHash(source) : null;
+                    // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
+                    // has run; the durable copy never does. Hash the APP, not our console mirror —
+                    // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
+                    // build where nothing had written after the copy).
+                    const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
                     await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
                     // The paths travel with the copy for THIS build only, so a mismatch can say which
                     // side holds what — see staleDetail. The hash is still what decides.
@@ -21080,7 +21110,7 @@ async function noteBuildOutcome(
             await finalSave;
             const verdict = snapshotConfirmation({
               taken: snapshotTaken,
-              persistedHash: workspaceContentHash(persisted),
+              persistedHash: workspaceContentHash(identitySource(persisted)),
               persistedPaths: Object.keys(persisted ?? {}),
             });
             if (verdict.action === 'restamp') {

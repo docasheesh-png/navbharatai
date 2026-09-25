@@ -186,7 +186,8 @@ describe('the wiring — each half reaches the place that was blank', () => {
   it('🔒 only the LADDER may allow it, and at most once per build', () => {
     // readStream cannot see the chain, so left to itself it could abandon the LAST engine and turn a
     // slow success into a failure. Once per build caps the total cost at one abandoned call.
-    expect(multi).toContain('const canAbandonSlowStream = () => !abandonedSlowRung && i + 1 < chain.length;');
+    // The once-per-build flag lives on the build's shared bench registry since 2026-09-25.
+    expect(multi).toContain('const canAbandonSlowStream = () => !bench.abandonedSlowRung && i + 1 < chain.length;');
     expect(multi).toContain('abandonedSlowRung = true;');
   });
 

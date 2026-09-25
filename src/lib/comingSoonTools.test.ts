@@ -47,11 +47,17 @@ describe('the held-back tool list matches what the admin actually named', () => 
     for (const id of rest) expect(isComingSoonTool(id), `${id} should be held back`).toBe(true);
   });
 
-  it('Publish & Deploy: everything off EXCEPT Custom Domain ("custom domain ko chor ke sabhi")', () => {
+  it('Publish & Deploy: everything off EXCEPT Custom Domain and Website Checkup', () => {
+    // 2026-09-15: "custom domain ko chor ke sabhi" held back.
+    // 2026-09-25: the admin commissioned Website Checkup and asked to START it ("shuru karo") — a
+    // held-back tile cannot be opened, so the tool they asked to use ships LIVE, like Custom Domain.
+    const LIVE_IN_GROUP = new Set(['domain', 'checkup']);
     const pub = idsIn('Publish & Deploy');
     expect(pub).toContain('domain');
+    expect(pub).toContain('checkup');
     expect(isComingSoonTool('domain'), 'Custom Domain is the one the admin kept').toBe(false);
-    for (const id of pub.filter((i) => i !== 'domain')) {
+    expect(isComingSoonTool('checkup'), 'Website Checkup was commissioned live 2026-09-25').toBe(false);
+    for (const id of pub.filter((i) => !LIVE_IN_GROUP.has(i))) {
       expect(isComingSoonTool(id), `${id} should be held back`).toBe(true);
     }
   });
@@ -62,10 +68,10 @@ describe('the held-back tool list matches what the admin actually named', () => 
     for (const id of mon) expect(isComingSoonTool(id), `${id} should be held back`).toBe(true);
   });
 
-  it('exactly eight tools remain usable — the seven the admin signed off on, plus the API they ordered', () => {
+  it('exactly nine tools remain usable — the eight signed off before, plus Website Checkup (2026-09-25)', () => {
     const live = allTools.filter((t) => !isComingSoonTool(t.id)).map((t) => t.id);
     expect(new Set(live)).toEqual(
-      new Set(['botbuilder', 'imagegen', 'api', 'versioning', 'minifier', 'apk', 'domain', 'devapi']),
+      new Set(['botbuilder', 'imagegen', 'api', 'versioning', 'minifier', 'apk', 'domain', 'devapi', 'checkup']),
     );
   });
 });

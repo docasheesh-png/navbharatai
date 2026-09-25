@@ -72,7 +72,7 @@ export type ViewType =
   | 'deploy' | 'templates' | 'donation' | 'studio' | 'report'
   | 'security' | 'about' | 'admin' | 'billing' | 'secrets' | 'testing' | 'api'
   | 'diff' | 'database' | 'voice' | 'botbuilder' | 'cost' | 'screenshot'
-  | 'multipages' | 'analytics' | 'debugger' | 'performance' | 'components'
+  | 'multipages' | 'analytics' | 'debugger' | 'checkup' | 'performance' | 'components'
   | 'seo' | 'apk' | 'figma' | 'domain' | 'team' | 'pwa' | 'minifier' | 'sharereview'
   | 'darkmode' | 'monetize' | 'imagegen' | 'versioning' | 'apimarket'
   | 'appstore' | 'collab' | 'aitesting' | 'localization' | 'codereview'

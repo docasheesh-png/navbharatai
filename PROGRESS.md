@@ -81439,3 +81439,49 @@ the session that owns it, and one waits on the admin.
 - ⏳ **Green Freeze refuses post-settle tests/PWA — ASKED the admin (in Hindi), awaiting a decision.**
   Also named open by #3307 and #3308. Options put: (1) generate them BEFORE the green latch
   (recommended), (2) allow after green with verify-and-revert, (3) leave as is.
+
+## 2026-09-25 — Website Checkup (Phase 1): a user checks THEIR OWN published site, never anyone else's
+
+Admin asked to rebuild the "AI Debugger"-style idea as a friendly site tester (referencing the
+Juice-Shop demo), then narrowed the scope in the sentence that shaped the whole design: *"hame, kisi
+aur ki website test nahi karni hai! user ki khud ki website check karwani hai? kisi aur ki nahi!!"* —
+and confirmed *"Website Checkup Phase-1 shuru karo"*.
+
+**What shipped, all real and wired end-to-end (second absolute rule):**
+- **`src/server/lib/websiteCheckup.ts`** — a PURE passive analyzer plus one bounded, SSRF-guarded
+  fetch. It reads only what the site already serves to any visitor (response headers + HTML), changes
+  nothing, and probes nothing hidden — so it is lawful (IT Act §43/66 forbid UNAUTHORISED access; a
+  plain GET of your own site is not that) and safe for a non-technical user. Checks: HTTPS + the
+  http→https upgrade; the standard security headers (HSTS, X-Content-Type-Options, frame protection via
+  X-Frame-Options OR a CSP `frame-ancestors`, Referrer-Policy, and CSP itself); mixed `http://` content
+  on an https page; genuinely-exposed secrets in the page (Stripe `sk_live_`, AWS `AKIA…`, private-key
+  blocks, Slack tokens) — deliberately **NOT** the public Firebase web `apiKey`, which is meant to ship
+  in client code; cookie safety flags; and basic hygiene (title, mobile viewport, charset). It returns
+  a friendly grade + one-line summary + each finding with a plain "what it means" and "how to fix".
+- **`src/server/routes/websiteCheckup.ts`** — the own-sites-only guarantee, by construction: the client
+  never sends a URL. It sends a `workspaceId`; the server resolves the deployment record and refuses
+  unless `record.userId === the verified caller` AND the deployment is live (`decideCheckupAccess`,
+  pure + unit-tested). Guessing another person's workspaceId fails the ownership check; there is no code
+  path that fetches an arbitrary address. `GET /api/website-checkup/sites` lists only the caller's own
+  live sites for the dropdown. Costs **no** model call → free and unmetered (one-wallet law).
+- **`src/components/ide/WebsiteCheckup.tsx`** — a branded, theme-token panel: pick one of your sites,
+  tap "Run checkup", read the grade + findings. English UI (language standard), no typed-URL input.
+  Wired as the `checkup` ViewType, a "Website Checkup" tile in Home → Other → Publish & Deploy, and a
+  panel branch in `ViewPanels.tsx`.
+- **`AppKnowledgeBase.ts`** entry `website_checkup` (with `nav: { view: 'checkup' }`) so every AI can
+  point users to it.
+
+**Live now, not held back:** the admin commissioned it to use it, and a "Coming soon" tile cannot be
+opened, so it ships live (the `comingSoonTools` tests were updated to record it as a deliberate second
+live tile in Publish & Deploy, dated). If the admin wants it hidden after trying it, that is a one-line
+`COMING_SOON_TOOL_IDS` add.
+
+**Tests:** `tests/websiteCheckup.test.ts` (33 — the analyzers, the Firebase-key false-positive guard,
+grade derivation, and the ownership decision incl. "another user is refused") and
+`tests/websiteCheckupWiring.test.ts` (registration, ownership binding, SSRF-guard reuse, no-model-call,
+UI reachability, no typed URL). White-label locked: a test asserts no finding text names a vendor/model.
+
+**Phase 2 (later, not built):** checking an EXTERNAL site the user owns, behind a lightweight
+ownership proof (a Search-Console-style verification file or meta tag). Deliberately deferred — Phase 1
+covers the common case (a NavBharatAI-published site) with zero friction and zero risk of pointing at
+someone else's site.

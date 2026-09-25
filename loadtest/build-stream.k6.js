@@ -8,10 +8,9 @@
  *   • It load-tests the LIGHTWEIGHT read/ingest endpoints (health, analytics,
  *     pagespeed-less paths) to establish HTTP/Cloud Run concurrency capacity
  *     (p50/p95 latency, error rate) WITHOUT spending real AI credits.
- *   • It does NOT hammer /api/build-stream by default: each build is a real AI +
- *     sandbox run that costs money and needs provider keys. Load-testing real
- *     builds must be done against a STAGING deploy with a mocked AI provider
- *     (set ENABLE_BUILD_LOAD=1 to include a single smoke build per VU iteration).
+ *   • It never runs a build: each build is a real AI + sandbox run that costs money.
+ *     (The optional /api/build smoke step was removed on 2026-09-25 with the
+ *     legacy build engine; that endpoint now answers 410.)
  *
  * Stages model: ramp to 100 VUs, hold, ramp to peak, cool down.
  */
@@ -19,7 +18,6 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-const ENABLE_BUILD_LOAD = __ENV.ENABLE_BUILD_LOAD === '1';
 
 export const options = {
   stages: [
@@ -52,16 +50,6 @@ export default function () {
     { headers: { 'Content-Type': 'application/json' } },
   );
   check(logs, { 'logs 204': (r) => r.status === 204 });
-
-  // 3. Optional: a single real build smoke (STAGING + mocked AI only).
-  if (ENABLE_BUILD_LOAD) {
-    const build = http.post(
-      `${BASE_URL}/api/build`,
-      JSON.stringify({ prompt: 'build a hello world react app', preview: false }),
-      { headers: { 'Content-Type': 'application/json' }, timeout: '120s' },
-    );
-    check(build, { 'build responded': (r) => r.status === 200 || r.status === 429 });
-  }
 
   sleep(1);
 }

@@ -85,9 +85,10 @@ import { registerNotificationRoutes } from './src/server/routes/notifications';
 import { registerUserActionRoutes } from './src/server/routes/userActions';
 // DELETED — Engineer AI routes (/api/engineer-*) were unregistered in the v3.0 cutover and the
 // dead files (routes/engineer.ts, EngineerAIChat.tsx, EngineerRouterFactory, WebAgentLoop, legacy
-// LocalActuator) were removed on 2026-07-09. Replaced by Pro v3.0. NOTE: the rest of
-// src/server/EngineerAI/ (ProEngineRunner + agent loop + actuators) is still LIVE — it powers the
-// legacy /api/build pipeline (routes/build.ts) and must not be deleted with it.
+// LocalActuator) were removed on 2026-07-09. Replaced by Pro v3.0. The rest of src/server/EngineerAI/
+// powered only the legacy /api/build pipeline; that pipeline was retired on 2026-09-25 (both
+// endpoints now answer 410) and the folder was removed with it. The LIVE actuators are the separate
+// copies under src/server/AgentV3/sandbox/EngineerAI/ — those are not legacy.
 import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
 import { registerNbaiDomainsRoutes } from './src/server/routes/nbaiDomains';

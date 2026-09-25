@@ -7,46 +7,15 @@ the date + result at the bottom.)
 
 ---
 
-## 1. "ENGINE=v2 is broken" → roll back to v1 in < 30 seconds
+## 1–2. RETIRED (2026-09-25): the legacy build engine and its two procedures
 
-**Symptom:** Builds via the agentic engine fail/hang after an `ENGINE=v2` rollout;
-error rate alert fires in Settings → Admin → Live Metrics.
+These two entries described the pre-v3.0 engine behind `POST /api/build` and `POST /api/build-stream`
+(`ENGINE=v1/v2`, `UnifiedBuildOrchestrator`, `ProEngineRunner`'s VFS tier). That engine is removed and
+both endpoints answer `410`. Every build runs in NavBharatAI Pro (AgentV3).
 
-**Diagnosis:** Confirm it correlates with the env flag, not a provider outage
-(check the AI-cost panel — if all providers are erroring it's #3, not this).
-
-**Action (Cloud Run):**
-```bash
-gcloud run services update navbharat-ai-prod \
-  --region=asia-southeast1 --project=gen-lang-client-0866594388 \
-  --update-env-vars ENGINE=v1
-```
-`ENGINE=v1` (or unsetting it) routes builds back through the direct `runProEngine`
-path — see `src/server/project/UnifiedBuildOrchestrator.ts` (`isUnifiedEngineEnabled`).
-
-**Verify:** Submit a "hello world react app" build → completes with files +
-preview. Error-rate alert clears within one metrics interval.
-
----
-
-## 2. "E2B quota exhausted" → auto-fallback to VFS
-
-**Symptom:** Engineer AI builds error with E2B quota/limit messages.
-
-**Diagnosis:** The tier selector already auto-selects VFS when no E2B key/quota is
-available (`ProEngineRunner.ts` tier selection). A hard failure means a key is set
-but the account is over quota.
-
-**Action:** Either top up the E2B account, OR remove `E2B_API_KEY` from Cloud Run
-to force the free in-memory VFS tier for all users:
-```bash
-gcloud run services update navbharat-ai-prod \
-  --region=asia-southeast1 --project=gen-lang-client-0866594388 \
-  --remove-env-vars E2B_API_KEY
-```
-
-**Verify:** New builds report "Execution tier: In-memory tier (free)" and succeed.
-Users keep building; only real-sandbox features (live npm/browser) are paused.
+⚠️ **Do NOT follow the old section 2** ("remove `E2B_API_KEY` to force the in-memory tier"). AgentV3
+has no in-memory tier: without `E2B_API_KEY` it cannot build at all. An E2B quota problem is fixed by
+topping up the E2B account.
 
 ---
 

@@ -16633,25 +16633,6 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
-      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
-      // write time and how many errors were caught while the model still held the file. Reported
-      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
-      try {
-        const wt = dispatcher.writeTypecheckStats();
-        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
-        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
-        // its stats untouched — and the line then read "no TypeScript source was written this build"
-        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
-        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
-        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
-        // only inherited our template is not credited with having written it.
-        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
-          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
-        });
-      } catch { /* an advisory line must never affect a build */ }
-
       if (result.timedOut === true) {
         try {
           buildDiag.record({
@@ -16783,6 +16764,34 @@ async function noteBuildOutcome(
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+      // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
+      // write time and how many errors were caught while the model still held the file. Reported
+      // so the next autopsy can say whether the 7-minute endgame grind actually went away.
+      //
+      // 🔴 IT IS RECORDED AFTER THE RETRY, AND THAT POSITION IS THE FIX (autopsy e628efd4,
+      // 2026-09-25). It used to sit above the empty-build retry, so on any build that retried, the
+      // line described the ABANDONED first attempt and not the build that shipped — the FOURTH time
+      // this one sentence has been wrong about a build, from a THIRD distinct cause (the first two:
+      // a sub-agent with its own stats object, autopsy 3ce8459b; a fast lane that never touches
+      // them at all, autopsy 2026-09-22). `dispatcher` is a single instance shared with the retry
+      // runner through `baseRunnerOpts`, so its counters are CUMULATIVE across both attempts —
+      // which is precisely why reading them later is not merely a better sample but the only
+      // reading that describes the build the user was given.
+      try {
+        const wt = dispatcher.writeTypecheckStats();
+        // 🔴 THE COUNTER WATCHES ONE LANE; THE SENTENCE WAS ABOUT THE BUILD (autopsy 2026-09-22).
+        // Every call site of the check is in `ToolDispatcher`, so a successful FAST-LANE build leaves
+        // its stats untouched — and the line then read "no TypeScript source was written this build"
+        // about a build that had just written a whole app. `writtenFiles` is the ONE set every writer
+        // feeds (the architect's tools AND the fast lanes), so it is the evidence that turns a guess
+        // into a statement; `modelAuthoredPaths` drops the golden-scaffold pre-seed, so a build that
+        // only inherited our template is not credited with having written it.
+        const tsWritten = modelAuthoredPaths(writtenFiles).filter(shouldTypecheckWrite).length;
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
+          message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
 
       // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
       // model's "no console errors" against whether anyone actually looked.
